@@ -1,7 +1,7 @@
 use formula_model::{
     validate_value, CellRef, CellValue, DataValidation, DataValidationContext, DataValidationErrorAlert,
     DataValidationErrorKind, DataValidationErrorStyle, DataValidationKind, DataValidationOperator,
-    Range, Worksheet,
+    EntityValue, Range, RecordValue, Worksheet,
 };
 
 struct TestCtx;
@@ -196,6 +196,25 @@ fn allow_blank_short_circuits_validation() {
 }
 
 #[test]
+fn allow_blank_treats_empty_rich_display_string_as_blank() {
+    let ctx = TestCtx;
+
+    let mut rule = dv(
+        DataValidationKind::Whole,
+        Some(DataValidationOperator::Between),
+        "1",
+        Some("10"),
+    );
+    rule.allow_blank = true;
+    assert!(validate_value(
+        &rule,
+        &CellValue::Entity(EntityValue::new("")),
+        &ctx
+    )
+    .ok);
+}
+
+#[test]
 fn list_validation_supports_constants_and_callback_sources() {
     let ctx = TestCtx;
 
@@ -213,6 +232,41 @@ fn list_validation_supports_constants_and_callback_sources() {
     let from_range = dv(DataValidationKind::List, None, "MyRange", None);
     assert!(validate_value(&from_range, &CellValue::String("y".to_string()), &ctx).ok);
     assert!(!validate_value(&from_range, &CellValue::String("z".to_string()), &ctx).ok);
+}
+
+#[test]
+fn list_and_text_validations_use_rich_value_display_strings() {
+    let ctx = TestCtx;
+
+    let list = dv(DataValidationKind::List, None, "\"a,b,c\"", None);
+    assert!(validate_value(
+        &list,
+        &CellValue::Entity(EntityValue::new("B")),
+        &ctx
+    )
+    .ok);
+
+    let record = CellValue::Record(
+        RecordValue::default()
+            .with_display_field("name")
+            .with_field("name", "d"),
+    );
+    let result = validate_value(&list, &record, &ctx);
+    assert_eq!(result.ok, false);
+    assert_eq!(result.error_kind, Some(DataValidationErrorKind::NotInList));
+
+    let len_rule = dv(
+        DataValidationKind::TextLength,
+        Some(DataValidationOperator::Equal),
+        "2",
+        None,
+    );
+    assert!(validate_value(
+        &len_rule,
+        &CellValue::Entity(EntityValue::new("🙂")),
+        &ctx
+    )
+    .ok);
 }
 
 fn excel_serial(date: chrono::NaiveDate) -> f64 {
@@ -258,6 +312,24 @@ fn date_and_time_validations_accept_strings_and_serial_numbers() {
     assert!(validate_value(&time_rule, &CellValue::Number(0.5), &ctx).ok);
     assert!(validate_value(&time_rule, &CellValue::Number(1.5), &ctx).ok);
     assert!(!validate_value(&time_rule, &CellValue::String("08:59".to_string()), &ctx).ok);
+}
+
+#[test]
+fn numeric_validation_parses_rich_value_display_strings() {
+    let ctx = TestCtx;
+
+    let rule = dv(
+        DataValidationKind::Decimal,
+        Some(DataValidationOperator::Equal),
+        "123",
+        None,
+    );
+    assert!(validate_value(
+        &rule,
+        &CellValue::Entity(EntityValue::new("123")),
+        &ctx
+    )
+    .ok);
 }
 
 #[test]

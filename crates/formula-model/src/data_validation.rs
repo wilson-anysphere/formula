@@ -464,6 +464,22 @@ fn is_blank(candidate: &CellValue) -> bool {
         CellValue::Empty => true,
         CellValue::String(s) => s.is_empty(),
         CellValue::RichText(rt) => rt.plain_text().is_empty(),
+        CellValue::Entity(e) => e.display_value.is_empty(),
+        CellValue::Record(r) => {
+            if let Some(field) = r.display_field.as_deref() {
+                if let Some(value) = r.fields.get(field) {
+                    return match value {
+                        CellValue::String(s) => s.is_empty(),
+                        CellValue::RichText(rt) => rt.text.is_empty(),
+                        // Scalar display strings for these variants are always non-empty.
+                        CellValue::Number(_) | CellValue::Boolean(_) | CellValue::Error(_) => false,
+                        // Non-scalar displayField values fall back to `display_value`.
+                        _ => r.display_value.is_empty(),
+                    };
+                }
+            }
+            r.display_value.is_empty()
+        }
         _ => false,
     }
 }
@@ -562,6 +578,8 @@ fn coerce_number(value: &CellValue) -> Option<f64> {
         CellValue::String(s) => s.trim().parse::<f64>().ok(),
         CellValue::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
         CellValue::RichText(rt) => rt.plain_text().trim().parse::<f64>().ok(),
+        // Rich values are treated as text-like for data validation; attempt to parse the display
+        // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => e.display_value.trim().parse::<f64>().ok(),
         CellValue::Record(r) => r.to_string().trim().parse::<f64>().ok(),
         _ => None,
@@ -602,6 +620,8 @@ fn coerce_date_serial(value: &CellValue) -> Option<f64> {
         CellValue::Number(n) => Some(*n),
         CellValue::String(s) => parse_date_time_serial(s.trim()),
         CellValue::RichText(rt) => parse_date_time_serial(rt.plain_text().trim()),
+        // Rich values are treated as text-like for data validation; attempt to parse the display
+        // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => parse_date_time_serial(e.display_value.trim()),
         CellValue::Record(r) => parse_date_time_serial(r.to_string().trim()),
         _ => None,
@@ -613,6 +633,8 @@ fn coerce_time_fraction(value: &CellValue) -> Option<f64> {
         CellValue::Number(n) => Some(n.rem_euclid(1.0)),
         CellValue::String(s) => parse_time_fraction(s.trim()),
         CellValue::RichText(rt) => parse_time_fraction(rt.plain_text().trim()),
+        // Rich values are treated as text-like for data validation; attempt to parse the display
+        // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => parse_time_fraction(e.display_value.trim()),
         CellValue::Record(r) => parse_time_fraction(r.to_string().trim()),
         _ => None,

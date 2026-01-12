@@ -20,7 +20,6 @@ pub fn format_cell_display(
     // Some `CellValue` variants (e.g. Record/Entity) map to a synthesized display
     // string rather than a direct reference into the input value.
     let mut display_buf: Option<String> = None;
-
     let fmt_value = match value {
         CellValue::Empty => FmtValue::Blank,
         CellValue::Number(n) => FmtValue::Number(*n),
