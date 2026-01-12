@@ -199,6 +199,12 @@ pub trait FunctionContext {
     /// callers that do not care about dependency tracing can ignore it.
     fn record_reference(&self, _reference: &Reference) {}
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc>;
+    /// Workbook calculation mode (automatic vs manual).
+    ///
+    /// This is primarily surfaced for worksheet information functions like `INFO("recalc")`.
+    fn calculation_mode(&self) -> crate::calc_settings::CalculationMode {
+        crate::calc_settings::CalculationMode::Automatic
+    }
     fn date_system(&self) -> ExcelDateSystem;
     fn current_sheet_id(&self) -> usize;
     fn current_cell_addr(&self) -> CellAddr;

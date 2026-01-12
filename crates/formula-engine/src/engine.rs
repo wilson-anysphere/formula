@@ -3870,6 +3870,7 @@ impl Engine {
         let id = self.next_recalc_id;
         self.next_recalc_id = self.next_recalc_id.wrapping_add(1);
         let mut ctx = crate::eval::RecalcContext::new(id);
+        ctx.calculation_mode = self.calc_settings.calculation_mode;
         let separators = self.value_locale.separators;
         ctx.number_locale =
             crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
@@ -4334,6 +4335,7 @@ impl Engine {
         let separators = self.value_locale.separators;
         recalc_ctx.number_locale =
             crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+        recalc_ctx.calculation_mode = self.calc_settings.calculation_mode;
         let (value, trace) = crate::debug::evaluate_with_trace(
             &snapshot,
             ctx,
@@ -9833,6 +9835,46 @@ mod tests {
     }
 
     #[test]
+    fn info_recalc_reflects_calc_settings() {
+        let mut engine = Engine::new();
+
+        engine
+            .set_cell_formula("Sheet1", "A1", r#"=INFO("recalc")"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A1"),
+            Value::Text("Manual".to_string())
+        );
+
+        engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::Automatic,
+            ..CalcSettings::default()
+        });
+        engine
+            .set_cell_formula("Sheet1", "A2", r#"=INFO("recalc")"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Text("Automatic".to_string())
+        );
+
+        engine.set_calc_settings(CalcSettings {
+            calculation_mode: CalculationMode::AutomaticNoTable,
+            ..CalcSettings::default()
+        });
+        engine
+            .set_cell_formula("Sheet1", "A3", r#"=INFO("recalc")"#)
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A3"),
+            Value::Text("Automatic except for tables".to_string())
+        );
+    }
+
+    #[test]
     fn multithreaded_and_singlethreaded_match_for_volatiles_given_same_recalc_context() {
         fn setup(engine: &mut Engine) {
             engine
@@ -9861,6 +9903,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 42,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         let levels_single = single
@@ -9945,6 +9988,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 42,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         let levels_ast = ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
@@ -9997,6 +10041,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 42,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         let run = |engine: &mut Engine, ctx: &crate::eval::RecalcContext| {
@@ -10086,6 +10131,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 123,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         // Ensure the volatile RNG formulas compile to bytecode when the backend is enabled.
@@ -11361,6 +11407,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 42,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         // Bytecode-enabled engine.
@@ -11437,6 +11484,7 @@ mod tests {
                 .unwrap(),
             recalc_id: 42,
             number_locale: crate::value::NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Manual,
         };
 
         // Bytecode-enabled engine.

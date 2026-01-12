@@ -4,6 +4,7 @@ use crate::eval::address::CellAddr;
 use crate::eval::ast::{
     BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp,
 };
+use crate::calc_settings::CalculationMode;
 use crate::functions::{
     ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId,
 };
@@ -47,6 +48,7 @@ pub struct RecalcContext {
     pub now_utc: chrono::DateTime<chrono::Utc>,
     pub recalc_id: u64,
     pub number_locale: NumberLocale,
+    pub calculation_mode: CalculationMode,
 }
 
 impl RecalcContext {
@@ -55,6 +57,7 @@ impl RecalcContext {
             now_utc: chrono::Utc::now(),
             recalc_id,
             number_locale: NumberLocale::en_us(),
+            calculation_mode: CalculationMode::Automatic,
         }
     }
 }
@@ -1449,6 +1452,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
     fn now_utc(&self) -> chrono::DateTime<chrono::Utc> {
         self.recalc_ctx.now_utc
+    }
+
+    fn calculation_mode(&self) -> CalculationMode {
+        self.recalc_ctx.calculation_mode
     }
 
     fn push_local_scope(&self) {

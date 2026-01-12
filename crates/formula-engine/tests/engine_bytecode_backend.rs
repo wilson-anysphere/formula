@@ -131,6 +131,7 @@ fn eval_via_ast(engine: &Engine, formula: &str, current_cell: &str) -> Value {
     let separators = engine.value_locale().separators;
     recalc_ctx.number_locale =
         NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+    recalc_ctx.calculation_mode = engine.calc_settings().calculation_mode;
 
     let parsed = formula_engine::eval::Parser::parse(formula).unwrap();
     let compiled = {
@@ -169,6 +170,7 @@ fn eval_via_ast_with_now_utc(
         now_utc,
         recalc_id: 0,
         number_locale: NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep)),
+        calculation_mode: engine.calc_settings().calculation_mode,
     };
 
     let parsed = formula_engine::eval::Parser::parse(formula).unwrap();

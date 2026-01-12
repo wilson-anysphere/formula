@@ -1,3 +1,4 @@
+use crate::calc_settings::CalculationMode;
 use crate::eval::{parse_a1, CellAddr};
 use crate::functions::{FunctionContext, Reference, SheetId};
 use crate::{ErrorKind, Value};
@@ -41,7 +42,11 @@ pub fn info(ctx: &dyn FunctionContext, type_text: &str) -> Value {
 
     match info_type {
         // Deterministic & commonly used values.
-        InfoType::Recalc => Value::Text("Automatic".to_string()),
+        InfoType::Recalc => match ctx.calculation_mode() {
+            CalculationMode::Automatic => Value::Text("Automatic".to_string()),
+            CalculationMode::AutomaticNoTable => Value::Text("Automatic except for tables".to_string()),
+            CalculationMode::Manual => Value::Text("Manual".to_string()),
+        },
         InfoType::System => Value::Text("pcdos".to_string()),
         InfoType::NumFile => Value::Number(ctx.sheet_count() as f64),
         // Known Excel keys that this engine does not currently expose.
