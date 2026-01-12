@@ -412,7 +412,16 @@ See also:
 `xl/richData/richValueRel.xml`:
 
 ```xml
-<!-- Root name and namespace are version-dependent; this is one observed variant. -->
+<!-- Root name and namespace are version-dependent. Two variants are observed in-repo. -->
+
+<!-- `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` -->
+<richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <!-- slot 0 -->
+  <rel r:id="rId1"/>
+</richValueRel>
+
+<!-- `fixtures/xlsx/basic/image-in-cell.xlsx` -->
 <richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <!-- slot 0 -->
@@ -429,6 +438,12 @@ See also:
                 Target="../media/image1.png"/>
 </Relationships>
 ```
+
+Important indexing note:
+
+* `richValueRel.xml` is an **ordered** `<rel>` list; rich values reference it by integer slot index.
+* `richValueRel.xml.rels` is an **unordered** map from relationship ID (`rId*`) to `Target`; do not assume
+  the `.rels` file lists `<Relationship>` entries in the same order as `richValueRel.xml`.
 
 ##### 4) `[Content_Types].xml` overrides
 
