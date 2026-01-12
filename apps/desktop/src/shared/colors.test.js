@@ -20,6 +20,7 @@ test("normalizeExcelColorToCss converts Excel ARGB to canvas-safe CSS colors", (
 
 test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objects", () => {
   assert.equal(normalizeExcelColorToCss({ indexed: 2 }), "#ff0000");
+  assert.equal(normalizeExcelColorToCss({ indexed: 64 }), undefined);
 
   // Office 2013 default theme palette.
   assert.equal(normalizeExcelColorToCss({ theme: 4 }), "#5b9bd5"); // accent1
@@ -29,4 +30,7 @@ test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objec
   assert.equal(normalizeExcelColorToCss({ theme: 4, tint: -500 }), "#2e4e6b");
 
   assert.equal(normalizeExcelColorToCss({ auto: true }), undefined);
+
+  // Some XLSX tooling uses `{ argb: "#AARRGGBB" }`.
+  assert.equal(normalizeExcelColorToCss({ argb: "#80112233" }), "rgba(17,34,51,0.502)");
 });
