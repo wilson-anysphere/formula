@@ -1447,6 +1447,7 @@ export class SpreadsheetApp {
 
       this.conflictUi = new ConflictUiController({
         container: this.conflictUiContainer,
+        sheetNameResolver: this.sheetNameResolver,
         monitor: {
           resolveConflict: (id: string, chosen: unknown) => {
             const monitor = this.formulaConflictMonitor;
@@ -1489,6 +1490,7 @@ export class SpreadsheetApp {
 
       this.structuralConflictUi = new StructuralConflictUiController({
         container: this.conflictUiContainer,
+        sheetNameResolver: this.sheetNameResolver,
         monitor: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           resolveConflict: (id: string, resolution: any) => {

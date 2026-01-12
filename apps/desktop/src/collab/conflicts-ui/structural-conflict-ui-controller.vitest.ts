@@ -4,6 +4,45 @@ import { describe, expect, it, vi } from "vitest";
 import { StructuralConflictUiController } from "./structural-conflict-ui-controller.js";
 
 describe("StructuralConflictUiController", () => {
+  it("renders conflict locations using sheet display names when sheetNameResolver is provided", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const namesById = new Map<string, string>([["sheet_123", "My Sheet"]]);
+    const sheetNameResolver = {
+      getSheetNameById: (id: string) => namesById.get(id) ?? null,
+      getSheetIdByName: (_name: string) => null,
+    };
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      sheetNameResolver,
+    });
+
+    ui.addConflict({
+      id: "c_display",
+      type: "cell",
+      reason: "content",
+      sheetId: "sheet_123",
+      cell: "A1",
+      cellKey: "sheet_123:0:0",
+      local: { kind: "edit", cellKey: "sheet_123:0:0", before: null, after: { value: 1 } },
+      remote: { kind: "edit", cellKey: "sheet_123:0:0", before: null, after: { value: 2 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    const toast = container.querySelector<HTMLElement>('[data-testid="structural-conflict-toast"]');
+    expect(toast).not.toBeNull();
+    expect(toast!.textContent).toContain("'My Sheet'!A1");
+    expect(toast!.textContent).not.toContain("sheet_123");
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("resolves a cell conflict via 'Keep ours' and removes it from the UI", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

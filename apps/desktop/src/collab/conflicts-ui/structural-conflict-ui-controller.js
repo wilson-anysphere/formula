@@ -12,10 +12,12 @@ export class StructuralConflictUiController {
    * @param {object} opts
    * @param {HTMLElement} opts.container
    * @param {{ resolveConflict: (id: string, resolution: any) => boolean }} opts.monitor
+   * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null | undefined} [opts.sheetNameResolver]
    */
   constructor(opts) {
     this.container = opts.container;
     this.monitor = opts.monitor;
+    this.sheetNameResolver = opts.sheetNameResolver ?? null;
 
     /** @type {Array<any>} */
     this.conflicts = [];
@@ -65,7 +67,10 @@ export class StructuralConflictUiController {
     const msg = document.createElement("div");
     if (this.conflicts.length === 1) {
       const conflict = this.conflicts[0];
-      msg.textContent = `Structural conflict detected (${conflict.type}/${conflict.reason}) in ${formatLocation(conflict)}`;
+      msg.textContent = `Structural conflict detected (${conflict.type}/${conflict.reason}) in ${formatLocation(
+        conflict,
+        this.sheetNameResolver,
+      )}`;
     } else {
       msg.textContent = `${this.conflicts.length} structural conflicts detected`;
     }
@@ -92,7 +97,10 @@ export class StructuralConflictUiController {
     dialog.dataset.testid = "structural-conflict-dialog";
 
     const title = document.createElement("h2");
-    title.textContent = `Resolve ${conflict.type} conflict (${conflict.reason}) in ${formatLocation(conflict)}`;
+    title.textContent = `Resolve ${conflict.type} conflict (${conflict.reason}) in ${formatLocation(
+      conflict,
+      this.sheetNameResolver,
+    )}`;
     dialog.appendChild(title);
 
     const meta = document.createElement("div");
@@ -184,7 +192,7 @@ export class StructuralConflictUiController {
 
     const pre = document.createElement("pre");
     const op = input.side === "local" ? input.conflict.local : input.conflict.remote;
-    pre.textContent = formatJson(summarizeOp(op));
+    pre.textContent = formatJson(summarizeOp(op, this.sheetNameResolver));
     panel.appendChild(pre);
 
     if (input.conflict.type === "move") {
@@ -192,7 +200,7 @@ export class StructuralConflictUiController {
       moveInfo.dataset.testid = `${input.testid}-move`;
       const toCellKey = op?.toCellKey ?? null;
       if (toCellKey) {
-        moveInfo.textContent = `Destination: ${formatCellKey(toCellKey)}`;
+        moveInfo.textContent = `Destination: ${formatCellKey(toCellKey, this.sheetNameResolver)}`;
       } else {
         moveInfo.textContent = "";
       }
@@ -322,21 +330,26 @@ export class StructuralConflictUiController {
 
 /**
  * @param {any} conflict
+ * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null} sheetNameResolver
  */
-function formatLocation(conflict) {
+function formatLocation(conflict, sheetNameResolver) {
   const sheetId = String(conflict?.sheetId ?? "");
   const cell = String(conflict?.cell ?? "");
-  if (sheetId && cell) return `${sheetId}!${cell}`;
-  return sheetId || cell || "unknown";
+  const sheetName = sheetNameResolver?.getSheetNameById?.(sheetId) ?? sheetId;
+  const sheetPrefix = sheetName ? `${formatSheetNameForA1(sheetName)}!` : "";
+  if (sheetPrefix && cell) return `${sheetPrefix}${cell}`;
+  return sheetName || cell || "unknown";
 }
 
 /**
  * @param {string} cellKey
+ * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null} sheetNameResolver
  */
-function formatCellKey(cellKey) {
+function formatCellKey(cellKey, sheetNameResolver) {
   try {
     const ref = cellRefFromKey(String(cellKey));
-    return `${ref.sheetId}!${numberToCol(ref.col)}${ref.row + 1}`;
+    const sheetName = sheetNameResolver?.getSheetNameById?.(ref.sheetId) ?? ref.sheetId;
+    return `${formatSheetNameForA1(sheetName)}!${numberToCol(ref.col)}${ref.row + 1}`;
   } catch {
     return String(cellKey);
   }
@@ -344,14 +357,15 @@ function formatCellKey(cellKey) {
 
 /**
  * @param {any} op
+ * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null} sheetNameResolver
  */
-function summarizeOp(op) {
+function summarizeOp(op, sheetNameResolver) {
   if (!op || typeof op !== "object") return op;
   if (op.kind === "move") {
     return {
       kind: "move",
-      from: op.fromCellKey ? formatCellKey(op.fromCellKey) : null,
-      to: op.toCellKey ? formatCellKey(op.toCellKey) : null,
+      from: op.fromCellKey ? formatCellKey(op.fromCellKey, sheetNameResolver) : null,
+      to: op.toCellKey ? formatCellKey(op.toCellKey, sheetNameResolver) : null,
       cell: op.cell ?? null,
     };
   }
@@ -363,6 +377,19 @@ function summarizeOp(op) {
     };
   }
   return op;
+}
+
+/**
+ * Format a sheet name token for A1 references using Excel quoting conventions.
+ * (Only used for display in the conflict UI; underlying sheet ids remain stable.)
+ *
+ * @param {string} sheetName
+ */
+function formatSheetNameForA1(sheetName) {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
 }
 
 /**

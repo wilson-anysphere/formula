@@ -11,10 +11,12 @@ export class ConflictUiController {
    * @param {object} opts
    * @param {HTMLElement} opts.container
    * @param {{ resolveConflict: (id: string, chosen: any) => boolean }} opts.monitor
+   * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null | undefined} [opts.sheetNameResolver]
    */
   constructor(opts) {
     this.container = opts.container;
     this.monitor = opts.monitor;
+    this.sheetNameResolver = opts.sheetNameResolver ?? null;
 
     /** @type {Array<any>} */
     this.conflicts = [];
@@ -57,7 +59,7 @@ export class ConflictUiController {
     if (this.conflicts.length === 1) {
       const conflict = this.conflicts[0];
       const label = conflict.kind === "value" ? "Value" : conflict.kind === "content" ? "Content" : "Formula";
-      msg.textContent = `${label} conflict detected (${formatCell(conflict.cell)})`;
+      msg.textContent = `${label} conflict detected (${formatCell(conflict.cell, this.sheetNameResolver)})`;
     } else {
       msg.textContent = `${this.conflicts.length} conflicts detected`;
     }
@@ -85,7 +87,7 @@ export class ConflictUiController {
 
     const title = document.createElement("h2");
     const label = conflict.kind === "value" ? "value" : conflict.kind === "content" ? "content" : "formula";
-    title.textContent = `Resolve ${label} conflict in ${formatCell(conflict.cell)}`;
+    title.textContent = `Resolve ${label} conflict in ${formatCell(conflict.cell, this.sheetNameResolver)}`;
     dialog.appendChild(title);
 
     const body = document.createElement("div");
@@ -291,9 +293,24 @@ export class ConflictUiController {
 
 /**
  * @param {{ sheetId: string, row: number, col: number }} cell
+ * @param {import("../../sheet/sheetNameResolver.ts").SheetNameResolver | null} sheetNameResolver
  */
-function formatCell(cell) {
-  return `${cell.sheetId}!${numberToCol(cell.col)}${cell.row + 1}`;
+function formatCell(cell, sheetNameResolver) {
+  const sheetId = String(cell?.sheetId ?? "");
+  const sheetName = sheetNameResolver?.getSheetNameById?.(sheetId) ?? sheetId;
+  return `${formatSheetNameForA1(sheetName)}!${numberToCol(cell.col)}${cell.row + 1}`;
+}
+
+/**
+ * Format a sheet name token for A1 references using Excel quoting conventions.
+ *
+ * @param {string} sheetName
+ */
+function formatSheetNameForA1(sheetName) {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
 }
 
 /**
