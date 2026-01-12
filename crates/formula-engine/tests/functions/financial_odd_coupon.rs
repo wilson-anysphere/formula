@@ -774,7 +774,9 @@ fn oddfyield_extreme_prices_roundtrip() {
     let frequency = 2;
     let basis = 0;
 
-    for pr in [50.0, 200.0] {
+    // Cover both moderately extreme prices and stress cases that push yields toward the
+    // domain boundary (-frequency) or into very high-yield regions.
+    for pr in [0.1, 50.0, 200.0, 10_000.0] {
         let yld = oddfyield(
             settlement,
             maturity,
@@ -827,7 +829,9 @@ fn oddlyield_extreme_prices_roundtrip() {
     let frequency = 2;
     let basis = 0;
 
-    for pr in [50.0, 200.0] {
+    // Cover both moderately extreme prices and stress cases that push yields toward the
+    // domain boundary (-frequency) or into very high-yield regions.
+    for pr in [0.1, 50.0, 200.0, 10_000.0] {
         let yld = oddlyield(
             settlement,
             maturity,
