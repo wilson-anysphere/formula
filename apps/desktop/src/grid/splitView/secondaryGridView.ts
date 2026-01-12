@@ -287,6 +287,9 @@ export class SecondaryGridView {
     this.resizeObserver.disconnect();
     for (const dispose of this.disposeFns) dispose();
     this.disposeFns.length = 0;
+    // Ensure we don't drop in-progress edits when the split pane is torn down
+    // (e.g. disabling split view while editing).
+    this.editor.commit("command");
     this.editingCell = null;
     this.editor.close();
     this.grid.destroy();
