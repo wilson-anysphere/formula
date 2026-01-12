@@ -7692,78 +7692,7 @@ export class SpreadsheetApp {
   }
 
   private insertCurrentDateTimeIntoSelection(kind: "date" | "time"): void {
-    const now = new Date();
-
-    const value = (() => {
-      if (kind === "date") {
-        // Excel stores dates as integer serials (1900 date system).
-        // Interpret the "current date" in local time, but convert to a UTC midnight
-        // date for deterministic serial conversion.
-        const y = now.getFullYear();
-        const m = now.getMonth();
-        const d = now.getDate();
-        return dateToExcelSerial(new Date(Date.UTC(y, m, d)));
-      }
-
-      const seconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-      return seconds / 86_400;
-    })();
-
-    const numberFormat = kind === "date" ? "yyyy-mm-dd" : "hh:mm:ss";
-    const label = kind === "date" ? t("command.edit.insertDate") : t("command.edit.insertTime");
-
-    const normalizeRange = (range: Range): Range => ({
-      startRow: Math.min(range.startRow, range.endRow),
-      endRow: Math.max(range.startRow, range.endRow),
-      startCol: Math.min(range.startCol, range.endCol),
-      endCol: Math.max(range.startCol, range.endCol),
-    });
-
-    const MAX_SELECTED_CELLS = 10_000;
-    const selectedCellCount = (() => {
-      let count = 0;
-      for (const rawRange of this.selection.ranges) {
-        const range = normalizeRange(rawRange);
-        const rowCount = range.endRow - range.startRow + 1;
-        const colCount = range.endCol - range.startCol + 1;
-        if (rowCount <= 0 || colCount <= 0) continue;
-        count += rowCount * colCount;
-        if (count > MAX_SELECTED_CELLS) break;
-      }
-      return count;
-    })();
-
-    const targetRanges: Range[] =
-      selectedCellCount > MAX_SELECTED_CELLS || this.selection.ranges.length === 0
-        ? [
-            {
-              startRow: this.selection.active.row,
-              endRow: this.selection.active.row,
-              startCol: this.selection.active.col,
-              endCol: this.selection.active.col,
-            },
-          ]
-        : this.selection.ranges;
-
-    this.document.beginBatch({ label });
-    try {
-      for (const rawRange of targetRanges) {
-        const range = normalizeRange(rawRange);
-        const rowCount = range.endRow - range.startRow + 1;
-        const colCount = range.endCol - range.startCol + 1;
-        if (rowCount <= 0 || colCount <= 0) continue;
-
-        const values = Array.from({ length: rowCount }, () => Array(colCount).fill(value));
-        this.document.setRangeValues(this.sheetId, { row: range.startRow, col: range.startCol }, values);
-        this.document.setRangeFormat(
-          this.sheetId,
-          { start: { row: range.startRow, col: range.startCol }, end: { row: range.endRow, col: range.endCol } },
-          { numberFormat },
-        );
-      }
-    } finally {
-      this.document.endBatch();
-    }
+    this.insertCurrentDateTimeIntoSelectionExcelSerial(kind);
   }
 
   private insertCurrentDateTimeIntoSelectionExcelSerial(kind: "date" | "time"): void {
