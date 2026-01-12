@@ -400,8 +400,12 @@ fn build_spc_indirect_data_content_v2_with_sha256_algorithm_and_md5_source_hash(
     let sha256_oid = der_oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]);
     let alg_id = der_sequence(&[sha256_oid, der_null()]);
 
-    // SigDataV1Serialized (ASN.1-ish): SEQUENCE { algorithmId AlgorithmIdentifier, sourceHash OCTET STRING }
-    let sig_data = der_sequence(&[alg_id, der_octet_string(md5_digest)]);
+    // SigDataV1Serialized (ASN.1-ish): SEQUENCE { version INTEGER, algorithmId AlgorithmIdentifier, sourceHash OCTET STRING }
+    // The production structure includes a small version field; include it so our strict V2 parser
+    // can identify the blob without accidentally treating arbitrary 16-byte OCTET STRINGs as the
+    // VBA project hash.
+    let version = vec![0x02, 0x01, 0x01]; // INTEGER 1
+    let sig_data = der_sequence(&[version, alg_id, der_octet_string(md5_digest)]);
 
     // SpcIndirectDataContentV2-like: SEQUENCE { data ANY, sigData OCTET STRING }
     der_sequence(&[der_null(), der_octet_string(&sig_data)])

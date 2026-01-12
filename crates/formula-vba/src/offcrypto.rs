@@ -108,13 +108,14 @@ pub(crate) fn parse_digsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
 /// DigSigBlob (§2.3.2.2) with offset fields (`signatureOffset`, `certStoreOffset`, ...). The
 /// length-prefixed wrapper parsed here is a separate, commonly-seen on-disk shape.
 ///
-/// Returns `None` if the stream does not look like a DigSigInfoSerialized-wrapped PKCS#7 payload.
+/// Returns `None` if the stream does not look like a length-prefixed DigSigInfoSerialized-like
+/// wrapper around a PKCS#7 payload.
 ///
 /// Notes:
-/// - The DigSigInfoSerialized structure contains several length-prefixed metadata blobs (project
-///   name, certificate store, etc.). The order varies across producers/versions, so we try a small
-///   set of deterministic layouts and validate by checking for a well-formed PKCS#7 `SignedData`
-///   `ContentInfo` at the computed offset.
+/// - This DigSigInfoSerialized-like wrapper contains several length-prefixed metadata blobs
+///   (project name, certificate store, etc.). The order varies across producers/versions, so we try
+///   a small set of deterministic layouts and validate by checking for a well-formed PKCS#7
+///   `SignedData` `ContentInfo` at the computed offset.
 /// - Integer fields are little-endian.
 pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSerialized> {
     // The minimum layout we support has three u32 length fields.

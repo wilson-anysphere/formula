@@ -47,7 +47,7 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
     assert_ne!(sig.signature.first(), Some(&0x30));
     assert!(
         sig.signature.len() >= 12,
-        "expected at least DigSigInfoSerialized header"
+        "expected at least DigSigInfoSerialized-like header"
     );
 
     let cb_signature = u32::from_le_bytes(sig.signature[0..4].try_into().unwrap()) as usize;
