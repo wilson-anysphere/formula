@@ -108,6 +108,64 @@ test("CollabSession formula conflict monitor detects true offline concurrent edi
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor still detects conflicts after recreating the session (restart)", async () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  let sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    formulaConflicts: {
+      localUserId: "user-b",
+      onConflict: () => {},
+    },
+  });
+
+  // Establish base.
+  await sessionA.setCellFormula("Sheet1:0:0", "=0");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=0");
+
+  // Offline concurrent edits.
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+
+  // Simulate app reload: recreate the session (and conflict monitor) before reconnecting.
+  sessionA.destroy();
+  conflictsA.length = 0;
+  sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  await sessionB.setCellFormula("Sheet1:0:0", "=2");
+
+  // Reconnect and sync state.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict after restart");
+  const conflict = conflictsA[0];
+  assert.equal(conflict.kind, "formula");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession formula conflict monitor does not emit conflicts for sequential overwrites", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
