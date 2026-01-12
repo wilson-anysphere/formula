@@ -72,8 +72,9 @@ test("Desktop main.ts wires Home → Clipboard ribbon commands to SpreadsheetApp
   assert.match(main, /\bgetPasteSpecialMenuItems\(\)/);
   assert.match(main, /\bshowQuickPick\(/);
 
-  // Transpose is currently unimplemented (but should be handled gracefully).
+  // Transpose should invoke the spreadsheet paste pipeline (Excel-style).
   assert.match(main, /\bcase\s+["']home\.clipboard\.paste\.transpose["']:/);
   assert.match(main, /\bcase\s+["']home\.clipboard\.pasteSpecial\.transpose["']:/);
-  assert.match(main, /Paste Transpose not implemented/);
+  assert.match(main, /\bclipboardPasteSpecial\(\s*["']all["']\s*,\s*\{\s*transpose:\s*true\s*\}\s*\)/);
+  assert.doesNotMatch(main, /Paste Transpose not implemented/);
 });
