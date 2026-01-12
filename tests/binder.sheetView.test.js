@@ -112,6 +112,51 @@ test("binder: DocumentController→Yjs upgrades existing plain-object sheet entr
   }
 });
 
+test("binder: preserves unknown view keys when writing sheet view deltas", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    entry.set("view", {
+      frozenRows: 0,
+      frozenCols: 0,
+      defaultFormat: { font: { bold: true } },
+      rowFormats: { "0": { numberFormat: "percent" } },
+      colFormats: { "0": { numberFormat: "currency" } },
+    });
+    sheets.push([entry]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    documentController.setFrozen("Sheet1", 2, 1);
+
+    await waitForCondition(() => {
+      const entry = sheets.get(0);
+      if (!(entry instanceof Y.Map)) return false;
+      const view = entry.get("view");
+      return view?.frozenRows === 2 && view?.frozenCols === 1 && view?.defaultFormat?.font?.bold === true;
+    });
+
+    const entry = sheets.get(0);
+    assert.ok(entry instanceof Y.Map);
+    assert.deepEqual(entry.get("view"), {
+      frozenRows: 2,
+      frozenCols: 1,
+      defaultFormat: { font: { bold: true } },
+      rowFormats: { "0": { numberFormat: "percent" } },
+      colFormats: { "0": { numberFormat: "currency" } },
+    });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
 test("binder: prefers non-local sheet entries when duplicates exist", async () => {
   const ydoc = new Y.Doc();
 
