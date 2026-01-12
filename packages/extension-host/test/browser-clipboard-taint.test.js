@@ -650,6 +650,58 @@ test("BrowserExtensionHost: taints selectionChanged events when payload is trunc
   ]);
 });
 
+test("BrowserExtensionHost: taints truncated selectionChanged events when values are included", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-truncated-with-values";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-truncated-with-values",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: {
+      startRow: 10,
+      startCol: 20,
+      endRow: 1_000_000,
+      endCol: 100,
+      values: [[1, 2, 3]],
+      truncated: true,
+    },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 10, startCol: 20, endRow: 10, endCol: 22 },
+  ]);
+});
+
 test("BrowserExtensionHost: selectionChanged taints using active-sheet fallback when sheetId omitted", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
