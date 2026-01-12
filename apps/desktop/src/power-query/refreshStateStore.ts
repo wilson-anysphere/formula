@@ -80,8 +80,7 @@ function sanitizeEntry(entry: unknown): RefreshStateEntry | null {
   const obj = entry as any;
   const policy = sanitizePolicy(obj.policy);
   if (!policy) return null;
-  /** @type {RefreshStateEntry} */
-  const out = { policy };
+  const out: RefreshStateEntry = { policy };
   const lastRunAtMs = obj.lastRunAtMs;
   if (typeof lastRunAtMs === "number" && Number.isFinite(lastRunAtMs)) out.lastRunAtMs = lastRunAtMs;
   return out;

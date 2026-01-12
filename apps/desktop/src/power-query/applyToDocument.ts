@@ -262,10 +262,10 @@ export async function applyQueryToDocument(
       includeHeader: destination.includeHeader,
       materialize: false,
       signal: options.signal,
-      onProgress: async (evt) => {
+      onProgress: async (evt: unknown) => {
         await options.onProgress?.({ type: "engine", queryId: query.id, event: evt });
       },
-      onBatch: async (batch) => {
+      onBatch: async (batch: { rowOffset: number; values: unknown[][] }) => {
         // The engine consults the abort signal between batches, but we also check here so a
         // cancellation can prevent partially-applied writes mid-refresh.
         throwIfAborted(options.signal);

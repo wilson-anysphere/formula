@@ -76,6 +76,8 @@ export type DesktopQueryEngineOptions = {
   privacyMode?: "ignore" | "enforce" | "warn";
 };
 
+type FileAdapter = NonNullable<DesktopQueryEngineOptions["fileAdapter"]>;
+
 const PERMISSION_KIND_TO_DLP_ACTION: Record<string, string> = {
   "file:read": DLP_ACTION.EXTERNAL_CONNECTOR,
   "http:request": DLP_ACTION.EXTERNAL_CONNECTOR,
@@ -230,6 +232,13 @@ function normalizeBinaryPayload(payload: unknown): Uint8Array {
   throw new Error("Unexpected binary payload returned from filesystem API");
 }
 
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  if (bytes.byteLength === 0) return new ArrayBuffer(0);
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 function normalizeFileSize(payload: unknown): number {
   if (payload == null) {
     throw new Error("Unexpected stat payload returned from filesystem API");
@@ -318,7 +327,7 @@ function normalizeMtimeMs(payload: unknown): number {
   throw new Error("Unexpected stat payload returned from filesystem API");
 }
 
-function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
+function createDefaultFileAdapter(): FileAdapter {
   const fs = getTauriFs();
   const readTextFile = fs?.readTextFile;
   const readFile = fs?.readFile ?? fs?.readBinaryFile;
@@ -329,7 +338,7 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
       // Best-effort: the FS plugin does not currently expose a streamable file handle, so fall back
       // to an in-memory Blob.
       const bytes = normalizeBinaryPayload(await readFile(path));
-      return new Blob([bytes]);
+      return new Blob([uint8ArrayToArrayBuffer(bytes)]);
     };
 
     return {
@@ -417,7 +426,7 @@ function createDefaultFileAdapter(): DesktopQueryEngineOptions["fileAdapter"] {
           if (length <= 0) return new ArrayBuffer(0);
           const payload = await this.invoke("read_binary_file_range", { path: this.path, offset: this.start, length });
           const bytes = normalizeBinaryPayload(payload);
-          return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+          return uint8ArrayToArrayBuffer(bytes);
         }
       }
 
@@ -765,11 +774,29 @@ function classificationLevelToPrivacy(level: unknown): PrivacyLevel {
   }
 }
 
+type RangeRect = { start: { row: number; col: number }; end: { row: number; col: number } };
+
+function isRangeRect(range: unknown): range is RangeRect {
+  if (!range || typeof range !== "object") return false;
+  const start = (range as any).start;
+  const end = (range as any).end;
+  return (
+    start &&
+    typeof start === "object" &&
+    typeof (start as any).row === "number" &&
+    typeof (start as any).col === "number" &&
+    end &&
+    typeof end === "object" &&
+    typeof (end as any).row === "number" &&
+    typeof (end as any).col === "number"
+  );
+}
+
 function computeWorkbookPrivacyLevel(dlp: DlpContext | undefined): PrivacyLevel {
   if (!dlp) return "unknown";
   try {
     const records = dlp.classificationStore.list(dlp.documentId);
-    if (dlp.sheetId && dlp.range) {
+    if (dlp.sheetId && isRangeRect(dlp.range)) {
       try {
         const selection = effectiveRangeClassification(
           { documentId: dlp.documentId, sheetId: dlp.sheetId, range: dlp.range },
@@ -929,7 +956,7 @@ class DesktopQueryEngine extends QueryEngine {
  */
 export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}): QueryEngine {
   const cache = options.cache ?? createDefaultCacheManager();
-  const fileAdapter = options.fileAdapter ?? createDefaultFileAdapter();
+  const fileAdapter: FileAdapter = options.fileAdapter ?? createDefaultFileAdapter();
 
   // Prefer a host-provided queued invoke (set by the desktop entrypoint) so reads
   // like `list_tables`/`get_range` cannot race ahead of pending workbook writes.
@@ -1087,7 +1114,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     const columns = Array.isArray(payload?.columns) ? payload.columns.map((c: any) => String(c)) : [];
     const typesObj = payload?.types && typeof payload.types === "object" && !Array.isArray(payload.types) ? (payload.types as any) : null;
 
-    const typedColumns = columns.map((name) => ({ name, type: coerceSqlDataType(typesObj?.[name]) }));
+    const typedColumns = columns.map((name: string) => ({ name, type: coerceSqlDataType(typesObj?.[name]) }));
     const rawRows = Array.isArray(payload?.rows) ? payload.rows : [];
     const rows = rawRows.map((row: any) =>
       Array.from({ length: typedColumns.length }, (_, i) => {
@@ -1198,8 +1225,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
   const getPermissionObjectId = createEphemeralObjectId();
 
   const workbookPrivacyLevel = computeWorkbookPrivacyLevel(options.dlp);
-  /** @type {Record<string, PrivacyLevel>} */
-  const defaultPrivacyLevelsBySourceId = {};
+  const defaultPrivacyLevelsBySourceId: Record<string, PrivacyLevel> = {};
   if (workbookPrivacyLevel !== "unknown") {
     defaultPrivacyLevelsBySourceId["workbook:range"] = workbookPrivacyLevel;
     // Provide a fallback for table provenance that does not include a specific table name.
@@ -1221,7 +1247,7 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
       connectors: { ...(http ? { http } : null), ...(odata ? { odata } : null), sql },
       privacyMode: options.privacyMode,
       onCredentialRequest: options.onCredentialRequest,
-      onPermissionRequest: async (kind, details) => {
+      onPermissionRequest: async (kind: string, details: unknown) => {
         const dlpAction = PERMISSION_KIND_TO_DLP_ACTION[kind];
         if (dlpAction === DLP_ACTION.EXTERNAL_CONNECTOR && options.dlp) {
           const policy = typeof options.dlp.policy === "function" ? await options.dlp.policy() : options.dlp.policy;
@@ -1262,6 +1288,6 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
 export function getContextForDocument(doc: DocumentController): QueryExecutionContext {
   const registry = getTableSignatureRegistry(doc);
   return {
-    getTableSignature: (tableName) => registry.getTableSignature(tableName),
+    getTableSignature: (tableName: string) => registry.getTableSignature(tableName),
   };
 }
