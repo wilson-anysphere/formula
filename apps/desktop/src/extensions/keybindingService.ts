@@ -50,6 +50,9 @@ const RESERVED_EXTENSION_SHORTCUTS: ParsedKeybinding[] = [
   parseKeybinding("__reserved__", "cmd+x")!,
   parseKeybinding("__reserved__", "ctrl+v")!,
   parseKeybinding("__reserved__", "cmd+v")!,
+  // Paste Special
+  parseKeybinding("__reserved__", "ctrl+shift+v")!,
+  parseKeybinding("__reserved__", "cmd+shift+v")!,
   // Command palette
   parseKeybinding("__reserved__", "ctrl+shift+p")!,
   parseKeybinding("__reserved__", "cmd+shift+p")!,
@@ -195,4 +198,3 @@ export class KeybindingService {
     return best;
   }
 }
-
