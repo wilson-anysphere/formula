@@ -364,6 +364,12 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
 
     const borderSegments = segmentsForStroke(gridCalls, (state) => state.strokeStyle === "rgb(255,0,0)" && state.lineWidth === 1);
 
+    const crispStrokePos = (pos: number, lineWidth: number): number => {
+      const roundedPos = Math.round(pos);
+      const roundedWidth = Math.round(lineWidth);
+      return roundedWidth % 2 === 1 ? roundedPos + 0.5 : roundedPos;
+    };
+
     const maxX = Math.max(...borderSegments.flatMap((s) => [s.x1, s.x2]));
     const maxY = Math.max(...borderSegments.flatMap((s) => [s.y1, s.y2]));
 
@@ -371,6 +377,12 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
     // should reach beyond the anchor cell's 1x1 bounds.
     expect(maxX).toBeGreaterThan(150);
     expect(maxY).toBeGreaterThan(30);
+
+    // Ensure we did NOT draw borders on the interior merged gridlines (x=100px, y=21px).
+    const interiorX = crispStrokePos(100, 1);
+    const interiorY = crispStrokePos(21, 1);
+    expect(borderSegments.some((s) => s.x1 === interiorX && s.x2 === interiorX)).toBe(false);
+    expect(borderSegments.some((s) => s.y1 === interiorY && s.y2 === interiorY)).toBe(false);
   });
 
   it("resolves shared-edge border conflicts by preferring the thicker border", () => {
@@ -444,5 +456,112 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
     const expectedX = crispStrokePos(100, 3);
     expect(borderSegments[0].x1).toBeCloseTo(expectedX, 5);
     expect(borderSegments[0].x2).toBeCloseTo(expectedX, 5);
+  });
+
+  it("resolves equal-width conflicts deterministically (prefers right/bottom borders)", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: {
+                right: { width: 1, style: "solid", color: "rgb(255,0,0)" }
+              }
+            }
+          };
+        }
+        if (row === 0 && col === 1) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: {
+                left: { width: 1, style: "solid", color: "rgb(0,0,255)" }
+              }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: [] }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: [] }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 120, 1);
+    renderer.renderImmediately();
+
+    // The shared edge should be rendered with the right-hand cell's blue border.
+    const borderSegments = segmentsForStroke(gridCalls, (state) => state.strokeStyle === "rgb(0,0,255)" && state.lineWidth === 1);
+    expect(borderSegments).toHaveLength(1);
+    expect(gridCalls.some((c) => c[0] === "stroke" && c[1]?.strokeStyle === "rgb(255,0,0)")).toBe(false);
+  });
+
+  it("batches border segments by stroke config (single stroke for many segments)", () => {
+    const border = { width: 1, style: "solid" as const, color: "rgb(255,0,0)" };
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row < 2 && col < 2) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: { top: border, right: border, bottom: border, left: border }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: [] }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: [] }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 3, colCount: 3 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 160, 1);
+    renderer.renderImmediately();
+
+    const borderStrokes = gridCalls.filter(
+      (call) => call[0] === "stroke" && call[1]?.strokeStyle === "rgb(255,0,0)" && call[1]?.lineWidth === 1
+    );
+    expect(borderStrokes).toHaveLength(1);
   });
 });
