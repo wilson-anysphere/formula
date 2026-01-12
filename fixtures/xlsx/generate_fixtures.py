@@ -41,7 +41,7 @@ def write_xlsx(
     workbook_xml_override: str | None = None,
     workbook_rels_extra: list[str] | None = None,
     content_types_extra_overrides: list[str] | None = None,
-    extra_parts: dict[str, str] | None = None,
+    extra_parts: dict[str, str | bytes] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -86,7 +86,10 @@ def write_xlsx(
             _zip_write(zf, "xl/sharedStrings.xml", shared_strings_xml)
         if extra_parts is not None:
             for name, data in extra_parts.items():
-                _zip_write(zf, name, data)
+                if isinstance(data, bytes):
+                    _zip_write_bytes(zf, name, data)
+                else:
+                    _zip_write(zf, name, data)
 
 
 def content_types_xml(
@@ -1186,7 +1189,7 @@ def content_types_cellimages_xml() -> str:
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
+  <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.ms-excel.cellimages+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
 </Types>
