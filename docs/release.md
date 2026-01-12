@@ -217,6 +217,12 @@ After the workflow completes:
 3. Publish the release to make it visible to users and (if your updater endpoint references
    GitHub) available for auto-update.
 
+Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
+
+- From source (recommended preflight): `pnpm -C apps/desktop check:coi`
+- Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
+  confirm `globalThis.crossOriginIsolated === true`.
+
 ## 6) Bundle size reporting + (optional) size gate
 
 The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /
