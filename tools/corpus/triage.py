@@ -181,9 +181,16 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
             from xml.etree import ElementTree as ET
 
             def _resolve_workbook_target(target: str) -> str:
-                target = (target or "").replace("\\", "/")
+                target = (target or "").strip().replace("\\", "/")
+                if not target:
+                    return ""
                 if target.startswith("/"):
-                    return target.lstrip("/")
+                    return posixpath.normpath(target.lstrip("/"))
+                # Some producers incorrectly include the `xl/` prefix without a leading `/`,
+                # even though relationship targets are supposed to be relative to the source
+                # part (`xl/workbook.xml`). Treat this as a package-root-relative path.
+                if target.casefold().startswith("xl/"):
+                    return posixpath.normpath(target)
                 return posixpath.normpath(posixpath.join("xl", target))
 
             rels_root = ET.fromstring(z.read(workbook_rels_name))
