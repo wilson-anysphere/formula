@@ -127,6 +127,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         if (!target) return;
         if (target.closest(".ribbon__tabs")) return;
         if (!target.closest(".ribbon__content")) return;
+        if (target.closest(".ribbon-dropdown__menu")) return;
         event.preventDefault();
         tabButtonRefs.current[activeTabId]?.focus();
       }}
