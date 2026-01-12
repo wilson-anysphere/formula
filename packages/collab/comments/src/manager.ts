@@ -471,8 +471,17 @@ export function createCommentManagerForDoc(params: (
     // Best-effort; never block comment usage on normalization.
   }
 
-  const transact = "transactLocal" in params ? params.transactLocal : params.transact;
-  return new CommentManager(params.doc, { transact: (fn) => transact(fn) });
+  // Be careful to preserve the caller's `this` binding.
+  //
+  // `CollabSession.transactLocal` is a class method, so extracting it into a local
+  // variable (or passing it through) would lose `this` and crash under strict-mode
+  // invocation. Always invoke via the originating object.
+  return new CommentManager(params.doc, {
+    transact: (fn) => {
+      if ("transactLocal" in params) params.transactLocal(fn);
+      else params.transact(fn);
+    },
+  });
 }
 
 export function createCommentManagerForSession(session: { doc: Y.Doc; transactLocal: (fn: () => void) => void }): CommentManager {

@@ -211,6 +211,7 @@ export class FileCollabPersistence implements CollabPersistence {
     // append new records (or compact) since that can corrupt the log or
     // accidentally downgrade encrypted persistence to plaintext.
     let persistenceEnabled = !this.docsWithFailedEncryptedLoad.has(docId);
+    let sawUpdate = false;
 
     // Initialize (and validate) the persistence file before any update events are
     // queued. Update writes are serialized behind this task via `enqueue()`.
@@ -284,6 +285,7 @@ export class FileCollabPersistence implements CollabPersistence {
 
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === persistenceOrigin) return;
+      sawUpdate = true;
 
       void this.enqueue(docId, async () => {
           if (!persistenceEnabled) return;
@@ -316,6 +318,12 @@ export class FileCollabPersistence implements CollabPersistence {
       const timer = this.compactTimers.get(docId);
       if (timer) clearTimeout(timer);
       this.compactTimers.delete(docId);
+
+      // If the document never changed after binding, we don't need to enqueue a final snapshot
+      // compaction. This avoids creating empty persistence files when the caller simply opened
+      // and closed a document without edits (and prevents teardown races in tests where the
+      // session is destroyed without awaiting `binding.destroy()` / `persistence.flush()`).
+      if (!sawUpdate) return;
 
       // Capture the final document state immediately so callers can destroy the
       // Y.Doc without racing the async persistence queue.
