@@ -1787,6 +1787,19 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       lastCollabSheetsKey = collabSheetsKey(this.session);
     });
   }
+
+  override remove(id: string): void {
+    super.remove(id);
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      this.session.sheets.delete(idx, 1);
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+    });
+  }
 }
 
 function reconcileSheetStoreWithDocument(ids: string[]): void {
