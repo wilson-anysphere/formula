@@ -32,15 +32,6 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     }
 }
 
-fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
-    match sheet.eval(formula) {
-        Value::Number(n) => Some(n),
-        // These bond functions may not be registered in every build of the engine yet.
-        Value::Error(ErrorKind::Name) => None,
-        other => panic!("expected number, got {other:?} from {formula}"),
-    }
-}
-
 #[test]
 fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
     let system = ExcelDateSystem::EXCEL_1900;
@@ -238,6 +229,17 @@ fn builtins_odd_coupon_zero_coupon_rate_oracle_cases() {
     )
     .expect("ODDLYIELD should evaluate");
     assert_close(yld2, 0.1, 1e-10);
+}
+
+#[test]
+fn oddfprice_matches_known_example_basis0() {
+    let mut sheet = TestSheet::new();
+    let formula = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let v = sheet.eval(formula);
+    match v {
+        Value::Number(n) => assert_close(n, 113.59920582823823, 1e-9),
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
 }
 
 #[test]

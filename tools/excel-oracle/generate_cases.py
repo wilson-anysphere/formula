@@ -1799,6 +1799,32 @@ def generate_cases() -> dict[str, Any]:
         formula="=TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
     )
 
+    # Odd-coupon bond functions (`ODDF*` / `ODDL*`).
+    _add_case(
+        cases,
+        prefix="oddfprice",
+        tags=["financial", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="oddfyield",
+        tags=["financial", "ODDFYIELD"],
+        formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlprice",
+        tags=["financial", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="oddlyield",
+        tags=["financial", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
+    )
+
     # French accounting depreciation functions (AMOR*)
     amor_date_purchased = _excel_serial_1900(2008, 8, 19)
     amor_first_period = _excel_serial_1900(2008, 12, 31)

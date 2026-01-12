@@ -30880,6 +30880,46 @@
       "id": "tbilleq_fd491a02769a"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "id": "oddfprice_a87b2fd2430e"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "id": "oddfyield_8cd8b1d8d162"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "id": "oddlprice_b43afeae88ea"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "id": "oddlyield_aa53352d755f"
+    },
+    {
       "formula": "=AMORLINC(2400,A1,A2,300,1,0.15,1)",
       "outputCell": "C1",
       "inputs": [

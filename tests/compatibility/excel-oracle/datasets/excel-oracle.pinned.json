@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T08:08:08.890671294Z",
+  "generatedAt": "2026-01-12T08:25:34.17648662Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "2a16c6ec303e9969734effb4a243215d39a7c5bc4988b73f022a93d6e46e5658",
-    "count": 1561
+    "sha256": "8cad470ff0447e15b9a51bd7815858c83f5b4a6bfb919bda4b45dc02b22a3f41",
+    "count": 1569
   },
   "results": [
     {
@@ -9703,41 +9703,41 @@
       "caseId": "forecast_ets_fd60a0f105e9",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "n",
+        "v": 7.0
       },
       "address": "C1",
-      "displayText": "#VALUE!"
+      "displayText": "7"
     },
     {
       "caseId": "forecast_ets_confint_8eafb6e3d87f",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "#VALUE!"
+      "displayText": "0"
     },
     {
       "caseId": "forecast_ets_seasonality_a4855868338a",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "n",
+        "v": 2.0
       },
       "address": "C1",
-      "displayText": "#VALUE!"
+      "displayText": "2"
     },
     {
       "caseId": "forecast_ets_stat_c8d98934d450",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#VALUE!"
+        "t": "n",
+        "v": 0.0
       },
       "address": "C1",
-      "displayText": "#VALUE!"
+      "displayText": "0"
     },
     {
       "caseId": "steyx_069420cb8eee",
@@ -14553,6 +14553,46 @@
       },
       "address": "C1",
       "displayText": "0.052707099771976636"
+    },
+    {
+      "caseId": "oddfprice_a87b2fd2430e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59920582823823
+      },
+      "address": "C1",
+      "displayText": "113.59920582823823"
+    },
+    {
+      "caseId": "oddfyield_8cd8b1d8d162",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.08110512123658985
+      },
+      "address": "C1",
+      "displayText": "0.08110512123658985"
+    },
+    {
+      "caseId": "oddlprice_b43afeae88ea",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.48044585692473
+      },
+      "address": "C1",
+      "displayText": "100.48044585692473"
+    },
+    {
+      "caseId": "oddlyield_aa53352d755f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.14811017424419679
+      },
+      "address": "C1",
+      "displayText": "0.14811017424419679"
     },
     {
       "caseId": "amorlinc_dee2af9ce2b3",

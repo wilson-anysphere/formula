@@ -1,51 +1,94 @@
+use chrono::{DateTime, Utc};
+
+use crate::date::ExcelDateSystem;
 use crate::error::{ExcelError, ExcelResult};
 use crate::eval::CompiledExpr;
-use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::date_time;
+use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
+
+fn excel_error_kind(e: ExcelError) -> ErrorKind {
+    match e {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
+    }
+}
 
 fn excel_result_number(res: ExcelResult<f64>) -> Value {
     match res {
         Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
+        Err(e) => Value::Error(excel_error_kind(e)),
     }
 }
 
-fn eval_finite_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
-    let v = ctx.eval_scalar(expr);
-    match v {
-        Value::Error(e) => Err(e),
-        other => {
-            let n = other.coerce_to_number_with_ctx(ctx)?;
-            if n.is_finite() {
-                Ok(n)
-            } else {
-                Err(ErrorKind::Num)
+fn datevalue_from_value(
+    ctx: &dyn FunctionContext,
+    value: &Value,
+    system: ExcelDateSystem,
+    now_utc: DateTime<Utc>,
+) -> Result<i32, ErrorKind> {
+    match value {
+        Value::Text(s) => {
+            date_time::datevalue(s, ctx.value_locale(), now_utc, system).map_err(excel_error_kind)
+        }
+        _ => {
+            let n = value.coerce_to_number_with_ctx(ctx)?;
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
             }
+            let serial = n.floor();
+            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
+                return Err(ErrorKind::Num);
+            }
+            Ok(serial as i32)
         }
     }
 }
 
-fn eval_i32_trunc(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<i32, ErrorKind> {
-    let n = eval_finite_number_arg(ctx, expr)?;
-    if n < (i32::MIN as f64) || n > (i32::MAX as f64) {
+fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
+    let n = v.coerce_to_number_with_ctx(ctx)?;
+    if !n.is_finite() {
         return Err(ErrorKind::Num);
     }
-    Ok(n.trunc() as i32)
+    Ok(n)
 }
 
-fn eval_optional_i32_trunc(
+fn basis_from_optional_arg(
     ctx: &dyn FunctionContext,
-    expr: Option<&CompiledExpr>,
-) -> Result<Option<i32>, ErrorKind> {
-    match expr {
-        Some(e) => Ok(Some(eval_i32_trunc(ctx, e)?)),
-        None => Ok(None),
+    arg: Option<&CompiledExpr>,
+) -> Result<i32, ErrorKind> {
+    let Some(arg) = arg else {
+        return Ok(0);
+    };
+    let v = eval_scalar_arg(ctx, arg);
+    if matches!(v, Value::Blank) {
+        return Ok(0);
     }
+    let n = coerce_to_finite_number(ctx, &v)?;
+    let t = n.trunc();
+    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
+        return Err(ErrorKind::Num);
+    }
+    let basis = t as i32;
+    if !(0..=4).contains(&basis) {
+        return Err(ErrorKind::Num);
+    }
+    Ok(basis)
+}
+
+fn frequency_from_value(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
+    let n = coerce_to_finite_number(ctx, v)?;
+    let t = n.trunc();
+    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
+        return Err(ErrorKind::Num);
+    }
+    let frequency = t as i32;
+    if !(frequency == 1 || frequency == 2 || frequency == 4) {
+        return Err(ErrorKind::Num);
+    }
+    Ok(frequency)
 }
 
 inventory::submit! {
@@ -58,10 +101,10 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Any,   // settlement
-            ValueType::Any,   // maturity
-            ValueType::Any,   // issue
-            ValueType::Any,   // first_coupon
+            ValueType::Any, // settlement
+            ValueType::Any, // maturity
+            ValueType::Any, // issue
+            ValueType::Any, // first_coupon
             ValueType::Number, // rate
             ValueType::Number, // yld
             ValueType::Number, // redemption
@@ -73,43 +116,51 @@ inventory::submit! {
 }
 
 fn oddfprice_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = eval_scalar_arg(ctx, &args[0]);
+    let maturity = eval_scalar_arg(ctx, &args[1]);
+    let issue = eval_scalar_arg(ctx, &args[2]);
+    let first_coupon = eval_scalar_arg(ctx, &args[3]);
+    let rate = eval_scalar_arg(ctx, &args[4]);
+    let yld = eval_scalar_arg(ctx, &args[5]);
+    let redemption = eval_scalar_arg(ctx, &args[6]);
+    let frequency = eval_scalar_arg(ctx, &args[7]);
+    let basis = match basis_from_optional_arg(ctx, args.get(8)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
 
-    let settlement = match eval_i32_trunc(ctx, &args[0]) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match eval_i32_trunc(ctx, &args[1]) {
+    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let issue = match eval_i32_trunc(ctx, &args[2]) {
+    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let first_coupon = match eval_i32_trunc(ctx, &args[3]) {
+    let first_coupon = match datevalue_from_value(ctx, &first_coupon, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let rate = match eval_finite_number_arg(ctx, &args[4]) {
+    let rate = match coerce_to_finite_number(ctx, &rate) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let yld = match eval_finite_number_arg(ctx, &args[5]) {
+    let yld = match coerce_to_finite_number(ctx, &yld) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let redemption = match eval_finite_number_arg(ctx, &args[6]) {
+    let redemption = match coerce_to_finite_number(ctx, &redemption) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let frequency = match eval_i32_trunc(ctx, &args[7]) {
+    let frequency = match frequency_from_value(ctx, &frequency) {
         Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let basis = match eval_optional_i32_trunc(ctx, args.get(8)) {
-        Ok(v) => v.unwrap_or(0),
         Err(e) => return Value::Error(e),
     };
 
@@ -137,10 +188,10 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Any,   // settlement
-            ValueType::Any,   // maturity
-            ValueType::Any,   // issue
-            ValueType::Any,   // first_coupon
+            ValueType::Any, // settlement
+            ValueType::Any, // maturity
+            ValueType::Any, // issue
+            ValueType::Any, // first_coupon
             ValueType::Number, // rate
             ValueType::Number, // pr
             ValueType::Number, // redemption
@@ -152,43 +203,51 @@ inventory::submit! {
 }
 
 fn oddfyield_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = eval_scalar_arg(ctx, &args[0]);
+    let maturity = eval_scalar_arg(ctx, &args[1]);
+    let issue = eval_scalar_arg(ctx, &args[2]);
+    let first_coupon = eval_scalar_arg(ctx, &args[3]);
+    let rate = eval_scalar_arg(ctx, &args[4]);
+    let pr = eval_scalar_arg(ctx, &args[5]);
+    let redemption = eval_scalar_arg(ctx, &args[6]);
+    let frequency = eval_scalar_arg(ctx, &args[7]);
+    let basis = match basis_from_optional_arg(ctx, args.get(8)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
 
-    let settlement = match eval_i32_trunc(ctx, &args[0]) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match eval_i32_trunc(ctx, &args[1]) {
+    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let issue = match eval_i32_trunc(ctx, &args[2]) {
+    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let first_coupon = match eval_i32_trunc(ctx, &args[3]) {
+    let first_coupon = match datevalue_from_value(ctx, &first_coupon, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let rate = match eval_finite_number_arg(ctx, &args[4]) {
+    let rate = match coerce_to_finite_number(ctx, &rate) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let pr = match eval_finite_number_arg(ctx, &args[5]) {
+    let pr = match coerce_to_finite_number(ctx, &pr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let redemption = match eval_finite_number_arg(ctx, &args[6]) {
+    let redemption = match coerce_to_finite_number(ctx, &redemption) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let frequency = match eval_i32_trunc(ctx, &args[7]) {
+    let frequency = match frequency_from_value(ctx, &frequency) {
         Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let basis = match eval_optional_i32_trunc(ctx, args.get(8)) {
-        Ok(v) => v.unwrap_or(0),
         Err(e) => return Value::Error(e),
     };
 
@@ -216,9 +275,9 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Any,   // settlement
-            ValueType::Any,   // maturity
-            ValueType::Any,   // last_interest
+            ValueType::Any, // settlement
+            ValueType::Any, // maturity
+            ValueType::Any, // last_interest
             ValueType::Number, // rate
             ValueType::Number, // yld
             ValueType::Number, // redemption
@@ -230,39 +289,46 @@ inventory::submit! {
 }
 
 fn oddlprice_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = eval_scalar_arg(ctx, &args[0]);
+    let maturity = eval_scalar_arg(ctx, &args[1]);
+    let last_interest = eval_scalar_arg(ctx, &args[2]);
+    let rate = eval_scalar_arg(ctx, &args[3]);
+    let yld = eval_scalar_arg(ctx, &args[4]);
+    let redemption = eval_scalar_arg(ctx, &args[5]);
+    let frequency = eval_scalar_arg(ctx, &args[6]);
+    let basis = match basis_from_optional_arg(ctx, args.get(7)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
 
-    let settlement = match eval_i32_trunc(ctx, &args[0]) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match eval_i32_trunc(ctx, &args[1]) {
+    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let last_interest = match eval_i32_trunc(ctx, &args[2]) {
+    let last_interest = match datevalue_from_value(ctx, &last_interest, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let rate = match eval_finite_number_arg(ctx, &args[3]) {
+    let rate = match coerce_to_finite_number(ctx, &rate) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let yld = match eval_finite_number_arg(ctx, &args[4]) {
+    let yld = match coerce_to_finite_number(ctx, &yld) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let redemption = match eval_finite_number_arg(ctx, &args[5]) {
+    let redemption = match coerce_to_finite_number(ctx, &redemption) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let frequency = match eval_i32_trunc(ctx, &args[6]) {
+    let frequency = match frequency_from_value(ctx, &frequency) {
         Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let basis = match eval_optional_i32_trunc(ctx, args.get(7)) {
-        Ok(v) => v.unwrap_or(0),
         Err(e) => return Value::Error(e),
     };
 
@@ -289,9 +355,9 @@ inventory::submit! {
         array_support: ArraySupport::ScalarOnly,
         return_type: ValueType::Number,
         arg_types: &[
-            ValueType::Any,   // settlement
-            ValueType::Any,   // maturity
-            ValueType::Any,   // last_interest
+            ValueType::Any, // settlement
+            ValueType::Any, // maturity
+            ValueType::Any, // last_interest
             ValueType::Number, // rate
             ValueType::Number, // pr
             ValueType::Number, // redemption
@@ -303,39 +369,46 @@ inventory::submit! {
 }
 
 fn oddlyield_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let settlement = eval_scalar_arg(ctx, &args[0]);
+    let maturity = eval_scalar_arg(ctx, &args[1]);
+    let last_interest = eval_scalar_arg(ctx, &args[2]);
+    let rate = eval_scalar_arg(ctx, &args[3]);
+    let pr = eval_scalar_arg(ctx, &args[4]);
+    let redemption = eval_scalar_arg(ctx, &args[5]);
+    let frequency = eval_scalar_arg(ctx, &args[6]);
+    let basis = match basis_from_optional_arg(ctx, args.get(7)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
     let system = ctx.date_system();
+    let now_utc = ctx.now_utc();
 
-    let settlement = match eval_i32_trunc(ctx, &args[0]) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let maturity = match eval_i32_trunc(ctx, &args[1]) {
+    let maturity = match datevalue_from_value(ctx, &maturity, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let last_interest = match eval_i32_trunc(ctx, &args[2]) {
+    let last_interest = match datevalue_from_value(ctx, &last_interest, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-
-    let rate = match eval_finite_number_arg(ctx, &args[3]) {
+    let rate = match coerce_to_finite_number(ctx, &rate) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let pr = match eval_finite_number_arg(ctx, &args[4]) {
+    let pr = match coerce_to_finite_number(ctx, &pr) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let redemption = match eval_finite_number_arg(ctx, &args[5]) {
+    let redemption = match coerce_to_finite_number(ctx, &redemption) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let frequency = match eval_i32_trunc(ctx, &args[6]) {
+    let frequency = match frequency_from_value(ctx, &frequency) {
         Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let basis = match eval_optional_i32_trunc(ctx, args.get(7)) {
-        Ok(v) => v.unwrap_or(0),
         Err(e) => return Value::Error(e),
     };
 
