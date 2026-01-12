@@ -2,6 +2,7 @@ use std::io::{Cursor, Write};
 
 use base64::Engine;
 use formula_model::CellRef;
+use formula_xlsx::rich_data::extract_rich_cell_images;
 use formula_xlsx::XlsxPackage;
 use zip::write::FileOptions;
 use zip::ZipWriter;
@@ -104,9 +105,7 @@ fn extracts_in_cell_images_with_direct_extlst_rvb_list() {
 
     let bytes = build_rich_data_package(metadata_xml);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = pkg
-        .extract_rich_data_images()
-        .expect("extract richData images");
+    let images = extract_rich_cell_images(&pkg).expect("extract richData images");
 
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
@@ -140,9 +139,7 @@ fn extracts_in_cell_images_with_future_metadata_indirection() {
 
     let bytes = build_rich_data_package(metadata_xml);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = pkg
-        .extract_rich_data_images()
-        .expect("extract richData images");
+    let images = extract_rich_cell_images(&pkg).expect("extract richData images");
 
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     assert_eq!(images.get(&key).cloned(), Some(png_1x1()));
