@@ -101,10 +101,10 @@ impl From<RichText> for CellValue {
 #[serde(rename_all = "camelCase")]
 pub struct EntityValue {
     /// Entity type discriminator (e.g. `"stock"`, `"geography"`).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, alias = "entity_type", skip_serializing_if = "String::is_empty")]
     pub entity_type: String,
     /// Entity identifier (e.g. `"AAPL"`).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, alias = "entity_id", skip_serializing_if = "String::is_empty")]
     pub entity_id: String,
     /// User-visible string representation (what Excel renders in the grid).
     ///
@@ -333,6 +333,19 @@ mod tests {
         }))
         .expect("deserialize snake_case entity display");
         assert_eq!(entity.display_value, "Entity display");
+    }
+
+    #[test]
+    fn entity_value_deserializes_snake_case_entity_metadata() {
+        let entity: EntityValue = serde_json::from_value(json!({
+            "entity_type": "stock",
+            "entity_id": "AAPL",
+            "displayValue": "Apple"
+        }))
+        .expect("deserialize snake_case entity metadata");
+        assert_eq!(entity.entity_type, "stock");
+        assert_eq!(entity.entity_id, "AAPL");
+        assert_eq!(entity.display_value, "Apple");
     }
 
     #[test]
