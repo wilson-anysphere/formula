@@ -667,12 +667,44 @@ export function installYwsSecurity(
         return { drop: true };
       }
 
+      const isSyncUpdate = innerType === 1 || innerType === 2;
+
+      // For read-only connections we normally drop write messages without parsing. However,
+      // reserved-root updates are a protocol violation we want to explicitly reject and log.
+      const shouldInspectReservedRoots = reservedRootGuardEnabled && isSyncUpdate && readOnly;
+
+      let updateBytes: Uint8Array | null = null;
+      if (shouldInspectReservedRoots) {
+        try {
+          const updateRes = readVarUint8Array(message, offset);
+          updateBytes = updateRes.value;
+        } catch {
+          ws.close(1003, "malformed sync update");
+          return { drop: true };
+        }
+
+        const inspection = inspectUpdate({
+          ydoc,
+          update: updateBytes,
+          reservedRootNames,
+          reservedRootPrefixes,
+        });
+        if (inspection.touchesReserved) {
+          const firstTouch = inspection.touches[0];
+          logReservedRootOnce({
+            root: firstTouch?.root ?? "<unknown>",
+            keyPath: firstTouch?.keyPath ?? [],
+            unknownReason: inspection.unknownReason,
+          });
+          ws.close(1008, RESERVED_ROOT_MUTATION_CLOSE_REASON);
+          return { drop: true };
+        }
+      }
+
       if (readOnly && innerType !== 0) {
         // Allow SyncStep1 (0), drop SyncStep2 (1) and Update (2).
         return { drop: true };
       }
-
-      const isSyncUpdate = innerType === 1 || innerType === 2;
 
       const branchingCommitsMap =
         maxBranchingCommitsPerDoc > 0 && ydoc && typeof ydoc.getMap === "function"
@@ -702,14 +734,18 @@ export function installYwsSecurity(
         isSyncUpdate &&
         (reservedRootGuardEnabled || enforceRangeRestrictions || shouldCheckReservedRootQuotas);
 
-      let updateBytes: Uint8Array | null = null;
+      // If we already parsed the update bytes for the reserved root guard above, reuse them.
       if (shouldParseUpdate) {
-        try {
-          const updateRes = readVarUint8Array(message, offset);
-          updateBytes = updateRes.value;
-        } catch {
-          ws.close(1003, "malformed sync update");
-          return { drop: true };
+        if (updateBytes) {
+          // no-op
+        } else {
+          try {
+            const updateRes = readVarUint8Array(message, offset);
+            updateBytes = updateRes.value;
+          } catch {
+            ws.close(1003, "malformed sync update");
+            return { drop: true };
+          }
         }
       }
 
