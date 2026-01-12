@@ -169,6 +169,7 @@ pub fn sibling_path_with_suffix(path: impl AsRef<Path>, suffix: &str) -> PathBuf
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -203,6 +204,40 @@ mod tests {
             std::fs::read(tmp.path().join("file.bin")).expect("read file"),
             b"hello"
         );
+    }
 
+    #[test]
+    fn atomic_write_with_path_does_not_clobber_existing_file_on_write_error() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let dest = tmp.path().join("existing.bin");
+
+        let sentinel = b"sentinel-bytes";
+        std::fs::write(&dest, sentinel).expect("write sentinel dest file");
+
+        let err = atomic_write_with_path(&dest, |tmp_path| {
+            std::fs::write(tmp_path, b"partial").expect("write to temp file");
+            Err::<(), _>(io::Error::new(io::ErrorKind::Other, "simulated write failure"))
+        })
+        .expect_err("expected atomic_write_with_path to return error");
+
+        // The destination file must remain untouched.
+        let got = std::fs::read(&dest).expect("read dest");
+        assert_eq!(got, sentinel, "dest file should not be clobbered: {err}");
+
+        // Temp file should be cleaned up.
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .expect("read_dir")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("list dir");
+        let names: Vec<_> = entries
+            .iter()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        assert_eq!(
+            names,
+            vec![dest.clone()],
+            "expected only the destination file to remain (no temp files)"
+        );
     }
 }
