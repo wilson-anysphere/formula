@@ -96,6 +96,68 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 }
 
 #[test]
+fn project_normalized_data_skips_projectcompatversion_record() {
+    // Real-world `VBA/dir` streams often include PROJECTCOMPATVERSION (0x004A) in the
+    // ProjectInformation record list. MS-OVBA does not include this record in the
+    // ProjectNormalizedData transcript, so it must be safely skipped.
+    let compat_version = 0xDEADBEEFu32.to_le_bytes();
+
+    fn build_dir(include_compat: bool, compat_version: &[u8; 4]) -> Vec<u8> {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0001, &1u32.to_le_bytes()); // PROJECTSYSKIND
+        push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes()); // PROJECTLCID
+        push_record(&mut out, 0x0014, &0x0409u32.to_le_bytes()); // PROJECTLCIDINVOKE
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+        push_record(&mut out, 0x0004, b"VBAProject"); // PROJECTNAME
+        push_record(&mut out, 0x0005, b"DocString"); // PROJECTDOCSTRING
+        push_record(&mut out, 0x0006, b"C:\\help.chm"); // PROJECTHELPFILEPATH
+        push_record(&mut out, 0x0007, &0u32.to_le_bytes()); // PROJECTHELPCONTEXT
+        push_record(&mut out, 0x0008, &0u32.to_le_bytes()); // PROJECTLIBFLAGS
+
+        let mut version = Vec::new();
+        version.extend_from_slice(&1u16.to_le_bytes());
+        version.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x0009, &version); // PROJECTVERSION
+
+        if include_compat {
+            push_record(&mut out, 0x004A, compat_version); // PROJECTCOMPATVERSION
+        }
+
+        push_record(&mut out, 0x000C, b"Constants"); // PROJECTCONSTANTS
+
+        out
+    }
+
+    let dir_without = build_dir(false, &compat_version);
+    let dir_with = build_dir(true, &compat_version);
+
+    let vba_without = build_vba_bin_with_dir_decompressed(&dir_without);
+    let vba_with = build_vba_bin_with_dir_decompressed(&dir_with);
+
+    let normalized_without =
+        project_normalized_data(&vba_without).expect("ProjectNormalizedData without compat");
+    let normalized_with =
+        project_normalized_data(&vba_with).expect("ProjectNormalizedData with compat");
+
+    assert_eq!(
+        normalized_without, normalized_with,
+        "PROJECTCOMPATVERSION (0x004A) must not affect ProjectNormalizedData"
+    );
+    assert!(
+        find_subslice(&normalized_without, b"VBAProject").is_some(),
+        "expected ProjectNormalizedData to include PROJECTNAME bytes"
+    );
+    assert!(
+        !normalized_without
+            .windows(compat_version.len())
+            .any(|w| w == compat_version),
+        "ProjectNormalizedData must skip PROJECTCOMPATVERSION payload bytes"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -371,7 +433,6 @@ fn project_normalized_data_v3_is_sensitive_to_module_record_group_order() {
         "expected ModuleA group to precede ModuleB group when dir order is A then B"
     );
 }
-
 #[test]
 fn project_normalized_data_handles_lfcr_nwln_and_strips_host_extender_ref_newlines() {
     // Regression test:
