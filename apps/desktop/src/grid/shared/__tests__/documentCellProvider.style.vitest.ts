@@ -216,6 +216,39 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     });
   });
 
+  it("falls back to a theme-safe border color when no explicit border color is provided", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Borders");
+    doc.setRangeFormat(sheetId, "A1", {
+      border: {
+        left: { style: "thin" },
+        diagonal: { style: "thin" },
+        diagonalDown: true
+      }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+
+    const style = (cell as any).style as any;
+    // In unit tests (no DOM), resolveCssVar falls back to the provided fallback "CanvasText".
+    expect(style?.borders?.left?.color).toBe("CanvasText");
+    expect(style?.diagonalBorders?.down?.color).toBe("CanvasText");
+  });
+
   it("allows UI patches to clear an imported snake_case number_format", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
