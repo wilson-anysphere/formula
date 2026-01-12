@@ -323,6 +323,24 @@ test("clearRange preserves style-only cells for includeFormat used range", () =>
   assert.equal(sheet.__formatBoundsRecomputeCount, 0);
 });
 
+test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)", () => {
+  const doc = new DocumentController();
+
+  // Column default: bold.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId] = doc.getCellFormatStyleIds("Sheet1", "A1");
+  assert.equal(sheetDefaultStyleId, 0);
+  assert.equal(rowStyleId, 0);
+  assert.equal(cellStyleId, 0);
+  assert.equal(Boolean(doc.styleTable.get(colStyleId).font?.bold), true);
+
+  // Convenience accessors match.
+  assert.equal(doc.getSheetDefaultStyleId("Sheet1"), sheetDefaultStyleId);
+  assert.equal(doc.getRowStyleId("Sheet1", 0), rowStyleId);
+  assert.equal(doc.getColStyleId("Sheet1", 0), colStyleId);
+});
+
 test("setFrozen is undoable", () => {
   const doc = new DocumentController();
 

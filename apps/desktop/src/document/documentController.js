@@ -949,6 +949,68 @@ export class DocumentController {
   }
 
   /**
+   * Return the contributing style ids for a cell's effective formatting (layered formats).
+   *
+   * Tuple order matches the clipboard helper expectations:
+   * `[sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId]`.
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {[number, number, number, number]}
+   */
+  getCellFormatStyleIds(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+
+    // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
+    const cell = this.model.getCell(sheetId, c.row, c.col);
+    const sheet = this.model.sheets.get(sheetId);
+
+    const sheetDefaultStyleId = sheet?.defaultStyleId ?? 0;
+    const rowStyleId = sheet?.rowStyleIds.get(c.row) ?? 0;
+    const colStyleId = sheet?.colStyleIds.get(c.col) ?? 0;
+    const cellStyleId = cell.styleId ?? 0;
+
+    return [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId];
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {number}
+   */
+  getSheetDefaultStyleId(sheetId) {
+    // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    return sheet?.defaultStyleId ?? 0;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} row
+   * @returns {number}
+   */
+  getRowStyleId(sheetId, row) {
+    const idx = Number(row);
+    if (!Number.isInteger(idx) || idx < 0) return 0;
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    return sheet?.rowStyleIds.get(idx) ?? 0;
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {number} col
+   * @returns {number}
+   */
+  getColStyleId(sheetId, col) {
+    const idx = Number(col);
+    if (!Number.isInteger(idx) || idx < 0) return 0;
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    return sheet?.colStyleIds.get(idx) ?? 0;
+  }
+
+  /**
    * Return the effective formatting for a cell, taking layered styles into account.
    *
    * Merge semantics:

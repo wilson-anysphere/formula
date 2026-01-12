@@ -21,6 +21,10 @@ export class DocumentController {
   setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
 
   getCell(sheetId: string, coord: unknown): any;
+  getCellFormatStyleIds(sheetId: string, coord: unknown): [number, number, number, number];
+  getSheetDefaultStyleId(sheetId: string): number;
+  getRowStyleId(sheetId: string, row: number): number;
+  getColStyleId(sheetId: string, col: number): number;
   getCellFormat(sheetId: string, coord: unknown): Record<string, any>;
   getCellFormatStyleIds(sheetId: string, coord: unknown): [number, number, number, number];
 

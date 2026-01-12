@@ -6257,10 +6257,11 @@ export class SpreadsheetApp {
 
       // DocumentController layered-formatting storage (sheet/row/col/cell).
       if (sheetModel && typeof sheetModel === "object") {
-        const sheetStyleId = normalizeStyleId((sheetModel as any).sheetStyleId);
-        const rowStyleId = normalizeStyleId((sheetModel as any).rowStyles?.get?.(row));
-        const colStyleId = normalizeStyleId((sheetModel as any).colStyles?.get?.(col));
-        return [sheetStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)].join(",");
+        // These property names match the desktop DocumentController's internal model.
+        const sheetDefaultStyleId = normalizeStyleId((sheetModel as any).defaultStyleId);
+        const rowStyleId = normalizeStyleId((sheetModel as any).rowStyleIds?.get?.(row));
+        const colStyleId = normalizeStyleId((sheetModel as any).colStyleIds?.get?.(col));
+        return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)].join(",");
       }
 
       return null;
