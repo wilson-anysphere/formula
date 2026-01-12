@@ -26,6 +26,9 @@ test.describe("sheet switcher", () => {
     await expect(switcher.locator("option")).toHaveCount(3);
     await expect(switcher.locator("option", { hasText: "Sheet2" })).toHaveCount(1);
 
+    // Make Sheet2 active so hiding it exercises the "active sheet becomes hidden" path.
+    await page.getByTestId("sheet-tab-Sheet2").click();
+
     // Hide Sheet2 via context menu.
     await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
     const menu = page.getByTestId("context-menu");
@@ -38,6 +41,16 @@ test.describe("sheet switcher", () => {
     {
       const optionLabels = await switcher.locator("option").allTextContents();
       expect(optionLabels).toEqual(["Sheet1", "Sheet3"]);
+    }
+    {
+      // The active sheet should have moved to a visible sheet.
+      const activeSheetId = await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app: any = (window as any).__formulaApp;
+        return app.getCurrentSheetId();
+      });
+      expect(activeSheetId).not.toEqual("Sheet2");
+      expect(["Sheet1", "Sheet3"]).toContain(activeSheetId);
     }
 
     // Unhide Sheet2 via context menu on any visible tab.

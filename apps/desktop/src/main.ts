@@ -1857,7 +1857,6 @@ function openSheetTabsContextMenu(sheetId: string, x: number, y: number): void {
         } catch (err) {
           showToast(`Failed to hide sheet: ${String((err as any)?.message ?? err)}`, "error");
         }
-        syncSheetUi();
       },
     },
   ];
@@ -1874,7 +1873,6 @@ function openSheetTabsContextMenu(sheetId: string, x: number, y: number): void {
           } catch (err) {
             showToast(`Failed to unhide sheet: ${String((err as any)?.message ?? err)}`, "error");
           }
-          syncSheetUi();
         },
       });
     }
@@ -2132,6 +2130,19 @@ function installSheetStoreSubscription(): void {
     syncWorkbookSheetNamesFromSheetStore();
     const sheets = listSheetsForUi();
     const activeId = app.getCurrentSheetId();
+
+    // If the current active sheet becomes hidden, ensure we actually switch the app to a
+    // visible sheet (not just the dropdown value). This keeps the sheet switcher + grid
+    // consistent even when sheet visibility changes are initiated outside `syncSheetUi()`.
+    if (!sheets.some((sheet) => sheet.id === activeId)) {
+      const fallback = sheets[0]?.id ?? null;
+      if (fallback) {
+        app.activateSheet(fallback);
+        restoreFocusAfterSheetNavigation();
+        return;
+      }
+    }
+
     renderSheetSwitcher(sheets, activeId);
     renderSheetPosition(sheets, activeId);
   });
