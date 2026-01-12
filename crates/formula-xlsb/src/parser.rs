@@ -830,6 +830,44 @@ mod tests {
     }
 
     #[test]
+    fn parse_workbook_defined_name_indices_skip_unparsed_records() {
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1) is needed so `parse_workbook` can resolve workbook relationships.
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Defined name record that is too short to parse. This should still consume an index so
+        // subsequent PtgName tokens remain aligned with Excel's name ids.
+        write_record(&mut workbook_bin, 0x0018, &[0xFF]);
+
+        // Next defined name record should be assigned index=2.
+        let mut name2 = Vec::new();
+        name2.extend_from_slice(&0u16.to_le_bytes()); // flags
+        name2.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // workbook scope sentinel
+        write_utf16_string(&mut name2, "GoodName");
+        write_record(&mut workbook_bin, 0x0018, &name2);
+
+        let rels: HashMap<String, String> =
+            HashMap::from([("rId1".to_string(), "worksheets/sheet1.bin".to_string())]);
+
+        let (_sheets, ctx, _props, defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        // Only one name parsed, but it should still get the correct (skipped) index.
+        assert_eq!(defined_names.len(), 1);
+        assert_eq!(defined_names[0].name, "GoodName");
+        assert_eq!(defined_names[0].index, 2);
+        assert_eq!(ctx.name_index("GoodName", None), Some(2));
+    }
+
+    #[test]
     fn parses_shared_string_phonetic_tail_as_opaque_bytes() {
         // SI with phonetic flag set: [flags][xlWideString][phonetic bytes...]
         let mut payload = Vec::new();
