@@ -108,6 +108,27 @@ fn parse_allow_invoke_permission_commands(permission_file: &JsonValue) -> BTreeS
 
 #[test]
 fn tauri_main_capability_scopes_to_main_window() {
+    let tauri_conf_path = repo_path("tauri.conf.json");
+    let conf_raw = fs::read_to_string(&tauri_conf_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", tauri_conf_path.display()));
+    let conf: JsonValue =
+        serde_json::from_str(&conf_raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
+
+    let windows = conf
+        .get("app")
+        .and_then(|app| app.get("windows"))
+        .and_then(|w| w.as_array())
+        .unwrap_or_else(|| panic!("tauri.conf.json missing `app.windows` array"));
+    let main_window = windows
+        .iter()
+        .find(|w| w.get("label").and_then(|v| v.as_str()) == Some("main"))
+        .unwrap_or_else(|| panic!("tauri.conf.json missing main window (label \"main\")"));
+
+    assert!(
+        main_window.get("capabilities").is_none(),
+        "tauri.conf.json window-level `capabilities` is not supported by tauri-build; window scoping should be done via `capabilities/main.json` instead"
+    );
+
     let capability_path = repo_path("capabilities/main.json");
     let capability_raw = fs::read_to_string(&capability_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", capability_path.display()));

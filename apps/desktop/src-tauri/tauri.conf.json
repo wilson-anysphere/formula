@@ -21,7 +21,6 @@
     "windows": [
       {
         "label": "main",
-        "capabilities": ["main"],
         "title": "Formula",
         "width": 1280,
         "height": 800,

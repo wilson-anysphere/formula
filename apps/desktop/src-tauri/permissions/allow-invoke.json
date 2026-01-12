@@ -58,6 +58,7 @@
           "read_text_file",
           "refresh_pivot_table",
           "rename_sheet",
+          "reorder_sheets",
           "report_startup_tti",
           "report_startup_webview_loaded",
           "restart_app",
