@@ -122,6 +122,7 @@ test.describe("split view", () => {
 
     await expect(page.locator("#grid-secondary")).toBeVisible();
     await expect(page.locator("#grid-secondary canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     await expect
       .poll(async () => Number((await page.locator("#grid-secondary").getAttribute("data-scroll-y")) ?? 0))
@@ -211,6 +212,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the primary pane so A1 is offscreen.
     const primary = page.locator("#grid");
@@ -250,6 +252,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the secondary pane so A1 is offscreen.
     await secondary.hover({ position: { x: 60, y: 40 } });
@@ -292,6 +295,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the secondary pane away from the top-left so selection mirroring does not auto-scroll it.
     await secondary.hover({ position: { x: 60, y: 40 } });
@@ -336,6 +340,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the primary pane so we're verifying drag selection from secondary does not disturb it.
     const primary = page.locator("#grid");
@@ -389,6 +394,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the primary pane so the selected cells are offscreen (sync should not scroll it back).
     const primary = page.locator("#grid");
@@ -427,6 +433,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Scroll the secondary pane so A1 is offscreen; syncing selection from primary should not scroll it back.
     await secondary.hover({ position: { x: 60, y: 40 } });
@@ -478,6 +485,7 @@ test.describe("split view", () => {
     const secondary = page.locator("#grid-secondary");
     await expect(secondary).toBeVisible();
     await expect(secondary.locator("canvas")).toHaveCount(3);
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
     // Set primary zoom + scroll while split view is active. These should be stored under
     // layout.splitView.panes.primary.
@@ -547,6 +555,7 @@ test.describe("split view", () => {
 
       await page.getByTestId("split-vertical").click();
       await expect(page.getByTestId("grid-secondary")).toBeVisible();
+      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
       // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
       await page.click("#grid", { position: { x: 260, y: 40 } });
