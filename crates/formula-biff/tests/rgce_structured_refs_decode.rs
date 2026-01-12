@@ -332,6 +332,22 @@ fn decodes_structured_ref_unknown_flags_are_ignored() {
 }
 
 #[test]
+fn decodes_structured_ref_unknown_flags_preserve_known_item_bits() {
+    let rgce = ptg_list(1, 0x8000 | 0x0002, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Headers],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Headers],[Column2]]"));
+}
+
+#[test]
+fn decodes_structured_ref_unknown_flags_preserve_known_this_row_bit() {
+    let rgce = ptg_list(1, 0x8000 | 0x0010, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "[@Column2]");
+    assert_eq!(normalize(&text), normalize("[@Column2]"));
+}
+
+#[test]
 fn decodes_structured_ref_multiple_item_flags_prefers_headers() {
     // Excel's flags are not strictly mutually exclusive; ensure we stay best-effort by choosing a
     // stable priority order (Headers > Totals > All > Data), matching formula-xlsb's decoder.
