@@ -165,9 +165,9 @@ export function getRibbonIcon(commandId: string): RibbonIconComponent | undefine
 /**
  * Command-id → icon component mapping for ribbon integration.
  *
- * `RibbonButton` will consult this map first (falling back to the schema's
- * placeholder glyph string) so we can progressively replace emoji/text icons
- * with Cursor-style SVGs without rewriting the full ribbon schema.
+ * `RibbonButton` renders icons exclusively via this map. The ribbon schema's
+ * `icon` string field remains in place as legacy placeholder data, but it is
+ * not rendered in the desktop ribbon UI.
  */
 export const ribbonIconMap = {
   // File
@@ -440,6 +440,8 @@ export const ribbonIconMap = {
   "formulas.calculation.calculationOptions": SettingsIcon,
   "formulas.calculation.calculateNow": RefreshIcon,
   "formulas.calculation.calculateSheet": RefreshIcon,
+
+  "formulas.solutions.solver": TargetIcon,
 
   // Data
   "data.getTransform.getData": FileIcon,

@@ -30,7 +30,7 @@ function renderRibbon(actions: RibbonActions = {}) {
 }
 
 describe("Ribbon icon rendering", () => {
-  it("renders SVG icons for mapped command ids (and falls back to glyph icons otherwise)", () => {
+  it("renders SVG icons for mapped command ids (and no icon otherwise)", () => {
     const { container, root } = renderRibbon();
 
     const bold = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.bold"]');
@@ -39,13 +39,13 @@ describe("Ribbon icon rendering", () => {
 
     const fontName = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.fontName"]');
     expect(fontName).toBeInstanceOf(HTMLButtonElement);
-    expect(fontName?.querySelector(".ribbon-button__icon svg")).toBeNull();
-    expect(fontName?.querySelector(".ribbon-button__icon")?.textContent?.trim()).toBe("A");
+    expect(fontName?.querySelector(".ribbon-button__icon")).toBeNull();
+    expect(fontName?.querySelector(".ribbon-button__label")?.textContent?.trim()).toBe("Font");
 
     act(() => root.unmount());
   });
 
-  it("renders fallback glyph icons for dropdown menu items when no SVG mapping exists", async () => {
+  it("does not render icons for dropdown menu items when no SVG mapping exists", async () => {
     const { container, root } = renderRibbon();
 
     const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
@@ -59,8 +59,8 @@ describe("Ribbon icon rendering", () => {
     const pasteValues = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste.values"]');
     expect(pasteValues).toBeInstanceOf(HTMLButtonElement);
 
-    expect(pasteValues?.querySelector(".ribbon-dropdown__icon svg")).toBeNull();
-    expect(pasteValues?.querySelector(".ribbon-dropdown__icon")?.textContent?.trim()).toBe("123");
+    expect(pasteValues?.querySelector(".ribbon-dropdown__icon")).toBeNull();
+    expect(pasteValues?.querySelector(".ribbon-dropdown__label")?.textContent?.trim()).toBe("Paste Values");
 
     act(() => root.unmount());
   });
