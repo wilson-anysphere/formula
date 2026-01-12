@@ -32,6 +32,9 @@ import { getSqlSourceId } from "../privacy/sourceId.js";
  *   Optional hook for schema discovery (columns/types) used to enable SQL folding
  *   of operations like `renameColumn` / `changeType` when the source column list
  *   is not pre-specified.
+ * @property {((request: SqlConnectorRequest, options?: ConnectorExecuteOptions) => Promise<import("./types.js").SourceState>) | undefined} [getSourceState]
+ *   Optional hook used by the engine to validate cached results against the
+ *   current source state (e.g. SQLite database file mtime).
  */
 
 export class SqlConnector {
@@ -44,6 +47,9 @@ export class SqlConnector {
     this.querySql = options.querySql ?? null;
     this.getConnectionIdentity = options.getConnectionIdentity ?? defaultGetConnectionIdentity;
     this.getSchema = options.getSchema ?? null;
+    if (typeof options.getSourceState === "function") {
+      this.getSourceState = options.getSourceState;
+    }
   }
 
   /**

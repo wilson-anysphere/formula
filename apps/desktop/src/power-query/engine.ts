@@ -1140,58 +1140,57 @@ export function createDesktopQueryEngine(options: DesktopQueryEngineOptions = {}
     querySql,
     getSchema,
     getConnectionIdentity: parseConnectionIdentity,
+    // Enable cache validation for file-backed SQLite connections by probing the
+    // database file mtime (similar to the file connector's source-state handling).
+    //
+    // Postgres (and in-memory SQLite) do not currently have a deterministic, cheap
+    // source-state probe, so they return `{}` and fall back to cache hits.
+    getSourceState: async (request: any, stateOptions: any = {}) => {
+      const signal = stateOptions?.signal as AbortSignal | undefined;
+      if (signal?.aborted) throw abortError();
+
+      if (!fileAdapter.stat) return {};
+      const connection = request?.connection;
+      if (!connection || typeof connection !== "object" || Array.isArray(connection)) return {};
+
+      /** @type {string | null} */
+      let sqlitePath = null;
+      let sqliteInMemory = false;
+
+      if (connection.kind === "sqlite") {
+        const inMemory = connection.inMemory ?? connection.in_memory;
+        if (inMemory) return {};
+
+        const path = typeof connection.path === "string" ? connection.path : "";
+        if (!path) return {};
+        sqlitePath = path;
+      } else if (connection.kind === "odbc") {
+        const connectionString = typeof connection.connectionString === "string" ? connection.connectionString : "";
+        if (!connectionString) return {};
+        const props = parseOdbcConnectionString(connectionString);
+        const driver = String(props.driver ?? props.drv ?? "").toLowerCase();
+        if (!driver.includes("sqlite")) return {};
+
+        const path = String(props.database ?? props.dbq ?? props.datasource ?? "");
+        if (!path) return {};
+        sqliteInMemory = path.trim().toLowerCase() === ":memory:" || path.trim().toLowerCase() === "memory";
+        if (sqliteInMemory) return {};
+        sqlitePath = path;
+      } else {
+        return {};
+      }
+
+      const normalized = normalizeFilePath(sqlitePath);
+      const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
+      if (!isAbsolute) return {};
+
+      const result = await fileAdapter.stat(sqlitePath);
+      if (signal?.aborted) throw abortError();
+      const mtimeMs = result?.mtimeMs;
+      if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return {};
+      return { sourceTimestamp: new Date(mtimeMs) };
+    },
   });
-
-  // Enable cache validation for file-backed SQLite connections by probing the
-  // database file mtime (similar to the file connector's source-state handling).
-  //
-  // Postgres (and in-memory SQLite) do not currently have a deterministic, cheap
-  // source-state probe, so they return `{}` and fall back to cache hits.
-  (sql as any).getSourceState = async (request: any, stateOptions: any = {}) => {
-    const signal = stateOptions?.signal as AbortSignal | undefined;
-    if (signal?.aborted) throw abortError();
-
-    if (!fileAdapter.stat) return {};
-    const connection = request?.connection;
-    if (!connection || typeof connection !== "object" || Array.isArray(connection)) return {};
-
-    /** @type {string | null} */
-    let sqlitePath = null;
-    let sqliteInMemory = false;
-
-    if (connection.kind === "sqlite") {
-      const inMemory = connection.inMemory ?? connection.in_memory;
-      if (inMemory) return {};
-
-      const path = typeof connection.path === "string" ? connection.path : "";
-      if (!path) return {};
-      sqlitePath = path;
-    } else if (connection.kind === "odbc") {
-      const connectionString = typeof connection.connectionString === "string" ? connection.connectionString : "";
-      if (!connectionString) return {};
-      const props = parseOdbcConnectionString(connectionString);
-      const driver = String(props.driver ?? props.drv ?? "").toLowerCase();
-      if (!driver.includes("sqlite")) return {};
-
-      const path = String(props.database ?? props.dbq ?? props.datasource ?? "");
-      if (!path) return {};
-      sqliteInMemory = path.trim().toLowerCase() === ":memory:" || path.trim().toLowerCase() === "memory";
-      if (sqliteInMemory) return {};
-      sqlitePath = path;
-    } else {
-      return {};
-    }
-
-    const normalized = normalizeFilePath(sqlitePath);
-    const isAbsolute = normalized.startsWith("/") || /^[a-z]:\//.test(normalized);
-    if (!isAbsolute) return {};
-
-    const result = await fileAdapter.stat(sqlitePath);
-    if (signal?.aborted) throw abortError();
-    const mtimeMs = result?.mtimeMs;
-    if (typeof mtimeMs !== "number" || !Number.isFinite(mtimeMs)) return {};
-    return { sourceTimestamp: new Date(mtimeMs) };
-  };
 
   // Cache permission prompts across executions so previewing the same query
   // doesn't repeatedly ask the user.
