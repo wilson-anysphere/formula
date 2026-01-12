@@ -477,6 +477,11 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
         "digest constant should match the digest of the explicit transcript above"
     );
     assert_eq!(actual_digest.as_slice(), expected_digest.as_ref());
+    assert_eq!(
+        Sha256::digest(&expected).as_slice(),
+        expected_digest.as_ref(),
+        "hard-coded digest must match the explicit normalized transcript"
+    );
 }
 
 #[test]
