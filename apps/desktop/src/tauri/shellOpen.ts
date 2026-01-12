@@ -15,6 +15,29 @@ function getTauriInvokeOrNull(): TauriInvoke | null {
   return typeof invoke === "function" ? invoke : null;
 }
 
+type TauriShellOpen = (url: string, options?: Record<string, unknown>) => Promise<unknown> | unknown;
+
+function getTauriShellOpenOrNull(): ((url: string) => Promise<void>) | null {
+  const tauri = (globalThis as any).__TAURI__;
+  const candidates: unknown[] = [
+    // Tauri v1 style
+    tauri?.shell?.open,
+    // Tauri v2 plugin style
+    tauri?.plugin?.shell?.open,
+    // Alternate namespaces seen in some builds/tests.
+    tauri?.plugins?.shell?.open,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "function") {
+      const fn = candidate as TauriShellOpen;
+      return async (url: string) => {
+        await fn(url);
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Open a URL in the host OS browser (Tauri) when available.
  *
@@ -32,8 +55,16 @@ export async function shellOpen(url: string): Promise<void> {
 
   const tauri = (globalThis as any).__TAURI__;
   const invoke = getTauriInvokeOrNull();
+
   if (invoke) {
     await invoke("open_external_url", { url });
+    return;
+  }
+
+  const shellOpenFn = getTauriShellOpenOrNull();
+  // Fallback for runtimes/tests that expose only the shell plugin API.
+  if (shellOpenFn) {
+    await shellOpenFn(url);
     return;
   }
 

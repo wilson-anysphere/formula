@@ -1060,9 +1060,10 @@ export class SpreadsheetApp {
         const value = state?.value ?? null;
         return isRichTextValue(value) ? value.text : value;
       },
-      // Creating/removing charts shouldn't force a full rerender of every existing chart's SVG.
-      // Only new charts (no host yet) will render content; existing charts keep their current DOM
-      // until a full refresh / data change triggers a content rerender.
+      // Creating/removing charts should not force a full SVG re-render for *every* existing chart.
+      // `renderCharts(false)` renders new charts (no host yet) and updates positioning while keeping
+      // existing chart content intact. Full re-renders still happen on "full" refreshes (cell edits),
+      // zoom changes, etc.
       onChange: () => this.renderCharts(false)
     });
 
@@ -7972,7 +7973,30 @@ export class SpreadsheetApp {
           },
         ];
 
-    const decision = evaluateFormattingSelectionSize(selectionRanges, this.limits, {
+    // When the UI selection is a full row/column/sheet, expand it to the canonical Excel bounds
+    // so DocumentController can use fast layered-format paths (sheet/row/col style ids) without
+    // enumerating every cell.
+    //
+    // Back-compat: older "legacy" grid selections used a 10k x 200 coordinate space. Those
+    // persisted selections should still behave as full-row/col selections when applying
+    // formatting shortcuts.
+    const ranges = selectionRanges.map((range) => {
+      const r = normalizeSelectionRange(range);
+      const legacyMaxRows = 10_000;
+      const legacyMaxCols = 200;
+      const isFullColBand =
+        r.startRow === 0 && (r.endRow === this.limits.maxRows - 1 || r.endRow === legacyMaxRows - 1);
+      const isFullRowBand =
+        r.startCol === 0 && (r.endCol === this.limits.maxCols - 1 || r.endCol === legacyMaxCols - 1);
+      return {
+        startRow: Math.max(0, r.startRow),
+        startCol: Math.max(0, r.startCol),
+        endRow: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : Math.max(0, r.endRow),
+        endCol: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : Math.max(0, r.endCol),
+      };
+    });
+
+    const decision = evaluateFormattingSelectionSize(ranges, DEFAULT_GRID_LIMITS, {
       maxCells: MAX_KEYBOARD_FORMATTING_CELLS,
     });
 
@@ -7987,26 +8011,6 @@ export class SpreadsheetApp {
       }
       return true;
     }
-
-    // When the UI selection is a full row/column/sheet *within the current grid limits* (or
-    // within the legacy 10k×200 bounds used by the old renderer), expand it to the canonical
-    // Excel bounds so DocumentController can use fast layered formatting paths (sheet/row/col
-    // style ids) without enumerating every cell.
-    const ranges = selectionRanges.map((range) => {
-      const r = normalizeSelectionRange(range);
-      const LEGACY_MAX_ROWS = 10_000;
-      const LEGACY_MAX_COLS = 200;
-      const isFullColBand =
-        r.startRow === 0 && (r.endRow === this.limits.maxRows - 1 || r.endRow === LEGACY_MAX_ROWS - 1);
-      const isFullRowBand =
-        r.startCol === 0 && (r.endCol === this.limits.maxCols - 1 || r.endCol === LEGACY_MAX_COLS - 1);
-      return {
-        startRow: r.startRow,
-        startCol: r.startCol,
-        endRow: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : r.endRow,
-        endCol: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : r.endCol,
-      };
-    });
 
     const batchLabel = (() => {
       switch (action.kind) {

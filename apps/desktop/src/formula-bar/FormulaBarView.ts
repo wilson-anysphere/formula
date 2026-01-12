@@ -352,13 +352,7 @@ export class FormulaBarView {
         this.model.updateDraft(prevText, cursorStart, cursorEnd);
       }
 
-      const activeIndex = this.model.activeReferenceIndex();
-      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
-      if (!active) return;
-
-      // Toggle using the model's reference spans so we always operate on the active
-      // reference token (as determined by the formula highlighter).
-      const toggled = toggleA1AbsoluteAtCursor(prevText, active.start, active.end);
+      const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
       this.textarea.value = toggled.text;

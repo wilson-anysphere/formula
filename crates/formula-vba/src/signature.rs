@@ -1579,9 +1579,8 @@ fn signature_payload_candidates(signature_bytes: &[u8]) -> Vec<SignaturePayloadC
 
 #[cfg(test)]
 mod tests {
-    use crate::DigestAlg;
-
     use super::{digest_alg_from_oid_str, digest_name_from_oid_str};
+    use crate::DigestAlg;
 
     #[test]
     fn digest_alg_from_oid_str_maps_known_digest_oids() {
