@@ -49,6 +49,28 @@ function getActivePanel(container: HTMLElement): HTMLElement {
 }
 
 describe("Ribbon a11y + keyboard navigation", () => {
+  it("only sets aria-haspopup=\"menu\" when a dropdown button actually has menu items", () => {
+    const { container, root } = renderRibbon();
+
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.paste"]');
+    expect(paste).toBeInstanceOf(HTMLButtonElement);
+    expect(paste?.getAttribute("aria-haspopup")).toBe("menu");
+
+    const insertTab = getTabs(container).find((tab) => tab.textContent?.trim() === "Insert");
+    if (!insertTab) throw new Error("Missing Insert tab");
+
+    act(() => {
+      insertTab.click();
+    });
+
+    // This command is marked as kind="dropdown" in the schema but does not have an attached menu.
+    const pivotChart = container.querySelector<HTMLButtonElement>('[data-command-id="insert.pivotcharts.pivotChart"]');
+    expect(pivotChart).toBeInstanceOf(HTMLButtonElement);
+    expect(pivotChart?.getAttribute("aria-haspopup")).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it("wires tabs to tabpanels via aria-controls / aria-labelledby", () => {
     const { container, root } = renderRibbon();
 

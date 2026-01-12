@@ -56,8 +56,8 @@ export const RibbonButton = React.memo(function RibbonButton({
   const iconNode = getRibbonIconNode(button.id, button.icon);
   const hasIcon = Boolean(iconNode);
   const ariaPressed = kind === "toggle" ? isPressed : undefined;
-  const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
+  const ariaHaspopup = hasMenu ? ("menu" as const) : undefined;
   const reactInstanceId = React.useId();
   const domInstanceId = React.useMemo(() => reactInstanceId.replace(/[^a-zA-Z0-9_-]/g, "-"), [reactInstanceId]);
   const menuId = React.useMemo(
