@@ -369,21 +369,6 @@ fn normalize_sheet_key(name: &str) -> String {
     name.to_ascii_uppercase()
 }
 
-fn parse_error_kind_literal(value: &str) -> Option<ErrorKind> {
-    match value {
-        "#NULL!" => Some(ErrorKind::Null),
-        "#DIV/0!" => Some(ErrorKind::Div0),
-        "#VALUE!" => Some(ErrorKind::Value),
-        "#REF!" => Some(ErrorKind::Ref),
-        "#NAME?" => Some(ErrorKind::Name),
-        "#NUM!" => Some(ErrorKind::Num),
-        "#N/A" => Some(ErrorKind::NA),
-        "#SPILL!" => Some(ErrorKind::Spill),
-        "#CALC!" => Some(ErrorKind::Calc),
-        _ => None,
-    }
-}
-
 fn json_to_engine_value(value: &JsonValue) -> EngineValue {
     match value {
         JsonValue::Null => EngineValue::Blank,
@@ -396,7 +381,7 @@ fn json_to_engine_value(value: &JsonValue) -> EngineValue {
                 return EngineValue::Text(rest.to_string());
             }
 
-            if let Some(kind) = parse_error_kind_literal(s) {
+            if let Some(kind) = ErrorKind::from_code(s) {
                 return EngineValue::Error(kind);
             }
 

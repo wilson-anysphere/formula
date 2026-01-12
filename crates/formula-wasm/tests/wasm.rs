@@ -519,6 +519,48 @@ fn from_xlsx_bytes_imports_bool_and_error_cells() {
 }
 
 #[wasm_bindgen_test]
+fn getting_data_error_literal_is_parsed_as_error() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_str("#GETTING_DATA"), None)
+        .unwrap();
+    wb.set_cell(
+        "A2".to_string(),
+        JsValue::from_str("  #getting_data  "),
+        None,
+    )
+    .unwrap();
+
+    // Use ISERROR to distinguish between real errors and error-looking text.
+    wb.set_cell("B1".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_str("=ISERROR(A2)"), None)
+        .unwrap();
+
+    wb.set_cell("C1".to_string(), JsValue::from_str("=ERROR.TYPE(A1)"), None)
+        .unwrap();
+    wb.set_cell("C2".to_string(), JsValue::from_str("=ERROR.TYPE(A2)"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, json!(true));
+
+    let b2_js = wb.get_cell("B2".to_string(), None).unwrap();
+    let b2: CellData = serde_wasm_bindgen::from_value(b2_js).unwrap();
+    assert_eq!(b2.value, json!(true));
+
+    let c1_js = wb.get_cell("C1".to_string(), None).unwrap();
+    let c1: CellData = serde_wasm_bindgen::from_value(c1_js).unwrap();
+    assert_json_number(&c1.value, 8.0);
+
+    let c2_js = wb.get_cell("C2".to_string(), None).unwrap();
+    let c2: CellData = serde_wasm_bindgen::from_value(c2_js).unwrap();
+    assert_json_number(&c2.value, 8.0);
+}
+
+#[wasm_bindgen_test]
 fn leading_apostrophe_forces_text_for_error_literals() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("#DIV/0!"), None)
