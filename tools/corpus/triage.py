@@ -198,7 +198,16 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 if el.tag.split("}")[-1] != "Relationship":
                     continue
                 target = el.attrib.get("Target") or ""
-                if _resolve_workbook_target(target).casefold() == part_name.casefold():
+                resolved = _resolve_workbook_target(target)
+                if not resolved:
+                    continue
+                if resolved.casefold() == part_name.casefold():
+                    workbook_rel_type = el.attrib.get("Type")
+                    break
+                # Be tolerant of producers that use an incorrect base path but a correct basename.
+                # This helps us still fingerprint the workbook relationship type even when the
+                # package layout is non-standard.
+                if posixpath.basename(resolved).casefold() == posixpath.basename(part_name).casefold():
                     workbook_rel_type = el.attrib.get("Type")
                     break
         except Exception:

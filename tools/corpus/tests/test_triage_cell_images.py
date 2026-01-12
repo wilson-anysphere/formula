@@ -261,6 +261,55 @@ def _make_xlsx_with_cell_images_smallest_numeric_suffix() -> bytes:
     return buf.getvalue()
 
 
+def _make_xlsx_with_cell_images_folder_layout_and_basename_target() -> bytes:
+    """Folder layout where `workbook.xml.rels` targets only the basename.
+
+    This is technically non-standard, but triage should still extract the relationship type.
+    """
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/cellimages/cellimages1.xml" ContentType="application/vnd.ms-excel.cellimages+xml+folder"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "xl/cellimages/cellimages1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ci:cellImages xmlns:ci="http://schemas.microsoft.com/office/spreadsheetml/2024/cellimages"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <ci:cellImage><a:blip r:embed="rId1"/></ci:cellImage>
+</ci:cellImages>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId99"
+                Type="http://example.com/relationships/cellImages-folder"
+                Target="cellimages1.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/cellimages/_rels/cellimages1.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>
+""",
+        )
+    return buf.getvalue()
+
+
 class TriageCellImagesTests(unittest.TestCase):
     def test_triage_extracts_cell_images_metadata(self) -> None:
         import tools.corpus.triage as triage_mod
@@ -413,6 +462,38 @@ class TriageCellImagesTests(unittest.TestCase):
         self.assertEqual(cell_images["workbook_rel_type"], "http://example.com/relationships/cellImages2")
         self.assertEqual(cell_images["content_type"], "application/vnd.ms-excel.cellimages+xml+2")
         self.assertEqual(cell_images["embed_rids_count"], 2)
+
+    def test_triage_matches_workbook_rel_by_basename_for_folder_layout(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            wb = WorkbookInput(
+                display_name="book.xlsx",
+                data=_make_xlsx_with_cell_images_folder_layout_and_basename_target(),
+            )
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        self.assertTrue(report["features"]["has_cell_images"])
+        self.assertIn("cell_images", report)
+
+        cell_images = report["cell_images"]
+        self.assertEqual(cell_images["part_name"], "xl/cellimages/cellimages1.xml")
+        self.assertEqual(cell_images["workbook_rel_type"], "http://example.com/relationships/cellImages-folder")
 
     def test_triage_counts_embed_rids_outside_blips(self) -> None:
         import tools.corpus.triage as triage_mod
