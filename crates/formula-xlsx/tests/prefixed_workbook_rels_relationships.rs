@@ -71,6 +71,14 @@ fn reader_resolves_prefixed_relationship_elements_in_workbook_rels(
         CellValue::String("Hello".to_string())
     );
 
+    // Ensure the full reader path (`load_from_bytes`) also resolves workbook relationships.
+    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+    assert_eq!(doc.workbook.sheets.len(), 1);
+    assert_eq!(doc.workbook.sheets[0].name, "Sheet1");
+    assert_eq!(
+        doc.workbook.sheets[0].value(CellRef::from_a1("A1")?),
+        CellValue::String("Hello".to_string())
+    );
+
     Ok(())
 }
-
