@@ -2,7 +2,9 @@ use std::io::Write;
 
 use formula_model::{CellRef, CellValue, DateSystem, Range};
 
-mod xls_fixture_builder;
+mod common;
+
+use common::xls_fixture_builder;
 
 fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");

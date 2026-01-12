@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::io::{Cursor, Write};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
