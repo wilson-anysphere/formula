@@ -70,8 +70,15 @@ impl Hasher {
 /// - `ContentNormalizedData` is computed by [`crate::content_normalized_data`] (MS-OVBA §2.4.2.1)
 /// - `FormsNormalizedData` is computed by [`crate::forms_normalized_data`] (MS-OVBA §2.4.2.2)
 ///
+/// Note: For projects without designer/UserForm storages, `FormsNormalizedData` is typically empty,
+/// so this digest is equivalent to the v1 "Content Hash" (`hash(ContentNormalizedData)`).
+///
 /// The transcript is then hashed using the requested `alg` (MD5/SHA-1/SHA-256). Even though Office
 /// signature *binding* uses MD5, callers may request other algorithms for debugging or comparison.
+///
+/// This function is intentionally strict: if the transcript cannot be produced (missing or
+/// unparseable required streams), it returns an error rather than falling back to hashing raw OLE
+/// streams.
 pub fn compute_vba_project_digest(
     vba_project_bin: &[u8],
     alg: DigestAlg,

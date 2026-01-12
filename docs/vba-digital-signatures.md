@@ -515,7 +515,7 @@ If you need to update or extend signature handling, start with:
 - `crates/formula-vba/src/normalized_data.rs`
   - MS-OVBA §2.4.2.2 `FormsNormalizedData` (`forms_normalized_data`)
 - `crates/formula-vba/src/project_digest.rs`
-  - `compute_vba_project_digest` (v1/v2 digest over MS-OVBA transcripts)
+  - `compute_vba_project_digest` (v1/v2 digest over MS-OVBA transcripts; strict transcript-only, no raw-stream fallback)
   - `compute_vba_project_digest_v3` (MS-OVBA §2.4.2 v3 digest for `DigitalSignatureExt`)
 
 ## Tests / examples in this repo
