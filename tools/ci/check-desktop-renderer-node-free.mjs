@@ -24,7 +24,7 @@ const desktopSrcDir = path.join(repoRoot, "apps", "desktop", "src");
 const desktopToolsDir = path.join(repoRoot, "apps", "desktop", "tools");
 const desktopScriptsDir = path.join(repoRoot, "apps", "desktop", "scripts");
 
-const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
+const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"]);
 
 const BANNED_MODULE_SPECIFIERS = new Set();
 for (const mod of builtinModules) {
