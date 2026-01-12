@@ -11,6 +11,8 @@ type Entry = {
   onDocDestroy: () => void;
 };
 
+const UPDATES_STORE_NAME = "updates";
+
 /**
  * Browser (IndexedDB) persistence using `y-indexeddb`.
  *
@@ -72,6 +74,58 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
         this.destroyEntry(docId, entry);
       },
     };
+  }
+
+  /**
+   * Best-effort durability flush for IndexedDB persistence.
+   *
+   * `y-indexeddb` writes updates to IndexedDB asynchronously and does not expose a
+   * built-in API to await the completion of those writes. For Formula's collab
+   * persistence contract (`CollabPersistence.flush`), we implement flush by
+   * storing a full document snapshot update into the same `updates` object store
+   * used by `y-indexeddb`.
+   *
+   * This guarantees that all in-memory state at the time of the call is durable
+   * (even if some incremental updates are still in flight).
+   */
+  async flush(docId: string): Promise<void> {
+    const entry = this.entries.get(docId);
+    if (!entry) return;
+
+    const ready = await Promise.race([
+      Promise.resolve(entry.persistence.whenSynced).then(() => "synced" as const),
+      entry.destroyed.then(() => "destroyed" as const),
+    ]);
+    if (ready === "destroyed") return;
+
+    const db = entry.persistence.db;
+    if (!db) return;
+
+    const snapshot = Y.encodeStateAsUpdate(entry.doc);
+
+    await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = (db as any).transaction([UPDATES_STORE_NAME], "readwrite");
+        const finishError = () => reject((tx as any).error ?? new Error("IndexedDB flush transaction failed"));
+        const finishOk = () => resolve();
+
+        // Prefer EventTarget listeners when available.
+        if (typeof tx?.addEventListener === "function") {
+          tx.addEventListener("complete", finishOk, { once: true });
+          tx.addEventListener("error", finishError, { once: true });
+          tx.addEventListener("abort", finishError, { once: true });
+        } else {
+          (tx as any).oncomplete = finishOk;
+          (tx as any).onerror = finishError;
+          (tx as any).onabort = finishError;
+        }
+
+        const store = (tx as any).objectStore(UPDATES_STORE_NAME);
+        store.add(snapshot);
+      } catch (err) {
+        reject(err);
+      }
+    });
   }
 
   async clear(docId: string): Promise<void> {
