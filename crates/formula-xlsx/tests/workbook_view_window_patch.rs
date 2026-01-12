@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read, Write};
 
 use formula_model::{WorkbookWindow, WorkbookWindowState};
-use formula_xlsx::load_from_bytes;
+use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes};
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -105,6 +105,18 @@ fn patch_workbook_xml_inserts_workbook_view_window_metadata() {
     let loaded = load_from_bytes(&saved).expect("load saved");
     assert_eq!(
         loaded.workbook.view.window,
+        Some(WorkbookWindow {
+            x: Some(10),
+            y: Some(20),
+            width: Some(800),
+            height: Some(600),
+            state: Some(WorkbookWindowState::Maximized),
+        })
+    );
+
+    let model = read_workbook_model_from_bytes(&saved).expect("read workbook model");
+    assert_eq!(
+        model.view.window,
         Some(WorkbookWindow {
             x: Some(10),
             y: Some(20),

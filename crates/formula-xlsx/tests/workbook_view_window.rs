@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read};
 
 use formula_model::{Workbook, WorkbookWindow, WorkbookWindowState};
-use formula_xlsx::{load_from_bytes, XlsxDocument};
+use formula_xlsx::{load_from_bytes, read_workbook_model_from_bytes, XlsxDocument};
 use zip::ZipArchive;
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
@@ -56,6 +56,23 @@ fn new_document_writes_workbook_view_window_metadata() {
     assert_eq!(loaded.workbook.view.active_sheet_id, Some(sheet2_id));
     assert_eq!(
         loaded.workbook.view.window,
+        Some(WorkbookWindow {
+            x: Some(10),
+            y: Some(20),
+            width: Some(800),
+            height: Some(600),
+            state: Some(WorkbookWindowState::Maximized),
+        })
+    );
+
+    let model = read_workbook_model_from_bytes(&bytes).expect("read workbook model");
+    let model_sheet2_id = model
+        .sheet_by_name("Second")
+        .expect("Second sheet")
+        .id;
+    assert_eq!(model.view.active_sheet_id, Some(model_sheet2_id));
+    assert_eq!(
+        model.view.window,
         Some(WorkbookWindow {
             x: Some(10),
             y: Some(20),
