@@ -904,12 +904,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
 
 fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
     let mut warnings = warnings;
-    // The BIFF8 rgce decoder is best-effort: for tokens we can't decode, we still want a formula
-    // string that is parseable by downstream consumers. Emit a stable, known Excel error literal
-    // (`#UNKNOWN!`) and include the ptg id in warnings for debugging/telemetry.
-    let msg = format!("unsupported rgce token 0x{ptg:02X}");
-    if !warnings.iter().any(|w| w == &msg) {
-        warnings.push(msg);
+    // The BIFF8 rgce decoder is best-effort: for tokens we can't decode we still want:
+    // 1) a parseable formula string (`#UNKNOWN!`)
+    // 2) a warning that includes the ptg id for debugging/telemetry.
+    let ptg_hex = format!("0x{ptg:02X}");
+    if !warnings.iter().any(|w| w.contains(&ptg_hex)) {
+        warnings.push(format!("rgce decode failed at ptg {ptg_hex}"));
     }
     DecodeRgceResult {
         // Use a parseable error literal so downstream formula parsing can still succeed.
@@ -2253,6 +2253,30 @@ mod tests {
         assert!(
             decoded.warnings.iter().any(|w| w.contains("0x00")),
             "expected warning to include original ptg id, warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_stack_underflow_to_unknown_error_literal_with_ptg_warning() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgAdd requires two operands; with an empty stack this triggers stack underflow.
+        let rgce = [0x03];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("stack underflow")),
+            "expected stack underflow warning, warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0x03")),
+            "expected ptg id in warnings, warnings={:?}",
             decoded.warnings
         );
         assert_parseable(&decoded.text);
