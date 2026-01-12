@@ -416,8 +416,13 @@ When you bind two reactive systems, you must avoid doing this:
 
 The binder prevents this using **Yjs transaction origins**:
 
-- Local DocumentController→Yjs writes are wrapped in a Yjs transaction with a stable `origin` token (`binderOrigin` or `undoService.origin`).
-- The Yjs→DocumentController observer checks `transaction.origin` and **ignores** transactions that originated from those known local origins.
+- Local DocumentController→Yjs writes run inside a Yjs transaction with a stable `origin` token:
+  - when `undoService.transact(...)` is provided, the binder uses it (the origin is whatever the undo service uses for local edits; in `@formula/collab-session` this is `session.origin`)
+  - otherwise the binder uses its own `binderOrigin` token
+- The binder maintains a `localOrigins` set (used for echo suppression) containing:
+  - `binderOrigin`
+  - any origins from `undoService.localOrigins` (when provided), excluding the `Y.UndoManager` instance
+- The Yjs→DocumentController observer checks `transaction.origin` and **ignores** transactions whose origin is in `localOrigins`.
 
 However, when collaborative undo/redo is enabled, Yjs uses a `Y.UndoManager` instance as an origin for undo/redo application. If we treated the UndoManager itself as “local” for echo suppression, then:
 

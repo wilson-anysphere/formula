@@ -137,7 +137,7 @@ session and already wrap mutations in `session.transactLocal`, e.g.:
 
 ### 3) Interaction with `bindYjsToDocumentController` and “local-only undo”
 
-`bindYjsToDocumentController` binds cell edits between:
+`bindYjsToDocumentController` binds cell edits (and sheet view state deltas) between:
 
 - the shared Yjs CRDT, and
 - the desktop `DocumentController` (as a local projection for the UI).
@@ -150,11 +150,12 @@ In collaborative mode:
 3. Ensure DocumentController-origin edits are captured by Yjs UndoManager:
    - Pass an `undoService` (from `@formula/collab-undo`) into `bindYjsToDocumentController`.
 
-`bindYjsToDocumentController` uses origin tokens to prevent “echo” updates:
+`bindYjsToDocumentController` uses Yjs origin tokens to prevent “echo” updates:
 
 - It ignores Yjs transactions whose `transaction.origin` is considered “local”
-  (e.g. `undoService.origin`) to avoid re-applying edits that already originated
-  from the local `DocumentController`.
+  (the binder builds a `localOrigins` set from its own binder origin + any origins
+  in `undoService.localOrigins`) to avoid re-applying edits that already
+  originated from the local `DocumentController`.
 - It intentionally **does not ignore** the `Y.UndoManager` instance origin, so
   calling `session.undo.undo()` still propagates into `DocumentController`.
 
