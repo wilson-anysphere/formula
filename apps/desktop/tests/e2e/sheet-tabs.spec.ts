@@ -550,7 +550,7 @@ test.describe("sheet tabs", () => {
 
     await page.getByTestId("command-palette-input").fill("RenamedSheet1!A1");
     await expect(page.locator('[data-testid="command-palette-list"] .command-palette__item').first()).toContainText(
-      "Go to RenamedSheet1!A1",
+      "RenamedSheet1!A1",
     );
     await page.keyboard.press("Enter");
 

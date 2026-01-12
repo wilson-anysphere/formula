@@ -5121,7 +5121,7 @@ if (
       // `parseGoTo` expects sheet names (what users type, and what formulas use),
       // so we provide the current sheet display name and resolve back to a stable id
       // at execution time.
-      getCurrentSheetName: () => currentSheetDisplayName(),
+      getCurrentSheetName: () => workbookSheetStore.getName(app.getCurrentSheetId()) ?? app.getCurrentSheetId(),
       onGoTo: (parsed) => {
         const sheetId = resolveSheetIdFromName(parsed.sheetName);
         if (!sheetId) return;
