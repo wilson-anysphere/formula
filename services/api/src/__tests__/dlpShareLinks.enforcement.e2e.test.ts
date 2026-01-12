@@ -234,4 +234,126 @@ describe("API e2e: DLP enforcement on public share links", () => {
       reasonCode: "dlp.blockedByPolicy"
     });
   }, 20_000);
+
+  it("blocks redeeming a public share link for a now-confidential document (external user)", async () => {
+    const ownerRegister = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "dlp-redeem-owner@example.com",
+        password: "password1234",
+        name: "Owner",
+        orgName: "DLP Redeem Org"
+      }
+    });
+    expect(ownerRegister.statusCode).toBe(200);
+    const ownerCookie = extractCookie(ownerRegister.headers["set-cookie"]);
+    const ownerOrgId = (ownerRegister.json() as any).organization.id as string;
+
+    const createDoc = await app.inject({
+      method: "POST",
+      url: "/docs",
+      headers: { cookie: ownerCookie },
+      payload: { orgId: ownerOrgId, title: "DLP redeem doc" }
+    });
+    expect(createDoc.statusCode).toBe(200);
+    const docId = (createDoc.json() as any).document.id as string;
+
+    const putOrgPolicy = await app.inject({
+      method: "PUT",
+      url: `/orgs/${ownerOrgId}/dlp-policy`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            "sharing.externalLink": { maxAllowed: "Internal" }
+          }
+        }
+      }
+    });
+    expect(putOrgPolicy.statusCode).toBe(200);
+
+    const setInternal = await app.inject({
+      method: "PUT",
+      url: `/docs/${docId}/classifications`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        selector: { scope: "document", documentId: docId },
+        classification: { level: "Internal", labels: [] }
+      }
+    });
+    expect(setInternal.statusCode).toBe(200);
+
+    const createLink = await app.inject({
+      method: "POST",
+      url: `/docs/${docId}/share-links`,
+      headers: { cookie: ownerCookie },
+      payload: { visibility: "public", role: "viewer" }
+    });
+    expect(createLink.statusCode).toBe(200);
+    const token = (createLink.json() as any).shareLink.token as string;
+    expect(token).toBeTypeOf("string");
+
+    // Later, the document is reclassified more restrictively. Redemption should be
+    // re-evaluated for external users even if the link already exists.
+    const setConfidential = await app.inject({
+      method: "PUT",
+      url: `/docs/${docId}/classifications`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        selector: { scope: "document", documentId: docId },
+        classification: { level: "Confidential", labels: [] }
+      }
+    });
+    expect(setConfidential.statusCode).toBe(200);
+
+    const externalRegister = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: {
+        email: "dlp-redeem-external@example.com",
+        password: "password1234",
+        name: "External User"
+      }
+    });
+    expect(externalRegister.statusCode).toBe(200);
+    const externalCookie = extractCookie(externalRegister.headers["set-cookie"]);
+    const externalUserId = (externalRegister.json() as any).user.id as string;
+
+    const redeem = await app.inject({
+      method: "POST",
+      url: `/share-links/${token}/redeem`,
+      headers: { cookie: externalCookie }
+    });
+    expect(redeem.statusCode).toBe(403);
+    expect(redeem.json()).toMatchObject({ error: "dlp_blocked" });
+
+    const orgMembership = await db.query("SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2", [
+      ownerOrgId,
+      externalUserId
+    ]);
+    expect(orgMembership.rowCount).toBe(0);
+
+    const docMembership = await db.query("SELECT 1 FROM document_members WHERE document_id = $1 AND user_id = $2", [
+      docId,
+      externalUserId
+    ]);
+    expect(docMembership.rowCount).toBe(0);
+
+    const audit = await db.query(
+      "SELECT event_type, resource_id, details FROM audit_log WHERE event_type = 'dlp.blocked' AND resource_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [docId]
+    );
+    expect(audit.rowCount).toBe(1);
+    expect(audit.rows[0]).toMatchObject({ event_type: "dlp.blocked", resource_id: docId });
+    expect((audit.rows[0] as any).details).toMatchObject({
+      action: "sharing.externalLink",
+      docId,
+      classification: { level: "Confidential" },
+      maxAllowed: "Internal",
+      reasonCode: "dlp.blockedByPolicy"
+    });
+  }, 20_000);
 });
