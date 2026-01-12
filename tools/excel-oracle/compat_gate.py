@@ -103,9 +103,10 @@ def _default_expected_dataset(*, cases_path: Path) -> Path:
         cases_sha8 = _sha256_file(cases_path)[:8]
         candidates = sorted(p for p in versioned_dir.glob(f"*-cases-{cases_sha8}.json") if p.is_file())
         if candidates:
-            # Multiple Excel versions/builds can share the same corpus hash. Prefer the newest by
-            # mtime for developer ergonomics.
-            return max(candidates, key=lambda p: p.stat().st_mtime)
+            # Multiple Excel versions/builds can share the same corpus hash.
+            # Keep this deterministic by selecting the lexicographically last filename
+            # (version/build are embedded in the name).
+            return candidates[-1]
 
     pinned = Path("tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json")
     if pinned.is_file():

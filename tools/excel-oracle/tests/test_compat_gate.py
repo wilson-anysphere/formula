@@ -45,10 +45,6 @@ class CompatGateDatasetSelectionTests(unittest.TestCase):
                 older.write_text("{}", encoding="utf-8", newline="\n")
                 newer.write_text("{}", encoding="utf-8", newline="\n")
 
-                # Make sure `newer` has the newest mtime regardless of filesystem ordering.
-                os.utime(older, (1, 1))
-                os.utime(newer, (2, 2))
-
                 selected = compat_gate._default_expected_dataset(cases_path=cases_path)
                 self.assertEqual(selected.resolve(), newer.resolve())
             finally:
