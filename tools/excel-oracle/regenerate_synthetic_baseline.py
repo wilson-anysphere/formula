@@ -106,6 +106,7 @@ def main() -> int:
     pinned_relpath = Path(
         "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
     )
+    versioned_relpath = Path("tests/compatibility/excel-oracle/datasets/versioned")
     cases_path = repo_root / cases_relpath
     pinned_path = repo_root / pinned_relpath
 
@@ -158,6 +159,8 @@ def main() -> int:
                     str(engine_results_path),
                     "--pinned",
                     str(pinned_relpath),
+                    "--versioned-dir",
+                    str(versioned_relpath),
                 ),
                 cwd=repo_root,
                 env=env,
