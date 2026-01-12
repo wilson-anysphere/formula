@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { CanvasGridRenderer as RendererFromTs } from "../../../packages/grid/src/node.ts";
 
-test("grid/node is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("grid/node is importable under Node ESM when executing TS sources directly", async () => {
   const mod = await import("@formula/grid/node");
 
   assert.equal(typeof mod.CanvasGridRenderer, "function");
@@ -15,4 +15,3 @@ test("grid/node is importable under Node ESM when executing TS sources (strip-ty
   // Sanity: the TS source import resolves and matches the package export type.
   assert.equal(typeof RendererFromTs, "function");
 });
-

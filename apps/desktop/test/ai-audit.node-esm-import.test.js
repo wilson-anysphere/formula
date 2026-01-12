@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { AIAuditRecorder as RecorderFromTs } from "../../../packages/ai-audit/src/index.node.ts";
 
-test("ai-audit is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("ai-audit is importable under Node ESM when executing TS sources directly", async () => {
   // This test lives under apps/desktop so `@formula/ai-audit` resolves via
   // apps/desktop/node_modules (where it's declared as a dependency).
   const mod = await import("@formula/ai-audit");
@@ -30,4 +30,3 @@ test("ai-audit is importable under Node ESM when executing TS sources (strip-typ
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.session_id, "s1");
 });
-

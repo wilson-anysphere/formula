@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { createCollabSession as createSessionFromTs } from "../../../packages/collab/session/src/index.ts";
 
-test("collab-session is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("collab-session is importable under Node ESM when executing TS sources directly", async () => {
   const mod = await import("@formula/collab-session");
 
   assert.equal(typeof mod.createCollabSession, "function");
@@ -18,4 +18,3 @@ test("collab-session is importable under Node ESM when executing TS sources (str
   session.destroy?.();
   session.doc.destroy?.();
 });
-

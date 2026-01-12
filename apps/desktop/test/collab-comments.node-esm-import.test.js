@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { getCommentsRoot as getCommentsRootFromTs } from "../../../packages/collab/comments/src/index.ts";
 
-test("collab-comments is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("collab-comments is importable under Node ESM when executing TS sources directly", async () => {
   const mod = await import("@formula/collab-comments");
   const Y = await import("yjs");
 
@@ -19,4 +19,3 @@ test("collab-comments is importable under Node ESM when executing TS sources (st
   assert.ok(root.map);
   assert.equal(typeof root.map.get, "function");
 });
-
