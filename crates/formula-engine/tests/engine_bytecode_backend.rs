@@ -2458,12 +2458,12 @@ fn bytecode_backend_recompiles_when_constant_defined_name_changes() {
 fn bytecode_backend_compiles_error_literals() {
     for (formula, expected) in [
         ("=#NULL!", Value::Error(ErrorKind::Null)),
-        ("=#N/A", Value::Error(ErrorKind::NA)),
         ("=#DIV/0!", Value::Error(ErrorKind::Div0)),
-        ("=#REF!", Value::Error(ErrorKind::Ref)),
         ("=#VALUE!", Value::Error(ErrorKind::Value)),
+        ("=#REF!", Value::Error(ErrorKind::Ref)),
         ("=#NAME?", Value::Error(ErrorKind::Name)),
         ("=#NUM!", Value::Error(ErrorKind::Num)),
+        ("=#N/A", Value::Error(ErrorKind::NA)),
         ("=#GETTING_DATA", Value::Error(ErrorKind::GettingData)),
         ("=#SPILL!", Value::Error(ErrorKind::Spill)),
         ("=#CALC!", Value::Error(ErrorKind::Calc)),
@@ -2481,6 +2481,47 @@ fn bytecode_backend_compiles_error_literals() {
         engine.recalculate_single_threaded();
         assert_eq!(engine.get_cell_value("Sheet1", "A1"), expected);
         assert_engine_matches_ast(&engine, formula, "A1");
+    }
+}
+
+#[test]
+fn bytecode_backend_propagates_error_literals_through_ops_and_functions() {
+    let mut engine = Engine::new();
+
+    let cases = [
+        ("A1", "=1+#DIV/0!", Value::Error(ErrorKind::Div0)),
+        ("A2", "=#DIV/0!+1", Value::Error(ErrorKind::Div0)),
+        ("A3", "=#N/A=0", Value::Error(ErrorKind::NA)),
+        ("A4", "=IFERROR(1+#DIV/0!,7)", Value::Number(7.0)),
+        ("A5", "=SUM(1,#DIV/0!,2)", Value::Error(ErrorKind::Div0)),
+        ("A6", r#"=CONCAT("x",#DIV/0!)"#, Value::Error(ErrorKind::Div0)),
+        ("A7", "=NOT(#DIV/0!)", Value::Error(ErrorKind::Div0)),
+        ("A8", "=ABS(#DIV/0!)", Value::Error(ErrorKind::Div0)),
+        ("A9", "=-#DIV/0!", Value::Error(ErrorKind::Div0)),
+    ];
+
+    for (cell, formula, _) in &cases {
+        engine.set_cell_formula("Sheet1", cell, formula).unwrap();
+    }
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.compiled, cases.len());
+
+    engine.recalculate_single_threaded();
+
+    for (cell, formula, expected) in &cases {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            expected.clone(),
+            "mismatched value for {cell}: {formula}"
+        );
+        assert_engine_matches_ast(&engine, formula, cell);
     }
 }
 
