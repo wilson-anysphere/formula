@@ -1576,6 +1576,7 @@ impl Engine {
         let mut moved_ranges = Vec::new();
 
         let sheet_names = sheet_names_by_id(&self.workbook);
+        let edited_sheet_id: SheetId;
 
         match op {
             EditOp::InsertRows { sheet, row, count } => {
@@ -1586,6 +1587,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 shift_rows(&mut self.workbook.sheets[sheet_id], row, count, true);
                 let edit = StructuralEdit::InsertRows {
                     sheet: sheet.clone(),
@@ -1608,6 +1610,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 shift_rows(&mut self.workbook.sheets[sheet_id], row, count, false);
                 let edit = StructuralEdit::DeleteRows {
                     sheet: sheet.clone(),
@@ -1630,6 +1633,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, true);
                 let edit = StructuralEdit::InsertCols {
                     sheet: sheet.clone(),
@@ -1652,6 +1656,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 shift_cols(&mut self.workbook.sheets[sheet_id], col, count, false);
                 let edit = StructuralEdit::DeleteCols {
                     sheet: sheet.clone(),
@@ -1675,6 +1680,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 insert_cells_shift_right(&mut self.workbook.sheets[sheet_id], range, width);
                 let edit = RangeMapEdit {
                     sheet,
@@ -1705,6 +1711,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 insert_cells_shift_down(&mut self.workbook.sheets[sheet_id], range, height);
                 let edit = RangeMapEdit {
                     sheet,
@@ -1735,6 +1742,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 delete_cells_shift_left(&mut self.workbook.sheets[sheet_id], range, width);
                 let start_col = range.end.col.saturating_add(1);
                 let edit = RangeMapEdit {
@@ -1771,6 +1779,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 delete_cells_shift_up(&mut self.workbook.sheets[sheet_id], range, height);
                 let start_row = range.end.row.saturating_add(1);
                 let edit = RangeMapEdit {
@@ -1807,6 +1816,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 if src.width() == 0 || src.height() == 0 {
                     return Err(EditError::InvalidRange);
                 }
@@ -1855,6 +1865,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 if src.width() == 0 || src.height() == 0 {
                     return Err(EditError::InvalidRange);
                 }
@@ -1871,6 +1882,7 @@ impl Engine {
                     .workbook
                     .sheet_id(&sheet)
                     .ok_or_else(|| EditError::SheetNotFound(sheet.clone()))?;
+                edited_sheet_id = sheet_id;
                 fill_range(
                     &mut self.workbook.sheets[sheet_id],
                     &sheet,
@@ -1879,6 +1891,14 @@ impl Engine {
                     &mut formula_rewrites,
                 );
             }
+        }
+
+        if let Err(err) = self.grow_sheet_dimensions_to_fit_cells(edited_sheet_id) {
+            // `apply_operation` performs in-place edits to the workbook and only rebuilds the
+            // dependency graph after the edit succeeds. If we hit a bounds error here, roll back
+            // the workbook so the engine does not end up with mismatched workbook/graph state.
+            self.workbook = before;
+            return Err(err);
         }
 
         self.rebuild_graph()
@@ -1892,6 +1912,39 @@ impl Engine {
             moved_ranges,
             formula_rewrites,
         })
+    }
+
+    fn grow_sheet_dimensions_to_fit_cells(&mut self, sheet_id: SheetId) -> Result<(), EditError> {
+        let (max_row, max_col) = {
+            let Some(sheet) = self.workbook.sheets.get(sheet_id) else {
+                return Ok(());
+            };
+            let mut max_row: Option<u32> = None;
+            let mut max_col: Option<u32> = None;
+            for addr in sheet.cells.keys() {
+                max_row = Some(max_row.map_or(addr.row, |v| v.max(addr.row)));
+                max_col = Some(max_col.map_or(addr.col, |v| v.max(addr.col)));
+            }
+            match (max_row, max_col) {
+                (Some(r), Some(c)) => (r, c),
+                _ => return Ok(()),
+            }
+        };
+
+        // The engine enforces Excel's fixed 16,384-column grid. Editing operations should not be
+        // able to create cells beyond that bound.
+        if max_col >= EXCEL_MAX_COLS {
+            return Err(EditError::Engine(
+                crate::eval::AddressParseError::ColumnOutOfRange.to_string(),
+            ));
+        }
+
+        let max_addr = CellAddr {
+            row: max_row,
+            col: max_col,
+        };
+        self.workbook.grow_sheet_dimensions(sheet_id, max_addr);
+        Ok(())
     }
 
     pub fn recalculate(&mut self) {

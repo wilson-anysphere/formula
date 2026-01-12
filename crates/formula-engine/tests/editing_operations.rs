@@ -1,5 +1,5 @@
 use formula_engine::{EditOp, Engine, NameDefinition, NameScope, Value};
-use formula_model::{CellRef, Range};
+use formula_model::{CellRef, Range, EXCEL_MAX_COLS};
 use pretty_assertions::assert_eq;
 
 fn cell(a1: &str) -> CellRef {
@@ -81,6 +81,28 @@ fn copy_range_adjusts_relative_references() {
 
     assert_eq!(engine.get_cell_formula("Sheet1", "B1"), Some("=A1"));
     assert_eq!(engine.get_cell_formula("Sheet1", "B2"), Some("=A2"));
+}
+
+#[test]
+fn copy_range_to_far_row_grows_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 42.0).unwrap();
+
+    engine
+        .apply_operation(EditOp::CopyRange {
+            sheet: "Sheet1".to_string(),
+            src: range("A1"),
+            dst_top_left: cell("A2000000"),
+        })
+        .unwrap();
+
+    // Copying a literal value to a row beyond Excel's default should automatically grow the sheet
+    // dimensions so the new cell remains addressable.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2000000"),
+        Value::Number(42.0)
+    );
+    assert_eq!(engine.sheet_dimensions("Sheet1"), Some((2_000_000, EXCEL_MAX_COLS)));
 }
 
 #[test]
