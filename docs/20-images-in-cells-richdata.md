@@ -37,6 +37,51 @@ Notes:
 * For linked data types and richer payloads, Excel is expected to add the supporting “types” and
   “structure” tables; treat their presence as feature-dependent.
 
+## Observed “image in cell” fixture (in-repo)
+
+The repository includes `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`, a minimal workbook that contains
+an image-in-cell backed by RichData. Key observations (useful for implementers):
+
+* `xl/worksheets/sheet1.xml` contains a cell with `vm="0"`:
+
+  ```xml
+  <c r="A1" vm="0"><v>0</v></c>
+  ```
+
+* `xl/metadata.xml` contains `<metadataTypes>` and `<valueMetadata>`, but no `futureMetadata` / `rvb`:
+
+  ```xml
+  <valueMetadata count="1">
+    <bk><rc t="1" v="0"/></bk>
+  </valueMetadata>
+  ```
+
+* `xl/richData/richValue.xml` stores an image rich value whose payload is a relationship-table index:
+
+  ```xml
+  <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+    <rv s="0" t="image"><v>0</v></rv>
+  </rvData>
+  ```
+
+* `xl/richData/richValueRel.xml` is a bare `<rel>` list (no `<rels>` wrapper), and uses the `richdata2` namespace:
+
+  ```xml
+  <richValueRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+    <rel r:id="rId1"/>
+  </richValueRel>
+  ```
+
+* Workbook relationships (`xl/_rels/workbook.xml.rels`) link directly to the rich value parts using Microsoft
+  relationship types:
+  * `http://schemas.microsoft.com/office/2017/06/relationships/richValue` → `richData/richValue.xml`
+  * `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` → `richData/richValueRel.xml`
+* The relationship from the workbook to `xl/metadata.xml` uses `Type="…/sheetMetadata"` (not `…/metadata`) in
+  this file.
+* `[Content_Types].xml` does **not** include overrides for `xl/metadata.xml` or `xl/richData/*` in this fixture;
+  it relies on the default `application/xml`. Preserve whatever the source workbook uses.
+
 ### Roles (high level)
 
 | Part | Purpose |
