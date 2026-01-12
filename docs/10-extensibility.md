@@ -37,6 +37,15 @@ devtools:
   - `formula.ui.showMessage` shows a **toast** in the desktop UI.
   - `formula.ui.showQuickPick` / `formula.ui.showInputBox` are implemented via native `<dialog>` prompts.
 
+### DevTools debugging hooks (desktop)
+
+For Playwright e2e tests (and useful for manual debugging), the desktop app exposes a few globals:
+
+- `window.__formulaExtensionHost` — the underlying `BrowserExtensionHost` instance
+- `window.__formulaExtensionHostManager` — the `DesktopExtensionHostManager` wrapper
+
+These are **not** stable public APIs, but can be handy when debugging extension load/permission issues from the console.
+
 ## Webview sandbox model (desktop)
 
 Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:` URL generated from the HTML):
