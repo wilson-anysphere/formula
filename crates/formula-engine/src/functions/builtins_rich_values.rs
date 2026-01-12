@@ -1,10 +1,10 @@
-use std::cmp::Ordering;
-use std::collections::HashMap;
-
 use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
-use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility};
-use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Value};
+use crate::functions::{
+    eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType,
+    Volatility,
+};
+use crate::value::{Array, ErrorKind, Value};
 
 pub(crate) static FIELDACCESS_SPEC: FunctionSpec = FunctionSpec {
     name: "_FIELDACCESS",
@@ -49,31 +49,13 @@ fn fieldaccess_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 fn fieldaccess_scalar(base: &Value, field: &str) -> Value {
     match base {
         Value::Error(e) => Value::Error(*e),
-        Value::Entity(entity) => match map_get_case_insensitive(&entity.fields, field) {
-            Some(v) => v.clone(),
-            None => Value::Error(ErrorKind::Field),
-        },
-        Value::Record(record) => match map_get_case_insensitive(&record.fields, field) {
-            Some(v) => v.clone(),
-            None => Value::Error(ErrorKind::Field),
-        },
+        Value::Entity(entity) => entity
+            .get_field_case_insensitive(field)
+            .unwrap_or(Value::Error(ErrorKind::Field)),
+        Value::Record(record) => record
+            .get_field_case_insensitive(field)
+            .unwrap_or(Value::Error(ErrorKind::Field)),
         // Field access on a non-rich value is a type error.
         _ => Value::Error(ErrorKind::Value),
     }
-}
-
-fn map_get_case_insensitive<'a>(map: &'a HashMap<String, Value>, key: &str) -> Option<&'a Value> {
-    if let Some(v) = map.get(key) {
-        return Some(v);
-    }
-
-    // Fast-path lookups for callers (or builders) that store case-folded keys.
-    let folded = casefold(key);
-    if let Some(v) = map.get(&folded) {
-        return Some(v);
-    }
-
-    map.iter()
-        .find(|(k, _)| cmp_case_insensitive(k, key) == Ordering::Equal)
-        .map(|(_, v)| v)
 }

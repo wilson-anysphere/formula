@@ -1865,26 +1865,13 @@ fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
 }
 
 fn eval_field_access(value: &Value, field_key: &str) -> Value {
-    fn map_lookup<'a>(
-        map: &'a std::collections::HashMap<String, Value>,
-        key: &str,
-    ) -> Option<&'a Value> {
-        if let Some(v) = map.get(key) {
-            return Some(v);
-        }
-        let folded = crate::value::casefold(key);
-        map.iter()
-            .find(|(k, _)| crate::value::casefold(k) == folded)
-            .map(|(_, v)| v)
-    }
-
     match value {
         Value::Error(e) => Value::Error(*e),
-        Value::Entity(entity) => map_lookup(&entity.fields, field_key)
-            .cloned()
+        Value::Entity(entity) => entity
+            .get_field_case_insensitive(field_key)
             .unwrap_or(Value::Error(ErrorKind::Field)),
-        Value::Record(record) => map_lookup(&record.fields, field_key)
-            .cloned()
+        Value::Record(record) => record
+            .get_field_case_insensitive(field_key)
             .unwrap_or(Value::Error(ErrorKind::Field)),
         // Field access on a non-rich value yields `#VALUE!` (type mismatch). `#FIELD!` is reserved
         // for missing fields on rich values.

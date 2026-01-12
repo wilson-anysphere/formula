@@ -314,6 +314,17 @@ impl EntityValue {
     }
 
     pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {
+        // Common fast paths:
+        // - exact-key match (already case-correct)
+        // - pre-folded key storage (some builders may store case-folded keys)
+        if let Some(v) = self.fields.get(field) {
+            return Some(v.clone());
+        }
+        let folded = casefold(field);
+        if let Some(v) = self.fields.get(&folded) {
+            return Some(v.clone());
+        }
+
         self.fields
             .iter()
             .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
@@ -371,6 +382,14 @@ impl RecordValue {
     }
 
     pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {
+        if let Some(v) = self.fields.get(field) {
+            return Some(v.clone());
+        }
+        let folded = casefold(field);
+        if let Some(v) = self.fields.get(&folded) {
+            return Some(v.clone());
+        }
+
         self.fields
             .iter()
             .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
