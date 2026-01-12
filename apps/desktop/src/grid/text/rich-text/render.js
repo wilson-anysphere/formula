@@ -1,6 +1,7 @@
 import { resolveCssVar } from "../../../theme/cssVars.js";
 import { detectBaseDirection, resolveAlign, toCanvasFontString } from "@formula/text-layout";
 import { getSharedTextLayoutEngine } from "../textLayout.js";
+import { normalizeExcelColorToCss } from "../../../shared/colors.js";
 
 /**
  * @param {import('./types.js').RichTextRunStyle | undefined} style
@@ -24,25 +25,7 @@ function pointsToPx(points) {
 }
 
 function engineColorToCanvasColor(color) {
-  if (typeof color !== "string") return undefined;
-  if (!color.startsWith("#")) return color;
-  if (color.length !== 9) return color;
-
-  // Engine colors are serialized as `#AARRGGBB`.
-  const hex = color.slice(1);
-  const a = Number.parseInt(hex.slice(0, 2), 16) / 255;
-  const r = Number.parseInt(hex.slice(2, 4), 16);
-  const g = Number.parseInt(hex.slice(4, 6), 16);
-  const b = Number.parseInt(hex.slice(6, 8), 16);
-
-  if (Number.isNaN(a) || Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
-    return color;
-  }
-
-  if (a >= 1) {
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
+  return normalizeExcelColorToCss(color);
 }
 
 function buildCodePointIndex(text) {

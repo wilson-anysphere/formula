@@ -20,11 +20,11 @@ test("drawConditionalFormattingLayer emits deterministic draw calls", () => {
   drawConditionalFormattingLayer(ctx, cellRects, byCell);
 
   assert.deepStrictEqual(ctx.commands, [
-    ["fillStyle", "rgba(255,0,0,1)"],
+    ["fillStyle", "#ff0000"],
     ["fillRect", 0, 0, 50, 20],
-    ["fillStyle", "rgba(99,142,198,1)"],
+    ["fillStyle", "#638ec6"],
     ["fillRect", 51, 5, 24, 10],
-    ["fillStyle", "rgba(0,255,0,1)"],
+    ["fillStyle", "#00ff00"],
     ["beginPath"],
     ["moveTo", 142.5, 5],
     ["lineTo", 137.5, 15],
