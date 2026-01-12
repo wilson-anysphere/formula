@@ -21,6 +21,7 @@ mod rich_value_images;
 pub use images::resolve_rich_value_image_targets;
 pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use formula_model::CellRef;
@@ -97,10 +98,11 @@ pub fn extract_rich_cell_images(
         return Ok(HashMap::new());
     }
 
-    let rich_value_parts: Vec<&str> = pkg
+    let mut rich_value_parts: Vec<&str> = pkg
         .part_names()
         .filter(|name| is_rich_value_part(name))
         .collect();
+    rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
     if rich_value_parts.is_empty() {
         return Ok(HashMap::new());
     }
@@ -148,14 +150,69 @@ pub fn extract_rich_cell_images(
     Ok(out)
 }
 
-fn is_rich_value_part(name: &str) -> bool {
-    const PREFIX: &str = "xl/richData/richValue";
-    const SUFFIX: &str = ".xml";
-    if !name.starts_with(PREFIX) || !name.ends_with(SUFFIX) {
-        return false;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RichValuePartFamily {
+    RichValue,
+    RdRichValue,
+}
+
+/// Parse an `xl/richData/*` rich value part name and return its "family" plus numeric suffix.
+///
+/// Examples:
+/// - `xl/richData/richValue.xml` -> (`RichValue`, 0)
+/// - `xl/richData/richValue2.xml` -> (`RichValue`, 2)
+/// - `xl/richData/rdrichvalue10.xml` -> (`RdRichValue`, 10)
+///
+/// This is case-insensitive for the filename (but not the containing directory).
+fn parse_rich_value_part_name(part_path: &str) -> Option<(RichValuePartFamily, u32)> {
+    if !part_path.starts_with("xl/richData/") {
+        return None;
     }
-    let mid = &name[PREFIX.len()..name.len() - SUFFIX.len()];
-    mid.chars().all(|c| c.is_ascii_digit())
+
+    let file_name = part_path.rsplit('/').next()?;
+    let file_name_lower = file_name.to_ascii_lowercase();
+    if !file_name_lower.ends_with(".xml") {
+        return None;
+    }
+
+    let stem = &file_name[..file_name.len() - ".xml".len()];
+    let stem_lower = stem.to_ascii_lowercase();
+
+    let (family, suffix) = if let Some(rest) = stem_lower.strip_prefix("richvalue") {
+        (RichValuePartFamily::RichValue, rest)
+    } else if let Some(rest) = stem_lower.strip_prefix("rdrichvalue") {
+        (RichValuePartFamily::RdRichValue, rest)
+    } else {
+        return None;
+    };
+
+    let idx = if suffix.is_empty() {
+        0
+    } else if suffix.chars().all(|c| c.is_ascii_digit()) {
+        suffix.parse::<u32>().ok()?
+    } else {
+        return None;
+    };
+
+    Some((family, idx))
+}
+
+fn is_rich_value_part(name: &str) -> bool {
+    parse_rich_value_part_name(name).is_some()
+}
+
+fn cmp_rich_value_parts_by_numeric_suffix(a: &str, b: &str) -> Ordering {
+    let Some((a_family, a_idx)) = parse_rich_value_part_name(a) else {
+        return a.cmp(b);
+    };
+    let Some((b_family, b_idx)) = parse_rich_value_part_name(b) else {
+        return a.cmp(b);
+    };
+
+    a_family
+        .cmp(&b_family)
+        .then(a_idx.cmp(&b_idx))
+        .then_with(|| a.cmp(b))
 }
 
 fn parse_vm_to_rich_value_index_map(bytes: &[u8]) -> Result<HashMap<u32, u32>, RichDataError> {

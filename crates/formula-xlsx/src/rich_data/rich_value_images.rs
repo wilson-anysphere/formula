@@ -121,8 +121,21 @@ impl XlsxPackage {
 fn build_rich_value_index(parts: &BTreeMap<String, Vec<u8>>) -> Result<RichValueIndex, XlsxError> {
     let mut parsed: Vec<ParsedRv> = Vec::new();
 
-    // Deterministic part ordering (BTreeMap keys are already sorted).
-    for (part_name, bytes) in parts.iter().filter(|(name, _)| is_rich_value_part(name)) {
+    // Deterministic part ordering (numeric suffix; not lexicographic).
+    //
+    // Excel can split rich value stores across many parts (e.g. richValue.xml, richValue1.xml, ...,
+    // richValue10.xml). A lexicographic sort puts richValue10 before richValue2, corrupting the
+    // global implicit index assignment.
+    let mut part_names: Vec<&str> = parts
+        .keys()
+        .map(String::as_str)
+        .filter(|name| is_rich_value_part(name))
+        .collect();
+    part_names.sort_by(|a, b| super::cmp_rich_value_parts_by_numeric_suffix(a, b));
+    for part_name in part_names {
+        let Some(bytes) = parts.get(part_name) else {
+            continue;
+        };
         parsed.extend(parse_rich_value_part(part_name, bytes)?);
     }
 
@@ -184,12 +197,7 @@ struct ParsedRv {
 }
 
 fn is_rich_value_part(part_name: &str) -> bool {
-    const PREFIX: &str = "xl/richData/richValue";
-    if !part_name.starts_with(PREFIX) || !part_name.ends_with(".xml") {
-        return false;
-    }
-    let rest = &part_name[PREFIX.len()..part_name.len() - ".xml".len()];
-    rest.is_empty() || rest.chars().all(|c| c.is_ascii_digit())
+    super::parse_rich_value_part_name(part_name).is_some()
 }
 
 fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>, XlsxError> {
