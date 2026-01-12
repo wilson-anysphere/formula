@@ -7826,9 +7826,14 @@ export class SpreadsheetApp {
       await provider.write(payload);
       this.clipboardCopyContext = { range, payload, cells };
     } catch (err) {
-      if (err instanceof DlpViolationError) {
+      const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+      if (isDlpViolation) {
         try {
-          showToast(err.message || "Copy blocked by data loss prevention policy.", "error");
+          const message =
+            typeof (err as any)?.message === "string" && (err as any).message.trim()
+              ? String((err as any).message)
+              : "Copy blocked by data loss prevention policy.";
+          showToast(message, "error");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
@@ -7955,9 +7960,11 @@ export class SpreadsheetApp {
       this.refresh();
       this.focus();
     } catch (err) {
-      if (err instanceof DlpViolationError) {
+      const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+      if (isDlpViolation) {
         try {
-          showToast(err.message, "error");
+          const message = typeof (err as any)?.message === "string" ? String((err as any).message) : "Paste blocked by policy.";
+          showToast(message, "error");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
@@ -8036,9 +8043,14 @@ export class SpreadsheetApp {
       this.refresh();
       this.focus();
     } catch (err) {
-      if (err instanceof DlpViolationError) {
+      const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+      if (isDlpViolation) {
         try {
-          showToast(err.message || "Cut blocked by data loss prevention policy.", "error");
+          const message =
+            typeof (err as any)?.message === "string" && (err as any).message.trim()
+              ? String((err as any).message)
+              : "Cut blocked by data loss prevention policy.";
+          showToast(message, "error");
         } catch {
           // Best-effort: if the toast UI isn't mounted, don't crash clipboard actions.
         }
