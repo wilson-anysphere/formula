@@ -2,6 +2,43 @@ function cellKey(row, col) {
   return `${row},${col}`;
 }
 
+// Extension APIs represent ranges as full 2D JS arrays. With Excel-scale sheets, unbounded
+// ranges can allocate millions of entries and OOM the host process. Keep reads/writes bounded
+// to match the desktop extension API guardrails.
+const DEFAULT_EXTENSION_RANGE_CELL_LIMIT = 200000;
+
+function normalizeRangeCoords(startRow, startCol, endRow, endCol) {
+  const sRow = Number(startRow);
+  const sCol = Number(startCol);
+  const eRow = Number(endRow);
+  const eCol = Number(endCol);
+  return {
+    startRow: Math.min(sRow, eRow),
+    startCol: Math.min(sCol, eCol),
+    endRow: Math.max(sRow, eRow),
+    endCol: Math.max(sCol, eCol)
+  };
+}
+
+function getRangeSize(startRow, startCol, endRow, endCol) {
+  const r = normalizeRangeCoords(startRow, startCol, endRow, endCol);
+  const rows = Math.max(0, r.endRow - r.startRow + 1);
+  const cols = Math.max(0, r.endCol - r.startCol + 1);
+  return { ...r, rows, cols, cellCount: rows * cols };
+}
+
+function assertRangeWithinLimit(startRow, startCol, endRow, endCol, { maxCells, label } = {}) {
+  const size = getRangeSize(startRow, startCol, endRow, endCol);
+  const limit = Number.isFinite(maxCells) ? maxCells : DEFAULT_EXTENSION_RANGE_CELL_LIMIT;
+  if (size.cellCount > limit) {
+    const name = String(label ?? "Range");
+    throw new Error(
+      `${name} is too large (${size.rows}x${size.cols}=${size.cellCount} cells). Limit is ${limit} cells.`
+    );
+  }
+  return size;
+}
+
 function columnLettersToIndex(letters) {
   const cleaned = String(letters ?? "").trim().toUpperCase();
   if (!/^[A-Z]+$/.test(cleaned)) {
@@ -177,19 +214,25 @@ class InMemorySpreadsheet {
 
   setSelection(range) {
     const sheet = this._getActiveSheetRecord();
-    sheet.selection = {
-      startRow: range.startRow,
-      startCol: range.startCol,
-      endRow: range.endRow,
-      endCol: range.endCol
-    };
+    const { startRow, startCol, endRow, endCol } = range ?? {};
+    sheet.selection = { startRow, startCol, endRow, endCol };
 
-    const payload = { sheetId: sheet.id, selection: this.getSelection() };
+    let selection;
+    try {
+      selection = this.getSelection();
+    } catch {
+      // Best-effort: still emit the event so extensions can observe selection movement, but
+      // do not materialize a huge values matrix for Excel-scale selections.
+      selection = { startRow, startCol, endRow, endCol, values: [], truncated: true };
+    }
+
+    const payload = { sheetId: sheet.id, selection };
     for (const listener of this._selectionListeners) listener(payload);
   }
 
   getSelection() {
     const { startRow, startCol, endRow, endCol } = this._getActiveSheetRecord().selection;
+    assertRangeWithinLimit(startRow, startCol, endRow, endCol, { label: "Selection" });
     return {
       startRow,
       startCol,
@@ -234,6 +277,7 @@ class InMemorySpreadsheet {
 
   getRange(ref) {
     const { sheetName, startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    assertRangeWithinLimit(startRow, startCol, endRow, endCol);
     const sheet =
       sheetName == null ? this._getActiveSheetRecord() : this._getSheetRecordByName(sheetName);
     return {
@@ -247,6 +291,7 @@ class InMemorySpreadsheet {
 
   setRange(ref, values) {
     const { sheetName, startRow, startCol, endRow, endCol } = parseA1RangeRef(ref);
+    assertRangeWithinLimit(startRow, startCol, endRow, endCol);
     const sheet =
       sheetName == null ? this._getActiveSheetRecord() : this._getSheetRecordByName(sheetName);
     const expectedRows = endRow - startRow + 1;
