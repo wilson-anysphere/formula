@@ -42,6 +42,7 @@ fn build_dir_decompressed_spec_with_references(
     project_name: &str,
     project_constants: &str,
     module_name: &str,
+    projectversion_reserved: u32,
     references: &[u8],
 ) -> Vec<u8> {
     let project_name_bytes = project_name.as_bytes();
@@ -100,7 +101,7 @@ fn build_dir_decompressed_spec_with_references(
 
     // PROJECTVERSION
     push_u16(&mut out, 0x0009);
-    push_u32(&mut out, 0); // Reserved
+    push_u32(&mut out, projectversion_reserved); // Reserved
     push_u32(&mut out, 1); // VersionMajor
     push_u16(&mut out, 0); // VersionMinor
 
@@ -186,6 +187,7 @@ fn build_dir_decompressed_spec_with_references_and_stream_name(
     module_name: &str,
     module_stream_name_ansi: &str,
     module_stream_name_unicode_bytes: &[u8],
+    projectversion_reserved: u32,
     references: &[u8],
 ) -> Vec<u8> {
     let project_name_bytes = project_name.as_bytes();
@@ -244,7 +246,7 @@ fn build_dir_decompressed_spec_with_references_and_stream_name(
 
     // PROJECTVERSION
     push_u16(&mut out, 0x0009);
-    push_u32(&mut out, 0); // Reserved
+    push_u32(&mut out, projectversion_reserved); // Reserved
     push_u32(&mut out, 1); // VersionMajor
     push_u16(&mut out, 0); // VersionMinor
 
@@ -323,7 +325,7 @@ fn build_dir_decompressed_spec_with_references_and_stream_name(
 }
 
 fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, module_name: &str) -> Vec<u8> {
-    build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, &[])
+    build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, 0, &[])
 }
 
 fn build_vba_project_bin_spec_with_dir(
@@ -478,6 +480,7 @@ fn content_normalized_data_parses_spec_dir_stream_with_unicode_module_stream_nam
         module_name,
         "WrongStreamName",
         &module_stream_name_unicode_bytes,
+        0,
         &[],
     );
 
@@ -608,6 +611,7 @@ fn project_normalized_data_accepts_spec_dir_stream_with_fixed_length_projectvers
     expected.extend_from_slice(&0u32.to_le_bytes());
     expected.extend_from_slice(&1u32.to_le_bytes());
     expected.extend_from_slice(&0u16.to_le_bytes());
+
     // PROJECTCONSTANTSUNICODE payload bytes ("Answer=42" as UTF-16LE).
     let mut constants_unicode = Vec::new();
     push_utf16le(&mut constants_unicode, "Answer=42");
@@ -616,6 +620,69 @@ fn project_normalized_data_accepts_spec_dir_stream_with_fixed_length_projectvers
     // No designer modules, so FormsNormalizedData is empty.
     // ProjectProperties token bytes from the `PROJECT` stream.
     expected.extend_from_slice(b"NameVBAProjectModuleModule1");
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn project_normalized_data_v3_dir_records_accepts_projectversion_reserved_4() {
+    // Some producers emit the MS-OVBA fixed-length PROJECTVERSION record as:
+    //   Id(u16) || Reserved(u32=4) || VersionMajor(u32) || VersionMinor(u16)
+    //
+    // Ensure the v3 dir-record-only transcript helper handles it without mis-parsing it as a TLV
+    // record with Size=4.
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+
+    let dir_decompressed = build_dir_decompressed_spec_with_references(
+        project_name,
+        project_constants,
+        module_name,
+        4,
+        &[],
+    );
+    let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
+    let vba_project_bin =
+        build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
+
+    let normalized = project_normalized_data_v3_dir_records(&vba_project_bin)
+        .expect("ProjectNormalizedDataV3 dir-record transcript");
+
+    let mut expected = Vec::new();
+    // PROJECTSYSKIND.SysKind
+    expected.extend_from_slice(&0x0000_0003u32.to_le_bytes());
+    // PROJECTLCID.Lcid
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes());
+    // PROJECTLCIDINVOKE.LcidInvoke
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes());
+    // PROJECTCODEPAGE.CodePage (u16)
+    expected.extend_from_slice(&1252u16.to_le_bytes());
+    // PROJECTNAME.ProjectName
+    expected.extend_from_slice(b"VBAProject");
+    // PROJECTHELPCONTEXT.HelpContext
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    // PROJECTLIBFLAGS.ProjectLibFlags
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    // PROJECTVERSION: Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+    expected.extend_from_slice(&4u32.to_le_bytes());
+    expected.extend_from_slice(&1u32.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+
+    // PROJECTCONSTANTSUNICODE payload bytes ("Answer=42" as UTF-16LE).
+    let mut constants_unicode = Vec::new();
+    push_utf16le(&mut constants_unicode, "Answer=42");
+    expected.extend_from_slice(&constants_unicode);
+
+    // Module group:
+    // - MODULENAME bytes ("Module1")
+    expected.extend_from_slice(b"Module1");
+    // - MODULESTREAMNAMEUNICODE payload bytes ("Module1" as UTF-16LE)
+    let mut stream_name_unicode = Vec::new();
+    push_utf16le(&mut stream_name_unicode, "Module1");
+    expected.extend_from_slice(&stream_name_unicode);
+    // - MODULEHELPCONTEXT (u32)
+    expected.extend_from_slice(&0u32.to_le_bytes());
 
     assert_eq!(normalized, expected);
 }
@@ -716,6 +783,7 @@ fn content_normalized_data_parses_spec_dir_stream_with_reference_records() {
         project_name,
         project_constants,
         module_name,
+        0,
         &references,
     );
     let vba_project_bin = build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);

@@ -289,6 +289,7 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
             buf[offset + 4],
             buf[offset + 5],
         ]) as usize;
+
         let tlv_end = offset.saturating_add(6).saturating_add(size_or_reserved);
         let fixed_end = offset.saturating_add(12);
 
@@ -301,6 +302,17 @@ fn read_dir_record(buf: &[u8], offset: usize) -> Result<(u16, &[u8], usize), Dir
         if fixed_end <= buf.len() && fixed_next_ok && (!tlv_next_ok || size_or_reserved == 0) {
             return Ok((id, &buf[offset + 2..fixed_end], fixed_end));
         }
+
+        // Fall back to treating it as a TLV record (use the declared payload length).
+        let data_start = offset + 6;
+        let data_end = data_start + size_or_reserved;
+        if data_end > buf.len() {
+            return Err(DirParseError::BadRecordLength {
+                id,
+                len: size_or_reserved,
+            });
+        }
+        return Ok((id, &buf[data_start..data_end], data_end));
     }
 
     let len = u32::from_le_bytes([
