@@ -729,6 +729,48 @@ test.describe("sheet tabs", () => {
     await expect(editor).toBeFocused();
   });
 
+  test("clicking a sheet tab while the cell editor is open commits the edit to the original sheet", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+
+    // Create a second sheet so switching is observable.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Start editing A1 in Sheet1 but do not press Enter.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("h");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Switching sheets via a click should commit the in-cell edit on the original sheet.
+    await page.getByTestId("sheet-tab-Sheet2").click();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const sheet1A1 = await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      await app.whenIdle();
+      const doc = app.getDocument();
+      const cell = doc.getCell("Sheet1", "A1");
+      return cell?.value ?? null;
+    });
+    expect(sheet1A1).toBe("hello");
+
+    const sheet2A1 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(sheet2A1).toBe("");
+
+    await expect(editor).toBeHidden();
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id)).toBe("grid");
+  });
+
   test("invalid rename (forbidden characters) shows a toast and does not rename the sheet", async ({ page }) => {
     await gotoDesktop(page);
 
