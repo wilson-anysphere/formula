@@ -25,3 +25,20 @@ fn imports_sheet_tab_color_from_sheetext() {
     assert!(color.indexed.is_none(), "expected rgb-only tab color");
 }
 
+#[test]
+fn imports_sheet_tab_color_indexed_resolved_via_palette() {
+    let bytes = xls_fixture_builder::build_tab_color_indexed_palette_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("TabColorIndexed")
+        .expect("TabColorIndexed missing");
+
+    let color = sheet.tab_color.as_ref().expect("tab_color missing");
+    assert_eq!(color.rgb.as_deref(), Some("FF112233"));
+    assert!(
+        color.indexed.is_none(),
+        "expected indexed tab color to be resolved to rgb"
+    );
+}

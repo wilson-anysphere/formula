@@ -831,6 +831,21 @@ pub(crate) fn parse_biff_workbook_globals(
             }
             // PALETTE [MS-XLS 2.4.155]
             RECORD_PALETTE => {
+                if data.len() < 2 {
+                    out.warnings
+                        .push(format!("truncated PALETTE record at offset {}", record.offset));
+                } else {
+                    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+                    let expected_len = 2usize.saturating_add(count.saturating_mul(4));
+                    if data.len() < expected_len {
+                        out.warnings.push(format!(
+                            "truncated PALETTE record at offset {} (ccv={count}, len={}, expected={expected_len})",
+                            record.offset,
+                            data.len()
+                        ));
+                    }
+                }
+
                 if let Some(palette) = parse_biff_palette_record(data) {
                     out.palette = palette;
                 }
@@ -900,7 +915,43 @@ pub(crate) fn parse_biff_workbook_globals(
             .push("unexpected end of workbook globals stream (missing EOF)".to_string());
     }
 
+    if !out.palette.is_empty() {
+        apply_palette_to_tab_colors(&mut out.sheet_tab_colors, &out.palette);
+    }
+
     Ok(out)
+}
+
+fn apply_palette_to_tab_colors(colors: &mut [Option<TabColor>], palette: &[u32]) {
+    for color_opt in colors {
+        let Some(color) = color_opt.as_mut() else {
+            continue;
+        };
+        if color.rgb.is_some() {
+            continue;
+        }
+        let Some(indexed) = color.indexed else {
+            continue;
+        };
+        let Ok(idx) = u16::try_from(indexed) else {
+            continue;
+        };
+
+        // BIFF palette entries correspond to indexed color values 8..=63 by default (56 entries).
+        // Map `indexed=N` to palette[N-8] when in range so we can emit a stable ARGB string for
+        // `.xls` -> `.xlsx` conversion.
+        let palette_idx = match idx.checked_sub(8) {
+            Some(v) => v as usize,
+            None => continue,
+        };
+        let Some(argb) = palette.get(palette_idx).copied() else {
+            continue;
+        };
+        color.rgb = Some(format!("{argb:08X}"));
+        // Prefer RGB when available; XLSX tabColor `indexed` depends on a compatible indexedColors
+        // table, which we don't currently synthesize for legacy `.xls` conversion.
+        color.indexed = None;
+    }
 }
 
 /// Parse a BIFF8 `SHEETEXT` record and return the optional sheet tab color.
@@ -1012,6 +1063,15 @@ fn long_rgb_to_argb_hex(rgb: &[u8]) -> String {
 
     let alpha = if a == 0 { 0xFF } else { a };
     format!("{alpha:02X}{r:02X}{g:02X}{b:02X}")
+}
+
+fn long_rgb_to_argb(rgb: &[u8]) -> u32 {
+    let r = rgb.get(0).copied().unwrap_or(0);
+    let g = rgb.get(1).copied().unwrap_or(0);
+    let b = rgb.get(2).copied().unwrap_or(0);
+    let a = rgb.get(3).copied().unwrap_or(0);
+    let alpha = if a == 0 { 0xFF } else { a };
+    ((alpha as u32) << 24) | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
 fn workbook_globals_allows_continuation_biff5(record_id: u16) -> bool {
@@ -1235,12 +1295,7 @@ fn parse_biff_palette_record(data: &[u8]) -> Option<Vec<u32>> {
         if data.len() < offset + 4 {
             break;
         }
-        let r = data[offset];
-        let g = data[offset + 1];
-        let b = data[offset + 2];
-        // data[offset + 3] is reserved.
-        let argb = 0xFF00_0000u32 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
-        out.push(argb);
+        out.push(long_rgb_to_argb(&data[offset..offset + 4]));
         offset += 4;
     }
     Some(out)

@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Write};
 
-use formula_model::EXCEL_MAX_COLS;
+use formula_model::{indexed_color_argb, EXCEL_MAX_COLS};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
 // commonly-used BIFF constants named so the intent stays readable.
@@ -374,6 +374,22 @@ pub fn build_calc_settings_fixture_xls() -> Vec<u8> {
 /// Build a BIFF8 `.xls` fixture with a custom sheet tab color.
 pub fn build_tab_color_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_tab_color_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where the sheet tab color is stored as an indexed palette color
+/// (XColorType=1) and resolved through a workbook `PALETTE` record.
+pub fn build_tab_color_indexed_palette_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_tab_color_indexed_palette_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1665,6 +1681,52 @@ fn build_tab_color_workbook_stream() -> Vec<u8> {
     // SHEETEXT: store a tab color as an XColor RGB payload.
     // The importer converts this to an OOXML-style ARGB string.
     push_record(&mut globals, RECORD_SHEETEXT, &sheetext_record_rgb(0x11, 0x22, 0x33));
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_tab_color_sheet_stream();
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_tab_color_indexed_palette_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // Emit a PALETTE record that overrides the first palette entry (index 8) to 0x112233.
+    push_record(
+        &mut globals,
+        RECORD_PALETTE,
+        &palette_record_with_override(8, 0x11, 0x22, 0x33),
+    );
+
+    // Keep a minimal style XF table so readers tolerate the file even if it contains no cells.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "TabColorIndexed");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // SHEETEXT: store a tab color as an indexed XColor referring to palette index 8.
+    push_record(&mut globals, RECORD_SHEETEXT, &sheetext_record_indexed(8));
 
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
@@ -3109,5 +3171,48 @@ fn sheetext_record_rgb(r: u8, g: u8, b: u8) -> Vec<u8> {
     out.extend_from_slice(&2u16.to_le_bytes()); // xclrType = RGB
     out.extend_from_slice(&0u16.to_le_bytes()); // index
     out.extend_from_slice(&[r, g, b, 0]);
+    out
+}
+
+fn sheetext_record_indexed(idx: u16) -> Vec<u8> {
+    // Minimal BIFF8 `SHEETEXT` record storing an indexed `XColor`.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_SHEETEXT.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    // SheetExt flags (unused for this fixture).
+    out.extend_from_slice(&0u32.to_le_bytes());
+
+    // XColor payload (indexed).
+    out.extend_from_slice(&1u16.to_le_bytes()); // xclrType = indexed
+    out.extend_from_slice(&idx.to_le_bytes()); // icv
+    out.extend_from_slice(&[0u8; 4]); // rgb (unused for indexed)
+    out
+}
+
+fn palette_record_with_override(idx: u16, r: u8, g: u8, b: u8) -> Vec<u8> {
+    // BIFF8 PALETTE record: ccv + array of `LongRGB` entries.
+    //
+    // Excel defines 56 custom palette entries that correspond to indexed colors 8..=63.
+    // We base the record on the default palette and override one entry for testing.
+    let mut entries: Vec<[u8; 4]> = Vec::with_capacity(56);
+    for index in 8u16..=63u16 {
+        let argb = indexed_color_argb(index).unwrap_or(0xFF000000);
+        let rr = ((argb >> 16) & 0xFF) as u8;
+        let gg = ((argb >> 8) & 0xFF) as u8;
+        let bb = (argb & 0xFF) as u8;
+        entries.push([rr, gg, bb, 0]);
+    }
+
+    if idx >= 8 && idx <= 63 {
+        entries[(idx - 8) as usize] = [r, g, b, 0];
+    }
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    for entry in entries {
+        out.extend_from_slice(&entry);
+    }
     out
 }
