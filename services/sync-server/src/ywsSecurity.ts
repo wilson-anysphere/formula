@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import { getCellPermissions } from "../../../packages/collab/permissions/index.js";
 
 import type { AuthContext } from "./auth.js";
+import type { SyncServerMetrics } from "./metrics.js";
 import { Y } from "./yjs.js";
 
 type MessageListener = (data: WebSocket.RawData, isBinary: boolean) => void;
@@ -27,6 +28,11 @@ const MAX_CELL_INDEX_CHARS = 32;
 // Tracks which websocket "owns" an awareness clientID for a given doc.
 // Used to reject attempts to send awareness updates for another live connection.
 const awarenessClientIdOwnersByDoc = new Map<string, Map<number, WebSocket>>();
+
+const BRANCHING_COMMITS_ROOT = "branching:commits";
+const VERSIONS_ROOT = "versions";
+const BRANCHING_COMMITS_NEEDLE = Buffer.from(BRANCHING_COMMITS_ROOT, "utf8");
+const VERSIONS_NEEDLE = Buffer.from(VERSIONS_ROOT, "utf8");
 
 function rawDataByteLength(raw: WebSocket.RawData): number {
   if (typeof raw === "string") return Buffer.byteLength(raw);
@@ -427,10 +433,13 @@ export function installYwsSecurity(
     auth: AuthContext | undefined;
     logger: Logger;
     ydoc: any;
+    metrics?: Pick<SyncServerMetrics, "wsReservedRootQuotaViolationsTotal">;
     limits: {
       maxMessageBytes: number;
       maxAwarenessStateBytes: number;
       maxAwarenessEntries: number;
+      maxBranchingCommitsPerDoc?: number;
+      maxVersionsPerDoc?: number;
     };
     enforceRangeRestrictions?: boolean;
   }
@@ -440,12 +449,15 @@ export function installYwsSecurity(
     auth,
     logger,
     ydoc,
+    metrics,
     limits,
     enforceRangeRestrictions: enforceRangeRestrictionsConfig,
   } = params;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
+  const maxBranchingCommitsPerDoc = Math.max(0, limits.maxBranchingCommitsPerDoc ?? 0);
+  const maxVersionsPerDoc = Math.max(0, limits.maxVersionsPerDoc ?? 0);
 
   const rangeRestrictions =
     auth?.tokenType === "jwt" && Array.isArray(auth.rangeRestrictions)
@@ -605,13 +617,37 @@ export function installYwsSecurity(
         return { drop: true };
       }
 
-      if (
-        enforceRangeRestrictions &&
-        (innerType === 1 || innerType === 2) &&
-        shadowDoc &&
-        shadowCells
-      ) {
-        let updateBytes: Uint8Array;
+      const isSyncUpdate = innerType === 1 || innerType === 2;
+
+      const branchingCommitsMap =
+        maxBranchingCommitsPerDoc > 0 && ydoc && typeof ydoc.getMap === "function"
+          ? ydoc.getMap(BRANCHING_COMMITS_ROOT)
+          : null;
+      const versionsMap =
+        maxVersionsPerDoc > 0 && ydoc && typeof ydoc.getMap === "function"
+          ? ydoc.getMap(VERSIONS_ROOT)
+          : null;
+
+      const branchingCommitsSize =
+        branchingCommitsMap && typeof branchingCommitsMap.size === "number"
+          ? branchingCommitsMap.size
+          : 0;
+      const versionsSize =
+        versionsMap && typeof versionsMap.size === "number" ? versionsMap.size : 0;
+
+      const branchingCommitsAtOrOverLimit =
+        maxBranchingCommitsPerDoc > 0 && branchingCommitsSize >= maxBranchingCommitsPerDoc;
+      const versionsAtOrOverLimit =
+        maxVersionsPerDoc > 0 && versionsSize >= maxVersionsPerDoc;
+
+      const shouldCheckReservedRootQuotas =
+        isSyncUpdate && (branchingCommitsAtOrOverLimit || versionsAtOrOverLimit);
+
+      const shouldParseUpdate =
+        isSyncUpdate && (enforceRangeRestrictions || shouldCheckReservedRootQuotas);
+
+      let updateBytes: Uint8Array | null = null;
+      if (shouldParseUpdate) {
         try {
           const updateRes = readVarUint8Array(message, offset);
           updateBytes = updateRes.value;
@@ -619,7 +655,110 @@ export function installYwsSecurity(
           ws.close(1003, "malformed sync update");
           return { drop: true };
         }
+      }
 
+      if (updateBytes && shouldCheckReservedRootQuotas) {
+        const updateBuf = Buffer.from(
+          updateBytes.buffer,
+          updateBytes.byteOffset,
+          updateBytes.byteLength
+        );
+        const rootsToCheck: string[] = [];
+        if (
+          branchingCommitsAtOrOverLimit &&
+          updateBuf.indexOf(BRANCHING_COMMITS_NEEDLE) !== -1
+        ) {
+          rootsToCheck.push(BRANCHING_COMMITS_ROOT);
+        }
+        if (versionsAtOrOverLimit && updateBuf.indexOf(VERSIONS_NEEDLE) !== -1) {
+          rootsToCheck.push(VERSIONS_ROOT);
+        }
+
+        if (rootsToCheck.length > 0) {
+          const touched = maybeCollectTouchedRootMapKeys(updateBytes, rootsToCheck);
+          const violations: Array<{
+            kind: "branching_commits" | "versions";
+            limit: number;
+            currentSize: number;
+            attemptedIds: string[];
+          }> = [];
+
+          if (branchingCommitsAtOrOverLimit && branchingCommitsMap) {
+            const touchedIds = touched.get(BRANCHING_COMMITS_ROOT);
+            if (touchedIds) {
+              const attemptedIds: string[] = [];
+              for (const id of touchedIds) {
+                if (attemptedIds.length >= 5) break;
+                if (
+                  typeof branchingCommitsMap.has === "function" &&
+                  !branchingCommitsMap.has(id)
+                ) {
+                  attemptedIds.push(id);
+                }
+              }
+              if (attemptedIds.length > 0) {
+                violations.push({
+                  kind: "branching_commits",
+                  limit: maxBranchingCommitsPerDoc,
+                  currentSize: branchingCommitsSize,
+                  attemptedIds,
+                });
+              }
+            }
+          }
+
+          if (versionsAtOrOverLimit && versionsMap) {
+            const touchedIds = touched.get(VERSIONS_ROOT);
+            if (touchedIds) {
+              const attemptedIds: string[] = [];
+              for (const id of touchedIds) {
+                if (attemptedIds.length >= 5) break;
+                if (typeof versionsMap.has === "function" && !versionsMap.has(id)) {
+                  attemptedIds.push(id);
+                }
+              }
+              if (attemptedIds.length > 0) {
+                violations.push({
+                  kind: "versions",
+                  limit: maxVersionsPerDoc,
+                  currentSize: versionsSize,
+                  attemptedIds,
+                });
+              }
+            }
+          }
+
+          if (violations.length > 0) {
+            for (const violation of violations) {
+              try {
+                metrics?.wsReservedRootQuotaViolationsTotal.inc({
+                  kind: violation.kind,
+                });
+              } catch {
+                // ignore
+              }
+            }
+
+            logger.warn(
+              {
+                docName,
+                userId,
+                role,
+                violations,
+              },
+              "ws_reserved_root_quota_violation"
+            );
+            ws.close(1008, "reserved history quota exceeded");
+            return { drop: true };
+          }
+        }
+      }
+
+      if (enforceRangeRestrictions && isSyncUpdate && shadowDoc && shadowCells) {
+        if (!updateBytes) {
+          ws.close(1003, "malformed sync update");
+          return { drop: true };
+        }
         const preStateVector = Y.encodeStateVector(shadowDoc);
         const touchedCellKeys = new Set<string>();
         let oversizedCellKeyLength: number | null = null;
@@ -868,4 +1007,69 @@ export function installYwsSecurity(
   };
 
   patchWebSocketMessageHandlers(ws, guard);
+}
+
+function maybeCollectTouchedRootMapKeys(
+  update: Uint8Array,
+  rootNames: string[]
+): Map<string, Set<string>> {
+  const result = new Map<string, Set<string>>();
+  if (rootNames.length === 0) return result;
+
+  const doc = new Y.Doc();
+  const observers: Array<{ root: any; observer: (event: any) => void }> = [];
+
+  const collectFromEvent = (target: Set<string>, event: any) => {
+    const keys = event?.changes?.keys;
+    if (!keys) return;
+
+    if (typeof keys.entries === "function") {
+      for (const [key] of keys.entries()) {
+        if (typeof key === "string" && key.length > 0) target.add(key);
+      }
+      return;
+    }
+
+    if (typeof keys.keys === "function") {
+      for (const key of keys.keys()) {
+        if (typeof key === "string" && key.length > 0) target.add(key);
+      }
+    }
+  };
+
+  for (const rootName of rootNames) {
+    const target = new Set<string>();
+    result.set(rootName, target);
+    const root = doc.getMap(rootName);
+    const observer = (event: any) => {
+      collectFromEvent(target, event);
+    };
+    try {
+      root.observe(observer);
+      observers.push({ root, observer });
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    Y.applyUpdate(doc, update);
+  } catch {
+    // ignore (best-effort decoding)
+  } finally {
+    for (const { root, observer } of observers) {
+      try {
+        root.unobserve(observer);
+      } catch {
+        // ignore
+      }
+    }
+    try {
+      doc.destroy();
+    } catch {
+      // ignore
+    }
+  }
+
+  return result;
 }

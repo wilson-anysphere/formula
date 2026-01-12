@@ -149,6 +149,8 @@ test("optional JWT introspection cache is scoped per (token, docId, clientIp)", 
       maxAwarenessEntries: 10,
       maxMessagesPerDocWindow: 10_000,
       docMessageWindowMs: 10_000,
+      maxBranchingCommitsPerDoc: 0,
+      maxVersionsPerDoc: 0,
     },
     logLevel: "silent",
   };
@@ -186,4 +188,3 @@ test("optional JWT introspection cache is scoped per (token, docId, clientIp)", 
   assert.equal(hitsByKey.get(`${token}\n${docId}\n${ipA}`), 1);
   assert.equal(hitsByKey.get(`${token}\n${docId}\n${ipB}`), 1);
 });
-

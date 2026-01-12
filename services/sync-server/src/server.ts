@@ -1391,10 +1391,13 @@ export function createSyncServer(
       auth: authCtx,
       logger,
       ydoc,
+      metrics,
       limits: {
         maxMessageBytes: config.limits.maxMessageBytes,
         maxAwarenessStateBytes: config.limits.maxAwarenessStateBytes,
         maxAwarenessEntries: config.limits.maxAwarenessEntries,
+        maxBranchingCommitsPerDoc: config.limits.maxBranchingCommitsPerDoc,
+        maxVersionsPerDoc: config.limits.maxVersionsPerDoc,
       },
       enforceRangeRestrictions: config.enforceRangeRestrictions,
     });

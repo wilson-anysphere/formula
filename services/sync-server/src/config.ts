@@ -114,6 +114,8 @@ export type SyncServerConfig = {
     maxAwarenessEntries: number;
     maxMessagesPerDocWindow: number;
     docMessageWindowMs: number;
+    maxBranchingCommitsPerDoc: number;
+    maxVersionsPerDoc: number;
   };
 
   logLevel: string;
@@ -425,6 +427,14 @@ export function loadConfigFromEnv(): SyncServerConfig {
       docMessageWindowMs: envInt(
         process.env.SYNC_SERVER_DOC_MESSAGE_WINDOW_MS,
         10_000
+      ),
+      maxBranchingCommitsPerDoc: Math.max(
+        0,
+        envInt(process.env.SYNC_SERVER_MAX_BRANCHING_COMMITS_PER_DOC, 0)
+      ),
+      maxVersionsPerDoc: Math.max(
+        0,
+        envInt(process.env.SYNC_SERVER_MAX_VERSIONS_PER_DOC, 0)
       ),
     },
     logLevel: process.env.LOG_LEVEL ?? "info",

@@ -166,7 +166,9 @@ describe("API e2e: auth + RBAC + sync token", () => {
           maxAwarenessStateBytes: 64 * 1024,
           maxAwarenessEntries: 10,
           maxMessagesPerDocWindow: 10_000,
-          docMessageWindowMs: 10_000
+          docMessageWindowMs: 10_000,
+          maxBranchingCommitsPerDoc: 0,
+          maxVersionsPerDoc: 0
         },
         logLevel: "silent"
       };

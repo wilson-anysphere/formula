@@ -141,6 +141,8 @@ test("auth:introspect caches results per (token, docId, clientIp)", async (t) =>
       maxAwarenessEntries: 10,
       maxMessagesPerDocWindow: 10_000,
       docMessageWindowMs: 10_000,
+      maxBranchingCommitsPerDoc: 0,
+      maxVersionsPerDoc: 0,
     },
     logLevel: "silent",
   };
@@ -181,4 +183,3 @@ test("auth:introspect caches results per (token, docId, clientIp)", async (t) =>
   assert.equal(hitsByKey.get(`${token}\n${docName}\n${ipA}`), 1);
   assert.equal(hitsByKey.get(`${token}\n${docName}\n${ipB}`), 1);
 });
-

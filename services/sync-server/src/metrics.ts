@@ -241,6 +241,15 @@ function createFallbackMetrics(): SyncServerMetrics {
     help: "Total WebSocket messages rejected due to message size limits.",
   });
 
+  const wsReservedRootQuotaViolationsTotal = createCounter<"kind">({
+    name: "sync_server_ws_reserved_root_quota_violations_total",
+    help:
+      "Total WebSocket messages rejected due to reserved-root history growth quotas.",
+    labelNames: ["kind"],
+  });
+  wsReservedRootQuotaViolationsTotal.inc({ kind: "branching_commits" }, 0);
+  wsReservedRootQuotaViolationsTotal.inc({ kind: "versions" }, 0);
+
   const retentionSweepsTotal = createCounter<"sweep">({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -291,6 +300,7 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsReservedRootQuotaViolationsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
@@ -319,6 +329,7 @@ export type SyncServerMetrics = {
 
   wsMessagesRateLimitedTotal: Counter<string>;
   wsMessagesTooLargeTotal: Counter<string>;
+  wsReservedRootQuotaViolationsTotal: Counter<"kind">;
 
   retentionSweepsTotal: Counter<"sweep">;
   retentionDocsPurgedTotal: Counter<"sweep">;
@@ -389,6 +400,16 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     registers: [registry],
   });
 
+  const wsReservedRootQuotaViolationsTotal = new promClient.Counter({
+    name: "sync_server_ws_reserved_root_quota_violations_total",
+    help:
+      "Total WebSocket messages rejected due to reserved-root history growth quotas.",
+    labelNames: ["kind"],
+    registers: [registry],
+  });
+  wsReservedRootQuotaViolationsTotal.inc({ kind: "branching_commits" }, 0);
+  wsReservedRootQuotaViolationsTotal.inc({ kind: "versions" }, 0);
+
   const retentionSweepsTotal = new promClient.Counter({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -446,6 +467,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsReservedRootQuotaViolationsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,

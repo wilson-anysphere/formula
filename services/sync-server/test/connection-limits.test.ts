@@ -43,6 +43,8 @@ function createConfig(dataDir: string, overrides: Partial<SyncServerConfig> = {}
       maxAwarenessEntries: 10,
       maxMessagesPerDocWindow: 10_000,
       docMessageWindowMs: 10_000,
+      maxBranchingCommitsPerDoc: 0,
+      maxVersionsPerDoc: 0,
     },
     logLevel: "silent",
     ...overrides,

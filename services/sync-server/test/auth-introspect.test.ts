@@ -160,6 +160,8 @@ test("auth:introspect enforces roles and caches introspection results", async (t
       maxAwarenessEntries: 10,
       maxMessagesPerDocWindow: 10_000,
       docMessageWindowMs: 10_000,
+      maxBranchingCommitsPerDoc: 0,
+      maxVersionsPerDoc: 0,
     },
     logLevel: "silent",
   };
