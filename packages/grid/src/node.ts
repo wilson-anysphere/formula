@@ -12,7 +12,11 @@ export type {
   CellData,
   CellRichText,
   CellRichTextRun,
-  CellStyle
+  CellStyle,
+  CellBorderLineStyle,
+  CellBorderSpec,
+  CellBorders,
+  CellDiagonalBorders
 } from "./model/CellProvider.ts";
 
 export type { GridPerfStats, ScrollToCellAlign } from "./rendering/CanvasGridRenderer.ts";
