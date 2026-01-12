@@ -21,6 +21,7 @@ body {
 
 #app {
   height: 100%;
+  width: 100%;
   display: grid;
   /* titlebar, ribbon, formula bar, workspace, sheet tabs, status bar */
   grid-template-rows: auto auto auto 1fr auto auto;
@@ -29,6 +30,12 @@ body {
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+  min-width: 0;
+}
+
+/* Grid/flex children can overflow horizontally unless they're allowed to shrink. */
+#app > * {
+  min-width: 0;
 }
 
 /* --- Find/replace + go to dialogs --------------------------------------- */

@@ -213,7 +213,15 @@ export class FormulaBarView {
 
   focus(opts: { cursor?: "end" | "all" } = {}): void {
     this.textarea.style.display = "block";
-    this.textarea.focus();
+    // Prevent browser focus handling from scrolling the desktop shell horizontally.
+    // (The app uses its own scroll containers; window scrolling is accidental and
+    // breaks pointer-coordinate based interactions like range-drag insertion.)
+    try {
+      this.textarea.focus({ preventScroll: true });
+    } catch {
+      // Older browsers may not support FocusOptions; fall back to default focus behavior.
+      this.textarea.focus();
+    }
     if (opts.cursor === "all") {
       this.textarea.setSelectionRange(0, this.textarea.value.length);
     } else if (opts.cursor === "end") {
