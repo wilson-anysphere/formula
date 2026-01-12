@@ -12,7 +12,12 @@ export class DocumentController {
   readonly isDirty: boolean;
 
   getSheetIds(): string[];
-  getSheetView(sheetId: string): { frozenRows: number; frozenCols: number };
+  getSheetView(sheetId: string): {
+    frozenRows: number;
+    frozenCols: number;
+    colWidths?: Record<string, number>;
+    rowHeights?: Record<string, number>;
+  };
   setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
 
   getCell(sheetId: string, coord: unknown): any;
@@ -30,4 +35,5 @@ export class DocumentController {
   cancelBatch(): void;
 
   applyExternalDeltas(deltas: any[], options?: unknown): void;
+  applyExternalSheetViewDeltas(deltas: any[], options?: unknown): void;
 }
