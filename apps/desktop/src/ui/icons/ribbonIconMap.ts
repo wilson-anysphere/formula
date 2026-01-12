@@ -14,6 +14,8 @@ import { CellStylesIcon } from "./CellStylesIcon";
 import { ClearFormattingIcon } from "./ClearFormattingIcon";
 import { ClearIcon } from "./ClearIcon";
 import { ClipboardPaneIcon } from "./ClipboardPaneIcon";
+import { ClockIcon } from "./ClockIcon";
+import { CloseIcon } from "./CloseIcon";
 import { CommaIcon } from "./CommaIcon";
 import { ConditionalFormattingIcon } from "./ConditionalFormattingIcon";
 import { CopyIcon } from "./CopyIcon";
@@ -22,26 +24,40 @@ import { CutIcon } from "./CutIcon";
 import { DecreaseDecimalIcon } from "./DecreaseDecimalIcon";
 import { DecreaseFontIcon } from "./DecreaseFontIcon";
 import { DecreaseIndentIcon } from "./DecreaseIndentIcon";
+import { ExportIcon } from "./ExportIcon";
+import { EyeIcon } from "./EyeIcon";
+import { FileIcon } from "./FileIcon";
 import { FillColorIcon } from "./FillColorIcon";
 import { FillDownIcon } from "./FillDownIcon";
 import { FilterIcon } from "./FilterIcon";
 import { FindIcon } from "./FindIcon";
+import { FolderIcon } from "./FolderIcon";
 import { FontColorIcon } from "./FontColorIcon";
 import { FontSizeIcon } from "./FontSizeIcon";
 import { FormatAsTableIcon } from "./FormatAsTableIcon";
 import { FormatPainterIcon } from "./FormatPainterIcon";
+import { GlobeIcon } from "./GlobeIcon";
 import { GoToIcon } from "./GoToIcon";
 import { IncreaseDecimalIcon } from "./IncreaseDecimalIcon";
 import { IncreaseFontIcon } from "./IncreaseFontIcon";
 import { IncreaseIndentIcon } from "./IncreaseIndentIcon";
 import { ItalicIcon } from "./ItalicIcon";
+import { LinkIcon } from "./LinkIcon";
+import { LockIcon } from "./LockIcon";
+import { MailIcon } from "./MailIcon";
 import { MergeCenterIcon } from "./MergeCenterIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
 import { OrientationIcon } from "./OrientationIcon";
+import { PageSetupIcon } from "./PageSetupIcon";
 import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
 import { PercentIcon } from "./PercentIcon";
+import { PinIcon } from "./PinIcon";
+import { PrintIcon } from "./PrintIcon";
+import { SaveIcon } from "./SaveIcon";
+import { SettingsIcon } from "./SettingsIcon";
+import { ShareIcon } from "./ShareIcon";
 import { ReplaceIcon } from "./ReplaceIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
 import { SortIcon } from "./SortIcon";
@@ -49,6 +65,7 @@ import { StrikethroughIcon } from "./StrikethroughIcon";
 import { SubscriptIcon } from "./SubscriptIcon";
 import { SuperscriptIcon } from "./SuperscriptIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
+import { UserIcon } from "./UserIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 
 export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
@@ -61,6 +78,35 @@ export type RibbonIconComponent = ComponentType<Omit<IconProps, "children">>;
  * placeholder glyph strings.
  */
 export const ribbonIconMap = {
+  // File
+  "file.new.new": FileIcon,
+  "file.new.blankWorkbook": FileIcon,
+  "file.new.templates": FileIcon,
+  "file.info.protectWorkbook": LockIcon,
+  "file.info.inspectWorkbook": FindIcon,
+  "file.info.manageWorkbook": FolderIcon,
+  "file.open.open": FolderIcon,
+  "file.open.recent": ClockIcon,
+  "file.open.pinned": PinIcon,
+  "file.save.save": SaveIcon,
+  "file.save.saveAs": SaveIcon,
+  "file.save.autoSave": ClockIcon,
+  "file.export.export": ExportIcon,
+  "file.export.createPdf": FileIcon,
+  "file.export.changeFileType": FileIcon,
+  "file.print.print": PrintIcon,
+  "file.print.printPreview": EyeIcon,
+  "file.print.pageSetup": PageSetupIcon,
+  "file.share.share": ShareIcon,
+  "file.share.email": MailIcon,
+  "file.share.presentOnline": GlobeIcon,
+  "file.options.options": SettingsIcon,
+  "file.options.account": UserIcon,
+  "file.options.close": CloseIcon,
+
+  // Misc generic
+  link: LinkIcon,
+
   // Clipboard
   "home.clipboard.paste": PasteIcon,
   "home.clipboard.pasteSpecial": PasteSpecialIcon,
