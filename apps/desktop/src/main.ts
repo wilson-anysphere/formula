@@ -2636,6 +2636,31 @@ if (
     formulaBar.root.addEventListener("click", () => syncSecondaryGridInteractionModeSoon());
   }
 
+  // Range selection insertion updates the formula bar draft + reference highlights via
+  // `FormulaBarView.begin/updateRangeSelection()`, which are programmatic (no textarea `input`
+  // events). When split view is active, mirror those changing highlights onto the secondary pane
+  // so the visual outline stays live during drags initiated from *either* pane.
+  //
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anyApp = app as any;
+  if (!anyApp.__formulaSplitViewRangeSelectionHighlightSyncPatched) {
+    anyApp.__formulaSplitViewRangeSelectionHighlightSyncPatched = true;
+
+    const wrap = (methodName: "onSharedRangeSelectionStart" | "onSharedRangeSelectionChange" | "onSharedRangeSelectionEnd") => {
+      const original = anyApp[methodName];
+      if (typeof original !== "function") return;
+      anyApp[methodName] = (...args: any[]) => {
+        const result = original.apply(anyApp, args);
+        syncSecondaryGridReferenceHighlights();
+        return result;
+      };
+    };
+
+    wrap("onSharedRangeSelectionStart");
+    wrap("onSharedRangeSelectionChange");
+    wrap("onSharedRangeSelectionEnd");
+  }
+
   // High-frequency split-pane interactions (scroll/zoom) update the in-memory layout
   // without persisting on every event. Flush to storage on a debounce so we avoid
   // spamming localStorage writes.
@@ -2930,22 +2955,9 @@ if (
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
         callbacks: {
-          // When dragging a range in the secondary pane during formula editing, SpreadsheetApp
-          // updates the formula bar draft and emits reference highlights for the active reference.
-          // Those formula-bar updates are programmatic (no textarea input events), so explicitly
-          // resync highlights here so the secondary pane mirrors the primary pane behavior.
-          onRangeSelectionStart: (range) => {
-            (app as any).onSharedRangeSelectionStart(range);
-            syncSecondaryGridReferenceHighlights();
-          },
-          onRangeSelectionChange: (range) => {
-            (app as any).onSharedRangeSelectionChange(range);
-            syncSecondaryGridReferenceHighlights();
-          },
-          onRangeSelectionEnd: () => {
-            (app as any).onSharedRangeSelectionEnd();
-            syncSecondaryGridReferenceHighlights();
-          },
+          onRangeSelectionStart: (range) => (app as any).onSharedRangeSelectionStart(range),
+          onRangeSelectionChange: (range) => (app as any).onSharedRangeSelectionChange(range),
+          onRangeSelectionEnd: () => (app as any).onSharedRangeSelectionEnd(),
         },
         initialScroll,
         initialZoom,
