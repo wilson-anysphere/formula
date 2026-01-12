@@ -308,8 +308,30 @@ impl<'a> PythonRpcHost<'a> {
                 if name.is_empty() {
                     return Err("create_sheet expects a non-empty name".to_string());
                 }
-                let sheet_id = self.state.create_sheet(name).map_err(|e| e.to_string())?;
-                Ok(JsonValue::String(sheet_id))
+
+                {
+                    let workbook = self.state.get_workbook().map_err(|e| e.to_string())?;
+                    if workbook
+                        .sheets
+                        .iter()
+                        .any(|sheet| sheet.name.eq_ignore_ascii_case(&name))
+                    {
+                        return Err(formula_model::SheetNameError::DuplicateName.to_string());
+                    }
+                }
+
+                let index = params
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+
+                let insert_after = index.is_none().then(|| self.active_sheet_id.clone());
+
+                let sheet = self
+                    .state
+                    .add_sheet(name, insert_after, index)
+                    .map_err(|e| e.to_string())?;
+                Ok(JsonValue::String(sheet.id))
             }
             "get_sheet_name" => {
                 let sheet_id = params
