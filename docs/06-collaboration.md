@@ -342,10 +342,14 @@ The binder lives at:
 
 - [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
 
-It synchronizes **cell value/formula/format** between:
+It synchronizes:
 
-- `Y.Doc` → `cells` root (`Y.Map`)
-- Desktop `DocumentController` (see [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js))
+- **Cell contents** (`value` / `formula` / `format`):
+  - `Y.Doc` → `cells` root (`Y.Map`)
+  - Desktop `DocumentController` (see [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js))
+- **Sheet view state** (frozen panes + row/col sizes):
+  - `Y.Doc` → `sheets[].view`
+  - Desktop `DocumentController` sheet view state (`applyExternalSheetViewDeltas` / `sheetViewDeltas`)
 
 > Note: the binder syncs **cell contents** (`cells`) *and* **sheet view state**
 > (`sheets[].view`), but it does **not** implement full sheet list semantics
