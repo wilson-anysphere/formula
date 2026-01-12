@@ -18,7 +18,7 @@ use formula_xlsx::{
     patch_xlsx_streaming_workbook_cell_patches, CellPatch as XlsxCellPatch, PreservedPivotParts,
     WorkbookCellPatches, XlsxPackage,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufReader, Cursor};
 use std::path::Path;
 #[cfg(feature = "desktop")]
@@ -1218,7 +1218,7 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             .map(|(idx, meta)| (meta.name.clone(), idx))
             .collect();
 
-        let mut edits_by_sheet: HashMap<usize, Vec<XlsbCellEdit>> = HashMap::new();
+        let mut edits_by_sheet: BTreeMap<usize, Vec<XlsbCellEdit>> = BTreeMap::new();
         for sheet in &workbook.sheets {
             if sheet.dirty_cells.is_empty() {
                 continue;
@@ -1330,33 +1330,54 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
         }
 
         edits_by_sheet.retain(|_, edits| !edits.is_empty());
-        let mut edits: Vec<(usize, Vec<XlsbCellEdit>)> = edits_by_sheet.into_iter().collect();
-        edits.sort_by_key(|(sheet_index, _)| *sheet_index);
-
-        if edits.is_empty() {
+        if edits_by_sheet.is_empty() {
             xlsb.save_as(&final_out_path)
                 .with_context(|| format!("save xlsb {:?}", final_out_path))?;
             return Ok(());
         }
 
-        if edits.len() == 1 {
-            let (sheet_index, edits) = &edits[0];
+        if edits_by_sheet.len() == 1 {
+            let (&sheet_index, edits) = edits_by_sheet.iter().next().expect("non-empty map");
             let has_text_edits = edits.iter().any(|edit| {
-                matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
+                matches!(edit.new_value, XlsbCellValue::Text(_))
+                    && edit.new_formula.is_none()
+                    && edit.new_rgcb.is_none()
             });
-            let has_shared_strings = !xlsb.shared_strings().is_empty();
-            if has_text_edits && has_shared_strings {
-                xlsb.save_with_cell_edits_streaming_shared_strings(&final_out_path, *sheet_index, edits)
+            if has_text_edits {
+                xlsb.save_with_cell_edits_streaming_shared_strings(&final_out_path, sheet_index, edits)
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
             } else {
-                xlsb.save_with_cell_edits_streaming(&final_out_path, *sheet_index, edits)
+                xlsb.save_with_cell_edits_streaming(&final_out_path, sheet_index, edits)
                     .with_context(|| format!("save edited xlsb {:?}", final_out_path))?;
             }
             return Ok(());
         }
 
-        // `formula-xlsb` edits are applied per-sheet. For workbooks with changes across multiple
-        // worksheets, apply patches sequentially through intermediate packages.
+        let has_text_edits = edits_by_sheet
+            .values()
+            .flatten()
+            .any(|edit| {
+                matches!(edit.new_value, XlsbCellValue::Text(_))
+                    && edit.new_formula.is_none()
+                    && edit.new_rgcb.is_none()
+            });
+
+        // Prefer a single-pass multi-sheet streaming save. Keep the older "patch through temp
+        // workbooks" approach only as a fallback if the multi-sheet writer errors.
+        let multi_res = if has_text_edits {
+            xlsb.save_with_cell_edits_streaming_multi_shared_strings(&final_out_path, &edits_by_sheet)
+        } else {
+            xlsb.save_with_cell_edits_streaming_multi(&final_out_path, &edits_by_sheet)
+        };
+        if multi_res
+            .with_context(|| format!("save edited xlsb {:?}", final_out_path))
+            .is_ok()
+        {
+            return Ok(());
+        }
+
+        // Multi-sheet streaming writer failed. Fall back to the older sequential writer so we can
+        // still save (at the cost of additional ZIP rewrites).
         let dir = path.parent().unwrap_or_else(|| Path::new("."));
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -1365,8 +1386,8 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             .as_nanos();
 
         let mut source_path = origin_path.to_path_buf();
-        for (step, (sheet_index, sheet_edits)) in edits.iter().enumerate() {
-            let is_last = step + 1 == edits.len();
+        for (step, (&sheet_index, sheet_edits)) in edits_by_sheet.iter().enumerate() {
+            let is_last = step + 1 == edits_by_sheet.len();
             let out_path = if is_last {
                 final_out_path.clone()
             } else {
@@ -1393,14 +1414,15 @@ fn write_xlsb_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<Arc<[
             )
             .with_context(|| format!("open xlsb {:?}", source_path))?;
             let has_text_edits = sheet_edits.iter().any(|edit| {
-                matches!(edit.new_value, XlsbCellValue::Text(_)) && edit.new_formula.is_none()
+                matches!(edit.new_value, XlsbCellValue::Text(_))
+                    && edit.new_formula.is_none()
+                    && edit.new_rgcb.is_none()
             });
-            let has_shared_strings = !wb.shared_strings().is_empty();
-            if has_text_edits && has_shared_strings {
-                wb.save_with_cell_edits_streaming_shared_strings(&out_path, *sheet_index, sheet_edits)
+            if has_text_edits {
+                wb.save_with_cell_edits_streaming_shared_strings(&out_path, sheet_index, sheet_edits)
                     .with_context(|| format!("save edited xlsb {:?}", out_path))?;
             } else {
-                wb.save_with_cell_edits_streaming(&out_path, *sheet_index, sheet_edits)
+                wb.save_with_cell_edits_streaming(&out_path, sheet_index, sheet_edits)
                     .with_context(|| format!("save edited xlsb {:?}", out_path))?;
             }
 

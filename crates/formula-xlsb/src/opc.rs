@@ -14,7 +14,7 @@ use crate::SharedString;
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::ops::ControlFlow;
@@ -829,6 +829,208 @@ impl XlsbWorkbook {
         )
     }
 
+    /// Save the workbook with cell edits across multiple worksheets, streaming each worksheet part
+    /// through the patcher while writing a single output ZIP.
+    ///
+    /// This avoids buffering full worksheet `.bin` payloads in memory, making it suitable for
+    /// workbooks with very large sheets.
+    pub fn save_with_cell_edits_streaming_multi(
+        &self,
+        dest: impl AsRef<Path>,
+        edits_by_sheet: &BTreeMap<usize, Vec<CellEdit>>,
+    ) -> Result<(), ParseError> {
+        let mut edits_by_part: BTreeMap<String, &[CellEdit]> = BTreeMap::new();
+        for (&sheet_index, edits) in edits_by_sheet {
+            if edits.is_empty() {
+                continue;
+            }
+            let meta = self
+                .sheets
+                .get(sheet_index)
+                .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+            edits_by_part.insert(meta.part_path.clone(), edits.as_slice());
+        }
+
+        if edits_by_part.is_empty() {
+            return self.save_as(dest);
+        }
+
+        let stream_parts: BTreeSet<String> = edits_by_part.keys().cloned().collect();
+        self.save_with_part_overrides_streaming_multi(
+            dest,
+            &HashMap::new(),
+            &stream_parts,
+            |part_name, input, output| {
+                let edits = edits_by_part
+                    .get(part_name)
+                    .ok_or_else(|| ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("missing worksheet edits for streamed part: {part_name}"),
+                    )))?;
+                patch_sheet_bin_streaming(input, output, edits)
+            },
+        )
+    }
+
+    /// Save the workbook with cell edits across multiple worksheets, streaming each worksheet part
+    /// while updating the shared string table (if present) so edited text cells can remain
+    /// shared-string (`BrtCellIsst`) references.
+    pub fn save_with_cell_edits_streaming_multi_shared_strings(
+        &self,
+        dest: impl AsRef<Path>,
+        edits_by_sheet: &BTreeMap<usize, Vec<CellEdit>>,
+    ) -> Result<(), ParseError> {
+        let Some(shared_strings_part) = self.shared_strings_part.as_deref() else {
+            // Workbook has no shared string table. Fall back to the generic multi-sheet streaming
+            // patcher, which may emit inline strings.
+            return self.save_with_cell_edits_streaming_multi(dest, edits_by_sheet);
+        };
+
+        // Read sharedStrings.bin once up front so we can intern new strings across all sheets.
+        let file = File::open(&self.path)?;
+        let mut zip = ZipArchive::new(file)?;
+        let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
+            Some(bytes) => bytes.clone(),
+            None => match read_zip_entry(&mut zip, shared_strings_part)? {
+                Some(bytes) => bytes,
+                None => {
+                    // Shared strings part went missing; fall back to the generic patcher.
+                    return self.save_with_cell_edits_streaming_multi(dest, edits_by_sheet);
+                }
+            },
+        };
+
+        let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
+
+        let mut updated_edits_by_part: BTreeMap<String, Vec<CellEdit>> = BTreeMap::new();
+        let mut total_ref_delta: i64 = 0;
+
+        for (&sheet_index, edits) in edits_by_sheet {
+            if edits.is_empty() {
+                continue;
+            }
+
+            let meta = self
+                .sheets
+                .get(sheet_index)
+                .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
+            let sheet_part = meta.part_path.clone();
+
+            let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
+            let cell_records = if targets.is_empty() {
+                HashMap::new()
+            } else if let Some(sheet_bytes) = self.preserved_parts.get(&sheet_part) {
+                sheet_cell_records(sheet_bytes, &targets)?
+            } else {
+                let mut entry = zip.by_name(&sheet_part)?;
+                sheet_cell_records_streaming(&mut entry, &targets)?
+            };
+
+            let mut updated_edits = edits.clone();
+            for edit in &mut updated_edits {
+                let CellValue::Text(text) = &edit.new_value else {
+                    continue;
+                };
+                if edit.new_formula.is_some() || edit.new_rgcb.is_some() {
+                    // Formula cells store cached string results inline (BrtFmlaString). Even when
+                    // the workbook has a shared string table, cached formula strings do not
+                    // reference it.
+                    continue;
+                }
+
+                let coord = (edit.row, edit.col);
+                let record = cell_records.get(&coord);
+                let record_id = record.map(|r| r.id);
+                if record_id.is_some_and(is_formula_cell_record) {
+                    continue;
+                }
+
+                if record_id == Some(biff12::CELL_ST) {
+                    if let Some(record) = record {
+                        if value_edit_is_noop_inline_string(&record.payload, edit)? {
+                            // Preserve no-op inline-string edits without touching the shared string
+                            // table.
+                            continue;
+                        }
+                    }
+                }
+
+                if record_id == Some(biff12::STRING) {
+                    if let Some(record) = record {
+                        // No-op shared-string edit: keep the existing `isst` to avoid inserting a
+                        // new plain `BrtSI` when the original string has rich-text/phonetic data.
+                        if record.payload.len() >= 12 {
+                            let isst =
+                                u32::from_le_bytes(record.payload[8..12].try_into().unwrap());
+                            if self
+                                .shared_strings
+                                .get(isst as usize)
+                                .is_some_and(|s| s == text)
+                            {
+                                edit.shared_string_index = Some(isst);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                edit.shared_string_index = Some(sst.intern_plain(text)?);
+            }
+
+            let sheet_delta: i64 = updated_edits
+                .iter()
+                .map(|edit| {
+                    let coord = (edit.row, edit.col);
+                    let old_id = cell_records.get(&coord).map(|r| r.id);
+                    let old_uses_sst = matches!(old_id, Some(biff12::STRING));
+                    let old_is_formula = old_id.is_some_and(is_formula_cell_record);
+                    let new_uses_sst = matches!(edit.new_value, CellValue::Text(_))
+                        && edit.shared_string_index.is_some()
+                        && edit.new_formula.is_none()
+                        && edit.new_rgcb.is_none()
+                        && !old_is_formula;
+                    match (old_uses_sst, new_uses_sst) {
+                        (false, true) => 1,
+                        (true, false) => -1,
+                        _ => 0,
+                    }
+                })
+                .sum();
+            total_ref_delta = total_ref_delta.checked_add(sheet_delta).ok_or(ParseError::UnexpectedEof)?;
+
+            updated_edits_by_part.insert(sheet_part, updated_edits);
+        }
+
+        if updated_edits_by_part.is_empty() {
+            return self.save_as(dest);
+        }
+
+        sst.note_total_ref_delta(total_ref_delta)?;
+        let updated_shared_strings_bytes = sst.into_bytes()?;
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            shared_strings_part.to_string(),
+            updated_shared_strings_bytes,
+        );
+
+        let stream_parts: BTreeSet<String> = updated_edits_by_part.keys().cloned().collect();
+        self.save_with_part_overrides_streaming_multi(
+            dest,
+            &overrides,
+            &stream_parts,
+            |part_name, input, output| {
+                let edits = updated_edits_by_part
+                    .get(part_name)
+                    .ok_or_else(|| ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("missing worksheet edits for streamed part: {part_name}"),
+                    )))?;
+                patch_sheet_bin_streaming(input, output, edits)
+            },
+        )
+    }
+
     /// Save the workbook with cell edits across multiple worksheets.
     ///
     /// This is a convenience wrapper around the in-memory worksheet patcher
@@ -1046,30 +1248,29 @@ impl XlsbWorkbook {
         Ok(())
     }
 
-    /// Save the workbook while overriding a single part via a streaming patch callback.
-    ///
-    /// This is similar to [`XlsbWorkbook::save_with_part_overrides`], but allows generating a
-    /// replacement payload for `stream_part` without first buffering the entire part in memory.
-    ///
-    /// The callback is invoked twice when `stream_part` is a worksheet:
-    /// 1) once writing to an `io::sink()` to determine whether the part would change, which drives
-    ///    calcChain invalidation behavior,
-    /// 2) once during the actual ZIP write.
-    pub fn save_with_part_overrides_streaming<F>(
+    fn save_with_part_overrides_streaming_multi<F>(
         &self,
         dest: impl AsRef<Path>,
         overrides: &HashMap<String, Vec<u8>>,
-        stream_part: &str,
+        stream_parts: &BTreeSet<String>,
         stream_override: F,
     ) -> Result<(), ParseError>
     where
-        F: Fn(&mut dyn Read, &mut dyn Write) -> Result<bool, ParseError>,
+        F: Fn(&str, &mut dyn Read, &mut dyn Write) -> Result<bool, ParseError>,
     {
-        if overrides.contains_key(stream_part) {
-            return Err(ParseError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("streaming override conflicts with byte override for part: {stream_part}"),
-            )));
+        if stream_parts.is_empty() {
+            return self.save_with_part_overrides(dest, overrides);
+        }
+
+        for part in stream_parts {
+            if overrides.contains_key(part) {
+                return Err(ParseError::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "streaming override conflicts with byte override for part: {part}"
+                    ),
+                )));
+            }
         }
 
         let dest = dest.as_ref();
@@ -1078,20 +1279,25 @@ impl XlsbWorkbook {
         let mut zip = ZipArchive::new(file)?;
 
         let edited_by_bytes = worksheets_edited(&mut zip, &self.sheets, overrides)?;
-        let stream_is_worksheet = self.sheets.iter().any(|s| s.part_path == stream_part);
 
-        let edited_by_stream = if stream_is_worksheet {
+        let worksheet_paths: HashSet<&str> = self.sheets.iter().map(|s| s.part_path.as_str()).collect();
+
+        let mut edited_by_stream = false;
+        for stream_part in stream_parts {
+            if !worksheet_paths.contains(stream_part.as_str()) {
+                continue;
+            }
+
             let mut sink = io::sink();
-            if let Some(bytes) = self.preserved_parts.get(stream_part) {
+            let edited = if let Some(bytes) = self.preserved_parts.get(stream_part) {
                 let mut cursor = Cursor::new(bytes);
-                stream_override(&mut cursor, &mut sink)?
+                stream_override(stream_part, &mut cursor, &mut sink)?
             } else {
                 let mut entry = zip.by_name(stream_part)?;
-                stream_override(&mut entry, &mut sink)?
-            }
-        } else {
-            false
-        };
+                stream_override(stream_part, &mut entry, &mut sink)?
+            };
+            edited_by_stream = edited_by_stream || edited;
+        }
 
         let edited = edited_by_bytes || edited_by_stream;
 
@@ -1152,7 +1358,7 @@ impl XlsbWorkbook {
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
 
         let mut used_overrides: HashSet<String> = HashSet::new();
-        let mut used_stream_override = false;
+        let mut used_stream_overrides: HashSet<String> = HashSet::new();
 
         for i in 0..zip.len() {
             let mut entry = zip.by_index(i)?;
@@ -1203,13 +1409,13 @@ impl XlsbWorkbook {
                 }
             }
 
-            if name == stream_part {
-                used_stream_override = true;
+            if stream_parts.contains(&name) {
+                used_stream_overrides.insert(name.clone());
                 if let Some(bytes) = self.preserved_parts.get(&name) {
                     let mut cursor = Cursor::new(bytes);
-                    stream_override(&mut cursor, &mut writer)?;
+                    stream_override(&name, &mut cursor, &mut writer)?;
                 } else {
-                    stream_override(&mut entry, &mut writer)?;
+                    stream_override(&name, &mut entry, &mut writer)?;
                 }
                 continue;
             }
@@ -1224,10 +1430,19 @@ impl XlsbWorkbook {
             }
         }
 
-        if !used_stream_override {
+        if used_stream_overrides.len() != stream_parts.len() {
+            let mut missing: Vec<String> = stream_parts
+                .iter()
+                .filter(|part| !used_stream_overrides.contains(part.as_str()))
+                .cloned()
+                .collect();
+            missing.sort();
             return Err(ParseError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("override part not found in source package: {stream_part}"),
+                format!(
+                    "override parts not found in source package: {}",
+                    missing.join(", ")
+                ),
             )));
         }
 
@@ -1250,6 +1465,34 @@ impl XlsbWorkbook {
 
         writer.finish()?;
         Ok(())
+    }
+
+    /// Save the workbook while overriding a single part via a streaming patch callback.
+    ///
+    /// This is similar to [`XlsbWorkbook::save_with_part_overrides`], but allows generating a
+    /// replacement payload for `stream_part` without first buffering the entire part in memory.
+    ///
+    /// The callback is invoked twice when `stream_part` is a worksheet:
+    /// 1) once writing to an `io::sink()` to determine whether the part would change, which drives
+    ///    calcChain invalidation behavior,
+    /// 2) once during the actual ZIP write.
+    pub fn save_with_part_overrides_streaming<F>(
+        &self,
+        dest: impl AsRef<Path>,
+        overrides: &HashMap<String, Vec<u8>>,
+        stream_part: &str,
+        stream_override: F,
+    ) -> Result<(), ParseError>
+    where
+        F: Fn(&mut dyn Read, &mut dyn Write) -> Result<bool, ParseError>,
+    {
+        let stream_parts = BTreeSet::from([stream_part.to_string()]);
+        self.save_with_part_overrides_streaming_multi(
+            dest,
+            overrides,
+            &stream_parts,
+            |_part_name, input, output| stream_override(input, output),
+        )
     }
 }
 
