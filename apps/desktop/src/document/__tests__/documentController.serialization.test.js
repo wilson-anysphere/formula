@@ -101,6 +101,32 @@ test("applyState removes sheets that are not present in the snapshot", () => {
   assert.deepEqual(doc.getSheetIds(), ["OnlySheet"]);
 });
 
+test("contentVersion increments when applyState adds/removes sheets (even if empty)", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  assert.equal(doc.contentVersion, 1);
+  assert.equal(doc.updateVersion, 1);
+
+  // Add an *empty* sheet via applyState: no cell deltas, but sheet structure changes.
+  const withExtraSheet = new DocumentController();
+  withExtraSheet.setCellValue("Sheet1", "A1", 1);
+  withExtraSheet.getCell("Sheet2", "A1"); // materialize Sheet2 without content
+
+  doc.applyState(withExtraSheet.encodeState());
+  assert.equal(doc.contentVersion, 2);
+  assert.equal(doc.updateVersion, 2);
+  assert.deepEqual(doc.getSheetIds().sort(), ["Sheet1", "Sheet2"]);
+
+  // Remove the sheet via applyState: again, structure-only change.
+  const withoutExtraSheet = new DocumentController();
+  withoutExtraSheet.setCellValue("Sheet1", "A1", 1);
+
+  doc.applyState(withoutExtraSheet.encodeState());
+  assert.equal(doc.contentVersion, 3);
+  assert.equal(doc.updateVersion, 3);
+  assert.deepEqual(doc.getSheetIds().sort(), ["Sheet1"]);
+});
+
 test("encodeState/applyState preserves sheet insertion order", () => {
   const doc = new DocumentController();
   // Sheets are created lazily on first access. Create them in a non-sorted order.
