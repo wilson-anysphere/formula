@@ -94,6 +94,10 @@ describe("keybindings", () => {
     const ctrlSpace = parseKeybinding("cmd", "ctrl+ ");
     expect(ctrlSpace).not.toBeNull();
     expect(ctrlSpace).toMatchObject({ key: "space", ctrl: true });
+
+    // Tabs/newlines are not treated as the spacebar.
+    expect(parseKeybinding("cmd", "\t")).toBeNull();
+    expect(parseKeybinding("cmd", "ctrl+\t")).toBeNull();
   });
 
   it("matchesKeybinding handles special keys (space/escape)", () => {

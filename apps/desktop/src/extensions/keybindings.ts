@@ -42,9 +42,12 @@ export function parseKeybinding(command: string, binding: string, when: string |
   const raw = String(binding ?? "");
   if (!raw) return null;
 
-  // Treat a binding that is literally a single whitespace token as the spacebar.
+  // Treat a binding that is literally a single space token as the spacebar.
   // (This matches `KeyboardEvent.key === " "` and is occasionally used in manifests.)
+  //
+  // Important: do not treat other whitespace-only strings (e.g. tabs/newlines) as Space.
   if (raw.trim() === "") {
+    if (!/^[ ]+$/.test(raw)) return null;
     return {
       command,
       when: when ?? null,
@@ -62,9 +65,10 @@ export function parseKeybinding(command: string, binding: string, when: string |
     const trimmed = rawPart.trim();
 
     // Allow the last token to be a literal space (e.g. `"ctrl+ "` in user-provided strings).
-    // Avoid treating missing tokens (e.g. `"ctrl++c"`) as space.
+    // Avoid treating missing tokens (e.g. `"ctrl++c"`) as space, and avoid treating other
+    // whitespace (tabs/newlines) as space.
     if (trimmed === "") {
-      if (rawPart.length > 0) {
+      if (/^[ ]+$/.test(rawPart)) {
         parts.push("space");
         continue;
       }
