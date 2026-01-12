@@ -29,6 +29,15 @@ export interface SpreadsheetApi {
   readRange(range: RangeAddress): CellData[][];
   writeRange(range: RangeAddress, cells: CellData[][]): void;
 
+  /**
+   * Apply a formatting patch to a rectangular range.
+   *
+   * Returns the number of cells the caller *attempted* to format.
+   *
+   * Implementations should throw an Error if the formatting request cannot be
+   * applied (e.g. host safety caps) rather than silently returning `0`.
+   * ToolExecutor will surface the failure as `ok:false` with `runtime_error`.
+   */
   applyFormatting(range: RangeAddress, format: Partial<CellFormat>): number;
 
   /**
