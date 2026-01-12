@@ -2418,7 +2418,8 @@ if (
       if (size <= 0) return;
       const offset = direction === "vertical" ? clientX - rect.left : clientY - rect.top;
       const ratio = Math.max(0.1, Math.min(0.9, offset / size));
-      layoutController.setSplitRatio(ratio);
+      // Dragging the splitter updates very frequently; avoid persisting on every event.
+      layoutController.setSplitRatio(ratio, { persist: false });
     };
 
     updateRatio(event.clientX, event.clientY);
@@ -2439,6 +2440,9 @@ if (
       } catch {
         // Ignore capture release errors.
       }
+
+      // Persist the final ratio (without emitting an additional change event).
+      layoutController.persistNow();
     };
 
     window.addEventListener("pointermove", onMove, { passive: false });
