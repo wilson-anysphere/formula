@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use formula_model::{
-    Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem, Fill,
-    FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
+    indexed_color_argb, Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem,
+    Fill, FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
     WorkbookProtection, WorkbookWindow, WorkbookWindowState,
 };
 
@@ -563,8 +563,10 @@ impl BiffWorkbookGlobals {
     }
 
     fn resolve_color_idx(&self, idx: u16) -> Option<Color> {
-        // 0x7FFF indicates automatic color.
-        if idx == 0x7FFF {
+        // Excel uses multiple sentinels for "automatic" depending on the record/field.
+        // - 0x0040 is the "automatic" ICV value used by many BIFF structures.
+        // - 0x7FFF is used by some records such as FONT.
+        if idx == 0x0040 || idx == 0x7FFF {
             return Some(Color::Auto);
         }
 
@@ -574,6 +576,10 @@ impl BiffWorkbookGlobals {
             if let Some(&argb) = self.palette.get(pal_idx) {
                 return Some(Color::Argb(argb));
             }
+        }
+
+        if let Some(argb) = indexed_color_argb(idx) {
+            return Some(Color::Argb(argb));
         }
 
         Some(Color::Indexed(idx))
@@ -1066,12 +1072,13 @@ fn apply_palette_to_tab_colors(colors: &mut [Option<TabColor>], palette: &[u32])
 
         // BIFF palette entries correspond to indexed color values 8..=63 by default (56 entries).
         // Map `indexed=N` to palette[N-8] when in range so we can emit a stable ARGB string for
-        // `.xls` -> `.xlsx` conversion.
-        let palette_idx = match idx.checked_sub(8) {
-            Some(v) => v as usize,
-            None => continue,
-        };
-        let Some(argb) = palette.get(palette_idx).copied() else {
+        // `.xls` -> `.xlsx` conversion. Fall back to Excel's standard indexed table when the
+        // palette record is missing/truncated.
+        let argb = idx
+            .checked_sub(8)
+            .and_then(|v| palette.get(v as usize).copied())
+            .or_else(|| indexed_color_argb(idx));
+        let Some(argb) = argb else {
             continue;
         };
         color.rgb = Some(format!("{argb:08X}"));
