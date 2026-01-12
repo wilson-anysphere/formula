@@ -246,11 +246,20 @@ pub async fn install_downloaded_update(_app: AppHandle) -> Result<(), String> {
             .lock()
             .unwrap_or_else(|err| err.into_inner());
 
-        if let Some(downloaded) = state.downloaded.take() {
-            return downloaded
+        // If we already have a downloaded update, attempt to install it.
+        //
+        // NOTE: We intentionally do *not* `take()` the downloaded update before installing.
+        // Installation can fail (e.g. file system issues), and keeping the bytes available
+        // allows the user to retry without forcing a re-download.
+        if let Some(downloaded) = state.downloaded.as_ref() {
+            let result = downloaded
                 .update
                 .install(&downloaded.bytes)
                 .map_err(|err| err.to_string());
+            if result.is_ok() {
+                state.downloaded = None;
+            }
+            return result;
         }
 
         if !state.in_flight {
