@@ -157,6 +157,11 @@ The scope check uses canonicalization to normalize paths and prevent symlink-bas
 - Background download
 - User approval before install
 - Rollback capability
+  - Tauri does not provide an automatic “revert to previous version” after a successful upgrade.
+  - Formula supports a clear **manual downgrade path** via the GitHub Releases page (in-app via the
+    updater dialog’s “Open release page” / “Download manually” action).
+  - Rollback depends on keeping older release assets available (don’t delete prior releases). See
+    `docs/11-desktop-shell.md` and `docs/release.md`.
 
 ### Distribution
 
