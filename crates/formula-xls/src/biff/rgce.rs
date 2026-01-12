@@ -685,6 +685,30 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     stack.push(ExprFragment::new("#NAME?".to_string()));
                     continue;
                 };
+                if meta.name.is_empty() {
+                    warnings.push(format!(
+                        "PtgName references empty defined name at index {name_id} (0-based idx={idx})"
+                    ));
+                    stack.push(ExprFragment::new("#NAME?".to_string()));
+                    continue;
+                }
+                // `formula-engine`'s parser does not accept boolean literals (TRUE/FALSE) after a
+                // sheet prefix (`Sheet1!TRUE`), since `TRUE` would be lexed as a boolean rather than
+                // an identifier. If a BIFF file contains a sheet-scoped name with one of these
+                // reserved keywords, fall back to a parseable name error literal.
+                if meta.scope_sheet.is_some()
+                    && (meta.name.eq_ignore_ascii_case("TRUE")
+                        || meta.name.eq_ignore_ascii_case("FALSE")
+                        || meta.name.starts_with('#')
+                        || meta.name.starts_with('\''))
+                {
+                    warnings.push(format!(
+                        "PtgName references sheet-scoped name `{}` (index {name_id}) that cannot be rendered parseably after a sheet prefix; using #NAME?",
+                        meta.name
+                    ));
+                    stack.push(ExprFragment::new("#NAME?".to_string()));
+                    continue;
+                }
 
                 let text = match meta.scope_sheet {
                     None => meta.name.clone(),
@@ -1469,13 +1493,13 @@ fn format_namex_ref(
             sb.extern_names.len()
         ));
     };
+    if extern_name.is_empty() {
+        return Err(format!(
+            "PtgNameX references empty EXTERNNAME iname={iname} for SUPBOOK index {supbook_index} (ixti={ixti})"
+        ));
+    }
 
     if is_function {
-        if extern_name.is_empty() {
-            return Err(format!(
-                "PtgNameX function reference has empty EXTERNNAME (ixti={ixti}, iname={iname})"
-            ));
-        }
         return Ok(extern_name.clone());
     }
 
@@ -4252,6 +4276,31 @@ mod tests {
             decoded2.warnings
         );
         assert_parseable(&decoded2.text);
+    }
+
+    #[test]
+    fn ptgname_sheet_scoped_reserved_boolean_name_falls_back_to_name_error() {
+        // A sheet-scoped name of "TRUE"/"FALSE" cannot be rendered as `Sheet1!TRUE` because the
+        // parser lexes `TRUE`/`FALSE` as booleans (not identifiers) after a sheet prefix. Ensure we
+        // fall back to a parseable Excel error literal.
+        let sheet_names = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names = vec![DefinedNameMeta {
+            name: "TRUE".to_string(),
+            scope_sheet: Some(0),
+        }];
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Sheet-scoped name (id=1).
+        let rgce = [0x23, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#NAME?");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("cannot be rendered parseably")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
     }
 
     #[test]
