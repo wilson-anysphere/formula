@@ -702,6 +702,61 @@ test("BrowserExtensionHost: selectionChanged taints formulas that extend beyond 
   ]);
 });
 
+test("BrowserExtensionHost: selectionChanged does not over-taint when values/formulas bounds form an L-shape", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-l-shape";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-l-shape",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  // Values cover A1:A2, formulas cover A1:B1. The union would be A1:B2, but that would over-taint
+  // B2, which was never delivered. Keep the L-shape as two rectangles.
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: {
+      startRow: 0,
+      startCol: 0,
+      endRow: 10,
+      endCol: 10,
+      values: [[1], [2]],
+      formulas: [["=A1", "=B1"]],
+    },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 0 },
+  ]);
+});
+
 test("BrowserExtensionHost: taints selectionChanged events when payload is truncated but includes values", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
