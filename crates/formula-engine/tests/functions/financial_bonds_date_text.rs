@@ -1,3 +1,4 @@
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -158,7 +159,19 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
     if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYS(DATE(2024,6,15),"nope",2,0)"#) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYBS(DATE(2024,6,15),"nope",2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPDAYSNC(DATE(2024,6,15),"nope",2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPNUM(DATE(2024,6,15),"nope",2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
     if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPNCD(DATE(2024,6,15),"nope",2,0)"#) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(&mut sheet, r#"=COUPPCD(DATE(2024,6,15),"nope",2,0)"#) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
 
@@ -178,6 +191,12 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
     if let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=ACCRINT(DATE(2020,2,15),"nope",DATE(2020,4,15),0.1,1000,2,0)"#,
+    ) {
+        assert_eq!(v, Value::Error(ErrorKind::Value));
+    }
+    if let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),"nope",0.1,1000,2,0)"#,
     ) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
@@ -225,4 +244,35 @@ fn unparseable_date_text_maps_to_value_error_in_bond_coupon_builtins() {
     ) {
         assert_eq!(v, Value::Error(ErrorKind::Value));
     }
+}
+
+#[test]
+fn bond_date_text_coercion_respects_workbook_date_system() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1904);
+
+    // Under Excel 1904 date system, coercing date text must yield the same serial as DATE(...).
+    let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=COUPDAYS("2024-06-15","2025-01-01",2,0)-COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)"#,
+    ) else {
+        return;
+    };
+    assert_number(&v, 0.0);
+
+    let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=ACCRINTM("2020-01-01","2020-07-01",0.1,1000,0)-ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0)"#,
+    ) else {
+        return;
+    };
+    assert_number(&v, 0.0);
+
+    let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=YIELD("2008-02-15","2017-11-15",0.0575,95.04287,100,2,0)-YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)"#,
+    ) else {
+        return;
+    };
+    assert_number(&v, 0.0);
 }
