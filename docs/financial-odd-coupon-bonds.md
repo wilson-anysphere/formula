@@ -175,16 +175,12 @@ The current engine implementation enforces:
 - ODDF\*: `issue < settlement < first_coupon <= maturity`
 - ODDL\*: `last_interest < settlement < maturity`
 
-So the settlement equality boundary probes in the oracle corpus currently evaluate to `#NUM!` in
-the engine:
+These boundaries are covered by:
 
-| Case ID | Scenario | Engine result (today) |
-|---|---|---|
-| `fin_oddfprice_settle_eq_first_b0_4d9f4b7e1d1a` | `settlement == first_coupon` | `#NUM!` |
-| `fin_oddfprice_settle_after_first_b0_0e5d51d6b24d` | `settlement > first_coupon` | `#NUM!` |
-| `fin_oddlprice_settle_eq_last_b0_4d1a6e0a2d2a` | `settlement == last_interest` | `#NUM!` |
-| `fin_oddlprice_settle_before_last_b0_1c3c4e93d8f2` | `settlement < last_interest` | `#NUM!` |
-| `fin_oddlyield_settle_before_last_b0_4ef7acb86b86` | `settlement < last_interest` | `#NUM!` |
+- Unit tests:
+  - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+- Excel oracle corpus cases tagged `odd_coupon` + `boundary`:
+  - `tests/compatibility/excel-oracle/cases.json` (search for e.g. “ODDFPRICE boundary: settlement == first_coupon”)
 
 Note: the engine currently allows `first_coupon == maturity` for ODDF\* (a single odd coupon paid
 at maturity). This behavior should be validated against real Excel.
