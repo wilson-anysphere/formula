@@ -2005,6 +2005,21 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &builtin_name_record(true, 1, 0x06, &print_area_rgce),
     );
 
+    // 11) Duplicate workbook-scoped name (should be skipped by the importer with a warning).
+    let dup_rgce = ptg_ref3d(0, 0, 2); // Sheet1!$C$1
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("GlobalName", 0, false, None, &dup_rgce),
+    );
+
+    // 12) Invalid name (looks like a cell reference) should be skipped with a warning.
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("A1", 0, false, None, &global_rgce),
+    );
+
     push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
 
     // -- Sheet substreams -------------------------------------------------------

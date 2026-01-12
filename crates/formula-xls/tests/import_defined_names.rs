@@ -103,6 +103,35 @@ fn imports_defined_names_from_biff_name_records() {
     assert_eq!(print_area.refers_to, "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5");
     assert_parseable_refers_to(&print_area.refers_to);
 
+    assert_eq!(
+        wb.defined_names
+            .iter()
+            .filter(|n| n.scope == DefinedNameScope::Workbook && n.name.eq_ignore_ascii_case("GlobalName"))
+            .count(),
+        1,
+        "expected duplicate GlobalName to be skipped"
+    );
+    assert!(
+        wb.get_defined_name(DefinedNameScope::Workbook, "A1").is_none(),
+        "expected invalid defined name to be skipped"
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("skipping defined name `GlobalName`")),
+        "expected duplicate GlobalName warning; warnings={:?}",
+        result.warnings
+    );
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("skipping defined name `A1`")),
+        "expected invalid name warning; warnings={:?}",
+        result.warnings
+    );
+
     // All imported name formulas should be parseable by our formula parser (stored without `=`).
     for name in &wb.defined_names {
         let f = format!("={}", name.refers_to);
