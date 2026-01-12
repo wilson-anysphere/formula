@@ -324,7 +324,13 @@ export class FormulaBarView {
 
       // Ensure model-derived reference metadata is current for the F4 operation
       // (the selection may have changed without triggering our keyup/select listeners yet).
-      this.model.updateDraft(prevText, cursorStart, cursorEnd);
+      if (
+        this.model.draft !== prevText ||
+        this.model.cursorStart !== cursorStart ||
+        this.model.cursorEnd !== cursorEnd
+      ) {
+        this.model.updateDraft(prevText, cursorStart, cursorEnd);
+      }
 
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
