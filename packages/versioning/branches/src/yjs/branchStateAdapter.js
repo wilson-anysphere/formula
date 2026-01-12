@@ -338,7 +338,26 @@ export function branchStateFromYjsDoc(doc) {
     const id = coerceString(readYMapOrObject(entry, "id"));
     if (!id) continue;
     const name = coerceString(readYMapOrObject(entry, "name"));
-    metaById[id] = { id, name };
+    /** @type {SheetMeta} */
+    const meta = { id, name };
+
+    // Per-sheet view state (e.g. frozen panes) can be stored either under a
+    // dedicated `view` object or (legacy/experimental) as top-level fields.
+    const rawView = readYMapOrObject(entry, "view");
+    if (rawView !== undefined) {
+      meta.view = yjsValueToJson(rawView);
+    } else {
+      const frozenRows = readYMapOrObject(entry, "frozenRows");
+      const frozenCols = readYMapOrObject(entry, "frozenCols");
+      if (frozenRows !== undefined || frozenCols !== undefined) {
+        meta.view = {
+          frozenRows: yjsValueToJson(frozenRows) ?? 0,
+          frozenCols: yjsValueToJson(frozenCols) ?? 0,
+        };
+      }
+    }
+
+    metaById[id] = meta;
     order.push(id);
   }
 
@@ -627,12 +646,15 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           const entry = new Y.Map();
           if (existing) {
             for (const key of Array.from(existing.keys()).sort()) {
-              if (key === "id" || key === "name") continue;
+              if (key === "id" || key === "name" || key === "view" || key === "frozenRows" || key === "frozenCols") {
+                continue;
+              }
               entry.set(key, cloneYjsValue(existing.get(key)));
             }
           }
           entry.set("id", sheetId);
           entry.set("name", meta?.name ?? null);
+          if (meta?.view !== undefined) entry.set("view", structuredClone(meta.view));
           desiredEntries.push(entry);
         }
 

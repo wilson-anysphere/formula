@@ -7,7 +7,14 @@ import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "./documentSta
 
 test("yjs document adapter: normalizes formulas + handles legacy cell keys", () => {
   const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
   const cells = doc.getMap("cells");
+
+  const sheet = new Y.Map();
+  sheet.set("id", "Sheet1");
+  sheet.set("name", "Sheet1");
+  sheet.set("view", { frozenRows: 2, frozenCols: 1 });
+  sheets.push([sheet]);
 
   const cellA1 = new Y.Map();
   cellA1.set("value", 123);
@@ -30,7 +37,7 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
     sheets: {
       order: ["Sheet1"],
       metaById: {
-        Sheet1: { id: "Sheet1", name: "Sheet1" },
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 2, frozenCols: 1 } },
       },
     },
     cells: {
@@ -47,6 +54,10 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
 
   const doc2 = new Y.Doc();
   applyDocumentStateToYjsDoc(doc2, state, { origin: { test: true } });
+
+  const sheet2 = doc2.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1 });
 
   const cells2 = doc2.getMap("cells");
   assert.equal(cells2.has("Sheet1:0:0"), true);
