@@ -48,6 +48,7 @@ mod builtins_select;
 mod builtins_reference;
 mod builtins_statistical;
 mod builtins_text;
+mod builtins_text_dbcs;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {

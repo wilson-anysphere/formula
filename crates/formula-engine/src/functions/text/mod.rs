@@ -1,4 +1,5 @@
 mod convert;
+pub(crate) mod dbcs;
 mod format;
 mod join;
 mod replace;

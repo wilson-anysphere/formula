@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T05:50:21.979029644Z",
+  "generatedAt": "2026-01-12T06:11:46.813892945Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "7a874d2591609126f26188847d6067716041cae15760d55da7ef73b4c042e675",
-    "count": 1415
+    "sha256": "36e8ab29dd766146e46aa19ac42ef2403c9015716f84a64051b93a14673f3f4f",
+    "count": 1425
   },
   "results": [
     {
@@ -11813,6 +11813,106 @@
       },
       "address": "C1",
       "displayText": "abcX"
+    },
+    {
+      "caseId": "lenb_927131cd188e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.0
+      },
+      "address": "C1",
+      "displayText": "3"
+    },
+    {
+      "caseId": "leftb_3af2cf2bbb55",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ab"
+      },
+      "address": "C1",
+      "displayText": "ab"
+    },
+    {
+      "caseId": "rightb_0ae73360f2b6",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "bc"
+      },
+      "address": "C1",
+      "displayText": "bc"
+    },
+    {
+      "caseId": "midb_684c65525cd6",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "bc"
+      },
+      "address": "C1",
+      "displayText": "bc"
+    },
+    {
+      "caseId": "findb_0707f97beca7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "searchb_b4cd4d23de70",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "replaceb_e625ddf85f4c",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "aXef"
+      },
+      "address": "C1",
+      "displayText": "aXef"
+    },
+    {
+      "caseId": "asc_898314172b9e",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ABC"
+      },
+      "address": "C1",
+      "displayText": "ABC"
+    },
+    {
+      "caseId": "dbcs_5aa81f762f24",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "ABC"
+      },
+      "address": "C1",
+      "displayText": "ABC"
+    },
+    {
+      "caseId": "phonetic_b695fcc6ae90",
+      "outputCell": "C1",
+      "result": {
+        "t": "s",
+        "v": "abc"
+      },
+      "address": "C1",
+      "displayText": "abc"
     },
     {
       "caseId": "concat_new_577bb69cae3a",

@@ -1120,6 +1120,27 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="replace", tags=["text", "REPLACE"], formula='=REPLACE("abcdef",2,3,"X")')
     _add_case(cases, prefix="replace", tags=["text", "REPLACE"], formula='=REPLACE("abc",5,1,"X")')
 
+    # Legacy DBCS / byte-count text functions.
+    #
+    # In single-byte locales (en-US), these behave identically to their non-`B`
+    # equivalents. In DBCS locales they become locale/codepage-dependent.
+    _add_case(cases, prefix="lenb", tags=["text", "LENB"], formula='=LENB("abc")')
+    _add_case(cases, prefix="leftb", tags=["text", "LEFTB"], formula='=LEFTB("abc",2)')
+    _add_case(cases, prefix="rightb", tags=["text", "RIGHTB"], formula='=RIGHTB("abc",2)')
+    _add_case(cases, prefix="midb", tags=["text", "MIDB"], formula='=MIDB("abc",2,2)')
+    _add_case(cases, prefix="findb", tags=["text", "FINDB"], formula='=FINDB("b","abc")')
+    _add_case(cases, prefix="searchb", tags=["text", "SEARCHB"], formula='=SEARCHB("B","abc")')
+    _add_case(cases, prefix="replaceb", tags=["text", "REPLACEB"], formula='=REPLACEB("abcdef",2,3,"X")')
+    _add_case(cases, prefix="asc", tags=["text", "ASC"], formula='=ASC("ABC")')
+    _add_case(cases, prefix="dbcs", tags=["text", "DBCS"], formula='=DBCS("ABC")')
+    _add_case(
+        cases,
+        prefix="phonetic",
+        tags=["text", "PHONETIC"],
+        formula="=PHONETIC(A1)",
+        inputs=[CellInput("A1", "abc")],
+    )
+
     # CONCAT (unlike CONCATENATE, CONCAT flattens ranges)
     _add_case(
         cases,

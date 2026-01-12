@@ -31,3 +31,4 @@ mod reference;
 mod statistical;
 mod criteria_locale;
 mod text;
+mod text_dbcs;

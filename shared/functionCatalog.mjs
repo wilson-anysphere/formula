@@ -58,6 +58,16 @@ export default {
       ]
     },
     {
+      "name": "ASC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "ASIN",
       "min_args": 1,
       "max_args": 1,
@@ -452,6 +462,16 @@ export default {
       ]
     },
     {
+      "name": "DBCS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "DDB",
       "min_args": 4,
       "max_args": 5,
@@ -592,6 +612,18 @@ export default {
     },
     {
       "name": "FIND",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text",
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "FINDB",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",
@@ -987,7 +1019,28 @@ export default {
       ]
     },
     {
+      "name": "LEFTB",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
       "name": "LEN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "LENB",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
@@ -1123,6 +1176,18 @@ export default {
     },
     {
       "name": "MID",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "MIDB",
       "min_args": 3,
       "max_args": 3,
       "volatility": "non_volatile",
@@ -1445,6 +1510,16 @@ export default {
       ]
     },
     {
+      "name": "PHONETIC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
       "name": "PI",
       "min_args": 0,
       "max_args": 0,
@@ -1649,7 +1724,31 @@ export default {
       ]
     },
     {
+      "name": "REPLACEB",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number",
+        "number",
+        "text"
+      ]
+    },
+    {
       "name": "RIGHT",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "RIGHTB",
       "min_args": 1,
       "max_args": 2,
       "volatility": "non_volatile",
@@ -1745,6 +1844,18 @@ export default {
     },
     {
       "name": "SEARCH",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text",
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "SEARCHB",
       "min_args": 2,
       "max_args": 3,
       "volatility": "non_volatile",

@@ -24688,6 +24688,111 @@
       "id": "replace_fb2cb708e6ff"
     },
     {
+      "formula": "=LENB(\"abc\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "LENB"
+      ],
+      "id": "lenb_927131cd188e"
+    },
+    {
+      "formula": "=LEFTB(\"abc\",2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "LEFTB"
+      ],
+      "id": "leftb_3af2cf2bbb55"
+    },
+    {
+      "formula": "=RIGHTB(\"abc\",2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "RIGHTB"
+      ],
+      "id": "rightb_0ae73360f2b6"
+    },
+    {
+      "formula": "=MIDB(\"abc\",2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "MIDB"
+      ],
+      "id": "midb_684c65525cd6"
+    },
+    {
+      "formula": "=FINDB(\"b\",\"abc\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "FINDB"
+      ],
+      "id": "findb_0707f97beca7"
+    },
+    {
+      "formula": "=SEARCHB(\"B\",\"abc\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "SEARCHB"
+      ],
+      "id": "searchb_b4cd4d23de70"
+    },
+    {
+      "formula": "=REPLACEB(\"abcdef\",2,3,\"X\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "REPLACEB"
+      ],
+      "id": "replaceb_e625ddf85f4c"
+    },
+    {
+      "formula": "=ASC(\"ABC\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "ASC"
+      ],
+      "id": "asc_898314172b9e"
+    },
+    {
+      "formula": "=DBCS(\"ABC\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "text",
+        "DBCS"
+      ],
+      "id": "dbcs_5aa81f762f24"
+    },
+    {
+      "formula": "=PHONETIC(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "abc"
+        }
+      ],
+      "tags": [
+        "text",
+        "PHONETIC"
+      ],
+      "id": "phonetic_b695fcc6ae90"
+    },
+    {
       "formula": "=CONCAT(A1:A2,\"c\")",
       "outputCell": "C1",
       "inputs": [
