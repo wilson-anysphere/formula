@@ -114,8 +114,11 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "core:default",
     { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook", "open_external_url"] },
     // ...
-    { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
-    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
+    {
+      "identifier": "core:event:allow-listen",
+      "allow": [{ "event": "open-file" }, { "event": "oauth-redirect" }, { "event": "startup:metrics" }]
+    },
+    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }, { "event": "close-prep-done" }] },
     // ...
     "dialog:allow-open",
     "dialog:allow-save",
