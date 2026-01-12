@@ -299,4 +299,80 @@ describe("DesktopSharedGrid theme reactivity", () => {
       expect(record.disconnect).toHaveBeenCalledTimes(1);
     }
   });
+
+  it("supports legacy matchMedia addListener/removeListener APIs", () => {
+    // Disable MutationObserver so this test isolates the matchMedia subscription logic.
+    vi.stubGlobal("MutationObserver", undefined);
+
+    const listenersByQuery = new Map<string, Set<() => void>>();
+    const matchMediaMock = vi.fn((query: string) => {
+      const listeners = new Set<() => void>();
+      listenersByQuery.set(query, listeners);
+
+      return {
+        media: query,
+        matches: false,
+        addListener: (listener: () => void) => {
+          listeners.add(listener);
+        },
+        removeListener: (listener: () => void) => {
+          listeners.delete(listener);
+        }
+      } as unknown as MediaQueryList;
+    });
+    vi.stubGlobal("matchMedia", matchMediaMock);
+
+    const container = document.createElement("div");
+    container.style.setProperty("--formula-grid-bg", "rgb(10, 20, 30)");
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas")
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div")
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars
+    });
+
+    try {
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-contrast: more)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(forced-colors: active)");
+
+      // Ensure listeners were registered via the legacy API.
+      for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+        expect(listenersByQuery.get(query)?.size).toBeGreaterThan(0);
+      }
+
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
+
+      container.style.setProperty("--formula-grid-bg", "rgb(40, 50, 60)");
+      for (const listener of listenersByQuery.get("(forced-colors: active)") ?? []) listener();
+
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(40, 50, 60)");
+    } finally {
+      grid.destroy();
+    }
+
+    // Ensure destroy removes legacy listeners.
+    for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+      expect(listenersByQuery.get(query)?.size ?? 0).toBe(0);
+    }
+  });
 });
