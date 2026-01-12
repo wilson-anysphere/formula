@@ -133,6 +133,10 @@ test("diffFormula: normalize=false treats identifier case changes as edits", () 
 test("diffFormula: normalize=true treats comma/semicolon argument separators as equal", () => {
   const result = diffFormula("=SUM(A1;B1)", "=SUM(A1,B1)", { normalize: true });
   assert.equal(result.equal, true);
+  // In normalized mode, equal ops should emit tokens from the *new* formula.
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:SUM", "punct:(", "ident:A1", "punct:,", "ident:B1", "punct:)"] },
+  ]);
 });
 
 test("diffFormula: normalize=false treats comma/semicolon argument separators as edits", () => {
@@ -143,6 +147,10 @@ test("diffFormula: normalize=false treats comma/semicolon argument separators as
 test("diffFormula: normalize=true treats numeric formatting differences as equal", () => {
   const result = diffFormula("=1.0+2", "=1+2", { normalize: true });
   assert.equal(result.equal, true);
+  // In normalized mode, equal ops should emit tokens from the *new* formula.
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "number:1", "op:+", "number:2"] },
+  ]);
 });
 
 test("diffFormula: normalize=false treats numeric formatting differences as edits", () => {
