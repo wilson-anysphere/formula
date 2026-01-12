@@ -115,7 +115,13 @@ The desktop application uses **Tauri** for a native shell with a Rust backend. T
       
       "linux": {
         "deb": {
-          "depends": ["libwebkit2gtk-4.0-37", "libssl-dev"]
+          "depends": [
+            "libwebkit2gtk-4.1-0",
+            "libgtk-3-0",
+            "libayatana-appindicator3-1 | libappindicator3-1",
+            "librsvg2-2",
+            "libssl3"
+          ]
         }
       }
     },

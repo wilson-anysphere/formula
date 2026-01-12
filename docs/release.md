@@ -99,6 +99,60 @@ Two common approaches:
    - Mirror the update JSON and artifacts from GitHub Releases to `releases.formula.app`.
    - Keep the URL scheme stable so older clients can always resolve update metadata.
 
+## Linux: `.deb` runtime dependencies (WebView + tray)
+
+The Linux desktop shell is built on **GTK3 + WebKitGTK** (Tauri/Wry) and uses the **AppIndicator**
+stack for the tray icon.
+
+The resulting `.deb` must declare the required runtime packages so that:
+
+- the WebView can start (no missing `libwebkit2gtk*` / `libgtk*` shared libraries)
+- the tray icon backend can be loaded (otherwise the tray icon will be missing)
+
+These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` under
+`bundle.linux.deb.depends`:
+
+- `libwebkit2gtk-4.1-0` – WebKitGTK system WebView used by Tauri on Linux.
+- `libgtk-3-0` – GTK3 (windowing/event loop; also required by WebKitGTK).
+- `libayatana-appindicator3-1 | libappindicator3-1` – tray icon backend.
+  The Rust bindings (`libappindicator-sys`) load this library dynamically at runtime; without it
+  the app can launch but the tray icon will not appear.
+- `librsvg2-2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
+- `libssl3` – OpenSSL runtime required by native dependencies in the Tauri stack.
+
+### Validating the `.deb`
+
+After `cargo tauri build` (or after CI produces an artifact), verify the dependency list and shared
+library resolution.
+
+From `apps/desktop/src-tauri`:
+
+```bash
+# Inspect the control file (check Depends: ...)
+deb="$(ls target/release/bundle/deb/*.deb | head -n 1)"
+dpkg -I "$deb"
+
+# Extract and confirm all linked shared libraries resolve
+tmpdir="$(mktemp -d)"
+dpkg-deb -x "$deb" "$tmpdir"
+ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
+```
+
+For a clean install test (no GUI required), use a container:
+
+```bash
+docker run --rm -it \
+  -v "$PWD/target/release/bundle/deb:/deb" \
+  ubuntu:24.04 bash -lc '
+    apt-get update
+    apt-get install -y /deb/*.deb
+    ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
+  '
+```
+
+Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
+support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
+
 ## 5) Verifying a release
 
 After the workflow completes:
