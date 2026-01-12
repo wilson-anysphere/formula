@@ -266,6 +266,10 @@ ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormali
 V3ContentHash         = SHA-256(ProjectNormalizedData)
 ```
 
+Where `(filtered PROJECT stream properties)` is derived from the textual `PROJECT` stream:
+for each non-empty `key=value` line, if `key` is **not** one of `ID`, `Document`, `CMG`, `DPB`, `GC`
+(case-insensitive), include the trimmed `key=value` bytes and terminate the line with `CRLF`.
+
 In this repo:
 
 - `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`
