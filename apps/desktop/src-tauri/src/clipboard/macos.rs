@@ -199,15 +199,17 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
     let data = nsdata_from_bytes(png)?;
     let cls = objc2::class!(NSImage);
     let alloc: *mut AnyObject = objc2::msg_send![cls, alloc];
-    let img: *mut AnyObject = objc2::msg_send![alloc, initWithData: &*data];
-    if img.is_null() {
+    let img_ptr: *mut AnyObject = objc2::msg_send![alloc, initWithData: &*data];
+    if img_ptr.is_null() {
         return Err(ClipboardError::OperationFailed(
             "failed to decode PNG via NSImage".to_string(),
         ));
     }
+    // `alloc/init` returns a retained object; wrap it so we reliably release it.
+    let img: Id<AnyObject, Owned> = Id::from_retained_ptr(img_ptr);
 
     // -[NSImage TIFFRepresentation]
-    let tiff_data: *mut AnyObject = objc2::msg_send![img, TIFFRepresentation];
+    let tiff_data: *mut AnyObject = objc2::msg_send![&*img, TIFFRepresentation];
     if tiff_data.is_null() {
         return Err(ClipboardError::OperationFailed(
             "failed to encode TIFF via NSImage::TIFFRepresentation".to_string(),
