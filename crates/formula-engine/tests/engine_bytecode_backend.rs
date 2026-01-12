@@ -772,6 +772,8 @@ fn array_literal_errors_propagate_in_sum() {
 
 #[test]
 fn array_literals_enable_bytecode_for_logical_functions() {
+    // AND/OR have typed semantics over booleans within array literals, so ensure the bytecode
+    // backend can compile and evaluate them without falling back to the AST path.
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "A1", "=AND({TRUE,FALSE})")
@@ -785,6 +787,8 @@ fn array_literals_enable_bytecode_for_logical_functions() {
     engine.recalculate_single_threaded();
     assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE})", "A1");
     assert_engine_matches_ast(&engine, "=OR({TRUE,FALSE})", "A2");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
 }
 
 #[test]
@@ -3622,6 +3626,112 @@ fn bytecode_backend_xor_reference_semantics_match_ast() {
         assert_eq!(engine.get_cell_value("Sheet1", "B1"), *expected);
         assert_engine_matches_ast(&engine, "=XOR(A1)", "B1");
     }
+}
+
+#[test]
+fn bytecode_backend_xor_array_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=XOR({TRUE,FALSE,TRUE})")
+        .unwrap();
+    // Text values inside arrays are ignored (unlike scalar text args, which coerce).
+    engine.set_cell_formula("Sheet1", "A2", "=XOR({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=XOR({\"TRUE\",0,1,\"x\"})")
+        .unwrap();
+    // Errors in arrays should propagate.
+    engine
+        .set_cell_formula("Sheet1", "A4", "=XOR({#DIV/0!,TRUE})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=XOR({TRUE,FALSE,TRUE})", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+
+    assert_engine_matches_ast(&engine, "=XOR({\"TRUE\"})", "A2");
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+
+    assert_engine_matches_ast(&engine, "=XOR({\"TRUE\",0,1,\"x\"})", "A3");
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Bool(true));
+
+    assert_engine_matches_ast(&engine, "=XOR({#DIV/0!,TRUE})", "A4");
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn bytecode_backend_and_array_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=AND({TRUE,FALSE,TRUE})")
+        .unwrap();
+    // Text values inside arrays are ignored (unlike scalar text args, which error).
+    engine.set_cell_formula("Sheet1", "A2", "=AND({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=AND({\"TRUE\",0,1,\"x\"})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=AND({#DIV/0!,TRUE})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE,TRUE})", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
+
+    assert_engine_matches_ast(&engine, "=AND({\"TRUE\"})", "A2");
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
+
+    assert_engine_matches_ast(&engine, "=AND({\"TRUE\",0,1,\"x\"})", "A3");
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Bool(false));
+
+    assert_engine_matches_ast(&engine, "=AND({#DIV/0!,TRUE})", "A4");
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn bytecode_backend_or_array_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=OR({TRUE,FALSE,TRUE})")
+        .unwrap();
+    // Text values inside arrays are ignored (unlike scalar text args, which error).
+    engine.set_cell_formula("Sheet1", "A2", "=OR({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=OR({\"TRUE\",0,1,\"x\"})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=OR({#DIV/0!,TRUE})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 4);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=OR({TRUE,FALSE,TRUE})", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
+
+    assert_engine_matches_ast(&engine, "=OR({\"TRUE\"})", "A2");
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+
+    assert_engine_matches_ast(&engine, "=OR({\"TRUE\",0,1,\"x\"})", "A3");
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Bool(true));
+
+    assert_engine_matches_ast(&engine, "=OR({#DIV/0!,TRUE})", "A4");
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
