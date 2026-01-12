@@ -70,5 +70,56 @@ describe("ContextManager DLP indexing", () => {
       sheetId: "Sheet1",
     });
   });
-});
 
+  it("buildContext resolves sheet display names to stable sheet ids for structured DLP enforcement", async () => {
+    const documentId = "doc-1";
+    const displayName = "Budget";
+    const stableSheetId = "Sheet2";
+
+    const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+
+    const auditLogger = { log: vi.fn() };
+
+    const out = await cm.buildContext({
+      sheet: { name: displayName, values: [["Public"], ["TOP SECRET"]] },
+      query: "secret",
+      dlp: {
+        document_id: documentId,
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: { scope: "cell", documentId, sheetId: stableSheetId, row: 1, col: 0 },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+        sheet_name_resolver: {
+          getSheetIdByName: (name: string) => (name.trim().toLowerCase() === displayName.toLowerCase() ? stableSheetId : null),
+        },
+        auditLogger,
+      },
+    });
+
+    expect(out.schema.name).toBe(displayName);
+    expect(out.retrieved[0]?.range).toBe(`${displayName}!A1:A2`);
+    expect(out.promptContext).toContain("[REDACTED]");
+    expect(out.promptContext).not.toContain("TOP SECRET");
+
+    expect(auditLogger.log).toHaveBeenCalledTimes(1);
+    expect(auditLogger.log.mock.calls[0]?.[0]).toMatchObject({
+      type: "ai.context",
+      documentId,
+      sheetId: stableSheetId,
+      sheetName: displayName,
+    });
+  });
+});

@@ -138,15 +138,43 @@ export class ContextManager {
     let dlpRedactedCells = 0;
     let dlpSelectionClassification = null;
     let dlpDecision = null;
+    let dlpAuditDocumentId = null;
+    let dlpAuditSheetId = null;
 
     if (dlp) {
-      const records = dlp.classificationRecords ?? dlp.classificationStore?.list(dlp.documentId) ?? [];
-      const sheetId = dlp.sheetId ?? rawSheet.name;
-      const includeRestrictedContent = dlp.includeRestrictedContent ?? false;
+      const documentId = dlp.documentId ?? dlp.document_id;
+      const records =
+        dlp.classificationRecords ??
+        dlp.classification_records ??
+        dlp.classificationStore?.list?.(documentId) ??
+        dlp.classification_store?.list?.(documentId) ??
+        [];
+      const includeRestrictedContent = dlp.includeRestrictedContent ?? dlp.include_restricted_content ?? false;
+
+      // Some hosts keep stable internal sheet ids even after a user renames the sheet
+      // (id != display name). When a resolver is provided, map the user-facing name back
+      // to the stable id before evaluating structured DLP selectors.
+      const dlpSheetNameResolver = dlp.sheetNameResolver ?? dlp.sheet_name_resolver ?? null;
+      const resolveDlpSheetId = (sheetNameOrId) => {
+        const raw = typeof sheetNameOrId === "string" ? sheetNameOrId.trim() : "";
+        if (!raw) return "";
+        if (dlpSheetNameResolver && typeof dlpSheetNameResolver.getSheetIdByName === "function") {
+          try {
+            return dlpSheetNameResolver.getSheetIdByName(raw) ?? raw;
+          } catch {
+            return raw;
+          }
+        }
+        return raw;
+      };
+
+      const sheetId = resolveDlpSheetId(dlp.sheetId ?? dlp.sheet_id ?? rawSheet.name);
+      dlpAuditDocumentId = documentId;
+      dlpAuditSheetId = sheetId;
 
       const maxCols = valuesForContext.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
       const rangeRef = {
-        documentId: dlp.documentId,
+        documentId,
         sheetId,
         range: {
           start: { row: 0, col: 0 },
@@ -166,8 +194,9 @@ export class ContextManager {
       if (dlpDecision.decision === DLP_DECISION.BLOCK) {
         dlp.auditLogger?.log({
           type: "ai.context",
-          documentId: dlp.documentId,
+          documentId,
           sheetId,
+          sheetName: rawSheet.name,
           decision: dlpDecision,
           selectionClassification: dlpSelectionClassification,
           redactedCellCount: 0,
@@ -180,7 +209,7 @@ export class ContextManager {
       let nextValues;
       if (dlpDecision.decision === DLP_DECISION.REDACT) {
         const maxAllowedRank = dlpDecision.maxAllowed === null ? null : classificationRank(dlpDecision.maxAllowed);
-        const index = buildDlpRangeIndex({ documentId: dlp.documentId, sheetId, range: normalizedRange }, records, {
+        const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records, {
           maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
         });
         const policyAllowsRestrictedContent = Boolean(dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
@@ -206,7 +235,7 @@ export class ContextManager {
         nextValues = valuesForContext.map((row) => (row ?? []).slice());
       }
 
-      sheetForContext = { ...rawSheet, name: sheetId, values: nextValues };
+      sheetForContext = { ...rawSheet, values: nextValues };
     }
 
     throwIfAborted(signal);
@@ -272,8 +301,9 @@ export class ContextManager {
     if (dlp) {
       dlp.auditLogger?.log({
         type: "ai.context",
-        documentId: dlp.documentId,
-        sheetId: dlp.sheetId ?? rawSheet.name,
+        documentId: dlpAuditDocumentId ?? dlp.documentId ?? dlp.document_id,
+        sheetId: dlpAuditSheetId ?? dlp.sheetId ?? dlp.sheet_id ?? rawSheet.name,
+        sheetName: rawSheet.name,
         decision: dlpDecision,
         selectionClassification: dlpSelectionClassification,
         redactedCellCount: dlpRedactedCells,
