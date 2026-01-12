@@ -422,6 +422,71 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 }
                 stack.push(frag);
             }
+            // PtgList (structured reference).
+            //
+            // NOTE: This implementation is intentionally small-scope: it supports the subset of
+            // structured references needed for round-tripping common Excel Table formulas (e.g.
+            // `Table1[Col]`, `[@Col]`, `Table1[[#Headers],[Col]]`, `Table1[#All]`,
+            // `Table1[[Col1]:[Col2]]`).
+            //
+            // The token layout mirrors what our encoder emits:
+            //   [ptg: u8]
+            //   [flags: u16]  (item + column selector)
+            //   [table: XLUnicodeString(u16-len)]
+            //   [col1: XLUnicodeString(u16-len)]
+            //   [col2: XLUnicodeString(u16-len)]
+            0x2E | 0x4E | 0x6E => {
+                if input.len() < 2 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let flags = u16::from_le_bytes([input[0], input[1]]);
+                input = &input[2..];
+
+                let item = (flags & 0x0007) as u8;
+                let cols = ((flags >> 3) & 0x0003) as u8;
+
+                let table = take_utf16_len_prefixed(&mut input)?;
+                let col1 = take_utf16_len_prefixed(&mut input)?;
+                let col2 = take_utf16_len_prefixed(&mut input)?;
+
+                let item = match item {
+                    0 => None,
+                    1 => Some(StructuredRefItem::All),
+                    2 => Some(StructuredRefItem::Data),
+                    3 => Some(StructuredRefItem::Headers),
+                    4 => Some(StructuredRefItem::Totals),
+                    5 => Some(StructuredRefItem::ThisRow),
+                    _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
+                };
+                let cols = match cols {
+                    0 => StructuredColumns::All,
+                    1 => StructuredColumns::Single(col1),
+                    2 => StructuredColumns::Range { start: col1, end: col2 },
+                    _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
+                };
+
+                let is_value_class = (ptg & 0x60) == 0x40;
+                let is_single_cell = is_structured_ref_single_cell(item.as_ref(), &cols);
+
+                let mut text = String::new();
+                if is_value_class && !is_single_cell {
+                    // Preserve legacy implicit intersection semantics (same approach as PtgAreaV).
+                    text.push('@');
+                }
+
+                if !table.is_empty() {
+                    text.push_str(&table);
+                }
+                text.push('[');
+                push_structured_ref_spec(&mut text, item.as_ref(), &cols);
+                text.push(']');
+
+                let mut frag = ExprFragment::new(text);
+                if is_value_class && !is_single_cell {
+                    frag.precedence = 70;
+                }
+                stack.push(frag);
+            }
             _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
         }
     }
@@ -446,6 +511,124 @@ fn push_column(mut col: u32, out: &mut String) {
     }
     for ch in buf[..i].iter().rev() {
         out.push(*ch as char);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StructuredRefItem {
+    All,
+    Data,
+    Headers,
+    Totals,
+    ThisRow,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StructuredColumns {
+    All,
+    Single(String),
+    Range { start: String, end: String },
+}
+
+fn take_utf16_len_prefixed(input: &mut &[u8]) -> Result<String, DecodeRgceError> {
+    if input.len() < 2 {
+        return Err(DecodeRgceError::UnexpectedEof);
+    }
+    let cch = u16::from_le_bytes([input[0], input[1]]) as usize;
+    *input = &input[2..];
+
+    let byte_len = cch.checked_mul(2).ok_or(DecodeRgceError::UnexpectedEof)?;
+    if input.len() < byte_len {
+        return Err(DecodeRgceError::UnexpectedEof);
+    }
+    let raw = &input[..byte_len];
+    *input = &input[byte_len..];
+
+    let mut units = Vec::with_capacity(cch);
+    for chunk in raw.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    String::from_utf16(&units).map_err(|_| DecodeRgceError::InvalidUtf16)
+}
+
+fn escape_structured_ref_name(name: &str) -> String {
+    // Excel escapes `]` as `]]` within structured reference bracketed identifiers.
+    name.replace(']', "]]")
+}
+
+fn is_structured_ref_single_cell(item: Option<&StructuredRefItem>, cols: &StructuredColumns) -> bool {
+    match (item, cols) {
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
+        // `Table1[[#Headers],[Col]]` and `Table1[[#Totals],[Col]]` resolve to a single cell.
+        (Some(StructuredRefItem::Headers | StructuredRefItem::Totals), StructuredColumns::Single(_)) => true,
+        _ => false,
+    }
+}
+
+fn push_structured_ref_spec(out: &mut String, item: Option<&StructuredRefItem>, cols: &StructuredColumns) {
+    match (item, cols) {
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(col)) => {
+            out.push('@');
+            out.push_str(&escape_structured_ref_name(col));
+        }
+        (Some(item), StructuredColumns::All) => out.push_str(match item {
+            StructuredRefItem::All => "#All",
+            StructuredRefItem::Data => "#Data",
+            StructuredRefItem::Headers => "#Headers",
+            StructuredRefItem::Totals => "#Totals",
+            StructuredRefItem::ThisRow => "#ThisRow",
+        }),
+        (None, StructuredColumns::Single(col)) => out.push_str(&escape_structured_ref_name(col)),
+        (None, StructuredColumns::Range { start, end }) => {
+            out.push('[');
+            out.push_str(&escape_structured_ref_name(start));
+            out.push(']');
+            out.push(':');
+            out.push('[');
+            out.push_str(&escape_structured_ref_name(end));
+            out.push(']');
+        }
+        // Canonicalize item+column selections to the nested bracket form:
+        // `Table1[[#Headers],[Col]]`, `Table1[[#All],[Col1]:[Col2]]`, etc.
+        (Some(item), StructuredColumns::Single(col)) => {
+            out.push('[');
+            out.push_str(match item {
+                StructuredRefItem::All => "#All",
+                StructuredRefItem::Data => "#Data",
+                StructuredRefItem::Headers => "#Headers",
+                StructuredRefItem::Totals => "#Totals",
+                StructuredRefItem::ThisRow => "#ThisRow",
+            });
+            out.push(']');
+            out.push(',');
+            out.push('[');
+            out.push_str(&escape_structured_ref_name(col));
+            out.push(']');
+        }
+        (Some(item), StructuredColumns::Range { start, end }) => {
+            out.push('[');
+            out.push_str(match item {
+                StructuredRefItem::All => "#All",
+                StructuredRefItem::Data => "#Data",
+                StructuredRefItem::Headers => "#Headers",
+                StructuredRefItem::Totals => "#Totals",
+                StructuredRefItem::ThisRow => "#ThisRow",
+            });
+            out.push(']');
+            out.push(',');
+            out.push('[');
+            out.push_str(&escape_structured_ref_name(start));
+            out.push(']');
+            out.push(':');
+            out.push('[');
+            out.push_str(&escape_structured_ref_name(end));
+            out.push(']');
+        }
+        (None, StructuredColumns::All) => {
+            // Default "all columns" selection is not representable without additional context.
+            // Emit an explicit `#All` so the text is parseable and round-trips through our encoder.
+            out.push_str("#All");
+        }
     }
 }
 
@@ -631,6 +814,9 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                     out.extend_from_slice(&row.to_le_bytes());
                     out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
                 }
+                Expr::StructuredRef(r) => {
+                    encode_structured_ref(r, out, StructuredRefClass::Value)?;
+                }
                 Expr::Binary(b) if b.op == BinaryOp::Range => {
                     // Encode `@A1:A2` as PtgAreaV.
                     if let (Expr::CellRef(a), Expr::CellRef(bref)) = (&*b.left, &*b.right) {
@@ -741,12 +927,107 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
         Expr::RowRef(_) => return Err(EncodeRgceError::Unsupported("row references")),
-        Expr::StructuredRef(_) => {
-            return Err(EncodeRgceError::Unsupported("structured references"))
+        Expr::StructuredRef(r) => {
+            encode_structured_ref(r, out, StructuredRefClass::Ref)?;
         }
         Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
     }
 
+    Ok(())
+}
+
+#[cfg(feature = "encode")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StructuredRefClass {
+    Ref,
+    Value,
+}
+
+#[cfg(feature = "encode")]
+fn encode_structured_ref(
+    r: &formula_engine::StructuredRef,
+    out: &mut Vec<u8>,
+    class: StructuredRefClass,
+) -> Result<(), EncodeRgceError> {
+    if r.workbook.is_some() || r.sheet.is_some() {
+        return Err(EncodeRgceError::Unsupported(
+            "3D/sheet-qualified structured references",
+        ));
+    }
+
+    let mut sref_text = String::new();
+    if let Some(table) = &r.table {
+        sref_text.push_str(table);
+    }
+    sref_text.push('[');
+    sref_text.push_str(&r.spec);
+    sref_text.push(']');
+
+    let Some((sref, end)) = formula_engine::structured_refs::parse_structured_ref(&sref_text, 0) else {
+        return Err(EncodeRgceError::Unsupported("invalid structured reference syntax"));
+    };
+    if end != sref_text.len() {
+        return Err(EncodeRgceError::Unsupported("invalid structured reference syntax"));
+    }
+
+    let (item_code, col_kind, col1, col2) = match (sref.item, sref.columns) {
+        (None, formula_engine::structured_refs::StructuredColumns::All) => {
+            (0u16, 0u16, String::new(), String::new())
+        }
+        (Some(item), formula_engine::structured_refs::StructuredColumns::All) => {
+            (structured_ref_item_code(item), 0u16, String::new(), String::new())
+        }
+        (item, formula_engine::structured_refs::StructuredColumns::Single(col)) => {
+            (item.map(structured_ref_item_code).unwrap_or(0u16), 1u16, col, String::new())
+        }
+        (item, formula_engine::structured_refs::StructuredColumns::Range { start, end }) => (
+            item.map(structured_ref_item_code).unwrap_or(0u16),
+            2u16,
+            start,
+            end,
+        ),
+    };
+
+    const PTG_LIST: u8 = 0x2E;
+    let ptg = match class {
+        StructuredRefClass::Ref => PTG_LIST,
+        StructuredRefClass::Value => PTG_LIST.wrapping_add(0x20),
+    };
+
+    let flags: u16 = item_code | (col_kind << 3);
+
+    out.push(ptg);
+    out.extend_from_slice(&flags.to_le_bytes());
+
+    encode_utf16_len_prefixed(sref.table_name.as_deref().unwrap_or(""), out)?;
+    encode_utf16_len_prefixed(&col1, out)?;
+    encode_utf16_len_prefixed(&col2, out)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "encode")]
+fn structured_ref_item_code(item: formula_engine::structured_refs::StructuredRefItem) -> u16 {
+    match item {
+        formula_engine::structured_refs::StructuredRefItem::All => 1,
+        formula_engine::structured_refs::StructuredRefItem::Data => 2,
+        formula_engine::structured_refs::StructuredRefItem::Headers => 3,
+        formula_engine::structured_refs::StructuredRefItem::Totals => 4,
+        formula_engine::structured_refs::StructuredRefItem::ThisRow => 5,
+    }
+}
+
+#[cfg(feature = "encode")]
+fn encode_utf16_len_prefixed(s: &str, out: &mut Vec<u8>) -> Result<(), EncodeRgceError> {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let cch: u16 = units
+        .len()
+        .try_into()
+        .map_err(|_| EncodeRgceError::Unsupported("structured reference identifier too long"))?;
+    out.extend_from_slice(&cch.to_le_bytes());
+    for u in units {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
     Ok(())
 }
 

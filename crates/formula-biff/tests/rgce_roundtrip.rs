@@ -54,3 +54,45 @@ fn rgce_roundtrip_spill_range() {
     let decoded = decode_rgce(&rgce).expect("decode");
     assert_eq!(normalize("A1#"), normalize(&decoded));
 }
+
+#[test]
+fn rgce_roundtrip_structured_ref_this_row() {
+    let rgce = encode_rgce("[@Col]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("[@Col]"), normalize(&decoded));
+}
+
+#[test]
+fn rgce_roundtrip_structured_ref_table_column() {
+    let rgce = encode_rgce("Table1[Col]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("Table1[Col]"), normalize(&decoded));
+}
+
+#[test]
+fn rgce_roundtrip_structured_ref_headers_column() {
+    let rgce = encode_rgce("Table1[[#Headers],[Col]]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("Table1[[#Headers],[Col]]"), normalize(&decoded));
+}
+
+#[test]
+fn rgce_roundtrip_structured_ref_all() {
+    let rgce = encode_rgce("Table1[#All]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("Table1[#All]"), normalize(&decoded));
+}
+
+#[test]
+fn rgce_roundtrip_structured_ref_column_range() {
+    let rgce = encode_rgce("Table1[[Col1]:[Col2]]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("Table1[[Col1]:[Col2]]"), normalize(&decoded));
+}
+
+#[test]
+fn rgce_roundtrip_structured_ref_explicit_implicit_intersection() {
+    let rgce = encode_rgce("@Table1[Col]").expect("encode");
+    let decoded = decode_rgce(&rgce).expect("decode");
+    assert_eq!(normalize("@Table1[Col]"), normalize(&decoded));
+}
