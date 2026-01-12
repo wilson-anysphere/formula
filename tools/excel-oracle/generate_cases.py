@@ -2244,8 +2244,9 @@ def generate_cases() -> dict[str, Any]:
 
     # Boundary-date equality behavior (Excel quirks).
     #
-    # These are intentionally simple and vary only one boundary at a time to confirm Excel's
-    # strictness/leniency for equality cases.
+    # These are intentionally simple and vary only one boundary at a time. Today they are primarily
+    # used to pin current engine behavior in CI; verify the actual Excel semantics by generating a
+    # real Excel dataset via tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
     #
     # Locked by `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
     _add_case(
