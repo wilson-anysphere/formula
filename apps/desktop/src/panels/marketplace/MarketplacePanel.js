@@ -521,6 +521,15 @@ async function renderSearchResults({
                 const update = updates.find((u) => u.id === item.id);
                 if (!update) {
                   actions.textContent = "Up to date";
+                  tryShowToast("Up to date", "info");
+                  await renderSearchResults({
+                    container,
+                    marketplaceClient,
+                    extensionManager,
+                    extensionHostManager,
+                    query,
+                    transientStatusById,
+                  });
                   return;
                 }
                 actions.textContent = `Updating to ${update.latestVersion}…`;
@@ -557,9 +566,23 @@ async function renderSearchResults({
                 });
               } catch (error) {
                 // eslint-disable-next-line no-console
-                console.error(error);
-                tryShowToast(String(error?.message ?? error), "error");
-                actions.textContent = `Error: ${String(error?.message ?? error)}`;
+                const msg = String(error?.message ?? error);
+                if (/engine mismatch/i.test(msg)) {
+                  actions.textContent = "No compatible update";
+                  tryShowToast("No compatible update", "warning");
+                } else {
+                  console.error(error);
+                  tryShowToast(msg, "error");
+                  actions.textContent = `Error: ${msg}`;
+                }
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                });
               }
             },
           },
