@@ -36,9 +36,11 @@ from pathlib import Path
 from typing import Sequence
 
 
-def _run(*, cmd: Sequence[str], cwd: Path, env: dict[str, str]) -> None:
+def _run(*, cmd: Sequence[str], cwd: Path, env: dict[str, str], dry_run: bool) -> None:
     rendered = " ".join(cmd)
     print(f"+ {rendered}")
+    if dry_run:
+        return
     subprocess.run(list(cmd), cwd=str(cwd), env=env, check=True)
 
 
@@ -141,6 +143,11 @@ def main() -> int:
         action="store_true",
         help="Run validation tests after regeneration (formula-engine + node function-catalog + tools/excel-oracle python tests).",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the commands that would run without executing them or writing any files.",
+    )
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -161,7 +168,12 @@ def main() -> int:
             raise SystemExit(
                 "node was not found on PATH. Install node, or re-run with --skip-function-catalog."
             )
-        _run(cmd=("node", "scripts/generate-function-catalog.js"), cwd=repo_root, env=env)
+        _run(
+            cmd=("node", "scripts/generate-function-catalog.js"),
+            cwd=repo_root,
+            env=env,
+            dry_run=args.dry_run,
+        )
 
     if not args.skip_cases:
         _run(
@@ -173,6 +185,7 @@ def main() -> int:
             ),
             cwd=repo_root,
             env=env,
+            dry_run=args.dry_run,
         )
         # Keep convenience subset corpora (under tools/excel-oracle/) aligned with the canonical
         # cases.json corpus so Windows+Excel runs can target a small case set and still merge
@@ -181,6 +194,7 @@ def main() -> int:
             cmd=(sys.executable, "tools/excel-oracle/regenerate_subset_corpora.py"),
             cwd=repo_root,
             env=env,
+            dry_run=args.dry_run,
         )
 
     if not args.skip_pinned:
@@ -204,6 +218,7 @@ def main() -> int:
                     ),
                     cwd=repo_root,
                     env=env,
+                    dry_run=args.dry_run,
                 )
             else:
                 _run(
@@ -222,6 +237,7 @@ def main() -> int:
                     ),
                     cwd=repo_root,
                     env=env,
+                    dry_run=args.dry_run,
                 )
             _run(
                 cmd=(
@@ -236,6 +252,7 @@ def main() -> int:
                 ),
                 cwd=repo_root,
                 env=env,
+                dry_run=args.dry_run,
             )
 
     if args.run_tests:
@@ -246,9 +263,15 @@ def main() -> int:
                 cmd=("bash", "scripts/cargo_agent.sh", "test", "-p", "formula-engine"),
                 cwd=repo_root,
                 env=env,
+                dry_run=args.dry_run,
             )
         else:
-            _run(cmd=("cargo", "test", "-p", "formula-engine"), cwd=repo_root, env=env)
+            _run(
+                cmd=("cargo", "test", "-p", "formula-engine"),
+                cwd=repo_root,
+                env=env,
+                dry_run=args.dry_run,
+            )
         # Validate that the committed JS/TS function catalog artifacts are in sync.
         if _have_command("node"):
             _run(
@@ -259,6 +282,7 @@ def main() -> int:
                 ),
                 cwd=repo_root,
                 env=env,
+                dry_run=args.dry_run,
             )
         else:
             print("Skipping function catalog node:test suite (node not found on PATH).")
@@ -266,6 +290,7 @@ def main() -> int:
             cmd=(sys.executable, "-m", "unittest", "discover", "-s", "tools/excel-oracle/tests"),
             cwd=repo_root,
             env=env,
+            dry_run=args.dry_run,
         )
 
     return 0

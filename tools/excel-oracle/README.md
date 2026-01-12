@@ -238,6 +238,12 @@ To regenerate all of them from the current `formula-engine` implementation:
 python tools/excel-oracle/regenerate_synthetic_baseline.py
 ```
 
+To preview the commands it would run (without executing them or writing files), use:
+
+```bash
+python tools/excel-oracle/regenerate_synthetic_baseline.py --dry-run
+```
+
 ### Incremental pinned dataset updates (merge-friendly)
 
 When you *only add new cases* to `cases.json` (i.e. existing case IDs remain valid), regenerating the
