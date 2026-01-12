@@ -328,6 +328,7 @@ describe("DesktopSharedGrid theme reactivity", () => {
     });
 
     expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
+    const renderSpy = vi.spyOn(grid.renderer, "renderImmediately").mockImplementation(() => {});
 
     // Should observe the container + root + body.
     expect(records.length).toBeGreaterThanOrEqual(1);
@@ -352,6 +353,7 @@ describe("DesktopSharedGrid theme reactivity", () => {
     containerRecord.callback([], {} as any);
 
     expect(grid.renderer.getTheme().gridBg).toBe("rgb(40, 50, 60)");
+    expect(renderSpy).toHaveBeenCalledTimes(1);
 
     grid.destroy();
 
