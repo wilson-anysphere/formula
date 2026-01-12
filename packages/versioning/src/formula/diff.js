@@ -179,6 +179,33 @@ function coalesceEdits(edits) {
 }
 
 /**
+ * @template T
+ * @param {T[]} a
+ * @param {T[]} b
+ * @param {(x: T, y: T) => boolean} equals
+ */
+function commonPrefixLength(a, b, equals) {
+  const len = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < len && equals(a[i], b[i])) i += 1;
+  return i;
+}
+
+/**
+ * @template T
+ * @param {T[]} a
+ * @param {T[]} b
+ * @param {(x: T, y: T) => boolean} equals
+ * @param {number} prefixLen
+ */
+function commonSuffixLength(a, b, equals, prefixLen) {
+  const max = Math.min(a.length, b.length) - prefixLen;
+  let i = 0;
+  while (i < max && equals(a[a.length - 1 - i], b[b.length - 1 - i])) i += 1;
+  return i;
+}
+
+/**
  * Formula-aware diff returning token operations so callers can render changes with
  * syntax highlighting.
  *
@@ -201,11 +228,38 @@ export function diffFormula(oldFormula, newFormula, opts) {
   const oldTokens = tokenizeForDiff(oldText);
   const newTokens = tokenizeForDiff(newText);
 
+  const equals = (a, b) => tokenEquals(a, b, { normalize });
+
   const equal =
     oldTokens.length === newTokens.length &&
-    oldTokens.every((t, i) => tokenEquals(t, newTokens[i], { normalize }));
+    oldTokens.every((t, i) => equals(t, newTokens[i]));
 
-  const edits = myersDiff(oldTokens, newTokens, (a, b) => tokenEquals(a, b, { normalize }));
+  // Trim common prefix/suffix before running Myers to keep the O((N+M)^2) worst
+  // case (and memory use) away from long shared prefixes.
+  const prefixLen = commonPrefixLength(oldTokens, newTokens, equals);
+  const suffixLen = commonSuffixLength(oldTokens, newTokens, equals, prefixLen);
+
+  const oldMid = oldTokens.slice(prefixLen, oldTokens.length - suffixLen);
+  const newMid = newTokens.slice(prefixLen, newTokens.length - suffixLen);
+
+  // Guardrail: Myers stores the full trace to reconstruct an edit script.
+  // For extremely long formulas, fall back to a simple delete+insert diff for
+  // the middle section to keep memory bounded.
+  const MAX_MYERS_TOKENS = 2048;
+  const midEdits =
+    oldMid.length + newMid.length > MAX_MYERS_TOKENS
+      ? [
+          ...oldMid.map((token) => ({ type: "delete", token })),
+          ...newMid.map((token) => ({ type: "insert", token })),
+        ]
+      : myersDiff(oldMid, newMid, equals);
+
+  /** @type {Array<{ type: DiffOpType, token: Token }>} */
+  const edits = [];
+  for (const token of oldTokens.slice(0, prefixLen)) edits.push({ type: "equal", token });
+  edits.push(...midEdits);
+  for (const token of oldTokens.slice(oldTokens.length - suffixLen)) edits.push({ type: "equal", token });
+
   const ops = coalesceEdits(edits);
 
   return { equal, ops };
