@@ -540,6 +540,9 @@ export class CollabSession {
   /**
    * Optional offline persistence status + controls. Present when `options.offline`
    * is provided.
+   *
+   * @deprecated `options.offline` is deprecated. Prefer `options.persistence` and
+   * `session.whenLocalPersistenceLoaded()` / `persistence.clear(docId)` instead.
    */
   readonly offline?: {
     whenLoaded: () => Promise<void>;
