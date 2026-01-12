@@ -296,8 +296,9 @@ fn model_workbook_import_export_round_trips() {
         .find(|s| s.name == "Äbc")
         .expect("sheet a")
         .id;
+    let tab_color = TabColor::rgb("FF112233");
     storage
-        .set_sheet_tab_color(sheet_a_storage_id, Some("FF112233"))
+        .set_sheet_tab_color(sheet_a_storage_id, Some(&tab_color))
         .expect("set tab color");
 
     // Sparse invariant: only stored (non-truly-empty) cells should be persisted.

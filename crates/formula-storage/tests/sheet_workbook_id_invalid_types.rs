@@ -1,3 +1,4 @@
+use formula_model::TabColor;
 use formula_storage::{SheetVisibility, Storage};
 use rusqlite::{params, Connection, OpenFlags};
 
@@ -32,8 +33,9 @@ fn sheet_crud_tolerates_invalid_workbook_id_types() {
     storage
         .set_sheet_visibility(sheet.id, SheetVisibility::Hidden)
         .expect("set visibility even if workbook_id is corrupt");
+    let tab_color = TabColor::rgb("FF112233");
     storage
-        .set_sheet_tab_color(sheet.id, Some("FF112233"))
+        .set_sheet_tab_color(sheet.id, Some(&tab_color))
         .expect("set tab color even if workbook_id is corrupt");
     storage
         .set_sheet_xlsx_metadata(sheet.id, Some(42), Some("rId7"))

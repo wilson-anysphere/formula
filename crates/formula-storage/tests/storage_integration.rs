@@ -1,5 +1,6 @@
 use formula_model::{
-    ArrayValue, CellRef, ErrorValue, RichText, SheetNameError, SpillValue, EXCEL_MAX_SHEET_NAME_LEN,
+    ArrayValue, CellRef, ErrorValue, RichText, SheetNameError, SpillValue, TabColor,
+    EXCEL_MAX_SHEET_NAME_LEN,
 };
 use formula_storage::storage::StorageError;
 use formula_storage::{
@@ -588,8 +589,9 @@ fn sheet_metadata_persists_visibility_tab_color_and_xlsx_ids() {
     storage
         .set_sheet_visibility(sheet.id, SheetVisibility::Hidden)
         .expect("set visibility");
+    let tab_color = TabColor::rgb("FFFF0000");
     storage
-        .set_sheet_tab_color(sheet.id, Some("FFFF0000"))
+        .set_sheet_tab_color(sheet.id, Some(&tab_color))
         .expect("set tab color");
     storage
         .set_sheet_xlsx_metadata(sheet.id, Some(42), Some("rId7"))

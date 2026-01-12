@@ -1308,21 +1308,24 @@ impl Storage {
         Ok(())
     }
 
-    pub fn set_sheet_tab_color(&self, sheet_id: Uuid, tab_color: Option<&str>) -> Result<()> {
+    pub fn set_sheet_tab_color(
+        &self,
+        sheet_id: Uuid,
+        tab_color: Option<&formula_model::TabColor>,
+    ) -> Result<()> {
         let mut conn = self.conn.lock().expect("storage mutex poisoned");
         let tx = conn.transaction()?;
-        let tab_color_json = tab_color
-            .map(|c| serde_json::to_value(formula_model::TabColor::rgb(c)))
-            .transpose()?;
+        let tab_color_fast = tab_color.and_then(|c| c.rgb.as_deref());
+        let tab_color_json = tab_color.map(serde_json::to_value).transpose()?;
         let updated = tx.execute(
             "UPDATE sheets SET tab_color = ?1, tab_color_json = ?2 WHERE id = ?3",
-            params![tab_color, tab_color_json, sheet_id.to_string()],
+            params![tab_color_fast, tab_color_json, sheet_id.to_string()],
         )?;
         if updated == 0 {
             return Err(StorageError::SheetNotFound(sheet_id));
         }
         update_sheet_model_json_tx(&tx, sheet_id, |sheet| {
-            sheet.tab_color = tab_color.map(formula_model::TabColor::rgb);
+            sheet.tab_color = tab_color.cloned();
         })?;
         touch_workbook_modified_at(&tx, sheet_id)?;
         tx.commit()?;

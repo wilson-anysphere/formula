@@ -1083,18 +1083,9 @@ impl AppState {
                 ))
             })?;
 
-            // The storage API currently supports fast-path RGB values; treat non-RGB tab colors
-            // as unsupported for updates (they are still preserved on read+write).
-            let rgb = tab_color.as_ref().and_then(|c| c.rgb.as_deref());
-            if tab_color.is_some() && rgb.is_none() {
-                return Err(AppStateError::WhatIf(
-                    "tab color must be specified as an ARGB hex value".to_string(),
-                ));
-            }
-
             persistent
                 .storage
-                .set_sheet_tab_color(sheet_uuid, rgb)
+                .set_sheet_tab_color(sheet_uuid, tab_color.as_ref())
                 .map_err(|e| match e {
                     formula_storage::StorageError::SheetNotFound(_) => {
                         AppStateError::UnknownSheet(sheet_id.to_string())
