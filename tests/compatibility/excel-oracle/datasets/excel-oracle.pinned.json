@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T21:58:09.766552154Z",
+  "generatedAt": "2026-01-12T22:10:38.05482283Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "9973e6d5fd6149c84e72040e3a9734cbb7bb143cc5d9f7a202526d7dd91d2ad7",
-    "count": 1931
+    "sha256": "2a3bf7a995f2f9ab2b4c620a7e71d28ce7ce43d10fd1d91f0fb4fedca0cad247",
+    "count": 1935
   },
   "results": [
     {
@@ -17231,6 +17231,46 @@
       },
       "address": "C1",
       "displayText": "5"
+    },
+    {
+      "caseId": "oddfprice_basis_omitted_3c7f89f1309a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 113.59920582823823
+      },
+      "address": "C1",
+      "displayText": "113.59920582823823"
+    },
+    {
+      "caseId": "oddfyield_basis_omitted_ca5d006b4d66",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.08110512123658985
+      },
+      "address": "C1",
+      "displayText": "0.08110512123658985"
+    },
+    {
+      "caseId": "oddlprice_basis_omitted_476ea5c32499",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.48044585692473
+      },
+      "address": "C1",
+      "displayText": "100.48044585692473"
+    },
+    {
+      "caseId": "oddlyield_basis_omitted_f1ecf475d233",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.14811017424419679
+      },
+      "address": "C1",
+      "displayText": "0.14811017424419679"
     },
     {
       "caseId": "oddfprice_basis_omitted_yld0_03dad81a6f57",

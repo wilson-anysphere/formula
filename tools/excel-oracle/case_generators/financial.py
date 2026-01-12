@@ -834,6 +834,46 @@ def generate(
     # Also include yld=0, which is a common edge where discount factors become 1.0.
     add_case(
         cases,
+        prefix="oddfprice_basis_omitted",
+        tags=["financial", "odd_coupon", "ODDFPRICE", "basis_omitted", "basis0"],
+        formula=(
+            "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),"
+            "0.0785,0.0625,100,2)"
+        ),
+        description="ODDFPRICE with basis omitted (defaults to 0)",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_basis_omitted",
+        tags=["financial", "odd_coupon", "ODDFYIELD", "basis_omitted", "basis0"],
+        formula=(
+            "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),"
+            "0.0785,98,100,2)"
+        ),
+        description="ODDFYIELD with basis omitted (defaults to 0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_basis_omitted",
+        tags=["financial", "odd_coupon", "ODDLPRICE", "basis_omitted", "basis0"],
+        formula=(
+            "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),"
+            "0.0785,0.0625,100,2)"
+        ),
+        description="ODDLPRICE with basis omitted (defaults to 0)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_basis_omitted",
+        tags=["financial", "odd_coupon", "ODDLYIELD", "basis_omitted", "basis0"],
+        formula=(
+            "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),"
+            "0.0785,98,100,2)"
+        ),
+        description="ODDLYIELD with basis omitted (defaults to 0)",
+    )
+    add_case(
+        cases,
         prefix="oddfprice_basis_omitted_yld0",
         tags=["financial", "odd_coupon", "ODDFPRICE", "basis_omitted", "basis0", "yld0"],
         formula=(
