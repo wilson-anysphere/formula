@@ -466,7 +466,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
   const setIndicatorText = (
     text: string,
-    meta: { mode?: string; conn?: string; sync?: string } = {},
+    meta: { mode?: string; conn?: string; sync?: string; docId?: string } = {},
   ): void => {
     element.textContent = text;
     element.title = text;
@@ -476,6 +476,8 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     else delete element.dataset.collabConn;
     if (meta.sync) element.dataset.collabSync = meta.sync;
     else delete element.dataset.collabSync;
+    if (meta.docId) element.dataset.collabDocId = meta.docId;
+    else delete element.dataset.collabDocId;
   };
 
   const detachProviderListeners = (provider: unknown): void => {
@@ -598,13 +600,13 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     }
 
     if (offlineLoading) {
-      setIndicatorText(`${docId} • Loading…`, { mode: "collab", conn: "loading", sync: "loading" });
+      setIndicatorText(`${docId} • Loading…`, { mode: "collab", conn: "loading", sync: "loading", docId });
       return;
     }
 
     // No provider: offline-only/local collab session.
     if (!currentProvider) {
-      setIndicatorText(`${docId} • Offline`, { mode: "collab", conn: "offline", sync: "offline" });
+      setIndicatorText(`${docId} • Offline`, { mode: "collab", conn: "offline", sync: "offline", docId });
       return;
     }
 
@@ -650,6 +652,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       mode: "collab",
       conn: connected ? "connected" : connecting ? "connecting" : "disconnected",
       sync: connected ? (synced ? "synced" : "syncing") : hasEverSynced ? "unsynced" : "syncing",
+      docId,
     });
   };
 

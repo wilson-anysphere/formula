@@ -108,6 +108,8 @@ test.describe("collab status indicator (collab mode)", () => {
     await expect(page2.getByTestId("collab-status")).toBeVisible();
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-mode", "collab");
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-mode", "collab");
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-doc-id", docId);
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-doc-id", docId);
 
     await expect(page.getByTestId("collab-status")).toContainText(docId);
     await expect(page2.getByTestId("collab-status")).toContainText(docId);

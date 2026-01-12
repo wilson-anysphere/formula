@@ -7,6 +7,7 @@ test.describe("collab status indicator", () => {
     await gotoDesktop(page);
     await expect(page.getByTestId("collab-status")).toBeVisible();
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-mode", "local");
+    await expect(page.getByTestId("collab-status")).not.toHaveAttribute("data-collab-doc-id", /.+/);
     await expect(page.getByTestId("collab-status")).toHaveText("Local");
   });
 });
