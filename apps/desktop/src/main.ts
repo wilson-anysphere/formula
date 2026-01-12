@@ -71,7 +71,7 @@ import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
 import { shellOpen } from "./tauri/shellOpen";
 import { setTrayStatus } from "./tauri/trayStatus";
-import { installUpdaterUi } from "./tauri/updaterUi";
+import { FORMULA_RELEASES_URL, installUpdaterUi } from "./tauri/updaterUi";
 import { installOpenFileIpc } from "./tauri/openFileIpc";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
@@ -8948,6 +8948,12 @@ try {
         );
       });
     }, fallbackDelayMs);
+  });
+
+  void listen("menu-open-release-page", () => {
+    void shellOpen(FORMULA_RELEASES_URL).catch((err) => {
+      console.error("Failed to open release page:", err);
+    });
   });
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.

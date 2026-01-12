@@ -282,8 +282,10 @@ The updater dialog includes an **"Open release page"** action. If an update down
 that action is relabeled/promoted to **"Download manually"** and the dialog surfaces manual
 download/downgrade instructions.
 
-1. Open Formula's **Releases** page (in-app via the updater dialog's **"Open release page"** / **"Download manually"**
-   action, or directly in your browser): https://github.com/wilson-anysphere/formula/releases
+1. Open Formula's **Releases** page:
+   - In-app: **Help → Open Release Page**, or via the updater dialog's **"Open release page"** / **"Download manually"**
+     action.
+   - Browser: https://github.com/wilson-anysphere/formula/releases
 2. Download the installer/bundle for the **older version** you want.
 3. Install it over your current install (or uninstall first if your platform's installer blocks
    downgrades).
@@ -512,7 +514,7 @@ Events emitted by the Rust host (see `main.rs`, `menu.rs`, `tray.rs`, `updater.r
   - `menu-open`, `menu-new`, `menu-save`, `menu-save-as`, `menu-export-pdf`, `menu-close-window`, `menu-quit`
   - `menu-undo`, `menu-redo`, `menu-cut`, `menu-copy`, `menu-paste`, `menu-paste-special`, `menu-select-all`
   - `menu-zoom-in`, `menu-zoom-out`, `menu-zoom-reset`
-  - `menu-about`, `menu-check-updates`
+  - `menu-about`, `menu-check-updates`, `menu-open-release-page`
 - Tray:
   - `tray-new`, `tray-open`, `tray-quit`
 - Shortcuts:

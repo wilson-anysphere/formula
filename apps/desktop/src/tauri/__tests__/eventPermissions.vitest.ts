@@ -13,6 +13,9 @@ type CapabilityPermission =
     };
 
 describe("tauri capability event permissions", () => {
+  const allowListenIdentifiers = ["event:allow-listen", "core:event:allow-listen"] as const;
+  const allowEmitIdentifiers = ["event:allow-emit", "core:event:allow-emit"] as const;
+
   it("is scoped to the main window label via the capability file", () => {
     const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
     const tauriConf = JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
@@ -42,18 +45,19 @@ describe("tauri capability event permissions", () => {
     const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
 
     // Using the string form grants the permission with its default (unscoped) allowlist. For
-    // `core:event:allow-listen` / `core:event:allow-emit` that effectively becomes "allow all events", which
-    // is not acceptable for hardened desktop builds.
-    expect(permissions).not.toContain("core:event:allow-listen");
-    expect(permissions).not.toContain("core:event:allow-emit");
+    // `event:allow-listen` / `event:allow-emit` (or the `core:`-prefixed variants in some Tauri
+    // versions) that effectively becomes "allow all events", which is not acceptable for
+    // hardened desktop builds.
+    for (const id of allowListenIdentifiers) expect(permissions).not.toContain(id);
+    for (const id of allowEmitIdentifiers) expect(permissions).not.toContain(id);
 
     const listen = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-listen",
+        typeof p === "object" && p != null && allowListenIdentifiers.includes((p as any).identifier),
     );
     const emit = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-emit",
+        typeof p === "object" && p != null && allowEmitIdentifiers.includes((p as any).identifier),
     );
 
     expect(listen).toBeTruthy();
@@ -107,11 +111,11 @@ describe("tauri capability event permissions", () => {
 
     const allowListen = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-listen",
+        typeof p === "object" && p != null && allowListenIdentifiers.includes((p as any).identifier),
     ) as any;
     const allowEmit = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-emit",
+        typeof p === "object" && p != null && allowEmitIdentifiers.includes((p as any).identifier),
     ) as any;
 
     const listenEvents = new Set(
@@ -160,6 +164,7 @@ describe("tauri capability event permissions", () => {
       "menu-zoom-reset",
       "menu-about",
       "menu-check-updates",
+      "menu-open-release-page",
 
       // Updater
       "update-check-started",
@@ -220,11 +225,11 @@ describe("tauri capability event permissions", () => {
 
     const allowListen = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-listen",
+        typeof p === "object" && p != null && allowListenIdentifiers.includes((p as any).identifier),
     ) as any;
     const allowEmit = permissions.find(
       (p): p is Exclude<CapabilityPermission, string> =>
-        typeof p === "object" && p != null && (p as any).identifier === "core:event:allow-emit",
+        typeof p === "object" && p != null && allowEmitIdentifiers.includes((p as any).identifier),
     ) as any;
 
     const allowlistedEvents = [

@@ -367,7 +367,6 @@ export class FormulaBarView {
           nextCursorEnd = active.end;
         }
       }
-
       this.textarea.value = toggled.text;
       this.textarea.setSelectionRange(nextCursorStart, nextCursorEnd);
       this.model.updateDraft(toggled.text, nextCursorStart, nextCursorEnd);

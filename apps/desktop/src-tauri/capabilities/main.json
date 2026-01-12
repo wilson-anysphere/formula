@@ -113,7 +113,7 @@
         { "event": "menu-zoom-reset" },
         { "event": "menu-about" },
         { "event": "menu-check-updates" },
-
+        { "event": "menu-open-release-page" },
         { "event": "startup:window-visible" },
         { "event": "startup:webview-loaded" },
         { "event": "startup:tti" },

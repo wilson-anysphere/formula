@@ -17,6 +17,7 @@ pub const ITEM_PASTE_SPECIAL: &str = "menu-paste-special";
 pub const ITEM_SELECT_ALL: &str = "menu-select-all";
 pub const ITEM_ABOUT: &str = "menu-about";
 pub const ITEM_CHECK_UPDATES: &str = "menu-check-updates";
+pub const ITEM_OPEN_RELEASE_PAGE: &str = "menu-open-release-page";
 pub const ITEM_ZOOM_IN: &str = "menu-zoom-in";
 pub const ITEM_ZOOM_OUT: &str = "menu-zoom-out";
 pub const ITEM_ZOOM_RESET: &str = "menu-zoom-reset";
@@ -113,6 +114,10 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             crate::updater::spawn_update_check(app, crate::updater::UpdateCheckSource::Manual);
             let _ = app.emit(ITEM_CHECK_UPDATES, ());
         }
+        ITEM_OPEN_RELEASE_PAGE => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_OPEN_RELEASE_PAGE, ());
+        }
         #[cfg(debug_assertions)]
         ITEM_RELOAD => {
             if let Some(window) = app.get_webview_window("main") {
@@ -195,6 +200,8 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
         true,
         None::<&str>,
     )?;
+    let open_release_page =
+        MenuItem::with_id(handle, ITEM_OPEN_RELEASE_PAGE, "Open Release Page", true, None::<&str>)?;
 
     let sep_file_1 = PredefinedMenuItem::separator(handle)?;
     let sep_file_2 = PredefinedMenuItem::separator(handle)?;
@@ -301,13 +308,18 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
     let help_menu = {
         #[cfg(target_os = "macos")]
         {
-            Submenu::with_items(handle, "Help", true, &[&check_updates])?
+            Submenu::with_items(handle, "Help", true, &[&check_updates, &open_release_page])?
         }
 
         #[cfg(not(target_os = "macos"))]
         {
             let sep_help = PredefinedMenuItem::separator(handle)?;
-            Submenu::with_items(handle, "Help", true, &[&about, &sep_help, &check_updates])?
+            Submenu::with_items(
+                handle,
+                "Help",
+                true,
+                &[&about, &sep_help, &check_updates, &open_release_page],
+            )?
         }
     };
 

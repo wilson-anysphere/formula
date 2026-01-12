@@ -17,4 +17,3 @@ export function registerFindReplaceShortcuts({
 
   return { findDialog, replaceDialog, goToDialog };
 }
-
