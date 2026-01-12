@@ -220,6 +220,14 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::Error(err) => CellValue::Error(*err),
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
         ModelCellValue::Entity(entity) => CellValue::Text(entity.display_value.clone()),
+        ModelCellValue::Image(image) => {
+            let display = image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]");
+            CellValue::Text(display.to_string())
+        }
         ModelCellValue::Record(record) => {
             if let Some(display_field) = record.display_field.as_deref() {
                 if let Some(value) = record.fields.get(display_field) {
@@ -245,6 +253,14 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
                             } else {
                                 Some(CellValue::Text(display))
                             }
+                        }
+                        ModelCellValue::Image(image) => {
+                            let display = image
+                                .alt_text
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("[Image]");
+                            Some(CellValue::Text(display.to_string()))
                         }
                         _ => None,
                     };
@@ -410,6 +426,20 @@ mod tests {
             CellValue::Text("Entity display".to_string())
         );
 
+        let Some(image) = from_json_or_skip_unknown_variant(json!({
+            "type": "image",
+            "value": {
+                "imageId": "logo.png",
+                "altText": "Logo"
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&image),
+            CellValue::Text("Logo".to_string())
+        );
+
         // Canonical camelCase field name (`displayValue`) should also deserialize.
         let Some(entity_camel_case) = from_json_or_skip_unknown_variant(json!({
             "type": "entity",
@@ -518,6 +548,21 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&record_entity_display_field),
             CellValue::Text("Nested entity".to_string())
+        );
+
+        let record_image_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "logo",
+                "fields": {
+                    "logo": { "type": "image", "value": { "imageId": "logo.png", "altText": "Logo" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_image_display_field),
+            CellValue::Text("Logo".to_string())
         );
 
         // Invalid display field falls back to the record's display string (if present),
