@@ -105,6 +105,19 @@ def generate(
         output_cell="J1",
     )
 
+    # Non-formula criteria cells under a blank header should be invalid (Excel returns #VALUE!).
+    add_case(
+        cases,
+        prefix="database_dsum_computed",
+        tags=["database", "DSUM", "computed-criteria", "invalid"],
+        formula='=DSUM(A1:D4,"Salary",F1:F2)',
+        inputs=[
+            *db_table_inputs,
+            CellInput("F2", ">30"),
+        ],
+        output_cell="J1",
+    )
+
     # OR across clauses mixing computed + standard criteria:
     # (Dept="Sales" AND computed Age>32) OR (Dept="HR" AND Age<30)
     add_case(
