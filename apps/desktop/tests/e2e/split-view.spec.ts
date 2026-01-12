@@ -549,13 +549,31 @@ test.describe("split view", () => {
   const modes = ["legacy", "shared"] as const;
 
   for (const mode of modes) {
-    test(`dragging a range in the secondary pane inserts it into the formula bar (${mode})`, async ({ page }) => {
+    test(`dragging a range in the secondary pane inserts it into the formula bar and commit clears the overlay (${mode})`, async ({
+      page,
+    }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Seed numeric inputs in A1 and A2 (so SUM has a visible result).
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+        doc.setCellValue(sheetId, "A1", 1);
+        doc.setCellValue(sheetId, "A2", 2);
+      });
       await waitForIdle(page);
 
       await page.getByTestId("split-vertical").click();
       await expect(page.getByTestId("grid-secondary")).toBeVisible();
       await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+      const secondary = page.locator("#grid-secondary");
+      const secondaryStatus = secondary.getByTestId("canvas-grid-a11y-status");
+      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+      const secondary = page.locator("#grid-secondary");
+      const secondaryStatus = secondary.getByTestId("canvas-grid-a11y-status");
 
       // Select C1 in the primary pane (same offsets as formula-bar.spec.ts).
       await page.click("#grid", { position: { x: 260, y: 40 } });
@@ -577,6 +595,26 @@ test.describe("split view", () => {
       await page.mouse.up();
 
       await expect(input).toHaveValue("=SUM(A1:A2");
+      await expect(secondaryStatus).toContainText("Selection A1:A2");
+
+      // Commit the formula; the split-view transient range selection overlay should clear.
+      await input.focus();
+      await page.keyboard.type(")");
+      await page.keyboard.press("Enter");
+      await waitForIdle(page);
+
+      const { c1Formula } = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+        return { c1Formula: doc.getCell(sheetId, "C1").formula };
+      });
+      expect(c1Formula).toBe("=SUM(A1:A2)");
+
+      const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
+      expect(c1Value).toBe("3");
+
+      await expect(secondaryStatus).toContainText("Selection C1");
     });
   }
 
