@@ -2334,9 +2334,11 @@ fn build_protection_sheet_stream() -> Vec<u8> {
     // Worksheet protection with a legacy password hash.
     push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
     push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
-    // Objects and scenarios are protected by default in Excel.
-    push_record(&mut sheet, RECORD_OBJPROTECT, &1u16.to_le_bytes());
-    push_record(&mut sheet, RECORD_SCENPROTECT, &1u16.to_le_bytes());
+    // Allow editing objects and scenarios while protection is enabled.
+    // This verifies we correctly map BIFF's "is protected" flags to our model's "is allowed"
+    // booleans.
+    push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet

@@ -29,5 +29,6 @@ fn imports_biff_workbook_and_sheet_protection() {
         .expect("fixture should contain one sheet");
     assert_eq!(sheet.sheet_protection.enabled, true);
     assert_eq!(sheet.sheet_protection.password_hash, Some(0xCBEB));
+    assert_eq!(sheet.sheet_protection.edit_objects, true);
+    assert_eq!(sheet.sheet_protection.edit_scenarios, true);
 }
-
