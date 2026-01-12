@@ -9,7 +9,7 @@ const {
   isPlainObject,
   normalizePath,
   readExtensionPackageV2
-} = v2Core as any;
+} = v2Core;
 
 const SIGNATURE_ALGORITHM = "ed25519";
 

@@ -23,7 +23,20 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
     // Hide Sheet2.
-    await sheet2Tab.click({ button: "right", position: { x: 10, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
@@ -39,7 +52,19 @@ test.describe("sheet tab context menu", () => {
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
@@ -55,7 +80,19 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
 
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
-    await sheet2TabVisible.click({ button: "right", position: { x: 10, y: 10 } });
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
     await menu.getByRole("button", { name: "Red" }).click();
