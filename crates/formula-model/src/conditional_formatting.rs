@@ -1415,7 +1415,14 @@ impl ValueKey {
             CellValue::RichText(t) => Some(ValueKey::String(t.text)),
             CellValue::Entity(e) => Some(ValueKey::String(e.display_value)),
             CellValue::Record(r) => Some(ValueKey::String(r.to_string())),
-            CellValue::Image(image) => Some(ValueKey::String(image.image_id.0)),
+            CellValue::Image(image) => Some(ValueKey::String(
+                image
+                    .alt_text
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("[Image]")
+                    .to_string(),
+            )),
             CellValue::Array(_) => None,
             CellValue::Spill(_) => None,
         }
@@ -2034,6 +2041,17 @@ mod tests {
         assert_eq!(
             ValueKey::from_cell_value(CellValue::Record(record)),
             Some(ValueKey::String(record_display))
+        );
+
+        let image = crate::ImageValue {
+            image_id: crate::drawings::ImageId::new("image1.png"),
+            alt_text: Some("Logo".to_string()),
+            width: None,
+            height: None,
+        };
+        assert_eq!(
+            ValueKey::from_cell_value(CellValue::Image(image)),
+            Some(ValueKey::String("Logo".to_string()))
         );
 
         let record_entity = crate::RecordValue {
