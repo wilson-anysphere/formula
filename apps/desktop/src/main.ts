@@ -999,6 +999,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       // Keep AutoSave off until a real autosave implementation exists.
       "file.save.autoSave": false,
       "view.show.showFormulas": app.getShowFormulas(),
+      "formulas.formulaAuditing.showFormulas": app.getShowFormulas(),
       "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
       "data.queriesConnections.queriesConnections":
@@ -5289,7 +5290,11 @@ mountRibbon(ribbonRoot, {
         else app.closeCommentsPanel();
         return;
       case "view.show.showFormulas":
-        app.toggleShowFormulas();
+        app.setShowFormulas(pressed);
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.showFormulas":
+        app.setShowFormulas(pressed);
         app.focus();
         return;
       case "view.show.performanceStats":
@@ -6014,6 +6019,20 @@ mountRibbon(ribbonRoot, {
         }
         return;
 
+      case "formulas.formulaAuditing.tracePrecedents":
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.traceDependents":
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.removeArrows":
+        app.clearAuditing();
+        app.focus();
+        return;
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
