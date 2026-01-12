@@ -243,3 +243,19 @@ test("parseClipboardContentToCellGrid does not trim CF_HTML payloads (offsets ar
   assert.ok(grid);
   assert.equal(grid[0][0].value, "RIGHT");
 });
+
+test("clipboard HTML tolerates CF_HTML end offsets that include stripped trailing NUL padding", () => {
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
+    includeFragmentMarkers: false,
+    offsets: "bytes",
+    // Include trailing NUL padding *inside* the offset calculations (so EndHTML/EndFragment point past
+    // the trimmed string). This simulates some native clipboard bridges.
+    afterHtml: "\u0000\u0000\u0000",
+    fragmentEnd: "htmlEnd",
+  });
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "RIGHT");
+});

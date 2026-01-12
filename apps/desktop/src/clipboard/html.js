@@ -133,15 +133,23 @@ function normalizeClipboardHtml(html) {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
     if (start < 0 || end <= start) return null;
     const bytes = getUtf8Bytes();
-    if (!bytes || end > bytes.length) return null;
-    const decoded = decodeUtf8(bytes.subarray(start, end));
+    if (!bytes || start >= bytes.length) return null;
+    // Some producers include trailing NUL padding in their offset calculations. When we strip those
+    // NULs, EndHTML/EndFragment can end up slightly out-of-bounds. Clamp to the available byte
+    // length so we can still honor an otherwise-correct Start* offset.
+    const clampedEnd = Math.min(end, bytes.length);
+    if (clampedEnd <= start) return null;
+    const decoded = decodeUtf8(bytes.subarray(start, clampedEnd));
     return typeof decoded === "string" ? decoded : null;
   };
 
   const safeSliceCodeUnits = (start, end) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    if (start < 0 || end <= start || end > input.length) return null;
-    return input.slice(start, end);
+    if (start < 0 || end <= start) return null;
+    if (start >= input.length) return null;
+    const clampedEnd = Math.min(end, input.length);
+    if (clampedEnd <= start) return null;
+    return input.slice(start, clampedEnd);
   };
 
   const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
