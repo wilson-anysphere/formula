@@ -2707,6 +2707,39 @@ mod tests {
     }
 
     #[test]
+    fn read_csv_blocking_supports_utf16le_tab_delimited_text() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("data.csv");
+
+        // Excel's "Unicode Text" export is UTF-16LE with a BOM and (typically) tab-delimited.
+        let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+        let mut bytes = vec![0xFF, 0xFE];
+        for unit in tsv.encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        std::fs::write(&path, &bytes).expect("write utf16 tsv");
+
+        let workbook = read_csv_blocking(&path).expect("read csv");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        let sheet = &workbook.sheets[0];
+        let table = sheet.columnar.as_deref().expect("expected columnar table");
+        assert_eq!(table.column_count(), 2);
+        assert_eq!(table.row_count(), 2);
+
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Text("hello".to_string())
+        );
+        assert_eq!(sheet.get_cell(1, 0).computed_value, CellScalar::Number(2.0));
+        assert_eq!(
+            sheet.get_cell(1, 1).computed_value,
+            CellScalar::Text("world".to_string())
+        );
+    }
+
+    #[test]
     fn read_csv_blocking_sniffs_pipe_delimiter() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let path = tmp.path().join("data.csv");
