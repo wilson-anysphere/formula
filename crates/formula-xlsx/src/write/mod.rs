@@ -3315,15 +3315,18 @@ fn relationship_target_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Option
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
                 let mut type_ = None;
                 let mut target = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"Type" => type_ = Some(attr.unescape_value()?.into_owned()),
-                        b"Target" => target = Some(attr.unescape_value()?.into_owned()),
-                        _ => {}
+                    let key = local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"Type") {
+                        type_ = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Target") {
+                        target = Some(attr.unescape_value()?.into_owned());
                     }
                 }
                 if type_.as_deref() == Some(rel_type) {
@@ -3381,16 +3384,46 @@ fn patch_workbook_rels_for_sheet_edits(
     let mut writer = Writer::new(Vec::with_capacity(existing.len() + added.len() * 128));
     let mut buf = Vec::new();
 
+    let mut root_prefix: Option<String> = None;
+    let mut root_has_default_ns = false;
+    let mut relationship_prefix: Option<String> = None;
+
     let mut skipping = false;
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"Relationship" => {
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if attr.key.as_ref() == b"xmlns" {
+                            root_has_default_ns = true;
+                            break;
+                        }
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
                 let mut id = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"Id" {
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Id") {
                         id = Some(attr.unescape_value()?.into_owned());
                     }
                 }
@@ -3400,11 +3433,18 @@ fn patch_workbook_rels_for_sheet_edits(
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"Relationship" => {
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
                 let mut id = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() == b"Id" {
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Id") {
                         id = Some(attr.unescape_value()?.into_owned());
                     }
                 }
@@ -3412,13 +3452,23 @@ fn patch_workbook_rels_for_sheet_edits(
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
-            Event::End(ref e) if skipping && e.name().as_ref() == b"Relationship" => {
+            Event::End(ref e)
+                if skipping && local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
                 skipping = false;
             }
-            Event::End(ref e) if e.name().as_ref() == b"Relationships" => {
+            Event::End(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+                let prefix = relationship_prefix.as_deref().or_else(|| {
+                    if root_has_default_ns {
+                        None
+                    } else {
+                        root_prefix.as_deref()
+                    }
+                });
+                let relationship_tag = prefixed_tag(prefix, "Relationship");
                 for sheet in added {
                     let target = relationship_target_from_workbook(&sheet.path);
-                    let mut rel = quick_xml::events::BytesStart::new("Relationship");
+                    let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
                     rel.push_attribute(("Id", sheet.relationship_id.as_str()));
                     rel.push_attribute(("Type", WORKSHEET_REL_TYPE));
                     rel.push_attribute(("Target", target.as_str()));

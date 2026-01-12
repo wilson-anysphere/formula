@@ -546,17 +546,22 @@ fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
     let mut shared_strings_target = None;
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+            Event::Start(e) | Event::Empty(e)
+                if crate::openxml::local_name(e.name().as_ref())
+                    .eq_ignore_ascii_case(b"Relationship") =>
+            {
                 let mut id = None;
                 let mut type_ = None;
                 let mut target = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    match attr.key.as_ref() {
-                        b"Id" => id = Some(attr.unescape_value()?.into_owned()),
-                        b"Type" => type_ = Some(attr.unescape_value()?.into_owned()),
-                        b"Target" => target = Some(attr.unescape_value()?.into_owned()),
-                        _ => {}
+                    let key = crate::openxml::local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"Id") {
+                        id = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Type") {
+                        type_ = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Target") {
+                        target = Some(attr.unescape_value()?.into_owned());
                     }
                 }
                 if let (Some(id), Some(target)) = (id, target) {
