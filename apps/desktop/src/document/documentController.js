@@ -1016,6 +1016,10 @@ class SheetModel {
      * @type {Set<string>}
      */
     this.styledCells = new Set();
+    /** @type {Map<number, Set<number>>} */
+    this.styledCellsByRow = new Map();
+    /** @type {Map<number, Set<number>>} */
+    this.styledCellsByCol = new Map();
     /** @type {SheetViewState} */
     this.view = emptySheetViewState();
 
@@ -1146,8 +1150,37 @@ class SheetModel {
 
     // Maintain the derived set of styled cells.
     if (beforeHasStyle !== afterHasStyle) {
-      if (afterHasStyle) this.styledCells.add(key);
-      else this.styledCells.delete(key);
+      if (afterHasStyle) {
+        this.styledCells.add(key);
+
+        let cols = this.styledCellsByRow.get(row);
+        if (!cols) {
+          cols = new Set();
+          this.styledCellsByRow.set(row, cols);
+        }
+        cols.add(col);
+
+        let rows = this.styledCellsByCol.get(col);
+        if (!rows) {
+          rows = new Set();
+          this.styledCellsByCol.set(col, rows);
+        }
+        rows.add(row);
+      } else {
+        this.styledCells.delete(key);
+
+        const cols = this.styledCellsByRow.get(row);
+        if (cols) {
+          cols.delete(col);
+          if (cols.size === 0) this.styledCellsByRow.delete(row);
+        }
+
+        const rows = this.styledCellsByCol.get(col);
+        if (rows) {
+          rows.delete(row);
+          if (rows.size === 0) this.styledCellsByCol.delete(col);
+        }
+      }
     }
 
     // Maintain content-cell count.

@@ -320,9 +320,99 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
       storedBounds.startCol <= range.end.col);
 
   const styledKeys = sheet.styledCells;
-  const hasStyledCellsIndex = Boolean(styledKeys && typeof styledKeys[Symbol.iterator] === "function");
+  const styledCellsByRow = sheet.styledCellsByRow;
+  const styledCellsByCol = sheet.styledCellsByCol;
+  const hasAxisIndex =
+    styledCellsByRow &&
+    typeof styledCellsByRow.get === "function" &&
+    styledCellsByCol &&
+    typeof styledCellsByCol.get === "function";
 
-  if (selectionIntersectsStoredBounds && hasStyledCellsIndex) {
+  if (selectionIntersectsStoredBounds && hasAxisIndex) {
+    const rowCount = range.end.row - range.start.row + 1;
+    const colCount = range.end.col - range.start.col + 1;
+
+    // Prefer iterating the smaller axis to keep work proportional to the number of
+    // intersecting cell overrides rather than total overrides in the sheet.
+    const iterateRows = rowCount <= colCount;
+
+    if (iterateRows && rowCount <= AXIS_ENUMERATION_LIMIT) {
+      for (let row = range.start.row; row <= range.end.row; row++) {
+        const cols = styledCellsByRow.get(row);
+        if (!cols || cols.size === 0) continue;
+        for (const col of cols) {
+          if (col < range.start.col || col > range.end.col) continue;
+          const cell = sheet.cells.get(`${row},${col}`);
+          if (!cell || cell.styleId === 0) continue;
+
+          const rowStyleId = rowStyleIds.get(row) ?? 0;
+          const colStyleId = colStyleIds.get(col) ?? 0;
+          const runStyleId = styleIdForRowInRuns(formatRunsByCol.get(col), row);
+
+          if (runColSet.has(col)) {
+            let rows = cellOverrideRowsByRunCol.get(col);
+            if (!rows) {
+              rows = [];
+              cellOverrideRowsByRunCol.set(col, rows);
+            }
+            rows.push(row);
+          } else {
+            const regionKey = `${colStyleId}|${rowStyleId}`;
+            overriddenCellCountByNoRunRegion.set(regionKey, (overriddenCellCountByNoRunRegion.get(regionKey) ?? 0) + 1);
+          }
+
+          const cellKey = `${colStyleId}|${rowStyleId}|${runStyleId}|${cell.styleId}`;
+          const cachedMatch = cellPredicateCache.get(cellKey);
+          if (cachedMatch === false) return false;
+          if (cachedMatch === true) continue;
+
+          const merged = applyStylePatch(baseStyle(colStyleId, rowStyleId, runStyleId), styleTable.get(cell.styleId));
+          const matches = Boolean(predicate(merged));
+          cellPredicateCache.set(cellKey, matches);
+          if (!matches) return false;
+        }
+      }
+    } else {
+      // Column iteration is always safe (Excel max 16,384 columns).
+      for (let col = range.start.col; col <= range.end.col; col++) {
+        const rows = styledCellsByCol.get(col);
+        if (!rows || rows.size === 0) continue;
+        for (const row of rows) {
+          if (row < range.start.row || row > range.end.row) continue;
+          const cell = sheet.cells.get(`${row},${col}`);
+          if (!cell || cell.styleId === 0) continue;
+
+          const rowStyleId = rowStyleIds.get(row) ?? 0;
+          const colStyleId = colStyleIds.get(col) ?? 0;
+          const runStyleId = styleIdForRowInRuns(formatRunsByCol.get(col), row);
+
+          if (runColSet.has(col)) {
+            let rowList = cellOverrideRowsByRunCol.get(col);
+            if (!rowList) {
+              rowList = [];
+              cellOverrideRowsByRunCol.set(col, rowList);
+            }
+            rowList.push(row);
+          } else {
+            const regionKey = `${colStyleId}|${rowStyleId}`;
+            overriddenCellCountByNoRunRegion.set(regionKey, (overriddenCellCountByNoRunRegion.get(regionKey) ?? 0) + 1);
+          }
+
+          const cellKey = `${colStyleId}|${rowStyleId}|${runStyleId}|${cell.styleId}`;
+          const cachedMatch = cellPredicateCache.get(cellKey);
+          if (cachedMatch === false) return false;
+          if (cachedMatch === true) continue;
+
+          const merged = applyStylePatch(baseStyle(colStyleId, rowStyleId, runStyleId), styleTable.get(cell.styleId));
+          const matches = Boolean(predicate(merged));
+          cellPredicateCache.set(cellKey, matches);
+          if (!matches) return false;
+        }
+      }
+    }
+  }
+  // Backward-compatible fallback (older sheet encodings without `styledCells`).
+  else if (selectionIntersectsStoredBounds && styledKeys && typeof styledKeys[Symbol.iterator] === "function") {
     for (const key of styledKeys) {
       const cell = sheet.cells.get(key);
       if (!cell || cell.styleId === 0) continue;
