@@ -159,8 +159,11 @@ This is where Excel binds a cell’s `vm` index to a rich value index via the ri
   <futureMetadata name="XLRICHVALUE" count="1">
     <bk>
       <extLst>
-        <ext uri="{BDBB8CDC-FA1E-496E-A857-3C3F30B4D73F}">
-          <!-- i="5" => rich value #5 (0-based) in richValue*.xml -->
+        <!-- ext/@uri GUID varies by producer/version; preserve it byte-for-byte when round-tripping. -->
+        <!-- Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`: {3e2802c4-a4d2-4d8b-9148-e3be6c30e623} -->
+        <ext uri="{3e2802c4-a4d2-4d8b-9148-e3be6c30e623}">
+          <!-- i="5" => rich value #5 (0-based) in the rich value table
+               (e.g. richValue*.xml or rdrichvalue.xml depending on the naming scheme) -->
           <xlrd:rvb i="5"/>
         </ext>
       </extLst>
