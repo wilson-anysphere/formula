@@ -22,10 +22,9 @@ function isLayeredFormatRange(range) {
   // - full sheet (sheet format layer)
   // - full-width rows (row format layer)
   // - full-height columns (column format layer)
-  return (
-    (range.start.row === 0 && range.end.row === EXCEL_MAX_ROW) ||
-    (range.start.col === 0 && range.end.col === EXCEL_MAX_COL)
-  );
+  const isFullHeightCols = range.start.row === 0 && range.end.row === EXCEL_MAX_ROW;
+  const isFullWidthRows = range.start.col === 0 && range.end.col === EXCEL_MAX_COL;
+  return isFullHeightCols || isFullWidthRows;
 }
 
 function ensureSafeFormattingRange(rangeOrRanges) {
@@ -54,6 +53,10 @@ function ensureSafeFormattingRange(rangeOrRanges) {
       continue;
     }
     const cellCount = rangeCellCount(r);
+    // DocumentController.setRangeFormat stores very large rectangles as compressed "range runs"
+    // (sheet.formatRunsByCol) rather than enumerating per-cell overrides, so those ranges are
+    // safe to apply even if they are larger than our per-cell cap.
+    if (cellCount > MAX_RANGE_FORMATTING_CELLS) continue;
     totalCells += cellCount;
     if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
       try {
