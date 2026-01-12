@@ -590,6 +590,9 @@ export class SpreadsheetApp {
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
   private lastHoveredCommentCellKey: number | null = null;
+  private sharedHoverCellKey: number | null = null;
+  private sharedHoverCellRect: { x: number; y: number; width: number; height: number } | null = null;
+  private sharedHoverCellHasComment = false;
 
   private collabSession: CollabSession | null = null;
   private collabBinder: { destroy: () => void } | null = null;
@@ -1059,16 +1062,17 @@ export class SpreadsheetApp {
                effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
              }
 
-              const prevX = this.scrollX;
-              const prevY = this.scrollY;
-              const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-              this.scrollX = nextScroll.x;
-              this.scrollY = nextScroll.y;
-              this.syncSharedChartPanes(effectiveViewport);
-              this.hideCommentTooltip();
-              this.renderCharts(zoomChanged);
-              this.renderAuditing();
-              this.renderSelection();
+               const prevX = this.scrollX;
+               const prevY = this.scrollY;
+               const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+               this.scrollX = nextScroll.x;
+               this.scrollY = nextScroll.y;
+               this.syncSharedChartPanes(effectiveViewport);
+               this.clearSharedHoverCellCache();
+               this.hideCommentTooltip();
+               this.renderCharts(zoomChanged);
+               this.renderAuditing();
+               this.renderSelection();
               if (this.scrollX !== prevX || this.scrollY !== prevY) {
                 this.notifyScrollListeners();
               }
@@ -3134,6 +3138,8 @@ export class SpreadsheetApp {
 
   private onSharedGridAxisSizeChange(change: GridAxisSizeChange): void {
     if (!this.sharedGrid) return;
+    this.clearSharedHoverCellCache();
+    this.hideCommentTooltip();
 
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
@@ -3251,21 +3257,76 @@ export class SpreadsheetApp {
       return;
     }
 
+    const cachedRect = this.sharedHoverCellRect;
+    if (
+      cachedRect &&
+      x >= cachedRect.x &&
+      y >= cachedRect.y &&
+      x <= cachedRect.x + cachedRect.width &&
+      y <= cachedRect.y + cachedRect.height
+    ) {
+      if (!this.sharedHoverCellHasComment) {
+        if (this.commentTooltip.classList.contains("comment-tooltip--visible")) {
+          this.hideCommentTooltip();
+        }
+        return;
+      }
+
+      const cellKey = this.sharedHoverCellKey;
+      if (cellKey == null) {
+        this.hideCommentTooltip();
+        return;
+      }
+
+      if (
+        this.lastHoveredCommentCellKey === cellKey &&
+        this.commentTooltip.classList.contains("comment-tooltip--visible")
+      ) {
+        return;
+      }
+
+      const preview = this.commentPreviewByCoord.get(cellKey) ?? "";
+      if (!preview) {
+        this.sharedHoverCellHasComment = false;
+        this.hideCommentTooltip();
+        return;
+      }
+
+      this.lastHoveredCommentCellKey = cellKey;
+      this.commentTooltip.textContent = preview;
+      this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
+      this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
+      this.commentTooltip.classList.add("comment-tooltip--visible");
+      return;
+    }
+
     const picked = this.sharedGrid.renderer.pickCellAt(x, y);
     if (!picked) {
       this.hideCommentTooltip();
+      this.clearSharedHoverCellCache();
       return;
     }
+    const cellRect = this.sharedGrid.getCellRect(picked.row, picked.col);
+    if (!cellRect) {
+      this.hideCommentTooltip();
+      this.clearSharedHoverCellCache();
+      return;
+    }
+    this.sharedHoverCellRect = cellRect;
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
     if (picked.row < headerRows || picked.col < headerCols) {
+      this.sharedHoverCellKey = null;
+      this.sharedHoverCellHasComment = false;
       this.hideCommentTooltip();
       return;
     }
 
     const docCell = this.docCellFromGridCell(picked);
     const cellKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
+    this.sharedHoverCellKey = cellKey;
     const preview = this.commentPreviewByCoord.get(cellKey);
+    this.sharedHoverCellHasComment = Boolean(preview);
     if (!preview) {
       this.hideCommentTooltip();
       return;
@@ -3277,7 +3338,6 @@ export class SpreadsheetApp {
     ) {
       return;
     }
-
     this.lastHoveredCommentCellKey = cellKey;
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
@@ -3645,6 +3705,12 @@ export class SpreadsheetApp {
     this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
 
+  private clearSharedHoverCellCache(): void {
+    this.sharedHoverCellKey = null;
+    this.sharedHoverCellRect = null;
+    this.sharedHoverCellHasComment = false;
+  }
+
   private reindexCommentCells(): void {
     this.commentCells.clear();
     this.commentMeta.clear();
@@ -3819,6 +3885,7 @@ export class SpreadsheetApp {
     this.height = rect.height;
     this.rootLeft = rect.left;
     this.rootTop = rect.top;
+    this.clearSharedHoverCellCache();
     this.dpr = window.devicePixelRatio || 1;
 
     if (this.sharedGrid) {

@@ -143,6 +143,7 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
 
       const tooltip = (app as any).commentTooltip as HTMLDivElement;
       const listSpy = vi.spyOn((app as any).commentManager, "listForCell");
+      const pickSpy = vi.spyOn((app as any).sharedGrid.renderer, "pickCellAt");
 
       const mutations: MutationRecord[] = [];
       const observer = new MutationObserver((records) => mutations.push(...records));
@@ -158,6 +159,7 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       expect(tooltip.classList.contains("comment-tooltip--visible")).toBe(true);
       expect(tooltip.textContent).toBe("Hello");
       expect(listSpy).toHaveBeenCalledTimes(0);
+      expect(pickSpy).toHaveBeenCalledTimes(1);
       expect(mutations.length).toBeGreaterThan(0);
       const firstMutationCount = mutations.length;
 
@@ -167,6 +169,7 @@ describe("SpreadsheetApp shared-grid comment tooltip hover perf", () => {
       await flushMicrotasks();
 
       expect(listSpy).toHaveBeenCalledTimes(0);
+      expect(pickSpy).toHaveBeenCalledTimes(1);
       expect(mutations.length).toBe(firstMutationCount);
       expect(rootRectSpy).toHaveBeenCalledTimes(0);
       expect(selectionRectSpy).toHaveBeenCalledTimes(0);
