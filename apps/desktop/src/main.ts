@@ -3804,6 +3804,39 @@ mountRibbon(ribbonRoot, {
   onCommand: (commandId) => {
     const doc = app.getDocument();
 
+    const openCustomZoomQuickPick = async (): Promise<void> => {
+      if (!app.supportsZoom()) return;
+      const baseOptions = [50, 75, 100, 125, 150, 200];
+      const current = Math.round(app.getZoom() * 100);
+      const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
+      const picked = await showQuickPick(
+        options.map((value) => ({ label: `${value}%`, value })),
+        { placeHolder: "Zoom" },
+      );
+      if (picked == null) return;
+      app.setZoom(picked / 100);
+      syncZoomControl();
+      app.focus();
+    };
+
+    const zoomMenuItemPrefix = "view.zoom.zoom.";
+    if (commandId.startsWith(zoomMenuItemPrefix)) {
+      const suffix = commandId.slice(zoomMenuItemPrefix.length);
+      if (suffix === "custom") {
+        void openCustomZoomQuickPick();
+        return;
+      }
+
+      const percent = Number(suffix);
+      if (!Number.isFinite(percent) || percent <= 0) return;
+      if (!app.supportsZoom()) return;
+
+      app.setZoom(percent / 100);
+      syncZoomControl();
+      app.focus();
+      return;
+    }
+
     const fontSizePrefix = "home.font.fontSize.";
     if (commandId.startsWith(fontSizePrefix)) {
       const size = Number(commandId.slice(fontSizePrefix.length));
@@ -4266,21 +4299,11 @@ mountRibbon(ribbonRoot, {
         syncZoomControl();
         app.focus();
         return;
+      case "view.zoom.zoomToSelection":
+        showToast("Zoom to Selection not implemented yet");
+        return;
       case "view.zoom.zoom":
-        void (async () => {
-          if (!app.supportsZoom()) return;
-          const baseOptions = [50, 75, 100, 125, 150, 200];
-          const current = Math.round(app.getZoom() * 100);
-          const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
-          const picked = await showQuickPick(
-            options.map((value) => ({ label: `${value}%`, value })),
-            { placeHolder: "Zoom" },
-          );
-          if (picked == null) return;
-          app.setZoom(picked / 100);
-          syncZoomControl();
-          app.focus();
-        })();
+        void openCustomZoomQuickPick();
         return;
       case "view.zoom.zoomToSelection":
         app.zoomToSelection();
