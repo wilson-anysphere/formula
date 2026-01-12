@@ -56,6 +56,7 @@ function getBuiltInTypeScriptSupport() {
 
 const builtInTypeScript = getBuiltInTypeScriptSupport();
 const canExecuteTypeScript = builtInTypeScript.enabled || hasTypeScriptDependency();
+const canExecuteTsx = hasTypeScriptDependency();
 
 test("run-node-ts can execute a TS entrypoint", { skip: !canExecuteTypeScript }, () => {
   const child = spawnSync(
@@ -90,4 +91,24 @@ test("run-node-ts strips pnpm `--` delimiters before forwarding argv", { skip: !
     `run-node-ts exited with ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
   );
   assert.equal(child.stdout.trim(), "ok");
+});
+
+test("run-node-ts handles TSX entrypoints", { skip: !canExecuteTypeScript }, () => {
+  const child = spawnSync(
+    process.execPath,
+    ["scripts/run-node-ts.mjs", "scripts/__fixtures__/run-node-ts/entry.tsx"],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  if (canExecuteTsx) {
+    assert.equal(
+      child.status,
+      0,
+      `run-node-ts exited with ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+    );
+    assert.equal(child.stdout.trim(), "tsx-ok");
+  } else {
+    assert.notEqual(child.status, 0, "expected run-node-ts to fail without a TSX-capable loader");
+    assert.match(child.stderr, /TSX execution is not available/i);
+  }
 });

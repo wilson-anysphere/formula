@@ -28,6 +28,7 @@ if (!entry) {
 // execute the child process with `cwd=repoRoot` so workspace resolution behaves
 // consistently.
 const entryPath = path.isAbsolute(entry) ? entry : path.resolve(process.cwd(), entry);
+const entryExt = path.extname(entryPath).toLowerCase();
 
 const baseNodeArgs = ["--no-warnings"];
 const tsLoaderArgs = resolveTypeScriptLoaderArgs();
@@ -40,6 +41,15 @@ if (tsLoaderArgs.length > 0) {
       "TypeScript execution is not available in this environment.\n" +
         "- Install dependencies (to enable the TypeScript transpile loader), or\n" +
         "- Use a Node version with built-in TypeScript support.",
+    );
+    process.exit(1);
+  }
+
+  if (entryExt === ".tsx") {
+    console.error(
+      "TSX execution is not available in this environment.\n" +
+        "- Install dependencies (to enable the TypeScript transpile loader), or\n" +
+        "- Use a .ts entrypoint instead (Node's built-in TypeScript support does not execute .tsx modules).",
     );
     process.exit(1);
   }
