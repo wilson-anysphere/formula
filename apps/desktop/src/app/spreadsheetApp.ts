@@ -845,6 +845,10 @@ export class SpreadsheetApp {
         // Ensure comment edits are tracked by the binder-origin collaborative UndoManager
         // (so Cmd/Ctrl+Z reverts comment add/edit/reply/resolve just like cell edits).
         transact: (fn) => {
+          // If the comments root was created lazily (e.g. first comment add), ensure it
+          // is added to the UndoManager scope before we perform the tracked transaction.
+          // This keeps early comment edits undoable even if they happen before provider sync.
+          this.ensureCommentsUndoScope();
           const transact = (undoService as any)?.transact;
           if (typeof transact === "function") {
             transact(fn);
