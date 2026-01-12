@@ -147,6 +147,7 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
 
     let sheet2_id = doc.workbook.sheets[1].id;
     doc.workbook.delete_sheet(sheet2_id).expect("delete sheet2");
+    doc.workbook.add_sheet("Added").expect("add sheet");
 
     let saved = doc.save_to_vec().expect("save");
 
@@ -193,4 +194,3 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         "[Content_Types].xml must retain override for /xl/richData/richValues.xml"
     );
 }
-
