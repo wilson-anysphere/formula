@@ -199,9 +199,9 @@ fn project_normalized_data_project_properties_preserves_non_ascii_mbcs_bytes_ver
     let expected = [b"Name".as_slice(), mbcs_bytes].concat();
     let not_expected = [b"Name".as_slice(), utf8_bytes].concat();
 
-    assert!(
-        find_subslice(&normalized, &expected).is_some(),
-        "expected ProjectNormalizedData to contain Name token bytes in original MBCS encoding"
+    assert_eq!(
+        normalized, expected,
+        "expected ProjectNormalizedData to equal the concatenated Name token bytes (raw MBCS)"
     );
     assert!(
         find_subslice(&normalized, &not_expected).is_none(),
@@ -222,4 +222,38 @@ fn project_normalized_data_project_properties_preserves_non_ascii_mbcs_bytes_ver
         !normalized.contains(&b'\r') && !normalized.contains(&b'\n'),
         "expected ProjectNormalizedData to omit NWLN bytes"
     );
+}
+
+#[test]
+fn project_normalized_data_project_properties_excludes_project_id_property_entirely() {
+    // MS-OVBA §2.4.2.6 explicitly excludes the ProjectId (`ID=...`) property from the transcript.
+    // This test ensures the entire property is omitted (both the name token and the value bytes).
+
+    let project_stream = concat!(
+        "ID=\"{11111111-2222-3333-4444-555555555555}\"\r\n",
+        "Name=\"VBAProject\"\r\n",
+    );
+
+    // `project_normalized_data()` requires `VBA/dir` to exist, but the contents can be empty.
+    let dir_container = compress_container(&[]);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // With an empty `VBA/dir` and no designers, the output should be exactly the Name token bytes.
+    assert_eq!(normalized, b"NameVBAProject");
 }
