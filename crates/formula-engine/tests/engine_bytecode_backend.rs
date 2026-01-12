@@ -40,19 +40,7 @@ inventory::submit! {
 }
 
 fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
-    fn col_to_name(mut col: u32) -> String {
-        col += 1;
-        let mut out = Vec::<u8>::new();
-        while col > 0 {
-            let rem = (col - 1) % 26;
-            out.push(b'A' + rem as u8);
-            col = (col - 1) / 26;
-        }
-        out.reverse();
-        String::from_utf8(out).expect("column letters are ASCII")
-    }
-
-    format!("{}{}", col_to_name(addr.col), addr.row + 1)
+    addr.to_a1()
 }
 
 struct EngineResolver<'a> {

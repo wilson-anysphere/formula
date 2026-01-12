@@ -980,10 +980,9 @@ fn format_number_general(n: f64) -> String {
     };
 
     // Match the engine's number-to-text coercion semantics used by the AST evaluator (Excel's
-    // "General" format), including locale-specific decimal separators.
-    //
-    // This avoids divergence in bytecode-eligible formulas like `=CONCAT(1.5)` under `de-DE`,
-    // which Excel formats as `1,5`.
+    // "General" format), including locale-specific decimal separators. This avoids divergence in
+    // bytecode-eligible formulas like `=1.5&""` / `=CONCAT(1.5)` under `de-DE`, which Excel formats
+    // as `1,5`.
     formula_format::format_value(FmtValue::Number(n), None, &options).text
 }
 
