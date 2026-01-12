@@ -44,6 +44,12 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/rich-data/images-in-cell.xlsx");
     let fixture_bytes = std::fs::read(&fixture_path)?;
 
+    let app_xml = String::from_utf8(zip_part(&fixture_bytes, "docProps/app.xml"))?;
+    assert!(
+        app_xml.contains("<Application>Microsoft Excel</Application>"),
+        "expected docProps/app.xml to indicate the workbook was saved by Excel, got: {app_xml}"
+    );
+
     for part in [
         "xl/cellimages.xml",
         "xl/_rels/cellimages.xml.rels",
