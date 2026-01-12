@@ -799,4 +799,40 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn normalizes_model_entity_display_value_and_record_display_field() {
+        let entity = formula_model::EntityValue::new("AAPL");
+        assert_eq!(
+            normalize_model_value(&CellValue::Entity(entity.clone())),
+            NormalizedValue::Text("AAPL".to_string())
+        );
+
+        let mut record = formula_model::RecordValue::default();
+        record.display_value = "fallback".to_string();
+        record.display_field = Some("Name".to_string());
+        record
+            .fields
+            .insert("Name".to_string(), CellValue::String("Alice".to_string()));
+
+        assert_eq!(
+            normalize_model_value(&CellValue::Record(record.clone())),
+            NormalizedValue::Text("Alice".to_string())
+        );
+
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+
+        set_engine_value(&mut engine, "Sheet1", "A1", &CellValue::Entity(entity)).unwrap();
+        set_engine_value(&mut engine, "Sheet1", "A2", &CellValue::Record(record)).unwrap();
+
+        assert_eq!(
+            normalize_engine_value(&engine.get_cell_value("Sheet1", "A1")),
+            NormalizedValue::Text("AAPL".to_string())
+        );
+        assert_eq!(
+            normalize_engine_value(&engine.get_cell_value("Sheet1", "A2")),
+            NormalizedValue::Text("Alice".to_string())
+        );
+    }
 }
