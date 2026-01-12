@@ -334,8 +334,8 @@ function createTauriClipboardProvider() {
       }
 
       // 2) Secondary path: Best-effort rich write via ClipboardItem when available (WebView-dependent).
-      // ClipboardItem writes are best-effort and intentionally avoid `text/rtf` so we don't
-      // regress HTML clipboard writes on platforms that reject unsupported types.
+      // Some platforms reject unknown/unsupported clipboard types (especially `text/rtf`).
+      // When that happens, retry with just HTML/plain so we don't regress HTML clipboard writes.
       const clipboard = globalThis.navigator?.clipboard;
       if ((html || rtf) && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
@@ -344,6 +344,7 @@ function createTauriClipboardProvider() {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
           };
           if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
+          if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
 
           await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
