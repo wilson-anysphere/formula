@@ -967,6 +967,25 @@ pub fn build_note_comment_missing_txo_header_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// TXO record header is empty/truncated and the TXO text is split across multiple `CONTINUE`
+/// records, with the *second* fragment omitting the BIFF8 flags byte.
+pub fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_fixture_xls(
+) -> Vec<u8> {
+    let workbook_stream =
+        build_note_comment_missing_txo_header_missing_flags_in_second_fragment_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
 /// TXO header is truncated such that the `cbRuns` field is missing.
 ///
 /// The `cchText` field is intentionally larger than the available text bytes, and a formatting-run
@@ -2550,6 +2569,14 @@ fn build_note_comment_missing_txo_header_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesMissingTxoHeaderNoFlagsMid",
+        &build_note_comment_missing_txo_header_missing_flags_in_second_fragment_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_truncated_txo_header_missing_cb_runs_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesTxoHeaderNoCbRuns",
@@ -3468,6 +3495,57 @@ fn build_note_comment_missing_txo_header_sheet_stream() -> Vec<u8> {
     // Formatting runs continuation. Unlike continued string fragments, this payload does **not**
     // have a leading flags byte. When the TXO header is missing, our fallback decoder should stop
     // before decoding these bytes as text.
+    push_record(&mut sheet, RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_missing_txo_header_missing_flags_in_second_fragment_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO record with an empty header, forcing best-effort fallback decoding from CONTINUE fragments.
+    push_record(&mut sheet, RECORD_TXO, &[]);
+
+    // CONTINUE #1: BIFF8 flags byte + first two chars.
+    let mut cont1 = Vec::<u8>::new();
+    cont1.push(0); // flags: compressed 8-bit chars
+    cont1.extend_from_slice(b"He");
+    push_record(&mut sheet, RECORD_CONTINUE, &cont1);
+
+    // CONTINUE #2: remaining chars *without* a flags byte.
+    let text_bytes = TEXT.as_bytes();
+    push_record(&mut sheet, RECORD_CONTINUE, &text_bytes[2..]);
+
+    // Formatting runs continuation. Unlike continued string fragments, this payload does **not**
+    // have a leading flags byte. Our fallback decoder should stop before decoding these bytes as text.
     push_record(&mut sheet, RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]);
 
     push_record(&mut sheet, RECORD_EOF, &[]);

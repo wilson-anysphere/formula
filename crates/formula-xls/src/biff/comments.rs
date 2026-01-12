@@ -1148,10 +1148,16 @@ fn fallback_decode_continue_fragments(
     let mut ansi_bytes: Vec<u8> = Vec::new();
     let mut utf16_bytes: Vec<u8> = Vec::new();
     let mut pending_unicode_byte: Option<u8> = None;
+    let mut current_is_unicode: Option<bool> = None;
+    let mut warned_missing_flags = false;
     let mut remaining_chars = TXO_MAX_TEXT_CHARS;
     for frag in continues {
         if remaining_chars == 0 {
             break;
+        }
+
+        if frag.is_empty() {
+            continue;
         }
 
         // If this fragment looks like TXO formatting run data (no leading flags byte), stop before
@@ -1160,18 +1166,33 @@ fn fallback_decode_continue_fragments(
             break;
         }
 
-        let Some((&flags, bytes)) = frag.split_first() else {
+        let Some((&first, rest)) = frag.split_first() else {
             continue;
         };
 
-        // Continuation fragments for BIFF8 `XLUnicodeString` use a one-byte "high-byte" flag,
-        // which is typically 0/1. If we see something else, assume we've reached formatting-run
-        // data and stop best-effort.
-        if flags > 1 {
-            break;
+        let (bytes, is_unicode, has_flags) = if matches!(first, 0 | 1) {
+            let is_unicode = (first & 0x01) != 0;
+            (rest, is_unicode, true)
+        } else {
+            // Nonstandard fragment: missing the 1-byte "high-byte" flag. Assume this fragment
+            // continues using the same encoding as the previous fragment (default: compressed).
+            let is_unicode = current_is_unicode.unwrap_or(false);
+            (frag, is_unicode, false)
+        };
+
+        if has_flags {
+            current_is_unicode = Some(is_unicode);
+        } else if !warned_missing_flags {
+            warned_missing_flags = true;
+            push_warning(
+                warnings,
+                format!(
+                    "TXO record at offset {} has CONTINUE fragment missing BIFF8 flags byte; assuming the previous fragment encoding",
+                    record.offset
+                ),
+            );
         }
 
-        let is_unicode = (flags & 0x01) != 0;
         if is_unicode {
             if !ansi_bytes.is_empty() {
                 out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
@@ -2135,6 +2156,39 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn falls_back_to_decoding_continue_fragments_when_txo_header_is_missing_and_a_later_fragment_is_missing_flags_byte(
+    ) {
+        // Similar to `parses_biff8_txo_text_when_a_later_continue_fragment_is_missing_flags_byte`,
+        // but the TXO header is also missing/truncated, forcing us down the fallback decoder path.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &[]),
+            continue_text_compressed_bytes(b"He"),
+            // Second fragment omits the BIFF8 flags byte.
+            record(records::RECORD_CONTINUE, b"llo"),
+            // Formatting runs CONTINUE payload (dummy bytes, no leading flags byte).
+            record(records::RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("falling back")),
+            "expected fallback warning; warnings={warnings:?}"
+        );
+        assert!(
+            warnings.iter().any(|w| w.contains("missing BIFF8 flags byte")),
+            "expected missing-flags warning; warnings={warnings:?}"
+        );
     }
 
     #[test]
