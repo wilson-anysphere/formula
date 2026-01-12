@@ -1,7 +1,8 @@
-use formula_engine::sort_filter::apply_autofilter_to_outline;
+use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::sort_filter::{apply_autofilter_to_outline, apply_autofilter_to_outline_with_value_locale};
 use formula_model::{
-    CellRef, CellValue, FilterColumn, FilterCriterion, FilterJoin, FilterValue, Outline, Range,
-    SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
+    CellRef, CellValue, FilterColumn, FilterCriterion, FilterJoin, FilterValue, NumberComparison,
+    Outline, Range, SheetAutoFilter, TextMatch, TextMatchKind, Worksheet,
 };
 
 #[test]
@@ -115,4 +116,42 @@ fn autofilter_blanks_does_not_treat_errors_as_blank() {
     assert_eq!(result.hidden_sheet_rows, vec![1]);
     assert!(outline.rows.entry(2).hidden.filter);
     assert!(!outline.rows.entry(3).hidden.filter);
+}
+
+#[test]
+fn autofilter_with_value_locale_parses_text_numbers() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+    sheet.set_value(CellRef::new(0, 0), CellValue::String("Val".into()));
+    sheet.set_value(CellRef::new(1, 0), CellValue::String("1,10".into()));
+    sheet.set_value(CellRef::new(2, 0), CellValue::String("1,2".into()));
+
+    let range = Range::from_a1("A1:A3").unwrap();
+
+    let filter = SheetAutoFilter {
+        range,
+        filter_columns: vec![FilterColumn {
+            col_id: 0,
+            join: FilterJoin::Any,
+            criteria: vec![FilterCriterion::Number(NumberComparison::LessThan(1.15))],
+            values: Vec::new(),
+            raw_xml: Vec::new(),
+        }],
+        sort_state: None,
+        raw_xml: Vec::new(),
+    };
+
+    let mut outline = Outline::default();
+    let result = apply_autofilter_to_outline_with_value_locale(
+        &sheet,
+        &mut outline,
+        range,
+        Some(&filter),
+        ValueLocaleConfig::de_de(),
+    );
+
+    // Row 1 is header and should always be visible.
+    assert_eq!(result.visible_rows, vec![true, true, false]);
+    assert_eq!(result.hidden_sheet_rows, vec![2]);
+    assert!(!outline.rows.entry(2).hidden.filter);
+    assert!(outline.rows.entry(3).hidden.filter);
 }

@@ -168,15 +168,6 @@ fn compare_key_value(a: &SortKeyValue, b: &SortKeyValue, key: &SortKey) -> Order
     }
 }
 
-pub(crate) fn compute_header_rows(
-    row_count: usize,
-    header: HeaderOption,
-    keys: &[SortKey],
-    cell_at: impl FnMut(usize, usize) -> CellValue,
-) -> usize {
-    compute_header_rows_with_value_locale(row_count, header, keys, ValueLocaleConfig::en_us(), cell_at)
-}
-
 pub(crate) fn compute_header_rows_with_value_locale(
     row_count: usize,
     header: HeaderOption,
@@ -189,21 +180,6 @@ pub(crate) fn compute_header_rows_with_value_locale(
         HeaderOption::HasHeader => 1.min(row_count),
         HeaderOption::Auto => detect_header_row(row_count, keys, value_locale, &mut cell_at),
     }
-}
-
-pub(crate) fn compute_row_permutation(
-    row_count: usize,
-    header_rows: usize,
-    keys: &[SortKey],
-    cell_at: impl FnMut(usize, usize) -> CellValue,
-) -> RowPermutation {
-    compute_row_permutation_with_value_locale(
-        row_count,
-        header_rows,
-        keys,
-        ValueLocaleConfig::en_us(),
-        cell_at,
-    )
 }
 
 pub(crate) fn compute_row_permutation_with_value_locale(

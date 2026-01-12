@@ -1,6 +1,8 @@
-use crate::sort_filter::sort::{compute_header_rows, compute_row_permutation};
+use crate::locale::ValueLocaleConfig;
+use crate::sort_filter::sort::{compute_header_rows_with_value_locale, compute_row_permutation_with_value_locale};
 use crate::sort_filter::{
-    apply_autofilter, AutoFilter, CellValue, FilterResult, RowPermutation, SortSpec,
+    apply_autofilter_with_value_locale, AutoFilter, CellValue, FilterResult, RowPermutation,
+    SortSpec,
 };
 use crate::{parse_formula, CellAddr, LocaleConfig, ParseOptions, SerializeOptions};
 use formula_model::{
@@ -11,6 +13,15 @@ pub fn sort_worksheet_range(
     sheet: &mut Worksheet,
     range: Range,
     spec: &SortSpec,
+) -> RowPermutation {
+    sort_worksheet_range_with_value_locale(sheet, range, spec, ValueLocaleConfig::en_us())
+}
+
+pub fn sort_worksheet_range_with_value_locale(
+    sheet: &mut Worksheet,
+    range: Range,
+    spec: &SortSpec,
+    value_locale: ValueLocaleConfig,
 ) -> RowPermutation {
     let row_count = range.height() as usize;
     if row_count <= 1 || spec.keys.is_empty() {
@@ -33,12 +44,20 @@ pub fn sort_worksheet_range(
         model_cell_value_to_sort_value(&sheet.value(CellRef::new(row, col)))
     };
 
-    let header_rows = compute_header_rows(row_count, spec.header, &spec.keys, |r, c| {
-        cell_at(sheet, r, c)
-    });
-    let perm = compute_row_permutation(row_count, header_rows, &spec.keys, |r, c| {
-        cell_at(sheet, r, c)
-    });
+    let header_rows = compute_header_rows_with_value_locale(
+        row_count,
+        spec.header,
+        &spec.keys,
+        value_locale,
+        |r, c| cell_at(sheet, r, c),
+    );
+    let perm = compute_row_permutation_with_value_locale(
+        row_count,
+        header_rows,
+        &spec.keys,
+        value_locale,
+        |r, c| cell_at(sheet, r, c),
+    );
 
     // Nothing to permute (e.g. header-only range).
     if header_rows >= row_count {
@@ -90,6 +109,22 @@ pub fn apply_autofilter_to_outline(
     outline: &mut Outline,
     range: Range,
     filter: Option<&SheetAutoFilter>,
+) -> FilterResult {
+    apply_autofilter_to_outline_with_value_locale(
+        sheet,
+        outline,
+        range,
+        filter,
+        ValueLocaleConfig::en_us(),
+    )
+}
+
+pub fn apply_autofilter_to_outline_with_value_locale(
+    sheet: &Worksheet,
+    outline: &mut Outline,
+    range: Range,
+    filter: Option<&SheetAutoFilter>,
+    value_locale: ValueLocaleConfig,
 ) -> FilterResult {
     let row_count = range.height() as usize;
     let col_count = range.width() as usize;
@@ -151,7 +186,7 @@ pub fn apply_autofilter_to_outline(
     let range_data = crate::sort_filter::RangeData::new(range_ref, rows)
         .expect("worksheet range should always produce rectangular RangeData");
 
-    let result = apply_autofilter(&range_data, &filter);
+    let result = apply_autofilter_with_value_locale(&range_data, &filter, value_locale);
 
     for hidden_row_0based in &result.hidden_sheet_rows {
         let row_1based = u32::try_from(*hidden_row_0based)

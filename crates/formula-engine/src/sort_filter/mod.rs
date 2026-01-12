@@ -18,5 +18,5 @@ pub use sort::{
 };
 pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
 pub use visibility::{HiddenRows, RowVisibility};
-pub use worksheet::apply_autofilter_to_outline;
-pub use worksheet::sort_worksheet_range;
+pub use worksheet::{apply_autofilter_to_outline, apply_autofilter_to_outline_with_value_locale};
+pub use worksheet::{sort_worksheet_range, sort_worksheet_range_with_value_locale};

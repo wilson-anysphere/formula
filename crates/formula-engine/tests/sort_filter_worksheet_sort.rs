@@ -1,5 +1,7 @@
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::sort_filter::{
-    sort_worksheet_range, HeaderOption, SortKey, SortOrder, SortSpec, SortValueType,
+    sort_worksheet_range, sort_worksheet_range_with_value_locale, HeaderOption, SortKey, SortOrder,
+    SortSpec, SortValueType,
 };
 use formula_model::{CellRef, CellValue, ErrorValue, Range, Worksheet};
 
@@ -89,4 +91,38 @@ fn worksheet_sort_places_errors_after_booleans_and_orders_by_error_code() {
     );
     assert_eq!(sheet.value(CellRef::new(7, 0)), CellValue::Error(ErrorValue::Field));
     assert_eq!(sheet.value(CellRef::new(8, 0)), CellValue::Empty);
+}
+
+#[test]
+fn worksheet_sort_with_value_locale_parses_text_numbers() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    // Header row.
+    sheet.set_value(CellRef::new(0, 0), CellValue::String("Val".into()));
+
+    // de-DE decimals: 1,10 (1.1) should sort before 1,2 (1.2).
+    sheet.set_value(CellRef::new(1, 0), CellValue::String("1,2".into()));
+    sheet.set_value(CellRef::new(2, 0), CellValue::String("1,10".into()));
+
+    let range = Range::from_a1("A1:A3").unwrap();
+    let spec = SortSpec {
+        header: HeaderOption::HasHeader,
+        keys: vec![SortKey {
+            column: 0,
+            order: SortOrder::Ascending,
+            value_type: SortValueType::Auto,
+            case_sensitive: false,
+        }],
+    };
+
+    sort_worksheet_range_with_value_locale(&mut sheet, range, &spec, ValueLocaleConfig::de_de());
+
+    assert_eq!(
+        sheet.value(CellRef::new(1, 0)),
+        CellValue::String("1,10".into())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(2, 0)),
+        CellValue::String("1,2".into())
+    );
 }
