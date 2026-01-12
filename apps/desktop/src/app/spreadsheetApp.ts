@@ -1185,17 +1185,17 @@ export class SpreadsheetApp {
             const prevZoom = this.sharedGridZoom;
             const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
 
-            const zoomChanged = nextZoom !== prevZoom;
-             if (zoomChanged) {
-               this.sharedGridZoom = nextZoom;
-               // Document sheet views store base axis sizes at zoom=1. When zoom changes via
-               // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
-               // still need to reapply persisted axis overrides at the new zoom level.
-               this.syncSharedGridAxisSizesFromDocument();
-               this.dispatchZoomChanged();
-               this.notifyZoomListeners();
-               effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
-             }
+             const zoomChanged = nextZoom !== prevZoom;
+              if (zoomChanged) {
+                this.sharedGridZoom = nextZoom;
+                // `CanvasGridRenderer.setZoom()` scales both the default row/col sizes and any
+                // existing overrides derived from document state. Avoid re-applying persisted
+                // overrides here: rebuilding large override maps on every zoom gesture step can
+                // be expensive when many explicit row/col sizes exist.
+                this.dispatchZoomChanged();
+                this.notifyZoomListeners();
+                effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
+              }
 
                const prevX = this.scrollX;
                const prevY = this.scrollY;
@@ -2465,7 +2465,7 @@ export class SpreadsheetApp {
     if (Math.abs(prev - clamped) < 1e-6) return;
 
     // DesktopSharedGrid.setZoom will resync scrollbars + emit an onScroll callback
-    // (which is where shared-grid overlays and persisted axis sizes are re-applied).
+    // (which is where shared-grid overlays are re-positioned and zoom listeners are notified).
     this.sharedGrid.setZoom(clamped);
   }
 
