@@ -562,6 +562,15 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   }, [props.zoom]);
 
   useLayoutEffect(() => {
+    // Keep track-size inputs in sync with the committed DOM styles. Avoid mutating refs during
+    // render (React concurrent mode), and ensure `syncScrollbars` always uses values that match the
+    // currently-rendered scrollbar layout.
+    const inset = 2 * zoom;
+    const thickness = 10 * zoom;
+    const gap = 4 * zoom;
+    const corner = inset + thickness + gap;
+    scrollbarLayoutRef.current = { inset, corner };
+
     syncScrollbars();
   }, [zoom]);
 
@@ -2797,8 +2806,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const scrollbarCorner = scrollbarInset + scrollbarThickness + scrollbarGap;
   const scrollbarRadius = 6 * zoom;
   const scrollbarThumbInset = 1 * zoom;
-
-  scrollbarLayoutRef.current = { inset: scrollbarInset, corner: scrollbarCorner };
 
   const containerStyle: React.CSSProperties = useMemo(
     () => ({
