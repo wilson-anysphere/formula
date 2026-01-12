@@ -947,6 +947,8 @@ export function createSyncServer(
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: config.limits.maxMessageBytes,
+    // Explicitly disable compression (defense-in-depth against compression bombs).
+    perMessageDeflate: false,
   });
 
   const introspectCache: IntrospectCache | null =
