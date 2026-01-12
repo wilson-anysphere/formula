@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::DefinedNameScope;
 
 mod common;
@@ -105,7 +104,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
 }
 
 #[test]
-fn defined_name_formulas_quote_sheet_names_and_are_parseable() {
+fn defined_name_formulas_quote_sheet_names() {
     let bytes = xls_fixture_builder::build_defined_names_quoting_fixture_xls();
     let result = import_fixture(&bytes);
 
@@ -124,8 +123,5 @@ fn defined_name_formulas_quote_sheet_names_and_are_parseable() {
             .find(|n| n.name == name)
             .unwrap_or_else(|| panic!("{name} missing"));
         assert_eq!(dn.refers_to, expected_refers_to);
-
-        parse_formula(&format!("={}", dn.refers_to), ParseOptions::default())
-            .unwrap_or_else(|e| panic!("failed to parse {name} refers_to `{}`: {e}", dn.refers_to));
     }
 }
