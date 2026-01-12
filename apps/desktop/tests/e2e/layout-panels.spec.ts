@@ -106,7 +106,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     await page.getByTestId("open-version-history-panel").click();
-    await expect(page.getByTestId("dock-right").getByTestId("panel-versionHistory")).toBeVisible();
+    await expect(page.getByTestId("panel-versionHistory")).toBeVisible();
   });
 
   test("ribbon button opens Branch Manager panel", async ({ page }) => {
@@ -116,7 +116,7 @@ test.describe("dockable panels layout persistence", () => {
     await waitForDesktopReady(page);
 
     await page.getByTestId("open-branch-manager-panel").click();
-    await expect(page.getByTestId("dock-right").getByTestId("panel-branchManager")).toBeVisible();
+    await expect(page.getByTestId("panel-branchManager")).toBeVisible();
   });
 
   test("Ctrl/Cmd+Shift+A toggles AI chat panel open/closed", async ({ page }) => {
