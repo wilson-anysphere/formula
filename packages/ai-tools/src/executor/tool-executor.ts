@@ -474,22 +474,20 @@ export class ToolExecutor {
     if (params.include_formulas) {
       const values: CellScalar[][] = [];
       const formulas: Array<Array<string | null>> = [];
-      for (let r = 0; r < cells.length; r += 1) {
+      for (let r = 0, rowIndex = range.startRow; r < cells.length; r += 1, rowIndex += 1) {
         const row = cells[r] ?? [];
-        const valuesRow: CellScalar[] = [];
-        const formulasRow: Array<string | null> = [];
-        for (let c = 0; c < row.length; c += 1) {
+        const valuesRow: CellScalar[] = new Array(row.length);
+        const formulasRow: Array<string | null> = new Array(row.length);
+        for (let c = 0, colIndex = range.startCol; c < row.length; c += 1, colIndex += 1) {
           const cell = row[c]!;
-          const rowIndex = range.startRow + r;
-          const colIndex = range.startCol + c;
           if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
             redactedCellCount += 1;
-            valuesRow.push(DLP_REDACTION_PLACEHOLDER);
-            formulasRow.push(DLP_REDACTION_PLACEHOLDER);
+            valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
+            formulasRow[c] = DLP_REDACTION_PLACEHOLDER;
             continue;
           }
-          valuesRow.push(cell.formula ? null : cell.value);
-          formulasRow.push(cell.formula ?? null);
+          valuesRow[c] = cell.formula ? null : cell.value;
+          formulasRow[c] = cell.formula ?? null;
         }
         values.push(valuesRow);
         formulas.push(formulasRow);
@@ -502,19 +500,17 @@ export class ToolExecutor {
     }
 
     const values: CellScalar[][] = [];
-    for (let r = 0; r < cells.length; r += 1) {
+    for (let r = 0, rowIndex = range.startRow; r < cells.length; r += 1, rowIndex += 1) {
       const row = cells[r] ?? [];
-      const valuesRow: CellScalar[] = [];
-      for (let c = 0; c < row.length; c += 1) {
+      const valuesRow: CellScalar[] = new Array(row.length);
+      for (let c = 0, colIndex = range.startCol; c < row.length; c += 1, colIndex += 1) {
         const cell = row[c]!;
-        const rowIndex = range.startRow + r;
-        const colIndex = range.startCol + c;
         if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
           redactedCellCount += 1;
-          valuesRow.push(DLP_REDACTION_PLACEHOLDER);
+          valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
           continue;
         }
-        valuesRow.push(cell.formula ? null : cell.value);
+        valuesRow[c] = cell.formula ? null : cell.value;
       }
       values.push(valuesRow);
     }
