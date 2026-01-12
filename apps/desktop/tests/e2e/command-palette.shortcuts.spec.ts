@@ -64,6 +64,14 @@ test.describe("command palette shortcut hints", () => {
     const copy = page.locator("li.command-palette__item", { hasText: "Copy" }).first();
     await expect(copy).toBeVisible();
     await expect(copy.locator(".command-palette__shortcut")).toHaveText(expectedCopyShortcut);
+
+    // When a command has multiple keybindings, shortcut search should display the binding that matched the query.
+    // Copy has both the primary chord and an explicit Ctrl+Cmd/Meta fallback chord for remote desktop setups.
+    const expectedFallbackCopyShortcut = process.platform === "darwin" ? "⌃⌘C" : "Ctrl+Meta+C";
+    await input.fill("/ ctrl+cmd+c");
+    const fallbackCopy = page.locator("li.command-palette__item", { hasText: "Copy" }).first();
+    await expect(fallbackCopy).toBeVisible();
+    await expect(fallbackCopy.locator(".command-palette__shortcut")).toHaveText(expectedFallbackCopyShortcut);
   });
 
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
