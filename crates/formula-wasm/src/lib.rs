@@ -2813,6 +2813,9 @@ mod tests {
 
     #[test]
     fn set_cell_rich_entity_properties_flow_through_to_field_access_formulas() {
+        // Note: the full public WASM interface surface (`setCellRich`/`getCellRich`) is exercised
+        // in `tests/wasm.rs` under `wasm32`. Native unit tests cannot construct JS objects via
+        // `serde_wasm_bindgen::to_value` because it requires JS host imports.
         let mut wb = WorkbookState::new_with_default_sheet();
 
         let entity = json!({
