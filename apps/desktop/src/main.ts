@@ -6296,14 +6296,7 @@ mountRibbon(ribbonRoot, {
 // `getCollabSession()` at prompt time instead of only once at startup.
 const collabAwareDirtyController = {
   get isDirty(): boolean {
-    const anyApp = app as any;
-    try {
-      if (typeof anyApp.getCollabSession === "function" && anyApp.getCollabSession() != null) {
-        return false;
-      }
-    } catch {
-      // Ignore collab detection failures and fall back to normal dirty tracking.
-    }
+    if (isCollabModeActive()) return false;
     return app.getDocument().isDirty;
   },
 };
