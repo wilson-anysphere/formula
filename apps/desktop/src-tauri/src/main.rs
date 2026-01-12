@@ -504,7 +504,11 @@ async fn show_system_notification(
     )?;
 
     let url = window.url().map_err(|err| err.to_string())?;
-    desktop::ipc_origin::ensure_trusted_origin(&url, "notifications", desktop::ipc_origin::Verb::Are)?;
+    desktop::ipc_origin::ensure_trusted_origin(
+        &url,
+        "notifications",
+        desktop::ipc_origin::Verb::Are,
+    )?;
 
     let mut builder = window.app_handle().notification().builder().title(title);
 
@@ -529,9 +533,11 @@ async fn oauth_loopback_listen(
     }
 
     let url = window.url().map_err(|err| err.to_string())?;
-    if !is_trusted_notification_origin(&url) {
-        return Err("oauth loopback listeners are not allowed from this origin".to_string());
-    }
+    desktop::ipc_origin::ensure_trusted_origin(
+        &url,
+        "oauth loopback listeners",
+        desktop::ipc_origin::Verb::Are,
+    )?;
 
     let app = window.app_handle();
 

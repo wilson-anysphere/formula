@@ -60,7 +60,7 @@ pub fn handler<R: Runtime>(
     let window_url = current_window_url(&ctx);
     if !window_url
         .as_ref()
-        .is_some_and(is_trusted_asset_protocol_origin)
+        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
     {
         let url_for_log = window_url
             .as_ref()
@@ -107,27 +107,6 @@ pub fn handler<R: Runtime>(
 fn current_window_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> Option<Url> {
     let window = ctx.app_handle().get_webview_window(ctx.webview_label())?;
     window.as_ref().url().ok()
-}
-
-fn is_trusted_asset_protocol_origin(url: &Url) -> bool {
-    // Keep this logic consistent with other "privileged API" origin gates in the desktop shell.
-    //
-    // We treat app-local content as trusted:
-    // - packaged builds typically run on an internal `*.localhost` origin
-    // - dev builds run on `http://localhost:<port>`
-    //
-    // Note: `file://` is included as a best-effort compatibility fallback.
-    match url.scheme() {
-        "data" => return false,
-        "file" => return true,
-        _ => {}
-    }
-
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-
-    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
 
 fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
@@ -280,6 +259,23 @@ fn get_response(
             return not_satisfiable();
         };
 
+        // Avoid unbounded allocations in multi-range requests. Range headers can contain many
+        // comma-separated ranges; even with per-range clamping, building a multipart response could
+        // otherwise allocate an arbitrarily large `Vec<u8>`.
+        const MAX_RANGES: usize = 32;
+        if ranges.len() > MAX_RANGES {
+            eprintln!(
+                "[asset protocol] too many ranges requested: {path} (count={})",
+                ranges.len()
+            );
+            return Response::builder()
+                .status(StatusCode::PAYLOAD_TOO_LARGE)
+                .header("Access-Control-Allow-Origin", window_origin)
+                .header("Cross-Origin-Resource-Policy", "cross-origin")
+                .body(Vec::new())
+                .map_err(Into::into);
+        }
+
         /// Max bytes we send in one range.
         const MAX_LEN: u64 = 1000 * 1024;
 
@@ -320,6 +316,23 @@ fn get_response(
 
         if ranges.is_empty() {
             return not_satisfiable();
+        }
+
+        let mut total_range_bytes = 0u64;
+        for (start, end) in &ranges {
+            // (end + 1 - start) should be safe because we validated start/end above.
+            total_range_bytes = total_range_bytes.saturating_add(end + 1 - start);
+        }
+        if total_range_bytes > MAX_NON_RANGE_ASSET_BYTES {
+            eprintln!(
+                "[asset protocol] refusing to serve multi-range response larger than limit: {path} (bytes={total_range_bytes}, limit={MAX_NON_RANGE_ASSET_BYTES})"
+            );
+            return Response::builder()
+                .status(StatusCode::PAYLOAD_TOO_LARGE)
+                .header("Access-Control-Allow-Origin", window_origin)
+                .header("Cross-Origin-Resource-Policy", "cross-origin")
+                .body(Vec::new())
+                .map_err(Into::into);
         }
 
         let boundary = random_boundary();
