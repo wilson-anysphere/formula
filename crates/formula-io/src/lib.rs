@@ -196,7 +196,40 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
 
     match workbook {
         Workbook::Xlsx(package) => match ext.as_str() {
-            "xlsx" | "xlsm" => {
+            "xlsx" => {
+                let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+
+                // If we're saving a macro-enabled workbook to a `.xlsx` filename, strip the VBA
+                // project and its related parts/relationships so we don't produce an
+                // XLSM-in-disguise (which Excel refuses to open).
+                if package.vba_project_bin().is_some() {
+                    let mut stripped = package.clone();
+                    stripped
+                        .remove_vba_project()
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                    stripped
+                        .write_to(file)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                } else {
+                    package
+                        .write_to(file)
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                }
+                Ok(())
+            }
+            "xlsm" => {
                 let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
                     path: path.to_path_buf(),
                     source,
