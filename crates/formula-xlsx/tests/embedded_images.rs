@@ -24,7 +24,7 @@ const METADATA_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="y
   </futureMetadata>
   <valueMetadata count="1">
     <bk>
-      <rc t="0" v="0"/>
+      <rc t="1" v="0"/>
     </bk>
   </valueMetadata>
 </metadata>
@@ -123,4 +123,3 @@ fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
     assert_eq!(image.alt_text.as_deref(), Some("Example alt text"));
     assert!(!image.decorative);
 }
-

@@ -225,7 +225,8 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
 
     let mut buf = Vec::new();
     let mut xlr_type_index: Option<u32> = None;
-    let mut next_metadata_type_index = 0u32;
+    // `<rc t="...">` uses a **1-based** index into the `<metadataTypes>` list.
+    let mut next_metadata_type_index = 1u32;
 
     // `futureMetadata` bk entries in order: each entry contains `xlrd:rvb i="..."`
     let mut future_bk_rich_value_index: Vec<Option<u32>> = Vec::new();
