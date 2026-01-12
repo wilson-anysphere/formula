@@ -129,3 +129,19 @@ test("CSV export uses row formats to override column formats (layer precedence)"
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1000");
   assert.equal(csv, dateTime.toISOString());
 });
+
+test("CSV export respects range-run formats for large rectangles (styleId may be 0)", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  // This range is large enough to trigger DocumentController's compressed range-run formatting layer
+  // (instead of enumerating every cell).
+  doc.setRangeFormat("Sheet1", "A1:A50001", { numberFormat: "yyyy-mm-dd" });
+  doc.setCellValue("Sheet1", "A50001", serial);
+
+  assert.equal(doc.getCell("Sheet1", "A50001").styleId, 0);
+  assert.notEqual(doc.getCellFormatStyleIds("Sheet1", "A50001")[4], 0);
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A50001");
+  assert.equal(csv, "2024-01-31");
+});
