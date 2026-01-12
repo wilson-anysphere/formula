@@ -185,6 +185,8 @@ Notes:
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell.xlsx` (`rdrichvalue.xml` + `richValueRel.xml` 2022 variant)
 
+See also: [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md) (walkthrough of this fixture).
+
 **Parts present** (complete inventory from `unzip -l`):
 
 ```

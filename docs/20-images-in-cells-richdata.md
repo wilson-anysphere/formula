@@ -382,6 +382,9 @@ Treat these as equivalent to the `richValue*` tables for the purposes of “imag
 | `xl/richData/richValue.xml` | Stores the **rich value instances** (“objects”) in a workbook-global table. Each instance references a type (and/or structure) and stores member values. |
 | `xl/richData/richValueRel.xml` | Stores a **relationship-ID table** (`r:id` strings) that can be referenced **by index** from rich values, avoiding embedding raw `rId*` strings inside each rich value payload. |
 | `xl/richData/_rels/richValueRel.xml.rels` | OPC relationships for the `r:id` entries in `richValueRel.xml` (e.g. to `../media/imageN.png`). |
+| `xl/richData/rdrichvalue.xml` | **rdRichValue variant** of the rich value instance table. Instances store positional `<v>` fields and use `rv/@s` to select a structure definition. |
+| `xl/richData/rdrichvaluestructure.xml` | **rdRichValue variant** structure table. Defines ordered `<k>` keys; key ordering determines how to interpret positional `<v>` fields. |
+| `xl/richData/rdRichValueTypes.xml` | **rdRichValue variant** type/key metadata (e.g. `<keyFlags>`). Not required to resolve local images in the observed fixtures, but should be preserved for round-trip safety. |
 
 ---
 
@@ -896,10 +899,16 @@ For images-in-cell, the minimum viable read path usually looks like:
    `xl/_rels/metadata.xml.rels`; also fall back to part existence).
 3. If present, parse `richValueTypes.xml` into `type_id -> structure_id`.
 4. If present, parse `richValueStructure.xml` into `structure_id -> ordered member schema`.
+   * For the `rdRichValue*` naming variant (observed in `fixtures/xlsx/basic/image-in-cell.xlsx`), the
+     analogous structure table is `xl/richData/rdrichvaluestructure.xml` (which defines ordered `<k>` keys
+     for positional `<v>` fields).
 5. Parse `richValueRel.xml` into `rel_index -> rId`.
 6. Parse `xl/richData/_rels/richValueRel.xml.rels` into `rId -> target` (image path).
 7. Parse the rich value store (`richValue*.xml` and/or `rdrichvalue.xml`) into a table of
    `rich_value_index -> {type_id, payload...}`.
+   * For the `rdrichvalue.xml` variant, interpret positional `<v>` fields using
+     `rdrichvaluestructure.xml` key order. For local embedded images the relationship-slot index is stored
+     in the field named `_rvRel:LocalImageIdentifier` (not necessarily “first `<v>`”).
 8. Parse `xl/metadata.xml` to resolve `vm` (cell attribute) → `rich_value_index` (best-effort; schemas vary:
    some use `xlrd:rvb/@i`, others may reference the rich value index directly).
 9. Use worksheet cell `vm` values to map cells → `rich_value_index`.
