@@ -356,6 +356,10 @@ Key components:
 6. **Persistence (Desktop)**:
    - Permission grants: `localStorage["formula.extensionHost.permissions"]`
    - Extension storage/config: `localStorage["formula.extensionHost.storage.<extensionId>"]`
+   - Contributed panel seed store: `localStorage["formula.extensions.contributedPanels.v1"]`
+
+   Note: these keys are **removed entirely** (not just set to `"{}"`) when their normalized stores are empty or corrupted,
+   so "missing key" is the expected clean-slate state after uninstall/reset flows.
 
 **Important:** marketplace-installed extensions are loaded from `blob:` module URLs. Because `blob:` module URLs
 cannot reliably resolve relative imports, the browser entrypoint (`manifest.browser`/`manifest.module`) should be a

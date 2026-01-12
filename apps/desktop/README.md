@@ -222,18 +222,21 @@ modules (defense-in-depth so untrusted extension code can't call native commands
 
 - Stored by `BrowserExtensionHost` in `localStorage["formula.extensionHost.permissions"]`
   (per-extension record of granted permissions).
+  - Note: the key is removed entirely when the normalized store is empty or corrupted (clean slate).
 
 **Extension storage + config (`formula.storage` / `formula.config` APIs):**
 
 - Stored in `localStorage` via `LocalStorageExtensionStorage`:
   - key prefix: `formula.extensionHost.storage.`
   - key per extension: `formula.extensionHost.storage.<extensionId>`
+  - Note: per-extension keys are removed entirely when the store is empty or corrupted (clean slate).
 
 **Panel layout seed data (contributed panels):**
 
 - Stored in a synchronous localStorage “seed store” so contributed panel ids can be registered *before* layout
   deserialization on startup:
   - `localStorage["formula.extensions.contributedPanels.v1"]`
+  - Note: the key is removed entirely when the normalized store is empty or corrupted (clean slate).
 
 To “reset” extensions in dev, clear:
 
