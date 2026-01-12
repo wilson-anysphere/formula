@@ -2377,11 +2377,7 @@ mod encode_ast {
                 .table_id_by_name(table_name)
                 .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?,
             None => {
-                // If the workbook contains exactly one table, we can resolve table-less structured
-                // references (`[@Col]`) without needing location/range metadata.
-                if let Some(table_id) = ctx.single_table_id() {
-                    table_id
-                } else if let Some(sheet) = sheet {
+                if let Some(sheet) = sheet {
                     ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
                         EncodeError::Parse(format!(
                             "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
@@ -2390,12 +2386,14 @@ mod encode_ast {
                         ))
                     })?
                 } else {
-                    // No sheet context and the workbook does not have exactly one registered
-                    // table; require explicit `TableName[...]` syntax.
-                    return Err(EncodeError::Parse(
-                        "structured references without an explicit table name are ambiguous; specify TableName[...]"
-                            .to_string(),
-                    ));
+                    // Fall back to a "single table in workbook" heuristic when the caller doesn't
+                    // know the base sheet.
+                    ctx.single_table_id().ok_or_else(|| {
+                        EncodeError::Parse(
+                            "structured references without an explicit table name are ambiguous; specify TableName[...]"
+                                .to_string(),
+                        )
+                    })?
                 }
             }
         };
