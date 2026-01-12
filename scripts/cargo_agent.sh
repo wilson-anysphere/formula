@@ -62,10 +62,16 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Use repo-local cargo home by default to avoid lock contention
 DEFAULT_GLOBAL_CARGO_HOME="${HOME:-/root}/.cargo"
-if [[ -z "${CARGO_HOME:-}" ]] || {
+
+# Some agent runners pre-set `CARGO_HOME` to `$HOME/.cargo` (sometimes with a trailing slash).
+# Treat that as "unset" for our purposes so we still get per-repo isolation by default.
+CARGO_HOME_NORM="${CARGO_HOME:-}"
+CARGO_HOME_NORM="${CARGO_HOME_NORM%/}"
+DEFAULT_GLOBAL_CARGO_HOME_NORM="${DEFAULT_GLOBAL_CARGO_HOME%/}"
+if [[ -z "${CARGO_HOME_NORM}" ]] || {
   [[ -z "${CI:-}" ]] &&
   [[ -z "${FORMULA_ALLOW_GLOBAL_CARGO_HOME:-}" ]] &&
-  [[ "${CARGO_HOME:-}" == "${DEFAULT_GLOBAL_CARGO_HOME}" ]];
+  [[ "${CARGO_HOME_NORM}" == "${DEFAULT_GLOBAL_CARGO_HOME_NORM}" ]];
 }; then
   export CARGO_HOME="${repo_root}/target/cargo-home"
 fi
