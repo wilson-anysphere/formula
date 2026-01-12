@@ -1198,7 +1198,23 @@ impl WorkbookState {
                 | CellValue::RichText(_)
         ) {
             let scalar_input = cell_value_to_scalar_json_input(&input);
-            return self.set_cell_internal(sheet, address, scalar_input);
+            self.set_cell_internal(sheet, address, scalar_input)?;
+
+            // Preserve the typed representation for `getCellRich.input`.
+            //
+            // Note: For rich text values, the engine currently only stores the plain string value.
+            // Persisting the input here allows callers to round-trip rich text styling even though
+            // `getCellRich.value` will still reflect the scalar engine value.
+            if !input.is_empty() {
+                let sheet = self.ensure_sheet(sheet);
+                let address = Self::parse_address(address)?.to_a1();
+                self.sheets_rich
+                    .entry(sheet)
+                    .or_default()
+                    .insert(address, input);
+            }
+
+            return Ok(());
         }
 
         let sheet = self.ensure_sheet(sheet);
@@ -2983,12 +2999,13 @@ mod tests {
         assert_eq!(cell.input, json!(42.0));
         assert_eq!(cell.value, json!(42.0));
 
-        // Scalar edits should not persist the typed rich schema entry.
-        assert!(wb
-            .sheets_rich
-            .get(DEFAULT_SHEET)
-            .and_then(|cells| cells.get("A1"))
-            .is_none());
+        // Rich edits preserve the typed schema entry for `getCellRich.input`.
+        assert_eq!(
+            wb.sheets_rich
+                .get(DEFAULT_SHEET)
+                .and_then(|cells| cells.get("A1")),
+            Some(&CellValue::Number(42.0))
+        );
     }
 
     #[test]
