@@ -86,6 +86,31 @@ fn sumif_numeric_criteria_does_not_treat_text_as_zero() {
 }
 
 #[test]
+fn sumifs_numeric_criteria_does_not_treat_text_as_zero() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "x");
+    sheet.set("A2", 0);
+    // A3 left unset (blank) -> treated as 0 for numeric SUMIFS criteria.
+
+    // Second criteria always matches so the result depends only on the numeric criteria.
+    sheet.set("B1", 1);
+    sheet.set("B2", 1);
+    sheet.set("B3", 1);
+
+    sheet.set("C1", 5);
+    sheet.set("C2", 10);
+    sheet.set("C3", 20);
+
+    sheet.set_formula(sheet.scratch_cell, r#"=SUMIFS(C1:C3,A1:A3,0,B1:B3,">0")"#);
+    assert!(
+        sheet.engine.bytecode_program_count() > 0,
+        "expected SUMIFS formula to compile to bytecode for this test"
+    );
+    sheet.engine.recalculate();
+    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 30.0);
+}
+
+#[test]
 fn averageif_treats_blank_average_range_as_omitted() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1);

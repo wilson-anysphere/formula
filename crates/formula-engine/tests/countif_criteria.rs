@@ -165,6 +165,29 @@ fn countif_numeric_criteria_does_not_treat_text_as_zero() {
 }
 
 #[test]
+fn countifs_numeric_criteria_does_not_treat_text_as_zero() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0.0).unwrap();
+    // A3 left unset (blank) -> treated as 0 for numeric COUNTIFS criteria.
+
+    // Ensure the second criteria always matches so the result depends only on the numeric criteria.
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 1.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", r#"=COUNTIFS(A1:A3, 0, B1:B3, ">0")"#)
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected COUNTIFS formula to compile to bytecode for this test"
+    );
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(2.0));
+}
+
+#[test]
 fn countif_date_criteria_parses_date_strings() {
     let mut engine = Engine::new();
     engine.set_date_system(ExcelDateSystem::EXCEL_1900);
