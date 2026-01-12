@@ -7,11 +7,14 @@ import { AlignLeftIcon } from "./AlignLeftIcon";
 import { AlignMiddleIcon } from "./AlignMiddleIcon";
 import { AlignRightIcon } from "./AlignRightIcon";
 import { AlignTopIcon } from "./AlignTopIcon";
+import { ArrowDownIcon } from "./ArrowDownIcon";
 import { ArrowLeftIcon } from "./ArrowLeftIcon";
 import { ArrowRightIcon } from "./ArrowRightIcon";
+import { ArrowUpIcon } from "./ArrowUpIcon";
 import { AutoSumIcon } from "./AutoSumIcon";
 import { BoldIcon } from "./BoldIcon";
 import { BordersIcon } from "./BordersIcon";
+import { BookIcon } from "./BookIcon";
 import { BringForwardIcon } from "./BringForwardIcon";
 import { CalculatorIcon } from "./CalculatorIcon";
 import { CalendarIcon } from "./CalendarIcon";
@@ -38,6 +41,7 @@ import { DecreaseIndentIcon } from "./DecreaseIndentIcon";
 import { DeleteSheetIcon } from "./DeleteSheetIcon";
 import { ExportIcon } from "./ExportIcon";
 import { EyeIcon } from "./EyeIcon";
+import { EyeOffIcon } from "./EyeOffIcon";
 import { FileIcon } from "./FileIcon";
 import { ChartIcon } from "./ChartIcon";
 import { FillColorIcon } from "./FillColorIcon";
@@ -53,6 +57,7 @@ import { FormatPainterIcon } from "./FormatPainterIcon";
 import { GlobeIcon } from "./GlobeIcon";
 import { GoToIcon } from "./GoToIcon";
 import { GridlinesIcon } from "./GridlinesIcon";
+import { HashIcon } from "./HashIcon";
 import { HeadingsIcon } from "./HeadingsIcon";
 import { IncreaseDecimalIcon } from "./IncreaseDecimalIcon";
 import { IncreaseFontIcon } from "./IncreaseFontIcon";
@@ -79,6 +84,8 @@ import { PageLandscapeIcon } from "./PageLandscapeIcon";
 import { PagePortraitIcon } from "./PagePortraitIcon";
 import { PageSetupIcon } from "./PageSetupIcon";
 import { PaletteIcon } from "./PaletteIcon";
+import { PenIcon } from "./PenIcon";
+import { PencilIcon } from "./PencilIcon";
 import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
 import { PercentIcon } from "./PercentIcon";
@@ -100,6 +107,7 @@ import { RowHeightIcon } from "./RowHeightIcon";
 import { SlidersIcon } from "./SlidersIcon";
 import { SparklesIcon } from "./SparklesIcon";
 import { ShapesIcon } from "./ShapesIcon";
+import { HighlighterIcon } from "./HighlighterIcon";
 import { SmartArtIcon } from "./SmartArtIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
 import { SortIcon } from "./SortIcon";
@@ -113,7 +121,9 @@ import { TextBoxIcon } from "./TextBoxIcon";
 import { TrashIcon } from "./TrashIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
 import { UndoIcon } from "./UndoIcon";
+import { UnlockIcon } from "./UnlockIcon";
 import { UserIcon } from "./UserIcon";
+import { UsersIcon } from "./UsersIcon";
 import { WarningIcon } from "./WarningIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 
@@ -406,6 +416,42 @@ export const ribbonIconMap = {
 
   "data.dataTypes.stocks": ChartIcon,
   "data.dataTypes.geography": GlobeIcon,
+
+  // Review
+  "review.proofing.spelling": CheckIcon,
+  "review.proofing.spelling.thesaurus": BookIcon,
+  "review.proofing.spelling.wordCount": HashIcon,
+  "review.proofing.accessibility": WarningIcon,
+  "review.proofing.smartLookup": FindIcon,
+
+  "review.comments.newComment": CommentIcon,
+  "review.comments.deleteComment": TrashIcon,
+  "review.comments.previous": ArrowUpIcon,
+  "review.comments.next": ArrowDownIcon,
+  "review.comments.showComments": EyeIcon,
+
+  "review.notes.newNote": NoteIcon,
+  "review.notes.editNote": PencilIcon,
+  "review.notes.showAllNotes": EyeIcon,
+  "review.notes.showHideNote": EyeOffIcon,
+
+  "review.protect.protectSheet": LockIcon,
+  "review.protect.unprotectSheet": UnlockIcon,
+  "review.protect.protectWorkbook": LockIcon,
+  "review.protect.unprotectWorkbook": UnlockIcon,
+  "review.protect.allowEditRanges": CheckIcon,
+  "review.protect.allowEditRanges.new": PlusIcon,
+
+  "review.ink.startInking": PenIcon,
+
+  "review.language.translate": GlobeIcon,
+  "review.language.language": GlobeIcon,
+
+  "review.changes.trackChanges": PencilIcon,
+  "review.changes.trackChanges.highlight": HighlighterIcon,
+  "review.changes.shareWorkbook": UsersIcon,
+  "review.changes.shareWorkbook.shareNow": ShareIcon,
+  "review.changes.protectShareWorkbook": LockIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
