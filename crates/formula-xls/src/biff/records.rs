@@ -325,16 +325,16 @@ mod tests {
 
         let stream = [
             prefix,
-            record(0x0809, &[0u8; 16]),
+            record(RECORD_BOF_BIFF8, &[0u8; 16]),
             record(0x0002, &[0xBB]),
-            record(0x0809, &[0u8; 16]),
+            record(RECORD_BOF_BIFF8, &[0u8; 16]),
             record(0x0003, &[0xCC]),
         ]
         .concat();
 
         let iter = BestEffortSubstreamIter::from_offset(&stream, start_offset).unwrap();
         let ids: Vec<u16> = iter.map(|r| r.record_id).collect();
-        assert_eq!(ids, vec![0x0809, 0x0002]);
+        assert_eq!(ids, vec![RECORD_BOF_BIFF8, 0x0002]);
     }
 
     #[test]

@@ -375,7 +375,7 @@ mod tests {
         bs_payload.push(0x80); // "Ђ" in cp1251
         let r_bs = record(0x0085, &bs_payload);
 
-        let stream = [r_codepage, r_bs, record(0x000A, &[])].concat();
+        let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
         assert_eq!(
             sheets,
@@ -400,7 +400,7 @@ mod tests {
         bs_payload.push(0xA3); // "£" in cp1252
         let r_bs = record(0x0085, &bs_payload);
 
-        let stream = [r_codepage, r_bs, record(0x000A, &[])].concat();
+        let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
         let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
         assert_eq!(
             sheets,
@@ -426,7 +426,7 @@ mod tests {
         let r_bs = record(0x0085, &bs_payload);
 
         // BOF for the next substream (worksheet).
-        let r_sheet_bof = record(0x0809, &[0u8; 16]);
+        let r_sheet_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
 
         // No EOF record; should still stop at the worksheet BOF.
         let stream = [r_codepage, r_bs, r_sheet_bof].concat();
@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn globals_scan_stops_at_next_bof_without_eof() {
-        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
         // CODEPAGE=1251 (Windows Cyrillic).
         let r_codepage = record(0x0042, &1251u16.to_le_bytes());
 
@@ -459,7 +459,7 @@ mod tests {
         let r_xf = record(0x00E0, &xf_payload);
 
         // BOF for the next substream (worksheet).
-        let r_sheet_bof = record(0x0809, &[0u8; 16]);
+        let r_sheet_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
 
         // A 1904 record and another CODEPAGE after the worksheet BOF should be ignored.
         let r_1904_after = record(0x0022, &[1, 0]);
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn globals_missing_eof_returns_partial_with_warning() {
-        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
         let r_1904 = record(0x0022, &[1, 0]);
 
         let mut xf_payload = vec![0u8; 20];
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn globals_scan_stops_on_malformed_record_and_warns() {
-        let r_bof_globals = record(0x0809, &[0u8; 16]);
+        let r_bof_globals = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
         let r_1904 = record(0x0022, &[1, 0]);
 
         // Truncated record: declares 4 bytes but only provides 2.
@@ -556,7 +556,7 @@ mod tests {
         xf_payload[4..6].copy_from_slice(&0u16.to_le_bytes());
         let r_xf = record(0x00E0, &xf_payload);
 
-        let r_eof = record(0x000A, &[]);
+        let r_eof = record(records::RECORD_EOF, &[]);
 
         let mut stream = Vec::new();
         stream.extend_from_slice(&r_1904);
@@ -589,7 +589,7 @@ mod tests {
             record(0x00E0, &xf14),
             record(0x00E0, &xf60),
             record(0x00E0, &xf0),
-            record(0x000A, &[]),
+            record(records::RECORD_EOF, &[]),
         ]
         .concat();
 
@@ -618,7 +618,12 @@ mod tests {
         let mut xf_payload = vec![0u8; 16];
         xf_payload[2..4].copy_from_slice(&200u16.to_le_bytes());
 
-        let stream = [r_fmt, record(0x00E0, &xf_payload), record(0x000A, &[])].concat();
+        let stream = [
+            r_fmt,
+            record(0x00E0, &xf_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
 
         let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff5).expect("parse");
         assert_eq!(
