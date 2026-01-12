@@ -205,6 +205,7 @@ Key observed behavior for “Place in Cell” images: the worksheet cell is enco
 
 Indexing note:
 - Excel commonly uses **1-based** `vm` values, but some producers/fixtures use **0-based** `vm` values. For round-trip safety, treat `vm` as an opaque integer index and preserve it exactly.
+- Other common cell attributes (unrelated to the image binding) still apply, e.g. `r="A1"` (cell reference) and `s="…"` (style index).
 
 ##### Mapping chain (high-level)
 
