@@ -62,6 +62,10 @@ export default defineConfig({
       // high even when the process is constrained by OS thread limits. Cap the
       // pool size so `vitest run <single test>` doesn't try to spin up hundreds of
       // worker threads (which can lead to flaky shutdowns).
+      forks: {
+        minForks: 1,
+        maxForks: MAX_VITEST_THREADS,
+      },
       threads: {
         minThreads: 1,
         maxThreads: MAX_VITEST_THREADS,
