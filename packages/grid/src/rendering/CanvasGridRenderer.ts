@@ -1119,6 +1119,111 @@ export class CanvasGridRenderer {
     const cols = overrides.cols;
     const resetUnspecified = options?.resetUnspecified ?? false;
     const zoom = this.zoom;
+
+    // When we're replacing the full set of overrides (the common case for sheet-view sync),
+    // it is much faster to rebuild the VirtualScrollManager from scratch. This avoids
+    // `VariableSizeAxis.setSize()` doing O(n) prefix sum updates for *each* updated index
+    // when many overrides change at once (worst-case O(n^2)).
+    if (resetUnspecified && (rows || cols)) {
+      const epsilon = 1e-6;
+
+      const mapsEqual = (a: ReadonlyMap<number, number>, b: ReadonlyMap<number, number>): boolean => {
+        if (a.size !== b.size) return false;
+        for (const [key, value] of a) {
+          const other = b.get(key);
+          if (other === undefined) return false;
+          if (Math.abs(other - value) > epsilon) return false;
+        }
+        return true;
+      };
+
+      const normalizeAxis = (axis: "rows" | "cols") => {
+        const sizes = axis === "rows" ? rows : cols;
+        if (!sizes) return null;
+
+        const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
+        const assertIndex = axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
+        const defaultSize = variableAxis.defaultSize;
+
+        // Normalize into base-unit overrides (zoom=1), excluding defaults.
+        const out = new Map<number, number>();
+        for (const [idx, size] of sizes) {
+          assertIndex(idx);
+          if (!Number.isFinite(size) || size <= 0) {
+            throw new Error(`${axis} size must be a positive finite number, got ${size} for index ${idx}`);
+          }
+          if (Math.abs(size - defaultSize) < epsilon) continue;
+          out.set(idx, size / zoom);
+        }
+        return out;
+      };
+
+      const nextRowsBase = normalizeAxis("rows");
+      const nextColsBase = normalizeAxis("cols");
+
+      const rowChanged = nextRowsBase ? !mapsEqual(this.rowHeightOverridesBase, nextRowsBase) : false;
+      const colChanged = nextColsBase ? !mapsEqual(this.colWidthOverridesBase, nextColsBase) : false;
+      if (!rowChanged && !colChanged) {
+        return;
+      }
+
+      const prevScroll = this.scroll.getScroll();
+      const prevViewport = this.scroll.getViewportState();
+      const { rowCount, colCount } = this.scroll.getCounts();
+
+      const nextScroll = new VirtualScrollManager({
+        rowCount,
+        colCount,
+        defaultRowHeight: this.baseDefaultRowHeight * zoom,
+        defaultColWidth: this.baseDefaultColWidth * zoom
+      });
+      nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
+      nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
+
+      const applySorted = (axis: "rows" | "cols") => {
+        const base = axis === "rows" ? nextRowsBase : nextColsBase;
+        if (!base) {
+          // Preserve existing overrides for axes that aren't being replaced.
+          const existing = axis === "rows" ? this.rowHeightOverridesBase : this.colWidthOverridesBase;
+          const entries = Array.from(existing.entries()).sort((a, b) => a[0] - b[0]);
+          for (const [idx, baseSize] of entries) {
+            if (axis === "rows") nextScroll.rows.setSize(idx, baseSize * zoom);
+            else nextScroll.cols.setSize(idx, baseSize * zoom);
+          }
+          return;
+        }
+
+        const entries = Array.from(base.entries()).sort((a, b) => a[0] - b[0]);
+        for (const [idx, baseSize] of entries) {
+          if (axis === "rows") nextScroll.rows.setSize(idx, baseSize * zoom);
+          else nextScroll.cols.setSize(idx, baseSize * zoom);
+        }
+      };
+
+      applySorted("cols");
+      applySorted("rows");
+
+      if (nextRowsBase) {
+        this.rowHeightOverridesBase.clear();
+        for (const [idx, baseSize] of nextRowsBase) {
+          this.rowHeightOverridesBase.set(idx, baseSize);
+        }
+      }
+      if (nextColsBase) {
+        this.colWidthOverridesBase.clear();
+        for (const [idx, baseSize] of nextColsBase) {
+          this.colWidthOverridesBase.set(idx, baseSize);
+        }
+      }
+
+      this.scroll = nextScroll;
+      this.scroll.setScroll(prevScroll.x, prevScroll.y);
+      const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
+      this.scroll.setScroll(aligned.x, aligned.y);
+      this.markAllDirty();
+      return;
+    }
+
     let changed = false;
 
     const applyAxis = (axis: "rows" | "cols") => {
@@ -1129,22 +1234,11 @@ export class CanvasGridRenderer {
       const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
       const assertIndex = axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
 
-      if (resetUnspecified) {
-        // Delete in descending order so `VariableSizeAxis.deleteSize()` work stays near O(n).
-        const toDelete: number[] = [];
-        for (const existing of baseOverrides.keys()) {
-          if (!sizes.has(existing)) toDelete.push(existing);
-        }
-        toDelete.sort((a, b) => b - a);
-        for (const idx of toDelete) {
-          baseOverrides.delete(idx);
-          variableAxis.deleteSize(idx);
-          changed = true;
-        }
-      }
+      const epsilon = 1e-6;
 
       const indices = Array.from(sizes.keys()).sort((a, b) => a - b);
       const defaultSize = variableAxis.defaultSize;
+
       for (const idx of indices) {
         assertIndex(idx);
         const size = sizes.get(idx);
@@ -1153,7 +1247,7 @@ export class CanvasGridRenderer {
           throw new Error(`${axis} size must be a positive finite number, got ${size} for index ${idx}`);
         }
 
-        const isDefault = Math.abs(size - defaultSize) < 1e-6;
+        const isDefault = Math.abs(size - defaultSize) < epsilon;
         if (isDefault) {
           if (baseOverrides.has(idx) || variableAxis.getSize(idx) !== defaultSize) {
             baseOverrides.delete(idx);
@@ -1166,7 +1260,7 @@ export class CanvasGridRenderer {
         const baseSize = size / zoom;
         const prevBase = baseOverrides.get(idx);
         const prevSize = variableAxis.getSize(idx);
-        if (prevBase === baseSize && prevSize === size) continue;
+        if (prevBase !== undefined && Math.abs(prevBase - baseSize) < epsilon && Math.abs(prevSize - size) < epsilon) continue;
 
         baseOverrides.set(idx, baseSize);
         variableAxis.setSize(idx, size);
