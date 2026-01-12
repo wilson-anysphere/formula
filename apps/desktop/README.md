@@ -301,11 +301,14 @@ This serves the app at `http://localhost:4174`.
 
 ### 3) Open two clients to the same doc (URL params)
 
+Each desktop client gets a **stable collaboration identity** (`id`/`name`/`color`) persisted in localStorage
+(`formula:collab:user`). For local testing you can override the identity per-window via URL query params.
+
 Open two browser windows/tabs with the same `docId`, but different user identities:
 
 ```text
-http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&userId=u1&userName=User%201&userColor=%23ff0000
-http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&userId=u2&userName=User%202&userColor=%2300ff00
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&collabUserId=u1&collabUserName=User%201&collabUserColor=%23ff0000
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=my-doc&token=dev-token&collabUserId=u2&collabUserName=User%202&collabUserColor=%2300ff00
 ```
 
 Params:
@@ -315,8 +318,9 @@ Params:
 - `docId` is the shared document/room name (must match across clients)
 - `token` must match the sync-server auth token (defaults to `dev-token`)
 - `collabOffline=0` disables offline persistence (IndexedDB) for debugging/tests (default: enabled)
-- `userId`, `userName`, `userColor` control presence/awareness identity
-  - `userColor` must be URL-encoded (`#` → `%23`)
+- `collabUserId`, `collabUserName`, `collabUserColor` override the per-client identity used for presence/comments/conflicts
+  - `collabUserColor` must be URL-encoded (`#` → `%23`)
+  - Legacy aliases are still accepted: `userId`, `userName`, `userColor`
 
 ### 4) Expected behavior
 
