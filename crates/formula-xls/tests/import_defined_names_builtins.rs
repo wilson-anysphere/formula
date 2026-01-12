@@ -59,7 +59,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
 }
 
 #[test]
-fn builtin_defined_name_prefers_chkey_when_present() {
+fn builtin_defined_name_prefers_rgchname_when_chkey_mismatched() {
     let bytes = xls_fixture_builder::build_defined_names_builtins_chkey_mismatch_fixture_xls();
     let result = import_fixture(&bytes);
     let workbook = result.workbook;
@@ -73,17 +73,19 @@ fn builtin_defined_name_prefers_chkey_when_present() {
         .expect("Sheet2 missing")
         .id;
 
-    // The fixture stores a mismatched built-in id in `NAME.rgchName` for the Sheet1 Print_Area
-    // name, but provides the correct id in `NAME.chKey`. Some producers appear to store the
-    // built-in name id in `chKey`, so the importer should prefer it when it looks like a known
-    // built-in id.
+    // The fixture stores a mismatched built-in id in `NAME.chKey` for the Sheet1 Print_Area name.
+    // Empirically Excel prefers the built-in id from `rgchName` and treats `chKey` as a keyboard
+    // shortcut; the importer should do the same.
     let print_area = workbook.get_defined_name(DefinedNameScope::Sheet(sheet1_id), XLNM_PRINT_AREA);
-    assert!(print_area.is_some(), "missing Print_Area defined name");
+    assert!(
+        print_area.is_none(),
+        "unexpected Print_Area defined name on Sheet1"
+    );
     let print_titles_sheet1 =
         workbook.get_defined_name(DefinedNameScope::Sheet(sheet1_id), XLNM_PRINT_TITLES);
     assert!(
-        print_titles_sheet1.is_none(),
-        "unexpected Print_Titles defined name on Sheet1"
+        print_titles_sheet1.is_some(),
+        "missing Print_Titles defined name on Sheet1"
     );
 
     let print_titles_sheet2 =
