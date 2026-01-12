@@ -185,6 +185,7 @@ export class DesktopPowerQueryService {
   private readonly queries = new Map<string, Query>();
   private readonly applyControllers = new Map<string, AbortController>();
   private readonly unsubscribeRefreshEvents: (() => void) | null;
+  private lastPersistedWorkbookXml: string | null = null;
 
   constructor(options: DesktopPowerQueryServiceOptions) {
     this.workbookId = normalizeWorkbookId(options.workbookId);
@@ -464,6 +465,7 @@ export class DesktopPowerQueryService {
             // Avoid round-tripping the XML back into the workbook on open; that can cause
             // byte-for-byte differences even when the user hasn't changed queries.
             this.applyQueries(workbookQueries, { persist: false, emit: true });
+            this.lastPersistedWorkbookXml = serializeFormulaPowerQueryXml(this.getQueries());
             saveQueriesToStorage(this.workbookId, workbookQueries);
             if (workbookQueries.length > 0) this.refreshManager.triggerOnOpen();
             return;
@@ -487,8 +489,13 @@ export class DesktopPowerQueryService {
 
     if (!this.invoke) return;
     const xml = serializeFormulaPowerQueryXml(queries);
+    if (xml === this.lastPersistedWorkbookXml) {
+      return;
+    }
+    this.lastPersistedWorkbookXml = xml;
     this.invoke("power_query_state_set", { xml }).catch(() => {
-      // ignore
+      // Retry on future updates if the invoke failed.
+      if (this.lastPersistedWorkbookXml === xml) this.lastPersistedWorkbookXml = null;
     });
 
     // Query definitions are persisted inside the workbook file on desktop. Ensure the host
