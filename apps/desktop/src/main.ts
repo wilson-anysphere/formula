@@ -1924,7 +1924,9 @@ function openSheetTabsContextMenu(sheetId: string, x: number, y: number): void {
   if (!sheet) return;
 
   const visibleSheets = workbookSheetStore.listVisible();
-  const hiddenSheets = workbookSheetStore.listAll().filter((s) => s.visibility !== "visible");
+  // Only allow unhiding "hidden" sheets. Excel does not offer UI affordances for
+  // "veryHidden" sheets (those are typically VBA-only), so keep them out of the menu.
+  const hiddenSheets = workbookSheetStore.listAll().filter((s) => s.visibility === "hidden");
 
   const items: ContextMenuItem[] = [
     {
