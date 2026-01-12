@@ -9262,14 +9262,24 @@ mod tests {
         // Ensure the COUNTA formula is actually bytecode-compiled.
         let sheet1_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
         let b1 = parse_a1("B1").unwrap();
+        let b2 = parse_a1("B2").unwrap();
         let cell_b1 = bytecode_engine.workbook.sheets[sheet1_id]
             .cells
             .get(&b1)
             .and_then(|c| c.compiled.as_ref())
             .expect("compiled formula");
+        let cell_b2 = bytecode_engine.workbook.sheets[sheet1_id]
+            .cells
+            .get(&b2)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
         assert!(
             matches!(cell_b1, CompiledFormula::Bytecode(_)),
             "expected COUNTA(Sheet1:Sheet3!A:A) to compile to bytecode"
+        );
+        assert!(
+            matches!(cell_b2, CompiledFormula::Bytecode(_)),
+            "expected COUNTBLANK(Sheet1:Sheet3!A:A) to compile to bytecode"
         );
 
         // Column caches should *not* allocate full-column buffers for 3D spans over `A:A`.
@@ -9279,11 +9289,9 @@ mod tests {
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
         );
-        let key_b1 = CellKey {
-            sheet: sheet1_id,
-            addr: b1,
-        };
-        let tasks = vec![(key_b1, cell_b1.clone())];
+        let key_b1 = CellKey { sheet: sheet1_id, addr: b1 };
+        let key_b2 = CellKey { sheet: sheet1_id, addr: b2 };
+        let tasks = vec![(key_b1, cell_b1.clone()), (key_b2, cell_b2.clone())];
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
 
