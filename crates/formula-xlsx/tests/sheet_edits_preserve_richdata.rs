@@ -2,6 +2,8 @@ use std::io::{Cursor, Read, Write};
 
 use formula_xlsx::load_from_bytes;
 use pretty_assertions::assert_eq;
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -133,6 +135,80 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     buf
 }
 
+fn workbook_sheet_names(xml: &[u8]) -> Vec<String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"sheet" => {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"name" {
+                        out.push(attr.unescape_value().expect("attr").into_owned());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn workbook_relationship_targets(xml: &[u8]) -> std::collections::BTreeMap<String, String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = std::collections::BTreeMap::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+                let mut id = None;
+                let mut target = None;
+                for attr in e.attributes().flatten() {
+                    let val = attr.unescape_value().expect("attr").into_owned();
+                    match attr.key.as_ref() {
+                        b"Id" => id = Some(val),
+                        b"Target" => target = Some(val),
+                        _ => {}
+                    }
+                }
+                if let (Some(id), Some(target)) = (id, target) {
+                    out.insert(id, target);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn content_type_overrides(xml: &[u8]) -> std::collections::BTreeSet<String> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut out = std::collections::BTreeSet::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("read xml") {
+            Event::Start(e) | Event::Empty(e) if e.name().as_ref() == b"Override" => {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"PartName" {
+                        out.insert(attr.unescape_value().expect("attr").into_owned());
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
 #[test]
 fn sheet_edits_preserve_richdata_parts_and_relationships() {
     let fixture = build_fixture_xlsx();
@@ -152,13 +228,14 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
     let saved = doc.save_to_vec().expect("save");
 
     // Sanity: ensure we actually exercised the sheet-structure rewrite path.
-    let workbook_xml = String::from_utf8(zip_part(&saved, "xl/workbook.xml")).expect("utf8");
+    let workbook_xml = zip_part(&saved, "xl/workbook.xml");
+    let workbook_sheets = workbook_sheet_names(&workbook_xml);
     assert!(
-        !workbook_xml.contains("Sheet2"),
+        !workbook_sheets.iter().any(|s| s == "Sheet2"),
         "expected deleted sheet to be removed from xl/workbook.xml"
     );
     assert!(
-        workbook_xml.contains("Added"),
+        workbook_sheets.iter().any(|s| s == "Added"),
         "expected newly-added sheet to be present in xl/workbook.xml"
     );
     let cursor = Cursor::new(&saved);
@@ -193,25 +270,24 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         "xl/richData/richValues.xml must be preserved byte-for-byte across sheet edits"
     );
 
-    let workbook_rels = String::from_utf8(zip_part(&saved, "xl/_rels/workbook.xml.rels"))
-        .expect("workbook.xml.rels utf8");
-    assert!(
-        workbook_rels.contains(r#"Id="rId9""#) && workbook_rels.contains(r#"Target="metadata.xml""#),
+    let workbook_rels = workbook_relationship_targets(&zip_part(&saved, "xl/_rels/workbook.xml.rels"));
+    assert_eq!(
+        workbook_rels.get("rId9").map(String::as_str),
+        Some("metadata.xml"),
         "workbook.xml.rels must retain the metadata relationship (rId9 -> metadata.xml)"
     );
 
-    let content_types =
-        String::from_utf8(zip_part(&saved, "[Content_Types].xml")).expect("content types utf8");
+    let content_types = content_type_overrides(&zip_part(&saved, "[Content_Types].xml"));
     assert!(
-        content_types.contains(r#"/xl/metadata.xml"#),
+        content_types.contains("/xl/metadata.xml"),
         "[Content_Types].xml must retain override for /xl/metadata.xml"
     );
     assert!(
-        content_types.contains(r#"/xl/richData/richValueTypes.xml"#),
+        content_types.contains("/xl/richData/richValueTypes.xml"),
         "[Content_Types].xml must retain override for /xl/richData/richValueTypes.xml"
     );
     assert!(
-        content_types.contains(r#"/xl/richData/richValues.xml"#),
+        content_types.contains("/xl/richData/richValues.xml"),
         "[Content_Types].xml must retain override for /xl/richData/richValues.xml"
     );
 }
