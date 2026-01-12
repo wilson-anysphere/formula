@@ -122,6 +122,14 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
 
     await gotoDesktop(page);
 
+    // The demo workbook seeded into the desktop-web harness only includes Sheet1.
+    // Create a second sheet (Sheet2) via the DocumentController so we can exercise
+    // hide/unhide + tab color persistence hooks.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+
     const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
     await expect(sheet2Tab).toBeVisible();
 
