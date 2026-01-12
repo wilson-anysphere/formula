@@ -1781,14 +1781,14 @@ fn plan_shared_strings<R: Read + Seek>(
                         .rich_at(idx)
                         .map(|rt| rt.text.as_str() == entity.display_value.as_str())
                         .unwrap_or(false),
-                    CellValue::Record(record) => {
-                        let display = record.to_string();
-                        shared_strings
-                            .editor
-                            .rich_at(idx)
-                            .map(|rt| rt.text.as_str() == display.as_str())
-                            .unwrap_or(false)
-                    }
+                    CellValue::Record(record) => shared_strings
+                        .editor
+                        .rich_at(idx)
+                        .map(|rt| {
+                            let display = record.to_string();
+                            rt.text.as_str() == display.as_str()
+                        })
+                        .unwrap_or(false),
                     CellValue::RichText(rich) => shared_strings
                         .editor
                         .rich_at(idx)

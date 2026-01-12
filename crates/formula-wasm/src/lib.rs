@@ -415,7 +415,6 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
 }
 
 fn cell_value_to_engine(value: &CellValue) -> EngineValue {
-    #[allow(unreachable_patterns)]
     match value {
         CellValue::Empty => EngineValue::Blank,
         CellValue::Number(n) => EngineValue::Number(*n),
@@ -438,61 +437,16 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
             formula_model::ErrorValue::Unknown => EngineValue::Error(ErrorKind::Unknown),
         },
         CellValue::RichText(rt) => EngineValue::Text(rt.plain_text().to_string()),
-        CellValue::Entity(entity) => EngineValue::Text(entity.display_value.clone()),
-        CellValue::Record(record) => EngineValue::Text(record.to_string()),
+        CellValue::Entity(entity) => EngineValue::Entity(formula_engine::value::EntityValue::new(
+            entity.display_value.clone(),
+        )),
+        CellValue::Record(record) => EngineValue::Record(formula_engine::value::RecordValue::new(
+            record.to_string(),
+        )),
         // The workbook model can store cached array/spill results, but the WASM worker API only
         // supports scalar values today. Treat these as spill errors so downstream formulas see an
         // error rather than silently treating an array as a string.
         CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Error(ErrorKind::Spill),
-        // Rich value variants (Entity/Record) are not part of `formula-model` yet on older
-        // versions of this repository. Once added, this wildcard arm prevents the match from
-        // becoming non-exhaustive while degrading the value to a stable display string.
-        _ => rich_cell_value_to_engine(value).unwrap_or(EngineValue::Blank),
-    }
-}
-
-fn rich_cell_value_to_engine(value: &CellValue) -> Option<EngineValue> {
-    let serialized = serde_json::to_value(value).ok()?;
-    let value_type = serialized.get("type")?.as_str()?;
-
-    match value_type {
-        "entity" => {
-            let display_value = serialized
-                .get("value")?
-                .get("display_value")?
-                .as_str()?
-                .to_string();
-            Some(EngineValue::Text(display_value))
-        }
-        "record" => {
-            let record = serialized.get("value")?;
-            let display_field = record.get("display_field")?.as_str()?;
-            let fields = record.get("fields")?.as_object()?;
-            let display_value = fields.get(display_field)?;
-
-            let display_value_type = display_value.get("type")?.as_str()?;
-            let display_str = match display_value_type {
-                "number" => display_value.get("value")?.as_f64()?.to_string(),
-                "string" => display_value.get("value")?.as_str()?.to_string(),
-                "boolean" => {
-                    if display_value.get("value")?.as_bool()? {
-                        "TRUE".to_string()
-                    } else {
-                        "FALSE".to_string()
-                    }
-                }
-                "error" => display_value.get("value")?.as_str()?.to_string(),
-                "rich_text" => display_value
-                    .get("value")?
-                    .get("text")?
-                    .as_str()?
-                    .to_string(),
-                other => return Some(EngineValue::Text(other.to_string())),
-            };
-
-            Some(EngineValue::Text(display_str))
-        }
-        _ => None,
     }
 }
 
@@ -2277,7 +2231,7 @@ mod tests {
         let entity: CellValue = match serde_json::from_value(json!({
             "type": "entity",
             "value": {
-                "display_value": "Entity display"
+                "display": "Entity display"
             }
         })) {
             Ok(value) => value,
@@ -2288,7 +2242,7 @@ mod tests {
         let record: CellValue = match serde_json::from_value(json!({
             "type": "record",
             "value": {
-                "display_field": "name",
+                "displayField": "name",
                 "fields": {
                     "name": { "type": "string", "value": "Alice" },
                     "age": { "type": "number", "value": 42.0 }
