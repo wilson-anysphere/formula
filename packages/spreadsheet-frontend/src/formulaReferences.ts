@@ -345,16 +345,48 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   while (prev >= 0 && isWhitespace(input[prev]!)) prev -= 1;
   if (prev >= 0 && isIdentifierPart(input[prev]!)) return null;
 
+  if (input[start] === "[") {
+    // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
+    let i = start + 1;
+    while (i < input.length && input[i] !== "]") i += 1;
+    if (i >= input.length || input[i] !== "]") return null;
+    i += 1;
+    if (!isIdentifierStart(input[i] ?? "")) return null;
+
+    let j = i + 1;
+    while (j < input.length && (isIdentifierPart(input[j]!) || input[j] === ":")) j += 1;
+    if (input[j] === "!") {
+      const sheetSpec = input.slice(i, j);
+      const sheetNames = sheetSpec.split(":");
+      if (
+        sheetNames.some(
+          (name) =>
+            isReservedUnquotedSheetName(name) ||
+            looksLikeA1CellReference(name) ||
+            looksLikeR1C1CellReference(name)
+        )
+      ) {
+        return null;
+      }
+      return { text: input.slice(start, j + 1), end: j + 1 };
+    }
+    return null;
+  }
+
   if (!isIdentifierStart(input[start] ?? "")) return null;
 
   let i = start + 1;
-  while (i < input.length && isIdentifierPart(input[i]!)) i += 1;
+  while (i < input.length && (isIdentifierPart(input[i]!) || input[i] === ":")) i += 1;
   if (input[i] === "!") {
-    const sheetName = input.slice(start, i);
+    const sheetSpec = input.slice(start, i);
+    const sheetNames = sheetSpec.split(":");
     if (
-      isReservedUnquotedSheetName(sheetName) ||
-      looksLikeA1CellReference(sheetName) ||
-      looksLikeR1C1CellReference(sheetName)
+      sheetNames.some(
+        (name) =>
+          isReservedUnquotedSheetName(name) ||
+          looksLikeA1CellReference(name) ||
+          looksLikeR1C1CellReference(name)
+      )
     ) {
       return null;
     }
@@ -382,6 +414,11 @@ function tryReadCellRef(input: string, start: number): { text: string; end: numb
   const rowStart = i;
   while (isDigit(input[i] ?? "")) i += 1;
   if (i === rowStart) return null;
+
+  // Mirror the engine lexer: avoid mis-extracting references from identifiers that start with a
+  // cell-ref prefix (e.g. `A1FOO`, `R1C1Sheet`).
+  const next = input[i] ?? "";
+  if (next === "(" || (next !== "." && isIdentifierPart(next))) return null;
 
   return { text: input.slice(start, i), end: i };
 }

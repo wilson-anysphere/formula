@@ -54,6 +54,27 @@ describe("extractFormulaReferences", () => {
     expect(references[0]?.range).toEqual({ sheet: undefined, startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
   });
 
+  it("does not treat ambiguous unquoted sheet prefixes as sheet-qualified references", () => {
+    const { references } = extractFormulaReferences("=TRUE!A1 + A1!B2 + R1C1!C3", 0, 0);
+    expect(references.map((r) => r.text)).toEqual(["A1", "A1", "B2", "C3"]);
+    expect(references.map((r) => r.range.sheet)).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("does not treat identifiers starting with cell-ref prefixes as references", () => {
+    const { references } = extractFormulaReferences("=A1FOO + R1C1FOO + A1.Price", 0, 0);
+    expect(references).toHaveLength(1);
+    expect(references[0]?.text).toBe("A1");
+  });
+
+  it("parses external workbook and 3D sheet-qualified references", () => {
+    const { references } = extractFormulaReferences("=[Book.xlsx]Sheet1!A1 + Sheet1:Sheet3!B2", 0, 0);
+    expect(references).toHaveLength(2);
+    expect(references[0]?.text).toBe("[Book.xlsx]Sheet1!A1");
+    expect(references[0]?.range).toEqual({ sheet: "[Book.xlsx]Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+    expect(references[1]?.text).toBe("Sheet1:Sheet3!B2");
+    expect(references[1]?.range).toEqual({ sheet: "Sheet1:Sheet3", startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
+  });
+
   it("detects the active reference at the caret (including token end)", () => {
     // =A1+B1, caret after final "1" should count as being in B1.
     const input = "=A1+B1";

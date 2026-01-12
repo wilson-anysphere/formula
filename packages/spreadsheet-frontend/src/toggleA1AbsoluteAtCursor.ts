@@ -104,10 +104,6 @@ function splitSheetPrefix(text: string): { sheetPrefix: string; refText: string 
   const bang = text.indexOf("!");
   if (bang === -1) return { sheetPrefix: "", refText: text };
 
-  const candidate = text.slice(0, bang);
-  // Match the tokenizer: unquoted sheet names must be identifier-ish.
-  if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(candidate)) return { sheetPrefix: "", refText: text };
-
   const end = bang + 1;
   return { sheetPrefix: text.slice(0, end), refText: text.slice(end) };
 }

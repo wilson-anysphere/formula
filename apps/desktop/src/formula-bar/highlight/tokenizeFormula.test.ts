@@ -61,4 +61,25 @@ describe("tokenizeFormula", () => {
       ["punctuation", "]"],
     ]);
   });
+
+  it("does not treat ambiguous unquoted sheet prefixes as sheet-qualified refs", () => {
+    const tokens = tokenizeFormula("=SUM(TRUE!A1, A1!B2, R1C1!C3)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["A1", "A1", "B2", "C3"]);
+  });
+
+  it("does not treat identifiers starting with cell-ref prefixes as references", () => {
+    const tokens = tokenizeFormula("=A1FOO + R1C1FOO + A1.Price");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["A1"]);
+
+    const idents = tokens.filter((t) => t.type === "identifier").map((t) => t.text);
+    expect(idents).toEqual(expect.arrayContaining(["A1FOO", "R1C1FOO", "Price"]));
+  });
+
+  it("tokenizes unquoted external workbook and 3D sheet-qualified references", () => {
+    const tokens = tokenizeFormula("=SUM([Book.xlsx]Sheet1!A1, Sheet1:Sheet3!B2)");
+    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
+    expect(refs).toEqual(["[Book.xlsx]Sheet1!A1", "Sheet1:Sheet3!B2"]);
+  });
 });

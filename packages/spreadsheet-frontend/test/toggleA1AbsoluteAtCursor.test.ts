@@ -53,6 +53,14 @@ describe("toggleA1AbsoluteAtCursor", () => {
     expect(quoted?.text).toBe("=SUM('My Sheet'!$A$1:$B$2)");
   });
 
+  it("preserves Unicode and external-workbook sheet qualifiers", () => {
+    const unicode = toggleA1AbsoluteAtCursor("=résumé!A1", 9, 9);
+    expect(unicode?.text).toBe("=résumé!$A$1");
+
+    const external = toggleA1AbsoluteAtCursor("=[Book.xlsx]Sheet1!A1", 19, 19);
+    expect(external?.text).toBe("=[Book.xlsx]Sheet1!$A$1");
+  });
+
   it("keeps full-token selections selecting the full toggled token", () => {
     const res = toggleA1AbsoluteAtCursor("=A1", 1, 3);
     expect(res?.text).toBe("=$A$1");
@@ -74,5 +82,9 @@ describe("toggleA1AbsoluteAtCursor", () => {
 
   it("returns null when the caret is not within a reference token", () => {
     expect(toggleA1AbsoluteAtCursor("=SUM(", 5, 5)).toBeNull();
+  });
+
+  it("returns null for identifiers that start with cell references (e.g. defined names)", () => {
+    expect(toggleA1AbsoluteAtCursor("=A1FOO", 2, 2)).toBeNull();
   });
 });
