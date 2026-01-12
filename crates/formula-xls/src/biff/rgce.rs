@@ -255,6 +255,50 @@ fn decode_defined_name_rgce_impl(
                     escape_excel_string(&s)
                 )));
             }
+            // PtgAttr: [grbit: u8][wAttr: u16]
+            //
+            // Most PtgAttr bits are evaluation hints (or formatting metadata) that do not affect the
+            // printed formula text, but some do. In particular, Excel can encode `SUM(A1:A10)` as
+            // `PtgArea` + `PtgAttr(tAttrSum)` (no explicit `PtgFuncVar(SUM)`).
+            0x19 => {
+                if input.len() < 3 {
+                    return Err("unexpected eof".to_string());
+                }
+                let grbit = input[0];
+                let w_attr = u16::from_le_bytes([input[1], input[2]]);
+                input = &input[3..];
+
+                const T_ATTR_VOLATILE: u8 = 0x01;
+                const T_ATTR_IF: u8 = 0x02;
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                const T_ATTR_SKIP: u8 = 0x08;
+                const T_ATTR_SUM: u8 = 0x10;
+                const T_ATTR_SPACE: u8 = 0x40;
+                const T_ATTR_SEMI: u8 = 0x80;
+
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    // `tAttrChoose` is followed by a jump table of `u16` offsets used for
+                    // short-circuit evaluation.
+                    //
+                    // We don't need it for printing, but we must consume it so subsequent tokens
+                    // stay aligned.
+                    let needed = (w_attr as usize).saturating_mul(2);
+                    if input.len() < needed {
+                        return Err("unexpected eof".to_string());
+                    }
+                    input = &input[needed..];
+                }
+
+                if grbit & T_ATTR_SUM != 0 {
+                    let a = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
+                    stack.push(format_function_call("SUM", vec![a]));
+                } else {
+                    // Ignore other attributes for printing, but keep the constants referenced so
+                    // this doesn't accidentally get treated as dead code.
+                    let _ =
+                        grbit & (T_ATTR_VOLATILE | T_ATTR_IF | T_ATTR_SKIP | T_ATTR_SPACE | T_ATTR_SEMI);
+                }
+            }
             // Error literal.
             0x1C => {
                 let (&err, rest) = input.split_first().ok_or_else(|| "unexpected eof".to_string())?;
@@ -433,6 +477,21 @@ fn decode_defined_name_rgce_impl(
                 }
                 stack.push(frag);
             }
+            // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
+            //
+            // Payload: [cce: u16][rgce: cce bytes]
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if input.len() < 2 {
+                    return Err("unexpected eof".to_string());
+                }
+                let cce = u16::from_le_bytes([input[0], input[1]]) as usize;
+                input = &input[2..];
+                if input.len() < cce {
+                    return Err("unexpected eof".to_string());
+                }
+                input = &input[cce..];
+            }
             _ => return Err(format!("unsupported ptg token 0x{ptg:02X}")),
         }
     }
@@ -514,6 +573,54 @@ mod tests {
 
         let decoded = decode_defined_name_rgce(&rgce, 1252);
         assert_eq!(decoded.text.as_deref(), Some("IF(TRUE,1,2)"));
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+    }
+
+    #[test]
+    fn ptg_attr_sum_wraps_area_in_sum() {
+        // SUM(A1:A2) encoded as `PtgArea` + `PtgAttr(tAttrSum)`.
+        let mut rgce = Vec::new();
+
+        // PtgArea (0x25) with rowFirst=0,rowLast=1,col=A relative.
+        rgce.push(0x25);
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rowFirst0 (A1)
+        rgce.extend_from_slice(&1u16.to_le_bytes()); // rowLast0 (A2)
+        // col field: index 0 + both relative flags -> no '$' markers.
+        let col_rel: u16 = 0xC000;
+        rgce.extend_from_slice(&(0u16 | col_rel).to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&(0u16 | col_rel).to_le_bytes()); // colLast
+
+        // PtgAttr (0x19): grbit=tAttrSum (0x10), wAttr=0.
+        rgce.push(0x19);
+        rgce.push(0x10);
+        rgce.extend_from_slice(&0u16.to_le_bytes());
+
+        let decoded = decode_defined_name_rgce(&rgce, 1252);
+        assert_eq!(decoded.text.as_deref(), Some("SUM(A1:A2)"));
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+    }
+
+    #[test]
+    fn ptg_mem_tokens_are_skipped_and_do_not_break_alignment() {
+        let mut rgce = Vec::new();
+
+        // PtgMemArea (0x26): cce=2, dummy bytes.
+        rgce.push(0x26);
+        rgce.extend_from_slice(&2u16.to_le_bytes());
+        rgce.extend_from_slice(&[0xAA, 0xBB]);
+
+        // PtgMemFunc (0x29): cce=3, dummy bytes that look like a token (PtgInt 42).
+        rgce.push(0x29);
+        rgce.extend_from_slice(&3u16.to_le_bytes());
+        rgce.extend_from_slice(&[0x1E, 0x2A, 0x00]);
+
+        // 1 2 +
+        rgce.extend_from_slice(&[0x1E, 0x01, 0x00]); // PtgInt 1
+        rgce.extend_from_slice(&[0x1E, 0x02, 0x00]); // PtgInt 2
+        rgce.push(0x03); // PtgAdd
+
+        let decoded = decode_defined_name_rgce(&rgce, 1252);
+        assert_eq!(decoded.text.as_deref(), Some("1+2"));
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
     }
 }
