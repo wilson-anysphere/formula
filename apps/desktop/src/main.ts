@@ -4073,8 +4073,8 @@ if (
           // Some environments provide a lightweight `session.sheets` implementation that stores
           // plain JS objects and does not attach Yjs types to a Y.Doc; in that case insert a
           // plain `{ id, name, visibility }` entry instead.
-          const ctorName = (collabSession as any)?.sheets?.constructor?.name ?? "";
-          const isYjsSheetsArray = ctorName === "YArray";
+          const sheetsArray: any = (collabSession as any)?.sheets ?? null;
+          const isYjsSheetsArray = Boolean(sheetsArray && typeof sheetsArray === "object" && sheetsArray.doc);
 
           if (isYjsSheetsArray) {
             const sheet = new Y.Map<unknown>();
