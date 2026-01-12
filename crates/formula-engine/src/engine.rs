@@ -7868,27 +7868,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                let lhs_ok = match &args[0] {
-                    bytecode::Expr::RangeRef(_)
-                    | bytecode::Expr::CellRef(_)
-                    | bytecode::Expr::SpillRange(_) => true,
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
-                    ),
-                    _ => false,
-                };
-                let rhs_ok = match &args[1] {
-                    bytecode::Expr::RangeRef(_)
-                    | bytecode::Expr::CellRef(_)
-                    | bytecode::Expr::SpillRange(_) => true,
-                    bytecode::Expr::NameRef(name) => matches!(
-                        local_binding_kind(lexical_scopes, name),
-                        Some(BytecodeLocalBindingKind::Range)
-                    ),
-                    _ => false,
-                };
-                lhs_ok && rhs_ok
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes))
             }
             bytecode::ast::Function::VLookup | bytecode::ast::Function::HLookup => {
                 if args.len() < 3 || args.len() > 4 {

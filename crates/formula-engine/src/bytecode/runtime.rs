@@ -6416,34 +6416,192 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
-    match (&args[0], &args[1]) {
-        (Value::Array(a), Value::Array(b)) => {
-            if a.len() != b.len() {
-                return Value::Error(ErrorKind::Value);
+
+    // Preserve Excel-like argument error precedence.
+    if let Value::Error(e) = &args[0] {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = &args[1] {
+        return Value::Error(*e);
+    }
+
+    struct RangeOperand<'a> {
+        grid: &'a dyn Grid,
+        range: ResolvedRange,
+        rows: usize,
+        cols: usize,
+        // Per-column strict-numeric slices (numbers/blanks only) for faster reads when available.
+        col_slices: Vec<Option<&'a [f64]>>,
+    }
+
+    impl<'a> RangeOperand<'a> {
+        fn new(grid: &'a dyn Grid, range: ResolvedRange) -> Result<Self, ErrorKind> {
+            if !range_in_bounds(grid, range) {
+                return Err(ErrorKind::Ref);
             }
+            let rows_i32 = range.rows();
+            let cols_i32 = range.cols();
+            if rows_i32 <= 0 || cols_i32 <= 0 {
+                return Err(ErrorKind::Value);
+            }
+            let rows = rows_i32 as usize;
+            let cols = cols_i32 as usize;
+            let mut col_slices = Vec::with_capacity(cols);
+            for col in range.col_start..=range.col_end {
+                col_slices.push(grid.column_slice_strict_numeric(col, range.row_start, range.row_end));
+            }
+            Ok(Self {
+                grid,
+                range,
+                rows,
+                cols,
+                col_slices,
+            })
+        }
+
+        fn len(&self) -> usize {
+            self.rows.saturating_mul(self.cols)
+        }
+
+        fn coerce_number_at(&self, idx: usize) -> Result<f64, ErrorKind> {
+            if self.cols == 0 {
+                return Err(ErrorKind::Value);
+            }
+            let row_offset = idx / self.cols;
+            let col_offset = idx % self.cols;
+            if row_offset >= self.rows {
+                return Err(ErrorKind::Value);
+            }
+
+            if let Some(slice) = self.col_slices[col_offset] {
+                let n = slice[row_offset];
+                // Column slices represent blanks as NaN; SUMPRODUCT treats blanks as 0.
+                return Ok(if n.is_nan() { 0.0 } else { n });
+            }
+
+            let row = self.range.row_start + row_offset as i32;
+            let col = self.range.col_start + col_offset as i32;
+            coerce_sumproduct_number(&self.grid.get_value(CellCoord { row, col }))
+        }
+    }
+
+    enum Operand<'a> {
+        Scalar(&'a Value),
+        Array(&'a ArrayValue),
+        Range(RangeOperand<'a>),
+        MultiRange,
+    }
+
+    impl Operand<'_> {
+        fn len(&self) -> usize {
+            match self {
+                Operand::Scalar(_) => 1,
+                Operand::Array(a) => a.len(),
+                Operand::Range(r) => r.len(),
+                Operand::MultiRange => 0,
+            }
+        }
+
+        fn coerce_number_at(&self, idx: usize) -> Result<f64, ErrorKind> {
+            match self {
+                Operand::Scalar(v) => coerce_sumproduct_number(v),
+                Operand::Array(arr) => {
+                    let v = arr.values.get(idx).ok_or(ErrorKind::Value)?;
+                    coerce_sumproduct_number(v)
+                }
+                Operand::Range(r) => r.coerce_number_at(idx),
+                Operand::MultiRange => Err(ErrorKind::Value),
+            }
+        }
+    }
+
+    let a = match &args[0] {
+        Value::Range(r) => match RangeOperand::new(grid, r.resolve(base)) {
+            Ok(v) => Operand::Range(v),
+            Err(e) => return Value::Error(e),
+        },
+        Value::Array(arr) => Operand::Array(arr),
+        Value::MultiRange(_) => Operand::MultiRange,
+        other => Operand::Scalar(other),
+    };
+    let b = match &args[1] {
+        Value::Range(r) => match RangeOperand::new(grid, r.resolve(base)) {
+            Ok(v) => Operand::Range(v),
+            Err(e) => return Value::Error(e),
+        },
+        Value::Array(arr) => Operand::Array(arr),
+        Value::MultiRange(_) => Operand::MultiRange,
+        other => Operand::Scalar(other),
+    };
+
+    let len_a = a.len();
+    let len_b = b.len();
+    let len = len_a.max(len_b);
+    if len == 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+    if (len_a != len && len_a != 1) || (len_b != len && len_b != 1) {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    // Fast path: both ranges, same shape, and we can use strict numeric slices for every column.
+    if let (Operand::Range(ra), Operand::Range(rb)) = (&a, &b) {
+        if len_a == len_b && len_a == len && ra.rows == rb.rows && ra.cols == rb.cols {
+            let all_slices = ra
+                .col_slices
+                .iter()
+                .zip(rb.col_slices.iter())
+                .all(|(sa, sb)| sa.is_some() && sb.is_some());
+            if all_slices {
+                return match sumproduct_range(grid, ra.range, rb.range) {
+                    Ok(v) => Value::Number(v),
+                    Err(e) => Value::Error(e),
+                };
+            }
+        }
+    }
+
+    let result = (|| -> Result<f64, ErrorKind> {
+        if len_a == 1 && len_b == 1 {
+            let x = a.coerce_number_at(0)?;
+            let y = b.coerce_number_at(0)?;
+            return Ok(x * y);
+        }
+
+        if len_a == 1 {
+            let x = a.coerce_number_at(0)?;
             let mut sum = 0.0;
-            for (x, y) in a.iter().zip(b.iter()) {
-                let x = match coerce_sumproduct_number(x) {
-                    Ok(v) => v,
-                    Err(e) => return Value::Error(e),
-                };
-                let y = match coerce_sumproduct_number(y) {
-                    Ok(v) => v,
-                    Err(e) => return Value::Error(e),
-                };
+            for idx in 0..len {
+                let y = b.coerce_number_at(if len_b == 1 { 0 } else { idx })?;
                 sum += x * y;
             }
-            Value::Number(sum)
+            return Ok(sum);
         }
-        (Value::Range(a), Value::Range(b)) => {
-            let ra = a.resolve(base);
-            let rb = b.resolve(base);
-            match sumproduct_range(grid, ra, rb) {
-                Ok(v) => Value::Number(v),
-                Err(e) => Value::Error(e),
+
+        if len_b == 1 {
+            // Preserve error precedence: for idx=0 we must coerce `a[0]` before `b[0]`.
+            let x0 = a.coerce_number_at(0)?;
+            let y = b.coerce_number_at(0)?;
+            let mut sum = x0 * y;
+            for idx in 1..len {
+                let x = a.coerce_number_at(idx)?;
+                sum += x * y;
             }
+            return Ok(sum);
         }
-        _ => Value::Error(ErrorKind::Value),
+
+        let mut sum = 0.0;
+        for idx in 0..len {
+            let x = a.coerce_number_at(idx)?;
+            let y = b.coerce_number_at(idx)?;
+            sum += x * y;
+        }
+        Ok(sum)
+    })();
+
+    match result {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
     }
 }
 
@@ -8418,7 +8576,19 @@ fn coerce_sumproduct_number(v: &Value) -> Result<f64, ErrorKind> {
             Err(ExcelError::Div0) => Err(ErrorKind::Div0),
             Err(ExcelError::Num) => Err(ErrorKind::Num),
         },
-        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
+        // Rich values behave like text for numeric coercions.
+        Value::Entity(entity) => match parse_number(&entity.display, thread_number_locale()) {
+            Ok(n) => Ok(n),
+            Err(ExcelError::Value) => Ok(0.0),
+            Err(ExcelError::Div0) => Err(ErrorKind::Div0),
+            Err(ExcelError::Num) => Err(ErrorKind::Num),
+        },
+        Value::Record(record) => match parse_number(&record.display, thread_number_locale()) {
+            Ok(n) => Ok(n),
+            Err(ExcelError::Value) => Ok(0.0),
+            Err(ExcelError::Div0) => Err(ErrorKind::Div0),
+            Err(ExcelError::Num) => Err(ErrorKind::Num),
+        },
         Value::Empty | Value::Missing => Ok(0.0),
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),

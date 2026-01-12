@@ -1533,6 +1533,98 @@ fn bytecode_backend_sumproduct_respects_engine_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_sumproduct_broadcasts_single_cell_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 4.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUMPRODUCT(A1,A1:A3)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected SUMPRODUCT scalar-broadcasting to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(18.0));
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(A1,A1:A3)", "B1");
+}
+
+#[test]
+fn bytecode_backend_sumproduct_flattens_mismatched_range_shapes_by_length() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 4.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SUMPRODUCT(A1:C1,A1:A3)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(24.0));
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(A1:C1,A1:A3)", "D1");
+}
+
+#[test]
+fn bytecode_backend_sumproduct_accepts_scalars_and_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUMPRODUCT({1,2},{3,4})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=SUMPRODUCT(2,{1,2,3})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=LET(a,{1,2},SUMPRODUCT(a,{3,4}))")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        3,
+        "expected array/scalar SUMPRODUCT formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(12.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(11.0));
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT({1,2},{3,4})", "A1");
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(2,{1,2,3})", "A2");
+    assert_engine_matches_ast(&engine, "=LET(a,{1,2},SUMPRODUCT(a,{3,4}))", "A3");
+}
+
+#[test]
+fn bytecode_backend_sumproduct_accepts_array_expressions_and_range_args() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUMPRODUCT(A1:A3>0,B1:B3)")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected SUMPRODUCT array+range formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(40.0));
+    assert_engine_matches_ast(&engine, "=SUMPRODUCT(A1:A3>0,B1:B3)", "C1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_scalar_math_and_comparisons() {
     let mut engine = Engine::new();
 
