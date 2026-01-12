@@ -293,8 +293,11 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
     ]
   },
   "bundle": {
-    "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }],
-    "protocols": { "name": "formula", "schemes": ["formula"] }
+    "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }]
+    // (Other bundle config omitted for brevity; see the real file.)
+    //
+    // Note: `formula://` deep links are registered at runtime via `tauri-plugin-deep-link`,
+    // not via `bundle.protocols`.
   },
   "plugins": {
     "updater": {
