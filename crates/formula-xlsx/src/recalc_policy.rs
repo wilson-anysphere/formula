@@ -481,6 +481,7 @@ mod tests {
 <r:Relationships xmlns:r="http://schemas.openxmlformats.org/package/2006/relationships">
   <r:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <r:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+  <r:Relationship Id="rId3" Type="http://example.com/keep" Target="xl/calcChain.xml"/>
   <r:Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
 </r:Relationships>
 "#;
@@ -490,6 +491,10 @@ mod tests {
         let updated = std::str::from_utf8(&updated).expect("utf8 workbook rels");
 
         assert!(
+            updated.contains(r#"Id="rId1""#),
+            "expected worksheet relationship to be preserved, got: {updated}"
+        );
+        assert!(
             !updated.contains("calcChain.xml"),
             "expected calc chain relationship to be removed, got: {updated}"
         );
@@ -498,8 +503,16 @@ mod tests {
             "expected metadata relationship to be preserved, got: {updated}"
         );
         assert!(
+            updated.contains(r#"Id="rId9""#),
+            "expected metadata relationship to be preserved, got: {updated}"
+        );
+        assert!(
             updated.contains("<r:Relationships"),
             "expected root element prefix to be preserved, got: {updated}"
+        );
+        assert!(
+            updated.contains("<r:Relationship"),
+            "expected Relationship element prefix to be preserved, got: {updated}"
         );
     }
 
