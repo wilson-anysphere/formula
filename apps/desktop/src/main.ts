@@ -1548,6 +1548,38 @@ if (
         app.focus();
       },
     },
+    {
+      id: "freezePanes",
+      label: "Freeze Panes",
+      run: () => {
+        app.freezePanes();
+        app.focus();
+      },
+    },
+    {
+      id: "freezeTopRow",
+      label: "Freeze Top Row",
+      run: () => {
+        app.freezeTopRow();
+        app.focus();
+      },
+    },
+    {
+      id: "freezeFirstColumn",
+      label: "Freeze First Column",
+      run: () => {
+        app.freezeFirstColumn();
+        app.focus();
+      },
+    },
+    {
+      id: "unfreezePanes",
+      label: "Unfreeze Panes",
+      run: () => {
+        app.unfreezePanes();
+        app.focus();
+      },
+    },
   ];
 
   let paletteQuery = "";
@@ -1684,160 +1716,6 @@ freezeFirstColumn?.addEventListener("click", () => {
 unfreezePanes?.addEventListener("click", () => {
   app.unfreezePanes();
   app.focus();
-});
-
-type CommandPaletteCommand = { id: string; title: string; run: () => void; keywords?: string[] };
-
-function createCommandPalette(commands: readonly CommandPaletteCommand[]): { open: () => void } {
-  const dialog = document.createElement("dialog");
-  dialog.className = "command-palette";
-  dialog.dataset.testid = "command-palette";
-  dialog.addEventListener("click", (e) => {
-    if (e.target === dialog) dialog.close();
-  });
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = "command-palette__input";
-  input.placeholder = "Type a command…";
-
-  const list = document.createElement("ul");
-  list.className = "command-palette__list";
-
-  dialog.appendChild(input);
-  dialog.appendChild(list);
-  document.body.appendChild(dialog);
-
-  let filtered: CommandPaletteCommand[] = [];
-  let selectedIndex = 0;
-
-  const updateSelection = (next: number) => {
-    selectedIndex = Math.max(0, Math.min(filtered.length - 1, next));
-    const children = Array.from(list.children) as HTMLElement[];
-    for (let i = 0; i < children.length; i += 1) {
-      children[i]?.setAttribute("aria-selected", i === selectedIndex ? "true" : "false");
-    }
-  };
-
-  const runSelected = () => {
-    const cmd = filtered[selectedIndex];
-    if (!cmd) return;
-    dialog.close();
-    cmd.run();
-  };
-
-  const render = () => {
-    const query = input.value.trim().toLowerCase();
-    filtered = commands.filter((cmd) => {
-      if (query === "") return true;
-      const haystack = `${cmd.title} ${cmd.id} ${(cmd.keywords ?? []).join(" ")}`.toLowerCase();
-      return haystack.includes(query);
-    });
-
-    list.replaceChildren();
-    selectedIndex = 0;
-
-    for (const [idx, cmd] of filtered.entries()) {
-      const item = document.createElement("li");
-      item.className = "command-palette__item";
-      item.textContent = cmd.title;
-      item.setAttribute("role", "option");
-      item.setAttribute("aria-selected", idx === selectedIndex ? "true" : "false");
-      item.addEventListener("pointermove", () => updateSelection(idx));
-      item.addEventListener("click", () => {
-        dialog.close();
-        cmd.run();
-      });
-      list.appendChild(item);
-    }
-  };
-
-  input.addEventListener("input", render);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      updateSelection(selectedIndex + 1);
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      updateSelection(selectedIndex - 1);
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      runSelected();
-    }
-  });
-
-  dialog.addEventListener("close", () => {
-    input.value = "";
-    list.replaceChildren();
-    filtered = [];
-    selectedIndex = 0;
-  });
-
-  return {
-    open: () => {
-      if (dialog.open) {
-        input.focus();
-        return;
-      }
-      if (typeof dialog.showModal === "function") dialog.showModal();
-      else dialog.setAttribute("open", "");
-      render();
-      input.focus();
-    },
-  };
-}
-
-const commandPalette = createCommandPalette([
-  {
-    id: "view.freezePanes",
-    title: "Freeze Panes",
-    run: () => {
-      app.freezePanes();
-      app.focus();
-    },
-    keywords: ["frozen", "pane"]
-  },
-  {
-    id: "view.freezeTopRow",
-    title: "Freeze Top Row",
-    run: () => {
-      app.freezeTopRow();
-      app.focus();
-    },
-    keywords: ["frozen", "row"]
-  },
-  {
-    id: "view.freezeFirstColumn",
-    title: "Freeze First Column",
-    run: () => {
-      app.freezeFirstColumn();
-      app.focus();
-    },
-    keywords: ["frozen", "column"]
-  },
-  {
-    id: "view.unfreezePanes",
-    title: "Unfreeze Panes",
-    run: () => {
-      app.unfreezePanes();
-      app.focus();
-    },
-    keywords: ["frozen", "pane"]
-  }
-]);
-
-const openCommandPalette = () => commandPalette.open();
-
-window.addEventListener("keydown", (e) => {
-  const primary = e.ctrlKey || e.metaKey;
-  if (!primary || !e.shiftKey) return;
-  if (e.key !== "P" && e.key !== "p") return;
-  e.preventDefault();
-  openCommandPalette();
 });
 
 const workbook = app.getSearchWorkbook();
