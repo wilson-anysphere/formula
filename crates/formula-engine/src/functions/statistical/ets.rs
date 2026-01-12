@@ -1,3 +1,5 @@
+use crate::date::ExcelDateSystem;
+use crate::functions::date_time;
 use crate::value::ErrorKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,11 +28,55 @@ impl AggregationMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum TimelineStep {
+    /// Timeline uses a fixed numeric step (`timeline[i] = start + step * i`).
+    Fixed { start: f64, step: f64 },
+    /// Timeline advances in fixed calendar-month steps (EDATE semantics).
+    ///
+    /// This is required to support common Excel use-cases like monthly/quarterly/yearly date
+    /// timelines, where the difference in serial days varies (28/29/30/31).
+    Month {
+        start_serial: i32,
+        months_step: i32,
+        system: ExcelDateSystem,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct PreparedSeries {
-    pub start: f64,
-    pub step: f64,
+    pub step: TimelineStep,
     pub values: Vec<f64>,
+}
+
+impl PreparedSeries {
+    pub fn position(&self, target_date: f64) -> Result<f64, ErrorKind> {
+        if !target_date.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        match self.step {
+            TimelineStep::Fixed { start, step } => {
+                if !step.is_finite() || step == 0.0 {
+                    return Err(ErrorKind::Num);
+                }
+                let pos = (target_date - start) / step;
+                if pos.is_finite() {
+                    Ok(pos)
+                } else {
+                    Err(ErrorKind::Num)
+                }
+            }
+            TimelineStep::Month {
+                start_serial,
+                months_step,
+                system,
+            } => month_step_position(target_date, start_serial, months_step, system),
+        }
+    }
+
+    pub fn last_pos(&self) -> f64 {
+        (self.values.len().saturating_sub(1)) as f64
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +151,7 @@ pub fn prepare_series(
     timeline: &[f64],
     data_completion: bool,
     aggregation: AggregationMethod,
+    system: ExcelDateSystem,
 ) -> Result<PreparedSeries, ErrorKind> {
     if values.len() != timeline.len() {
         return Err(ErrorKind::NA);
@@ -144,45 +191,228 @@ pub fn prepare_series(
         return Err(ErrorKind::Num);
     }
 
-    let step = base_step(&uniq_timeline)?;
-    let start = uniq_timeline[0];
+    if let Ok(step) = base_step(&uniq_timeline) {
+        let start = uniq_timeline[0];
 
-    let mut out_values = Vec::new();
-    out_values.reserve(uniq_values.len());
+        let mut out_values = Vec::new();
+        out_values.reserve(uniq_values.len());
 
-    for idx in 0..uniq_timeline.len() - 1 {
-        let t0 = uniq_timeline[idx];
-        let t1 = uniq_timeline[idx + 1];
-        let v0 = uniq_values[idx];
-        let v1 = uniq_values[idx + 1];
-        out_values.push(v0);
+        for idx in 0..uniq_timeline.len() - 1 {
+            let t0 = uniq_timeline[idx];
+            let t1 = uniq_timeline[idx + 1];
+            let v0 = uniq_values[idx];
+            let v1 = uniq_values[idx + 1];
+            out_values.push(v0);
 
-        let diff = t1 - t0;
-        let multiple_f = diff / step;
-        let multiple = multiple_f.round() as i64;
-        if multiple < 1 {
+            let diff = t1 - t0;
+            let multiple_f = diff / step;
+            let multiple = multiple_f.round() as i64;
+            if multiple < 1 {
+                return Err(ErrorKind::Num);
+            }
+            let multiple = multiple as usize;
+            if multiple <= 1 {
+                continue;
+            }
+
+            // Fill missing points between t0 and t1.
+            for k in 1..multiple {
+                let filled = if data_completion {
+                    let frac = (k as f64) / (multiple as f64);
+                    v0 + frac * (v1 - v0)
+                } else {
+                    0.0
+                };
+                out_values.push(filled);
+            }
+        }
+        out_values.push(*uniq_values.last().unwrap());
+
+        return Ok(PreparedSeries {
+            step: TimelineStep::Fixed { start, step },
+            values: out_values,
+        });
+    }
+
+    prepare_series_month_step(&uniq_timeline, &uniq_values, data_completion, system)
+}
+
+fn as_integer_day(serial: f64) -> Option<i32> {
+    if !serial.is_finite() {
+        return None;
+    }
+    let rounded = serial.round();
+    if (serial - rounded).abs() > 1e-9 {
+        return None;
+    }
+    if rounded < (i32::MIN as f64) || rounded > (i32::MAX as f64) {
+        return None;
+    }
+    Some(rounded as i32)
+}
+
+fn month_index(serial: i32, system: ExcelDateSystem) -> Result<i32, ErrorKind> {
+    let ymd = crate::date::serial_to_ymd(serial, system).map_err(|_| ErrorKind::Num)?;
+    Ok(ymd.year * 12 + i32::from(ymd.month.saturating_sub(1)))
+}
+
+fn prepare_series_month_step(
+    timeline: &[f64],
+    values: &[f64],
+    data_completion: bool,
+    system: ExcelDateSystem,
+) -> Result<PreparedSeries, ErrorKind> {
+    if timeline.len() != values.len() || timeline.len() < 2 {
+        return Err(ErrorKind::Num);
+    }
+
+    let mut serials = Vec::with_capacity(timeline.len());
+    for &t in timeline {
+        serials.push(as_integer_day(t).ok_or(ErrorKind::Num)?);
+    }
+
+    // Compute the base step in calendar months.
+    let mut month_ids = Vec::with_capacity(serials.len());
+    for &s in &serials {
+        month_ids.push(month_index(s, system)?);
+    }
+
+    let mut months_step = i32::MAX;
+    let mut diffs = Vec::with_capacity(month_ids.len().saturating_sub(1));
+    for w in month_ids.windows(2) {
+        let d = w[1] - w[0];
+        if d <= 0 {
             return Err(ErrorKind::Num);
         }
-        let multiple = multiple as usize;
-        if multiple <= 1 {
+        months_step = months_step.min(d);
+        diffs.push(d);
+    }
+    if months_step <= 0 || months_step == i32::MAX {
+        return Err(ErrorKind::Num);
+    }
+    for d in diffs {
+        if d % months_step != 0 {
+            return Err(ErrorKind::Num);
+        }
+    }
+
+    let start_serial = serials[0];
+    let start_month_id = month_ids[0];
+
+    // Map each observed point to its integer period index.
+    let mut known = std::collections::BTreeMap::<usize, f64>::new();
+    let mut max_k = 0usize;
+    for ((&serial, &month_id), &v) in serials.iter().zip(month_ids.iter()).zip(values.iter()) {
+        let month_diff = month_id - start_month_id;
+        if month_diff < 0 || month_diff % months_step != 0 {
+            return Err(ErrorKind::Num);
+        }
+        let k_i32 = month_diff / months_step;
+        let expected = date_time::edate(start_serial, k_i32 * months_step, system)
+            .map_err(|_| ErrorKind::Num)?;
+        if expected != serial {
+            return Err(ErrorKind::Num);
+        }
+
+        let k = k_i32 as usize;
+        max_k = max_k.max(k);
+        known.insert(k, v);
+    }
+
+    // Expand to the full set of periods [0..=max_k], filling missing values according to
+    // `data_completion` (interpolate or zero-fill).
+    let mut out = vec![f64::NAN; max_k + 1];
+    for (&k, &v) in &known {
+        out[k] = v;
+    }
+
+    if !data_completion {
+        for v in &mut out {
+            if v.is_nan() {
+                *v = 0.0;
+            }
+        }
+    } else {
+        // Interpolate across gaps in period space.
+        let mut prev_idx = None::<usize>;
+        for idx in 0..out.len() {
+            if !out[idx].is_nan() {
+                if let Some(pi) = prev_idx {
+                    let pv = out[pi];
+                    let cv = out[idx];
+                    let span = (idx - pi) as f64;
+                    if span > 1.0 {
+                        for k in (pi + 1)..idx {
+                            let frac = (k - pi) as f64 / span;
+                            out[k] = pv + frac * (cv - pv);
+                        }
+                    }
+                }
+                prev_idx = Some(idx);
+            }
+        }
+
+        if out.iter().any(|v| v.is_nan()) {
+            return Err(ErrorKind::Num);
+        }
+    }
+
+    Ok(PreparedSeries {
+        step: TimelineStep::Month {
+            start_serial,
+            months_step,
+            system,
+        },
+        values: out,
+    })
+}
+
+fn month_step_position(
+    target_date: f64,
+    start_serial: i32,
+    months_step: i32,
+    system: ExcelDateSystem,
+) -> Result<f64, ErrorKind> {
+    if months_step <= 0 || !target_date.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    let start_month_id = month_index(start_serial, system)?;
+    let target_day = as_integer_day(target_date.floor()).ok_or(ErrorKind::Num)?;
+    let target_month_id = month_index(target_day, system)?;
+    let month_diff = target_month_id - start_month_id;
+
+    // Initial guess based on year/month difference, then adjust for day-of-month clamping.
+    let mut k = month_diff.div_euclid(months_step);
+
+    // Ensure date_k <= target_date < date_{k+1}.
+    for _ in 0..4 {
+        let date_k = date_time::edate(start_serial, k * months_step, system)
+            .map_err(|_| ErrorKind::Num)? as f64;
+        if target_date < date_k {
+            k -= 1;
+            continue;
+        }
+        let date_k1 = date_time::edate(start_serial, (k + 1) * months_step, system)
+            .map_err(|_| ErrorKind::Num)? as f64;
+        if target_date >= date_k1 {
+            k += 1;
             continue;
         }
 
-        // Fill missing points between t0 and t1.
-        for k in 1..multiple {
-            let _t = t0 + step * (k as f64);
-            let filled = if data_completion {
-                let frac = (k as f64) / (multiple as f64);
-                v0 + frac * (v1 - v0)
-            } else {
-                0.0
-            };
-            out_values.push(filled);
+        let denom = date_k1 - date_k;
+        if denom == 0.0 || !denom.is_finite() {
+            return Err(ErrorKind::Num);
+        }
+        let frac = (target_date - date_k) / denom;
+        let pos = k as f64 + frac;
+        if pos.is_finite() {
+            return Ok(pos);
+        } else {
+            return Err(ErrorKind::Num);
         }
     }
-    out_values.push(*uniq_values.last().unwrap());
-
-    Ok(PreparedSeries { start, step, values: out_values })
+    Err(ErrorKind::Num)
 }
 
 pub fn detect_seasonality(values: &[f64]) -> Result<usize, ErrorKind> {

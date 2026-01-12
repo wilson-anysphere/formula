@@ -215,7 +215,7 @@ fn forecast_ets_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation) {
+    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -233,15 +233,11 @@ fn forecast_ets_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    if !series.step.is_finite() || series.step == 0.0 {
-        return Value::Error(ErrorKind::Num);
-    }
-    let pos = (target_date - series.start) / series.step;
-    if !pos.is_finite() {
-        return Value::Error(ErrorKind::Num);
-    }
-
-    let last_pos = (series.values.len() - 1) as f64;
+    let pos = match series.position(target_date) {
+        Ok(p) => p,
+        Err(e) => return Value::Error(e),
+    };
+    let last_pos = series.last_pos();
     let out = if pos <= last_pos {
         match interpolate_observed(&series.values, pos) {
             Ok(v) => v,
@@ -319,7 +315,7 @@ fn forecast_ets_confint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> 
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation) {
+    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -337,14 +333,11 @@ fn forecast_ets_confint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> 
         Err(e) => return Value::Error(e),
     };
 
-    if !series.step.is_finite() || series.step == 0.0 {
-        return Value::Error(ErrorKind::Num);
-    }
-    let pos = (target_date - series.start) / series.step;
-    if !pos.is_finite() {
-        return Value::Error(ErrorKind::Num);
-    }
-    let last_pos = (series.values.len() - 1) as f64;
+    let pos = match series.position(target_date) {
+        Ok(p) => p,
+        Err(e) => return Value::Error(e),
+    };
+    let last_pos = series.last_pos();
     let h = (pos - last_pos).max(0.0);
     if h == 0.0 || fit.rmse == 0.0 {
         return Value::Number(0.0);
@@ -399,7 +392,7 @@ fn forecast_ets_seasonality_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr])
         Err(e) => return Value::Error(e),
     };
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation) {
+    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -463,7 +456,7 @@ fn forecast_ets_stat_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Val
         return Value::Error(ErrorKind::Num);
     }
 
-    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation) {
+    let series = match ets::prepare_series(&values, &timeline, data_completion, aggregation, ctx.date_system()) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };

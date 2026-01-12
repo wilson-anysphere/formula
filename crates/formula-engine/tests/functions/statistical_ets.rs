@@ -1,3 +1,4 @@
+use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -49,6 +50,32 @@ fn forecast_ets_stat_rmse_is_zero_for_perfect_fit() {
 }
 
 #[test]
+fn forecast_ets_accepts_monthly_date_timeline() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(system);
+
+    let jan = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap() as f64;
+    let feb = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap() as f64;
+    let mar = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap() as f64;
+    let apr = ymd_to_serial(ExcelDate::new(2020, 4, 1), system).unwrap() as f64;
+    let may = ymd_to_serial(ExcelDate::new(2020, 5, 1), system).unwrap() as f64;
+
+    // Constant monthly series: Excel should treat these as evenly spaced in calendar months, not
+    // serial-day deltas (31/29/31...), and therefore should not raise #NUM!.
+    for row in 1..=4 {
+        sheet.set(&format!("A{row}"), 10.0);
+    }
+    sheet.set("B1", jan);
+    sheet.set("B2", feb);
+    sheet.set("B3", mar);
+    sheet.set("B4", apr);
+    sheet.set("B5", may);
+
+    assert_number(&sheet.eval("=FORECAST.ETS(B5,A1:A4,B1:B4,1)"), 10.0);
+}
+
+#[test]
 fn forecast_ets_rejects_mismatched_series_lengths() {
     let mut sheet = TestSheet::new();
     assert_eq!(
@@ -65,4 +92,3 @@ fn forecast_ets_confint_rejects_invalid_confidence_level() {
         Value::Error(ErrorKind::Num)
     );
 }
-
