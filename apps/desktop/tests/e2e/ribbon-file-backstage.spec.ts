@@ -17,6 +17,7 @@ test.describe("ribbon File backstage", () => {
 
     await expect(fileNew).toBeVisible();
     await expect(fileNew).toBeFocused();
+    await expect(fileNew).toHaveAttribute("aria-keyshortcuts", "Control+N");
 
     // Focus trap: Shift+Tab wraps back to the last action.
     await page.keyboard.press("Shift+Tab");
@@ -24,6 +25,12 @@ test.describe("ribbon File backstage", () => {
 
     // Focus trap: Tab from the last action wraps back to the first.
     await page.keyboard.press("Tab");
+    await expect(fileNew).toBeFocused();
+
+    // Arrow navigation should move focus between menuitems.
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("file-open")).toBeFocused();
+    await page.keyboard.press("ArrowUp");
     await expect(fileNew).toBeFocused();
 
     for (let i = 0; i < 5; i += 1) {
@@ -42,4 +49,3 @@ test.describe("ribbon File backstage", () => {
     await expect(homeTab).toHaveAttribute("aria-selected", "true");
   });
 });
-
