@@ -216,8 +216,8 @@ function fontSpecForRichTextStyle(
     typeof style?.size_100pt === "number" && Number.isFinite(style.size_100pt)
       ? pointsToPx(style.size_100pt / 100) * zoom
       : defaults.sizePx;
-  const weight = style?.bold === true ? "bold" : defaults.weight;
-  const fontStyle = style?.italic === true ? "italic" : defaults.style;
+  const weight = style?.bold === true ? "bold" : style?.bold === false ? "normal" : defaults.weight;
+  const fontStyle = style?.italic === true ? "italic" : style?.italic === false ? "normal" : defaults.style;
   return { family, sizePx, weight, style: fontStyle };
 }
 
