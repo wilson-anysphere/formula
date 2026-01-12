@@ -30,6 +30,9 @@ struct ModuleInfo {
 ///   and strips `Attribute ...` lines (case-insensitive, start-of-line match).
 /// - **Reference records** are incorporated for a subset of record types (e.g. registered/project
 ///   references), matching the MS-OVBA §2.4.2.1 pseudocode.
+/// - **Project name and constants** are incorporated by appending the raw record payload bytes for
+///   `PROJECTNAME.ProjectName` (0x0004) and `PROJECTCONSTANTS.Constants` (0x000C) in `VBA/dir`
+///   record order.
 ///
 /// Spec reference: MS-OVBA §2.4.2.1 "Content Normalized Data".
 pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
@@ -71,12 +74,12 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         offset += len;
 
         match id {
-            // PROJECTNAME
+            // PROJECTNAME.ProjectName
             0x0004 => {
                 out.extend_from_slice(data);
             }
 
-            // PROJECTCONSTANTS
+            // PROJECTCONSTANTS.Constants
             0x000C => {
                 out.extend_from_slice(data);
             }

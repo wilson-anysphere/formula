@@ -78,6 +78,47 @@ fn build_two_module_project(module_order: [&str; 2]) -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+fn build_single_module_project_with_dir_prelude(dir_prelude: &[(u16, &[u8])], module_code: &[u8]) -> Vec<u8> {
+    let module_container = compress_container(module_code);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        for (id, data) in dir_prelude {
+            push_record(&mut out, *id, data);
+        }
+
+        // Minimal module record group.
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (standard) + MODULETEXTOFFSET (0: stream starts with a compressed container).
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 #[test]
 fn content_normalized_data_uses_module_record_order_from_dir_stream() {
     // Deliberately non-alphabetical order: B then A.
@@ -231,6 +272,36 @@ fn content_normalized_data_reference_records_registered_and_project() {
     let expected_full = [b"{REG}".as_slice(), expected_project.as_slice()].concat();
 
     assert_eq!(normalized, expected_full);
+}
+
+#[test]
+fn content_normalized_data_includes_projectname_and_projectconstants_bytes_in_dir_order() {
+    let module_code = b"Option Explicit\r\n";
+
+    let vba_bin = build_single_module_project_with_dir_prelude(
+        &[(0x0004, b"Proj"), (0x000C, b"Const")],
+        module_code,
+    );
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    let expected = [b"ProjConst".as_slice(), module_code].concat();
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn content_normalized_data_preserves_project_record_order_for_projectname_and_constants() {
+    let module_code = b"Option Explicit\r\n";
+
+    // Same bytes as the previous test, but with PROJECTCONSTANTS appearing before PROJECTNAME in
+    // the decompressed `VBA/dir` stream.
+    let vba_bin = build_single_module_project_with_dir_prelude(
+        &[(0x000C, b"Const"), (0x0004, b"Proj")],
+        module_code,
+    );
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    let expected = [b"ConstProj".as_slice(), module_code].concat();
+    assert_eq!(normalized, expected);
 }
 
 #[test]
