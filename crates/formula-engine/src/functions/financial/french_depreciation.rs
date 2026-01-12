@@ -64,9 +64,7 @@ fn validate_common(
     }
 
     let basis = basis.unwrap_or(0);
-    if !(0..=4).contains(&basis) {
-        return Err(ExcelError::Num);
-    }
+    let basis = super::coupon_schedule::validate_basis(basis)?;
 
     // Ensure the dates are representable under the date system and basis (yearfrac validates).
     let first_period_years = date_time::yearfrac(date_purchased, first_period, basis, system)?;
