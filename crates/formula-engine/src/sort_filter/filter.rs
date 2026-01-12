@@ -100,6 +100,21 @@ impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
     type Error = ModelAutoFilterError;
 
     fn try_from(value: &model_af::SheetAutoFilter) -> Result<Self, Self::Error> {
+        Self::try_from_model_with_value_locale(value, ValueLocaleConfig::en_us())
+    }
+}
+
+impl AutoFilter {
+    /// Convert a `formula-model` AutoFilter definition into the engine's filter representation,
+    /// interpreting legacy `values` payloads using the provided value locale.
+    ///
+    /// Note: modern schemas should prefer `filter_columns[*].criteria` which already carries typed
+    /// numeric/date values; locale-aware parsing is primarily required for the legacy `values` list
+    /// which stores everything as strings.
+    pub fn try_from_model_with_value_locale(
+        value: &model_af::SheetAutoFilter,
+        value_locale: ValueLocaleConfig,
+    ) -> Result<Self, ModelAutoFilterError> {
         let range = RangeRef {
             start_row: usize::try_from(value.range.start.row)
                 .map_err(|_| ModelAutoFilterError::RangeOverflow)?,
@@ -117,30 +132,28 @@ impl TryFrom<&model_af::SheetAutoFilter> for AutoFilter {
             let col_id =
                 usize::try_from(col.col_id).map_err(|_| ModelAutoFilterError::ColumnOverflow)?;
 
-            let criteria_src: Vec<model_af::FilterCriterion> = if !col.criteria.is_empty() {
-                col.criteria.clone()
+            let criteria: Vec<FilterCriterion> = if !col.criteria.is_empty() {
+                col.criteria
+                    .iter()
+                    .filter_map(model_criterion_to_engine)
+                    .collect()
             } else {
                 // Backwards compatibility: older schema used the `values` list only.
+                //
+                // These are stored as strings, and Excel interprets them using the workbook locale.
                 col.values
                     .iter()
-                    .map(|v| {
-                        if let Ok(n) = v.parse::<f64>() {
-                            model_af::FilterCriterion::Equals(model_af::FilterValue::Number(n))
+                    .map(|raw| {
+                        if let Some(n) = parse_text_number(raw, value_locale) {
+                            FilterCriterion::Equals(FilterValue::Number(n))
+                        } else if let Some(dt) = parse_text_datetime(raw, value_locale) {
+                            FilterCriterion::Equals(FilterValue::DateTime(dt))
                         } else {
-                            model_af::FilterCriterion::Equals(model_af::FilterValue::Text(
-                                v.clone(),
-                            ))
+                            FilterCriterion::Equals(FilterValue::Text(raw.clone()))
                         }
                     })
                     .collect()
             };
-
-            let mut criteria = Vec::new();
-            for c in &criteria_src {
-                if let Some(mapped) = model_criterion_to_engine(c) {
-                    criteria.push(mapped);
-                }
-            }
 
             columns.insert(
                 col_id,

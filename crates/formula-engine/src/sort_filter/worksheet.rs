@@ -157,7 +157,7 @@ pub fn apply_autofilter_to_outline_with_value_locale(
         };
     };
 
-    let Ok(filter) = AutoFilter::try_from(filter) else {
+    let Ok(filter) = AutoFilter::try_from_model_with_value_locale(filter, value_locale) else {
         return FilterResult {
             visible_rows: vec![true; row_count],
             hidden_sheet_rows: Vec::new(),
