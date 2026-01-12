@@ -184,6 +184,11 @@ export function loadConfigFromEnv(): SyncServerConfig {
 
   const host = process.env.SYNC_SERVER_HOST ?? "127.0.0.1";
   const port = envInt(process.env.SYNC_SERVER_PORT, 1234);
+  if (port < 0 || port > 65_535) {
+    throw new Error(
+      `SYNC_SERVER_PORT must be an integer between 0 and 65535 (got ${port}).`
+    );
+  }
   const trustProxy = envBool(process.env.SYNC_SERVER_TRUST_PROXY, false);
   const gc = envBool(process.env.SYNC_SERVER_GC, true);
 
