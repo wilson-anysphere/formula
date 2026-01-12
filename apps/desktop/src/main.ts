@@ -6258,7 +6258,9 @@ mountRibbon(ribbonReactRoot, {
     };
 
     const focusScriptEditorPanel = () => {
-      requestAnimationFrame(() => {
+      // Script editor is mounted via panel rendering; wait a frame (or two) so the
+      // DOM nodes exist before focusing.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         const el =
           document.querySelector<HTMLElement>('[data-testid="script-editor-code"]') ??
           document.querySelector<HTMLElement>('[data-testid="script-editor-run"]');
@@ -6267,7 +6269,22 @@ mountRibbon(ribbonReactRoot, {
         } catch {
           // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
         }
-      });
+      }));
+    };
+
+    const focusVbaMigratePanel = () => {
+      // The VBA migrate panel is a React mount; give it a couple of frames to render.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const el =
+          document.querySelector<HTMLElement>('[data-testid="vba-entrypoint"]') ??
+          document.querySelector<HTMLElement>('button[data-testid^="vba-module-"]') ??
+          document.querySelector<HTMLElement>('[data-testid="vba-refresh"]');
+        try {
+          el?.focus();
+        } catch {
+          // Best-effort: ignore focus errors (e.g. element not focusable in headless environments).
+        }
+      }));
     };
 
     const openCustomZoomQuickPick = async (): Promise<void> => {
@@ -6957,8 +6974,10 @@ mountRibbon(ribbonReactRoot, {
         // Desktop builds expose a VBA migration panel (used as a stand-in for the VBA editor).
         if (typeof (globalThis as any).__TAURI__?.core?.invoke === "function") {
           openRibbonPanel(PanelIds.VBA_MIGRATE);
+          focusVbaMigratePanel();
         } else {
           openRibbonPanel(PanelIds.SCRIPT_EDITOR);
+          focusScriptEditorPanel();
         }
         return;
 
