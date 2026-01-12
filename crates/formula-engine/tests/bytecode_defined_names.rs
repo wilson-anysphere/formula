@@ -1,4 +1,4 @@
-use formula_engine::{Engine, NameDefinition, NameScope, Value};
+use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value};
 
 #[test]
 fn bytecode_inlines_named_range_into_sum() {
@@ -58,3 +58,30 @@ fn bytecode_inlines_name_formula_into_scalar_math() {
     assert_eq!(debug.value, engine.get_cell_value("Sheet1", "A1"));
 }
 
+#[test]
+fn bytecode_defined_name_formula_cycles_fall_back_without_recursing_forever() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "SelfRef",
+            NameScope::Workbook,
+            NameDefinition::Formula("=SelfRef+1".to_string()),
+        )
+        .unwrap();
+
+    // If name inlining doesn't guard against cycles, this will recurse indefinitely during
+    // bytecode compilation.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SelfRef")
+        .unwrap();
+
+    // The bytecode backend should cleanly fall back to AST evaluation.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Name)
+    );
+}

@@ -3110,15 +3110,13 @@ impl Engine {
                     return expr.clone();
                 }
 
-                match self.try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting) {
-                    Some(inlined) => self.inline_static_defined_names_for_bytecode_inner(
-                        &inlined,
-                        current_sheet,
-                        visiting,
-                        lexical_scopes,
-                    ),
-                    None => expr.clone(),
-                }
+                self.try_inline_defined_name_ref_for_bytecode(
+                    nref,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )
+                .unwrap_or_else(|| expr.clone())
             }
             crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
                 base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
@@ -3307,6 +3305,7 @@ impl Engine {
         nref: &crate::NameRef,
         current_sheet: SheetId,
         visiting: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         if nref.workbook.is_some() {
             return None;
@@ -3326,7 +3325,7 @@ impl Engine {
             return None;
         }
 
-        self.resolve_defined_name_expr_for_bytecode(sheet_id, &name_key, visiting)
+        self.resolve_defined_name_expr_for_bytecode(sheet_id, &name_key, visiting, lexical_scopes)
     }
 
     fn resolve_defined_name_expr_for_bytecode(
@@ -3334,6 +3333,7 @@ impl Engine {
         sheet_id: SheetId,
         name_key: &str,
         visiting: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         let def = resolve_defined_name(&self.workbook, sheet_id, name_key)?;
         let visit_key = (sheet_id, name_key.to_string());
@@ -3359,7 +3359,12 @@ impl Engine {
                 };
                 match &ast.expr {
                     crate::Expr::CellRef(_) => {
-                        self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+                        self.extract_static_ref_expr_for_bytecode(
+                            &ast.expr,
+                            sheet_id,
+                            visiting,
+                            lexical_scopes,
+                        )
                     }
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                         // Reference definitions must be a direct cell/range reference.
@@ -3372,7 +3377,12 @@ impl Engine {
                         ) {
                             None
                         } else {
-                            self.extract_static_ref_expr_for_bytecode(&ast.expr, sheet_id, visiting)
+                            self.extract_static_ref_expr_for_bytecode(
+                                &ast.expr,
+                                sheet_id,
+                                visiting,
+                                lexical_scopes,
+                            )
                         }
                     }
                     _ => None,
@@ -3393,7 +3403,12 @@ impl Engine {
                         return None;
                     }
                 };
-                Some(ast.expr)
+                Some(self.inline_static_defined_names_for_bytecode_inner(
+                    &ast.expr,
+                    sheet_id,
+                    visiting,
+                    lexical_scopes,
+                ))
             }
             NameDefinition::Constant(_) => None,
         };
@@ -3407,16 +3422,25 @@ impl Engine {
         expr: &crate::Expr,
         current_sheet: SheetId,
         visiting: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
             crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
                 self.normalize_cell_ref_for_bytecode(r, current_sheet)?,
             )),
             crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
-                let left =
-                    self.normalize_range_endpoint_for_bytecode(&b.left, current_sheet, visiting)?;
-                let right =
-                    self.normalize_range_endpoint_for_bytecode(&b.right, current_sheet, visiting)?;
+                let left = self.normalize_range_endpoint_for_bytecode(
+                    &b.left,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                let right = self.normalize_range_endpoint_for_bytecode(
+                    &b.right,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
                 Some(crate::Expr::Binary(crate::BinaryExpr {
                     op: crate::BinaryOp::Range,
                     left: Box::new(left),
@@ -3424,7 +3448,12 @@ impl Engine {
                 }))
             }
             crate::Expr::NameRef(nref) => {
-                self.try_inline_defined_name_ref_for_bytecode(nref, current_sheet, visiting)
+                self.try_inline_defined_name_ref_for_bytecode(
+                    nref,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )
             }
             _ => None,
         }
@@ -3435,6 +3464,7 @@ impl Engine {
         expr: &crate::Expr,
         current_sheet: SheetId,
         visiting: &mut HashSet<(SheetId, String)>,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
             crate::Expr::CellRef(r) => Some(crate::Expr::CellRef(
@@ -3451,6 +3481,7 @@ impl Engine {
                     nref,
                     current_sheet,
                     visiting,
+                    lexical_scopes,
                 )?;
                 match resolved {
                     crate::Expr::CellRef(_) | crate::Expr::ColRef(_) | crate::Expr::RowRef(_) => {
