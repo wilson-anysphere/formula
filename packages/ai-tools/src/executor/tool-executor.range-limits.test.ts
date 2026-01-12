@@ -67,7 +67,7 @@ describe("ToolExecutor range size limits", () => {
     expect(api.readCalls).toBe(0);
   });
 
-  it("blocks apply_formatting before applying formatting to an unbounded number of cells", async () => {
+  it("does not block apply_formatting with max_tool_range_cells (formatting is host-guarded)", async () => {
     const api = new CountingSpreadsheet();
     const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
 
@@ -80,10 +80,10 @@ describe("ToolExecutor range size limits", () => {
       },
     });
 
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
     expect(result.tool).toBe("apply_formatting");
-    expect(result.error?.code).toBe("permission_denied");
-    expect(result.error?.message).toContain("max_tool_range_cells");
+    if (!result.ok) throw new Error(`Expected apply_formatting to succeed: ${result.error?.message ?? "unknown error"}`);
+    expect(result.data?.formatted_cells).toBe(0);
   });
 
   it("blocks apply_formula_column before writing an unbounded number of cells", async () => {

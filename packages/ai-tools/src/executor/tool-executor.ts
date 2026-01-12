@@ -876,7 +876,10 @@ export class ToolExecutor {
 
   private applyFormatting(params: any): ToolResultDataByName["apply_formatting"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
-    this.assertRangeWithinMaxToolCells("apply_formatting", range);
+    // NOTE: Unlike tools like sort/filter/statistics, `apply_formatting` does not need to
+    // materialize a full `CellData[][]` grid in JS memory. Host spreadsheet backends are
+    // expected to implement their own safety caps / scalable formatting paths (e.g.
+    // layered formats, compressed range runs). Do not apply `max_tool_range_cells` here.
     const formatted = this.spreadsheet.applyFormatting(range, params.format);
     return { range: this.formatRangeForUser(range), formatted_cells: formatted };
   }
