@@ -18,6 +18,29 @@ type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
+/// Best-effort loader for workbook-level "in-cell" images.
+///
+/// This is intentionally tolerant of incomplete/malformed workbooks:
+/// - Missing `cellimages*.xml` parts → no-op
+/// - Missing `.rels` → skip that part
+/// - Missing referenced media part → skip that image/part
+/// - Parse errors → skip that part
+///
+/// This is used by the workbook reader to opportunistically populate
+/// `workbook.images` during import.
+pub fn load_cell_images_from_parts(
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut formula_model::Workbook,
+) {
+    for path in parts.keys() {
+        if !is_cell_images_part(path) {
+            continue;
+        }
+        // Best-effort: ignore parse errors for cell image parts.
+        let _ = parse_cell_images_part(path, parts, workbook);
+    }
+}
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
@@ -72,24 +95,6 @@ impl CellImages {
         Ok(Self {
             parts: cell_images_parts,
         })
-    }
-}
-
-/// Best-effort loader for workbook-level "in-cell" images (`xl/cellimages*.xml`).
-///
-/// Missing parts / parse errors are ignored by design so workbook loading never fails due to
-/// optional in-cell image metadata.
-pub fn load_cell_images_from_parts(
-    parts: &BTreeMap<String, Vec<u8>>,
-    workbook: &mut formula_model::Workbook,
-) {
-    for path in parts.keys() {
-        if !is_cell_images_part(path) {
-            continue;
-        }
-
-        // Best-effort: ignore parse errors/missing parts so we don't fail workbook loads.
-        let _ = parse_cell_images_part(path, parts, workbook);
     }
 }
 

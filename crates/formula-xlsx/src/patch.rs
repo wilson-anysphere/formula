@@ -1980,13 +1980,13 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
             _ => false,
         },
         CellValue::Entity(entity) => match existing {
-            ExistingCellValue::String(v) => v == &entity.display,
-            ExistingCellValue::SharedString(rich) => rich.text == entity.display,
+            ExistingCellValue::String(v) => v == &entity.display_value,
+            ExistingCellValue::SharedString(rich) => rich.text == entity.display_value,
             _ => false,
         },
         CellValue::Record(record) => match existing {
-            ExistingCellValue::String(v) => v == &record.display,
-            ExistingCellValue::SharedString(rich) => rich.text == record.display,
+            ExistingCellValue::String(v) => v == &record.display_value,
+            ExistingCellValue::SharedString(rich) => rich.text == record.display_value,
             _ => false,
         },
         CellValue::RichText(rich) => match existing {
@@ -2066,7 +2066,7 @@ fn cell_representation_for_patch(
             }
         }
         CellValue::Entity(entity) => {
-            let degraded = CellValue::String(entity.display.clone());
+            let degraded = CellValue::String(entity.display_value.clone());
             cell_representation_for_patch(
                 Some(&degraded),
                 formula,
@@ -2075,7 +2075,7 @@ fn cell_representation_for_patch(
             )
         }
         CellValue::Record(record) => {
-            let degraded = CellValue::String(record.display.clone());
+            let degraded = CellValue::String(record.display_value.clone());
             cell_representation_for_patch(
                 Some(&degraded),
                 formula,

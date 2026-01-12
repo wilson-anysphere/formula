@@ -1403,7 +1403,7 @@ fn build_shared_strings_xml(
                     }
                 }
                 CellValue::Entity(entity) => {
-                    let text = entity.display.as_str();
+                    let text = entity.display_value.as_str();
                     ref_count += 1;
                     if meta
                         .and_then(|m| m.value_kind.clone())
@@ -1426,7 +1426,7 @@ fn build_shared_strings_xml(
                     }
                 }
                 CellValue::Record(record) => {
-                    let text = record.display.as_str();
+                    let text = record.display_value.as_str();
                     ref_count += 1;
                     if meta
                         .and_then(|m| m.value_kind.clone())
@@ -3117,7 +3117,7 @@ fn append_cell_xml(
                 }
             },
             value @ CellValue::Entity(entity) => {
-                let s = entity.display.as_str();
+                let s = entity.display_value.as_str();
                 match &value_kind {
                     CellValueKind::SharedString { .. } => {
                         let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3149,7 +3149,7 @@ fn append_cell_xml(
                 }
             }
             value @ CellValue::Record(record) => {
-                let s = record.display.as_str();
+                let s = record.display_value.as_str();
                 match &value_kind {
                     CellValueKind::SharedString { .. } => {
                         let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3415,7 +3415,7 @@ fn shared_string_index(
                 .unwrap_or(0)
         }
         CellValue::Entity(entity) => {
-            let text = entity.display.as_str();
+            let text = entity.display_value.as_str();
             if let Some(meta) = meta {
                 if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
                     if doc
@@ -3434,7 +3434,7 @@ fn shared_string_index(
                 .unwrap_or(0)
         }
         CellValue::Record(record) => {
-            let text = record.display.as_str();
+            let text = record.display_value.as_str();
             if let Some(meta) = meta {
                 if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
                     if doc

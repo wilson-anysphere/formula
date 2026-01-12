@@ -669,7 +669,7 @@ fn cell_xml(
             attrs.push_str(r#" t="s""#);
             let idx = shared_strings
                 .index
-                .get(&entity.display)
+                .get(&entity.display_value)
                 .copied()
                 .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
@@ -678,7 +678,7 @@ fn cell_xml(
             attrs.push_str(r#" t="s""#);
             let idx = shared_strings
                 .index
-                .get(&record.display)
+                .get(&record.display_value)
                 .copied()
                 .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
@@ -775,7 +775,7 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 CellValue::Entity(entity) => {
-                    let s = &entity.display;
+                    let s = &entity.display_value;
                     if !index.contains_key(s) {
                         let idx = values.len();
                         values.push(s.clone());
@@ -783,7 +783,7 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 CellValue::Record(record) => {
-                    let s = &record.display;
+                    let s = &record.display_value;
                     if !index.contains_key(s) {
                         let idx = values.len();
                         values.push(s.clone());
