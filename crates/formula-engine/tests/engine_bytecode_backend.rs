@@ -201,6 +201,40 @@ fn assert_engine_matches_ast(engine: &Engine, formula: &str, cell: &str) {
     assert_eq!(engine.get_cell_value("Sheet1", cell), expected);
 }
 
+fn assert_engine_spill_matches_ast(engine: &Engine, formula: &str, origin_cell: &str) {
+    let expected = eval_via_ast(engine, formula, origin_cell);
+    let Value::Array(arr) = expected else {
+        panic!("expected formula {formula} to spill an array, got {expected:?}");
+    };
+    let origin = parse_a1(origin_cell).expect("parse spill origin");
+
+    let end = formula_engine::eval::CellAddr {
+        row: origin.row + (arr.rows as u32).saturating_sub(1),
+        col: origin.col + (arr.cols as u32).saturating_sub(1),
+    };
+    assert_eq!(
+        engine.spill_range("Sheet1", origin_cell),
+        Some((origin, end)),
+        "spill footprint mismatch for {origin_cell} {formula}"
+    );
+
+    for r in 0..arr.rows {
+        for c in 0..arr.cols {
+            let addr = formula_engine::eval::CellAddr {
+                row: origin.row + r as u32,
+                col: origin.col + c as u32,
+            };
+            let a1 = addr.to_a1();
+            let expected = arr.get(r, c).cloned().unwrap_or(Value::Blank);
+            assert_eq!(
+                engine.get_cell_value("Sheet1", &a1),
+                expected,
+                "spill value mismatch at {a1} for origin {origin_cell} {formula}"
+            );
+        }
+    }
+}
+
 fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
     use formula_engine::bytecode::Value as ByteValue;
     match value {
@@ -4003,6 +4037,75 @@ fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     assert_engine_matches_ast(&engine, "=TYPE(A24)", "B24");
     assert_engine_matches_ast(&engine, "=TYPE(A25)", "B25");
     assert_engine_matches_ast(&engine, "=TYPE(A26:A27)", "B26");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_information_functions_with_range_args() {
+    let mut engine = Engine::new();
+    // A1 left blank.
+    engine.set_cell_value("Sheet1", "A2", "").unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", "hello").unwrap();
+    engine.set_cell_value("Sheet1", "A5", true).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A6", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A7", Value::Error(ErrorKind::NA))
+        .unwrap();
+
+    // Each formula spills down 7 rows, so place them in separate columns to avoid overlap.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ISBLANK(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=ISNUMBER(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", "=ISTEXT(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E1", "=ISLOGICAL(A1:A7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "F1", "=ISERROR(A1:A7)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "G1", "=ISNA(A1:A7)").unwrap();
+    engine.set_cell_formula("Sheet1", "H1", "=ISERR(A1:A7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "I1", "=ERROR.TYPE(A1:A7)")
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "J1", "=N(A1:A7)").unwrap();
+    engine.set_cell_formula("Sheet1", "K1", "=T(A1:A7)").unwrap();
+
+    // Array literals should also be eligible for these functions.
+    engine
+        .set_cell_formula("Sheet1", "B10", "=ISNUMBER({1,\"a\"})")
+        .unwrap();
+
+    // All formulas in this fixture should be bytecode-eligible.
+    assert!(
+        engine.bytecode_compile_report(32).is_empty(),
+        "expected all information function formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=ISBLANK(A1:A7)", "B1"),
+        ("=ISNUMBER(A1:A7)", "C1"),
+        ("=ISTEXT(A1:A7)", "D1"),
+        ("=ISLOGICAL(A1:A7)", "E1"),
+        ("=ISERROR(A1:A7)", "F1"),
+        ("=ISNA(A1:A7)", "G1"),
+        ("=ISERR(A1:A7)", "H1"),
+        ("=ERROR.TYPE(A1:A7)", "I1"),
+        ("=N(A1:A7)", "J1"),
+        ("=T(A1:A7)", "K1"),
+        ("=ISNUMBER({1,\"a\"})", "B10"),
+    ] {
+        assert_engine_spill_matches_ast(&engine, formula, cell);
+    }
 }
 
 #[test]

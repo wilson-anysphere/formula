@@ -7713,7 +7713,6 @@ fn bytecode_expr_is_eligible_inner(
                         lexical_scopes.pop();
                         return false;
                     }
-
                     // LET bindings can hold scalars, ranges, and array literals. We only need to
                     // ensure the overall LET expression remains non-spilling in scalar contexts;
                     // that is enforced by the `NameRef` eligibility check, which gates range/array

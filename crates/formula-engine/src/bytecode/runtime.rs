@@ -3688,9 +3688,6 @@ where
 
             Value::Array(ArrayValue::new(rows, cols, values))
         }
-        // Multi-sheet ranges (3D sheet spans) are lowered to a MultiRange value, which matches the
-        // evaluator's "reference union" behavior. Information functions treat these as invalid
-        // arguments (#VALUE!) rather than spilling arrays.
         other => map_value(other, f),
     }
 }
@@ -3823,7 +3820,7 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing => {
             Value::Text(Arc::from(""))
         }
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Text(Arc::from("")),
     })
 }
 
