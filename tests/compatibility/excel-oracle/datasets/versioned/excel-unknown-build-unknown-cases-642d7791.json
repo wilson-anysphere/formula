@@ -15959,20 +15959,20 @@
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 100.75597490147861
+        "v": 100.75627837079071
       },
       "address": "C1",
-      "displayText": "100.75597490147861"
+      "displayText": "100.75627837079071"
     },
     {
       "caseId": "oddfyield_basis4_b8c7df4a447f",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 0.0937828362065177
+        "v": 0.09377829305965153
       },
       "address": "C1",
-      "displayText": "0.0937828362065177"
+      "displayText": "0.09377829305965153"
     },
     {
       "caseId": "oddlprice_basis4_546c496042bd",
@@ -16318,21 +16318,21 @@
       "caseId": "oddlprice_settlement_eq_last_interest_2aaeec2068c7",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 100.49019607843137
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "100.49019607843137"
     },
     {
       "caseId": "oddlyield_settlement_eq_last_interest_478517910c3d",
       "outputCell": "C1",
       "result": {
-        "t": "e",
-        "v": "#NUM!"
+        "t": "n",
+        "v": 0.039999999999999813
       },
       "address": "C1",
-      "displayText": "#NUM!"
+      "displayText": "0.039999999999999813"
     },
     {
       "caseId": "oddlprice_last_interest_eq_maturity_6a12d560c779",
@@ -17925,10 +17925,10 @@
       "outputCell": "C1",
       "result": {
         "t": "e",
-        "v": "#NAME?"
+        "v": "#N/A"
       },
       "address": "C1",
-      "displayText": "#NAME?"
+      "displayText": "#N/A"
     },
     {
       "caseId": "isformula_de4876bb5980",
