@@ -677,9 +677,9 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         // Field access (`A1.Price`) is lowered into a synthetic `_FIELDACCESS(base, "field")` call.
         //
-        // Semantics (docs/04):
+        // Semantics:
         // - Base is Entity/Record: return matching field (case-insensitive), else `#FIELD!`
-        // - Base is not Entity/Record: `#VALUE!`
+        // - Base is not Entity/Record: `#FIELD!`
         // - Errors propagate
         // - Arrays lift elementwise
         if name.eq_ignore_ascii_case("_FIELDACCESS") {
@@ -712,7 +712,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     Value::Record(record) => record
                         .get_field_case_insensitive(field)
                         .unwrap_or(Value::Error(ErrorKind::Field)),
-                    _ => Value::Error(ErrorKind::Value),
+                    _ => Value::Error(ErrorKind::Field),
                 }
             }
 
@@ -1911,9 +1911,8 @@ fn eval_field_access(value: &Value, field_key: &str) -> Value {
         Value::Record(record) => map_lookup(&record.fields, field_key)
             .cloned()
             .unwrap_or(Value::Error(ErrorKind::Field)),
-        // Field access on a non-rich scalar is a type error (matches `_FIELDACCESS` semantics and
-        // Excel's behavior for rich values).
-        _ => Value::Error(ErrorKind::Value),
+        // Field access on a non-rich value yields `#FIELD!`.
+        _ => Value::Error(ErrorKind::Field),
     }
 }
 
