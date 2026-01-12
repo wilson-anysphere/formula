@@ -33,7 +33,7 @@ import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
-import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -223,7 +223,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
   const onBuildStats =
     import.meta.env.MODE === "development"
-      ? (stats: any) => {
+      ? (stats: WorkbookContextBuildStats) => {
           try {
             console.debug("[ai] WorkbookContextBuilder build stats (chat)", stats);
           } catch {

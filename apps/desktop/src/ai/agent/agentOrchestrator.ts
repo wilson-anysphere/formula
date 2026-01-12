@@ -20,7 +20,7 @@ import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
-import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 
 export interface AgentApprovalRequest {
   call: ToolCall;
@@ -267,7 +267,7 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
     const onBuildStats =
       import.meta.env.MODE === "development"
-        ? (stats: any) => {
+        ? (stats: WorkbookContextBuildStats) => {
             try {
               console.debug("[ai] WorkbookContextBuilder build stats (agent)", stats);
             } catch {

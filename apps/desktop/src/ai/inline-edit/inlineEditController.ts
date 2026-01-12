@@ -20,7 +20,7 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
-import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 import { getDesktopLLMClient, getDesktopModel } from "../llm/desktopLLMClient.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 
@@ -160,6 +160,16 @@ export class InlineEditController {
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
+      const onBuildStats =
+        import.meta.env.MODE === "development"
+          ? (stats: WorkbookContextBuildStats) => {
+              try {
+                console.debug("[ai] WorkbookContextBuilder build stats (inline_edit)", stats);
+              } catch {
+                // ignore
+              }
+            }
+          : undefined;
       const contextBuilder = new WorkbookContextBuilder({
         workbookId,
         documentController: this.options.document,
@@ -171,7 +181,8 @@ export class InlineEditController {
         model,
         contextWindowTokens,
         reserveForOutputTokens,
-        tokenEstimator: estimator as any
+        tokenEstimator: estimator as any,
+        onBuildStats,
       });
       const ctx = await contextBuilder.build({
         activeSheetId: params.sheetId,
