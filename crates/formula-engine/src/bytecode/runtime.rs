@@ -4327,6 +4327,8 @@ mod tests {
         assert_eq!(sum_range(&grid, range), Err(ErrorKind::Ref));
         assert_eq!(sum_count_range(&grid, range), Err(ErrorKind::Ref));
         assert_eq!(count_range(&grid, range), Err(ErrorKind::Ref));
+        assert_eq!(counta_range(&grid, range), Err(ErrorKind::Ref));
+        assert_eq!(countblank_range(&grid, range), Err(ErrorKind::Ref));
 
         let criteria = NumericCriteria::new(CmpOp::Gt, 0.0);
         assert_eq!(count_if_range(&grid, range, criteria), Err(ErrorKind::Ref));
