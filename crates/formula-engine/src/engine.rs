@@ -2888,7 +2888,7 @@ impl Engine {
         // are also treated as volatile by the dependency graph, but classify them under the
         // lowering error so coverage reports can prioritize external-reference support separately
         // from volatile worksheet functions.
-        if canonical_expr_contains_external_workbook_refs(expr) {
+        if canonical_expr_depends_on_external_workbook_refs(expr, key.sheet, &self.workbook) {
             return Err(BytecodeCompileReason::LowerError(
                 bytecode::LowerError::ExternalReference,
             ));
@@ -4814,6 +4814,183 @@ fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
     }
 }
 
+fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::FunctionCall(call) => {
+            if matches!(call.name.name_upper.as_str(), "LET" | "LAMBDA") {
+                return true;
+            }
+            call.args.iter().any(canonical_expr_contains_let_or_lambda)
+        }
+        crate::Expr::Call(call) => {
+            canonical_expr_contains_let_or_lambda(call.callee.as_ref())
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| canonical_expr_contains_let_or_lambda(arg))
+        }
+        crate::Expr::Unary(u) => canonical_expr_contains_let_or_lambda(&u.expr),
+        crate::Expr::Postfix(p) => canonical_expr_contains_let_or_lambda(&p.expr),
+        crate::Expr::Binary(b) => {
+            canonical_expr_contains_let_or_lambda(&b.left)
+                || canonical_expr_contains_let_or_lambda(&b.right)
+        }
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .flatten()
+            .any(|el| canonical_expr_contains_let_or_lambda(el)),
+        _ => false,
+    }
+}
+
+fn canonical_expr_depends_on_external_workbook_refs(
+    expr: &crate::Expr,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+) -> bool {
+    if canonical_expr_contains_external_workbook_refs(expr) {
+        return true;
+    }
+
+    // Avoid chasing defined names when LET/LAMBDA might introduce lexical bindings that shadow
+    // workbook/sheet defined names. Direct external workbook refs are still detected above.
+    if canonical_expr_contains_let_or_lambda(expr) {
+        return false;
+    }
+
+    let mut visiting: HashSet<(SheetId, String)> = HashSet::new();
+    canonical_expr_depends_on_external_workbook_refs_inner(expr, current_sheet, workbook, &mut visiting)
+}
+
+fn canonical_expr_depends_on_external_workbook_refs_inner(
+    expr: &crate::Expr,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+    visiting: &mut HashSet<(SheetId, String)>,
+) -> bool {
+    match expr {
+        crate::Expr::NameRef(nref) => {
+            if nref.workbook.is_some() {
+                return true;
+            }
+
+            let name_key = normalize_defined_name(&nref.name);
+            if name_key.is_empty() {
+                return false;
+            }
+
+            let sheet_id = match nref.sheet.as_ref() {
+                None => Some(current_sheet),
+                Some(sheet_ref) => sheet_ref
+                    .as_single_sheet()
+                    .and_then(|name| workbook.sheet_id(name)),
+            };
+            let Some(sheet_id) = sheet_id else {
+                return false;
+            };
+
+            defined_name_depends_on_external_workbook_refs(sheet_id, &name_key, workbook, visiting)
+        }
+        crate::Expr::FunctionCall(call) => call.args.iter().any(|arg| {
+            canonical_expr_depends_on_external_workbook_refs_inner(
+                arg,
+                current_sheet,
+                workbook,
+                visiting,
+            )
+        }),
+        crate::Expr::Call(call) => {
+            canonical_expr_depends_on_external_workbook_refs_inner(
+                call.callee.as_ref(),
+                current_sheet,
+                workbook,
+                visiting,
+            ) || call.args.iter().any(|arg| {
+                canonical_expr_depends_on_external_workbook_refs_inner(
+                    arg,
+                    current_sheet,
+                    workbook,
+                    visiting,
+                )
+            })
+        }
+        crate::Expr::Unary(u) => canonical_expr_depends_on_external_workbook_refs_inner(
+            &u.expr,
+            current_sheet,
+            workbook,
+            visiting,
+        ),
+        crate::Expr::Postfix(p) => canonical_expr_depends_on_external_workbook_refs_inner(
+            &p.expr,
+            current_sheet,
+            workbook,
+            visiting,
+        ),
+        crate::Expr::Binary(b) => {
+            canonical_expr_depends_on_external_workbook_refs_inner(
+                &b.left,
+                current_sheet,
+                workbook,
+                visiting,
+            ) || canonical_expr_depends_on_external_workbook_refs_inner(
+                &b.right,
+                current_sheet,
+                workbook,
+                visiting,
+            )
+        }
+        crate::Expr::Array(arr) => arr.rows.iter().flatten().any(|el| {
+            canonical_expr_depends_on_external_workbook_refs_inner(
+                el,
+                current_sheet,
+                workbook,
+                visiting,
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn defined_name_depends_on_external_workbook_refs(
+    sheet_id: SheetId,
+    name_key: &str,
+    workbook: &Workbook,
+    visiting: &mut HashSet<(SheetId, String)>,
+) -> bool {
+    let visit_key = (sheet_id, name_key.to_string());
+    if !visiting.insert(visit_key.clone()) {
+        return false;
+    }
+
+    let Some(def) = resolve_defined_name(workbook, sheet_id, name_key) else {
+        visiting.remove(&visit_key);
+        return false;
+    };
+
+    let mut result = false;
+    match &def.definition {
+        NameDefinition::Constant(_) => {}
+        NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
+            if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
+                if canonical_expr_contains_external_workbook_refs(&ast.expr) {
+                    result = true;
+                } else if !canonical_expr_contains_let_or_lambda(&ast.expr) {
+                    result = canonical_expr_depends_on_external_workbook_refs_inner(
+                        &ast.expr,
+                        sheet_id,
+                        workbook,
+                        visiting,
+                    );
+                }
+            }
+        }
+    }
+
+    visiting.remove(&visit_key);
+    result
+}
+
 fn rewrite_structured_refs_for_bytecode(
     expr: &crate::Expr,
     origin_sheet: usize,
@@ -5260,34 +5437,7 @@ fn rewrite_defined_name_constants_for_bytecode(
     current_sheet: SheetId,
     workbook: &Workbook,
 ) -> Option<crate::Expr> {
-    fn contains_let_or_lambda(expr: &crate::Expr) -> bool {
-        match expr {
-            crate::Expr::FunctionCall(call) => {
-                if matches!(call.name.name_upper.as_str(), "LET" | "LAMBDA") {
-                    return true;
-                }
-                call.args.iter().any(contains_let_or_lambda)
-            }
-            crate::Expr::Call(call) => {
-                // Calls are only possible with LAMBDA values (directly or indirectly), and can
-                // interact with lexical scope. Conservatively skip inlining.
-                contains_let_or_lambda(&call.callee) || call.args.iter().any(contains_let_or_lambda)
-            }
-            crate::Expr::Unary(u) => contains_let_or_lambda(&u.expr),
-            crate::Expr::Postfix(p) => contains_let_or_lambda(&p.expr),
-            crate::Expr::Binary(b) => {
-                contains_let_or_lambda(&b.left) || contains_let_or_lambda(&b.right)
-            }
-            crate::Expr::Array(arr) => arr
-                .rows
-                .iter()
-                .flatten()
-                .any(|el| contains_let_or_lambda(el)),
-            _ => false,
-        }
-    }
-
-    if contains_let_or_lambda(expr) {
+    if canonical_expr_contains_let_or_lambda(expr) {
         return None;
     }
 
