@@ -293,37 +293,38 @@ export class ContextMenu {
     }
 
     if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-      const activeBtn = activeEl instanceof HTMLButtonElement ? activeEl : null;
-      if (!activeBtn || activeBtn.disabled) return;
-      const inMenu = this.menu.contains(activeBtn);
-      const inSubmenu = this.submenu != null && this.submenu.contains(activeBtn);
-      if (!inMenu && !inSubmenu) return;
+      const isInMenu =
+        activeEl != null && (this.menu.contains(activeEl) || (this.submenu != null && this.submenu.contains(activeEl)));
+      if (!isInMenu) return;
 
       e.preventDefault();
       e.stopPropagation();
+
+      const activeBtn = activeEl instanceof HTMLButtonElement ? activeEl : null;
+      if (!activeBtn || activeBtn.disabled) return;
       activeBtn.click();
       return;
     }
 
     if (e.key === "ArrowRight") {
+      e.preventDefault();
+      e.stopPropagation();
+
       if (focusInSubmenu) return;
       const activeBtn = activeEl instanceof HTMLButtonElement ? activeEl : null;
       if (!activeBtn || activeBtn.disabled) return;
 
       const item = this.buttonItems.get(activeBtn);
       if (item?.type !== "submenu") return;
-
-      e.preventDefault();
-      e.stopPropagation();
       this.openSubmenu(activeBtn, item.items, { focus: true });
       return;
     }
 
     if (e.key === "ArrowLeft") {
-      if (!this.submenu) return;
-
       e.preventDefault();
       e.stopPropagation();
+
+      if (!this.submenu) return;
 
       if (!focusInSubmenu) {
         this.closeSubmenu();
