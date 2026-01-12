@@ -240,6 +240,53 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     root.remove();
   });
 
+  it("does not trigger while the formula bar is actively editing", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    // Begin editing in the formula bar (this enters Excel-style range selection mode, where the grid
+    // remains interactive while the formula bar is still editing).
+    input!.focus();
+    expect(app.isEditing()).toBe(true);
+
+    // Move focus back to the grid to mimic selecting ranges while the formula bar is still editing.
+    root.focus();
+    expect(app.isEditing()).toBe(true);
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        code: "Semicolon",
+        key: ";",
+      }),
+    );
+
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe("Seed");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("falls back to only inserting into the active cell when the selection exceeds 10k cells", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));

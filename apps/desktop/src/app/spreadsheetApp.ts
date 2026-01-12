@@ -7681,6 +7681,7 @@ export class SpreadsheetApp {
     // Do not trigger while editing.
     if (this.editor.isOpen()) return false;
     if (this.inlineEditController.isOpen()) return false;
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
     e.preventDefault();
     if (e.shiftKey) this.insertTime();
     else this.insertDate();
