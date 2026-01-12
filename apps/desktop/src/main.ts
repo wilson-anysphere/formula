@@ -4073,11 +4073,10 @@ if (
           // Some environments provide a lightweight `session.sheets` implementation that stores
           // plain JS objects and does not attach Yjs types to a Y.Doc; in that case insert a
           // plain `{ id, name, visibility }` entry instead.
-          const first: any = collabSession.sheets.get?.(0) ?? null;
-          const ctorName = first?.constructor?.name ?? "";
-          const isYjsSheetMap = ctorName === "YMap";
+          const ctorName = (collabSession as any)?.sheets?.constructor?.name ?? "";
+          const isYjsSheetsArray = ctorName === "YArray";
 
-          if (isYjsSheetMap) {
+          if (isYjsSheetsArray) {
             const sheet = new Y.Map<unknown>();
             // Attach first, then populate fields (Yjs types warn when accessed before attachment).
             collabSession.sheets.insert(insertIndex, [sheet as any]);
