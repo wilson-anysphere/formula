@@ -3649,18 +3649,24 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
 }
 
 fn parse_error_kind(value: &str) -> Option<ErrorKind> {
-    match value.trim() {
-        "#NULL!" | "Null" => Some(ErrorKind::Null),
-        "#DIV/0!" | "Div0" => Some(ErrorKind::Div0),
-        "#VALUE!" | "Value" => Some(ErrorKind::Value),
-        "#REF!" | "Ref" => Some(ErrorKind::Ref),
-        "#NAME?" | "Name" => Some(ErrorKind::Name),
-        "#NUM!" | "Num" => Some(ErrorKind::Num),
-        "#N/A" | "#N/A!" | "NA" => Some(ErrorKind::NA),
-        "#SPILL!" | "Spill" => Some(ErrorKind::Spill),
-        "#CALC!" | "Calc" => Some(ErrorKind::Calc),
-        "#FIELD!" | "Field" => Some(ErrorKind::Field),
-        _ => None,
+    let trimmed = value.trim();
+    match trimmed {
+        "Null" => Some(ErrorKind::Null),
+        "Div0" => Some(ErrorKind::Div0),
+        "Value" => Some(ErrorKind::Value),
+        "Ref" => Some(ErrorKind::Ref),
+        "Name" => Some(ErrorKind::Name),
+        "Num" => Some(ErrorKind::Num),
+        "NA" => Some(ErrorKind::NA),
+        "GettingData" => Some(ErrorKind::GettingData),
+        "Spill" => Some(ErrorKind::Spill),
+        "Calc" => Some(ErrorKind::Calc),
+        "Field" => Some(ErrorKind::Field),
+        "Connect" => Some(ErrorKind::Connect),
+        "Blocked" => Some(ErrorKind::Blocked),
+        "Unknown" => Some(ErrorKind::Unknown),
+        "#N/A!" => Some(ErrorKind::NA),
+        other => ErrorKind::from_code(other),
     }
 }
 

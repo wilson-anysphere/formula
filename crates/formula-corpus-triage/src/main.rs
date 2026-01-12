@@ -635,22 +635,7 @@ fn normalize_model_value(value: &CellValue) -> NormalizedValue {
 }
 
 fn map_error_value(error: ErrorValue) -> ErrorKind {
-    match error {
-        ErrorValue::Null => ErrorKind::Null,
-        ErrorValue::Div0 => ErrorKind::Div0,
-        ErrorValue::Value => ErrorKind::Value,
-        ErrorValue::Ref => ErrorKind::Ref,
-        ErrorValue::Name => ErrorKind::Name,
-        ErrorValue::Num => ErrorKind::Num,
-        ErrorValue::NA => ErrorKind::NA,
-        ErrorValue::GettingData => ErrorKind::GettingData,
-        ErrorValue::Spill => ErrorKind::Spill,
-        ErrorValue::Calc => ErrorKind::Calc,
-        ErrorValue::Field => ErrorKind::Field,
-        ErrorValue::Connect => ErrorKind::Connect,
-        ErrorValue::Blocked => ErrorKind::Blocked,
-        ErrorValue::Unknown => ErrorKind::Unknown,
-    }
+    ErrorKind::from_code(error.as_str()).unwrap_or(ErrorKind::Value)
 }
 
 fn set_engine_value(engine: &mut Engine, sheet: &str, addr: &str, value: &CellValue) -> Result<()> {
