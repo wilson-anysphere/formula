@@ -688,9 +688,9 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.clearContents",
     t("command.edit.clearContents"),
-    () => app.clearContents(),
+    () => app.clearSelectionContents(),
     {
-      category: "Edit",
+      category: t("commandCategory.editing"),
       icon: null,
       description: t("commandDescription.edit.clearContents"),
       keywords: ["clear", "contents", "delete"],
