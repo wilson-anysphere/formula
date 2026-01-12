@@ -264,7 +264,7 @@ async function verifyRangeStatClaim(
     const result = await ctx.toolExecutor.execute(toolCall);
     const sanitized = sanitizeVerificationToolResult(result);
     const actual = extractStatisticValue(result, claim.measure);
-    const verified = numbersApproximatelyEqual(actual, claim.expected);
+    const verified = statisticMatchesExpected(claim.measure, actual, claim.expected);
     return {
       claim: claimLabel,
       verified,
@@ -369,4 +369,16 @@ function numbersApproximatelyEqual(actual: number | null, expected: number): boo
   const diff = Math.abs(actual - expected);
   const scale = Math.max(1, Math.abs(actual), Math.abs(expected));
   return diff <= 1e-6 * scale;
+}
+
+function statisticMatchesExpected(
+  measure: import("./claim-extraction.js").SpreadsheetClaimMeasure,
+  actual: number | null,
+  expected: number
+): boolean {
+  if (actual == null) return false;
+  // Count is an integer-valued statistic and should match exactly.
+  // Using floating-point tolerance can incorrectly accept off-by-one errors for large ranges.
+  if (measure === "count") return actual === expected;
+  return numbersApproximatelyEqual(actual, expected);
 }

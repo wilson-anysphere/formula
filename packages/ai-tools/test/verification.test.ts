@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyQueryNeedsTools, verifyToolUsage } from "../src/llm/verification.js";
+import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage } from "../src/llm/verification.js";
 
 describe("classifyQueryNeedsTools", () => {
   it("returns true when attachments are present", () => {
@@ -33,5 +33,38 @@ describe("verifyToolUsage", () => {
     expect(result.used_tools).toBe(true);
     expect(result.verified).toBe(true);
     expect(result.confidence).toBeGreaterThan(0.5);
+  });
+});
+
+describe("verifyAssistantClaims", () => {
+  it("treats count claims as exact matches (no floating tolerance)", async () => {
+    const toolExecutor = {
+      tools: [{ name: "compute_statistics" }],
+      async execute(call: any) {
+        return {
+          tool: "compute_statistics",
+          ok: true,
+          timing: { started_at_ms: 0, duration_ms: 0 },
+          data: { range: call.arguments?.range, statistics: { count: 1_000_000 } }
+        };
+      }
+    };
+
+    const result = await verifyAssistantClaims({
+      assistantText: "Count for Sheet1!A1:A10 is 1000001.",
+      toolExecutor: toolExecutor as any
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.verified).toBe(false);
+    expect(result?.claims?.[0]).toMatchObject({
+      verified: false,
+      expected: 1000001,
+      actual: 1000000
+    });
+
+    const evidence = (result?.claims?.[0] as any)?.toolEvidence;
+    expect(evidence?.call?.name).toBe("compute_statistics");
+    expect(evidence?.result?.data?.statistics?.count).toBe(1_000_000);
   });
 });
