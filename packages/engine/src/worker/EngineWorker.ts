@@ -10,6 +10,7 @@ import type {
   RpcResponseOk,
   WorkerOutboundMessage
 } from "../protocol";
+import { isFormulaInput, normalizeFormulaText } from "../backend/formula";
 
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -38,6 +39,12 @@ type PendingRequest = {
 };
 
 type CellUpdate = { address: string; value: CellScalar; sheet?: string };
+
+function normalizeCellScalar(value: CellScalar): CellScalar {
+  if (typeof value !== "string") return value;
+  if (!isFormulaInput(value)) return value;
+  return normalizeFormulaText(value);
+}
 
 /**
  * Worker-backed Engine client using a MessagePort RPC transport.
@@ -165,7 +172,7 @@ export class EngineWorker {
   }
 
   async setCell(address: string, value: CellScalar, sheet?: string): Promise<void> {
-    this.pendingCellUpdates.push({ address, value, sheet });
+    this.pendingCellUpdates.push({ address, value: normalizeCellScalar(value), sheet });
     await this.scheduleFlush();
   }
 
@@ -177,7 +184,8 @@ export class EngineWorker {
       return;
     }
     await this.flush();
-    await this.invoke("setCells", { updates }, options);
+    const normalized = updates.map((update) => ({ ...update, value: normalizeCellScalar(update.value) }));
+    await this.invoke("setCells", { updates: normalized }, options);
   }
 
   async setRange(
@@ -187,7 +195,8 @@ export class EngineWorker {
     options?: RpcOptions
   ): Promise<void> {
     await this.flush();
-    await this.invoke("setRange", { range, values, sheet }, options);
+    const normalizedValues = values.map((row) => row.map((value) => normalizeCellScalar(value)));
+    await this.invoke("setRange", { range, values: normalizedValues, sheet }, options);
   }
 
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
