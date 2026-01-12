@@ -15,6 +15,36 @@ async function toggleShowFormulasShortcut(page: import("@playwright/test").Page)
 }
 
 test.describe("ribbon view toggles", () => {
+  test("clicking a ribbon control commits an in-progress in-cell edit without stealing focus", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    // Focus/select A1.
+    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Start editing A1 but do not press Enter.
+    await page.keyboard.press("h");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    const ribbon = page.getByTestId("ribbon-root");
+    const viewTab = ribbon.getByRole("tab", { name: "View", exact: true });
+    await expect(viewTab).toBeVisible();
+
+    // Clicking the ribbon should blur/commit the edit, and focus should remain on the ribbon
+    // control (no focus ping-pong back to the grid).
+    await viewTab.click();
+    await expect(viewTab).toBeFocused();
+    await waitForIdle(page);
+
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(editor).toBeHidden();
+    await expect(viewTab).toBeFocused();
+  });
+
   test("Show Formulas toggle works from Ribbon and stays in sync with Ctrl/Cmd+`", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);

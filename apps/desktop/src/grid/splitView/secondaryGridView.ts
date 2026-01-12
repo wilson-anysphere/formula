@@ -190,8 +190,8 @@ export class SecondaryGridView {
     // should commit the draft text.
     //
     // IMPORTANT: Avoid stealing focus back from whatever surface the user clicked. When the
-    // editor blurs to an element outside the secondary pane, suppress the focus-restore
-    // logic that normally runs after a command commit.
+    // editor blurs to an element other than the secondary grid root itself, suppress the
+    // focus-restore logic that normally runs after a command commit.
     const onEditorBlur = (event: FocusEvent) => {
       if (!this.editor.isOpen()) return;
       const next = event.relatedTarget as Node | null;
