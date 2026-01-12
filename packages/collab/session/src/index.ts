@@ -1021,9 +1021,62 @@ export class CollabSession {
       // this module can still be bundled for browser environments.
       const { FileCollabPersistence } = await import("@formula/collab-persistence/file");
       const dir = this.dirnameForOfflineFilePath(offline.filePath);
+
+      // Best-effort migration: older `@formula/collab-offline` used `offline.filePath`
+      // as the *actual* append-only log file. `FileCollabPersistence` stores one file
+      // per doc inside a directory, so users upgrading would otherwise "lose" their
+      // local offline state until the next sync.
+      //
+      // If the legacy file exists and the new persistence file does not, copy the
+      // legacy log bytes over so `FileCollabPersistence.load()` can replay them.
+      await this.migrateLegacyOfflineFileLogIfNeeded({
+        legacyFilePath: offline.filePath,
+        dir,
+        docId: this.persistenceDocId ?? offline.filePath,
+      });
+
       return new FileCollabPersistence(dir);
     }
     throw new Error(`Unsupported offline persistence mode: ${String((offline as any).mode)}`);
+  }
+
+  private async migrateLegacyOfflineFileLogIfNeeded(opts: {
+    legacyFilePath: string;
+    dir: string;
+    docId: string;
+  }): Promise<void> {
+    // Only relevant in Node environments. Keep this logic self-contained so
+    // browser bundlers can tree-shake it.
+    try {
+      const { promises: fs } = await import("node:fs");
+      const { createHash } = await import("node:crypto");
+      const path = await import("node:path");
+
+      const docHash = createHash("sha256").update(opts.docId).digest("hex");
+      const nextFilePath = path.join(opts.dir, `${docHash}.yjs`);
+
+      // Avoid self-copy (or re-migrating once the new file exists).
+      if (nextFilePath === opts.legacyFilePath) return;
+
+      const [legacyStat, nextStat] = await Promise.all([
+        fs.stat(opts.legacyFilePath).catch(() => null),
+        fs.stat(nextFilePath).catch(() => null),
+      ]);
+      if (!legacyStat || !legacyStat.isFile()) return;
+      if (nextStat && nextStat.isFile()) return;
+
+      await fs.mkdir(opts.dir, { recursive: true }).catch(() => {});
+      const bytes = await fs.readFile(opts.legacyFilePath).catch(() => null);
+      if (!bytes || bytes.length === 0) return;
+
+      await fs.writeFile(nextFilePath, bytes, { mode: 0o600, flag: "wx" }).catch((err) => {
+        const code = (err as any)?.code;
+        if (code === "EEXIST") return;
+        throw err;
+      });
+    } catch {
+      // Best-effort: migration failure should not prevent the session from starting.
+    }
   }
 
   private getDocIdForOfflinePersistence(
