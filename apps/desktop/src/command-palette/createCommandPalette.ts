@@ -21,7 +21,7 @@ export type CreateCommandPaletteOptions = {
    * A `commandId -> [displayKeybinding...]` index. The palette renders the first
    * entry as the primary shortcut hint.
    */
-  keybindingIndex: Map<string, readonly string[]>;
+  keybindingIndex: Map<string, string | readonly string[]>;
   ensureExtensionsLoaded: () => Promise<void>;
   onCloseFocus: () => void;
   placeholder?: string;
@@ -151,6 +151,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.style.paddingTop = "80px";
   overlay.style.background = "var(--dialog-backdrop)";
   overlay.style.zIndex = "1000";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
 
   const palette = document.createElement("div");
   palette.className = "command-palette";
@@ -285,10 +287,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
            main.appendChild(description);
          }
 
-         const shortcut = keybindingIndex.get(cmd.commandId)?.[0] ?? null;
-         if (shortcut) {
-           const right = document.createElement("div");
-           right.className = "command-palette__item-right";
+        const kbValue = keybindingIndex.get(cmd.commandId);
+        const shortcut =
+          typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
+        if (shortcut) {
+          const right = document.createElement("div");
+          right.className = "command-palette__item-right";
           const pill = document.createElement("span");
           pill.className = "command-palette__shortcut";
           pill.textContent = shortcut;
