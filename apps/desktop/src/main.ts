@@ -7732,17 +7732,6 @@ try {
     }
   };
   const readClipboardTextBestEffort = async (): Promise<string | null> => {
-    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
-    const readText = navigatorClipboard?.readText as (() => Promise<string>) | undefined;
-    if (typeof readText === "function") {
-      try {
-        const text = await readText.call(navigatorClipboard);
-        if (typeof text === "string") return text;
-      } catch {
-        // ignore and fall through
-      }
-    }
-
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
     if (typeof invoke === "function") {
       for (const cmd of ["clipboard_read", "read_clipboard"]) {
@@ -7753,6 +7742,17 @@ try {
         } catch {
           // try next
         }
+      }
+    }
+
+    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
+    const readText = navigatorClipboard?.readText as (() => Promise<string>) | undefined;
+    if (typeof readText === "function") {
+      try {
+        const text = await readText.call(navigatorClipboard);
+        if (typeof text === "string") return text;
+      } catch {
+        // ignore and fall through
       }
     }
 
@@ -7769,17 +7769,6 @@ try {
     return null;
   };
   const writeClipboardTextBestEffort = async (text: string): Promise<boolean> => {
-    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
-    const writeText = navigatorClipboard?.writeText as ((text: string) => Promise<void>) | undefined;
-    if (typeof writeText === "function") {
-      try {
-        await writeText.call(navigatorClipboard, text);
-        return true;
-      } catch {
-        // ignore and fall through
-      }
-    }
-
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
     if (typeof invoke === "function") {
       // Prefer the multi-format clipboard bridge (`clipboard_write`) when available.
@@ -7794,6 +7783,17 @@ try {
         return true;
       } catch {
         // fall through
+      }
+    }
+
+    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
+    const writeText = navigatorClipboard?.writeText as ((text: string) => Promise<void>) | undefined;
+    if (typeof writeText === "function") {
+      try {
+        await writeText.call(navigatorClipboard, text);
+        return true;
+      } catch {
+        // ignore and fall through
       }
     }
 
