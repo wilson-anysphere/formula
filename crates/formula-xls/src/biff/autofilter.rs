@@ -76,8 +76,9 @@ pub(crate) fn parse_biff_filter_database_ranges(
         return Ok(out);
     }
 
-    let allows_continuation =
-        |record_id: u16| record_id == RECORD_NAME || record_id == RECORD_SUPBOOK;
+    let allows_continuation = |record_id: u16| {
+        record_id == RECORD_NAME || record_id == RECORD_SUPBOOK || record_id == RECORD_EXTERNSHEET
+    };
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
 
     let mut saw_eof = false;
@@ -681,14 +682,19 @@ mod tests {
         };
 
         // EXTERNSHEET with one XTI entry mapping ixti=0 -> internal sheet 0 (iSupBook=1).
-        let externsheet = {
+        //
+        // EXTERNSHEET records can be split across CONTINUE records; split the payload mid-u16 to
+        // ensure the parser coalesces continuations.
+        let externsheet_full = {
             let mut data = Vec::new();
             data.extend_from_slice(&1u16.to_le_bytes()); // cXTI
             data.extend_from_slice(&1u16.to_le_bytes()); // iSupBook (internal SUPBOOK index)
             data.extend_from_slice(&0u16.to_le_bytes()); // itabFirst
             data.extend_from_slice(&0u16.to_le_bytes()); // itabLast
-            record(RECORD_EXTERNSHEET, &data)
+            data
         };
+        let externsheet_first = record(RECORD_EXTERNSHEET, &externsheet_full[..3]);
+        let externsheet_continue = record(records::RECORD_CONTINUE, &externsheet_full[3..]);
 
         // NAME record: built-in _FilterDatabase, workbook-scope (itab=0), rgce = PtgArea3d.
         let name = {
@@ -718,7 +724,8 @@ mod tests {
             record(records::RECORD_BOF_BIFF8, &bof_globals()),
             supbook_external,
             supbook_internal,
-            externsheet,
+            externsheet_first,
+            externsheet_continue,
             name,
             record(records::RECORD_EOF, &[]),
         ]
