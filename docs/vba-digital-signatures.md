@@ -331,7 +331,10 @@ not yet match the MS-OVBA §2.4.2.6/§2.4.2.7 pseudocode exactly.
 
 #### `formula_vba::project_normalized_data_v3_dir_records` helper (dir record allowlist)
 
-After MS-OVBA decompression, `VBA/dir` is a sequence of:
+`project_normalized_data_v3_dir_records` uses a simplified, best-effort record reader for
+decompressed `VBA/dir` bytes.
+
+Many fixtures (and many real-world projects) encode `VBA/dir` records in a TLV-like layout:
 
 ```text
 id:  u16le
@@ -339,8 +342,12 @@ len: u32le
 data: [u8; len]
 ```
 
-This helper concatenates **normalized `data` bytes only**. The `(id, len)` header bytes are never
-included.
+However, some real-world projects store fixed-length records (notably `PROJECTVERSION` (`0x0009`))
+without an explicit `len` field. `project_normalized_data_v3_dir_records` includes a small
+disambiguation heuristic for that record ID so it can continue scanning.
+
+For hashing, `project_normalized_data_v3_dir_records` concatenates **normalized `data` bytes only**.
+Record header bytes (`id` and, when present, `len`) are never included.
 
 #### `VBA/dir` record IDs included (project info + module metadata)
 
@@ -361,8 +368,13 @@ Project info records:
   - `0x000C` `PROJECTCONSTANTS` (ANSI)
   - `0x003C` `PROJECTCONSTANTSUNICODE` (Unicode/alternate; UTF-16LE payload extraction)
 
-Module metadata records (for each module record group, in stored order; a new module group begins at
-`MODULENAME` (`0x0019`)):
+Module metadata records (for each module record group, in stored order; a new module group typically
+begins at `MODULENAME` (`0x0019`)):
+
+- Some producers omit `MODULENAME` entirely and emit only `MODULENAMEUNICODE` (`0x0047`). In that
+  situation, `formula-vba` treats `MODULENAMEUNICODE` as the start of a new module group (and uses
+  a small heuristic to disambiguate `MODULENAMEUNICODE` as either an alternate representation of the
+  current module name or a new module group).
 
 - String records with ANSI/Unicode variants (Unicode preferred when present):
   - `0x0019` `MODULENAME` (ANSI)
