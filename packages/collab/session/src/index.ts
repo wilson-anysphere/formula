@@ -590,6 +590,7 @@ export class CollabSession {
   private readonly localPersistenceFactory: (() => Promise<CollabPersistence>) | null;
   private persistenceDetached = false;
   private readonly legacyOfflineFilePath: string | null;
+  private readonly localPersistenceBindBeforeLoad: boolean;
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
@@ -671,6 +672,7 @@ export class CollabSession {
       offlineShouldConfigurePersistence && options.offline?.mode === "file"
         ? options.offline.filePath ?? null
         : null;
+    this.localPersistenceBindBeforeLoad = offlineShouldConfigurePersistence;
 
     const persistenceDocId =
       explicitPersistence
@@ -1001,17 +1003,44 @@ export class CollabSession {
       const persistence = this.persistence ?? (await factory());
       this.persistence = persistence;
 
-      try {
-        await persistence.load(docId, this.doc);
-      } finally {
-        // Bind even if load fails so future edits still persist.
-        if (this.isDestroyed || this.persistenceDetached) return;
-        const binding = persistence.bind(docId, this.doc);
+      let binding: CollabPersistenceBinding | null = null;
+
+      // Legacy offline persistence attached listeners immediately and buffered
+      // writes during the initial load. To preserve that behavior, bind before
+      // loading when the persistence implementation is synthesized from the
+      // deprecated `options.offline` config.
+      if (this.localPersistenceBindBeforeLoad && !this.isDestroyed && !this.persistenceDetached) {
+        binding = persistence.bind(docId, this.doc);
         if (this.isDestroyed || this.persistenceDetached) {
-          void binding.destroy().catch(() => {});
+          await binding.destroy().catch(() => {});
           return;
         }
         this.persistenceBinding = binding;
+      }
+
+      try {
+        await persistence.load(docId, this.doc);
+      } finally {
+        if (binding) {
+          // If we detached/destroyed while loading, ensure the pre-bound binding
+          // does not linger.
+          if (this.isDestroyed || this.persistenceDetached) {
+            if (this.persistenceBinding === binding) {
+              this.persistenceBinding = null;
+              await binding.destroy().catch(() => {});
+            }
+          }
+        } else {
+          // Bind even if load fails so future edits still persist.
+          if (!this.isDestroyed && !this.persistenceDetached) {
+            const nextBinding = persistence.bind(docId, this.doc);
+            if (this.isDestroyed || this.persistenceDetached) {
+              void nextBinding.destroy().catch(() => {});
+            } else {
+              this.persistenceBinding = nextBinding;
+            }
+          }
+        }
       }
     })();
 

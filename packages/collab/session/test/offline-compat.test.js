@@ -252,3 +252,54 @@ test("CollabSession legacy `options.offline` (indexeddb) is implemented via coll
     session.doc.destroy();
   }
 });
+
+test("CollabSession legacy `options.offline` binds before load so edits during load are persisted (file)", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-during-load-"));
+  const filePath = path.join(dir, "doc.yjslog");
+
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Artificially slow down FileCollabPersistence.load() so we can reliably make
+  // edits while load is still in flight.
+  const realReadFile = fs.readFile;
+  fs.readFile = async (...args) => {
+    await sleep(50);
+    return await realReadFile(...args);
+  };
+  t.after(() => {
+    fs.readFile = realReadFile;
+  });
+
+  {
+    const session = createCollabSession({
+      schema: { autoInit: false },
+      offline: { mode: "file", filePath },
+    });
+
+    // Let the persistence start/bind; load is still pending due to delayed readFile.
+    await sleep(0);
+
+    await session.setCellValue("Sheet1:0:0", "during-load");
+    await session.offline?.whenLoaded();
+    await session.flushLocalPersistence();
+
+    session.destroy();
+    session.doc.destroy();
+  }
+
+  {
+    const session = createCollabSession({
+      schema: { autoInit: false },
+      offline: { mode: "file", filePath },
+    });
+
+    await session.offline?.whenLoaded();
+    assert.equal((await session.getCell("Sheet1:0:0"))?.value, "during-load");
+
+    await session.offline?.clear();
+    session.destroy();
+    session.doc.destroy();
+  }
+});
