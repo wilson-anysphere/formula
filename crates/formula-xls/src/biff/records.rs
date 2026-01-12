@@ -47,11 +47,6 @@ impl<'a> BiffRecordIter<'a> {
         }
         Ok(Self { stream, offset })
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn offset(&self) -> usize {
-        self.offset
-    }
 }
 
 impl<'a> Iterator for BiffRecordIter<'a> {

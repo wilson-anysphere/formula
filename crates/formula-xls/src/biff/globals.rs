@@ -113,7 +113,6 @@ impl BiffWorkbookGlobals {
     /// 2. workbook `FORMAT` record → exact code
     /// 3. `formula_format::builtin_format_code(numFmtId)` → built-in code
     /// 4. otherwise → stable placeholder (`__builtin_numFmtId:{numFmtId}`)
-    #[allow(dead_code)]
     pub(crate) fn resolve_number_format_code(&self, xf_index: u32) -> Option<String> {
         let xf = self.xfs.get(xf_index as usize)?;
         let num_fmt_id = xf.num_fmt_id;
