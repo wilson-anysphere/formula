@@ -5,7 +5,6 @@ import { gotoDesktop } from "./helpers";
 test.describe("sheet navigation shortcuts", () => {
   test("Ctrl+PageDown / Ctrl+PageUp switches the active sheet (wraps)", async ({ page }) => {
     await gotoDesktop(page);
-
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
 
     // Ensure the grid has focus by clicking the center of A1 once the layout is ready.

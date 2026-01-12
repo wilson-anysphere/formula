@@ -2331,7 +2331,6 @@ app.getDocument().on("change", (payload: any) => {
     return;
   }
 });
-
 // --- Dock layout + persistence (minimal shell wiring for e2e + demos) ----------
 
 const dockLeft = document.getElementById("dock-left");
@@ -2367,18 +2366,11 @@ if (
   // The primary grid wires clipboard + delete via SpreadsheetApp.onKeyDown, which only
   // runs when `#grid` is focused. When focus is in the secondary pane we need to map
   // Excel-style shortcuts back into SpreadsheetApp command APIs.
-  const isEditableTarget = (target: EventTarget | null): boolean => {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    const tag = el.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
-  };
-
   gridSecondaryEl.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
 
     // Match SpreadsheetApp guards: never steal shortcuts from active text editing.
-    if (isEditableTarget(e.target)) return;
+    if (isTextInputTarget(e.target)) return;
     if (app.isEditing()) return;
 
     // Excel semantics: Shift+F2 opens the comments panel.
@@ -4342,7 +4334,7 @@ if (
     "keydown",
     (e) => {
       if (e.defaultPrevented) return;
-      if (isEditableTarget(e.target as HTMLElement | null)) return;
+      if (isTextInputTarget(e.target)) return;
 
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;

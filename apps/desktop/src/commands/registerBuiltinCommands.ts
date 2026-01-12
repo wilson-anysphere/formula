@@ -11,8 +11,6 @@ export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
   app: SpreadsheetApp;
   layoutController: LayoutController;
-  ensureExtensionsLoaded?: (() => Promise<void>) | null;
-  onExtensionsLoaded?: (() => void) | null;
   /**
    * Optional focus restoration hook after sheet navigation actions.
    *
@@ -27,15 +25,17 @@ export function registerBuiltinCommands(params: {
    * the order the user sees in the tab strip.
    */
   getVisibleSheetIds?: (() => string[]) | null;
+  ensureExtensionsLoaded?: (() => Promise<void>) | null;
+  onExtensionsLoaded?: (() => void) | null;
 }): void {
   const {
     commandRegistry,
     app,
     layoutController,
-    ensureExtensionsLoaded = null,
-    onExtensionsLoaded = null,
     focusAfterSheetNavigation = null,
     getVisibleSheetIds = null,
+    ensureExtensionsLoaded = null,
+    onExtensionsLoaded = null,
   } = params;
 
   const toggleDockPanel = (panelId: string) => {
@@ -45,8 +45,14 @@ export function registerBuiltinCommands(params: {
   };
 
   const listVisibleSheetIds = (): string[] => {
-    const fromUi = getVisibleSheetIds?.() ?? [];
-    if (fromUi.length > 0) return fromUi;
+    if (getVisibleSheetIds) {
+      try {
+        const ids = getVisibleSheetIds();
+        if (Array.isArray(ids) && ids.length > 0) return ids;
+      } catch {
+        // Best-effort: fall back to DocumentController sheet ids.
+      }
+    }
 
     const doc: any = app.getDocument() as any;
     const ids =
@@ -59,6 +65,7 @@ export function registerBuiltinCommands(params: {
   };
 
   const activateRelativeSheet = (delta: -1 | 1): void => {
+    if (app.isEditing()) return;
     const sheetIds = listVisibleSheetIds();
     if (sheetIds.length <= 1) return;
     const active = app.getCurrentSheetId();
