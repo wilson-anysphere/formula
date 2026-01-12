@@ -17,9 +17,41 @@ export type TabColor = {
 
 function normalizeTabColor(value: TabColor | undefined): TabColor | undefined {
   if (!value) return undefined;
-  const out = { ...value };
-  if (typeof out.rgb === "string") out.rgb = out.rgb.trim().toUpperCase();
+  const out = { ...value } as TabColor;
+
+  if (typeof out.rgb === "string") {
+    const rgb = out.rgb.trim();
+    if (!rgb) {
+      delete (out as any).rgb;
+    } else {
+      out.rgb = rgb.toUpperCase();
+    }
+  }
+
+  // If all fields are empty/undefined, treat as no color.
+  if (
+    out.rgb == null &&
+    out.theme == null &&
+    out.indexed == null &&
+    out.tint == null &&
+    out.auto == null
+  ) {
+    return undefined;
+  }
+
   return out;
+}
+
+function tabColorEquals(a: TabColor | undefined, b: TabColor | undefined): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    (a.rgb ?? null) === (b.rgb ?? null) &&
+    (a.theme ?? null) === (b.theme ?? null) &&
+    (a.indexed ?? null) === (b.indexed ?? null) &&
+    (a.tint ?? null) === (b.tint ?? null) &&
+    (a.auto ?? null) === (b.auto ?? null)
+  );
 }
 
 export type SheetMeta = {
@@ -306,8 +338,11 @@ export class WorkbookSheetStore {
     if (idx === -1) throw new Error("Sheet not found");
     const sheet = this.sheets[idx]!;
 
+    const nextColor = normalizeTabColor(color);
+    if (tabColorEquals(sheet.tabColor, nextColor)) return;
+
     const next = this.sheets.slice();
-    next[idx] = { ...sheet, tabColor: normalizeTabColor(color) };
+    next[idx] = { ...sheet, tabColor: nextColor };
     this.sheets = next;
     this.emit();
   }

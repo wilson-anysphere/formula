@@ -91,4 +91,21 @@ describe("WorkbookSheetStore", () => {
     store.setTabColor("s1", { rgb: "ff00ff00" });
     expect(store.getById("s1")?.tabColor?.rgb).toBe("FF00FF00");
   });
+
+  it("avoids emitting for no-op tabColor updates", () => {
+    const store = new WorkbookSheetStore([
+      { id: "s1", name: "Sheet1", visibility: "visible", tabColor: { rgb: "#FF0000" } },
+    ]);
+    let calls = 0;
+    store.subscribe(() => {
+      calls += 1;
+    });
+
+    // No-op (case normalization only).
+    store.setTabColor("s1", { rgb: "#ff0000" });
+    expect(calls).toBe(0);
+
+    store.setTabColor("s1", { rgb: "#00FF00" });
+    expect(calls).toBe(1);
+  });
 });
