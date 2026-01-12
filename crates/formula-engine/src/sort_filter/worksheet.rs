@@ -255,9 +255,13 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                     display_value.get("value")?.as_str()?.to_string(),
                 )),
                 "boolean" => Some(CellValue::Bool(display_value.get("value")?.as_bool()?)),
-                "error" => Some(CellValue::Text(
-                    display_value.get("value")?.as_str()?.to_string(),
-                )),
+                "error" => {
+                    let err_str = display_value.get("value")?.as_str()?;
+                    let err = err_str
+                        .parse::<formula_model::ErrorValue>()
+                        .unwrap_or(formula_model::ErrorValue::Unknown);
+                    Some(CellValue::Error(err))
+                }
                 "rich_text" => Some(CellValue::Text(
                     display_value
                         .get("value")?
@@ -277,27 +281,41 @@ mod tests {
     use super::model_cell_value_to_sort_value;
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
+    use formula_model::ErrorValue;
     use serde_json::json;
 
     #[test]
     fn model_cell_value_to_sort_value_entity_record() {
-        let entity: ModelCellValue = match serde_json::from_value(json!({
+        fn from_json_or_skip_unknown_variant(json: serde_json::Value) -> Option<ModelCellValue> {
+            match serde_json::from_value(json) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    let msg = err.to_string();
+                    if msg.contains("unknown variant") {
+                        None
+                    } else {
+                        panic!("failed to deserialize ModelCellValue: {msg}");
+                    }
+                }
+            }
+        }
+
+        let Some(entity) = from_json_or_skip_unknown_variant(json!({
             "type": "entity",
             "value": {
                 "display_value": "Entity display"
             }
-        })) {
-            Ok(value) => value,
+        })) else {
             // Older versions of `formula-model` won't have Entity/Record variants yet.
             // Skip this test until they're added.
-            Err(_) => return,
+            return;
         };
         assert_eq!(
             model_cell_value_to_sort_value(&entity),
             CellValue::Text("Entity display".to_string())
         );
 
-        let record_string: ModelCellValue = match serde_json::from_value(json!({
+        let Some(record_string) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "display_field": "name",
@@ -306,16 +324,15 @@ mod tests {
                     "age": { "type": "number", "value": 42.0 }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
+        })) else {
+            return;
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_string),
             CellValue::Text("Alice".to_string())
         );
 
-        let record_number: ModelCellValue = match serde_json::from_value(json!({
+        let Some(record_number) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "display_field": "age",
@@ -324,16 +341,15 @@ mod tests {
                     "age": { "type": "number", "value": 42.0 }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
+        })) else {
+            return;
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_number),
             CellValue::Number(42.0)
         );
 
-        let record_bool: ModelCellValue = match serde_json::from_value(json!({
+        let Some(record_bool) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "display_field": "active",
@@ -341,13 +357,12 @@ mod tests {
                     "active": { "type": "boolean", "value": true }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
+        })) else {
+            return;
         };
         assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
 
-        let record_error: ModelCellValue = match serde_json::from_value(json!({
+        let Some(record_error) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "display_field": "err",
@@ -355,16 +370,15 @@ mod tests {
                     "err": { "type": "error", "value": "#REF!" }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
+        })) else {
+            return;
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_error),
-            CellValue::Text("#REF!".to_string())
+            CellValue::Error(ErrorValue::Ref)
         );
 
-        let record_rich_text: ModelCellValue = match serde_json::from_value(json!({
+        let Some(record_rich_text) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "display_field": "rt",
@@ -372,9 +386,8 @@ mod tests {
                     "rt": { "type": "rich_text", "value": { "text": "Hello", "runs": [] } }
                 }
             }
-        })) {
-            Ok(value) => value,
-            Err(_) => return,
+        })) else {
+            return;
         };
         assert_eq!(
             model_cell_value_to_sort_value(&record_rich_text),
