@@ -186,6 +186,18 @@ fn split_workbook_prefix(sheet_spec: &str) -> (Option<&str>, &str) {
 
 fn rewrite_sheet_spec(spec: &str, old_name: &str, new_name: &str) -> Option<String> {
     let (workbook_prefix, remainder) = split_workbook_prefix(spec);
+
+    // Ambiguous case: in valid Excel formulas, an unquoted `:` inside a sheet spec denotes a 3D
+    // sheet span (`Sheet1:Sheet3!A1`). However, legacy/invalid files can contain sheet names with
+    // characters Excel normally forbids (including `:`). When importing such workbooks we still
+    // want to rewrite references to the original sheet name after sanitization.
+    //
+    // If the *entire* unquoted sheet spec matches `old_name`, treat it as a single sheet name
+    // rather than a 3D span.
+    if remainder.contains(':') && sheet_name_eq_case_insensitive(remainder, old_name) {
+        return Some(format_sheet_reference(workbook_prefix, new_name, None));
+    }
+
     let mut parts = remainder.splitn(2, ':');
     let start = parts.next().unwrap_or_default();
     let end = parts.next();
@@ -499,15 +511,19 @@ fn sheet_ref_tail_end(formula: &str, start: usize) -> usize {
 /// This is intentionally conservative: it only rewrites tokens that *parse* as
 /// sheet references (`Sheet!A1`, `'My Sheet'!A1`, `Sheet1:Sheet3!A1`, etc) and it
 /// does not touch string literals.
+///
+/// This does **not** rewrite references that include an explicit workbook prefix
+/// (e.g. `='[Book1.xlsx]Sheet1'!A1`), since those refer to an external workbook and
+/// should not change when renaming a sheet inside the current workbook.
 pub fn rewrite_sheet_names_in_formula(formula: &str, old_name: &str, new_name: &str) -> String {
-    rewrite_sheet_names_in_formula_impl(formula, old_name, new_name, true)
+    rewrite_sheet_names_in_formula_impl(formula, old_name, new_name, false)
 }
 
 /// Rewrite sheet references inside `formula` that refer to the current workbook only.
 ///
-/// This behaves like [`rewrite_sheet_names_in_formula`], but it does **not** rewrite references
-/// that include an explicit workbook prefix (e.g. `='[Book1.xlsx]Sheet1'!A1`), since those refer
-/// to an external workbook and should not change when copying/duplicating a worksheet.
+/// This is equivalent to [`rewrite_sheet_names_in_formula`]. It is retained as a separate helper
+/// because some rewrite surfaces (e.g. sheet duplication) want to be explicit about not touching
+/// external workbook references.
 pub(crate) fn rewrite_sheet_names_in_formula_internal_refs_only(
     formula: &str,
     old_name: &str,

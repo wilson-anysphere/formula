@@ -939,20 +939,34 @@ fn import_xls_path_with_biff_reader(
         }
     }
 
-    // If we had to sanitize sheet names, internal hyperlinks may still reference the original
-    // (invalid) sheet names. Rewrite internal hyperlink targets to point at the final imported
-    // sheet names so navigation remains correct after import and round-trips to XLSX.
+    // If we had to sanitize sheet names, internal hyperlinks and cell formulas may still
+    // reference the original (invalid) sheet names. Rewrite those references to point at the
+    // final imported sheet names so navigation and formulas remain correct after import and
+    // round-trips to XLSX.
     if !final_sheet_names_by_idx.is_empty() {
         let mut resolved_sheet_names: HashMap<String, String> = HashMap::new();
+        let mut sheet_rename_pairs: Vec<(String, String)> = Vec::new();
+
         for (idx, sheet_meta) in sheets.iter().enumerate() {
             let Some(final_name) = final_sheet_names_by_idx.get(idx) else {
                 continue;
             };
+
+            // For hyperlink targets we resolve case-insensitively and strip embedded NULs so we
+            // can match calamine's decoded sheet names against BIFF's BoundSheet names.
             resolved_sheet_names.insert(
                 normalize_sheet_name_for_match(&sheet_meta.name),
                 final_name.clone(),
             );
 
+            // For formula rewriting we use exact old sheet name strings (the rewrite helper
+            // handles case-insensitive matching internally).
+            if sheet_meta.name != *final_name {
+                sheet_rename_pairs.push((sheet_meta.name.clone(), final_name.clone()));
+            }
+
+            // Add a BIFF BoundSheet name alias when available: calamine sheet metadata and BIFF
+            // BoundSheet names can diverge due to encoding issues or malformed files.
             if let Some(biff_idx) = sheet_mapping.get(idx).copied().flatten() {
                 if let Some(biff_name) = biff_sheets
                     .as_ref()
@@ -962,6 +976,10 @@ fn import_xls_path_with_biff_reader(
                     resolved_sheet_names
                         .entry(normalize_sheet_name_for_match(biff_name))
                         .or_insert_with(|| final_name.clone());
+
+                    if biff_name != final_name && biff_name != sheet_meta.name {
+                        sheet_rename_pairs.push((biff_name.to_string(), final_name.clone()));
+                    }
                 }
             }
         }
@@ -975,6 +993,28 @@ fn import_xls_path_with_biff_reader(
                     let key = normalize_sheet_name_for_match(sheet);
                     if let Some(resolved) = resolved_sheet_names.get(&key) {
                         *sheet = resolved.clone();
+                    }
+                }
+            }
+        }
+        if !sheet_rename_pairs.is_empty() {
+            for sheet in &mut out.sheets {
+                for (_, cell) in sheet.iter_cells_mut() {
+                    let Some(formula) = cell.formula.as_mut() else {
+                        continue;
+                    };
+
+                    let mut rewritten = formula.clone();
+                    for (old_name, new_name) in &sheet_rename_pairs {
+                        rewritten = formula_model::rewrite_sheet_names_in_formula(
+                            &rewritten,
+                            old_name,
+                            new_name,
+                        );
+                    }
+
+                    if rewritten != *formula {
+                        *formula = rewritten;
                     }
                 }
             }

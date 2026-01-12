@@ -37,10 +37,12 @@ const RECORD_DIMENSIONS: u16 = 0x0200;
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
+const RECORD_FORMULA: u16 = 0x0006;
 const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+const RECORD_SUPBOOK: u16 = 0x01AE;
 
 const ROW_OPTION_HIDDEN: u16 = 0x0020;
 const ROW_OPTION_COLLAPSED: u16 = 0x1000;
@@ -1602,6 +1604,62 @@ fn build_hyperlink_workbook_stream(sheet_name: &str, hlink: Vec<u8>) -> Vec<u8> 
     globals
 }
 
+fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import), with a numeric A1.
+    // - Sheet 1: `Ref`, with a formula in A1 that references `Bad:Name!A1`.
+    //
+    // The important part is that the formula token stream encodes a 3D reference using an
+    // EXTERNSHEET table entry, so calamine decodes it back into a sheet-qualified formula.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Bad:Name", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    // - SUPBOOK: one internal workbook entry (marker name = 0x01)
+    // - EXTERNSHEET: one mapping for `Bad:Name` (sheet index 0)
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 ------------------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_ref3d_formula_sheet_stream(xf_cell));
+
+    globals
+}
+
 fn build_calc_settings_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -1767,6 +1825,53 @@ fn build_hyperlink_sheet_stream(xf_cell: u16, hlink: Vec<u8>) -> Vec<u8> {
     sheet
 }
 
+fn build_simple_number_sheet_stream(xf_cell: u16, v: f64) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: NUMBER record.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, v));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_simple_ref3d_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1: FORMULA record referencing the first sheet's A1 (ixti=0, row=0, col=0).
+    let rgce = ptg_ref3d(0, 0, 0);
+    push_record(&mut sheet, RECORD_FORMULA, &formula_cell(0, 0, xf_cell, 0.0, &rgce));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_calc_settings_sheet_stream(xf: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -1859,6 +1964,25 @@ pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
         "A:B",
         hlink_internal_location(0, 0, 0, 0, "A:B!B2", "Go to B2", "Internal tooltip"),
     );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where a sheet name is invalid and will be sanitized by the
+/// importer, but a cross-sheet formula still references the original name.
+///
+/// This is used to verify that the `.xls` importer rewrites formulas after sheet name
+/// sanitization (similar to how internal hyperlinks are already rewritten).
+pub fn build_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_formula_sheet_name_sanitization_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -3149,6 +3273,32 @@ fn write_unicode_string(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&len.to_le_bytes());
     out.push(0); // compressed (8-bit)
     out.extend_from_slice(bytes);
+}
+
+fn supbook_internal(sheet_count: u16) -> Vec<u8> {
+    // SUPBOOK record payload [MS-XLS 2.4.271] for "internal" workbook references.
+    //
+    // `virtPath` is an XLUnicodeString containing a single 0x01 marker character.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&sheet_count.to_le_bytes()); // ctab
+    write_unicode_string(&mut out, "\u{0001}");
+    out
+}
+
+fn formula_cell(row: u16, col: u16, xf: u16, cached_result: f64, rgce: &[u8]) -> Vec<u8> {
+    // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
+    //
+    // This is a minimal encoding sufficient for calamine to surface the formula text.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&xf.to_le_bytes());
+    out.extend_from_slice(&cached_result.to_le_bytes()); // cached formula result (IEEE f64)
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbit
+    out.extend_from_slice(&0u32.to_le_bytes()); // chn
+    out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    out.extend_from_slice(rgce);
+    out
 }
 
 fn sheetext_record_rgb(r: u8, g: u8, b: u8) -> Vec<u8> {
