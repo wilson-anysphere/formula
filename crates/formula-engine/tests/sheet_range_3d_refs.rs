@@ -173,6 +173,38 @@ fn union_over_sheet_range_refs_is_ref_error() {
 }
 
 #[test]
+fn bytecode_union_operator_uses_current_sheet_for_unqualified_refs() {
+    // Regression test: the bytecode VM must treat unqualified reference unions like `(A1,B1)` as
+    // referring to the *current sheet* (not always Sheet1 / sheet_id=0).
+    //
+    // This relies on the VM passing the current sheet id through to the reference-union operator
+    // so it can tag the resulting `MultiRange` with the correct sheet.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 10.0).unwrap();
+    engine.set_cell_value("Sheet2", "B1", 20.0).unwrap();
+
+    // Place the formula on Sheet2 so A1/B1 should resolve to the Sheet2 values.
+    engine
+        .set_cell_formula("Sheet2", "C1", "=SUM((A1,B1))")
+        .unwrap();
+
+    // Ensure the bytecode backend accepted the formula.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Sheet2", "C1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Sheet2", "C1");
+
+    assert_eq!(bytecode_value, ast_value);
+    assert_eq!(bytecode_value, Value::Number(30.0));
+}
+
+#[test]
 fn evaluates_sum_over_sheet_range_ref_and_additional_argument() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
