@@ -14,7 +14,7 @@
     "pretest": "pnpm check:no-node",
     "test:node": "node scripts/run-node-tests.mjs",
     "vitest": "node scripts/run-vitest.mjs",
-    "test": "vitest run --minWorkers=1",
+    "test": "node scripts/run-vitest.mjs run --minWorkers=1",
     "pretest:e2e": "pnpm -w build:wasm",
     "test:e2e": "node scripts/run-playwright.mjs"
   },
