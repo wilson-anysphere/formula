@@ -474,21 +474,21 @@ export function bindYjsToDocumentController(options) {
     const prevApplyingLocal = applyingLocal;
     applyingLocal = true;
     try {
-    // Intentionally run in an *untracked* transaction (no origin) so collaborative undo
-    // only captures the user's actual edit.
-    ydoc.transact(() => {
-      for (const rawKey of foreign) {
-        const cellData = cells.get(rawKey);
-        const cell = getYMapCell(cellData);
-        if (!cell || cell instanceof Y.Map) continue;
+      // Intentionally run in an *untracked* transaction (no origin) so collaborative undo
+      // only captures the user's actual edit.
+      ydoc.transact(() => {
+        for (const rawKey of foreign) {
+          const cellData = cells.get(rawKey);
+          const cell = getYMapCell(cellData);
+          if (!cell || cell instanceof Y.Map) continue;
 
-        const local = new Y.Map();
-        cell.forEach((v, k) => {
-          local.set(k, v);
-        });
-        cells.set(rawKey, local);
-      }
-    });
+          const local = new Y.Map();
+          cell.forEach((v, k) => {
+            local.set(k, v);
+          });
+          cells.set(rawKey, local);
+        }
+      });
     } finally {
       applyingLocal = prevApplyingLocal;
     }
