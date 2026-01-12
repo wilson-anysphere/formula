@@ -458,6 +458,7 @@ fn coerce_datetime(cell: &CellValue) -> Option<NaiveDateTime> {
 mod tests {
     use super::*;
     use crate::sort_filter::types::{CellValue, RangeData, RangeRef};
+    use formula_model::ErrorValue;
     use pretty_assertions::assert_eq;
 
     fn range(rows: Vec<Vec<CellValue>>) -> RangeData {
@@ -548,6 +549,58 @@ mod tests {
         let result = apply_autofilter(&data, &filter);
         assert_eq!(result.visible_rows, vec![true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![2]);
+    }
+
+    #[test]
+    fn blanks_filter_does_not_treat_errors_as_blank() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Error(ErrorValue::Div0)],
+            vec![CellValue::Blank],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Blanks],
+                },
+            )]),
+        };
+
+        let result = apply_autofilter(&data, &filter);
+        assert_eq!(result.visible_rows, vec![true, false, true]);
+        assert_eq!(result.hidden_sheet_rows, vec![1]);
+    }
+
+    #[test]
+    fn numeric_filters_ignore_errors() {
+        let data = range(vec![
+            vec![CellValue::Text("Score".into())],
+            vec![CellValue::Error(ErrorValue::Div0)],
+            vec![CellValue::Number(10.0)],
+            vec![CellValue::Number(5.0)],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Number(NumberComparison::Between {
+                        min: 6.0,
+                        max: 10.0,
+                    })],
+                },
+            )]),
+        };
+
+        let result = apply_autofilter(&data, &filter);
+        assert_eq!(result.visible_rows, vec![true, false, true, false]);
+        assert_eq!(result.hidden_sheet_rows, vec![1, 3]);
     }
 
     #[test]
