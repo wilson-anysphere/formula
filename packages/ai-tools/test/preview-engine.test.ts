@@ -344,8 +344,8 @@ describe("PreviewEngine", () => {
         }
       ],
       workbook,
-      // The default max_tool_range_cells (200k) would block this edit. Override it here so we
-      // can validate PreviewEngine's "tool-reported cells touched" approval gating for
+      // ToolExecutor enforces a default `max_tool_range_cells` guard (200k). Override it here so we
+      // can validate PreviewEngine's approval gating based on tool-reported cell counts for
       // formatting backends that don't materialize per-cell entries.
       { max_tool_range_cells: 2_000_000 }
     );
