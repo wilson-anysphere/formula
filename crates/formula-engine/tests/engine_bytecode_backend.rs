@@ -4620,6 +4620,69 @@ fn bytecode_backend_propagates_error_literals_through_xor() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_reference_union_and_intersection() {
+    let mut engine = Engine::new();
+
+    // Populate a small grid of numbers:
+    // A1:C3 = 1..=9 (row-major).
+    let mut n = 1.0;
+    for row in 1..=3 {
+        for col in ["A", "B", "C"] {
+            engine
+                .set_cell_value("Sheet1", &format!("{col}{row}"), n)
+                .unwrap();
+            n += 1.0;
+        }
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=SUM((A1:A3,B1:B3))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", "=COUNT((A1:A3,B1:B3))")
+        .unwrap();
+    engine
+        // Place this formula outside the operand ranges so the engine's conservative dependency
+        // analysis (which treats the full operand ranges as precedents) does not create a spurious
+        // circular reference.
+        .set_cell_formula("Sheet1", "E3", "=SUM((A1:C3 B2:D4))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D4", "=SUM((A1:A3 B1:B3))")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        4,
+        "expected all union/intersection formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=SUM((A1:A3,B1:B3))", "D1"),
+        ("=COUNT((A1:A3,B1:B3))", "D2"),
+        ("=SUM((A1:C3 B2:D4))", "E3"),
+        ("=SUM((A1:A3 B1:B3))", "D4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+
+    // Sanity check expected results:
+    // - SUM((A1:A3,B1:B3)) = (1+4+7) + (2+5+8) = 27
+    // - COUNT(...) = 6
+    // - SUM((A1:C3 B2:D4)) = SUM(B2:C3) = 5+6+8+9 = 28
+    // - SUM((A1:A3 B1:B3)) => #NULL! (empty intersection)
+    assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(27.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(28.0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D4"),
+        Value::Error(ErrorKind::Null)
+    );
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     let mut engine = Engine::new();
 
@@ -5378,13 +5441,9 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     engine.set_cell_formula("Sheet1", "A2", "=RAND()").unwrap();
     // Cross-sheet reference.
     engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "A3", "=Sheet2!A1")
-        .unwrap();
-    // Unsupported operator (intersection).
-    engine
-        .set_cell_formula("Sheet1", "A4", "=A1:A2 B1:B2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "A3", "=Sheet2!A1").unwrap();
+    // Lowering error (unsupported expression): sheet-qualified defined name.
+    engine.set_cell_formula("Sheet1", "A4", "=Sheet1!Foo").unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 4);
@@ -5402,22 +5461,17 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
         1
     );
 
-    // Intersection can fail in lowering (Unsupported) or by failing the eligibility gate.
-    let unsupported = stats
-        .fallback_reasons
-        .get(&BytecodeCompileReason::LowerError(
-            formula_engine::bytecode::LowerError::Unsupported,
-        ))
-        .copied()
-        .unwrap_or(0);
+    // LowerError::Unsupported is mapped to `IneligibleExpr` so compile stats can distinguish
+    // structural lowering errors (e.g. cross-sheet refs) from missing bytecode implementation.
     let ineligible = stats
         .fallback_reasons
         .get(&BytecodeCompileReason::IneligibleExpr)
         .copied()
         .unwrap_or(0);
-
-    // A4 (intersection) can be ineligible or unsupported.
-    assert_eq!(unsupported + ineligible, 1);
+    assert_eq!(
+        ineligible, 1,
+        "expected Sheet1!Foo to be ineligible for bytecode"
+    );
 
     let report = engine.bytecode_compile_report(usize::MAX);
     assert_eq!(report.len(), 2);

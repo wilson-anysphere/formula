@@ -355,9 +355,13 @@ fn eval_ast_inner(
             }
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes, false);
-            let r = eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes, false);
-            apply_binary(*op, l, r, grid, base)
+            // Reference-algebra operators (union/intersection) must evaluate operands in a
+            // reference context so `A1` behaves like a single-cell range.
+            let allow_range = matches!(op, BinaryOp::Union | BinaryOp::Intersect);
+            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes, allow_range);
+            let r =
+                eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes, allow_range);
+            apply_binary(*op, l, r, grid, sheet_id, base)
         }
         Expr::FuncCall { func, args } => {
             if matches!(func, Function::Let) {
@@ -629,7 +633,7 @@ fn eval_ast_inner(
                             return Value::Error(e);
                         }
                         let matches =
-                            apply_binary(BinaryOp::Eq, expr_val.clone(), case_val, grid, base);
+                            apply_binary(BinaryOp::Eq, expr_val.clone(), case_val, grid, sheet_id, base);
                         match matches {
                             Value::Bool(true) => {
                                 return eval_ast_inner(
@@ -777,7 +781,12 @@ fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Err(ErrorKind::Ref),
+            [_] => Err(ErrorKind::Spill),
+            _ => Err(ErrorKind::Value),
+        },
     }
 }
 
@@ -804,7 +813,12 @@ pub(crate) fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
         }
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
+        Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => Err(ErrorKind::Ref),
+            [_] => Err(ErrorKind::Spill),
+            _ => Err(ErrorKind::Value),
+        },
     }
 }
 
@@ -937,6 +951,62 @@ fn coerce_countif_value_to_number(v: &Value) -> Option<f64> {
 }
 
 pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -> Value {
+    fn apply_implicit_intersection_on_sheet(
+        grid: &dyn Grid,
+        sheet: usize,
+        range: ResolvedRange,
+        base: CellCoord,
+    ) -> Value {
+        // Single-cell ranges return that cell.
+        if range.row_start == range.row_end && range.col_start == range.col_end {
+            return grid.get_value_on_sheet(
+                sheet,
+                CellCoord {
+                    row: range.row_start,
+                    col: range.col_start,
+                },
+            );
+        }
+
+        // 1D ranges intersect on the matching row/column.
+        if range.col_start == range.col_end {
+            if base.row >= range.row_start && base.row <= range.row_end {
+                return grid.get_value_on_sheet(
+                    sheet,
+                    CellCoord {
+                        row: base.row,
+                        col: range.col_start,
+                    },
+                );
+            }
+            return Value::Error(ErrorKind::Value);
+        }
+
+        if range.row_start == range.row_end {
+            if base.col >= range.col_start && base.col <= range.col_end {
+                return grid.get_value_on_sheet(
+                    sheet,
+                    CellCoord {
+                        row: range.row_start,
+                        col: base.col,
+                    },
+                );
+            }
+            return Value::Error(ErrorKind::Value);
+        }
+
+        // 2D ranges intersect only if the current cell is within the rectangle.
+        if base.row >= range.row_start
+            && base.row <= range.row_end
+            && base.col >= range.col_start
+            && base.col <= range.col_end
+        {
+            return grid.get_value_on_sheet(sheet, base);
+        }
+
+        Value::Error(ErrorKind::Value)
+    }
+
     match v {
         Value::Error(e) => Value::Error(e),
         Value::Range(r) => {
@@ -1415,19 +1485,174 @@ pub fn apply_binary(
     left: Value,
     right: Value,
     grid: &dyn Grid,
+    sheet_id: usize,
     base: CellCoord,
 ) -> Value {
-    let left = deref_value_dynamic(left, grid, base);
-    let right = deref_value_dynamic(right, grid, base);
-
     match op {
+        BinaryOp::Union => reference_union(left, right, sheet_id, base),
+        BinaryOp::Intersect => reference_intersect(left, right, sheet_id, base),
         BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
+            let left = deref_value_dynamic(left, grid, base);
+            let right = deref_value_dynamic(right, grid, base);
             elementwise_binary(&left, &right, |a, b| numeric_binary(op, a, b))
         }
         BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
+            let left = deref_value_dynamic(left, grid, base);
+            let right = deref_value_dynamic(right, grid, base);
             elementwise_binary(&left, &right, |a, b| excel_compare(a, b, op))
         }
     }
+}
+
+fn value_into_reference_areas(value: Value, sheet_id: usize) -> Result<Vec<SheetRangeRef>, Value> {
+    match value {
+        Value::Range(r) => Ok(vec![SheetRangeRef::new(sheet_id, r)]),
+        Value::MultiRange(r) => Ok(r.areas.iter().copied().collect()),
+        Value::Error(e) => Err(Value::Error(e)),
+        _ => Err(Value::Error(ErrorKind::Value)),
+    }
+}
+
+fn sort_reference_areas(areas: &mut [SheetRangeRef], base: CellCoord) {
+    areas.sort_by(|a, b| {
+        a.sheet.cmp(&b.sheet).then_with(|| {
+            let ra = a.range.resolve(base);
+            let rb = b.range.resolve(base);
+            (ra.row_start, ra.col_start, ra.row_end, ra.col_end).cmp(&(
+                rb.row_start,
+                rb.col_start,
+                rb.row_end,
+                rb.col_end,
+            ))
+        })
+    });
+}
+
+fn reference_union(left: Value, right: Value, sheet_id: usize, base: CellCoord) -> Value {
+    let mut left = match value_into_reference_areas(left, sheet_id) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let right = match value_into_reference_areas(right, sheet_id) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    let Some(first) = left.first() else {
+        return Value::Error(ErrorKind::Ref);
+    };
+    let expected_sheet = first.sheet;
+    if left.iter().any(|r| r.sheet != expected_sheet) || right.iter().any(|r| r.sheet != expected_sheet)
+    {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    left.extend(right);
+    sort_reference_areas(&mut left, base);
+
+    match left.as_slice() {
+        [] => Value::Error(ErrorKind::Ref),
+        [only] if only.sheet == sheet_id => Value::Range(only.range),
+        [only] => Value::MultiRange(MultiRangeRef::new(vec![*only].into())),
+        _ => Value::MultiRange(MultiRangeRef::new(left.into())),
+    }
+}
+
+fn reference_intersect(left: Value, right: Value, sheet_id: usize, base: CellCoord) -> Value {
+    let left = match value_into_reference_areas(left, sheet_id) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let right = match value_into_reference_areas(right, sheet_id) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    let Some(first) = left.first() else {
+        return Value::Error(ErrorKind::Ref);
+    };
+    let expected_sheet = first.sheet;
+    if left.iter().any(|r| r.sheet != expected_sheet) || right.iter().any(|r| r.sheet != expected_sheet)
+    {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let mut out: Vec<SheetRangeRef> = Vec::new();
+    for a in &left {
+        let ra = a.range.resolve(base);
+        for b in &right {
+            let rb = b.range.resolve(base);
+            let Some(intersection) = intersect_ranges(ra, rb) else {
+                continue;
+            };
+            let start = Ref::new(intersection.row_start, intersection.col_start, true, true);
+            let end = Ref::new(intersection.row_end, intersection.col_end, true, true);
+            out.push(SheetRangeRef::new(
+                expected_sheet,
+                RangeRef::new(start, end),
+            ));
+        }
+    }
+
+    if out.is_empty() {
+        return Value::Error(ErrorKind::Null);
+    }
+    sort_reference_areas(&mut out, base);
+
+    match out.as_slice() {
+        [only] if only.sheet == sheet_id => Value::Range(only.range),
+        [only] => Value::MultiRange(MultiRangeRef::new(vec![*only].into())),
+        _ => Value::MultiRange(MultiRangeRef::new(out.into())),
+    }
+}
+
+#[inline]
+fn intersect_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange> {
+    let row_start = a.row_start.max(b.row_start);
+    let row_end = a.row_end.min(b.row_end);
+    if row_start > row_end {
+        return None;
+    }
+    let col_start = a.col_start.max(b.col_start);
+    let col_end = a.col_end.min(b.col_end);
+    if col_start > col_end {
+        return None;
+    }
+    Some(ResolvedRange {
+        row_start,
+        row_end,
+        col_start,
+        col_end,
+    })
+}
+
+fn multi_range_has_overlaps(range: &MultiRangeRef, base: CellCoord) -> bool {
+    let areas = range.areas.as_ref();
+    if areas.len() <= 1 {
+        return false;
+    }
+
+    // Fast path: 3D sheet spans never overlap because each area is on a distinct sheet.
+    // (Reference unions/intersections operate within a single sheet, where overlap is possible.)
+    let mut sheets = HashSet::with_capacity(areas.len());
+    if areas.iter().all(|area| sheets.insert(area.sheet)) {
+        return false;
+    }
+
+    for i in 0..areas.len() {
+        let a = areas[i];
+        let ra = a.range.resolve(base);
+        for b in &areas[i + 1..] {
+            if b.sheet != a.sheet {
+                continue;
+            }
+            let rb = b.range.resolve(base);
+            if intersect_ranges(ra, rb).is_some() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn excel_compare(left: &Value, right: &Value, op: BinaryOp) -> Value {
@@ -3113,7 +3338,9 @@ fn fn_switch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 
     for pair in pairs.chunks_exact(2) {
-        let matches = apply_binary(BinaryOp::Eq, expr_val.clone(), pair[0].clone(), grid, base);
+        let left = deref_value_dynamic(expr_val.clone(), grid, base);
+        let right = deref_value_dynamic(pair[0].clone(), grid, base);
+        let matches = excel_compare(&left, &right, BinaryOp::Eq);
         match matches {
             Value::Bool(true) => return pair[1].clone(),
             Value::Bool(false) => continue,
@@ -3961,8 +4188,26 @@ fn fn_type(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 64
             }
         }
-        // Discontiguous unions (e.g. 3D sheet spans) are not valid TYPE arguments.
-        Value::MultiRange(_) => return Value::Error(ErrorKind::Value),
+        Value::MultiRange(r) => match r.areas.as_ref() {
+            [] => return Value::Error(ErrorKind::Ref),
+            [only] => {
+                let resolved = only.range.resolve(base);
+                if resolved.rows() == 1 && resolved.cols() == 1 {
+                    let v = grid.get_value_on_sheet(
+                        only.sheet,
+                        CellCoord {
+                            row: resolved.row_start,
+                            col: resolved.col_start,
+                        },
+                    );
+                    type_code_for_scalar(&v)
+                } else {
+                    64
+                }
+            }
+            // Discontiguous unions (e.g. 3D sheet spans) are not valid TYPE arguments.
+            _ => return Value::Error(ErrorKind::Value),
+        },
         other => type_code_for_scalar(other),
     };
 

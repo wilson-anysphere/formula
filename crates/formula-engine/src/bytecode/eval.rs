@@ -100,6 +100,8 @@ impl Vm {
                 | OpCode::Mul
                 | OpCode::Div
                 | OpCode::Pow
+                | OpCode::Union
+                | OpCode::Intersect
                 | OpCode::Eq
                 | OpCode::Ne
                 | OpCode::Lt
@@ -114,6 +116,8 @@ impl Vm {
                         OpCode::Mul => BinaryOp::Mul,
                         OpCode::Div => BinaryOp::Div,
                         OpCode::Pow => BinaryOp::Pow,
+                        OpCode::Union => BinaryOp::Union,
+                        OpCode::Intersect => BinaryOp::Intersect,
                         OpCode::Eq => BinaryOp::Eq,
                         OpCode::Ne => BinaryOp::Ne,
                         OpCode::Lt => BinaryOp::Lt,
@@ -122,7 +126,8 @@ impl Vm {
                         OpCode::Ge => BinaryOp::Ge,
                         _ => unreachable!(),
                     };
-                    self.stack.push(apply_binary(op, left, right, grid, base));
+                    self.stack
+                        .push(apply_binary(op, left, right, grid, sheet_id, base));
                 }
                 OpCode::CallFunc => {
                     let func = &program.funcs[inst.a() as usize];

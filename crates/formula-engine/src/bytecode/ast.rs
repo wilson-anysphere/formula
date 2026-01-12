@@ -15,6 +15,10 @@ pub enum BinaryOp {
     Mul,
     Div,
     Pow,
+    /// Reference union (`,`).
+    Union,
+    /// Reference intersection (whitespace).
+    Intersect,
     Eq,
     Ne,
     Lt,

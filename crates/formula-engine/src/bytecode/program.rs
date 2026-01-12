@@ -39,6 +39,10 @@ pub enum OpCode {
     JumpIfNotNaError = 23,
     LoadMultiRange = 24,
     SpillRange = 25,
+    /// Reference union (`,`).
+    Union = 26,
+    /// Reference intersection (whitespace).
+    Intersect = 27,
 }
 
 /// Packed instruction:
@@ -85,6 +89,8 @@ impl Instruction {
             23 => OpCode::JumpIfNotNaError,
             24 => OpCode::LoadMultiRange,
             25 => OpCode::SpillRange,
+            26 => OpCode::Union,
+            27 => OpCode::Intersect,
             _ => unreachable!("invalid opcode"),
         }
     }

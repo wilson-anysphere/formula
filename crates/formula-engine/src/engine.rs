@@ -6780,9 +6780,10 @@ impl BytecodeColumnCache {
         snapshot: &Snapshot,
         tasks: &[(CellKey, CompiledFormula)],
     ) -> Self {
-        #[derive(Clone, Copy, Debug)]
+        #[derive(Debug, Clone)]
         enum StackValue {
             Range(usize),
+            Ranges(Vec<usize>),
             Other,
         }
 
@@ -6813,7 +6814,7 @@ impl BytecodeColumnCache {
                     }
                     bytecode::OpCode::LoadLocal => {
                         let idx = inst.a() as usize;
-                        let v = locals.get(idx).copied().unwrap_or(StackValue::Other);
+                        let v = locals.get(idx).cloned().unwrap_or(StackValue::Other);
                         stack.push(v);
                     }
                     bytecode::OpCode::Jump => {
@@ -6831,6 +6832,26 @@ impl BytecodeColumnCache {
                     | bytecode::OpCode::SpillRange => {
                         let _ = stack.pop();
                         stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::Union | bytecode::OpCode::Intersect => {
+                        let right = stack.pop().unwrap_or(StackValue::Other);
+                        let left = stack.pop().unwrap_or(StackValue::Other);
+                        let mut ranges: Vec<usize> = Vec::new();
+                        match left {
+                            StackValue::Range(idx) => ranges.push(idx),
+                            StackValue::Ranges(mut idxs) => ranges.append(&mut idxs),
+                            StackValue::Other => {}
+                        }
+                        match right {
+                            StackValue::Range(idx) => ranges.push(idx),
+                            StackValue::Ranges(mut idxs) => ranges.append(&mut idxs),
+                            StackValue::Other => {}
+                        }
+                        stack.push(match ranges.len() {
+                            0 => StackValue::Other,
+                            1 => StackValue::Range(ranges[0]),
+                            _ => StackValue::Ranges(ranges),
+                        });
                     }
                     bytecode::OpCode::Add
                     | bytecode::OpCode::Sub
@@ -6854,6 +6875,13 @@ impl BytecodeColumnCache {
                                 StackValue::Range(idx) => {
                                     if idx < used.len() {
                                         used[idx] = true;
+                                    }
+                                }
+                                StackValue::Ranges(idxs) => {
+                                    for idx in idxs {
+                                        if idx < used.len() {
+                                            used[idx] = true;
+                                        }
                                     }
                                 }
                                 StackValue::Other => {}
@@ -7770,32 +7798,39 @@ fn bytecode_expr_is_eligible_inner(
                 bytecode_expr_is_eligible_inner(expr, true, false, lexical_scopes)
             }
         },
-        bytecode::Expr::Binary { op, left, right } => {
-            matches!(
-                op,
-                bytecode::ast::BinaryOp::Add
-                    | bytecode::ast::BinaryOp::Sub
-                    | bytecode::ast::BinaryOp::Mul
-                    | bytecode::ast::BinaryOp::Div
-                    | bytecode::ast::BinaryOp::Pow
-                    | bytecode::ast::BinaryOp::Eq
-                    | bytecode::ast::BinaryOp::Ne
-                    | bytecode::ast::BinaryOp::Lt
-                    | bytecode::ast::BinaryOp::Le
-                    | bytecode::ast::BinaryOp::Gt
-                    | bytecode::ast::BinaryOp::Ge
-            ) && bytecode_expr_is_eligible_inner(
-                left,
-                allow_range,
-                allow_array_literals,
-                lexical_scopes,
-            ) && bytecode_expr_is_eligible_inner(
-                right,
-                allow_range,
-                allow_array_literals,
-                lexical_scopes,
-            )
-        }
+        bytecode::Expr::Binary { op, left, right } => match op {
+            bytecode::ast::BinaryOp::Union | bytecode::ast::BinaryOp::Intersect => {
+                allow_range
+                    && bytecode_expr_is_eligible_inner(left, true, false, lexical_scopes)
+                    && bytecode_expr_is_eligible_inner(right, true, false, lexical_scopes)
+            }
+            _ => {
+                matches!(
+                    op,
+                    bytecode::ast::BinaryOp::Add
+                        | bytecode::ast::BinaryOp::Sub
+                        | bytecode::ast::BinaryOp::Mul
+                        | bytecode::ast::BinaryOp::Div
+                        | bytecode::ast::BinaryOp::Pow
+                        | bytecode::ast::BinaryOp::Eq
+                        | bytecode::ast::BinaryOp::Ne
+                        | bytecode::ast::BinaryOp::Lt
+                        | bytecode::ast::BinaryOp::Le
+                        | bytecode::ast::BinaryOp::Gt
+                        | bytecode::ast::BinaryOp::Ge
+                ) && bytecode_expr_is_eligible_inner(
+                    left,
+                    allow_range,
+                    allow_array_literals,
+                    lexical_scopes,
+                ) && bytecode_expr_is_eligible_inner(
+                    right,
+                    allow_range,
+                    allow_array_literals,
+                    lexical_scopes,
+                )
+            }
+        },
         bytecode::Expr::FuncCall { func, args } => match func {
             bytecode::ast::Function::If => {
                 if args.len() < 2 || args.len() > 3 {
@@ -7996,7 +8031,8 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 2 {
                     return false;
                 }
-                let range_ok = bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
+                let range_ok =
+                    bytecode_expr_is_eligible_inner(&args[0], true, true, lexical_scopes);
                 let criteria_ok =
                     bytecode_expr_is_eligible_inner(&args[1], false, false, lexical_scopes);
 
@@ -10849,11 +10885,12 @@ mod tests {
     }
 
     #[test]
-    fn bytecode_compile_report_classifies_unsupported_operators() {
+    fn bytecode_compile_report_classifies_unsupported_expressions() {
         let mut engine = Engine::new();
-        // The intersection operator (space) is not supported by the bytecode backend.
-        // (Note: ordinary whitespace is ignored; it is only parsed as intersection between refs.)
-        engine.set_cell_formula("Sheet1", "B1", "=A1 C1").unwrap();
+        engine
+            // Sheet-qualified defined names are currently handled by the AST evaluator.
+            .set_cell_formula("Sheet1", "B1", "=Sheet1!Foo")
+            .unwrap();
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
