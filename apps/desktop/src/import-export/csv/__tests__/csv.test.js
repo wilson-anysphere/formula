@@ -19,6 +19,14 @@ test("CSV parses quoted fields, quotes, and embedded newlines", () => {
   ]);
 });
 
+test("CSV strips a UTF-8 BOM from the first field", () => {
+  const rows = parseCsv("\uFEFFcol1,col2\n1,2\n", { delimiter: "," });
+  assert.deepEqual(rows, [
+    ["col1", "col2"],
+    ["1", "2"],
+  ]);
+});
+
 test("CSV import infers column types and preserves header strings", () => {
   const csv = "id,amount,active,date\n001,10,true,2024-01-31\n002,20,false,2024-02-01\n";
   const { grid } = importCsvToCellGrid(csv, { delimiter: "," });

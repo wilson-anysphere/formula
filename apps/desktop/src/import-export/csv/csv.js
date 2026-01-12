@@ -23,7 +23,10 @@ export function parseCsv(text, options) {
   let field = "";
   let inQuotes = false;
 
-  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Strip a UTF-8 BOM if present. Many CSV exporters include it, and leaving it in place
+  // would pollute the first header field (e.g. "\uFEFFcol" instead of "col").
+  if (normalized.startsWith("\uFEFF")) normalized = normalized.slice(1);
 
   for (let i = 0; i < normalized.length; i++) {
     const ch = normalized[i];
@@ -105,4 +108,3 @@ export function stringifyCsv(rows, options) {
     )
     .join(newline);
 }
-
