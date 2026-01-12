@@ -722,7 +722,7 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
 mod tests {
     use std::collections::HashSet;
 
-    use super::{FTAB, FUTURE_UDF_FUNCTIONS};
+    use super::{function_id_from_name, FTAB, FTAB_USER_DEFINED, FUTURE_UDF_FUNCTIONS};
 
     #[test]
     fn future_udf_functions_are_sorted_and_unique() {
@@ -750,6 +750,24 @@ mod tests {
             assert!(
                 !ftab_names.contains(name),
                 "FUTURE_UDF_FUNCTIONS should not contain FTAB entries; {name} is already in FTAB"
+            );
+        }
+    }
+
+    #[test]
+    fn future_udf_functions_map_to_user_defined_id() {
+        for &name in FUTURE_UDF_FUNCTIONS {
+            assert_eq!(
+                function_id_from_name(name),
+                Some(FTAB_USER_DEFINED),
+                "{name} should map to the BIFF UDF sentinel id"
+            );
+
+            let prefixed = format!("_xlfn.{name}");
+            assert_eq!(
+                function_id_from_name(&prefixed),
+                Some(FTAB_USER_DEFINED),
+                "{prefixed} should map to the BIFF UDF sentinel id"
             );
         }
     }
