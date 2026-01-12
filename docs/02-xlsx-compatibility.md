@@ -6,7 +6,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 
 ## Related docs
 
-- [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”)
+- [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”; naming varies: `richValue*` vs `rdrichvalue*`)
 - [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*`) tables used by images-in-cells
 
@@ -70,7 +70,7 @@ workbook.xlsx (ZIP archive)
 ```
 
 See also:
-- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — Excel RichData (`richValue*`) parts used by “Images in Cell” / `IMAGE()`.
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — Excel RichData parts used by “Images in Cell” / `IMAGE()` (naming varies: `richValue*` vs `rdrichvalue*`).
 - [`docs/20-images-in-cells.md`](./20-images-in-cells.md) — high-level “images in cells” overview + round-trip constraints.
 
 ---
