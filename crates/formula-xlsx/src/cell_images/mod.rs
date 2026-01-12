@@ -15,7 +15,7 @@ mod part_info;
 
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use formula_model::drawings::{ImageData, ImageId};
 use roxmltree::Document;
@@ -208,6 +208,9 @@ fn parse_cell_images_part(path: &str, parts: &BTreeMap<String, Vec<u8>>) -> Resu
     }
 
     let mut images = Vec::new();
+    // Track subtrees we've already materialized to avoid double-counting when scanning for `<blip>`
+    // nodes. Use the byte range in the source XML as a cheap stable identity.
+    let mut seen_ranges: HashSet<(usize, usize)> = HashSet::new();
     // Collect images in document order. Excel can represent the image relationship ID either:
     // - as DrawingML `<xdr:pic>` payloads referencing `<a:blip r:embed="…">`, or
     // - via a lightweight `<cellImage r:id="…">` schema.
@@ -231,14 +234,21 @@ fn parse_cell_images_part(path: &str, parts: &BTreeMap<String, Vec<u8>>) -> Resu
                 target,
                 raw_xml: slice_node_xml(&node, xml).unwrap_or_default(),
             });
+            let range = node.range();
+            seen_ranges.insert((range.start, range.end));
         }
         if name.eq_ignore_ascii_case("cellImage") {
+            let range = node.range();
             // If this `<cellImage>` includes a full `<pic>` payload, we'll pick it up when we hit
             // the `<pic>` node itself. Avoid double-counting in that case.
             if node
                 .descendants()
                 .any(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("pic"))
             {
+                // Still mark the `<cellImage>` subtree as seen so that any nested `<blip>` elements
+                // that aren't within `<pic>` aren't treated as separate images (this matches our
+                // historical "only parse `<pic>` when present" behavior).
+                seen_ranges.insert((range.start, range.end));
                 continue;
             }
 
@@ -256,6 +266,37 @@ fn parse_cell_images_part(path: &str, parts: &BTreeMap<String, Vec<u8>>) -> Resu
                 embed_rel_id,
                 target,
                 raw_xml: slice_node_xml(&node, xml).unwrap_or_default(),
+            });
+            seen_ranges.insert((range.start, range.end));
+        }
+
+        // Some schema variants store `<a:blip r:embed="...">` nodes without a `<pic>` wrapper and
+        // even without a `<cellImage>` wrapper. Scan all `blip` elements as a fallback.
+        if name.eq_ignore_ascii_case("blip") {
+            let Some(embed_rel_id) = get_blip_embed_rel_id(&node) else {
+                continue;
+            };
+
+            let container = node
+                .ancestors()
+                .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("pic"))
+                .or_else(|| {
+                    node.ancestors().find(|n| {
+                        n.is_element() && n.tag_name().name().eq_ignore_ascii_case("cellImage")
+                    })
+                })
+                .unwrap_or(node);
+
+            let range = container.range();
+            if !seen_ranges.insert((range.start, range.end)) {
+                continue;
+            }
+
+            let target = rid_to_target.get(&embed_rel_id).cloned();
+            images.push(CellImageEntry {
+                embed_rel_id,
+                target,
+                raw_xml: slice_node_xml(&container, xml).unwrap_or_default(),
             });
         }
     }
