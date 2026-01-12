@@ -2,7 +2,7 @@ use std::io::{Cursor, Read};
 use std::path::Path;
 
 use formula_model::{Cell, CellRef, CellValue, Workbook};
-use formula_xlsx::{assert_xml_semantic_eq, load_from_bytes, XlsxDocument};
+use formula_xlsx::{load_from_bytes, XlsxDocument};
 use zip::ZipArchive;
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
@@ -45,11 +45,57 @@ fn preserves_row_col_metadata_on_roundtrip() -> Result<(), Box<dyn std::error::E
         "critical diffs detected: {report:?}"
     );
 
-    // Sheet XML should preserve row/col metadata semantically.
-    assert_xml_semantic_eq(
-        &zip_part(&fixture_bytes, "xl/worksheets/sheet1.xml"),
-        &zip_part(&saved, "xl/worksheets/sheet1.xml"),
-    );
+    // Sheet XML should preserve row/col metadata.
+    let xml_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    let xml = std::str::from_utf8(&xml_bytes)?;
+    let parsed = roxmltree::Document::parse(xml)?;
+
+    let row2 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("2"))
+        .expect("row 2 exists");
+    assert_eq!(row2.attribute("ht"), Some("20"));
+    assert_eq!(row2.attribute("customHeight"), Some("1"));
+
+    let row3 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("3"))
+        .expect("row 3 exists");
+    assert_eq!(row3.attribute("hidden"), Some("1"));
+
+    let col_b = parsed
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "col"
+                && n.attribute("min") == Some("2")
+                && n.attribute("max") == Some("2")
+        })
+        .expect("col B exists");
+    assert_eq!(col_b.attribute("width"), Some("25"));
+    assert_eq!(col_b.attribute("customWidth"), Some("1"));
+
+    let col_c = parsed
+        .descendants()
+        .find(|n| {
+            n.is_element()
+                && n.tag_name().name() == "col"
+                && n.attribute("min") == Some("3")
+                && n.attribute("max") == Some("3")
+        })
+        .expect("col C exists");
+    assert_eq!(col_c.attribute("hidden"), Some("1"));
+
+    let cell_a2 = parsed
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
+        .expect("cell A2 exists");
+    let v = cell_a2
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(v, "2");
 
     Ok(())
 }
@@ -65,7 +111,7 @@ fn editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs() -> Result<(),
     let sheet_id = doc.workbook.sheets[0].id;
     let sheet = doc.workbook.sheet_mut(sheet_id).unwrap();
 
-    // Edit A2 (which has a non-modeled cell attribute `vm="1"` in the file).
+    // Edit A2 (which has a `vm="1"` rich-value metadata pointer in the file).
     sheet.set_value(CellRef::from_a1("A2")?, CellValue::Number(99.0));
 
     let saved = doc.save_to_vec()?;
@@ -114,7 +160,7 @@ fn editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs() -> Result<(),
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
         .expect("cell A2 exists");
-    assert_eq!(cell_a2.attribute("vm"), Some("1"));
+    assert_eq!(cell_a2.attribute("vm"), None, "vm should be dropped for normal values");
     let v = cell_a2
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "v")

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, StyleTable};
+use formula_model::{CellRef, CellValue, ErrorValue, StyleTable};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 use thiserror::Error;
@@ -3440,6 +3440,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
 ) -> Result<(), StreamingPatchError> {
+    let preserve_vm = matches!(patch.value, CellValue::Error(ErrorValue::Value));
     let patch_formula = match patch.formula.as_deref() {
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
         _ => None,
@@ -3463,6 +3464,9 @@ fn patch_existing_cell<R: BufRead, W: Write>(
             continue;
         }
         if attr.key.as_ref() == b"s" && style_override.is_some() {
+            continue;
+        }
+        if attr.key.as_ref() == b"vm" && !preserve_vm {
             continue;
         }
         if attr.key.as_ref() == b"r" {
@@ -3783,6 +3787,7 @@ fn write_patched_cell<W: Write>(
     patch: &CellPatchInternal,
     prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
+    let preserve_vm = matches!(patch.value, CellValue::Error(ErrorValue::Value));
     let patch_formula = match patch.formula.as_deref() {
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
         _ => None,
@@ -3812,6 +3817,9 @@ fn write_patched_cell<W: Write>(
                 continue;
             }
             if attr.key.as_ref() == b"s" && style_override.is_some() {
+                continue;
+            }
+            if attr.key.as_ref() == b"vm" && !preserve_vm {
                 continue;
             }
             if attr.key.as_ref() == b"r" {

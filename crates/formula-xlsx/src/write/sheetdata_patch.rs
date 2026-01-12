@@ -958,7 +958,11 @@ fn write_updated_cell<W: Write>(
             CellValueKind::Other { t } => c_start.push_attribute(("t", t.as_str())),
         }
     }
+    let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
     for (k, v) in &preserved_attrs {
+        if k == "vm" && !preserve_vm {
+            continue;
+        }
         c_start.push_attribute((k.as_str(), v.as_str()));
     }
 
