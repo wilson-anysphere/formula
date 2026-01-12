@@ -3287,6 +3287,57 @@ export class SpreadsheetApp {
         }
       }
     }
+
+    // Fast path: if the sheet has no stored content (value/formula), the summary is always empty
+    // regardless of selection area. Avoid scanning potentially thousands of blank coordinates on
+    // new/empty sheets.
+    const sheetModel: any = (this.document as any)?.model?.sheets?.get?.(sheetId) ?? null;
+    if (!sheetModel) {
+      const summary: SpreadsheetSelectionSummary = {
+        sum: null,
+        average: null,
+        count: 0,
+        numericCount: 0,
+        countNonEmpty: 0,
+      };
+      this.selectionSummaryCache = {
+        sheetId,
+        sheetContentVersion,
+        computedValuesVersion: this.computedValuesVersion,
+        rangesKey,
+        summary,
+      };
+      return summary;
+    }
+    const contentCellCount = typeof sheetModel.contentCellCount === "number" ? sheetModel.contentCellCount : null;
+    if (contentCellCount === 0) {
+      const summary: SpreadsheetSelectionSummary = {
+        sum: null,
+        average: null,
+        count: 0,
+        numericCount: 0,
+        countNonEmpty: 0,
+      };
+      this.selectionSummaryCache = {
+        sheetId,
+        sheetContentVersion,
+        computedValuesVersion: this.computedValuesVersion,
+        rangesKey,
+        summary,
+      };
+      return summary;
+    }
+
+    // Heuristic: for sparse sheets, iterating only stored cells can be faster even when the
+    // selection area is below the scan threshold (it avoids `getCell` calls for blank coords).
+    const storedCellCount = typeof sheetModel?.cells?.size === "number" ? sheetModel.cells.size : null;
+    const useSparseIteration =
+      selectionArea > SELECTION_AREA_SCAN_THRESHOLD ||
+      (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD &&
+        storedCellCount != null &&
+        // `storedCellCount` includes format-only cells, so this errs on the side of falling back
+        // to coordinate scanning.
+        storedCellCount <= selectionArea);
     let countNonEmpty = 0;
     let numericCount = 0;
     let numericSum = 0;
@@ -3312,7 +3363,7 @@ export class SpreadsheetApp {
     // `{row,col}` objects for every visited coordinate.
     const coordScratch = { row: 0, col: 0 };
 
-    if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
+    if (!useSparseIteration) {
       const visited = ranges.length > 1 ? new Set<number>() : null;
       for (const r of ranges) {
         for (let row = r.startRow; row <= r.endRow; row += 1) {

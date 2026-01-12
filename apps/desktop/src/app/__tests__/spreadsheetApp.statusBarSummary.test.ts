@@ -456,6 +456,53 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     root.remove();
   });
 
+  it("uses sparse iteration for medium selections on sparse sheets", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellValue(sheetId, "A1", 1);
+    doc.setCellValue(sheetId, "B2", 2);
+
+    // Exactly 10k cells (20 columns x 500 rows). This is below the "large selection" threshold,
+    // but should still use sparse iteration when the sheet is sparse.
+    (app as any).selection = buildSelection(
+      {
+        ranges: [{ startRow: 0, endRow: 499, startCol: 0, endCol: 19 }], // A1:T500
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
+
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 3,
+      average: 1.5,
+      count: 2,
+      numericCount: 2,
+      countNonEmpty: 2,
+    });
+
+    expect(sparseSpy).toHaveBeenCalledTimes(1);
+    expect(getCellSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("caches selection summary when selection and sheet content are unchanged", () => {
     const root = createRoot();
     const status = {
@@ -474,13 +521,16 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 } }); // A1:B1
 
     const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
     const first = app.getSelectionSummary();
-    expect(getCellSpy).toHaveBeenCalled();
+    expect(getCellSpy.mock.calls.length + sparseSpy.mock.calls.length).toBeGreaterThan(0);
 
     getCellSpy.mockClear();
+    sparseSpy.mockClear();
     const second = app.getSelectionSummary();
     expect(second).toEqual(first);
     expect(getCellSpy).not.toHaveBeenCalled();
+    expect(sparseSpy).not.toHaveBeenCalled();
 
     app.destroy();
     root.remove();
