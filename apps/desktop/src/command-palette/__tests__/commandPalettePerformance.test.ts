@@ -165,9 +165,9 @@ describe("command palette performance safeguards", () => {
     // Ensure the test stays valid even if jsdom implements scrollIntoView in the future:
     // explicitly override the per-element property to a *non-function* value so a direct call
     // (or `scrollIntoView?.(...)`) would throw, and only the `typeof === "function"` guard keeps this safe.
-    (selectedBefore as any).scrollIntoView = 0;
+    (selectedBefore as any).scrollIntoView = 1;
     const nextBefore = list.querySelector<HTMLElement>("#command-palette-option-1");
-    (nextBefore as any).scrollIntoView = 0;
+    (nextBefore as any).scrollIntoView = 1;
 
     // Flush the queued microtask that keeps the selected row in view after rendering.
     await Promise.resolve();
