@@ -256,3 +256,110 @@ test("binder: hydrates range-run formatting from tuple/array encodings of format
     ydoc.destroy();
   }
 });
+
+test("binder: DocumentController→Yjs upgrades plain-object sheet entries when writing formatRunsByCol", async () => {
+  const ydoc = new Y.Doc();
+  const cells = ydoc.getMap("cells");
+  const sheets = ydoc.getArray("sheets");
+
+  // Legacy/persistence payloads may store sheet metadata as plain JS objects inside
+  // the `sheets` Y.Array (rather than Y.Maps). The binder should upgrade these
+  // entries to Y.Maps when writing range-run formatting state.
+  ydoc.transact(() => {
+    sheets.push([{ id: "Sheet1", name: "Sheet1" }]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    documentController.setRangeFormat("Sheet1", "A1:Z2000", { font: { bold: true } });
+
+    await waitForCondition(() => {
+      if (sheets.length !== 1) return false;
+      const entry = sheets.get(0);
+      if (!(entry instanceof Y.Map)) return false;
+      const runsByCol = entry.get("formatRunsByCol");
+      return runsByCol instanceof Y.Map && Array.isArray(runsByCol.get("0")) && runsByCol.get("0")?.length > 0;
+    });
+
+    const entry = sheets.get(0);
+    assert.ok(entry instanceof Y.Map, "expected sheet entry to be upgraded to a Y.Map");
+    const runsByCol = entry.get("formatRunsByCol");
+    assert.ok(runsByCol instanceof Y.Map, "expected formatRunsByCol to be stored as a Y.Map");
+    const col0Runs = runsByCol.get("0");
+    assert.ok(Array.isArray(col0Runs) && col0Runs.length > 0);
+    assert.equal(col0Runs[0]?.format?.font?.bold, true);
+
+    // No per-cell materialization should occur.
+    assert.equal(cells.size, 0);
+    assert.equal(documentController.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: DocumentController→Yjs applies range-run formatting to duplicate sheet entries", async () => {
+  const ydoc = new Y.Doc();
+
+  // Simulate a remote client inserting a Sheet1 entry, then the local client also inserting
+  // a duplicate Sheet1 entry (a common race during schema init).
+  const remoteDoc = new Y.Doc();
+  remoteDoc.transact(() => {
+    const remoteSheets = remoteDoc.getArray("sheets");
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    remoteSheets.push([entry]);
+  });
+  Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(remoteDoc));
+
+  ydoc.transact(() => {
+    const localSheets = ydoc.getArray("sheets");
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    localSheets.push([entry]);
+  });
+
+  const sheets = ydoc.getArray("sheets");
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    documentController.setRangeFormat("Sheet1", "A1:Z2000", { font: { italic: true } });
+
+    await waitForCondition(() => {
+      /** @type {number} */
+      let matched = 0;
+      for (const entry of sheets.toArray()) {
+        if (!(entry instanceof Y.Map)) continue;
+        if (entry.get("id") !== "Sheet1") continue;
+        const runsByCol = entry.get("formatRunsByCol");
+        const col0Runs = runsByCol instanceof Y.Map ? runsByCol.get("0") : null;
+        if (Array.isArray(col0Runs) && col0Runs[0]?.format?.font?.italic === true) matched += 1;
+      }
+      return matched >= 2;
+    });
+
+    /** @type {Y.Map<any>[]} */
+    const entries = [];
+    for (const entry of sheets.toArray()) {
+      if (entry instanceof Y.Map && entry.get("id") === "Sheet1") entries.push(entry);
+    }
+    assert.ok(entries.length >= 2, "expected duplicate Sheet1 entries");
+
+    for (const entry of entries) {
+      const runsByCol = entry.get("formatRunsByCol");
+      assert.ok(runsByCol instanceof Y.Map);
+      const col0Runs = runsByCol.get("0");
+      assert.ok(Array.isArray(col0Runs) && col0Runs.length > 0);
+      assert.equal(col0Runs[0]?.format?.font?.italic, true);
+    }
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+    remoteDoc.destroy();
+  }
+});
