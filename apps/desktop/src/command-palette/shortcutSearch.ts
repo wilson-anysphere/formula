@@ -33,6 +33,25 @@ const SHORTCUT_SYMBOL_TOKENS: Record<string, string> = {
   "→": "right",
 };
 
+// Keys that appear as literal single-character tokens (e.g. "[" in "⌘[").
+// We intentionally include common punctuation used by spreadsheet shortcuts.
+const SHORTCUT_PUNCTUATION_KEYS = new Set([
+  "[",
+  "]",
+  ";",
+  "'",
+  ",",
+  ".",
+  "/",
+  "\\",
+  "`",
+  "-",
+  "=",
+  "$",
+  "%",
+  "#",
+]);
+
 type ShortcutSearchLimits = {
   /**
    * Max number of matches to return.
@@ -134,6 +153,10 @@ function extractShortcutTokens(text: string): string[] {
     }
 
     flush();
+
+    if (SHORTCUT_PUNCTUATION_KEYS.has(ch)) {
+      tokens.push(normalizeToken(ch));
+    }
   }
 
   flush();

@@ -55,6 +55,19 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("does not drop punctuation tokens (cmd+[ should not match all cmd shortcuts)", () => {
+    const commands = [
+      { commandId: "audit", title: "Audit", category: "Cat", source: { kind: "builtin" as const } },
+      { commandId: "other", title: "Other", category: "Cat", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([
+      ["audit", ["⌘["]],
+      ["other", ["⌘P"]],
+    ]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+[" }).map((c) => c.commandId)).toEqual(["audit"]);
+  });
+
   test("when limits are provided, fills results across categories (doesn't truncate to the first category)", () => {
     const commands = [
       { commandId: "catA.three", title: "Three", category: "CatA", source: { kind: "builtin" as const } },
