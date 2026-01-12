@@ -1032,7 +1032,17 @@ fn import_xls_path_with_biff_reader(
                     };
 
                     let mut rewritten = formula.clone();
-                    for (old_name, new_name) in &sheet_rename_pairs {
+                    // Apply rename pairs in reverse order so we don't cascade rewrites when a
+                    // sanitized name collides with another sheet's original name.
+                    //
+                    // Example:
+                    // - Sheet A: `Bad:Name` -> `Bad_Name`
+                    // - Sheet B: `Bad_Name` -> `Bad_Name (2)`
+                    //
+                    // A forward pass would rewrite `Bad:Name!A1` -> `Bad_Name!A1` -> `Bad_Name (2)!A1`,
+                    // incorrectly pointing at Sheet B. Reversing ensures each original name is
+                    // rewritten at most once.
+                    for (old_name, new_name) in sheet_rename_pairs.iter().rev() {
                         rewritten = formula_model::rewrite_sheet_names_in_formula(
                             &rewritten,
                             old_name,

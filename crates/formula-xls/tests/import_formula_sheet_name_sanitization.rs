@@ -25,6 +25,10 @@ fn rewrites_cross_sheet_formulas_to_sanitized_sheet_names() {
         result.workbook.sheet_by_name("Bad_Name").is_some(),
         "expected sanitized sheet to be present"
     );
+    assert!(
+        result.workbook.sheet_by_name("Bad_Name (2)").is_some(),
+        "expected colliding sheet name to be deduped"
+    );
 
     let sheet = result.workbook.sheet_by_name("Ref").expect("Ref missing");
     let formula = sheet
@@ -39,5 +43,8 @@ fn rewrites_cross_sheet_formulas_to_sanitized_sheet_names() {
         formula.contains("Bad_Name"),
         "expected formula to reference sanitized sheet name, got {formula:?}"
     );
+    assert!(
+        !formula.contains("Bad_Name (2)"),
+        "expected formula to reference the sanitized sheet, not the deduped collision, got {formula:?}"
+    );
 }
-

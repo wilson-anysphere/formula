@@ -1784,7 +1784,9 @@ fn build_hyperlink_workbook_stream(sheet_name: &str, hlink: Vec<u8>) -> Vec<u8> 
 fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     // This workbook contains:
     // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import), with a numeric A1.
-    // - Sheet 1: `Ref`, with a formula in A1 that references `Bad:Name!A1`.
+    // - Sheet 1: `Bad_Name` (already valid, but will be renamed to `Bad_Name (2)` due to a name
+    //   collision after sheet 0 sanitization).
+    // - Sheet 2: `Ref`, with a formula in A1 that references `Bad:Name!A1`.
     //
     // The important part is that the formula token stream encodes a 3D reference using an
     // EXTERNSHEET table entry, so calamine decodes it back into a sheet-qualified formula.
@@ -1804,7 +1806,7 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
 
     // BoundSheet records (workbook sheet list).
     let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
-    for name in ["Bad:Name", "Ref"] {
+    for name in ["Bad:Name", "Bad_Name", "Ref"] {
         let boundsheet_start = globals.len();
         let mut boundsheet = Vec::<u8>::new();
         boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
@@ -1817,7 +1819,7 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     // External reference tables used by 3D formula tokens.
     // - SUPBOOK: one internal workbook entry (marker name = 0x01)
     // - EXTERNSHEET: one mapping for `Bad:Name` (sheet index 0)
-    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(3));
     push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
 
     push_record(&mut globals, RECORD_EOF, &[]);
@@ -1832,6 +1834,12 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     let sheet1_offset = globals.len();
     globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 2.0));
+
+    // -- Sheet 2 ------------------------------------------------------------------
+    let sheet2_offset = globals.len();
+    globals[boundsheet_offset_positions[2]..boundsheet_offset_positions[2] + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
     globals.extend_from_slice(&build_simple_ref3d_formula_sheet_stream(xf_cell));
 
     globals
