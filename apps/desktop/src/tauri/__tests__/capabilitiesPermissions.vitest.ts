@@ -21,17 +21,36 @@ describe("Tauri capabilities", () => {
     expect(permissions).toContain("allow-invoke");
   });
 
-  it("does not grant unsupported core:allow-invoke permissions (command allowlist lives in allow-invoke.json)", () => {
+  it("does not grant unscoped core:allow-invoke (requires explicit allowlist when present)", () => {
     const permissions = readPermissions();
 
-    // `core:allow-invoke` is not present in the permission schema used by this repo's Tauri toolchain.
-    // If it is ever introduced in a future toolchain, we should only add it in a scoped/object form
-    // (explicit allowlist), and update this test accordingly.
+    // The string form would grant the default/unscoped allowlist, which is not acceptable for hardened desktop builds.
     expect(permissions).not.toContain("core:allow-invoke");
-    const coreAllowInvoke = permissions.find(
+
+    // Some toolchains model command allowlisting exclusively via `permissions/allow-invoke.json`.
+    // If `core:allow-invoke` is present, ensure it is scoped and explicit (no allow-all).
+    const allowInvoke = permissions.find(
       (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
-    );
-    expect(coreAllowInvoke).toBeFalsy();
+    ) as any;
+    if (!allowInvoke) return;
+
+    const allow = allowInvoke.allow;
+    expect(Array.isArray(allow)).toBe(true);
+    expect(allow.length).toBeGreaterThan(0);
+
+    const commands = allow
+      .map((entry: any) => entry?.command)
+      .filter((cmd: any): cmd is string => typeof cmd === "string");
+    expect(commands.length).toBe(allow.length);
+
+    // No duplicates.
+    expect(new Set(commands).size).toBe(commands.length);
+
+    for (const cmd of commands) {
+      expect(cmd.trim()).not.toBe("");
+      // Disallow wildcard/pattern scopes; keep commands explicit.
+      expect(cmd).not.toContain("*");
+    }
   });
 
   it("defines an explicit invoke command allowlist (no wildcards)", () => {
@@ -81,6 +100,26 @@ describe("Tauri capabilities", () => {
       // Keep the command allowlist explicit.
       expect(cmd).not.toContain("*");
     }
+
+    // Some toolchains also include an explicit per-command allowlist in the capability itself
+    // (`core:allow-invoke`). When present, keep it scoped and in sync with actual invoke() usage.
+    const permissions = readPermissions();
+    // The string form would grant the default/unscoped allowlist.
+    expect(permissions).not.toContain("core:allow-invoke");
+
+    const coreAllowInvoke = permissions.find(
+      (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
+    ) as any;
+    const coreAllow = coreAllowInvoke && Array.isArray(coreAllowInvoke?.allow) ? coreAllowInvoke.allow : [];
+    const coreAllowlistedList = coreAllow
+      .map((entry: any) => entry?.command)
+      .filter((cmd: any): cmd is string => typeof cmd === "string");
+    if (coreAllowInvoke) {
+      expect(coreAllowlistedList.length).toBe(coreAllow.length);
+      // No duplicates.
+      expect(new Set(coreAllowlistedList).size).toBe(coreAllowlistedList.length);
+    }
+    const coreAllowlistedCommands = coreAllowInvoke ? new Set(coreAllowlistedList) : null;
 
     const isRuntimeSource = (filePath: string): boolean => {
       const normalized = filePath.replace(/\\/g, "/");
@@ -160,6 +199,24 @@ describe("Tauri capabilities", () => {
       missingInAllowInvoke,
       `allow-invoke.json is missing commands used by the frontend: ${missingInAllowInvoke.join(", ")}`,
     ).toEqual([]);
+
+    if (coreAllowlistedCommands) {
+      const missingInCore = Array.from(invokedCommands)
+        .filter((cmd) => !coreAllowlistedCommands.has(cmd))
+        .sort();
+      expect(
+        missingInCore,
+        `capabilities/main.json core:allow-invoke is missing commands used by the frontend: ${missingInCore.join(", ")}`,
+      ).toEqual([]);
+
+      const extraInCore = Array.from(coreAllowlistedCommands)
+        .filter((cmd) => !invokedCommands.has(cmd))
+        .sort();
+      expect(
+        extraInCore,
+        `capabilities/main.json core:allow-invoke should match actual invoke() usage; remove unused commands: ${extraInCore.join(", ")}`,
+      ).toEqual([]);
+    }
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
