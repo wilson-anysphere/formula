@@ -478,6 +478,42 @@ describe("WorkbookContextBuilder", () => {
     expect(toolExecutorConstructorCalls).toBe(1);
   });
 
+  it("reads the active sheet only once on a cache miss by reusing the schema sample for the prompt sample", async () => {
+    const documentController = new DocumentController();
+    // Exceed the default maxBlockRows (20) so the schema window (maxSchemaRows) differs
+    // from the prompt window, which used to trigger a second read_range call.
+    const rows = Array.from({ length: 25 }, (_v, rIdx) =>
+      Array.from({ length: 5 }, (_v2, cIdx) => `R${rIdx + 1}C${cIdx + 1}`),
+    );
+    documentController.setRangeValues("Sheet1", "A1", rows);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const originalReadRange = spreadsheet.readRange.bind(spreadsheet);
+    let readRangeCalls = 0;
+    const spy = vi.spyOn(spreadsheet, "readRange").mockImplementation((range: any) => {
+      readRangeCalls += 1;
+      return originalReadRange(range);
+    });
+
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_single_read",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+    });
+
+    const ctx = await builder.build({ activeSheetId: "Sheet1" });
+    expect(readRangeCalls).toBe(1);
+
+    const sample = ctx.payload.blocks.find((b) => b.kind === "sheet_sample" && b.sheetId === "Sheet1");
+    expect(sample).toBeTruthy();
+    expect(sample!.range).toBe("Sheet1!A1:E20");
+
+    spy.mockRestore();
+  });
+
   it("serializes a stable payload snapshot", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [

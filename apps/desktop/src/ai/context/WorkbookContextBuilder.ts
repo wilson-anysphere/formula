@@ -782,6 +782,7 @@ export class WorkbookContextBuilder {
     stats?: WorkbookContextBuildStats | null,
   ): Promise<WorkbookContextDataBlock> {
     const sampleRange = clampRange(params.analyzedRange, { maxRows: this.options.maxBlockRows, maxCols: this.options.maxBlockCols });
+    const sampleRangeRef = this.rangeRef(params.sheetId, sampleRange);
 
     // First try to reuse the (larger) schema extraction sample block, if it's cached.
     // This avoids an extra `read_range` call for the active sheet.
@@ -796,14 +797,31 @@ export class WorkbookContextBuilder {
 
     if (cachedSchemaSample) {
       if (stats) stats.cache.block.hits += 1;
-      return sliceBlock({
+      if (cachedSchemaSample.range === sampleRangeRef) return cachedSchemaSample;
+
+      const derived = sliceBlock({
         block: cachedSchemaSample,
         kind: "sheet_sample",
         sheetId: params.sheetId,
         sourceRange: params.analyzedRange,
         targetRange: sampleRange,
-        rangeRef: this.rangeRef(params.sheetId, sampleRange),
+        rangeRef: sampleRangeRef,
       });
+
+      // Cache the derived prompt block under the smaller rangeRef key so subsequent builds can
+      // reuse it even if the larger schema sample block is evicted.
+      const { key } = this.getReadBlockCacheKey({
+        dlpCacheKey: params.dlpCacheKey,
+        kind: "sheet_sample",
+        sheetId: params.sheetId,
+        range: params.analyzedRange,
+        maxRows: this.options.maxBlockRows,
+        maxCols: this.options.maxBlockCols,
+      });
+      const contentVersion = this.getSheetContentVersion(params.sheetId);
+      this.rememberReadBlock(key, { contentVersion, block: derived });
+
+      return derived;
     }
 
     // If the schema sample isn't cached (e.g. sheet summary served from cache but block cache evicted),
