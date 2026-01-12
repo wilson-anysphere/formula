@@ -5,6 +5,16 @@ function isMod(e) {
   return e.ctrlKey || e.metaKey;
 }
 
+function showDialogWithFocus(dialog) {
+  if (!dialog.open) dialog.showModal();
+  requestAnimationFrame(() => {
+    const input = dialog.querySelector("input, textarea");
+    if (!input) return;
+    input.focus();
+    input.select?.();
+  });
+}
+
 export function registerFindReplaceShortcuts({
   controller,
   workbook,
@@ -24,13 +34,13 @@ export function registerFindReplaceShortcuts({
 
     if (e.key.toLowerCase() === "f") {
       e.preventDefault();
-      findDialog.showModal();
+      showDialogWithFocus(findDialog);
     } else if (e.key.toLowerCase() === "h") {
       e.preventDefault();
-      replaceDialog.showModal();
+      showDialogWithFocus(replaceDialog);
     } else if (e.key.toLowerCase() === "g") {
       e.preventDefault();
-      goToDialog.showModal();
+      showDialogWithFocus(goToDialog);
     }
   });
 

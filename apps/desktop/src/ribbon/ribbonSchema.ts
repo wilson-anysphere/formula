@@ -1,6 +1,24 @@
 export type RibbonButtonKind = "button" | "toggle" | "dropdown";
 export type RibbonButtonSize = "large" | "small" | "icon";
 
+export interface RibbonMenuItemDefinition {
+  /**
+   * Stable command identifier (used for wiring actions).
+   */
+  id: string;
+  label: string;
+  ariaLabel: string;
+  /**
+   * Small text glyph used as a placeholder until a real icon system exists.
+   */
+  icon?: string;
+  /**
+   * Optional E2E hook.
+   */
+  testId?: string;
+  disabled?: boolean;
+}
+
 export interface RibbonButtonDefinition {
   /**
    * Stable command identifier (used for wiring actions).
@@ -16,6 +34,11 @@ export interface RibbonButtonDefinition {
   icon?: string;
   kind?: RibbonButtonKind;
   size?: RibbonButtonSize;
+  /**
+   * Optional dropdown menu items. When provided for a `kind: "dropdown"` button,
+   * the ribbon will render a menu instead of invoking the command directly.
+   */
+  menuItems?: RibbonMenuItemDefinition[];
   /**
    * Optional E2E hook.
    */
@@ -256,7 +279,18 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "home.editing.fill", label: "Fill", ariaLabel: "Fill", icon: "↓", kind: "dropdown" },
             { id: "home.editing.clear", label: "Clear", ariaLabel: "Clear", icon: "⌫", kind: "dropdown" },
             { id: "home.editing.sortFilter", label: "Sort & Filter", ariaLabel: "Sort and Filter", icon: "⇅", kind: "dropdown" },
-            { id: "home.editing.findSelect", label: "Find & Select", ariaLabel: "Find and Select", icon: "⌕", kind: "dropdown" },
+            {
+              id: "home.editing.findSelect",
+              label: "Find & Select",
+              ariaLabel: "Find and Select",
+              icon: "⌕",
+              kind: "dropdown",
+              menuItems: [
+                { id: "home.editing.findSelect.find", label: "Find", ariaLabel: "Find", icon: "⌕", testId: "ribbon-find" },
+                { id: "home.editing.findSelect.replace", label: "Replace", ariaLabel: "Replace", icon: "⎘", testId: "ribbon-replace" },
+                { id: "home.editing.findSelect.goTo", label: "Go To", ariaLabel: "Go To", icon: "↗", testId: "ribbon-goto" },
+              ],
+            },
           ],
         },
       ],

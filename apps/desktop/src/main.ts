@@ -8,6 +8,8 @@ import "./styles/shell.css";
 
 import { ThemeController } from "./theme/themeController.js";
 
+import { mountRibbon } from "./ribbon/index.js";
+
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
@@ -156,6 +158,10 @@ if (!formulaBarRoot) {
   throw new Error("Missing #formula-bar container");
 }
 
+const ribbonRoot = document.createElement("div");
+const formulaBarContainer = document.createElement("div");
+formulaBarRoot.replaceChildren(ribbonRoot, formulaBarContainer);
+
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
@@ -182,7 +188,11 @@ if (!undoButton || !redoButton) {
 }
 
 const workbookId = "local-workbook";
-const app = new SpreadsheetApp(gridRoot, { activeCell, selectionRange, activeValue }, { formulaBar: formulaBarRoot, workbookId });
+const app = new SpreadsheetApp(
+  gridRoot,
+  { activeCell, selectionRange, activeValue },
+  { formulaBar: formulaBarContainer, workbookId },
+);
 // Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
 // their on-disk path; for unsaved sessions we generate a random session id so distinct new
 // workbooks don't collide.
@@ -2044,12 +2054,45 @@ const findReplaceController = new FindReplaceController({
   endBatch: () => app.getDocument().endBatch()
 });
 
-registerFindReplaceShortcuts({
+const { findDialog, replaceDialog, goToDialog } = registerFindReplaceShortcuts({
   controller: findReplaceController,
   workbook,
   getCurrentSheetName: () => app.getCurrentSheetId(),
   setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
   selectRange: ({ sheetName, range }) => app.selectRange({ sheetId: sheetName, range })
+});
+
+function showDialogAndFocus(dialog: HTMLDialogElement): void {
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+
+  const focusInput = () => {
+    const input = dialog.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+    if (!input) return;
+    input.focus();
+    input.select?.();
+  };
+
+  requestAnimationFrame(focusInput);
+}
+
+mountRibbon(ribbonRoot, {
+  onCommand: (commandId) => {
+    switch (commandId) {
+      case "home.editing.findSelect.find":
+        showDialogAndFocus(findDialog);
+        return;
+      case "home.editing.findSelect.replace":
+        showDialogAndFocus(replaceDialog);
+        return;
+      case "home.editing.findSelect.goTo":
+        showDialogAndFocus(goToDialog);
+        return;
+      default:
+        return;
+    }
+  },
 });
 
 installUnsavedChangesPrompt(window, app.getDocument());
