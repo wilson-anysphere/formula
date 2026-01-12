@@ -14,9 +14,10 @@ test("Desktop main.ts wires titlebar window controls to Tauri window operations"
   assert.match(source, /\bwindowControls:\s*titlebarWindowControls\b/);
 
   // Ensure the callbacks exist and invoke the expected helpers.
-  // (Keep this as simple text matching to avoid overly brittle AST parsing.)
-  assert.match(source, /\bonClose:\s*\(\)\s*=>\s*\{\s*\n?\s*void\s+hideTauriWindow\(\)/);
-  assert.match(source, /\bonMinimize:\s*\(\)\s*=>\s*\{\s*\n?\s*void\s+minimizeTauriWindow\(\)/);
-  assert.match(source, /\bonToggleMaximize:\s*\(\)\s*=>\s*\{\s*\n?\s*void\s+toggleTauriWindowMaximize\(\)/);
+  // Keep this loose enough to tolerate formatting changes (braces vs expression bodies, optional
+  // `void`, `.catch(...)`, etc) while still catching the "buttons render but do nothing" class of
+  // regressions.
+  assert.match(source, /\bonClose:\s*\(\)\s*=>[\s\S]{0,200}\bhideTauriWindow\(/);
+  assert.match(source, /\bonMinimize:\s*\(\)\s*=>[\s\S]{0,200}\bminimizeTauriWindow\(/);
+  assert.match(source, /\bonToggleMaximize:\s*\(\)\s*=>[\s\S]{0,200}\btoggleTauriWindowMaximize\(/);
 });
-
