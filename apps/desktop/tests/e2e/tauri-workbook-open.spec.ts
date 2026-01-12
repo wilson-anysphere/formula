@@ -714,9 +714,9 @@ test.describe("tauri workbook integration", () => {
 
     // Undo should restore the sheet, and main.ts should reconcile the backend by creating the sheet with the same id.
     await page.evaluate(async () => {
-      const registry = (window as any).__formulaCommandRegistry;
+      const registry = window.__formulaCommandRegistry as any;
       await registry.executeCommand("edit.undo");
-      await (window as any).__formulaApp.whenIdle();
+      await (window.__formulaApp as any).whenIdle();
     });
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveText("Budget");
