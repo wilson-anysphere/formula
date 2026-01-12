@@ -541,35 +541,35 @@ Further reading:
 </styleSheet>
 ```
 
-### In-cell images (cellimages.xml)
+### In-cell images (cellImages.xml)
 
 Some producer tooling (and possibly some Excel builds) can store “images in cell” (pictures that behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part:
 
-- Part: `xl/cellimages.xml`
-- Relationships: `xl/_rels/cellimages.xml.rels`
+- Part: `xl/cellImages.xml` (casing varies; `xl/cellimages.xml` is also seen in the wild)
+- Relationships: `xl/_rels/cellImages.xml.rels` (casing varies; `xl/_rels/cellimages.xml.rels` is also seen)
 
 However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via `xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and `xl/cellimages.xml` was not present. If we encounter `xl/cellimages.xml` in the wild, we should preserve it for round-trip safety.
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
-**Schema note:** `xl/cellimages.xml` is a Microsoft extension part; the root namespace / element vocabulary
+**Schema note:** `xl/cellImages.xml` is a Microsoft extension part; the root namespace / element vocabulary
 has been observed to vary across Excel versions (e.g. `…/2019/cellimages`, `…/2022/cellimages`). For
-round-trip, treat the **part path** (`/xl/cellimages.xml`) as authoritative, not the root namespace.
+round-trip, treat the **part path** (including its original casing) as authoritative, not the root namespace.
 
 #### How it’s usually connected
 
-1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellimages.xml`:
+1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellImages.xml` (or `cellimages.xml`):
    - The relationship **Type URI is a Microsoft extension** and has been observed to vary across Excel builds.
-   - **Detection strategy**: treat any relationship whose `Target` resolves to `/xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
-2. `xl/_rels/cellimages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
-   - The relationship `Id` values (e.g. `rId1`) are referenced from within `xl/cellimages.xml` via `r:embed`, so they must be preserved (or updated consistently if rewriting).
+   - **Detection strategy**: treat any relationship whose `Target` resolves (case-insensitively) to `xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
+2. `xl/_rels/cellImages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
+   - The relationship `Id` values (e.g. `rId1`) are referenced from within `xl/cellImages.xml` via `r:embed`, so they must be preserved (or updated consistently if rewriting).
    - Targets are typically relative paths like `media/image1.png` (resolving to `/xl/media/image1.png`), but should be preserved as-is.
 
 #### `[Content_Types].xml` requirements
 
-If `xl/cellimages.xml` is present, the package typically includes an override:
+If `xl/cellImages.xml` is present, the package typically includes an override:
 
-- `<Override PartName="/xl/cellimages.xml" ContentType="…"/>`
+- `<Override PartName="/xl/cellImages.xml" ContentType="…"/>` (or the lowercase variant)
 
 Excel uses a **Microsoft-specific** content type string for this part (the exact string may vary between versions).
 
@@ -579,14 +579,14 @@ Observed in this repo (see `crates/formula-xlsx/tests/cell_images.rs` and
 - `application/vnd.ms-excel.cellimages+xml`
 
 **Preservation/detection strategy:**
-- Treat any `[Content_Types].xml` `<Override>` with `PartName="/xl/cellimages.xml"` as authoritative.
+- Treat any `[Content_Types].xml` `<Override>` whose `PartName` case-insensitively matches `/xl/cellimages.xml` as authoritative.
 - Preserve the `ContentType` value byte-for-byte on round-trip; **do not** hardcode a single MIME string in the writer.
 
 #### Relationship type URIs
 
 - `xl/_rels/cellimages.xml.rels` → `xl/media/*`:
   - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
-- `xl/workbook.xml.rels` → `xl/cellimages.xml`:
+- `xl/workbook.xml.rels` → `xl/cellImages.xml`:
   - **Microsoft extension** (variable). Prefer detection by `Target`/part name.
 
 #### Minimal (non-normative) XML snippets
@@ -598,11 +598,11 @@ Workbook relationship entry (in `xl/_rels/workbook.xml.rels`):
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId42"
                 Type="http://schemas.microsoft.com/office/.../relationships/cellimages"
-                Target="cellimages.xml"/>
+                Target="cellImages.xml"/>
 </Relationships>
 ```
 
-Cellimages-to-media relationship entry (in `xl/_rels/cellimages.xml.rels`):
+Cellimages-to-media relationship entry (in `xl/_rels/cellImages.xml.rels`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -613,7 +613,7 @@ Cellimages-to-media relationship entry (in `xl/_rels/cellimages.xml.rels`):
 </Relationships>
 ```
 
-Cellimages part referencing an image by relationship id (in `xl/cellimages.xml`):
+Cellimages part referencing an image by relationship id (in `xl/cellImages.xml`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
