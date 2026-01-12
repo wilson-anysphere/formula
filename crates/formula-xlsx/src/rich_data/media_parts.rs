@@ -11,7 +11,6 @@ impl XlsxPackage {
     pub fn extract_rich_data_media_parts(&self) -> Result<BTreeMap<String, Vec<u8>>, XlsxError> {
         Ok(self.rich_data_media_parts())
     }
-
     /// Extract `xl/media/*` parts referenced by the workbook's RichData (`xl/richData`) graph.
     ///
     /// Excel stores "images in cell" and other RichData values using a set of parts under
