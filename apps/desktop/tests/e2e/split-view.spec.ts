@@ -1393,4 +1393,67 @@ test.describe("split view / shared grid zoom", () => {
     expect(a3).toBe("");
     expect(a4).toBe("");
   });
-});
+
+  test("secondary pane opens the custom grid context menu on right click", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1, then right-click B2 to ensure the secondary pane handles the context menu event.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await secondary.click({ button: "right", position: { x: 48 + 100 + 12, y: 24 + 24 + 12 } }); // B2
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+
+    const menuOverlay = page.getByTestId("context-menu");
+    await expect(menuOverlay).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(menuOverlay).toBeHidden();
+  });
+
+  test("Shift+F10 opens the grid context menu anchored to the active split pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Focus/select A1 in the secondary pane so the split view marks it active.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect.poll(() => page.evaluate(() => (window as any).__layoutController?.layout?.splitView?.activePane ?? null)).toBe("secondary");
+
+    await page.keyboard.press("Shift+F10");
+
+    const menuOverlay = page.getByTestId("context-menu");
+    const menu = menuOverlay.locator(".context-menu");
+    await expect(menuOverlay).toBeVisible();
+
+    const [secondaryBox, menuBox] = await Promise.all([secondary.boundingBox(), menu.boundingBox()]);
+    if (!secondaryBox) throw new Error("Missing secondary grid bounding box");
+    if (!menuBox) throw new Error("Missing context menu bounding box");
+
+    // If the context menu were incorrectly anchored to the primary grid, it would open to the left
+    // of the secondary pane in vertical split mode.
+    expect(menuBox.x).toBeGreaterThan(secondaryBox.x - 1);
+
+    await page.keyboard.press("Escape");
+    await expect(menuOverlay).toBeHidden();
+  });
+}); 

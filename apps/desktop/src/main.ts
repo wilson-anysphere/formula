@@ -4832,7 +4832,33 @@ if (
     openGridContextMenuAtPoint(anchorX, anchorY);
   });
 
+  gridSecondaryEl.addEventListener("contextmenu", (e) => {
+    // Always prevent the native context menu; we render our own.
+    e.preventDefault();
+    openGridContextMenuAtPoint(e.clientX, e.clientY);
+  });
+
   const openGridContextMenuAtActiveCell = () => {
+    // In split-view mode, anchor to the active pane so keyboard-invoked context menus
+    // (Shift+F10 / ContextMenu key) open next to the focused grid.
+    const split = layoutController.layout.splitView;
+    if (split.direction !== "none" && (split.activePane ?? "primary") === "secondary" && secondaryGridView) {
+      const active = app.getActiveCell();
+      const gridRow = active.row + SPLIT_HEADER_ROWS;
+      const gridCol = active.col + SPLIT_HEADER_COLS;
+      const rect = secondaryGridView.grid.getCellRect(gridRow, gridCol);
+      if (rect) {
+        const selectionCanvas = gridSecondaryEl.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+        const rootRect = (selectionCanvas ?? gridSecondaryEl).getBoundingClientRect();
+        openGridContextMenuAtPoint(rootRect.left + rect.x, rootRect.top + rect.y + rect.height);
+        return;
+      }
+
+      const gridRect = gridSecondaryEl.getBoundingClientRect();
+      openGridContextMenuAtPoint(gridRect.left + gridRect.width / 2, gridRect.top + gridRect.height / 2);
+      return;
+    }
+
     const rect = app.getActiveCellRect();
     if (rect) {
       openGridContextMenuAtPoint(rect.x, rect.y + rect.height);
