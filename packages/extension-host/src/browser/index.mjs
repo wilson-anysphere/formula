@@ -425,10 +425,12 @@ class LocalStorageExtensionStorage {
     const key = this._key(extensionId);
     try {
       const raw = this._storage.getItem(key);
-      if (!raw) return Object.create(null);
+      if (raw == null) return Object.create(null);
       const parsed = JSON.parse(raw);
       const { record, migrated } = normalizeExtensionStorageRecord(parsed);
-      if (migrated) {
+      // If we migrated any data, or the persisted record is empty/noisy, rewrite it. `_persist`
+      // removes the key entirely when empty.
+      if (migrated || Object.keys(record).length === 0) {
         try {
           this._persist(extensionId, record);
         } catch {

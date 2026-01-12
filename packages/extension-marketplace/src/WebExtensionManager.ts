@@ -230,9 +230,13 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
   if (!owner) return;
   try {
     const raw = storage.getItem(PERMISSIONS_STORE_KEY);
-    if (!raw) return;
+    if (raw == null) return;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      // Corrupted/invalid store: clear it so future installs start clean.
+      storage.removeItem(PERMISSIONS_STORE_KEY);
+      return;
+    }
     // If the permissions store exists but is already empty (e.g. because the host cleared the last
     // extension and persisted `{}`), remove the key entirely so uninstall leaves a clean slate.
     if (Object.keys(parsed as Record<string, unknown>).length === 0) {
@@ -247,7 +251,13 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
     }
     storage.setItem(PERMISSIONS_STORE_KEY, JSON.stringify(parsed));
   } catch {
-    // ignore
+    // If the store is corrupted (invalid JSON), clear it so uninstall does not leave behind a
+    // broken permissions store that can interfere with future installs.
+    try {
+      storage.removeItem(PERMISSIONS_STORE_KEY);
+    } catch {
+      // ignore
+    }
   }
 }
 

@@ -2045,6 +2045,34 @@ test("uninstall clears persisted permissions even when host is absent", async ()
   await manager.dispose();
 });
 
+test("uninstall removes corrupted permissions store key even when host is absent", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Simulate a corrupted permissions store value (invalid JSON).
+  globalThis.localStorage.setItem("formula.extensionHost.permissions", "{not-json");
+  expect(globalThis.localStorage.getItem("formula.extensionHost.permissions")).toBe("{not-json");
+
+  await manager.uninstall("formula.sample-hello");
+
+  // Uninstall should clear the corrupted permissions key so future installs start clean.
+  expect(globalThis.localStorage.getItem("formula.extensionHost.permissions")).toBe(null);
+
+  await manager.dispose();
+});
+
 test("uninstall removes permissions store key when the last extension is removed", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");

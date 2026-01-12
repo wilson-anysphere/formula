@@ -206,10 +206,13 @@ class PermissionManager {
 
     try {
       const raw = this._storage.getItem(this._storageKey);
-      const parsed = raw ? JSON.parse(raw) : {};
+      const hadRaw = raw != null;
+      const parsed = hadRaw ? JSON.parse(raw) : {};
       const { store, migrated } = normalizePermissionsStore(parsed);
       this._data = store;
-      this._needsSave = migrated;
+      // Treat any persisted empty/invalid store as a migration so we can rewrite storage to a clean
+      // slate (and remove the key entirely when the store is empty).
+      this._needsSave = migrated || (hadRaw && Object.keys(store).length === 0);
     } catch {
       this._data = Object.create(null);
       // If the stored value is corrupted (invalid JSON), treat it as a migration so we rewrite
