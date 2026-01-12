@@ -319,51 +319,140 @@ fn parse_note_record(
     let author_bytes = &data[8..];
     let mut author = match strings::parse_biff_short_string(author_bytes, biff, codepage) {
         Ok((s, consumed)) => {
-            // If BIFF8 short-string parsing succeeds but doesn't consume the full payload, attempt
-            // `XLUnicodeString` decoding before falling back to the short-string result.
-            if biff == BiffVersion::Biff8 && consumed != author_bytes.len() {
-                match strings::parse_biff8_unicode_string(author_bytes, codepage) {
-                    Ok((alt, alt_consumed)) if alt_consumed == author_bytes.len() => alt,
-                    _ => s,
+            // Most files match the spec-defined string encoding:
+            // - BIFF8: ShortXLUnicodeString
+            // - BIFF5: ANSI short string
+            //
+            // But files in the wild sometimes store NOTE authors using BIFF8 string encodings even
+            // in BIFF5 workbooks (e.g. a leading flags byte), or store an `XLUnicodeString`
+            // (16-bit length). If the spec-defined parser doesn't consume the full payload, try
+            // those alternatives best-effort.
+            if consumed != author_bytes.len() {
+                match biff {
+                    BiffVersion::Biff8 => match strings::parse_biff8_unicode_string(author_bytes, codepage) {
+                        Ok((alt, alt_consumed)) if alt_consumed == author_bytes.len() => alt,
+                        _ => s,
+                    },
+                    BiffVersion::Biff5 => {
+                        if let Ok((alt, alt_consumed)) =
+                            strings::parse_biff8_short_string(author_bytes, codepage)
+                        {
+                            if alt_consumed == author_bytes.len() {
+                                alt
+                            } else {
+                                s
+                            }
+                        } else if let Ok((alt, alt_consumed)) =
+                            strings::parse_biff8_unicode_string(author_bytes, codepage)
+                        {
+                            if alt_consumed == author_bytes.len() {
+                                alt
+                            } else {
+                                s
+                            }
+                        } else {
+                            s
+                        }
+                    }
                 }
             } else {
                 s
             }
         }
-        Err(err) => {
-            if biff == BiffVersion::Biff8 {
-                match strings::parse_biff8_unicode_string(author_bytes, codepage) {
-                    Ok((alt, _)) => alt,
-                    Err(unicode_err) => {
-                        if let Some(best_effort) =
-                            strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
-                        {
-                            push_warning(
-                                warnings,
-                                format!(
-                                    "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}; treating author as BIFF5 ANSI short string"
-                                ),
-                            );
-                            best_effort
-                        } else {
-                            push_warning(
-                                warnings,
-                                format!(
-                                    "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
-                                ),
-                            );
-                            String::new()
-                        }
+        Err(err) => match biff {
+            BiffVersion::Biff8 => match strings::parse_biff8_unicode_string(author_bytes, codepage) {
+                Ok((alt, _)) => alt,
+                Err(unicode_err) => {
+                    if let Some(best_effort) =
+                        strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                    {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}; treating author as BIFF5 ANSI short string"
+                            ),
+                        );
+                        best_effort
+                    } else {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
+                            ),
+                        );
+                        String::new()
                     }
                 }
-            } else {
-                push_warning(
-                    warnings,
-                    format!("failed to parse NOTE author string at offset {offset}: {err}"),
-                );
-                String::new()
+            },
+            BiffVersion::Biff5 => {
+                // Best-effort: some BIFF5 files appear to store NOTE authors using BIFF8 string
+                // encodings (leading option flags byte, 16-bit length prefix, etc).
+                if let Ok((alt, alt_consumed)) = strings::parse_biff8_short_string(author_bytes, codepage)
+                {
+                    if alt_consumed == author_bytes.len() {
+                        alt
+                    } else if let Some(best_effort) =
+                        strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                    {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to fully parse NOTE author string at offset {offset}: {err}; treating author as truncated BIFF5 ANSI short string"
+                            ),
+                        );
+                        best_effort
+                    } else {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to fully parse NOTE author string at offset {offset}: {err}"
+                            ),
+                        );
+                        String::new()
+                    }
+                } else if let Ok((alt, alt_consumed)) =
+                    strings::parse_biff8_unicode_string(author_bytes, codepage)
+                {
+                    if alt_consumed == author_bytes.len() {
+                        alt
+                    } else if let Some(best_effort) =
+                        strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                    {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to fully parse NOTE author string at offset {offset}: {err}; treating author as truncated BIFF5 ANSI short string"
+                            ),
+                        );
+                        best_effort
+                    } else {
+                        push_warning(
+                            warnings,
+                            format!(
+                                "failed to fully parse NOTE author string at offset {offset}: {err}"
+                            ),
+                        );
+                        String::new()
+                    }
+                } else if let Some(best_effort) =
+                    strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                {
+                    push_warning(
+                        warnings,
+                        format!(
+                            "failed to parse NOTE author string at offset {offset}: {err}; treating author as truncated BIFF5 ANSI short string"
+                        ),
+                    );
+                    best_effort
+                } else {
+                    push_warning(
+                        warnings,
+                        format!("failed to parse NOTE author string at offset {offset}: {err}"),
+                    );
+                    String::new()
+                }
             }
-        }
+        },
     };
     strip_embedded_nuls(&mut author);
 
@@ -1282,9 +1371,34 @@ mod tests {
             .expect("parse note");
         assert_eq!(parsed.author, author);
         assert!(
-            warnings.iter().any(|w| w.contains("treating author as BIFF5 ANSI short string")),
+            warnings
+                .iter()
+                .any(|w| w.contains("treating author as BIFF5 ANSI short string")),
             "expected BIFF5 fallback warning; warnings={warnings:?}"
         );
+    }
+
+    #[test]
+    fn note_record_biff5_parses_author_encoded_as_biff8_short_string() {
+        // Some BIFF5 producers appear to store NOTE authors using the BIFF8 ShortXLUnicodeString
+        // encoding (length + option flags byte). Ensure we can recover the full author string.
+        let author = "Alice";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // row
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col
+        payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        payload.extend_from_slice(&1u16.to_le_bytes()); // idObj
+
+        // BIFF8 ShortXLUnicodeString author (compressed) embedded in a BIFF5 NOTE record.
+        payload.push(author.len() as u8);
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(author.as_bytes());
+
+        let mut warnings = Vec::new();
+        let parsed = parse_note_record(&payload, 0, BiffVersion::Biff5, 1252, &mut warnings)
+            .expect("parse note");
+        assert_eq!(parsed.author, author);
     }
 
     #[test]
