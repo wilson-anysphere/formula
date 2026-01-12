@@ -1,5 +1,7 @@
 pub mod commands;
 mod fs_scope;
+#[cfg(feature = "desktop")]
+pub mod clipboard;
 pub mod file_io;
 #[cfg(any(feature = "desktop", test))]
 mod ipc_file_limits;
