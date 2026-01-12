@@ -156,6 +156,43 @@ def generate(
         formula="=COUPPCD(DATE(2020,3,1),DATE(2025,1,15),2,0)",
     )
 
+    # Coupon schedule edge cases around month-end dates that are not the 31st.
+    #
+    # Excel's coupon schedule rules are subtle for maturities like Apr 30 or Feb 28/29; these cases
+    # are intended to disambiguate whether Excel treats such maturities as an explicit end-of-month
+    # schedule (pinned to month end) or simply as an EDATE-style day-of-month schedule.
+    #
+    # These are especially important for basis=1 where `COUPDAYS` depends on the computed PCD/NCD
+    # dates (actual day count between coupon dates).
+    add_case(
+        cases,
+        prefix="couppcd_eom_apr30",
+        tags=["financial", "COUPPCD", "coupon_schedule", "eom_edge"],
+        formula="=COUPPCD(DATE(2020,2,15),DATE(2020,4,30),4,1)",
+        description="COUPPCD with maturity=2020-04-30 (month-end but not 31st), basis=1",
+    )
+    add_case(
+        cases,
+        prefix="coupdays_eom_apr30",
+        tags=["financial", "COUPDAYS", "coupon_schedule", "eom_edge"],
+        formula="=COUPDAYS(DATE(2020,2,15),DATE(2020,4,30),4,1)",
+        description="COUPDAYS with maturity=2020-04-30 (month-end but not 31st), basis=1",
+    )
+    add_case(
+        cases,
+        prefix="couppcd_eom_feb28",
+        tags=["financial", "COUPPCD", "coupon_schedule", "eom_edge"],
+        formula="=COUPPCD(DATE(2020,11,15),DATE(2021,2,28),2,1)",
+        description="COUPPCD with maturity=2021-02-28 (month-end), basis=1",
+    )
+    add_case(
+        cases,
+        prefix="coupdays_eom_feb28",
+        tags=["financial", "COUPDAYS", "coupon_schedule", "eom_edge"],
+        formula="=COUPDAYS(DATE(2020,11,15),DATE(2021,2,28),2,1)",
+        description="COUPDAYS with maturity=2021-02-28 (month-end), basis=1",
+    )
+
     # Discount securities / T-bills.
     add_case(
         cases,
@@ -417,6 +454,24 @@ def generate(
             ),
             description=f"ODDLYIELD basis={basis} (quarterly; fixed price)",
         )
+
+    # Month-end schedule disambiguation for ODDL*: last_interest on Apr 30 (month-end but not 31st).
+    # For basis=1, the computed regular period length `E` depends on whether the schedule pins to
+    # month-end (Jan 31 -> Apr 30) vs a day-of-month schedule (Jan 30 -> Apr 30).
+    add_case(
+        cases,
+        prefix="oddlprice_eom_apr30_basis1",
+        tags=["financial", "odd_coupon", "ODDLPRICE", "coupon_schedule", "eom_edge", "basis1"],
+        formula="=ODDLPRICE(DATE(2020,5,15),DATE(2020,7,31),DATE(2020,4,30),0.06,0.055,100,4,1)",
+        description="ODDLPRICE basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_eom_apr30_basis1",
+        tags=["financial", "odd_coupon", "ODDLYIELD", "coupon_schedule", "eom_edge", "basis1"],
+        formula="=ODDLYIELD(DATE(2020,5,15),DATE(2020,7,31),DATE(2020,4,30),0.06,98,100,4,1)",
+        description="ODDLYIELD basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
+    )
 
     add_case(
         cases,

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T12:54:18.720298707Z",
+  "generatedAt": "2026-01-12T13:01:54.435741137Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "da80dd2e407da6a47ec6ab3a3f6feaf82ce8f9688c10c1faaf8f6bf548e3bb6a",
-    "count": 1702
+    "sha256": "2729b04b2b46309f1a5a7a19cf57dd0b63273f321493fd0f66ea03965e9c2221",
+    "count": 1708
   },
   "results": [
     {
@@ -15145,6 +15145,46 @@
       "displayText": "43845"
     },
     {
+      "caseId": "couppcd_eom_apr30_22cd75e85c72",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 43861.0
+      },
+      "address": "C1",
+      "displayText": "43861"
+    },
+    {
+      "caseId": "coupdays_eom_apr30_f63ac6d593a1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 90.0
+      },
+      "address": "C1",
+      "displayText": "90"
+    },
+    {
+      "caseId": "couppcd_eom_feb28_8ebc724a184e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 44074.0
+      },
+      "address": "C1",
+      "displayText": "44074"
+    },
+    {
+      "caseId": "coupdays_eom_feb28_69d7ccd41d35",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 181.0
+      },
+      "address": "C1",
+      "displayText": "181"
+    },
+    {
       "caseId": "disc_816f7b8fb795",
       "outputCell": "C1",
       "result": {
@@ -15643,6 +15683,26 @@
       },
       "address": "C1",
       "displayText": "0.23089149550037363"
+    },
+    {
+      "caseId": "oddlprice_eom_apr30_basis1_36b354ead5f2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.10394690232079
+      },
+      "address": "C1",
+      "displayText": "100.10394690232079"
+    },
+    {
+      "caseId": "oddlyield_eom_apr30_basis1_f8402fa8a5fb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.15667744331501973
+      },
+      "address": "C1",
+      "displayText": "0.15667744331501973"
     },
     {
       "caseId": "oddfprice_neg_yld_7d02a1e3e38e",

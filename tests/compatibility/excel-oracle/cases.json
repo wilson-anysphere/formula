@@ -31513,6 +31513,58 @@
       "id": "couppcd_63f54b5a7c8c"
     },
     {
+      "formula": "=COUPPCD(DATE(2020,2,15),DATE(2020,4,30),4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "COUPPCD with maturity=2020-04-30 (month-end but not 31st), basis=1",
+      "id": "couppcd_eom_apr30_22cd75e85c72"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2020,2,15),DATE(2020,4,30),4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "COUPDAYS with maturity=2020-04-30 (month-end but not 31st), basis=1",
+      "id": "coupdays_eom_apr30_f63ac6d593a1"
+    },
+    {
+      "formula": "=COUPPCD(DATE(2020,11,15),DATE(2021,2,28),2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "COUPPCD with maturity=2021-02-28 (month-end), basis=1",
+      "id": "couppcd_eom_feb28_8ebc724a184e"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2020,11,15),DATE(2021,2,28),2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS",
+        "coupon_schedule",
+        "eom_edge"
+      ],
+      "description": "COUPDAYS with maturity=2021-02-28 (month-end), basis=1",
+      "id": "coupdays_eom_feb28_69d7ccd41d35"
+    },
+    {
       "formula": "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
       "outputCell": "C1",
       "inputs": [],
@@ -32143,6 +32195,36 @@
       ],
       "description": "ODDLYIELD basis=4 (quarterly; fixed price)",
       "id": "oddlyield_basis4_45ff4139618f"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,5,15),DATE(2020,7,31),DATE(2020,4,30),0.06,0.055,100,4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "coupon_schedule",
+        "eom_edge",
+        "basis1"
+      ],
+      "description": "ODDLPRICE basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
+      "id": "oddlprice_eom_apr30_basis1_36b354ead5f2"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,5,15),DATE(2020,7,31),DATE(2020,4,30),0.06,98,100,4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "coupon_schedule",
+        "eom_edge",
+        "basis1"
+      ],
+      "description": "ODDLYIELD basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
+      "id": "oddlyield_eom_apr30_basis1_f8402fa8a5fb"
     },
     {
       "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
