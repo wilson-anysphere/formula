@@ -7,6 +7,7 @@ import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStat
 import { loadOAuth2ProviderConfigs, saveOAuth2ProviderConfigs, type OAuth2ProviderConfig } from "../../power-query/oauthProviders.ts";
 import { deriveQueryListRows, reduceQueryRuntimeState, type QueryRuntimeState } from "../../power-query/queryRuntime.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { hyperlinkTextStyle } from "../../hyperlinks/style.js";
 import {
   DesktopPowerQueryService,
   getDesktopPowerQueryService,
@@ -120,6 +121,18 @@ function httpScopeKey(scope: any): string {
 function safeHttpScope(url: string): any | null {
   try {
     return httpScope({ url, realm: null }) as any;
+  } catch {
+    return null;
+  }
+}
+
+function safeHttpUrl(value: string): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return null;
+  try {
+    const parsed = new URL(text);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
   } catch {
     return null;
   }
@@ -920,7 +933,26 @@ export function DataQueriesPanelContainer(props: Props) {
         <div style={{ padding: 12, borderBottom: "1px solid var(--border)", background: "var(--bg-secondary)" }}>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>OAuth device code</div>
           <div style={{ fontSize: 12, opacity: 0.85 }}>
-            Code: <code>{pendingDeviceCode.code}</code> • URL: <code>{pendingDeviceCode.verificationUri}</code>
+            {(() => {
+              const href = safeHttpUrl(pendingDeviceCode.verificationUri);
+              return (
+                <>
+                  Code: <code>{pendingDeviceCode.code}</code> • URL:{" "}
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ ...hyperlinkTextStyle(), fontFamily: "monospace" }}
+                    >
+                      {pendingDeviceCode.verificationUri}
+                    </a>
+                  ) : (
+                    <code>{pendingDeviceCode.verificationUri}</code>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
