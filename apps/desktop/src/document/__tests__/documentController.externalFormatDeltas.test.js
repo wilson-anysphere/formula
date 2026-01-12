@@ -45,3 +45,18 @@ test("applyExternalFormatDeltas respects markDirty=false", () => {
   assert.deepEqual(doc.getCellFormat("Sheet1", "A1"), { font: { bold: true } });
   assert.equal(doc.isDirty, false);
 });
+
+test("applyExternalFormatDeltas bypasses canEditCell guards", () => {
+  const doc = new DocumentController({
+    canEditCell: () => {
+      throw new Error("canEditCell should not be consulted for external deltas");
+    },
+  });
+
+  const boldId = doc.styleTable.intern({ font: { bold: true } });
+  doc.applyExternalFormatDeltas([{ sheetId: "Sheet1", layer: "sheet", beforeStyleId: 0, afterStyleId: boldId }], {
+    source: "collab",
+  });
+
+  assert.deepEqual(doc.getCellFormat("Sheet1", "A1"), { font: { bold: true } });
+});
