@@ -74,6 +74,8 @@ export interface WorkbookContextBuildStats {
   model: string;
   sheetCountSummarized: number;
   blockCount: number;
+  promptContextChars: number;
+  promptContextTokens: number;
   readBlockCount: number;
   readBlockCountByKind: Record<WorkbookContextBlockKind, number>;
   cache: {
@@ -329,6 +331,8 @@ export class WorkbookContextBuilder {
           model: this.options.model,
           sheetCountSummarized: 0,
           blockCount: 0,
+          promptContextChars: 0,
+          promptContextTokens: 0,
           readBlockCount: 0,
           readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
           cache: {
@@ -536,6 +540,8 @@ export class WorkbookContextBuilder {
       stats.durationMs = nowMs() - stats.startedAtMs;
       stats.sheetCountSummarized = sheetSummaries.length;
       stats.blockCount = blocks.length;
+      stats.promptContextChars = promptContext.length;
+      stats.promptContextTokens = usedPromptContextTokens;
       stats.rag.retrievedBlockCount = blocks.filter((b) => b.kind === "retrieved").length;
       try {
         onBuildStats?.(stats);

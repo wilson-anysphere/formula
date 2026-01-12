@@ -263,7 +263,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     contextWindowTokens,
     reserveForOutputTokens,
     tokenEstimator: estimator as any,
-    onBuildStats
+    onBuildStats,
   });
 
   let disposePromise: Promise<void> | null = null;
@@ -329,18 +329,18 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
 
-      let workbookContext: any;
-      try {
-        throwIfAborted(signal);
-        workbookContext = await withAbort(
-          signal,
-          contextBuilder.build({
-            activeSheetId,
+    let workbookContext: any;
+    try {
+      throwIfAborted(signal);
+      workbookContext = await withAbort(
+        signal,
+        contextBuilder.build({
+          activeSheetId,
           dlp,
           ...(selectedRange ? { selectedRange } : {}),
           focusQuestion: text,
-          attachments
-        })
+          attachments,
+        }),
       );
     } catch (error) {
       // Hard stop: DLP says we cannot send any workbook content to a cloud model.
