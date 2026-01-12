@@ -16,16 +16,6 @@ fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
     ymd_to_serial(ExcelDate::new(year, month, day), system).expect("valid excel serial")
 }
 
-fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
-    match sheet.eval(formula) {
-        Value::Number(n) => Some(n),
-        // The odd-coupon bond functions are not yet implemented in every build of the engine.
-        // Skip these tests when the function registry doesn't recognize the name.
-        Value::Error(ErrorKind::Name) => None,
-        other => panic!("expected number, got {other:?} from {formula}"),
-    }
-}
-
 fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
     match sheet.get(addr) {
         Value::Number(n) => Some(n),
@@ -610,6 +600,73 @@ fn oddfyield_roundtrips_price_with_text_dates() {
         None => return,
     };
     assert_close(recovered_yield, 0.0625, 1e-10);
+}
+
+#[test]
+fn oddlyield_roundtrips_price_with_text_dates() {
+    let mut sheet = TestSheet::new();
+    // Ensure ODDLYIELD accepts date arguments supplied as ISO-like text, and that the
+    // ODDLPRICE/ODDLYIELD pair roundtrips the yield.
+
+    sheet.set_formula(
+        "A1",
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)",
+    );
+    sheet.recalc();
+
+    let _price = match cell_number_or_skip(&sheet, "A1") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let recovered_yield = match eval_number_or_skip(
+        &mut sheet,
+        r#"=ODDLYIELD("2020-11-11","2021-03-01","2020-10-15",0.0785,A1,100,2,0)"#,
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    assert_close(recovered_yield, 0.0625, 1e-10);
+}
+
+#[test]
+fn odd_coupon_yield_functions_floor_time_fractions_in_date_arguments() {
+    let mut sheet = TestSheet::new();
+    // Like ODDFPRICE/ODDLPRICE, Excel behaves as though the date args to ODDFYIELD/ODDLYIELD are
+    // floored to whole days.
+
+    let baseline_oddfyield =
+        "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,0)";
+    let baseline_oddfyield_value = match eval_number_or_skip(&mut sheet, baseline_oddfyield) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let fractional_oddfyield = "=ODDFYIELD(DATE(2008,11,11)+0.75,DATE(2021,3,1)+0.1,DATE(2008,10,15)+0.9,DATE(2009,3,1)+0.5,0.0785,98,100,2,0)";
+    let fractional_oddfyield_value = eval_number_or_skip(&mut sheet, fractional_oddfyield)
+        .expect("ODDFYIELD should floor fractional date serials");
+    assert_close(
+        fractional_oddfyield_value,
+        baseline_oddfyield_value,
+        1e-10,
+    );
+
+    let baseline_oddlyield =
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)";
+    let baseline_oddlyield_value = match eval_number_or_skip(&mut sheet, baseline_oddlyield) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let fractional_oddlyield =
+        "=ODDLYIELD(DATE(2020,11,11)+0.75,DATE(2021,3,1)+0.1,DATE(2020,10,15)+0.9,0.0785,98,100,2,0)";
+    let fractional_oddlyield_value = eval_number_or_skip(&mut sheet, fractional_oddlyield)
+        .expect("ODDLYIELD should floor fractional date serials");
+    assert_close(
+        fractional_oddlyield_value,
+        baseline_oddlyield_value,
+        1e-10,
+    );
 }
 
 #[test]
