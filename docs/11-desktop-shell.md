@@ -120,7 +120,8 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 Capabilities are scoped to windows by **label**. Each capability file lists which window labels it targets via
 `"windows": [...]`, and each window must explicitly opt into that capability in `tauri.conf.json` via
-`app.windows[].capabilities` (the main window label is `main`, and it opts into the `main` capability).
+`app.windows[].capabilities` (a list of capability **identifiers**; the main window label is `main`, and it opts into the
+`main` capability via `capabilities: ["main"]`).
 
 When adding new uses of privileged APIs (e.g. clipboard, dialog, updater, shell, window APIs) or adding new desktop event
 names, update the relevant allowlists in `capabilities/main.json`.
@@ -687,9 +688,9 @@ Source of truth in this repo:
 
 - `apps/desktop/src-tauri/capabilities/main.json`
 
-Capability files list which window labels they apply to via `"windows": [...]` (matching `app.windows[].label` in
-`apps/desktop/src-tauri/tauri.conf.json`). Windows must also opt into the capability via `app.windows[].capabilities`.
-The main window label is `main`.
+Capability files scope themselves to window labels via `"windows": [...]` (matching `app.windows[].label` in
+`apps/desktop/src-tauri/tauri.conf.json`). Windows must also opt into capabilities via `app.windows[].capabilities`, which
+is a list of capability **identifiers** (e.g. `capabilities: ["main"]`). The main window label is `main`.
 
 ### What `main.json` does
 
