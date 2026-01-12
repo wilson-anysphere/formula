@@ -209,10 +209,15 @@ To bind the signature to the VBA project contents, `formula-vba`:
 
 Result interpretation (current behavior):
 
-- If CMS verification fails ⇒ signature invalid.
-- If CMS verification succeeds but digest comparison fails ⇒ signature present but **not bound** to
-  the current VBA project bytes (reported as `VbaSignatureBinding::NotBound`).
-- If both succeed ⇒ signature is verified and bound (reported as `VbaSignatureBinding::Bound`).
+- If CMS verification fails ⇒ signature invalid (`VbaSignatureVerification::SignedInvalid` /
+  `SignedParseError`).
+- If CMS verification succeeds and binding matches ⇒ signature is verified and bound
+  (`VbaSignatureBinding::Bound`).
+- If CMS verification succeeds and binding mismatches ⇒ signature is present but **not bound** to the
+  current VBA project bytes (`VbaSignatureBinding::NotBound`).
+- If CMS verification succeeds but binding cannot be evaluated (missing/unparseable data, or we can't
+  distinguish mismatch vs missing forms data) ⇒ binding is conservative/unknown
+  (`VbaSignatureBinding::Unknown`).
 
 ### Implementation notes / caveats
 
