@@ -78,6 +78,12 @@ impl RichValueRels {
                     if pkg.part(&alt).is_some() {
                         return Some(alt);
                     }
+                } else if rest.starts_with("xl/") {
+                    // Another common producer mistake is emitting `Target="xl/..."` without a
+                    // leading `/`, which incorrectly resolves relative to `xl/richData/`.
+                    if pkg.part(rest).is_some() {
+                        return Some(rest.to_string());
+                    }
                 }
             }
         }
