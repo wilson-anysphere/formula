@@ -32,9 +32,9 @@ workbook.xlsx (ZIP archive)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming/casing varies)
-│   │   ├── richValue.xml                # or: rdrichvalue.xml
-│   │   ├── richValueStructure.xml       # or: rdrichvaluestructure.xml
-│   │   ├── richValueTypes.xml           # or: rdRichValueTypes.xml (casing varies)
+│   │   ├── rdrichvalue.xml              # or: richValue.xml
+│   │   ├── rdrichvaluestructure.xml     # or: richValueStructure.xml
+│   │   ├── rdRichValueTypes.xml         # or: richValueTypes.xml (casing varies)
 │   │   ├── richValueRel.xml             # Indirection to rich-value relationships (e.g. images)
 │   │   └── _rels/
 │   │       └── richValueRel.xml.rels    # richValueRel -> xl/media/* (image binaries)
