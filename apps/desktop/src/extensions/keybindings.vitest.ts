@@ -109,6 +109,12 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("{", { ctrlKey: true, shiftKey: true, code: "BracketLeft" }))).toBe(true);
   });
 
+  it("matches shifted backslash via KeyboardEvent.code fallback for IntlBackslash keyboards", () => {
+    const binding = parseKeybinding("cmd", "ctrl+shift+\\");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("|", { ctrlKey: true, shiftKey: true, code: "IntlBackslash" }))).toBe(true);
+  });
+
   it("does not fall back to KeyboardEvent.code for letters (layout-aware matching)", () => {
     const binding = parseKeybinding("cmd", "ctrl+y");
     expect(binding).not.toBeNull();

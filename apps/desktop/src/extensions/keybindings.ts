@@ -70,14 +70,15 @@ function normalizeEventKey(event: KeyboardEvent): string {
   return normalizeKeyToken(event.key);
 }
 
-const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"]> = {
+const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"] | KeyboardEvent["code"][]> = {
   ";": "Semicolon",
   "=": "Equal",
   "-": "Minus",
   "`": "Backquote",
   "[": "BracketLeft",
   "]": "BracketRight",
-  "\\": "Backslash",
+  // ISO/JIS keyboards may report alternate codes for the physical backslash key.
+  "\\": ["Backslash", "IntlBackslash", "IntlYen", "IntlRo"],
   "/": "Slash",
   ",": "Comma",
   ".": "Period",
@@ -105,10 +106,11 @@ export function matchesKeybinding(binding: ParsedKeybinding, event: KeyboardEven
 
   if (normalizeEventKey(event) === binding.key) return true;
 
-  const fallbackCode = keyTokenToCodeFallback[binding.key];
-  if (!fallbackCode) return false;
+  const fallback = keyTokenToCodeFallback[binding.key];
+  if (!fallback) return false;
 
-  return event.code === fallbackCode;
+  if (Array.isArray(fallback)) return fallback.includes(event.code);
+  return event.code === fallback;
 }
 
 export function platformKeybinding(binding: ContributedKeybinding, platform: "mac" | "other"): string {
