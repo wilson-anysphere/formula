@@ -731,7 +731,8 @@ Excel has been observed (in this repo) to use **both** encodings:
 - RichData-only (no `xl/cellImages.xml` / `xl/cellimages.xml`): `fixtures/xlsx/basic/image-in-cell.xlsx`
 - RichData **plus** `xl/cellimages.xml`: `fixtures/xlsx/rich-data/images-in-cell.xlsx`
 
-This repo also includes the **synthetic** fixture `fixtures/xlsx/basic/cellimages.xlsx`, which *does*
+This repo also includes the **synthetic** fixture `fixtures/xlsx/basic/cellimages.xlsx` (notes in
+`fixtures/xlsx/basic/cellimages.md`), which *does*
 contain a standalone `xl/cellimages.xml` part; treat it as an alternate store and preserve it when
 present.
 

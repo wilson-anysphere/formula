@@ -103,6 +103,9 @@ used by modern Excel “Place in Cell”.
 
 ### Fixture: `fixtures/xlsx/basic/cell-images.xlsx` (camel-case part name)
 
+Fixture workbook: [`fixtures/xlsx/basic/cell-images.xlsx`](../fixtures/xlsx/basic/cell-images.xlsx) (notes in
+[`fixtures/xlsx/basic/cell-images.md`](../fixtures/xlsx/basic/cell-images.md)).
+
 Note:
 
 - `fixtures/xlsx/basic/cell-images.xlsx` and `fixtures/xlsx/basic/cellimages.xlsx` are **synthetic**
@@ -124,6 +127,9 @@ Observed values:
   - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
 
 ### Fixture: `fixtures/xlsx/basic/cellimages.xlsx` (lowercase part name)
+
+Fixture workbook: [`fixtures/xlsx/basic/cellimages.xlsx`](../fixtures/xlsx/basic/cellimages.xlsx) (notes in
+[`fixtures/xlsx/basic/cellimages.md`](../fixtures/xlsx/basic/cellimages.md)).
 
 Observed values:
 
