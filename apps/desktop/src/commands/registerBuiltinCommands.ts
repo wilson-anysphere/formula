@@ -610,7 +610,7 @@ export function registerBuiltinCommands(params: {
     t("command.edit.clearContents"),
     () => app.clearContents(),
     {
-      category: t("commandCategory.editing"),
+      category: "Edit",
       icon: null,
       description: t("commandDescription.edit.clearContents"),
       keywords: ["clear", "contents", "delete"],
