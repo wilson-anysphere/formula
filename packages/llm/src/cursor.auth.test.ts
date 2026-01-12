@@ -53,7 +53,7 @@ describe("CursorLLMClient auth integration", () => {
     await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
   });
 
-  it("does not read provider API key env vars or local-model host env vars", async () => {
+  it("does not read legacy env vars for auth", async () => {
     const legacyApiKeyEnv = ["OPEN", "AI_API_KEY"].join("");
     const otherProviderApiKeyEnv = ["AN", "THROPIC_API_KEY"].join("");
     const localModelHostEnv = ["O", "LLAMA_HOST"].join("");

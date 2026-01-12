@@ -125,7 +125,7 @@ export interface RunAgentTaskParams {
    * Options for the default desktop workbook RAG service (if `ragService` is not provided).
    *
    * Note: Desktop workbook RAG uses deterministic hash embeddings by design
-   * (offline; no API keys / local model configuration).
+   * (offline; no API keys / local model setup).
    */
   ragOptions?: Omit<DesktopRagServiceOptions, "documentController" | "workbookId">;
   /**

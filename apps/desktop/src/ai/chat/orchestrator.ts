@@ -159,7 +159,7 @@ export interface AiChatOrchestratorOptions {
    *
    * If omitted, the orchestrator will create a default desktop RAG service backed
    * by a persistent sqlite vector store (stored in LocalStorage) and
-   * deterministic hash embeddings (offline; no API keys / local model configuration).
+   * deterministic hash embeddings (offline; no API keys / local model setup).
    */
   contextManager?: ContextManager;
   ragService?: DesktopRagService;
