@@ -14,6 +14,7 @@ export class DocumentController {
   readonly contentVersion: number;
 
   getSheetIds(): string[];
+  getVisibleSheetIds(): string[];
   getSheetContentVersion(sheetId: string): number;
   getSheetView(sheetId: string): {
     frozenRows: number;
