@@ -119,6 +119,7 @@ Implementation:
 
 - Encryption codec: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`, `isEncryptedCellPayload`)
 - Session + binder both treat **any** `enc` presence as “encrypted” (even if malformed) to avoid accidentally falling back to plaintext duplicates under legacy cell-key encodings.
+- Versioning diffs (`packages/versioning/src/yjs/*` + `semanticDiff`) treat `enc` as meaningful cell content for modified/moved/format-only detection without requiring decryption, and surface only minimal metadata (e.g. key id) in diff records.
 
 Usage:
 
