@@ -22,6 +22,27 @@ fn sum_propagates_errors() {
 }
 
 #[test]
+fn aggregates_reject_lambda_values_inside_arrays() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=SUM({LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=AVERAGE({1,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=MIN({1,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=MAX({LAMBDA(x,x),1})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn average_div0_when_no_numeric_values() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", Value::Text("x".to_string()));

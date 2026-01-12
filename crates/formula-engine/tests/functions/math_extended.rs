@@ -30,6 +30,15 @@ fn core_math_functions_match_excel_errors() {
 }
 
 #[test]
+fn product_rejects_lambda_values_inside_arrays() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=PRODUCT({2,LAMBDA(x,x)})"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn pi_returns_expected_constant() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=PI()"), std::f64::consts::PI);

@@ -649,13 +649,13 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match v {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Number(n) => values.push(*n),
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
                             | Value::Blank
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. } => {}
                         }
                     }
@@ -668,6 +668,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     match ctx.get_cell_value(&r.sheet_id, addr) {
                         Value::Error(e) => return Value::Error(e),
                         Value::Number(n) => values.push(n),
+                        Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Excel quirk: logicals/text in references are ignored.
                         Value::Bool(_)
                         | Value::Text(_)
@@ -675,7 +676,6 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_)
                         | Value::Array(_)
-                        | Value::Lambda(_)
                         | Value::Spill { .. } => {}
                     }
                 }
@@ -690,13 +690,13 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         match ctx.get_cell_value(&r.sheet_id, addr) {
                             Value::Error(e) => return Value::Error(e),
                             Value::Number(n) => values.push(n),
+                            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
                             | Value::Blank
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)
-                            | Value::Lambda(_)
                             | Value::Spill { .. } => {}
                         }
                     }
