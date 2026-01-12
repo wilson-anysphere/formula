@@ -9,17 +9,17 @@
  *
  * Bundlers (and TypeScript's `moduleResolution: "Bundler"`) understand this, but
  * Node's default ESM resolver does not. When we run `.test.js` files directly via
- * `node --test` (with `--experimental-strip-types`), those imports would fail with
- * `ERR_MODULE_NOT_FOUND`.
+ * `node --test` (executing TypeScript sources directly), those imports would fail
+ * with `ERR_MODULE_NOT_FOUND`.
  *
  * This loader keeps runtime semantics identical when a real `.js` file exists, but
- * falls back to the matching `.ts`/`.tsx` source when it doesn't.
+ * falls back to the matching `.ts` source when it doesn't.
  *
  * Additionally, some TS sources in this repo still use extensionless relative
  * imports (e.g. `import "./foo"`). Node ESM does not support extensionless path
- * resolution, so when the specifier is missing (and the file exists as
- * `foo.ts`/`foo.tsx`) we also provide a `.ts`/`.tsx` fallback. This includes
- * directory imports (e.g. `import "./foo"` where `foo/index.ts` exists).
+ * resolution, so when the specifier is missing (and the file exists as `foo.ts`)
+ * we also provide a `.ts` fallback. This includes directory imports (e.g.
+ * `import "./foo"` where `foo/index.ts` exists).
  *
  * Notes
  * -----

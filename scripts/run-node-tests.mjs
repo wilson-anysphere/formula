@@ -373,8 +373,8 @@ async function filterExternalDependencyTests(files, opts) {
 
   // Treat `import type ... from "..."` / `export type ... from "..."` as *type-only* when
   // deciding whether a test can run without external deps. These statements are erased by
-  // TypeScript (and Node's `--experimental-strip-types`) and do not create runtime module
-  // dependencies.
+  // TypeScript (and Node's built-in "strip types" TS execution) and do not create runtime
+  // module dependencies.
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
@@ -518,9 +518,9 @@ async function filterExternalDependencyTests(files, opts) {
         if (stats.isFile()) return base;
       } catch {
         // Bundler-style TS sources often import `./foo.js` while the file on disk is
-        // `foo.ts` / `foo.tsx`. When `--experimental-strip-types` is available (and we
-        // install the `.js` -> `.ts` loader), treat those as resolvable dependencies
-        // for dependency analysis too.
+        // `foo.ts` / `foo.tsx`. When TypeScript execution is enabled (and we install the
+        // `.js` -> `.ts` resolver loader), treat those as resolvable dependencies for
+        // dependency analysis too.
         if (opts.canStripTypes && (ext === ".js" || ext === ".jsx")) {
           const baseNoExt = base.slice(0, -ext.length);
           /** @type {string[]} */
