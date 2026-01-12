@@ -227,6 +227,7 @@ fn parse_cell_images_part(
         .filter(|n| n.is_element() && n.tag_name().name() == "cellImage")
     {
         let embed_rel_id = get_cell_image_rel_id(&cell_image).or_else(|| {
+            // Some minimal schemas store the relationship on a nested `<a:blip r:embed="...">`.
             cell_image
                 .descendants()
                 .find(|n| n.is_element() && n.tag_name().name() == "blip")
