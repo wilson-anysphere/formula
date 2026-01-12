@@ -456,16 +456,19 @@ only). When present, it must be preserved along with its `.rels` and referenced 
 The part embeds **SpreadsheetDrawing / DrawingML** `<xdr:pic>` payloads and uses
 `<a:blip r:embed="rId…">` to reference an image relationship in `xl/_rels/cellImages.xml.rels`.
 
-Observed root namespaces (from in-repo tests; Excel versions may vary):
+Observed root namespaces (from in-repo fixtures/tests; only `.../2022/cellimages` is confirmed in a real
+Excel file in this repo so far):
 
+- `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages` (real Excel + synthetic fixtures)
 - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
-- `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
+- `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
 
 Namespace prefixes vary (`cx`, `etc`, or none). Parsers should match by **local-name** (e.g.
 `cellImages`, `cellImage`, `pic`, `blip`) and by relationship-namespace attributes, not by prefix.
 
-### Confirmed fixture example (`fixtures/xlsx/basic/cellimages.xlsx`)
+### Example from synthetic fixture (`fixtures/xlsx/basic/cellimages.xlsx`)
 
 `xl/cellimages.xml`:
 
@@ -534,8 +537,10 @@ has explicit support for `r:id` on `<cellImage>` (and some variants use `r:embed
 `xl/_rels/cellImages.xml.rels` contains OPC relationships from `cellImages.xml` to the binary image parts
 under `xl/media/*`.
 
-This relationships file is standard OPC, and the **image relationship type URI is known** (and is
-confirmed in `fixtures/xlsx/basic/cellimages.xlsx`):
+This relationships file is standard OPC, and the **image relationship type URI is known** (it is the
+standard OOXML image relationship type, and is confirmed in the real Excel fixture
+`fixtures/xlsx/rich-data/images-in-cell.xlsx`; it is also used in synthetic fixtures/tests like
+`fixtures/xlsx/basic/cellimages.xlsx`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
