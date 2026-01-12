@@ -8,6 +8,7 @@ import { HashEmbedder } from "../../../../../packages/ai-rag/src/embedding/hashE
 import { InMemoryVectorStore } from "../../../../../packages/ai-rag/src/store/inMemoryVectorStore.js";
 
 import { createAiChatOrchestrator } from "./orchestrator.js";
+import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver.js";
 
 function createMockLlmClient(params: { cell: string; value: unknown }) {
   const requests: any[] = [];
@@ -115,6 +116,59 @@ describe("ai chat orchestrator (desktop integration)", () => {
     expect(entries[0]?.mode).toBe("chat");
     expect(entries[0]?.tool_calls?.[0]?.name).toBe("write_cell");
     expect(entries[0]?.tool_calls?.[0]?.approved).toBe(true);
+  });
+
+  it("resolves display sheet names in attachments and tool calls when sheetNameResolver is provided", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet2", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
+
+    const embedder = new HashEmbedder({ dimension: 128 });
+    const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+    const contextManager = new ContextManager({
+      tokenBudgetTokens: 800,
+      workbookRag: { vectorStore, embedder, topK: 3 },
+    });
+
+    const auditStore = new MemoryAIAuditStore();
+    const mock = createMockLlmClient({ cell: "Budget!C1", value: 99 });
+    const onApprovalRequired = vi.fn(async () => true);
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_test_display_names",
+      llmClient: mock.client as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet2",
+      sheetNameResolver,
+      auditStore,
+      sessionId: "session_test_display_names",
+      contextManager,
+      onApprovalRequired,
+      previewOptions: { approval_cell_threshold: 0 },
+    });
+
+    const result = await orchestrator.sendMessage({
+      text: "Set C1 to 99",
+      attachments: [{ type: "range", reference: "Budget!A1:B3" }],
+      history: [],
+    });
+
+    expect(result.finalText).toBe("ok");
+    expect(controller.getCell("Sheet2", "C1").value).toBe(99);
+    expect(controller.getSheetIds()).toContain("Sheet2");
+    expect(controller.getSheetIds()).not.toContain("Budget");
+
+    // Ensure the model saw user-facing display names.
+    const firstRequest = mock.requests[0];
+    expect(firstRequest.messages?.[0]?.role).toBe("system");
+    expect(firstRequest.messages?.[0]?.content).toContain("Budget!A1:B3");
   });
 
   it("includes the current selection in workbook context when provided (no explicit range attachment)", async () => {
