@@ -23,6 +23,10 @@ function formatKey(sheetId, layer, index) {
   return `${sheetId}:${layer}:${index == null ? "" : index}`;
 }
 
+function rangeRunKey(sheetId, col) {
+  return `${sheetId}:rangeRun:${col}`;
+}
+
 function sortKey(sheetId, row, col) {
   return `${sheetId}\u0000${row.toString().padStart(10, "0")}\u0000${col
     .toString()
@@ -100,6 +104,10 @@ function cellValueEquals(a, b) {
 function cellContentEquals(a, b) {
   return cellValueEquals(a?.value ?? null, b?.value ?? null) && (a?.formula ?? null) === (b?.formula ?? null);
 }
+
+// Above this number of cells, `setRangeFormat` will use the compressed range-run formatting
+// layer instead of enumerating every cell in the rectangle.
+const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 
 /**
  * Canonicalize formula text for storage.
@@ -271,7 +279,7 @@ function sheetViewStateEquals(a, b) {
  * Style id deltas for layered formatting.
  *
  * Layer precedence (for conflicts) is defined in `getCellFormat()`:
- * `sheet < col < row < cell`.
+ * `sheet < col < row < range-run < cell`.
  *
  * @typedef {{
  *   sheetId: string,
@@ -287,6 +295,47 @@ function sheetViewStateEquals(a, b) {
  */
 
 /**
+ * A compressed formatting segment for a column in a sheet.
+ *
+ * The segment covers the half-open row interval `[startRow, endRowExclusive)`.
+ *
+ * `styleId` references an entry in the document's `StyleTable` and represents a patch that
+ * participates in `getCellFormat()` merge semantics.
+ *
+ * Runs are:
+ * - non-overlapping
+ * - sorted by `startRow`
+ * - stored only for non-default styles (`styleId !== 0`)
+ *
+ * @typedef {{
+ *   startRow: number,
+ *   endRowExclusive: number,
+ *   styleId: number,
+ * }} FormatRun
+ */
+
+/**
+ * Deltas for edits to the range-run formatting layer.
+ *
+ * These are tracked per-column, since the underlying storage is `sheet.formatRunsByCol`.
+ *
+ * @typedef {{
+ *   sheetId: string,
+ *   col: number,
+ *   /**
+ *    * Inclusive start row of the union of all updates captured in this delta.
+ *    *\/
+ *   startRow: number,
+ *   /**
+ *    * Exclusive end row of the union of all updates captured in this delta.
+ *    *\/
+ *   endRowExclusive: number,
+ *   beforeRuns: FormatRun[],
+ *   afterRuns: FormatRun[],
+ * }} RangeRunDelta
+ */
+
+/**
  * @typedef {{
  *   label?: string,
  *   mergeKey?: string,
@@ -294,6 +343,7 @@ function sheetViewStateEquals(a, b) {
  *   deltasByCell: Map<string, CellDelta>,
  *   deltasBySheetView: Map<string, SheetViewDelta>,
  *   deltasByFormat: Map<string, FormatDelta>,
+ *   deltasByRangeRun: Map<string, RangeRunDelta>,
  * }} HistoryEntry
  */
 
@@ -335,6 +385,33 @@ function cloneFormatDelta(delta) {
 }
 
 /**
+ * @param {FormatRun} run
+ * @returns {FormatRun}
+ */
+function cloneFormatRun(run) {
+  return {
+    startRow: run.startRow,
+    endRowExclusive: run.endRowExclusive,
+    styleId: run.styleId,
+  };
+}
+
+/**
+ * @param {RangeRunDelta} delta
+ * @returns {RangeRunDelta}
+ */
+function cloneRangeRunDelta(delta) {
+  return {
+    sheetId: delta.sheetId,
+    col: delta.col,
+    startRow: delta.startRow,
+    endRowExclusive: delta.endRowExclusive,
+    beforeRuns: Array.isArray(delta.beforeRuns) ? delta.beforeRuns.map(cloneFormatRun) : [],
+    afterRuns: Array.isArray(delta.afterRuns) ? delta.afterRuns.map(cloneFormatRun) : [],
+  };
+}
+
+/**
  * @param {HistoryEntry} entry
  * @returns {CellDelta[]}
  */
@@ -371,6 +448,21 @@ function entryFormatDeltas(entry) {
     const ai = a.index ?? -1;
     const bi = b.index ?? -1;
     return ai - bi;
+  });
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {RangeRunDelta[]}
+ */
+function entryRangeRunDeltas(entry) {
+  const deltas = Array.from(entry.deltasByRangeRun.values()).map(cloneRangeRunDelta);
+  deltas.sort((a, b) => {
+    if (a.sheetId !== b.sheetId) return a.sheetId < b.sheetId ? -1 : 1;
+    if (a.col !== b.col) return a.col - b.col;
+    if (a.startRow !== b.startRow) return a.startRow - b.startRow;
+    return a.endRowExclusive - b.endRowExclusive;
   });
   return deltas;
 }
@@ -431,6 +523,193 @@ function cellDeltasAffectRecalc(deltas) {
   return false;
 }
 
+/**
+ * @param {RangeRunDelta[]} deltas
+ * @returns {RangeRunDelta[]}
+ */
+function invertRangeRunDeltas(deltas) {
+  return deltas.map((d) => ({
+    sheetId: d.sheetId,
+    col: d.col,
+    startRow: d.startRow,
+    endRowExclusive: d.endRowExclusive,
+    beforeRuns: Array.isArray(d.afterRuns) ? d.afterRuns.map(cloneFormatRun) : [],
+    afterRuns: Array.isArray(d.beforeRuns) ? d.beforeRuns.map(cloneFormatRun) : [],
+  }));
+}
+
+/**
+ * @param {FormatRun[] | undefined | null} runs
+ * @param {number} row
+ * @returns {number}
+ */
+function styleIdForRowInRuns(runs, row) {
+  if (!runs || runs.length === 0) return 0;
+  let lo = 0;
+  let hi = runs.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const run = runs[mid];
+    if (row < run.startRow) {
+      hi = mid - 1;
+    } else if (row >= run.endRowExclusive) {
+      lo = mid + 1;
+    } else {
+      return run.styleId;
+    }
+  }
+  return 0;
+}
+
+/**
+ * @param {FormatRun[] | undefined | null} a
+ * @param {FormatRun[] | undefined | null} b
+ * @returns {boolean}
+ */
+function formatRunsEqual(a, b) {
+  if (a === b) return true;
+  const al = a ? a.length : 0;
+  const bl = b ? b.length : 0;
+  if (al !== bl) return false;
+  for (let i = 0; i < al; i++) {
+    const ar = a[i];
+    const br = b[i];
+    if (!ar || !br) return false;
+    if (ar.startRow !== br.startRow) return false;
+    if (ar.endRowExclusive !== br.endRowExclusive) return false;
+    if (ar.styleId !== br.styleId) return false;
+  }
+  return true;
+}
+
+/**
+ * Normalize a run list:
+ * - drop invalid/default runs
+ * - merge adjacent runs with identical `styleId`
+ *
+ * Assumes `runs` are already sorted by `startRow`.
+ *
+ * @param {FormatRun[]} runs
+ * @returns {FormatRun[]}
+ */
+function normalizeFormatRuns(runs) {
+  /** @type {FormatRun[]} */
+  const out = [];
+  for (const run of runs) {
+    if (!run) continue;
+    const startRow = Number(run.startRow);
+    const endRowExclusive = Number(run.endRowExclusive);
+    const styleId = Number(run.styleId);
+    if (!Number.isInteger(startRow) || startRow < 0) continue;
+    if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+    if (!Number.isInteger(styleId) || styleId <= 0) continue;
+    const last = out[out.length - 1];
+    if (last && last.styleId === styleId && last.endRowExclusive === startRow) {
+      last.endRowExclusive = endRowExclusive;
+      continue;
+    }
+    out.push({ startRow, endRowExclusive, styleId });
+  }
+  return out;
+}
+
+/**
+ * Apply a style patch to a column's run list over a row interval.
+ *
+ * This is the core of the "compressed range formatting" layer used by `setRangeFormat`
+ * for large rectangles.
+ *
+ * @param {FormatRun[]} runs
+ * @param {number} startRow
+ * @param {number} endRowExclusive
+ * @param {Record<string, any> | null} stylePatch
+ * @param {StyleTable} styleTable
+ * @returns {FormatRun[]}
+ */
+function patchFormatRuns(runs, startRow, endRowExclusive, stylePatch, styleTable) {
+  const clampedStart = Math.max(0, Math.trunc(startRow));
+  const clampedEnd = Math.max(clampedStart, Math.trunc(endRowExclusive));
+  if (clampedEnd <= clampedStart) return runs ? runs.slice() : [];
+
+  const input = Array.isArray(runs) ? runs : [];
+  /** @type {FormatRun[]} */
+  const out = [];
+
+  let i = 0;
+  // Copy runs strictly before the target interval.
+  while (i < input.length && input[i].endRowExclusive <= clampedStart) {
+    out.push(cloneFormatRun(input[i]));
+    i += 1;
+  }
+
+  // If we start inside an existing run, preserve the prefix.
+  if (i < input.length) {
+    const run = input[i];
+    if (run.startRow < clampedStart && run.endRowExclusive > clampedStart) {
+      out.push({ startRow: run.startRow, endRowExclusive: clampedStart, styleId: run.styleId });
+    }
+  }
+
+  let cursor = clampedStart;
+  while (cursor < clampedEnd) {
+    const run = i < input.length ? input[i] : null;
+
+    // No more runs overlap: fill the rest of the interval as a gap.
+    if (!run || run.startRow >= clampedEnd) {
+      const baseStyle = styleTable.get(0);
+      const merged = applyStylePatch(baseStyle, stylePatch);
+      const styleId = styleTable.intern(merged);
+      if (styleId !== 0) out.push({ startRow: cursor, endRowExclusive: clampedEnd, styleId });
+      cursor = clampedEnd;
+      break;
+    }
+
+    // Gap before the next run.
+    if (run.startRow > cursor) {
+      const gapEnd = Math.min(run.startRow, clampedEnd);
+      const baseStyle = styleTable.get(0);
+      const merged = applyStylePatch(baseStyle, stylePatch);
+      const styleId = styleTable.intern(merged);
+      if (styleId !== 0) out.push({ startRow: cursor, endRowExclusive: gapEnd, styleId });
+      cursor = gapEnd;
+      continue;
+    }
+
+    // Overlap with current run.
+    const overlapEnd = Math.min(run.endRowExclusive, clampedEnd);
+    const baseStyle = styleTable.get(run.styleId);
+    const merged = applyStylePatch(baseStyle, stylePatch);
+    const styleId = styleTable.intern(merged);
+    if (styleId !== 0) out.push({ startRow: cursor, endRowExclusive: overlapEnd, styleId });
+    cursor = overlapEnd;
+
+    // Advance past fully-consumed runs. If the run extends beyond the interval,
+    // we'll preserve its suffix after the loop.
+    if (run.endRowExclusive <= clampedEnd) {
+      i += 1;
+    } else {
+      break;
+    }
+  }
+
+  // Preserve the suffix of the current overlapping run (if any) and all remaining runs.
+  if (i < input.length) {
+    const run = input[i];
+    if (run.startRow < clampedEnd && run.endRowExclusive > clampedEnd) {
+      out.push({ startRow: clampedEnd, endRowExclusive: run.endRowExclusive, styleId: run.styleId });
+      i += 1;
+    }
+    for (; i < input.length; i++) {
+      out.push(cloneFormatRun(input[i]));
+    }
+  }
+
+  // Runs may now contain adjacent segments with identical style ids (e.g. patch is a no-op or
+  // patching a gap created the same style as a neighbor). Merge + drop defaults.
+  out.sort((a, b) => a.startRow - b.startRow);
+  return normalizeFormatRuns(out);
+}
+
 class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
@@ -441,8 +720,8 @@ class SheetModel {
     /**
      * Layered formatting.
      *
-     * We store formatting at multiple granularities (sheet/col/row/cell) so the UI can apply
-     * formatting to whole rows/columns without eagerly materializing every cell.
+     * We store formatting at multiple granularities (sheet/col/row/range-run/cell) so the UI can apply
+     * formatting to whole rows/columns and large rectangles without eagerly materializing every cell.
      *
      * The per-cell layer continues to live on `CellState.styleId`. The remaining layers live here.
      */
@@ -451,6 +730,15 @@ class SheetModel {
     this.rowStyleIds = new Map();
     /** @type {Map<number, number>} */
     this.colStyleIds = new Map();
+
+    /**
+     * Range-based formatting layer for large rectangles (sparse, compressed).
+     *
+     * Stored as per-column sorted, non-overlapping row interval runs.
+     *
+     * @type {Map<number, FormatRun[]>}
+     */
+    this.formatRunsByCol = new Map();
 
     /**
      * Bounding box of row-level formatting overrides (rowStyleIds).
@@ -469,6 +757,16 @@ class SheetModel {
      * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
      */
     this.colStyleBounds = null;
+
+    /**
+     * Bounding box of range-run formatting overrides (formatRunsByCol).
+     *
+     * This represents the used-range impact of rectangular range formatting that may not span
+     * full rows/cols.
+     *
+     * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+     */
+    this.rangeRunBounds = null;
 
     /**
      * Bounding box of cells with user-visible contents (value/formula).
@@ -496,6 +794,7 @@ class SheetModel {
     this.formatBoundsDirty = false;
     this.rowStyleBoundsDirty = false;
     this.colStyleBoundsDirty = false;
+    this.rangeRunBoundsDirty = false;
 
     // Track the number of cells that contribute to `contentBounds` so we can fast-path the
     // empty case (common when clearing contents but preserving styles).
@@ -506,6 +805,7 @@ class SheetModel {
     this.__formatBoundsRecomputeCount = 0;
     this.__rowStyleBoundsRecomputeCount = 0;
     this.__colStyleBoundsRecomputeCount = 0;
+    this.__rangeRunBoundsRecomputeCount = 0;
   }
 
   /**
@@ -688,6 +988,79 @@ class SheetModel {
   }
 
   /**
+   * Set the compressed range-run formatting list for a single column.
+   *
+   * @param {number} col
+   * @param {FormatRun[] | null | undefined} runs
+   */
+  setFormatRunsForCol(col, runs) {
+    const colIdx = Number(col);
+    if (!Number.isInteger(colIdx) || colIdx < 0) return;
+
+    const beforeRuns = this.formatRunsByCol.get(colIdx) ?? [];
+    const beforeHad = beforeRuns.length > 0;
+
+    /** @type {FormatRun[]} */
+    const normalized = Array.isArray(runs) ? runs.map(cloneFormatRun) : [];
+    normalized.sort((a, b) => a.startRow - b.startRow);
+    const afterRuns = normalizeFormatRuns(normalized);
+    const afterHas = afterRuns.length > 0;
+
+    if (formatRunsEqual(beforeRuns, afterRuns)) return;
+
+    if (afterHas) {
+      this.formatRunsByCol.set(colIdx, afterRuns);
+    } else {
+      this.formatRunsByCol.delete(colIdx);
+    }
+
+    const bounds = this.rangeRunBounds;
+    if (!bounds || this.rangeRunBoundsDirty) {
+      // If bounds are missing/dirty, we'll recompute lazily when requested.
+      if (this.formatRunsByCol.size === 0) {
+        this.rangeRunBounds = null;
+        this.rangeRunBoundsDirty = false;
+      } else {
+        this.rangeRunBoundsDirty = true;
+      }
+      return;
+    }
+
+    const beforeTouched =
+      beforeHad &&
+      (colIdx === bounds.startCol ||
+        colIdx === bounds.endCol ||
+        beforeRuns[0]?.startRow === bounds.startRow ||
+        beforeRuns[beforeRuns.length - 1]?.endRowExclusive - 1 === bounds.endRow);
+
+    if (!afterHas) {
+      if (this.formatRunsByCol.size === 0) {
+        this.rangeRunBounds = null;
+        this.rangeRunBoundsDirty = false;
+      } else if (beforeTouched) {
+        this.rangeRunBoundsDirty = true;
+      }
+      return;
+    }
+
+    // afterHas: update bounds for expansion, but mark dirty for potential shrink.
+    const afterMinRow = afterRuns[0].startRow;
+    const afterMaxRow = afterRuns[afterRuns.length - 1].endRowExclusive - 1;
+    bounds.startCol = Math.min(bounds.startCol, colIdx);
+    bounds.endCol = Math.max(bounds.endCol, colIdx);
+    bounds.startRow = Math.min(bounds.startRow, afterMinRow);
+    bounds.endRow = Math.max(bounds.endRow, afterMaxRow);
+
+    if (beforeTouched) {
+      const beforeMinRow = beforeRuns[0].startRow;
+      const beforeMaxRow = beforeRuns[beforeRuns.length - 1].endRowExclusive - 1;
+      if (afterMinRow > beforeMinRow || afterMaxRow < beforeMaxRow) {
+        this.rangeRunBoundsDirty = true;
+      }
+    }
+  }
+
+  /**
    * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
    */
   getRowStyleBounds() {
@@ -719,6 +1092,23 @@ class SheetModel {
       this.colStyleBoundsDirty = false;
     }
     return this.colStyleBounds ? { ...this.colStyleBounds } : null;
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getRangeRunBounds() {
+    if (this.formatRunsByCol.size === 0) {
+      this.rangeRunBounds = null;
+      this.rangeRunBoundsDirty = false;
+      return null;
+    }
+    if (this.rangeRunBoundsDirty || !this.rangeRunBounds) {
+      this.__rangeRunBoundsRecomputeCount += 1;
+      this.rangeRunBounds = this.#recomputeRangeRunBounds();
+      this.rangeRunBoundsDirty = false;
+    }
+    return this.rangeRunBounds ? { ...this.rangeRunBounds } : null;
   }
 
   /**
@@ -820,6 +1210,29 @@ class SheetModel {
     }
     if (minCol === Infinity) return null;
     return { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: minCol, endCol: maxCol };
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  #recomputeRangeRunBounds() {
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+
+    for (const [col, runs] of this.formatRunsByCol.entries()) {
+      if (!runs || runs.length === 0) continue;
+      minCol = Math.min(minCol, col);
+      maxCol = Math.max(maxCol, col);
+      const first = runs[0];
+      const last = runs[runs.length - 1];
+      if (first) minRow = Math.min(minRow, first.startRow);
+      if (last) maxRow = Math.max(maxRow, last.endRowExclusive - 1);
+    }
+
+    if (minRow === Infinity || minCol === Infinity) return null;
+    return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
   }
 
   /**
@@ -977,6 +1390,7 @@ export class DocumentController {
    *     rowStyleDeltas: Array<{ sheetId: string, row: number, beforeStyleId: number, afterStyleId: number }>,
    *     colStyleDeltas: Array<{ sheetId: string, col: number, beforeStyleId: number, afterStyleId: number }>,
    *     sheetStyleDeltas: Array<{ sheetId: string, beforeStyleId: number, afterStyleId: number }>,
+   *     rangeRunDeltas: RangeRunDelta[],
    *     source?: string,
    *     recalc?: boolean,
    *   }
@@ -1044,7 +1458,8 @@ export class DocumentController {
       this.activeBatch &&
       (this.activeBatch.deltasByCell.size > 0 ||
         this.activeBatch.deltasBySheetView.size > 0 ||
-        this.activeBatch.deltasByFormat.size > 0)
+        this.activeBatch.deltasByFormat.size > 0 ||
+        this.activeBatch.deltasByRangeRun.size > 0)
     ) {
       return true;
     }
@@ -1185,10 +1600,10 @@ export class DocumentController {
   /**
    * Return the effective formatting for a cell, taking layered styles into account.
    *
-   * Merge semantics:
-   * - Non-conflicting keys compose via deep merge (e.g. `{ font: { bold:true } }` + `{ font: { italic:true } }`).
-   * - Conflicts resolve deterministically by layer precedence:
-   *   `sheet < col < row < cell` (later layers override earlier layers for the same property).
+    * Merge semantics:
+    * - Non-conflicting keys compose via deep merge (e.g. `{ font: { bold:true } }` + `{ font: { italic:true } }`).
+    * - Conflicts resolve deterministically by layer precedence:
+    *   `sheet < col < row < range-run < cell` (later layers override earlier layers for the same property).
    *
    * This mirrors the common spreadsheet model where cell-level formatting always wins, and
    * row formatting overrides column formatting when both specify the same property.
@@ -1206,12 +1621,16 @@ export class DocumentController {
     const sheetStyle = this.styleTable.get(sheet?.defaultStyleId ?? 0);
     const colStyle = this.styleTable.get(sheet?.colStyleIds.get(c.col) ?? 0);
     const rowStyle = this.styleTable.get(sheet?.rowStyleIds.get(c.row) ?? 0);
+    const runStyleId =
+      sheet && sheet.formatRunsByCol ? styleIdForRowInRuns(sheet.formatRunsByCol.get(c.col), c.row) : 0;
+    const runStyle = this.styleTable.get(runStyleId);
     const cellStyle = this.styleTable.get(cell.styleId ?? 0);
 
-    // Precedence: sheet < col < row < cell.
+    // Precedence: sheet < col < row < range-run < cell.
     const sheetCol = applyStylePatch(sheetStyle, colStyle);
     const sheetColRow = applyStylePatch(sheetCol, rowStyle);
-    return applyStylePatch(sheetColRow, cellStyle);
+    const sheetColRowRun = applyStylePatch(sheetColRow, runStyle);
+    return applyStylePatch(sheetColRowRun, cellStyle);
   }
 
   /**
@@ -1319,6 +1738,7 @@ export class DocumentController {
 
     mergeBounds(sheet.getColStyleBounds());
     mergeBounds(sheet.getRowStyleBounds());
+    mergeBounds(sheet.getRangeRunBounds());
 
     // Merge in bounds from stored cell states (values/formulas/cell-level format-only entries).
     mergeBounds(sheet.getFormatBounds());
@@ -1674,6 +2094,53 @@ export class DocumentController {
       return;
     }
 
+    const rowCount = r.end.row - r.start.row + 1;
+    const colCount = r.end.col - r.start.col + 1;
+    const area = rowCount * colCount;
+
+    // Large rectangular ranges should not enumerate every cell. Instead, store the
+    // patch as compressed per-column row interval runs (`sheet.formatRunsByCol`).
+    if (area > RANGE_RUN_FORMAT_THRESHOLD) {
+      const startRow = r.start.row;
+      const endRowExclusive = r.end.row + 1;
+
+      /** @type {RangeRunDelta[]} */
+      const rangeRunDeltas = [];
+
+      for (let col = r.start.col; col <= r.end.col; col++) {
+        const beforeRuns = sheet.formatRunsByCol.get(col) ?? [];
+        const afterRuns = patchFormatRuns(beforeRuns, startRow, endRowExclusive, stylePatch, this.styleTable);
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow,
+          endRowExclusive,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+
+      // Ensure patches apply to cells that already have explicit per-cell styles inside the
+      // rectangle (cell formatting is higher precedence than range runs).
+      for (const [key, cell] of sheet.cells.entries()) {
+        if (!cell) continue;
+        if (!cell.styleId || cell.styleId === 0) continue;
+        const { row, col } = parseRowColKey(key);
+        if (row < r.start.row || row > r.end.row) continue;
+        if (col < r.start.col || col > r.end.col) continue;
+        const before = this.model.getCell(sheetId, row, col);
+        const cellAfterStyleId = patchStyleId(before.styleId);
+        const after = { value: before.value, formula: before.formula, styleId: cellAfterStyleId };
+        if (cellStateEquals(before, after)) continue;
+        cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
+      }
+
+      if (rangeRunDeltas.length === 0 && cellDeltas.length === 0) return;
+      this.#applyUserRangeRunDeltas(cellDeltas, rangeRunDeltas, { label: options.label });
+      return;
+    }
+
     // Fallback: sparse per-cell overrides.
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
@@ -1959,6 +2426,22 @@ export class DocumentController {
       }));
       colFormats.sort((a, b) => a.col - b.col);
       out.colFormats = colFormats;
+
+      // Range-run formatting (compressed rectangular formatting).
+      const formatRunsByCol = Array.from(sheet?.formatRunsByCol?.entries?.() ?? [])
+        .map(([col, runs]) => ({
+          col,
+          runs: Array.isArray(runs)
+            ? runs.map((run) => ({
+                startRow: run.startRow,
+                endRowExclusive: run.endRowExclusive,
+                format: this.styleTable.get(run.styleId),
+              }))
+            : [],
+        }))
+        .filter((entry) => entry.runs.length > 0);
+      formatRunsByCol.sort((a, b) => a.col - b.col);
+      if (formatRunsByCol.length > 0) out.formatRunsByCol = formatRunsByCol;
       return out;
     });
 
@@ -1983,6 +2466,8 @@ export class DocumentController {
     const nextViews = new Map();
     /** @type {Map<string, { defaultStyleId: number, rowStyleIds: Map<number, number>, colStyleIds: Map<number, number> }>} */
     const nextFormats = new Map();
+    /** @type {Map<string, Map<number, FormatRun[]>>} */
+    const nextRangeRuns = new Map();
 
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
@@ -2007,6 +2492,56 @@ export class DocumentController {
           if (!Number.isInteger(idx) || idx < 0) continue;
           const styleId = value == null ? 0 : this.styleTable.intern(value);
           if (styleId !== 0) out.set(idx, styleId);
+        }
+      }
+
+      return out;
+    };
+
+    const normalizeFormatRunsByCol = (raw) => {
+      /** @type {Map<number, FormatRun[]>} */
+      const out = new Map();
+      if (!raw) return out;
+
+      const addColRuns = (colKey, rawRuns) => {
+        const col = Number(colKey);
+        if (!Number.isInteger(col) || col < 0) return;
+        if (!Array.isArray(rawRuns) || rawRuns.length === 0) return;
+        /** @type {FormatRun[]} */
+        const runs = [];
+        for (const entry of rawRuns) {
+          const startRow = Number(entry?.startRow);
+          const endRowExclusiveNum = Number(entry?.endRowExclusive);
+          const endRowNum = Number(entry?.endRow);
+          const endRowExclusive = Number.isInteger(endRowExclusiveNum)
+            ? endRowExclusiveNum
+            : Number.isInteger(endRowNum)
+              ? endRowNum + 1
+              : NaN;
+          if (!Number.isInteger(startRow) || startRow < 0) continue;
+          if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+          const format = entry?.format ?? null;
+          const styleId = format == null ? 0 : this.styleTable.intern(format);
+          if (styleId === 0) continue;
+          runs.push({ startRow, endRowExclusive, styleId });
+        }
+        runs.sort((a, b) => a.startRow - b.startRow);
+        const normalized = normalizeFormatRuns(runs);
+        if (normalized.length > 0) out.set(col, normalized);
+      };
+
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          const col = entry?.col ?? entry?.index;
+          const runs = entry?.runs ?? entry?.formatRuns ?? entry?.segments;
+          addColRuns(col, runs);
+        }
+        return out;
+      }
+
+      if (typeof raw === "object") {
+        for (const [key, value] of Object.entries(raw)) {
+          addColRuns(key, value);
         }
       }
 
@@ -2043,6 +2578,7 @@ export class DocumentController {
         rowStyleIds: normalizeFormatOverrides(sheet?.rowFormats, "row"),
         colStyleIds: normalizeFormatOverrides(sheet?.colFormats, "col"),
       });
+      nextRangeRuns.set(sheet.id, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
     }
 
     const existingSheetIds = new Set(this.model.sheets.keys());
@@ -2120,6 +2656,28 @@ export class DocumentController {
       }
     }
 
+    /** @type {RangeRunDelta[]} */
+    const rangeRunDeltas = [];
+    for (const sheetId of allSheetIds) {
+      const existingSheet = this.model.sheets.get(sheetId);
+      const beforeRunsByCol = existingSheet?.formatRunsByCol ?? new Map();
+      const afterRunsByCol = nextRangeRuns.get(sheetId) ?? new Map();
+      const colKeys = new Set([...beforeRunsByCol.keys(), ...afterRunsByCol.keys()]);
+      for (const col of colKeys) {
+        const beforeRuns = beforeRunsByCol.get(col) ?? [];
+        const afterRuns = afterRunsByCol.get(col) ?? [];
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow: 0,
+          endRowExclusive: EXCEL_MAX_ROWS,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+    }
+
     // Ensure all snapshot sheet ids exist even when they contain no cells (the model is otherwise
     // lazily materialized via reads/writes).
     for (const sheetId of nextSheetIds) {
@@ -2137,7 +2695,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, {
+    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, {
       recalc: false,
       emitChange: true,
       source: "applyState",
@@ -2203,7 +2761,7 @@ export class DocumentController {
 
     const recalc = options.recalc ?? true;
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], [], { recalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     //
@@ -2235,7 +2793,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -2361,6 +2919,7 @@ export class DocumentController {
         deltasByCell: new Map(),
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
       };
       this.engine?.beginBatch?.();
       this.#emitHistory();
@@ -2381,7 +2940,10 @@ export class DocumentController {
 
     if (
       !batch ||
-      (batch.deltasByCell.size === 0 && batch.deltasBySheetView.size === 0 && batch.deltasByFormat.size === 0)
+      (batch.deltasByCell.size === 0 &&
+        batch.deltasBySheetView.size === 0 &&
+        batch.deltasByFormat.size === 0 &&
+        batch.deltasByRangeRun.size === 0)
     ) {
       this.#emitHistory();
       this.#emitDirty();
@@ -2403,6 +2965,7 @@ export class DocumentController {
         rowStyleDeltas: [],
         colStyleDeltas: [],
         sheetStyleDeltas: [],
+        rangeRunDeltas: [],
         source: "endBatch",
         recalc: true,
       });
@@ -2422,7 +2985,11 @@ export class DocumentController {
 
     const batch = this.activeBatch;
     const hadDeltas = Boolean(
-      batch && (batch.deltasByCell.size > 0 || batch.deltasBySheetView.size > 0 || batch.deltasByFormat.size > 0),
+      batch &&
+        (batch.deltasByCell.size > 0 ||
+          batch.deltasBySheetView.size > 0 ||
+          batch.deltasByFormat.size > 0 ||
+          batch.deltasByRangeRun.size > 0),
     );
 
     // Reset batching state first so observers see consistent canUndo/canRedo.
@@ -2435,7 +3002,8 @@ export class DocumentController {
       const inverseCells = invertDeltas(entryCellDeltas(batch));
       const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
       const inverseFormats = invertFormatDeltas(entryFormatDeltas(batch));
-      this.#applyEdits(inverseCells, inverseViews, inverseFormats, {
+      const inverseRangeRuns = invertRangeRunDeltas(entryRangeRunDeltas(batch));
+      this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, {
         recalc: false,
         emitChange: true,
         source: "cancelBatch",
@@ -2455,6 +3023,7 @@ export class DocumentController {
         rowStyleDeltas: [],
         colStyleDeltas: [],
         sheetStyleDeltas: [],
+        rangeRunDeltas: [],
         source: "cancelBatch",
         recalc: true,
       });
@@ -2475,16 +3044,18 @@ export class DocumentController {
     const cellDeltas = entryCellDeltas(entry);
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
+    const rangeRunDeltas = entryRangeRunDeltas(entry);
     const inverseCells = invertDeltas(cellDeltas);
     const inverseViews = invertSheetViewDeltas(viewDeltas);
     const inverseFormats = invertFormatDeltas(formatDeltas);
+    const inverseRangeRuns = invertRangeRunDeltas(rangeRunDeltas);
     this.cursor -= 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(inverseCells, inverseViews, inverseFormats, {
+    this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, {
       recalc: shouldRecalc,
       emitChange: true,
       source: "undo",
@@ -2504,13 +3075,14 @@ export class DocumentController {
     const cellDeltas = entryCellDeltas(entry);
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
+    const rangeRunDeltas = entryRangeRunDeltas(entry);
     this.cursor += 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const shouldRecalc = cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, {
+    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, rangeRunDeltas, {
       recalc: shouldRecalc,
       emitChange: true,
       source: "redo",
@@ -2536,7 +3108,7 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(deltas);
-    this.#applyEdits(deltas, [], [], { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -2544,7 +3116,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(deltas, [], [], options);
+    this.#commitOrMergeHistoryEntry(deltas, [], [], [], options);
   }
 
   /**
@@ -2558,6 +3130,7 @@ export class DocumentController {
         deltasByCell: new Map(),
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
       };
     }
     for (const delta of deltas) {
@@ -2581,6 +3154,7 @@ export class DocumentController {
         deltasByCell: new Map(),
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
       };
     }
     for (const delta of deltas) {
@@ -2603,6 +3177,7 @@ export class DocumentController {
         deltasByCell: new Map(),
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
       };
     }
     for (const delta of deltas) {
@@ -2617,6 +3192,32 @@ export class DocumentController {
   }
 
   /**
+   * @param {RangeRunDelta[]} deltas
+   */
+  #mergeRangeRunIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
+      };
+    }
+    for (const delta of deltas) {
+      const key = rangeRunKey(delta.sheetId, delta.col);
+      const existing = this.activeBatch.deltasByRangeRun.get(key);
+      if (!existing) {
+        this.activeBatch.deltasByRangeRun.set(key, cloneRangeRunDelta(delta));
+      } else {
+        existing.afterRuns = Array.isArray(delta.afterRuns) ? delta.afterRuns.map(cloneFormatRun) : [];
+        existing.startRow = Math.min(existing.startRow, delta.startRow);
+        existing.endRowExclusive = Math.max(existing.endRowExclusive, delta.endRowExclusive);
+      }
+    }
+  }
+
+  /**
    * @param {SheetViewDelta[]} deltas
    * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
@@ -2624,7 +3225,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeSheetViewIntoBatch(deltas);
@@ -2632,7 +3233,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], deltas, [], options);
+    this.#commitOrMergeHistoryEntry([], deltas, [], [], options);
   }
 
   /**
@@ -2643,7 +3244,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], deltas, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], deltas, [], { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeFormatIntoBatch(deltas);
@@ -2651,7 +3252,46 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], [], deltas, options);
+    this.#commitOrMergeHistoryEntry([], [], deltas, [], options);
+  }
+
+  /**
+   * Apply combined per-cell style deltas and range-run formatting deltas.
+   *
+   * This is used by `setRangeFormat()` for large non-full-row/col rectangles to avoid O(area)
+   * cell materialization.
+   *
+   * @param {CellDelta[]} cellDeltas
+   * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
+   */
+  #applyUserRangeRunDeltas(cellDeltas, rangeRunDeltas, options) {
+    const hasCells = Array.isArray(cellDeltas) && cellDeltas.length > 0;
+    const hasRuns = Array.isArray(rangeRunDeltas) && rangeRunDeltas.length > 0;
+    if (!hasCells && !hasRuns) return;
+
+    if (hasCells && this.canEditCell) {
+      cellDeltas = cellDeltas.filter((delta) =>
+        this.canEditCell({ sheetId: delta.sheetId, row: delta.row, col: delta.col })
+      );
+    }
+
+    const filteredHasCells = Array.isArray(cellDeltas) && cellDeltas.length > 0;
+    if (!filteredHasCells && !hasRuns) return;
+
+    const source = typeof options?.source === "string" ? options.source : undefined;
+
+    // Formatting changes should never trigger formula recalc.
+    this.#applyEdits(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], { recalc: false, emitChange: true, source });
+
+    if (this.batchDepth > 0) {
+      if (filteredHasCells) this.#mergeIntoBatch(cellDeltas);
+      if (hasRuns) this.#mergeRangeRunIntoBatch(rangeRunDeltas);
+      this.#emitDirty();
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], options);
   }
 
   /**
@@ -2679,7 +3319,7 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, [], formatDeltas, { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(cellDeltas, [], formatDeltas, [], { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       if (cellDeltas.length > 0) this.#mergeIntoBatch(cellDeltas);
@@ -2688,16 +3328,17 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, options);
+    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, [], options);
   }
 
   /**
    * @param {CellDelta[]} cellDeltas
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
+   * @param {RangeRunDelta[]} rangeRunDeltas
    * @param {{ label?: string, mergeKey?: string }} options
    */
-  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, options) {
+  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, options) {
     // If we have redo history, truncate it before pushing a new edit.
     if (this.cursor < this.history.length) {
       if (this.savedCursor != null && this.savedCursor > this.cursor) {
@@ -2750,6 +3391,18 @@ export class DocumentController {
           existing.afterStyleId = delta.afterStyleId;
         }
       }
+
+      for (const delta of rangeRunDeltas) {
+        const key = rangeRunKey(delta.sheetId, delta.col);
+        const existing = entry.deltasByRangeRun.get(key);
+        if (!existing) {
+          entry.deltasByRangeRun.set(key, cloneRangeRunDelta(delta));
+        } else {
+          existing.afterRuns = Array.isArray(delta.afterRuns) ? delta.afterRuns.map(cloneFormatRun) : [];
+          existing.startRow = Math.min(existing.startRow, delta.startRow);
+          existing.endRowExclusive = Math.max(existing.endRowExclusive, delta.endRowExclusive);
+        }
+      }
       entry.timestamp = now;
       entry.mergeKey = mergeKey;
       entry.label = options.label ?? entry.label;
@@ -2769,6 +3422,7 @@ export class DocumentController {
       deltasByCell: new Map(),
       deltasBySheetView: new Map(),
       deltasByFormat: new Map(),
+      deltasByRangeRun: new Map(),
     };
 
     for (const delta of cellDeltas) {
@@ -2781,6 +3435,10 @@ export class DocumentController {
 
     for (const delta of formatDeltas) {
       entry.deltasByFormat.set(formatKey(delta.sheetId, delta.layer, delta.index), cloneFormatDelta(delta));
+    }
+
+    for (const delta of rangeRunDeltas) {
+      entry.deltasByRangeRun.set(rangeRunKey(delta.sheetId, delta.col), cloneRangeRunDelta(delta));
     }
 
     this.#commitHistoryEntry(entry);
@@ -2798,7 +3456,14 @@ export class DocumentController {
    * @param {HistoryEntry} entry
    */
   #commitHistoryEntry(entry) {
-    if (entry.deltasByCell.size === 0 && entry.deltasBySheetView.size === 0 && entry.deltasByFormat.size === 0) return;
+    if (
+      entry.deltasByCell.size === 0 &&
+      entry.deltasBySheetView.size === 0 &&
+      entry.deltasByFormat.size === 0 &&
+      entry.deltasByRangeRun.size === 0
+    ) {
+      return;
+    }
     this.history.push(entry);
     this.cursor += 1;
     this.#emitHistory();
@@ -2811,9 +3476,10 @@ export class DocumentController {
    * @param {CellDelta[]} cellDeltas
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
-   * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
+   * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {{ recalc: boolean, emitChange: boolean, source?: string, sheetStructureChanged?: boolean }} options
    */
-  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, options) {
+  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, options) {
     const contentChangedSheetIds = new Set();
     // Apply to the canonical model first.
     for (const delta of formatDeltas) {
@@ -2834,6 +3500,16 @@ export class DocumentController {
       if (delta.layer === "col") {
         sheet.setColStyleId(index, delta.afterStyleId);
       }
+    }
+    for (const delta of rangeRunDeltas) {
+      // Ensure sheet exists for format-only changes.
+      this.model.getCell(delta.sheetId, 0, 0);
+      const sheet = this.model.sheets.get(delta.sheetId);
+      if (!sheet) continue;
+      const col = Number(delta.col);
+      if (!Number.isInteger(col) || col < 0) continue;
+      const nextRuns = Array.isArray(delta.afterRuns) ? delta.afterRuns.map(cloneFormatRun) : [];
+      sheet.setFormatRunsForCol(col, nextRuns);
     }
     for (const delta of sheetViewDeltas) {
       this.model.setSheetView(delta.sheetId, delta.after);
@@ -2879,6 +3555,15 @@ export class DocumentController {
           sheet.setColStyleId(index, delta.beforeStyleId);
         }
       }
+      for (const delta of rangeRunDeltas) {
+        this.model.getCell(delta.sheetId, 0, 0);
+        const sheet = this.model.sheets.get(delta.sheetId);
+        if (!sheet) continue;
+        const col = Number(delta.col);
+        if (!Number.isInteger(col) || col < 0) continue;
+        const beforeRuns = Array.isArray(delta.beforeRuns) ? delta.beforeRuns.map(cloneFormatRun) : [];
+        sheet.setFormatRunsForCol(col, beforeRuns);
+      }
       for (const delta of sheetViewDeltas) {
         this.model.setSheetView(delta.sheetId, delta.before);
       }
@@ -2899,38 +3584,32 @@ export class DocumentController {
 
     if (options.emitChange) {
       /** @type {any[]} */
-      const sheetStyleDeltas = [];
-      /** @type {any[]} */
       const rowStyleDeltas = [];
       /** @type {any[]} */
       const colStyleDeltas = [];
-      for (const delta of formatDeltas) {
-        if (!delta) continue;
-        if (delta.layer === "sheet") {
-          sheetStyleDeltas.push({
-            sheetId: delta.sheetId,
-            beforeStyleId: delta.beforeStyleId,
-            afterStyleId: delta.afterStyleId,
-          });
-          continue;
-        }
-        const index = delta.index;
-        if (index == null) continue;
-        if (delta.layer === "row") {
+      /** @type {any[]} */
+      const sheetStyleDeltas = [];
+      for (const d of formatDeltas) {
+        if (!d) continue;
+        if (d.layer === "row" && d.index != null) {
           rowStyleDeltas.push({
-            sheetId: delta.sheetId,
-            row: index,
-            beforeStyleId: delta.beforeStyleId,
-            afterStyleId: delta.afterStyleId,
+            sheetId: d.sheetId,
+            row: d.index,
+            beforeStyleId: d.beforeStyleId,
+            afterStyleId: d.afterStyleId,
           });
-          continue;
-        }
-        if (delta.layer === "col") {
+        } else if (d.layer === "col" && d.index != null) {
           colStyleDeltas.push({
-            sheetId: delta.sheetId,
-            col: index,
-            beforeStyleId: delta.beforeStyleId,
-            afterStyleId: delta.afterStyleId,
+            sheetId: d.sheetId,
+            col: d.index,
+            beforeStyleId: d.beforeStyleId,
+            afterStyleId: d.afterStyleId,
+          });
+        } else if (d.layer === "sheet") {
+          sheetStyleDeltas.push({
+            sheetId: d.sheetId,
+            beforeStyleId: d.beforeStyleId,
+            afterStyleId: d.afterStyleId,
           });
         }
       }
@@ -2943,6 +3622,7 @@ export class DocumentController {
         rowStyleDeltas,
         colStyleDeltas,
         sheetStyleDeltas,
+        rangeRunDeltas: rangeRunDeltas.map(cloneRangeRunDelta),
         recalc: options.recalc,
       };
       if (options.source) payload.source = options.source;

@@ -224,4 +224,67 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(provider.getCell(headerRows, headerCols)?.value).toBe("two");
     expect(spy).toHaveBeenCalledTimes(3);
   });
+
+  it("emits grid invalidation updates for range-run formatting deltas", () => {
+    class FakeDocument {
+      private readonly listeners = new Set<(payload: any) => void>();
+
+      on(event: string, listener: (payload: any) => void): () => void {
+        if (event !== "change") return () => {};
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      }
+
+      emitChange(payload: any): void {
+        for (const listener of this.listeners) listener(payload);
+      }
+    }
+
+    const doc = new FakeDocument();
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const docRows = 100;
+    const docCols = 20;
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: docRows + headerRows,
+      colCount: docCols + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const updates: any[] = [];
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
+
+    doc.emitChange({
+      deltas: [],
+      sheetViewDeltas: [],
+      rangeRunDeltas: [{ sheetId: "Sheet1", col: 2, startRow: 10, endRowExclusive: 20, beforeRuns: [], afterRuns: [] }]
+    });
+
+    unsubscribe();
+
+    expect(updates.length).toBeGreaterThan(0);
+    const update = updates[0];
+
+    if (update.type === "invalidateAll") {
+      expect(update.type).toBe("invalidateAll");
+      return;
+    }
+
+    expect(update).toEqual({
+      type: "cells",
+      range: {
+        startRow: headerRows + 10,
+        endRow: headerRows + 20,
+        startCol: headerCols + 2,
+        endCol: headerCols + 3
+      }
+    });
+  });
 });

@@ -515,12 +515,18 @@ export class DocumentCellProvider implements CellProvider {
         const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
         const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
         const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
-        // DocumentController emits layered format updates as `formatDeltas`.
+        // DocumentController may emit layered format updates either as `formatDeltas` (sheet/row/col)
+        // or via the compressed rectangular range-run layer (`rangeRunDeltas`).
         const formatDeltas = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
+        const rangeRunDeltas = Array.isArray(payload?.rangeRunDeltas) ? payload.rangeRunDeltas : [];
 
         const recalc = payload?.recalc === true;
         const hasFormatLayerDeltas =
-          rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0 || formatDeltas.length > 0;
+          rowStyleDeltas.length > 0 ||
+          colStyleDeltas.length > 0 ||
+          sheetStyleDeltas.length > 0 ||
+          formatDeltas.length > 0 ||
+          rangeRunDeltas.length > 0;
 
         // No cell deltas + no formatting deltas: preserve the sheet-view optimization.
         if (deltas.length === 0 && !hasFormatLayerDeltas) {
@@ -689,6 +695,46 @@ export class DocumentCellProvider implements CellProvider {
             endRow: docRowCount,
             startCol: clampInt(colSpan.min, 0, docColCount),
             endCol: clampInt(colSpan.max + 1, 0, docColCount)
+          });
+        }
+
+        if (rangeRunDeltas.length > 0) {
+          let minRow = Infinity;
+          let maxRow = -Infinity;
+          let minCol = Infinity;
+          let maxCol = -Infinity;
+          let saw = false;
+
+          for (const delta of rangeRunDeltas) {
+            if (!delta) continue;
+            if (String(delta.sheetId ?? "") !== sheetId) continue;
+
+            const col = Number((delta as any).col);
+            if (!Number.isInteger(col) || col < 0) continue;
+
+            const startRow = Number((delta as any).startRow);
+            const endRowExclusive = Number((delta as any).endRowExclusive);
+            if (!Number.isInteger(startRow) || startRow < 0) continue;
+            if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+
+            saw = true;
+            minRow = Math.min(minRow, startRow);
+            maxRow = Math.max(maxRow, endRowExclusive - 1);
+            minCol = Math.min(minCol, col);
+            maxCol = Math.max(maxCol, col);
+          }
+
+          if (!saw) {
+            // If we can't determine the affected region, fall back.
+            this.invalidateAll();
+            return;
+          }
+
+          invalidateRanges.push({
+            startRow: clampInt(minRow, 0, docRowCount),
+            endRow: clampInt(maxRow + 1, 0, docRowCount),
+            startCol: clampInt(minCol, 0, docColCount),
+            endCol: clampInt(maxCol + 1, 0, docColCount)
           });
         }
 

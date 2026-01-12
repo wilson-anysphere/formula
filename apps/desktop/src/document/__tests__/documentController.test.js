@@ -704,6 +704,24 @@ test("dirty tracking considers in-progress batches (before endBatch)", () => {
   assert.equal(doc.isDirty, false);
 });
 
+test("dirty tracking considers in-progress batches for range-run formatting (before endBatch)", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.markSaved();
+  assert.equal(doc.isDirty, false);
+
+  doc.beginBatch({ label: "Format" });
+  doc.setRangeFormat("Sheet1", { start: { row: 0, col: 0 }, end: { row: 999, col: 99 } }, { font: { bold: true } });
+  assert.equal(doc.isDirty, true);
+
+  doc.endBatch();
+  assert.equal(doc.isDirty, true);
+
+  doc.undo();
+  assert.equal(doc.isDirty, false);
+});
+
 test("history enablement updates when entering/leaving an empty batch", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", "x");
