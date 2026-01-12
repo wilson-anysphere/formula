@@ -41,7 +41,8 @@ function loadThemeVars(theme) {
 function renderAppShell(theme) {
   const tokens = loadThemeVars(theme);
   const style = Object.entries(tokens)
-    .sort(([a], [b]) => a.localeCompare(b))
+    // Sort by code point order so snapshot ordering is stable across locales.
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([name, value]) => `--${name}: ${value}`)
     .join("; ");
 
