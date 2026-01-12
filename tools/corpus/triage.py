@@ -124,6 +124,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
     import re
 
     cellimages_part_re = re.compile(r"(?i)^cellimages(\d*)\.xml$")
+    zip_names_casefold_set = {n.casefold() for n in zip_names}
 
     def _is_cellimages_part(n: str) -> bool:
         normalized = n.replace("\\", "/")
@@ -207,7 +208,11 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 # Be tolerant of producers that use an incorrect base path but a correct basename.
                 # This helps us still fingerprint the workbook relationship type even when the
                 # package layout is non-standard.
-                if posixpath.basename(resolved).casefold() == posixpath.basename(part_name).casefold():
+                if (
+                    resolved.casefold() not in zip_names_casefold_set
+                    and posixpath.basename(resolved).casefold()
+                    == posixpath.basename(part_name).casefold()
+                ):
                     workbook_rel_type = el.attrib.get("Type")
                     break
         except Exception:
