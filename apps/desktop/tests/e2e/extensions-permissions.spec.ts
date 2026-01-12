@@ -271,13 +271,13 @@ test.describe("Extensions permissions UI", () => {
     await expect(page.getByTestId("extension-permission-cells.write")).toHaveCount(0);
 
     await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
-    await expect(page.getByTestId(`permission-${extensionId}-cells.read`)).toBeVisible();
-    await expect(page.getByTestId(`permission-${extensionId}-cells.write`)).toBeVisible();
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.read`)).toContainText("granted");
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.write`)).toContainText("granted");
 
     // Revoke only cells.read permission; ensure other grants remain.
     await page.getByTestId(`revoke-permission-${extensionId}-cells.read`).click();
-    await expect(page.getByTestId(`permission-${extensionId}-cells.read`)).toHaveCount(0);
-    await expect(page.getByTestId(`permission-${extensionId}-cells.write`)).toBeVisible();
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.read`)).toContainText("not granted");
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.write`)).toContainText("granted");
 
     await page.getByTestId("run-command-sampleHello.sumSelection").click();
 
@@ -287,8 +287,8 @@ test.describe("Extensions permissions UI", () => {
     await expect(page.getByTestId("extension-permission-cells.read")).toHaveCount(0);
 
     await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
-    await expect(page.getByTestId(`permission-${extensionId}-cells.read`)).toHaveCount(0);
-    await expect(page.getByTestId(`permission-${extensionId}-cells.write`)).toBeVisible();
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.read`)).toContainText("not granted");
+    await expect(page.getByTestId(`permission-row-${extensionId}-cells.write`)).toContainText("granted");
   });
 
   test("network allowlist prompts again for a new host", async ({ page }) => {
@@ -338,7 +338,7 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
 
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("allowed.example");
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("allowed.example");
 
       // Second run: different host should prompt again because network is allowlisted by hostname.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -355,7 +355,9 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
 
       // Permissions UI should still only include the original allowlisted host.
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("allowed.example");
+      const networkRow = page.getByTestId(`permission-row-${extensionId}-network`);
+      await expect(networkRow).toContainText("allowed.example");
+      await expect(networkRow).not.toContainText("blocked.example");
     } finally {
       await page.unroute("http://allowed.example/**").catch(() => {});
     }
