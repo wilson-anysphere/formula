@@ -31,7 +31,7 @@ test.describe("sheet switcher", () => {
 
     // Hide Sheet2 via context menu.
     await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
-    const menu = page.getByTestId("context-menu");
+    const menu = page.getByTestId("sheet-tab-context-menu");
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide sheet" }).click();
 
