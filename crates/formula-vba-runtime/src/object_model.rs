@@ -5,6 +5,9 @@ use std::rc::Rc;
 use crate::runtime::VbaError;
 use crate::value::VbaValue;
 
+const EXCEL_MAX_ROWS: u32 = 1_048_576;
+const EXCEL_MAX_COLS: u32 = 16_384;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VbaRangeRef {
     pub sheet: usize,
@@ -42,6 +45,15 @@ pub trait Spreadsheet {
         row: u32,
         col: u32,
     ) -> Result<Option<String>, VbaError>;
+
+    /// Return the configured dimensions of the worksheet as `(max_rows, max_cols)` where each
+    /// value is a 1-based count.
+    ///
+    /// For example, a sheet with 10 rows has valid row indices `1..=10` and should return
+    /// `max_rows=10`.
+    fn sheet_dimensions(&self, _sheet: usize) -> (u32, u32) {
+        (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
+    }
 
     /// Set a formula for a cell.
     fn set_cell_formula(
@@ -179,10 +191,11 @@ pub fn row_col_to_a1(row: u32, col: u32) -> Result<String, VbaError> {
     ))
 }
 
-fn parse_range_a1(a1: &str) -> Result<(u32, u32, u32, u32), VbaError> {
-    const MAX_ROW: u32 = 1_048_576;
-    const MAX_COL: u32 = 16_384;
-
+pub(crate) fn parse_range_a1_with_bounds(
+    a1: &str,
+    max_row: u32,
+    max_col: u32,
+) -> Result<(u32, u32, u32, u32), VbaError> {
     #[derive(Clone, Copy)]
     enum A1Ref {
         Cell { row: u32, col: u32 },
@@ -258,15 +271,19 @@ fn parse_range_a1(a1: &str) -> Result<(u32, u32, u32, u32), VbaError> {
         (A1Ref::Cell { row: r1, col: c1 }, A1Ref::Cell { row: r2, col: c2 }) => {
             Ok((r1.min(r2), c1.min(c2), r1.max(r2), c1.max(c2)))
         }
-        (A1Ref::Col { col: c1 }, A1Ref::Col { col: c2 }) => Ok((1, c1.min(c2), MAX_ROW, c1.max(c2))),
-        (A1Ref::Row { row: r1 }, A1Ref::Row { row: r2 }) => Ok((r1.min(r2), 1, r1.max(r2), MAX_COL)),
+        (A1Ref::Col { col: c1 }, A1Ref::Col { col: c2 }) => {
+            Ok((1, c1.min(c2), max_row, c1.max(c2)))
+        }
+        (A1Ref::Row { row: r1 }, A1Ref::Row { row: r2 }) => {
+            Ok((r1.min(r2), 1, r1.max(r2), max_col))
+        }
         _ => Err(VbaError::Runtime(format!("Invalid A1 range: {a1}"))),
     }
 }
 
 /// Parse an A1 reference into `(start_row, start_col, end_row, end_col)` (all 1-based).
 pub fn a1_to_row_col_range(a1: &str) -> Result<(u32, u32, u32, u32), VbaError> {
-    parse_range_a1(a1)
+    parse_range_a1_with_bounds(a1, EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
 }
 
 /// A very small in-memory workbook model used by tests and examples.
@@ -281,6 +298,8 @@ pub struct InMemoryWorkbook {
 #[derive(Debug, Default)]
 struct Sheet {
     name: String,
+    max_rows: u32,
+    max_cols: u32,
     cells: HashMap<(u32, u32), Cell>,
 }
 
@@ -303,9 +322,31 @@ impl InMemoryWorkbook {
         let idx = self.sheets.len();
         self.sheets.push(Sheet {
             name: name.to_string(),
+            max_rows: EXCEL_MAX_ROWS,
+            max_cols: EXCEL_MAX_COLS,
             cells: HashMap::new(),
         });
         idx
+    }
+
+    pub fn set_sheet_dimensions(
+        &mut self,
+        sheet: usize,
+        max_rows: u32,
+        max_cols: u32,
+    ) -> Result<(), VbaError> {
+        if max_rows == 0 || max_cols == 0 {
+            return Err(VbaError::Runtime(
+                "Sheet dimensions must be 1-based counts".to_string(),
+            ));
+        }
+        let sh = self
+            .sheets
+            .get_mut(sheet)
+            .ok_or_else(|| VbaError::Runtime(format!("Unknown sheet index: {sheet}")))?;
+        sh.max_rows = max_rows;
+        sh.max_cols = max_cols;
+        Ok(())
     }
 
     pub fn get_value_a1(&self, sheet: &str, a1: &str) -> Result<VbaValue, VbaError> {
@@ -341,7 +382,12 @@ impl InMemoryWorkbook {
     }
 
     pub fn range_ref(&self, sheet: usize, a1: &str) -> Result<VbaRangeRef, VbaError> {
-        let (r1, c1, r2, c2) = parse_range_a1(a1)?;
+        let (max_row, max_col) = self.sheet_dimensions(sheet);
+        let (r1, c1, r2, c2) = if (max_row, max_col) == (EXCEL_MAX_ROWS, EXCEL_MAX_COLS) {
+            a1_to_row_col_range(a1)?
+        } else {
+            parse_range_a1_with_bounds(a1, max_row, max_col)?
+        };
         Ok(VbaRangeRef {
             sheet,
             start_row: r1,
@@ -468,6 +514,13 @@ impl Spreadsheet for InMemoryWorkbook {
         self.output.push(message);
     }
 
+    fn sheet_dimensions(&self, sheet: usize) -> (u32, u32) {
+        self.sheets
+            .get(sheet)
+            .map(|s| (s.max_rows, s.max_cols))
+            .unwrap_or((EXCEL_MAX_ROWS, EXCEL_MAX_COLS))
+    }
+
     fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
         let sh = self.sheets.get(sheet)?;
         sh.cells
@@ -554,9 +607,11 @@ impl Spreadsheet for InMemoryWorkbook {
 
 /// Helper to create a `Range` object for a given A1 reference on the active sheet.
 pub fn range_on_active_sheet(sheet: &dyn Spreadsheet, a1: &str) -> Result<VbaObjectRef, VbaError> {
-    let (r1, c1, r2, c2) = parse_range_a1(a1)?;
+    let active_sheet = sheet.active_sheet();
+    let (max_row, max_col) = sheet.sheet_dimensions(active_sheet);
+    let (r1, c1, r2, c2) = parse_range_a1_with_bounds(a1, max_row, max_col)?;
     Ok(VbaObjectRef::new(VbaObject::Range(VbaRangeRef {
-        sheet: sheet.active_sheet(),
+        sheet: active_sheet,
         start_row: r1,
         start_col: c1,
         end_row: r2,

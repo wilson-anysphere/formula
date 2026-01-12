@@ -1389,18 +1389,21 @@ impl<'a> Executor<'a> {
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(sel))));
         }
         if name_lc == "cells" {
+            let sheet = self.sheet.active_sheet();
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                sheet_entire_range(self.sheet.active_sheet()),
+                sheet_entire_range(self.sheet, sheet),
             ))));
         }
         if name_lc == "rows" {
+            let sheet = self.sheet.active_sheet();
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
-                range: sheet_entire_range(self.sheet.active_sheet()),
+                range: sheet_entire_range(self.sheet, sheet),
             })));
         }
         if name_lc == "columns" {
+            let sheet = self.sheet.active_sheet();
             return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
-                range: sheet_entire_range(self.sheet.active_sheet()),
+                range: sheet_entire_range(self.sheet, sheet),
             })));
         }
         if name_lc == "activeworkbook" {
@@ -1572,6 +1575,16 @@ impl<'a> Executor<'a> {
                 if args.is_empty() {
                     return Err(VbaError::Runtime("Range() missing argument".to_string()));
                 }
+
+                if args.len() == 1 {
+                    let cell1 = arg_named_or_pos(args, "cell1", 0).unwrap_or(&args[0]);
+                    if let Expr::Literal(VbaValue::String(a1)) = &cell1.expr {
+                        return Ok(VbaValue::Object(crate::object_model::range_on_active_sheet(
+                            self.sheet, a1,
+                        )?));
+                    }
+                }
+
                 let sheet = self.sheet.active_sheet();
                 let range = self.eval_range_args(frame, sheet, args)?;
                 Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(range))))
@@ -1580,7 +1593,7 @@ impl<'a> Executor<'a> {
                 let sheet = self.sheet.active_sheet();
                 if args.is_empty() {
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                        sheet_entire_range(sheet),
+                        sheet_entire_range(self.sheet, sheet),
                     ))));
                 }
                 if args.len() < 2 {
@@ -1602,8 +1615,9 @@ impl<'a> Executor<'a> {
             }
             "rows" => {
                 if args.is_empty() {
+                    let sheet = self.sheet.active_sheet();
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
-                        range: sheet_entire_range(self.sheet.active_sheet()),
+                        range: sheet_entire_range(self.sheet, sheet),
                     })));
                 }
                 let sheet = self.sheet.active_sheet();
@@ -1612,7 +1626,7 @@ impl<'a> Executor<'a> {
                     VbaValue::String(s) => self.sheet_range(sheet, &s)?,
                     other => {
                         let row = self.coerce_cells_index(frame, other, true)?;
-                        let mut range = sheet_entire_range(sheet);
+                        let mut range = sheet_entire_range(self.sheet, sheet);
                         range.start_row = row;
                         range.end_row = row;
                         range
@@ -1622,8 +1636,9 @@ impl<'a> Executor<'a> {
             }
             "columns" => {
                 if args.is_empty() {
+                    let sheet = self.sheet.active_sheet();
                     return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
-                        range: sheet_entire_range(self.sheet.active_sheet()),
+                        range: sheet_entire_range(self.sheet, sheet),
                     })));
                 }
                 let sheet = self.sheet.active_sheet();
@@ -1632,7 +1647,7 @@ impl<'a> Executor<'a> {
                     VbaValue::String(s) => self.sheet_range(sheet, &s)?,
                     other => {
                         let col = self.coerce_cells_index(frame, other, false)?;
-                        let mut range = sheet_entire_range(sheet);
+                        let mut range = sheet_entire_range(self.sheet, sheet);
                         range.start_col = col;
                         range.end_col = col;
                         range
@@ -1949,7 +1964,7 @@ impl<'a> Executor<'a> {
                 "cells" => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                            sheet_entire_range(sheet),
+                            sheet_entire_range(self.sheet, sheet),
                         ))));
                     }
                     if args.len() < 2 {
@@ -1972,7 +1987,7 @@ impl<'a> Executor<'a> {
                 "rows" => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
-                            range: sheet_entire_range(sheet),
+                            range: sheet_entire_range(self.sheet, sheet),
                         })));
                     }
                     let v = self.eval_required_arg(frame, args, 0, "Rows")?;
@@ -1980,7 +1995,7 @@ impl<'a> Executor<'a> {
                         VbaValue::String(s) => self.sheet_range(sheet, &s)?,
                         other => {
                             let row = self.coerce_cells_index(frame, other, true)?;
-                            let mut range = sheet_entire_range(sheet);
+                            let mut range = sheet_entire_range(self.sheet, sheet);
                             range.start_row = row;
                             range.end_row = row;
                             range
@@ -1991,7 +2006,7 @@ impl<'a> Executor<'a> {
                 "columns" => {
                     if args.is_empty() {
                         return Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
-                            range: sheet_entire_range(sheet),
+                            range: sheet_entire_range(self.sheet, sheet),
                         })));
                     }
                     let v = self.eval_required_arg(frame, args, 0, "Columns")?;
@@ -1999,7 +2014,7 @@ impl<'a> Executor<'a> {
                         VbaValue::String(s) => self.sheet_range(sheet, &s)?,
                         other => {
                             let col = self.coerce_cells_index(frame, other, false)?;
-                            let mut range = sheet_entire_range(sheet);
+                            let mut range = sheet_entire_range(self.sheet, sheet);
                             range.start_col = col;
                             range.end_col = col;
                             range
@@ -2419,7 +2434,9 @@ impl<'a> Executor<'a> {
     }
 
     fn sheet_range(&self, sheet: usize, a1: &str) -> Result<VbaRangeRef, VbaError> {
-        let (r1, c1, r2, c2) = crate::object_model::a1_to_row_col_range(a1)?;
+        let (max_row, max_col) = self.sheet.sheet_dimensions(sheet);
+        let (r1, c1, r2, c2) =
+            crate::object_model::parse_range_a1_with_bounds(a1, max_row, max_col)?;
         Ok(VbaRangeRef {
             sheet,
             start_row: r1,
@@ -2542,13 +2559,13 @@ impl<'a> Executor<'a> {
                     self.sheet.sheet_name(*sheet).unwrap_or("").to_string(),
                 )),
                 "cells" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::Range(
-                    sheet_entire_range(*sheet),
+                    sheet_entire_range(self.sheet, *sheet),
                 )))),
                 "rows" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeRows {
-                    range: sheet_entire_range(*sheet),
+                    range: sheet_entire_range(self.sheet, *sheet),
                 }))),
                 "columns" => Ok(VbaValue::Object(VbaObjectRef::new(VbaObject::RangeColumns {
-                    range: sheet_entire_range(*sheet),
+                    range: sheet_entire_range(self.sheet, *sheet),
                 }))),
                 _ => Err(VbaError::Runtime(format!(
                     "Unknown Worksheet member `{member}`"
@@ -2626,10 +2643,8 @@ impl<'a> Executor<'a> {
         const XL_UP: i64 = -4162;
         const XL_TO_LEFT: i64 = -4159;
         const XL_TO_RIGHT: i64 = -4161;
-        const MAX_ROW: u32 = 1_048_576;
-        const MAX_COL: u32 = 16_384;
 
-        let (drow, dcol): (i32, i32) = match dir {
+        let (drow, dcol): (i64, i64) = match dir {
             XL_DOWN => (1, 0),
             XL_UP => (-1, 0),
             XL_TO_LEFT => (0, -1),
@@ -2642,21 +2657,22 @@ impl<'a> Executor<'a> {
         };
 
         let sheet = range.sheet;
+        let (max_row, max_col) = self.sheet.sheet_dimensions(sheet);
+        let max_row = max_row as i64;
+        let max_col = max_col as i64;
         let mut row = range.start_row;
         let mut col = range.start_col;
 
         let next_cell = |row: u32, col: u32| -> Option<(u32, u32)> {
-            let nr = row as i32 + drow;
-            let nc = col as i32 + dcol;
+            let nr = row as i64 + drow;
+            let nc = col as i64 + dcol;
             if nr <= 0 || nc <= 0 {
                 return None;
             }
-            let nr = nr as u32;
-            let nc = nc as u32;
-            if nr > MAX_ROW || nc > MAX_COL {
+            if nr > max_row || nc > max_col {
                 return None;
             }
-            Some((nr, nc))
+            Some((nr as u32, nc as u32))
         };
 
         let start_has_content = self.cell_has_content(sheet, row, col)?;
@@ -3270,13 +3286,14 @@ fn expand_single_cell_destination(dest: VbaRangeRef, template: VbaRangeRef) -> V
     }
 }
 
-fn sheet_entire_range(sheet: usize) -> VbaRangeRef {
+fn sheet_entire_range(spreadsheet: &dyn Spreadsheet, sheet: usize) -> VbaRangeRef {
+    let (max_rows, max_cols) = spreadsheet.sheet_dimensions(sheet);
     VbaRangeRef {
         sheet,
         start_row: 1,
         start_col: 1,
-        end_row: 1_048_576,
-        end_col: 16_384,
+        end_row: max_rows,
+        end_col: max_cols,
     }
 }
 
