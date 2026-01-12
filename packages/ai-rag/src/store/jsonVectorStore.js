@@ -1,6 +1,16 @@
 import { InMemoryBinaryStorage } from "./binaryStorage.js";
 import { InMemoryVectorStore } from "./inMemoryVectorStore.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * A small, dependency-free persistent vector store.
  *
@@ -90,12 +100,18 @@ export class JsonVectorStore extends InMemoryVectorStore {
   }
 
   async list(opts) {
+    const signal = opts?.signal;
+    throwIfAborted(signal);
     await this.load();
+    throwIfAborted(signal);
     return super.list(opts);
   }
 
   async query(vector, topK, opts) {
+    const signal = opts?.signal;
+    throwIfAborted(signal);
     await this.load();
+    throwIfAborted(signal);
     return super.query(vector, topK, opts);
   }
 

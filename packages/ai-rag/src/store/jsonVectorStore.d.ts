@@ -11,12 +11,12 @@ export class JsonVectorStore extends InMemoryVectorStore {
     filter?: (metadata: any, id: string) => boolean;
     workbookId?: string;
     includeVector?: boolean;
+    signal?: AbortSignal;
   }): Promise<Array<{ id: string; vector?: Float32Array; metadata: any }>>;
   query(
     vector: ArrayLike<number>,
     topK: number,
-    opts?: { filter?: (metadata: any, id: string) => boolean; workbookId?: string }
+    opts?: { filter?: (metadata: any, id: string) => boolean; workbookId?: string; signal?: AbortSignal }
   ): Promise<VectorSearchResult[]>;
   close(): Promise<void>;
 }
-

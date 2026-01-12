@@ -15,12 +15,12 @@ export class SqliteVectorStore {
     filter?: (metadata: any, id: string) => boolean;
     workbookId?: string;
     includeVector?: boolean;
+    signal?: AbortSignal;
   }): Promise<Array<{ id: string; vector?: Float32Array; metadata: any }>>;
   query(
     vector: ArrayLike<number>,
     topK: number,
-    opts?: { filter?: (metadata: any, id: string) => boolean; workbookId?: string }
+    opts?: { filter?: (metadata: any, id: string) => boolean; workbookId?: string; signal?: AbortSignal }
   ): Promise<Array<{ id: string; score: number; metadata: any }>>;
   close(): Promise<void>;
 }
-

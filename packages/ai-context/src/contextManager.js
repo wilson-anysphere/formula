@@ -509,12 +509,13 @@ export class ContextManager {
     const queryForEmbedding =
       dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
     throwIfAborted(signal);
-    const [queryVector] = await awaitWithAbort(embedder.embedTexts([queryForEmbedding]), signal);
+    const [queryVector] = await awaitWithAbort(embedder.embedTexts([queryForEmbedding], { signal }), signal);
     throwIfAborted(signal);
     const hits = await awaitWithAbort(
       vectorStore.query(queryVector, topK, {
         workbookId: params.workbook.id,
         filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
+        signal,
       }),
       signal
     );

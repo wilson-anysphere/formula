@@ -9,7 +9,7 @@ export type WorkbookRagOptions = {
    * deterministic hash embeddings by default. A future Cursor-managed embedding
    * service can replace this.
    */
-  embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> };
+  embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> };
   topK?: number;
   sampleRows?: number;
 };

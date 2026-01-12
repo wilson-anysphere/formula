@@ -1,5 +1,15 @@
 import { cosineSimilarity, normalizeL2, toFloat32Array } from "./vectorMath.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @typedef {Object} VectorRecord
  * @property {string} id
@@ -72,15 +82,18 @@ export class InMemoryVectorStore {
    * }} [opts]
    */
   async list(opts) {
+    const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     const includeVector = opts?.includeVector ?? true;
     const out = [];
     for (const [id, rec] of this._records) {
+      throwIfAborted(signal);
       if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
       if (filter && !filter(rec.metadata, id)) continue;
       out.push({ id, vector: includeVector ? rec.vector : undefined, metadata: rec.metadata });
     }
+    throwIfAborted(signal);
     return out;
   }
 
@@ -91,18 +104,22 @@ export class InMemoryVectorStore {
    * @returns {Promise<VectorSearchResult[]>}
    */
   async query(vector, topK, opts) {
+    const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     const q = normalizeL2(vector);
     /** @type {VectorSearchResult[]} */
     const scored = [];
     for (const [id, rec] of this._records) {
+      throwIfAborted(signal);
       if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
       if (filter && !filter(rec.metadata, id)) continue;
       const score = cosineSimilarity(q, rec.vector);
       scored.push({ id, score, metadata: rec.metadata });
     }
+    throwIfAborted(signal);
     scored.sort((a, b) => b.score - a.score);
+    throwIfAborted(signal);
     return scored.slice(0, topK);
   }
 

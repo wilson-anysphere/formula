@@ -1,6 +1,16 @@
 import { InMemoryBinaryStorage } from "./binaryStorage.js";
 import { normalizeL2, toFloat32Array } from "./vectorMath.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 function locateSqlJsFile(file, prefix = "") {
   try {
     if (typeof import.meta.resolve === "function") {
@@ -257,32 +267,40 @@ export class SqliteVectorStore {
    * }} [opts]
    */
   async list(opts) {
+    const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     const includeVector = opts?.includeVector ?? true;
 
+    throwIfAborted(signal);
     const sql = workbookId
       ? `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors WHERE workbook_id = ?`
       : `SELECT id, ${includeVector ? "vector," : ""} metadata_json FROM vectors`;
     const stmt = this._db.prepare(sql);
-    if (workbookId) stmt.bind([workbookId]);
+    try {
+      if (workbookId) stmt.bind([workbookId]);
 
-    const out = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      const id = row[0];
-      const vecBlob = includeVector ? row[1] : null;
-      const metaJson = includeVector ? row[2] : row[1];
-      const metadata = JSON.parse(metaJson);
-      if (filter && !filter(metadata, id)) continue;
-      out.push({
-        id,
-        vector: includeVector ? new Float32Array(blobToFloat32(vecBlob)) : undefined,
-        metadata,
-      });
+      const out = [];
+      while (true) {
+        throwIfAborted(signal);
+        if (!stmt.step()) break;
+        const row = stmt.get();
+        const id = row[0];
+        const vecBlob = includeVector ? row[1] : null;
+        const metaJson = includeVector ? row[2] : row[1];
+        const metadata = JSON.parse(metaJson);
+        if (filter && !filter(metadata, id)) continue;
+        out.push({
+          id,
+          vector: includeVector ? new Float32Array(blobToFloat32(vecBlob)) : undefined,
+          metadata,
+        });
+      }
+      throwIfAborted(signal);
+      return out;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return out;
   }
 
   /**
@@ -291,11 +309,13 @@ export class SqliteVectorStore {
    * @param {{ filter?: (metadata: any, id: string) => boolean, workbookId?: string }} [opts]
    */
   async query(vector, topK, opts) {
+    const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     const q = normalizeL2(vector);
     const qBlob = float32ToBlob(q);
 
+    throwIfAborted(signal);
     const sql = workbookId
       ? `
         SELECT id, metadata_json, dot(vector, ?) AS score
@@ -312,20 +332,26 @@ export class SqliteVectorStore {
       `;
 
     const stmt = this._db.prepare(sql);
-    if (workbookId) stmt.bind([qBlob, workbookId, topK]);
-    else stmt.bind([qBlob, topK]);
+    try {
+      if (workbookId) stmt.bind([qBlob, workbookId, topK]);
+      else stmt.bind([qBlob, topK]);
 
-    const out = [];
-    while (stmt.step()) {
-      const row = stmt.get();
-      const id = row[0];
-      const metadata = JSON.parse(row[1]);
-      if (filter && !filter(metadata, id)) continue;
-      const score = Number(row[2]);
-      out.push({ id, score, metadata });
+      const out = [];
+      while (true) {
+        throwIfAborted(signal);
+        if (!stmt.step()) break;
+        const row = stmt.get();
+        const id = row[0];
+        const metadata = JSON.parse(row[1]);
+        if (filter && !filter(metadata, id)) continue;
+        const score = Number(row[2]);
+        out.push({ id, score, metadata });
+      }
+      throwIfAborted(signal);
+      return out;
+    } finally {
+      stmt.free();
     }
-    stmt.free();
-    return out;
   }
 
   async close() {

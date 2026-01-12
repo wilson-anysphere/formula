@@ -1,5 +1,15 @@
 import { normalizeL2 } from "../store/vectorMath.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 function fnv1a32(str) {
   let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i += 1) {
@@ -47,14 +57,17 @@ export class HashEmbedder {
 
   /**
    * @param {string} text
+   * @param {AbortSignal | undefined} [signal]
    */
-  _embedOne(text) {
+  _embedOne(text, signal) {
+    throwIfAborted(signal);
     const vec = new Float32Array(this._dimension);
     const tokens = String(text)
       .toLowerCase()
       .split(/[^a-z0-9_]+/g)
       .filter(Boolean);
     for (const token of tokens) {
+      throwIfAborted(signal);
       const h = fnv1a32(token);
       const idx = h % this._dimension;
       // Simple TF weighting, lightly damped.
@@ -65,9 +78,12 @@ export class HashEmbedder {
 
   /**
    * @param {string[]} texts
+   * @param {{ signal?: AbortSignal }} [options]
    * @returns {Promise<Float32Array[]>}
    */
-  async embedTexts(texts) {
-    return texts.map((t) => this._embedOne(t));
+  async embedTexts(texts, options = {}) {
+    const signal = options.signal;
+    throwIfAborted(signal);
+    return texts.map((t) => this._embedOne(t, signal));
   }
 }

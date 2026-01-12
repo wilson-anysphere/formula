@@ -11,7 +11,7 @@ export function indexWorkbook(params: {
    * (no API keys / no local model setup). A future Cursor-managed
    * embedding service can replace this to improve retrieval quality.
    */
-  embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> };
+  embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> };
   sampleRows?: number;
   transform?: (
     record: { id: string; text: string; metadata: any }

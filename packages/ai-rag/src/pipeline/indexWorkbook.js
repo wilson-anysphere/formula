@@ -82,6 +82,7 @@ export async function indexWorkbook(params) {
     vectorStore.list({
       workbookId: workbook.id,
       includeVector: false,
+      signal,
     }),
     signal
   );
@@ -151,7 +152,7 @@ export async function indexWorkbook(params) {
   throwIfAborted(signal);
   const vectors =
     toUpsert.length > 0
-      ? await awaitWithAbort(embedder.embedTexts(toUpsert.map((r) => r.text)), signal)
+      ? await awaitWithAbort(embedder.embedTexts(toUpsert.map((r) => r.text), { signal }), signal)
       : [];
   throwIfAborted(signal);
 
