@@ -11,6 +11,7 @@ export interface FileBackstageProps {
 type BackstageItem = {
   label: string;
   hint: string;
+  ariaKeyShortcuts: string;
   testId: string;
   ariaLabel: string;
   onInvoke?: () => void;
@@ -35,28 +36,69 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
     [isMac],
   );
 
+  const ariaShortcut = React.useCallback(
+    (key: string, options: { shift?: boolean } = {}) => {
+      const prefix = isMac ? "Meta" : "Control";
+      const parts = [prefix];
+      if (options.shift) parts.push("Shift");
+      parts.push(key.toUpperCase());
+      return parts.join("+");
+    },
+    [isMac],
+  );
+
   const items = React.useMemo<BackstageItem[]>(
     () => [
       {
         label: "New Workbook",
         hint: shortcut("N"),
+        ariaKeyShortcuts: ariaShortcut("N"),
         testId: "file-new",
         ariaLabel: "New workbook",
         onInvoke: actions?.newWorkbook,
       },
-      { label: "Open…", hint: shortcut("O"), testId: "file-open", ariaLabel: "Open workbook", onInvoke: actions?.openWorkbook },
-      { label: "Save", hint: shortcut("S"), testId: "file-save", ariaLabel: "Save workbook", onInvoke: actions?.saveWorkbook },
+      {
+        label: "Open…",
+        hint: shortcut("O"),
+        ariaKeyShortcuts: ariaShortcut("O"),
+        testId: "file-open",
+        ariaLabel: "Open workbook",
+        onInvoke: actions?.openWorkbook,
+      },
+      {
+        label: "Save",
+        hint: shortcut("S"),
+        ariaKeyShortcuts: ariaShortcut("S"),
+        testId: "file-save",
+        ariaLabel: "Save workbook",
+        onInvoke: actions?.saveWorkbook,
+      },
       {
         label: "Save As…",
         hint: shortcut("S", { shift: true }),
+        ariaKeyShortcuts: ariaShortcut("S", { shift: true }),
         testId: "file-save-as",
         ariaLabel: "Save workbook as",
         onInvoke: actions?.saveWorkbookAs,
       },
-      { label: "Close Window", hint: shortcut("W"), testId: "file-close", ariaLabel: "Close window", onInvoke: actions?.closeWindow },
-      { label: "Quit", hint: shortcut("Q"), testId: "file-quit", ariaLabel: "Quit application", onInvoke: actions?.quit },
+      {
+        label: "Close Window",
+        hint: shortcut("W"),
+        ariaKeyShortcuts: ariaShortcut("W"),
+        testId: "file-close",
+        ariaLabel: "Close window",
+        onInvoke: actions?.closeWindow,
+      },
+      {
+        label: "Quit",
+        hint: shortcut("Q"),
+        ariaKeyShortcuts: ariaShortcut("Q"),
+        testId: "file-quit",
+        ariaLabel: "Quit application",
+        onInvoke: actions?.quit,
+      },
     ],
-    [actions, shortcut],
+    [actions, ariaShortcut, shortcut],
   );
 
   const focusFirst = React.useCallback(() => {
@@ -71,6 +113,18 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
     // Defer so the overlay is painted before we move focus.
     requestAnimationFrame(() => focusFirst());
   }, [focusFirst, open]);
+
+  const moveFocus = React.useCallback((direction: "next" | "prev") => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusables = Array.from(panel.querySelectorAll<HTMLButtonElement>("button:not([disabled])"));
+    if (focusables.length === 0) return;
+    const active = document.activeElement as HTMLElement | null;
+    const currentIndex = active ? focusables.findIndex((el) => el === active) : -1;
+    const delta = direction === "next" ? 1 : -1;
+    const nextIndex = currentIndex >= 0 ? (currentIndex + delta + focusables.length) % focusables.length : 0;
+    focusables[nextIndex]?.focus();
+  }, []);
 
   const trapTab = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Tab") return;
@@ -118,6 +172,16 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
           onClose();
           return;
         }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          moveFocus("next");
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          moveFocus("prev");
+          return;
+        }
         trapTab(event);
       }}
     >
@@ -135,6 +199,8 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
                 className="ribbon-backstage__item"
                 data-testid={item.testId}
                 aria-label={item.ariaLabel}
+                aria-keyshortcuts={item.ariaKeyShortcuts}
+                role="menuitem"
                 disabled={disabled}
                 onClick={() => {
                   onClose();
