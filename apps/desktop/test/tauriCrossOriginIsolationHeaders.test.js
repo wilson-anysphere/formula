@@ -40,7 +40,10 @@ test("Tauri main capability allows emitting coi-check-result (used by pnpm check
       typeof p === "object" &&
       (p.identifier === "core:event:allow-emit" || p.identifier === "event:allow-emit"),
   );
-  assert.ok(emitPerm, "expected capabilities/main.json to include event:allow-emit permission");
+  assert.ok(
+    emitPerm,
+    "expected capabilities/main.json to include a core:event:allow-emit (or event:allow-emit) permission object",
+  );
 
   const allowed = Array.isArray(emitPerm.allow) ? emitPerm.allow : [];
   const allowedEvents = allowed.map((entry) => entry?.event).filter(Boolean);
