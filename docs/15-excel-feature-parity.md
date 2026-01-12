@@ -181,7 +181,7 @@ This document tracks every Excel feature and our implementation status. Features
 | TEXTAFTER | ⬜ | |
 | TEXTBEFORE | ⬜ | |
 | TEXTJOIN | ⬜ | |
-| TEXTSPLIT | ⬜ | Dynamic array |
+| TEXTSPLIT | ✅ | Dynamic array |
 | TRIM | ⬜ | |
 | UNICHAR | ⬜ | |
 | UNICODE | ⬜ | |
