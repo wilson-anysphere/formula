@@ -51,8 +51,10 @@ const IGNORED_DIRS = new Set([
 
 // Match literal specifiers for common import/require forms, including with inline comments
 // (e.g. `import(/* webpackChunkName: "x" */ "./foo")`).
-const wsOrComment = "(?:\\s+|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)+";
-const optWsOrComment = "(?:\\s|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)*";
+const lineComment = "\\/\\/[^\\n]*(?:\\n|$)";
+const blockComment = "\\/\\*[\\s\\S]*?\\*\\/";
+const wsOrComment = `(?:\\s+|${blockComment}|${lineComment})+`;
+const optWsOrComment = `(?:\\s|${blockComment}|${lineComment})*`;
 
 const importFromRe = new RegExp(`\\b(?:import|export)\\s+(?:type\\s+)?[^"']*?\\sfrom${wsOrComment}["']([^"']+)["']`, "g");
 const sideEffectImportRe = new RegExp(`\\bimport${wsOrComment}["']([^"']+)["']`, "g");

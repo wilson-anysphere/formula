@@ -90,8 +90,10 @@ function listImportSpecifiers(sourceText) {
   // Note: these regexes are intentionally simple and conservative. They aim to catch
   // literal import specifiers in common patterns, including with inline `/* ... */` and
   // `// ...` comments (e.g. `import(/* webpackChunkName: "x" */ "foo")`).
-  const wsOrComment = "(?:\\s+|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)+";
-  const optWsOrComment = "(?:\\s|\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*\\n)*";
+  const lineComment = "\\/\\/[^\\n]*(?:\\n|$)";
+  const blockComment = "\\/\\*[\\s\\S]*?\\*\\/";
+  const wsOrComment = `(?:\\s+|${blockComment}|${lineComment})+`;
+  const optWsOrComment = `(?:\\s|${blockComment}|${lineComment})*`;
 
   const patterns = [
     {
