@@ -46,7 +46,7 @@ impl Default for CsvOptions {
             sample_rows: 100,
             page_size_rows: 65_536,
             cache_entries: 64,
-            encoding: CsvTextEncoding::Auto,
+            encoding: CsvTextEncoding::default(),
             decimal_separator: '.',
             date_order: CsvDateOrder::default(),
             timestamp_tz_policy: CsvTimestampTzPolicy::default(),
@@ -71,6 +71,12 @@ pub enum CsvTextEncoding {
     Utf8,
     /// Decode as Windows-1252 (aka CP-1252).
     Windows1252,
+}
+
+impl Default for CsvTextEncoding {
+    fn default() -> Self {
+        CsvTextEncoding::Auto
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
