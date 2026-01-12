@@ -72,6 +72,25 @@ fn decodes_structured_ref_totals_column() {
 }
 
 #[test]
+fn decodes_structured_ref_all_column() {
+    let rgce = ptg_list(1, 0x0001, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#All],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#All],[Column2]]"));
+}
+
+#[test]
+fn decodes_structured_ref_headers_column_range() {
+    let rgce = ptg_list(1, 0x0002, 2, 4, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Headers],[Column2]:[Column4]]");
+    assert_eq!(
+        normalize(&text),
+        normalize("Table1[[#Headers],[Column2]:[Column4]]")
+    );
+}
+
+#[test]
 fn decodes_structured_ref_item_only_all() {
     let rgce = ptg_list(1, 0x0001, 0, 0, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
@@ -82,6 +101,16 @@ fn decodes_structured_ref_item_only_all() {
 #[test]
 fn decodes_structured_ref_item_only_data() {
     let rgce = ptg_list(1, 0x0004, 0, 0, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[#Data]");
+    assert_eq!(normalize(&text), normalize("Table1[#Data]"));
+}
+
+#[test]
+fn decodes_structured_ref_default_data_when_no_item_and_no_columns() {
+    // If both the row/item flags and the column selectors are absent, Excel treats the reference
+    // as the table's data body.
+    let rgce = ptg_list(1, 0x0000, 0, 0, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table1[#Data]");
     assert_eq!(normalize(&text), normalize("Table1[#Data]"));
@@ -104,6 +133,14 @@ fn decodes_structured_ref_this_row_range() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "[@[Column2]:[Column4]]");
     assert_eq!(normalize(&text), normalize("[@[Column2]:[Column4]]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_column_range_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0000, 2, 4, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[[Column2]:[Column4]]");
+    assert_eq!(normalize(&text), normalize("@Table1[[Column2]:[Column4]]"));
 }
 
 #[test]
