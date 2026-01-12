@@ -37,6 +37,12 @@ test("desktop index.html exposes required shell containers and testids", () => {
     "ribbon",
     "sheet-tabs",
     "toast-root",
+    "dock-left",
+    "dock-right",
+    "dock-bottom",
+    "floating-root",
+    "grid-split",
+    "grid-secondary",
 
     // Status bar (e2e relies on these)
     "status-mode",
@@ -65,6 +71,24 @@ test("desktop index.html exposes required shell containers and testids", () => {
     missing,
     [],
     `apps/desktop/index.html is missing required shell markup:\\n${missing.map((m) => `- ${m}`).join("\\n")}`,
+  );
+
+  // Playwright's `getByTestId` is strict by default and will fail if the same test id is present
+  // multiple times in the DOM. Catch accidental duplication early (in the static HTML layer).
+  const duplicateTestIds = requiredTestIds
+    .map((testId) => {
+      const matches = html.match(new RegExp(`data-testid=["']${escapeRegExp(testId)}["']`, "g")) ?? [];
+      return { testId, count: matches.length };
+    })
+    .filter(({ count }) => count > 1)
+    .map(({ testId, count }) => `${testId} (${count}x)`);
+
+  assert.deepEqual(
+    duplicateTestIds,
+    [],
+    `apps/desktop/index.html contains duplicate data-testid values (breaks Playwright strict-mode):\\n${duplicateTestIds
+      .map((m) => `- ${m}`)
+      .join("\\n")}`,
   );
 
   // The collaboration indicator is part of the visible status bar (it should not be
