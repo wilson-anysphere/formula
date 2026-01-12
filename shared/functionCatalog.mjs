@@ -584,6 +584,16 @@ export default {
       ]
     },
     {
+      "name": "DB",
+      "min_args": 4,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "DBCS",
       "min_args": 1,
       "max_args": 1,
@@ -2822,6 +2832,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "VDB",
+      "min_args": 5,
+      "max_args": 7,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {

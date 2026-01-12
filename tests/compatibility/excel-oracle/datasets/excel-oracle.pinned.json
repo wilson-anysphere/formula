@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T06:11:46.813892945Z",
+  "generatedAt": "2026-01-12T06:26:08.223384754Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "b2a9c69672430b0ac61f0a70897ec8105f66d7b6765f98559f02be9954ab5c37",
-    "count": 1425
+    "sha256": "769e62e77ab4aaa5f7f7168864d99ac74066a7e046cdef4954a5bb351f1da16c",
+    "count": 1465
   },
   "results": [
     {
@@ -6842,6 +6842,386 @@
       "displayText": "1"
     },
     {
+      "caseId": "radians_b14947f6d6f0",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.141592653589793
+      },
+      "address": "C1",
+      "displayText": "3.141592653589793"
+    },
+    {
+      "caseId": "degrees_f4ac8fe6af00",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 180.0
+      },
+      "address": "C1",
+      "displayText": "180"
+    },
+    {
+      "caseId": "sinh_c364c3e5796b",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "cosh_ee6d7514e6e8",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "tanh_81657530d0ab",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "asinh_dbc39e7e371d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "acosh_fe2c908369fc",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "atanh_ed1d4b9c0683",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0
+      },
+      "address": "C1",
+      "displayText": "0"
+    },
+    {
+      "caseId": "cot_21a8297b9d49",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.6420926159343306
+      },
+      "address": "C1",
+      "displayText": "0.6420926159343306"
+    },
+    {
+      "caseId": "csc_19197b189b58",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.1883951057781212
+      },
+      "address": "C1",
+      "displayText": "1.1883951057781212"
+    },
+    {
+      "caseId": "sec_759d1d1c54f7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.8508157176809255
+      },
+      "address": "C1",
+      "displayText": "1.8508157176809255"
+    },
+    {
+      "caseId": "acot_7f76a8f2e6c5",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.7853981633974483
+      },
+      "address": "C1",
+      "displayText": "0.7853981633974483"
+    },
+    {
+      "caseId": "coth_3675c605e8fb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.3130352854993315
+      },
+      "address": "C1",
+      "displayText": "1.3130352854993315"
+    },
+    {
+      "caseId": "csch_13e05475ea79",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.8509181282393216
+      },
+      "address": "C1",
+      "displayText": "0.8509181282393216"
+    },
+    {
+      "caseId": "sech_ee1e43d519a6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.6480542736638855
+      },
+      "address": "C1",
+      "displayText": "0.6480542736638855"
+    },
+    {
+      "caseId": "acoth_d90da7433b7a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.5493061443340548
+      },
+      "address": "C1",
+      "displayText": "0.5493061443340548"
+    },
+    {
+      "caseId": "fact_39ac156478f2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 120.0
+      },
+      "address": "C1",
+      "displayText": "120"
+    },
+    {
+      "caseId": "factdouble_cf49da611307",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 48.0
+      },
+      "address": "C1",
+      "displayText": "48"
+    },
+    {
+      "caseId": "combin_ba8c13eeb6bb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 10.0
+      },
+      "address": "C1",
+      "displayText": "10"
+    },
+    {
+      "caseId": "combina_bc715b790934",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 6.0
+      },
+      "address": "C1",
+      "displayText": "6"
+    },
+    {
+      "caseId": "permut_ca5c3043713e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 20.0
+      },
+      "address": "C1",
+      "displayText": "20"
+    },
+    {
+      "caseId": "permutationa_8c9d563762bd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 9.0
+      },
+      "address": "C1",
+      "displayText": "9"
+    },
+    {
+      "caseId": "gcd_b1c052bacd2a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 12.0
+      },
+      "address": "C1",
+      "displayText": "12"
+    },
+    {
+      "caseId": "lcm_00435b6fe74c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 12.0
+      },
+      "address": "C1",
+      "displayText": "12"
+    },
+    {
+      "caseId": "multinomial_f7bd2ff29d75",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 60.0
+      },
+      "address": "C1",
+      "displayText": "60"
+    },
+    {
+      "caseId": "mround_f568f08290bc",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 9.0
+      },
+      "address": "C1",
+      "displayText": "9"
+    },
+    {
+      "caseId": "even_2b466b48bb43",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "odd_6fa3a43b1e9c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3.0
+      },
+      "address": "C1",
+      "displayText": "3"
+    },
+    {
+      "caseId": "iseven_6624117ee074",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "isodd_5b0863908f8d",
+      "outputCell": "C1",
+      "result": {
+        "t": "b",
+        "v": true
+      },
+      "address": "C1",
+      "displayText": "TRUE"
+    },
+    {
+      "caseId": "quotient_ef437b9549b6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 2.0
+      },
+      "address": "C1",
+      "displayText": "2"
+    },
+    {
+      "caseId": "sqrtpi_264ea7e47e48",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.7724538509055159
+      },
+      "address": "C1",
+      "displayText": "1.7724538509055159"
+    },
+    {
+      "caseId": "delta_8f44bf7c9d57",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "gestep_d8b36da0e755",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "seriessum_59a97a0736ab",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 17.0
+      },
+      "address": "C1",
+      "displayText": "17"
+    },
+    {
+      "caseId": "sumxmy2_69f8e50b38bc",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 8.0
+      },
+      "address": "C1",
+      "displayText": "8"
+    },
+    {
+      "caseId": "sumx2my2_d9c5ff6acb0d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -20.0
+      },
+      "address": "C1",
+      "displayText": "-20"
+    },
+    {
+      "caseId": "sumx2py2_9f5fcf5d6049",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 30.0
+      },
+      "address": "C1",
+      "displayText": "30"
+    },
+    {
       "caseId": "sum_r_94c994d17f65",
       "outputCell": "C1",
       "result": {
@@ -13508,6 +13888,26 @@
       },
       "address": "C1",
       "displayText": "400"
+    },
+    {
+      "caseId": "db_e269ef6b98fa",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 3690.0
+      },
+      "address": "C1",
+      "displayText": "3690"
+    },
+    {
+      "caseId": "vdb_fc81ac00a5c2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 480.0
+      },
+      "address": "C1",
+      "displayText": "480"
     },
     {
       "caseId": "npv_b9b2bb2deab1",

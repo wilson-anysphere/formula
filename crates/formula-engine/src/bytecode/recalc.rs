@@ -227,7 +227,6 @@ mod tests {
         let program = cache.get_or_compile(&expr);
         let empty_grid = crate::bytecode::ColumnarGrid::new(1, 1);
         let now_utc = chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap();
-        let locale = crate::LocaleConfig::en_us();
 
         // Set a non-default locale on this thread so we can verify `RecalcEngine::recalc` uses its
         // own deterministic eval context rather than inheriting ambient thread-local state.
@@ -237,8 +236,13 @@ mod tests {
             now_utc.clone(),
         );
 
+        let de_de_locale = ValueLocaleConfig::de_de();
+        let mut locale_config = crate::LocaleConfig::en_us();
+        locale_config.decimal_separator = de_de_locale.separators.decimal_sep;
+        locale_config.thousands_separator = Some(de_de_locale.separators.thousands_sep);
+
         let mut vm = Vm::with_capacity(32);
-        let de_de_value = vm.eval(&program, &empty_grid, origin, &locale);
+        let de_de_value = vm.eval(&program, &empty_grid, origin, &locale_config);
         let en_us_value = vm.eval_with_coercion_context(
             &program,
             &empty_grid,
@@ -267,7 +271,7 @@ mod tests {
         );
 
         // Ensure `recalc` restores the thread-local context after it finishes.
-        let after_value = vm.eval(&program, &empty_grid, origin, &locale);
+        let after_value = vm.eval(&program, &empty_grid, origin, &locale_config);
         assert_eq!(
             after_value, de_de_value,
             "recalc should restore any prior thread-local eval context"

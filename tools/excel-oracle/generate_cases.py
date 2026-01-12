@@ -1572,6 +1572,8 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
     _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
+    _add_case(cases, prefix="db", tags=["financial", "DB"], formula="=DB(10000, 1000, 5, 1)")
+    _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 300, 10, 0, 1)")
 
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]

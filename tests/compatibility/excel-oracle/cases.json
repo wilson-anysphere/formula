@@ -29158,6 +29158,26 @@
       "id": "ddb_b4f989ebe2ae"
     },
     {
+      "formula": "=DB(10000, 1000, 5, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DB"
+      ],
+      "id": "db_e269ef6b98fa"
+    },
+    {
+      "formula": "=VDB(2400, 300, 10, 0, 1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "VDB"
+      ],
+      "id": "vdb_fc81ac00a5c2"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [
