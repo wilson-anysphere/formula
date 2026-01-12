@@ -4360,6 +4360,21 @@ fn counta_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut count = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if !matches!(v, Value::Empty) {
+                    count += 1;
+                }
+            }
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         // Same strict-numeric slice requirement as `counta_range`.
@@ -4428,6 +4443,21 @@ fn countblank_range_on_sheet(
     }
 
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut non_blank = 0u64;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if !matches!(v, Value::Empty) && !matches!(v, Value::Text(ref s) if s.is_empty()) {
+                    non_blank += 1;
+                }
+            }
+            return Ok(size.saturating_sub(non_blank) as usize);
+        }
+    }
 
     let mut non_blank = 0u64;
     for col in range.col_start..=range.col_end {
@@ -4884,5 +4914,84 @@ mod tests {
         assert_eq!(max_range(&grid, range), Err(ErrorKind::Ref));
 
         assert_eq!(sumproduct_range(&grid, range, range), Err(ErrorKind::Ref));
+    }
+
+    #[test]
+    fn counta_and_countblank_use_sparse_iteration_for_sheet_ranges() {
+        use std::collections::HashMap;
+
+        struct PanicGrid {
+            bounds: (i32, i32),
+            cells_by_sheet: HashMap<usize, Vec<(CellCoord, Value)>>,
+        }
+
+        impl Grid for PanicGrid {
+            fn get_value(&self, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value call (expected sparse iteration)");
+            }
+
+            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn column_slice_on_sheet(
+                &self,
+                _sheet: usize,
+                _col: i32,
+                _row_start: i32,
+                _row_end: i32,
+            ) -> Option<&[f64]> {
+                None
+            }
+
+            fn iter_cells_on_sheet(
+                &self,
+                sheet: usize,
+            ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                self.bounds
+            }
+
+            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+                self.bounds
+            }
+        }
+
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 2),
+            cells_by_sheet: HashMap::from([(
+                0,
+                vec![
+                    (CellCoord { row: 0, col: 0 }, Value::Empty),
+                    (CellCoord { row: 1, col: 0 }, Value::Number(1.0)),
+                    (CellCoord { row: 2, col: 0 }, Value::Text(Arc::from("x"))),
+                    // Empty string is non-empty for COUNTA, blank for COUNTBLANK.
+                    (CellCoord { row: 3, col: 0 }, Value::Text(Arc::from(""))),
+                    // Outside the range (different col).
+                    (CellCoord { row: 1, col: 1 }, Value::Number(2.0)),
+                ],
+            )]),
+        };
+
+        assert_eq!(counta_range_on_sheet(&grid, 0, range), Ok(3));
+        assert_eq!(
+            countblank_range_on_sheet(&grid, 0, range),
+            Ok((range.rows() as usize).saturating_sub(2))
+        );
     }
 }
