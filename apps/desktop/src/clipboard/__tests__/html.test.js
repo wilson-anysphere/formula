@@ -95,3 +95,29 @@ test("clipboard HTML tolerates CF_HTML payloads with incorrect offsets", () => {
   assert.equal(grid[0][0].value, 3);
   assert.equal(grid[0][1].value, 4);
 });
+
+test("clipboard HTML tolerates CF_HTML payloads with truncated offsets (still containing '<table')", () => {
+  let cfHtml = buildCfHtmlPayload("<table><tr><td>5</td><td>6</td></tr></table>");
+
+  const getOffset = (name) => {
+    const m = new RegExp(`${name}:(\\d{8})`).exec(cfHtml);
+    assert.ok(m, `expected ${name} offset`);
+    return Number.parseInt(m[1], 10);
+  };
+
+  const pad8 = (n) => String(n).padStart(8, "0");
+
+  const startFragment = getOffset("StartFragment");
+  const startHTML = getOffset("StartHTML");
+
+  // Truncate the extracted slices so they include the opening <table> but not the closing tag.
+  cfHtml = cfHtml
+    .replace(/EndFragment:\d{8}/, `EndFragment:${pad8(startFragment + 20)}`)
+    .replace(/EndHTML:\d{8}/, `EndHTML:${pad8(startHTML + 80)}`);
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+
+  assert.equal(grid[0][0].value, 5);
+  assert.equal(grid[0][1].value, 6);
+});

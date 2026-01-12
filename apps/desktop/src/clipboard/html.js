@@ -84,13 +84,15 @@ function normalizeClipboardHtml(html) {
     return input.slice(start, end);
   };
 
-  const containsTable = (s) => /<table\b/i.test(s);
+  const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
 
   // Prefer fragment offsets when they look sane, but fall back to StartHTML/EndHTML.
   for (const candidate of [safeSlice(startFragment, endFragment), safeSlice(startHtml, endHtml)]) {
     if (!candidate) continue;
     const stripped = stripToMarkup(candidate);
-    if (containsTable(stripped)) return stripped;
+    // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
+    // contain a full table element so downstream parsing doesn't regress.
+    if (containsCompleteTable(stripped)) return stripped;
   }
 
   // Offsets missing or incorrect; fall back to heuristics on the full payload.
