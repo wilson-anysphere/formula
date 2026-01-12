@@ -73,7 +73,7 @@ inventory::submit! {
 fn thaidigit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |v| {
-        let text = v.coerce_to_string()?;
+        let text = v.coerce_to_string_with_ctx(ctx)?;
         Ok(Value::Text(crate::functions::text::thai::thai_digit(&text)))
     })
 }
@@ -171,7 +171,7 @@ inventory::submit! {
 fn thaistringlength_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |v| {
-        let text = v.coerce_to_string()?;
+        let text = v.coerce_to_string_with_ctx(ctx)?;
         Ok(Value::Number(
             crate::functions::text::thai::thai_string_length(&text) as f64,
         ))
@@ -221,7 +221,7 @@ inventory::submit! {
 fn isthaidigit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |v| {
-        let text = v.coerce_to_string()?;
+        let text = v.coerce_to_string_with_ctx(ctx)?;
         Ok(Value::Bool(crate::functions::text::thai::is_thai_digit(&text)))
     })
 }
@@ -300,4 +300,3 @@ fn excel_error_to_kind(err: ExcelError) -> ErrorKind {
         ExcelError::Num => ErrorKind::Num,
     }
 }
-

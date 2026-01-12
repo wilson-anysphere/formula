@@ -1,4 +1,5 @@
 use formula_engine::Value;
+use formula_engine::locale::ValueLocaleConfig;
 
 use super::harness::{assert_number, TestSheet};
 
@@ -71,8 +72,15 @@ fn isthaidigit_and_thaidigit_roundtrip() {
 }
 
 #[test]
+fn thaidigit_coerces_numbers_using_value_locale() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    // de-DE numeric -> text coercion uses ',' as decimal separator.
+    assert_eq!(sheet.eval("=THAIDIGIT(1.5)"), Value::Text("๑,๕".to_string()));
+}
+
+#[test]
 fn thaistringlength_counts_graphemes() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=THAISTRINGLENGTH(\"เก้า\")"), Value::Number(3.0));
 }
-

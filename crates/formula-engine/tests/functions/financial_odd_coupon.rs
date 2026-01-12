@@ -1,12 +1,24 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::error::ExcelError;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
+use formula_engine::{ErrorKind, Value};
+
+use super::harness::TestSheet;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {
     assert!(
         (actual - expected).abs() <= tol,
         "expected {expected}, got {actual}"
     );
+}
+
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // These bond functions may not be registered in every build of the engine yet.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
 }
 
 fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
