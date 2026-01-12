@@ -7843,7 +7843,9 @@ export class SpreadsheetApp {
             typeof (err as any)?.message === "string" && (err as any).message.trim()
               ? String((err as any).message)
               : "Copy blocked by data loss prevention policy.";
-          showToast(message, "error");
+          // Blocking copy/cut is expected under strict DLP policies; present this as a warning
+          // (rather than an "error") so it reads as a policy restriction instead of a crash.
+          showToast(message, "warning");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
@@ -8060,7 +8062,8 @@ export class SpreadsheetApp {
             typeof (err as any)?.message === "string" && (err as any).message.trim()
               ? String((err as any).message)
               : "Cut blocked by data loss prevention policy.";
-          showToast(message, "error");
+          // See `copySelectionToClipboard` for rationale.
+          showToast(message, "warning");
         } catch {
           // Best-effort: if the toast UI isn't mounted, don't crash clipboard actions.
         }
