@@ -960,6 +960,7 @@ export class CollabSession {
         localUserId: options.cellConflicts.localUserId,
         origin: this.origin,
         localOrigins: this.localOrigins,
+        ignoredOrigins: ignoredConflictOrigins,
         onConflict: options.cellConflicts.onConflict,
         maxOpRecordsPerUser: options.cellConflicts.maxOpRecordsPerUser,
       });

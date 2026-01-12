@@ -49,6 +49,7 @@ export class CellStructuralConflictMonitor {
    * @param {string} opts.localUserId
    * @param {any} [opts.origin]
    * @param {Set<any>} [opts.localOrigins]
+   * @param {Set<any>} [opts.ignoredOrigins] Transaction origins to ignore entirely.
    * @param {(conflict: CellStructuralConflict) => void} opts.onConflict
    * @param {number} [opts.maxOpRecordsPerUser] Maximum number of structural op
    *   records to retain per user in the shared `cellStructuralOps` log.
@@ -58,10 +59,11 @@ export class CellStructuralConflictMonitor {
     this.doc = opts.doc;
     this.cells = opts.cells ?? this.doc.getMap("cells");
     this.localUserId = opts.localUserId;
- 
+  
     this.origin = opts.origin ?? { type: "local" };
     this.localOrigins = opts.localOrigins ?? new Set([this.origin]);
- 
+    this.ignoredOrigins = opts.ignoredOrigins ?? new Set();
+  
     this.onConflict = opts.onConflict;
  
     // Shared operation log used to exchange per-transaction causal metadata
@@ -180,7 +182,9 @@ export class CellStructuralConflictMonitor {
    */
   _onCellsDeepEvent(events, transaction) {
     if (this._isApplyingResolution) return;
- 
+
+    if (this.ignoredOrigins?.has(transaction.origin)) return;
+  
     const isLocal = this.localOrigins.has(transaction.origin);
     if (!isLocal) return;
  
@@ -301,6 +305,7 @@ export class CellStructuralConflictMonitor {
    */
   _onOpsEvent(event, transaction) {
     if (this._isApplyingResolution) return;
+    if (this.ignoredOrigins?.has(transaction.origin)) return;
     if (!event?.changes?.keys) return;
  
     for (const [opId, change] of event.changes.keys.entries()) {

@@ -109,6 +109,7 @@ export function createDesktopCellStructuralConflictMonitor(opts) {
     // Use session origin for conflict resolution writes so they propagate through the binder.
     origin: opts.sessionOrigin,
     localOrigins,
+    ignoredOrigins: new Set([VERSIONING_RESTORE_ORIGIN, BRANCHING_APPLY_ORIGIN]),
     onConflict: opts.onConflict,
     maxOpRecordsPerUser: opts.maxOpRecordsPerUser,
   });

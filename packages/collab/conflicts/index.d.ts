@@ -142,6 +142,11 @@ export class CellStructuralConflictMonitor {
     cells?: Y.Map<any>;
     origin?: any;
     localOrigins?: Set<any>;
+    /**
+     * Transaction origins that should be ignored entirely (no conflicts emitted,
+     * no local-edit tracking updates).
+     */
+    ignoredOrigins?: Set<any>;
     onConflict: (conflict: CellStructuralConflict) => void;
     maxOpRecordsPerUser?: number;
   });
