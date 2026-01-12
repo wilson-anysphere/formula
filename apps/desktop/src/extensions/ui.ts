@@ -89,7 +89,7 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
   const field: HTMLInputElement | HTMLTextAreaElement = (() => {
     if (mode === "textarea") {
       const textarea = document.createElement("textarea");
-      textarea.className = "dialog__field dialog__field--textarea";
+      textarea.className = "dialog__field";
       textarea.value = options.value ?? "";
       if (options.placeHolder) textarea.placeholder = options.placeHolder;
       textarea.rows = Math.max(3, options.rows ?? 10);
