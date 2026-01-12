@@ -3334,7 +3334,7 @@ export class SpreadsheetApp {
    */
   activeCellHasComment(): boolean {
     const cell = this.selection.active;
-    return this.commentMetaByCoord.has(cell.row * COMMENT_COORD_COL_STRIDE + cell.col);
+    return Boolean(this.commentMetaByCoord.get(cell.row * COMMENT_COORD_COL_STRIDE + cell.col));
   }
 
   openInlineAiEdit(): void {
