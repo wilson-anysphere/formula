@@ -1,4 +1,4 @@
-export type ClipboardContent = { text?: string; html?: string; rtf?: string; pngBase64?: string };
+export type ClipboardContent = { text?: string; html?: string; rtf?: string; imagePng?: Uint8Array; pngBase64?: string };
 export type ClipboardWritePayload = { text: string; html?: string; rtf?: string; pngBase64?: string };
 
 export type ClipboardProvider = {
