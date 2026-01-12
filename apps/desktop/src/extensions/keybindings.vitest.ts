@@ -48,6 +48,22 @@ describe("keybindings", () => {
       meta: true,
       key: "k",
     });
+
+    expect(parseKeybinding("cmd", "win+shift+k")).toMatchObject({
+      ctrl: false,
+      alt: false,
+      shift: true,
+      meta: true,
+      key: "k",
+    });
+
+    expect(parseKeybinding("cmd", "super+shift+k")).toMatchObject({
+      ctrl: false,
+      alt: false,
+      shift: true,
+      meta: true,
+      key: "k",
+    });
   });
 
   it("matchesKeybinding handles special keys (space/escape)", () => {

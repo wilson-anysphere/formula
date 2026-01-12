@@ -63,7 +63,7 @@ export function parseKeybinding(command: string, binding: string, when: string |
     if (part === "ctrl" || part === "control") out.ctrl = true;
     else if (part === "shift") out.shift = true;
     else if (part === "alt" || part === "option") out.alt = true;
-    else if (part === "cmd" || part === "command" || part === "meta") out.meta = true;
+    else if (part === "cmd" || part === "command" || part === "meta" || part === "win" || part === "super") out.meta = true;
   }
 
   return out;
