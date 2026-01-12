@@ -759,7 +759,9 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
             // PROJECTCODEPAGE (u16 LE): Windows-1252.
             push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
 
-            for module in [b"FormB".as_slice(), b"FormA".as_slice()] {
+            // Intentionally *not* in PROJECT stream order to ensure BaseClass ordering is derived
+            // from PROJECT, not from VBA/dir module record group order.
+            for module in [b"FormA".as_slice(), b"FormB".as_slice()] {
                 push_record(&mut out, 0x0019, module); // MODULENAME
                 let mut stream_name = Vec::new();
                 stream_name.extend_from_slice(module);
