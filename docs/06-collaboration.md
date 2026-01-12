@@ -261,8 +261,10 @@ type Sheet = {
   id: string;
   name: string | null;
   view?: SheetViewState;
+  // Additional per-sheet metadata tracked by `@formula/collab-workbook` + BranchService.
+  visibility?: "visible" | "hidden" | "veryHidden";
+  tabColor?: string | null; // 8-digit ARGB hex (e.g. "FFFF0000")
 } & SheetFormatDefaults;
-};
 ```
 
 Implementation references:
