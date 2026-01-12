@@ -854,9 +854,12 @@ fn main() {
         //  3) Added to the explicit JS invoke allowlist in
         //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
         //
-        // Keep this list minimal: the desktop test
-        // `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the
-        // `generate_handler![...]` list matches the frontend's `invoke("...")` usage.
+        // Guardrails:
+        // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this
+        //   `generate_handler![...]` list matches `src-tauri/permissions/allow-invoke.json`.
+        // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts
+        //   `core:allow-invoke` (in `src-tauri/capabilities/main.json`) is scoped and matches the
+        //   frontend's `invoke("...")` usage.
         //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
         // external URL opening goes through the `open_external_url` Rust command which enforces a
