@@ -263,7 +263,8 @@ describe("MarketplacePanel", () => {
     await waitFor(() => Boolean(document.querySelector('[data-testid="toast"][data-type="error"]')));
     const toast = document.querySelector<HTMLElement>('[data-testid="toast"][data-type="error"]');
     expect(toast?.textContent).toContain("cancelled");
-    await waitFor(() => container.textContent?.toLowerCase().includes("error") ?? false);
+    // The panel rerenders after the error so the user can retry install.
+    await waitFor(() => Boolean(container.querySelector('[data-testid="marketplace-install-formula.sample-hello"]')));
   });
 
   it("restores action buttons when the update check finds no updates", async () => {

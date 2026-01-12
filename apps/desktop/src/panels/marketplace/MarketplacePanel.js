@@ -324,6 +324,14 @@ async function renderSearchResults({
                 console.error(error);
                 tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                }).catch(() => {});
               }
             },
           },
@@ -458,6 +466,14 @@ async function renderSearchResults({
                   console.error(error);
                   tryShowToast(String(error?.message ?? error), "error");
                   actions.textContent = `Error: ${String(error?.message ?? error)}`;
+                  await renderSearchResults({
+                    container,
+                    marketplaceClient,
+                    extensionManager,
+                    extensionHostManager,
+                    query,
+                    transientStatusById,
+                  }).catch(() => {});
                 }
               },
             },
@@ -502,6 +518,14 @@ async function renderSearchResults({
                 console.error(error);
                 tryShowToast(String(error?.message ?? error), "error");
                 actions.textContent = `Error: ${String(error?.message ?? error)}`;
+                await renderSearchResults({
+                  container,
+                  marketplaceClient,
+                  extensionManager,
+                  extensionHostManager,
+                  query,
+                  transientStatusById,
+                }).catch(() => {});
               }
             },
           },
