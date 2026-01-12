@@ -16,8 +16,25 @@ export type AlertDialogOptions = {
   title?: string;
 };
 
+import { showQuickPick } from "../extensions/ui.js";
+
 type TauriDialogConfirm = (message: string, options?: Record<string, unknown>) => Promise<boolean>;
 type TauriDialogMessage = (message: string, options?: Record<string, unknown>) => Promise<void>;
+
+function isNativeDialogFn(fn: unknown): boolean {
+  if (typeof fn !== "function") return false;
+  try {
+    // Native browser implementations typically include `[native code]` in their
+    // Function#toString output. Avoid calling those because they block the UI
+    // thread. (In unit tests, `window.confirm` is often stubbed with `vi.fn()`
+    // which does not include `[native code]`, and is safe to call synchronously.)
+    const text = Function.prototype.toString.call(fn);
+    return /\[native code\]/.test(text);
+  } catch {
+    // Be conservative: if we cannot inspect it, assume it's native.
+    return true;
+  }
+}
 
 function getTauriDialogApi():
   | {
@@ -36,6 +53,8 @@ function getWindowConfirm(): ((message: string) => boolean) | null {
   const win = (globalThis as any).window as unknown;
   const confirmFn = (win as any)?.confirm as ((message: string) => boolean) | undefined;
   if (typeof confirmFn !== "function") return null;
+  // Avoid calling the browser-native confirm dialog (blocks the UI thread).
+  if (isNativeDialogFn(confirmFn)) return null;
   return (message: string) => confirmFn.call(win, message);
 }
 
@@ -43,6 +62,8 @@ function getWindowAlert(): ((message: string) => void) | null {
   const win = (globalThis as any).window as unknown;
   const alertFn = (win as any)?.alert as ((message: string) => void) | undefined;
   if (typeof alertFn !== "function") return null;
+  // Avoid calling the browser-native alert dialog (blocks the UI thread).
+  if (isNativeDialogFn(alertFn)) return null;
   return (message: string) => alertFn.call(win, message);
 }
 
@@ -71,6 +92,22 @@ export async function confirm(message: string, opts: ConfirmDialogOptions = {}):
     }
   }
 
+  // Web fallback: use a non-blocking <dialog>-based quick pick instead of the
+  // browser-native `window.confirm` dialog.
+  if (typeof document !== "undefined" && document.body) {
+    const okLabel = dialogOpts.okLabel ?? "OK";
+    const cancelLabel = dialogOpts.cancelLabel ?? "Cancel";
+    const prefix = dialogOpts.title ? `${dialogOpts.title}: ` : "";
+    const choice = await showQuickPick(
+      [
+        { label: okLabel, value: true },
+        { label: cancelLabel, value: false },
+      ],
+      { placeHolder: `${prefix}${message}` },
+    );
+    return choice === true;
+  }
+
   // Non-browser environment (e.g. unit tests) without a stubbed `window.confirm`.
   // Default to `false` to avoid accidentally confirming destructive actions.
   return fallback;
@@ -96,5 +133,16 @@ export async function alert(message: string, opts: AlertDialogOptions = {}): Pro
       // Some test/host environments (e.g. jsdom) define `window.alert` but throw
       // a "Not implemented" error. Ignore and continue.
     }
+    return;
+  }
+
+  // Web fallback: use a non-blocking <dialog>-based quick pick instead of the
+  // browser-native `window.alert` dialog.
+  if (typeof document !== "undefined" && document.body) {
+    const prefix = opts.title ? `${opts.title}: ` : "";
+    const dialogMessage = `${prefix}${message}`;
+    const okLabel = "OK";
+    // Reuse the quick-pick dialog styling so we don't need a dedicated alert UI.
+    await showQuickPick([{ label: okLabel, value: true }], { placeHolder: dialogMessage });
   }
 }
