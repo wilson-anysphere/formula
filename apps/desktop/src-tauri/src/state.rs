@@ -4596,6 +4596,140 @@ mod tests {
     }
 
     #[test]
+    fn xlsx_sheet_visibility_and_tab_color_surface_in_workbook_info() {
+        use formula_model::{SheetVisibility, TabColor};
+
+        let mut model = formula_model::Workbook::new();
+        let visible_id = model.add_sheet("Visible").expect("add sheet");
+        let hidden_id = model.add_sheet("Hidden").expect("add sheet");
+        let very_hidden_id = model.add_sheet("VeryHidden").expect("add sheet");
+
+        model.sheet_mut(visible_id).expect("sheet").visibility = SheetVisibility::Visible;
+        model.sheet_mut(hidden_id).expect("sheet").visibility = SheetVisibility::Hidden;
+        model.sheet_mut(very_hidden_id).expect("sheet").visibility = SheetVisibility::VeryHidden;
+        model.sheet_mut(hidden_id).expect("sheet").tab_color = Some(TabColor::rgb("FFFF0000"));
+
+        let mut buf = std::io::Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp.path().join("sheet-metadata.xlsx");
+        std::fs::write(&xlsx_path, buf.into_inner()).expect("write xlsx file");
+
+        let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
+        let mut state = AppState::new();
+        let info = state.load_workbook(workbook);
+
+        let visible = info
+            .sheets
+            .iter()
+            .find(|s| s.name == "Visible")
+            .expect("Visible sheet");
+        assert_eq!(visible.visibility, SheetVisibility::Visible);
+        assert_eq!(visible.tab_color, None);
+
+        let hidden = info
+            .sheets
+            .iter()
+            .find(|s| s.name == "Hidden")
+            .expect("Hidden sheet");
+        assert_eq!(hidden.visibility, SheetVisibility::Hidden);
+        assert_eq!(
+            hidden.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+            Some("FFFF0000")
+        );
+
+        let very_hidden = info
+            .sheets
+            .iter()
+            .find(|s| s.name == "VeryHidden")
+            .expect("VeryHidden sheet");
+        assert_eq!(very_hidden.visibility, SheetVisibility::VeryHidden);
+        assert_eq!(very_hidden.tab_color, None);
+    }
+
+    #[test]
+    fn sheet_metadata_round_trips_through_patch_based_save() {
+        use formula_model::{SheetVisibility, TabColor};
+
+        let mut model = formula_model::Workbook::new();
+        let _ = model.add_sheet("Sheet1").expect("add sheet");
+        let _ = model.add_sheet("Sheet2").expect("add sheet");
+        let _ = model.add_sheet("Sheet3").expect("add sheet");
+
+        let mut buf = std::io::Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let xlsx_path = tmp.path().join("base.xlsx");
+        std::fs::write(&xlsx_path, buf.into_inner()).expect("write xlsx file");
+
+        let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
+            .expect("hide Sheet2");
+        state
+            .set_sheet_visibility("Sheet3", SheetVisibility::VeryHidden)
+            .expect("very-hide Sheet3");
+        state
+            .set_sheet_tab_color("Sheet2", Some(TabColor::rgb("FF00FF00")))
+            .expect("set tab color");
+
+        let out_path = tmp.path().join("saved.xlsx");
+        let workbook = state.get_workbook().expect("workbook").clone();
+        let saved_bytes = write_xlsx_blocking(&out_path, &workbook).expect("save xlsx");
+
+        let reparsed = formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(
+            saved_bytes.as_ref(),
+        ))
+        .expect("re-read saved workbook");
+
+        let sheet2 = reparsed
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet2")
+            .expect("Sheet2");
+        assert_eq!(sheet2.visibility, SheetVisibility::Hidden);
+        assert_eq!(
+            sheet2.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+            Some("FF00FF00")
+        );
+
+        let sheet3 = reparsed
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet3")
+            .expect("Sheet3");
+        assert_eq!(sheet3.visibility, SheetVisibility::VeryHidden);
+    }
+
+    #[test]
+    fn set_sheet_visibility_rejects_hiding_last_visible_sheet() {
+        use formula_model::SheetVisibility;
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
+            .expect("hide Sheet2");
+        let err = state
+            .set_sheet_visibility("Sheet1", SheetVisibility::VeryHidden)
+            .expect_err("expected hiding last visible sheet to fail");
+        assert!(
+            err.to_string().contains("last visible"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn mark_saved_treats_xltm_as_xlsx_family_for_origin_bookkeeping() {
         let old_bytes = Arc::<[u8]>::from(vec![1u8, 2, 3]);
         let new_bytes = Arc::<[u8]>::from(vec![9u8, 8, 7]);
