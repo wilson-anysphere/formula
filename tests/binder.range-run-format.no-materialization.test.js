@@ -204,3 +204,55 @@ test("binder: collab undo/redo reverts range-run formatting changes (formatRunsB
     ydoc.destroy();
   }
 });
+
+test("binder: hydrates range-run formatting from tuple/array encodings of formatRunsByCol", async () => {
+  const ydoc = new Y.Doc();
+  const cells = ydoc.getMap("cells");
+  const sheets = ydoc.getArray("sheets");
+
+  // Seed a default Sheet1 entry where `formatRunsByCol` is stored in a legacy
+  // tuple-array form rather than a Y.Map keyed by column strings.
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("formatRunsByCol", [
+      [
+        0,
+        {
+          runs: [
+            { startRow: 0, endRowExclusive: 3, format: { font: { italic: true } } },
+            { startRow: 10, endRowExclusive: 12, format: { font: { italic: true } } },
+          ],
+        },
+      ],
+    ]);
+    sheets.push([sheet]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1", userId: "u-a" });
+
+  try {
+    await waitForCondition(() => Boolean(documentController.getCellFormat("Sheet1", "A1")?.font?.italic));
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.italic, true);
+    assert.equal(documentController.getCellFormat("Sheet1", "A11")?.font?.italic, true);
+
+    // Rows outside the runs should not be styled.
+    assert.equal(documentController.getCellFormat("Sheet1", "A5")?.font?.italic, undefined);
+
+    // Ensure the formatting hydrated into DocumentController's range-run layer.
+    const runs = documentController.model.sheets.get("Sheet1")?.formatRunsByCol?.get?.(0) ?? [];
+    assert.ok(Array.isArray(runs) && runs.length > 0);
+    const styleId = runs[0]?.styleId ?? 0;
+    assert.ok(Number.isInteger(styleId) && styleId > 0);
+    assert.equal(documentController.styleTable.get(styleId)?.font?.italic, true);
+
+    // No per-cell materialization should occur.
+    assert.equal(cells.size, 0);
+    assert.equal(documentController.model?.sheets?.get?.("Sheet1")?.cells?.size ?? 0, 0);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
