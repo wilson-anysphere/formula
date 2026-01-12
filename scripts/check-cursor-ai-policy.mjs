@@ -414,6 +414,7 @@ async function walkDir(absoluteDir, rootDir, onFile) {
 export async function checkCursorAiPolicy(options = {}) {
   const rootDir = options.rootDir ? path.resolve(options.rootDir) : DEFAULT_REPO_ROOT;
   const includedDirs = options.includedDirs ?? INCLUDED_DIRS;
+  const restrictToIncludedDirs = Array.isArray(options.includedDirs);
   const maxViolations = options.maxViolations ?? 50;
 
   /** @type {Violation[]} */
@@ -529,20 +530,23 @@ export async function checkCursorAiPolicy(options = {}) {
     }
   }
 
-  const includedDirPrefixes = includedDirs.map((d) => (d.endsWith("/") ? d : `${d}/`));
-
   const tracked = listGitTrackedFiles(rootDir);
   if (tracked) {
+    const includedDirPrefixes = restrictToIncludedDirs
+      ? includedDirs.map((d) => (d.endsWith("/") ? d : `${d}/`))
+      : [];
     for (const rel of tracked) {
       if (violations.length >= maxViolations) break;
-      // Always scan root-level files; scan included directories by prefix.
-      const isRootFile = !rel.includes("/");
-      const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
-      if (!isRootFile && !isInIncludedDir) continue;
+      if (restrictToIncludedDirs) {
+        // Always scan root-level files; scan included directories by prefix.
+        const isRootFile = !rel.includes("/");
+        const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
+        if (!isRootFile && !isInIncludedDir) continue;
+      }
       await scanFile(path.join(rootDir, rel));
     }
   } else {
-      const dirsToScan = [];
+    const dirsToScan = [];
       for (const dir of includedDirs) {
         const abs = path.join(rootDir, dir);
         try {

@@ -138,6 +138,28 @@ test(
   },
 );
 
+test(
+  "cursor AI policy guard scans all git-tracked files (even outside the default scan roots)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-extra-dir-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "extra/notes.js", 'const provider = "OpenAI";\n');
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "extra/notes.js"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const proc = runPolicy(tmpRoot);
+      assert.notEqual(proc.status, 0);
+      assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
   try {
