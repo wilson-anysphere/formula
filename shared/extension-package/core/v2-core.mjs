@@ -8,7 +8,6 @@
 //
 // Keep this file in sync with `v2-core.js` (CommonJS). The implementations are
 // intentionally identical; only the export style differs.
-
 const PACKAGE_FORMAT_VERSION = 2;
 
 const TAR_BLOCK_SIZE = 512;
@@ -316,4 +315,3 @@ export default {
   normalizePath,
   readExtensionPackageV2
 };
-

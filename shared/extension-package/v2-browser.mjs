@@ -1,4 +1,9 @@
-import v2Core from "./core/v2-core.mjs";
+import * as v2CoreImport from "./core/v2-core.mjs";
+
+// `v2-core.js` is authored as CommonJS (shared with Node tooling). When served through Vite it may
+// expose only named exports (no `default` export). Normalize to a single object so browser builds
+// can consume it reliably.
+const v2Core = v2CoreImport.default ?? v2CoreImport;
 
 const {
   PACKAGE_FORMAT_VERSION,

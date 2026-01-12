@@ -3928,6 +3928,7 @@ pub async fn read_clipboard(
         tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
             .await
             .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -3966,6 +3967,370 @@ pub async fn write_clipboard(
     }
 }
 
+// -----------------------------------------------------------------------------
+// Network + Marketplace proxy (desktop webview)
+//
+// Desktop extensions and the in-webview marketplace client run inside the Tauri WebView, which is
+// governed by the app CSP (including `connect-src`). We keep `connect-src` locked down (no outbound
+// http(s) from the WebView) so the extension permission system cannot be bypassed via direct
+// `fetch()` / `WebSocket` calls.
+//
+// To still enable outbound HTTP(S) in production builds, the webview calls these Tauri commands and
+// the Rust backend performs the network request.
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkFetchResult {
+    pub ok: bool,
+    pub status: u16,
+    pub status_text: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body_text: String,
+}
+
+#[cfg(feature = "desktop")]
+fn normalize_header_value(value: &JsonValue) -> String {
+    match value {
+        JsonValue::String(s) => s.to_string(),
+        JsonValue::Number(n) => n.to_string(),
+        JsonValue::Bool(b) => b.to_string(),
+        JsonValue::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+#[cfg(feature = "desktop")]
+fn apply_request_init(
+    mut builder: reqwest::RequestBuilder,
+    init: &JsonValue,
+) -> Result<reqwest::RequestBuilder, String> {
+    if let Some(headers_val) = init.get("headers") {
+        if let Some(map) = headers_val.as_object() {
+            for (k, v) in map {
+                builder = builder.header(k, normalize_header_value(v));
+            }
+        } else if let Some(arr) = headers_val.as_array() {
+            for entry in arr {
+                let Some(pair) = entry.as_array() else {
+                    continue;
+                };
+                if pair.len() < 2 {
+                    continue;
+                }
+                let key = pair[0].as_str().unwrap_or("").to_string();
+                if key.trim().is_empty() {
+                    continue;
+                }
+                builder = builder.header(key, normalize_header_value(&pair[1]));
+            }
+        }
+    }
+
+    if let Some(body_val) = init.get("body") {
+        if !body_val.is_null() {
+            if let Some(body_str) = body_val.as_str() {
+                builder = builder.body(body_str.to_string());
+            } else {
+                // Best-effort: serialize non-string bodies (e.g. objects) as JSON.
+                builder = builder.body(body_val.to_string());
+            }
+        }
+    }
+
+    Ok(builder)
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn network_fetch(url: String, init: Option<JsonValue>) -> Result<NetworkFetchResult, String> {
+    use reqwest::Method;
+
+    let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
+    match parsed_url.scheme() {
+        "http" | "https" => {}
+        other => {
+            return Err(format!(
+                "Unsupported url scheme for network_fetch: {other} (only http/https allowed)"
+            ));
+        }
+    }
+
+    let init = init.unwrap_or(JsonValue::Null);
+    let method = init
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_uppercase();
+    let method = Method::from_bytes(method.as_bytes())
+        .map_err(|_| format!("Unsupported method: {method}"))?;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut req = client.request(method, parsed_url);
+    req = apply_request_init(req, &init)?;
+
+    let response = req.send().await.map_err(|e| e.to_string())?;
+    let status = response.status();
+    let status_text = status.canonical_reason().unwrap_or("").to_string();
+    let final_url = response.url().to_string();
+
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                v.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let body_text = String::from_utf8_lossy(&bytes).to_string();
+
+    Ok(NetworkFetchResult {
+        ok: status.is_success(),
+        status: status.as_u16(),
+        status_text,
+        url: final_url,
+        headers,
+        body_text,
+    })
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceSearchArgs {
+    pub base_url: String,
+    pub q: Option<String>,
+    pub category: Option<String>,
+    pub tag: Option<String>,
+    pub verified: Option<bool>,
+    pub featured: Option<bool>,
+    pub sort: Option<String>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub cursor: Option<String>,
+}
+
+#[cfg(feature = "desktop")]
+fn parse_marketplace_base_url(base_url: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(base_url).map_err(|_| {
+        "Marketplace baseUrl must be an absolute http(s) URL when running under Tauri".to_string()
+    })?;
+    match url.scheme() {
+        "http" | "https" => Ok(url),
+        other => Err(format!(
+            "Marketplace baseUrl must be http or https (got '{other}')"
+        )),
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn marketplace_search(args: MarketplaceSearchArgs) -> Result<JsonValue, String> {
+    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "Invalid marketplace baseUrl".to_string())?;
+        segments.push("search");
+    }
+
+    {
+        let mut qp = url.query_pairs_mut();
+        if let Some(v) = args.q.as_deref().filter(|s| !s.trim().is_empty()) {
+            qp.append_pair("q", v);
+        }
+        if let Some(v) = args.category.as_deref().filter(|s| !s.trim().is_empty()) {
+            qp.append_pair("category", v);
+        }
+        if let Some(v) = args.tag.as_deref().filter(|s| !s.trim().is_empty()) {
+            qp.append_pair("tag", v);
+        }
+        if let Some(v) = args.verified {
+            qp.append_pair("verified", if v { "true" } else { "false" });
+        }
+        if let Some(v) = args.featured {
+            qp.append_pair("featured", if v { "true" } else { "false" });
+        }
+        if let Some(v) = args.sort.as_deref().filter(|s| !s.trim().is_empty()) {
+            qp.append_pair("sort", v);
+        }
+        if let Some(v) = args.limit {
+            qp.append_pair("limit", &v.to_string());
+        }
+        if let Some(v) = args.offset {
+            qp.append_pair("offset", &v.to_string());
+        }
+        if let Some(v) = args.cursor.as_deref().filter(|s| !s.trim().is_empty()) {
+            qp.append_pair("cursor", v);
+        }
+    }
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("Marketplace search failed ({})", response.status()));
+    }
+    response.json::<JsonValue>().await.map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceGetExtensionArgs {
+    pub base_url: String,
+    pub id: String,
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn marketplace_get_extension(
+    args: MarketplaceGetExtensionArgs,
+) -> Result<Option<JsonValue>, String> {
+    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "Invalid marketplace baseUrl".to_string())?;
+        segments.push("extensions");
+        segments.push(args.id.trim());
+    }
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if response.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Marketplace getExtension failed ({})",
+            response.status()
+        ));
+    }
+    let json = response.json::<JsonValue>().await.map_err(|e| e.to_string())?;
+    Ok(Some(json))
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceDownloadArgs {
+    pub base_url: String,
+    pub id: String,
+    pub version: String,
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketplaceDownloadPayload {
+    pub bytes_base64: String,
+    pub signature_base64: Option<String>,
+    pub sha256: Option<String>,
+    pub format_version: Option<u32>,
+    pub publisher: Option<String>,
+    pub publisher_key_id: Option<String>,
+    pub scan_status: Option<String>,
+    pub files_sha256: Option<String>,
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn marketplace_download_package(
+    args: MarketplaceDownloadArgs,
+) -> Result<Option<MarketplaceDownloadPayload>, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let mut url = parse_marketplace_base_url(&args.base_url)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| "Invalid marketplace baseUrl".to_string())?;
+        segments.push("extensions");
+        segments.push(args.id.trim());
+        segments.push("download");
+        segments.push(args.version.trim());
+    }
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if response.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Marketplace download failed ({})",
+            response.status()
+        ));
+    }
+
+    let signature_base64 = response
+        .headers()
+        .get("x-package-signature")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let sha256 = response
+        .headers()
+        .get("x-package-sha256")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let format_version = response
+        .headers()
+        .get("x-package-format-version")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u32>().ok());
+    let publisher = response
+        .headers()
+        .get("x-publisher")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let publisher_key_id = response
+        .headers()
+        .get("x-publisher-key-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let scan_status = response
+        .headers()
+        .get("x-package-scan-status")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let files_sha256 = response
+        .headers()
+        .get("x-package-files-sha256")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+    let bytes_base64 = STANDARD.encode(bytes);
+
+    Ok(Some(MarketplaceDownloadPayload {
+        bytes_base64,
+        signature_base64,
+        sha256,
+        format_version,
+        publisher,
+        publisher_key_id,
+        scan_status,
+        files_sha256,
+    }))
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -100,7 +100,7 @@ The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.jso
 Current policy (exact):
 
 ```text
-default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: ws: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* blob: data:
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob: data:; child-src 'self' blob: data:; connect-src 'self' blob: data:
 ```
 
 Rationale:
@@ -113,10 +113,25 @@ Rationale:
 - Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
   to avoid blocking the iframe load.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
-- `connect-src` stays narrow but must allow:
-  - `https:` for remote APIs and user-driven Power Query fetches.
-  - `ws:` / `wss:` for WebSocket connections (e.g. collaboration, or local services).
-  - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for local development services and user-driven fetches to local endpoints.
+- `connect-src` stays locked down (`'self' blob: data:`). Outbound HTTP(S) is performed by the Rust backend and exposed to the
+  WebView via Tauri IPC (see “Network strategy” below).
+
+### Network strategy (extensions + marketplace)
+
+We keep a strict desktop CSP that blocks the WebView from making arbitrary outbound `fetch()` / `WebSocket` requests so:
+
+- extensions cannot bypass the extension host permission system by directly calling browser networking primitives
+- the Marketplace UI does not depend on the Marketplace service setting permissive CORS headers for the Tauri origin
+
+Instead, outbound HTTP(S) is performed by the Rust backend and exposed to the WebView via Tauri IPC commands:
+
+- `network_fetch` — used by the browser extension host to implement `formula.network.fetch(...)` under CSP
+- `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package` — used by the Marketplace client
+
+This pattern keeps `connect-src` locked down in production while still enabling:
+
+- installing extensions from a remote Marketplace
+- running extensions that have been granted the `network` permission
 
 ### Tauri v2 capabilities (permissions)
 

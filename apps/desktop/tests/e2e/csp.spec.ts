@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import crypto from "node:crypto";
+import http from "node:http";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,7 @@ const signingPkg: any = requireFromHere("../../../../shared/crypto/signing.js");
 const extensionPackagePkg: any = requireFromHere("../../../../shared/extension-package/index.js");
 
 const { generateEd25519KeyPair } = signingPkg;
-const { createExtensionPackageV2, readExtensionPackageV2 } = extensionPackagePkg;
+const { createExtensionPackageV2, readExtensionPackageV2, verifyExtensionPackageV2 } = extensionPackagePkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +43,33 @@ function getCspDirectiveSources(cspHeader: string, directive: string): string[] 
     .filter(Boolean);
 }
 
+function startHttpServer(
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void
+): Promise<{ origin: string; close: () => Promise<void> }> {
+  const server = http.createServer(handler);
+
+  return new Promise((resolve, reject) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (!addr || typeof addr === "string") {
+        reject(new Error("Failed to bind HTTP server"));
+        return;
+      }
+      resolve({
+        origin: `http://127.0.0.1:${addr.port}`,
+        close: () =>
+          new Promise((resolveClose, rejectClose) => {
+            server.close((err) => {
+              if (err) rejectClose(err);
+              else resolveClose();
+            });
+          })
+      });
+    });
+    server.on("error", reject);
+  });
+}
+
 test.describe("Content Security Policy (Tauri parity)", () => {
   test("startup has no CSP violations and allows WASM-in-worker execution", async ({ page }) => {
     const cspViolations: string[] = [];
@@ -61,13 +89,14 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
     const connectSrc = getCspDirectiveSources(String(cspHeader), "connect-src");
-    expect(connectSrc, "CSP `connect-src` should allow remote APIs, collab, and loopback providers").toContain("'self'");
-    expect(connectSrc).toContain("https:");
-    expect(connectSrc).toContain("wss:");
-    expect(connectSrc).toContain("http://localhost:*");
-    expect(connectSrc).toContain("http://127.0.0.1:*");
-    expect(connectSrc).toContain("ws://localhost:*");
-    expect(connectSrc).toContain("ws://127.0.0.1:*");
+    expect(connectSrc, "CSP `connect-src` should be locked down in desktop builds").toContain("'self'");
+    expect(connectSrc).toContain("blob:");
+    expect(connectSrc).not.toContain("https:");
+    expect(connectSrc).not.toContain("wss:");
+    expect(connectSrc).not.toContain("http://localhost:*");
+    expect(connectSrc).not.toContain("http://127.0.0.1:*");
+    expect(connectSrc).not.toContain("ws://localhost:*");
+    expect(connectSrc).not.toContain("ws://127.0.0.1:*");
 
     // The CSP smoke test doesn't need the full UI to render; it only needs the
     // document to load so we can validate WASM + Worker execution under the
@@ -132,6 +161,315 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(workerAnswer).toBe(42);
 
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
+
+  test("marketplace install + extension network.fetch works under production CSP via Tauri proxy", async ({ page }) => {
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    const keyPair = generateEd25519KeyPair();
+    const packageBytes: Buffer = await createExtensionPackageV2(path.join(repoRoot, "extensions/sample-hello"), {
+      privateKeyPem: keyPair.privateKeyPem
+    });
+
+    const pkgSha256 = crypto.createHash("sha256").update(packageBytes).digest("hex");
+    const verified = verifyExtensionPackageV2(packageBytes, keyPair.publicKeyPem);
+    const filesSha256 = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(verified.files || []), "utf8")
+      .digest("hex");
+
+    const now = new Date().toISOString();
+    const extensionId = "formula.sample-hello";
+
+    const marketplaceServer = await startHttpServer((req, res) => {
+      const url = new URL(req.url || "/", "http://localhost");
+      const method = req.method || "GET";
+
+      // Minimal Marketplace API used by MarketplaceClient.
+      if (method === "GET" && url.pathname === "/api/search") {
+        const body = JSON.stringify({
+          total: 1,
+          results: [
+            {
+              id: extensionId,
+              name: "sample-hello",
+              displayName: "Sample Hello",
+              publisher: "formula",
+              description: "Sample extension",
+              latestVersion: "1.0.0",
+              verified: true,
+              featured: false,
+              categories: [],
+              tags: [],
+              screenshots: [],
+              downloadCount: 1,
+              updatedAt: now
+            }
+          ],
+          nextCursor: null
+        });
+
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(body);
+        return;
+      }
+
+      if (method === "GET" && url.pathname === `/api/extensions/${encodeURIComponent(extensionId)}`) {
+        const body = JSON.stringify({
+          id: extensionId,
+          name: "sample-hello",
+          displayName: "Sample Hello",
+          publisher: "formula",
+          description: "Sample extension",
+          latestVersion: "1.0.0",
+          verified: true,
+          featured: false,
+          categories: [],
+          tags: [],
+          screenshots: [],
+          downloadCount: 1,
+          updatedAt: now,
+          versions: [
+            {
+              version: "1.0.0",
+              sha256: pkgSha256,
+              uploadedAt: now,
+              yanked: false,
+              formatVersion: 2
+            }
+          ],
+          readme: "Sample Hello",
+          publisherPublicKeyPem: keyPair.publicKeyPem,
+          createdAt: now,
+          deprecated: false,
+          blocked: false,
+          malicious: false
+        });
+
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(body);
+        return;
+      }
+
+      if (
+        method === "GET" &&
+        url.pathname === `/api/extensions/${encodeURIComponent(extensionId)}/download/1.0.0`
+      ) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/octet-stream");
+        res.setHeader("x-package-format-version", "2");
+        res.setHeader("x-package-sha256", pkgSha256);
+        res.setHeader("x-package-signature", verified.signatureBase64);
+        res.setHeader("x-publisher", "formula");
+        res.setHeader("x-package-scan-status", "passed");
+        res.setHeader("x-package-files-sha256", filesSha256);
+        res.end(packageBytes);
+        return;
+      }
+
+      res.statusCode = 404;
+      res.setHeader("content-type", "text/plain");
+      res.end("not found");
+    });
+
+    const networkServer = await startHttpServer((req, res) => {
+      const url = new URL(req.url || "/", "http://localhost");
+      if (req.method === "GET" && url.pathname === "/hello") {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/plain");
+        res.end("hello from network");
+        return;
+      }
+      res.statusCode = 404;
+      res.setHeader("content-type", "text/plain");
+      res.end("not found");
+    });
+
+    try {
+      await page.exposeFunction("__TAURI_INVOKE__", async (cmd: string, args: any) => {
+        const joinMarketplaceUrl = (segments: string[], searchParams?: Record<string, string>) => {
+          const baseUrl = String(args?.baseUrl ?? "");
+          const u = new URL(baseUrl);
+          const basePath = u.pathname.replace(/\/+$/, "");
+          u.pathname = `${basePath}/${segments.map((s) => encodeURIComponent(String(s))).join("/")}`;
+          u.search = "";
+          if (searchParams) {
+            for (const [k, v] of Object.entries(searchParams)) {
+              if (v === undefined || v === null || String(v).trim().length === 0) continue;
+              u.searchParams.set(k, String(v));
+            }
+          }
+          return u.toString();
+        };
+
+        switch (cmd) {
+          case "network_fetch": {
+            const response = await fetch(String(args?.url ?? ""), args?.init ?? undefined);
+            const bodyText = await response.text();
+            return {
+              ok: response.ok,
+              status: response.status,
+              statusText: response.statusText,
+              url: response.url,
+              headers: Array.from(response.headers.entries()),
+              bodyText
+            };
+          }
+
+          case "marketplace_search": {
+            const url = joinMarketplaceUrl(["search"], {
+              q: args?.q,
+              category: args?.category,
+              tag: args?.tag,
+              verified: args?.verified === undefined ? "" : args.verified ? "true" : "false",
+              featured: args?.featured === undefined ? "" : args.featured ? "true" : "false",
+              sort: args?.sort,
+              limit: args?.limit === undefined ? "" : String(args.limit),
+              offset: args?.offset === undefined ? "" : String(args.offset),
+              cursor: args?.cursor
+            });
+            const response = await fetch(url);
+            if (!response.ok) {
+              throw new Error(`marketplace_search failed (${response.status})`);
+            }
+            return response.json();
+          }
+
+          case "marketplace_get_extension": {
+            const url = joinMarketplaceUrl(["extensions", String(args?.id ?? "")]);
+            const response = await fetch(url);
+            if (response.status === 404) return null;
+            if (!response.ok) {
+              throw new Error(`marketplace_get_extension failed (${response.status})`);
+            }
+            return response.json();
+          }
+
+          case "marketplace_download_package": {
+            const url = joinMarketplaceUrl([
+              "extensions",
+              String(args?.id ?? ""),
+              "download",
+              String(args?.version ?? "")
+            ]);
+            const response = await fetch(url);
+            if (response.status === 404) return null;
+            if (!response.ok) {
+              throw new Error(`marketplace_download_package failed (${response.status})`);
+            }
+            const buf = Buffer.from(await response.arrayBuffer());
+            return {
+              bytesBase64: buf.toString("base64"),
+              signatureBase64: response.headers.get("x-package-signature"),
+              sha256: response.headers.get("x-package-sha256"),
+              formatVersion: response.headers.get("x-package-format-version")
+                ? Number.parseInt(String(response.headers.get("x-package-format-version")), 10)
+                : null,
+              publisher: response.headers.get("x-publisher"),
+              publisherKeyId: response.headers.get("x-publisher-key-id"),
+              scanStatus: response.headers.get("x-package-scan-status"),
+              filesSha256: response.headers.get("x-package-files-sha256")
+            };
+          }
+
+          default:
+            throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+        }
+      });
+
+      const response = await page.goto("/");
+      const cspHeader = response?.headers()["content-security-policy"];
+      expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+      await expect(page.locator("#grid")).toHaveCount(1);
+
+      const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+      const marketplaceModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
+
+      const result = await page.evaluate(
+        async ({ hostModuleUrl, marketplaceModuleUrl, marketplaceBaseUrl, networkUrl }) => {
+          // Inject a minimal Tauri IPC surface for the marketplace + extension host.
+          (window as any).__TAURI__ = {
+            core: {
+              invoke: (cmd: string, args: any) => (window as any).__TAURI_INVOKE__(cmd, args)
+            }
+          };
+
+          const { BrowserExtensionHost } = await import(hostModuleUrl);
+          const { MarketplaceClient, WebExtensionManager } = await import(marketplaceModuleUrl);
+
+          const spreadsheetApi = {
+            async getSelection() {
+              return {
+                startRow: 0,
+                startCol: 0,
+                endRow: 0,
+                endCol: 0,
+                values: [[null]]
+              };
+            },
+            async getCell() {
+              return null;
+            },
+            async setCell() {}
+          };
+
+          const host = new BrowserExtensionHost({
+            engineVersion: "1.0.0",
+            spreadsheetApi,
+            permissionPrompt: async () => true,
+            // The strict import preflight uses `fetch()` to walk module graphs.
+            // Under the production CSP emulation (`connect-src 'self'`), `fetch(blob:...)`
+            // is blocked in some WebViews. The import sandbox is covered in unit tests;
+            // disable preflight here so this e2e suite can focus on CSP + Tauri IPC.
+            sandbox: { strictImports: false }
+          });
+
+          const marketplaceClient = new MarketplaceClient({ baseUrl: marketplaceBaseUrl });
+          const manager = new WebExtensionManager({ marketplaceClient, host });
+
+          const id = "formula.sample-hello";
+          await manager.install(id);
+          await manager.loadInstalled(id);
+
+          const text = await host.executeCommand("sampleHello.fetchText", networkUrl);
+          const messages = host.getMessages();
+
+          await manager.dispose();
+          await host.dispose();
+
+          return { text, messages };
+        },
+        {
+          hostModuleUrl,
+          marketplaceModuleUrl,
+          marketplaceBaseUrl: `${marketplaceServer.origin}/api`,
+          networkUrl: `${networkServer.origin}/hello`
+        }
+      );
+
+      expect(result.text).toBe("hello from network");
+      expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello from network"))).toBe(
+        true
+      );
+
+      expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+    } finally {
+      await networkServer.close();
+      await marketplaceServer.close();
+    }
   });
 
   test("@formula/engine loads formula-wasm in a module Worker under CSP", async ({ page }) => {
@@ -422,36 +760,63 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           "X-Package-Format-Version": "2",
           "X-Package-Scan-Status": "passed",
           "X-Publisher": "formula",
-          "X-Publisher-Key-Id": publisherKeyId
+          "X-Publisher-Key-Id": publisherKeyId,
+          "X-Package-Scan-Status": "passed",
         },
         body: pkgBytes
       });
     });
 
-    await page.route("https://example.test/**", async (route) => {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Content-Type": "text/plain"
-        },
-        body: "hello"
-      });
+    const networkServer = await startHttpServer((req, res) => {
+      const url = new URL(req.url || "/", "http://localhost");
+      if (req.method === "GET" && url.pathname === "/hello") {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/plain");
+        res.end("hello");
+        return;
+      }
+      res.statusCode = 404;
+      res.setHeader("content-type", "text/plain");
+      res.end("not found");
     });
 
-    const response = await page.goto("/");
-    const cspHeader = response?.headers()["content-security-policy"];
-    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+    try {
+      await page.exposeFunction("__TAURI_INVOKE__", async (cmd: string, args: any) => {
+        if (cmd !== "network_fetch") {
+          throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+        }
 
-    await expect(page.locator("#grid")).toHaveCount(1);
+        const response = await fetch(String(args?.url ?? ""), args?.init ?? undefined);
+        const bodyText = await response.text();
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url,
+          headers: Array.from(response.headers.entries()),
+          bodyText
+        };
+      });
 
-    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
-    const managerModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
+      const response = await page.goto("/");
+      const cspHeader = response?.headers()["content-security-policy"];
+      expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
 
-    const result = await page.evaluate(
-      async ({ hostModuleUrl, managerModuleUrl }) => {
-        const { BrowserExtensionHost } = await import(hostModuleUrl);
-        const { WebExtensionManager } = await import(managerModuleUrl);
+      await expect(page.locator("#grid")).toHaveCount(1);
+
+      const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+      const managerModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
+
+      const result = await page.evaluate(
+        async ({ hostModuleUrl, managerModuleUrl, networkUrl }) => {
+          (window as any).__TAURI__ = {
+            core: {
+              invoke: (cmd: string, args: any) => (window as any).__TAURI_INVOKE__(cmd, args)
+            }
+          };
+
+          const { BrowserExtensionHost } = await import(hostModuleUrl);
+          const { WebExtensionManager } = await import(managerModuleUrl);
 
         const canBlobModuleUrls =
           typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined";
@@ -514,7 +879,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
             const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
 
             const sum = await host.executeCommand("sampleHello.sumSelection");
-            const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
+            const fetched = await host.executeCommand("sampleHello.fetchText", networkUrl);
             const outCell = await spreadsheetApi.getCell(2, 0);
             const messages = host.getMessages();
             await manager.dispose();
@@ -539,10 +904,10 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
         const blob = await run({ forceData: false });
         const data = await run({ forceData: true });
-        return { canBlobModuleUrls, blob, data };
-      },
-      { hostModuleUrl, managerModuleUrl }
-    );
+          return { canBlobModuleUrls, blob, data };
+        },
+        { hostModuleUrl, managerModuleUrl, networkUrl: `${networkServer.origin}/hello` }
+      );
 
     expect(result.blob.id).toBe("formula.sample-hello");
     expect(result.blob.loadedMainUrl).toMatch(/^(blob:|data:)/);
@@ -572,9 +937,12 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(result.data.outCell).toBe(10);
     expect(result.data.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
     expect(result.data.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
-    expect(result.data.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
+      expect(result.data.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
 
-    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+      expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+    } finally {
+      await networkServer.close();
+    }
   });
 
   test("extension network.fetch fails when denied under CSP without CSP violations", async ({ page }) => {
@@ -682,6 +1050,11 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     await expect(page.locator("#grid")).toHaveCount(1);
     await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHost), undefined, { timeout: 60_000 });
+    // Avoid interactive permission dialogs (the prompt waits on user input).
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__formulaPermissionPrompt = async () => true;
+    });
 
     await page.evaluate(async () => {
       // Auto-approve extension permission prompts so the test exercises panel CSP
@@ -724,4 +1097,4 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     expect(panelHtml).toContain("frame-src 'none'");
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
-});
+}); 

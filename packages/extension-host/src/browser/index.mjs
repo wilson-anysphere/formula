@@ -1874,13 +1874,25 @@ class BrowserExtensionHost {
       }
 
       case "network.fetch": {
+        const rawUrl = String(args[0]);
+        const init = args[1];
+
+        // When running inside the Tauri desktop shell we keep a strict
+        // `connect-src 'self'` CSP so extensions cannot bypass permission checks
+        // via direct `fetch()` calls. Instead, outbound HTTP(S) requests are
+        // proxied through the Rust backend via a Tauri command.
+        const tauriInvoke = globalThis?.__TAURI__?.core?.invoke ?? globalThis?.__TAURI__?.invoke;
+        if (typeof tauriInvoke === "function") {
+          const resolved = safeParseUrl(rawUrl);
+          const url = resolved ? resolved.toString() : rawUrl;
+          return tauriInvoke("network_fetch", { url, init: init ?? null });
+        }
+
         if (typeof fetch !== "function") {
           throw new Error("Network fetch is not available in this runtime");
         }
 
-        const url = String(args[0]);
-        const init = args[1];
-        const response = await fetch(url, init);
+        const response = await fetch(rawUrl, init);
         const bodyText = await response.text();
         const headers = Array.from(response.headers.entries());
 

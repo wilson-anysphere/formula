@@ -156,6 +156,46 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return out;
 }
 
+type TauriInvoke = (cmd: string, args?: Record<string, any>) => Promise<any>;
+
+function getTauriInvoke(): TauriInvoke | null {
+  const tauri = (globalThis as any)?.__TAURI__;
+  const invoke: unknown = tauri?.core?.invoke ?? tauri?.invoke;
+  if (typeof invoke !== "function") return null;
+  return invoke.bind(tauri?.core ?? tauri);
+}
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const raw = String(base64 ?? "");
+  if (raw.length === 0) {
+    throw new Error("Invalid base64 payload (empty)");
+  }
+
+  if (typeof Buffer !== "undefined") {
+    const buf = Buffer.from(raw, "base64");
+    const sliced = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return new Uint8Array(sliced);
+  }
+
+  if (typeof atob === "function") {
+    const bin = atob(raw);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  throw new Error("Base64 decoding is not available in this runtime");
+}
+
 export class MarketplaceClient {
   readonly baseUrl: string;
 
@@ -174,6 +214,22 @@ export class MarketplaceClient {
     offset?: number;
     cursor?: string | null;
   }): Promise<MarketplaceSearchResult> {
+    const invoke = getTauriInvoke();
+    if (invoke && isAbsoluteHttpUrl(this.baseUrl)) {
+      return invoke("marketplace_search", {
+        baseUrl: this.baseUrl,
+        q: params.q,
+        category: params.category,
+        tag: params.tag,
+        verified: params.verified,
+        featured: params.featured,
+        sort: params.sort,
+        limit: params.limit,
+        offset: params.offset,
+        cursor: params.cursor ?? undefined
+      });
+    }
+
     const url = new URL(`${this.baseUrl}/search`, globalThis.location?.href ?? "http://localhost/");
     if (params.q) url.searchParams.set("q", params.q);
     if (params.category) url.searchParams.set("category", params.category);
@@ -193,7 +249,17 @@ export class MarketplaceClient {
   }
 
   async getExtension(id: string): Promise<MarketplaceExtensionDetails | null> {
-    const url = new URL(`${this.baseUrl}/extensions/${encodeURIComponent(id)}`, globalThis.location?.href ?? "http://localhost/");
+    const invoke = getTauriInvoke();
+    if (invoke && isAbsoluteHttpUrl(this.baseUrl)) {
+      const result = await invoke("marketplace_get_extension", { baseUrl: this.baseUrl, id: String(id) });
+      if (!result) return null;
+      return result as MarketplaceExtensionDetails;
+    }
+
+    const url = new URL(
+      `${this.baseUrl}/extensions/${encodeURIComponent(id)}`,
+      globalThis.location?.href ?? "http://localhost/"
+    );
     const res = await fetch(url.toString());
     if (res.status === 404) return null;
     if (!res.ok) {
@@ -203,6 +269,48 @@ export class MarketplaceClient {
   }
 
   async downloadPackage(id: string, version: string): Promise<MarketplaceDownloadResult | null> {
+    const invoke = getTauriInvoke();
+    if (invoke && isAbsoluteHttpUrl(this.baseUrl)) {
+      const payload = await invoke("marketplace_download_package", {
+        baseUrl: this.baseUrl,
+        id: String(id),
+        version: String(version)
+      });
+      if (!payload) return null;
+
+      const bytes = base64ToBytes(String(payload.bytesBase64 ?? ""));
+
+      const signatureBase64 = payload.signatureBase64;
+      const sha256 = payload.sha256;
+      if (!sha256) {
+        throw new Error("Marketplace download missing x-package-sha256 (mandatory)");
+      }
+      const expectedSha = String(sha256).trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/i.test(expectedSha)) {
+        throw new Error("Marketplace download has invalid x-package-sha256 (expected 64-char hex)");
+      }
+      const computedSha = await sha256Hex(bytes);
+      if (computedSha !== expectedSha) {
+        throw new Error(`Marketplace download sha256 mismatch: expected ${expectedSha} but got ${computedSha}`);
+      }
+
+      const formatVersion =
+        typeof payload.formatVersion === "number" && Number.isFinite(payload.formatVersion)
+          ? Number(payload.formatVersion)
+          : null;
+
+      return {
+        bytes,
+        signatureBase64: signatureBase64 ? String(signatureBase64) : null,
+        sha256: expectedSha,
+        formatVersion,
+        publisher: payload.publisher ? String(payload.publisher) : null,
+        publisherKeyId: payload.publisherKeyId ? String(payload.publisherKeyId) : null,
+        scanStatus: payload.scanStatus ? String(payload.scanStatus) : null,
+        filesSha256: payload.filesSha256 ? String(payload.filesSha256) : null,
+      };
+    }
+
     const url = new URL(
       `${this.baseUrl}/extensions/${encodeURIComponent(id)}/download/${encodeURIComponent(version)}`,
       globalThis.location?.href ?? "http://localhost/"
