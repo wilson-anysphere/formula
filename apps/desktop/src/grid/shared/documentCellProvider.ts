@@ -296,12 +296,23 @@ export class DocumentCellProvider implements CellProvider {
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
     const horizontal =
       alignment?.horizontal ??
+      (alignment as any)?.horizontal_align ??
+      (alignment as any)?.horizontal_alignment ??
+      (alignment as any)?.horizontalAlign ??
+      (alignment as any)?.horizontalAlignment ??
       (docStyle as any).horizontalAlign ??
       (docStyle as any).horizontal_align ??
       (docStyle as any).horizontalAlignment ??
       (docStyle as any).horizontal_alignment;
     if (horizontal === "center") out.textAlign = "center";
     else if (horizontal === "left") out.textAlign = "start";
+    else if (horizontal === "fill" || horizontal === "justify") {
+      // Excel supports additional horizontal alignment modes:
+      // - "fill": repeat-to-fill cell width
+      // - "justify": distribute spacing across the line
+      // shared-grid doesn't implement these semantics yet; fall back to a deterministic left/start align.
+      out.textAlign = "start";
+    }
     else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
     if (alignment?.wrapText === true || (alignment as any)?.wrap_text === true) out.wrapMode = "word";

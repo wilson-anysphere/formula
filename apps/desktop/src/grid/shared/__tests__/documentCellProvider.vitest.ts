@@ -77,6 +77,48 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell?.style?.rotationDeg).toBe(45);
   });
 
+  it('maps Excel horizontal alignment "fill" into a deterministic shared-grid textAlign fallback', () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { horizontal: "fill" } });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell?.style?.textAlign).toBe("start");
+  });
+
+  it('maps Excel horizontal alignment "justify" into a deterministic shared-grid textAlign fallback', () => {
+    const doc = new DocumentController();
+    doc.setRangeFormat("Sheet1", "A1", { alignment: { horizontal: "justify" } });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell?.style?.textAlign).toBe("start");
+  });
+
   it("supports flat/clipboard-ish style keys when mapping styleId -> CellStyle", () => {
     const doc = new DocumentController();
 
