@@ -535,6 +535,7 @@ test.describe("Extensions UI integration", () => {
     // initializing.
     const item = menu.getByRole("button", { name: "Sample Hello: Open Sample Panel" });
     await expect(item).toBeVisible({ timeout: 30_000 });
+    await expect(item, "context menu item should be clickable").toBeEnabled();
   });
 
   test("executes a contributed context menu item when its when-clause matches", async ({ page }) => {
