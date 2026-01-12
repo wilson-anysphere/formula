@@ -5783,15 +5783,6 @@ fn rewrite_structured_refs_for_bytecode(
                 field: access.field.clone(),
             }))
         }
-        crate::Expr::FieldAccess(access) => Some(crate::Expr::FieldAccess(crate::FieldAccessExpr {
-            base: Box::new(rewrite_structured_refs_for_bytecode(
-                access.base.as_ref(),
-                origin_sheet,
-                origin_cell,
-                tables_by_sheet,
-            )?),
-            field: access.field.clone(),
-        })),
         crate::Expr::FunctionCall(call) => Some(crate::Expr::FunctionCall(crate::FunctionCall {
             name: call.name.clone(),
             args: call
