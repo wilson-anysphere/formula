@@ -200,6 +200,10 @@ python tools/excel-oracle/update_pinned_dataset.py \
   --no-engine
 ```
 
+For a one-command flow that runs Excel on a subset corpus and patches the pinned dataset, see:
+
+* `tools/excel-oracle/patch-pinned-dataset-with-excel.ps1`
+
 This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
 only evaluates missing cases via `crates/formula-excel-oracle`.
 
