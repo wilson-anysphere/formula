@@ -972,9 +972,9 @@ fn write_updated_cell<W: Write>(
     // Excel uses this for rich value types (linked data types, embedded images, etc). If the
     // caller edits a cell that previously had a `vm` pointer into a normal value, we must drop
     // `vm` to avoid leaving a dangling value-metadata reference.
-    let patch_is_rich_value_placeholder = matches!(cell.value, CellValue::Error(ErrorValue::Value));
-    let drop_vm = original_has_vm && !patch_is_rich_value_placeholder;
-    if !original_has_vm {
+    let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
+    let drop_vm = original_has_vm && !preserve_vm;
+    if preserve_vm && !original_has_vm {
         if let Some(vm) = meta_vm.as_deref() {
             c_start.push_attribute(("vm", vm));
         }
