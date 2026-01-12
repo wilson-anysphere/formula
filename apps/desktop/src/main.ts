@@ -5003,7 +5003,7 @@ if (
     platform,
     // Built-in keybindings use `when` clauses + focus/editing context keys to decide
     // whether a shortcut should run. Allow those built-ins to dispatch even when the
-    // keydown target is an input/textarea (e.g. command palette, find/replace).
+    // keydown target is an input/textarea (e.g. command palette).
     //
     // Extension keybindings remain blocked in text inputs for now as a conservative default.
     ignoreInputTargets: "extensions",

@@ -18,6 +18,8 @@ const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextIn
 const WHEN_SHEET_NAVIGATION =
   "focus.inSheetTabRename == false && (focus.inTextInput == false || spreadsheet.formulaBarFormulaEditing == true)";
 const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
+// Dialog-style shortcuts (Find/Replace/Go To, comments panel) should not steal focus while
+// the user is typing in a text input (notably the formula bar editor).
 const WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT = "workbench.commandPaletteOpen == false && focus.inTextInput == false";
 
 /**
