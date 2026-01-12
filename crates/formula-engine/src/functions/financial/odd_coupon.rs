@@ -332,7 +332,9 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology constraints (pinned by excel-oracle parity cases and unit tests).
+    // Excel-style chronology constraints (pinned by excel-oracle boundary cases and unit tests).
+    // See: `tools/excel-oracle/odd_coupon_boundary_cases.json` and
+    // `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
     //
     // Allowed boundary equalities:
     // - `issue == settlement` (zero accrued interest)

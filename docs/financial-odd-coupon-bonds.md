@@ -93,9 +93,10 @@ It also includes a small set of **negative yield / negative coupon rate** valida
 - the boundary `yld == -frequency` (`#DIV/0!`) vs `yld < -frequency` (`#NUM!`)
 - negative coupon rates (whether Excel returns `#NUM!`)
 
-For quick Windows + Excel runs, use the derived subset corpus:
+For quick Windows + Excel runs, use the derived subset corpora:
 
-- `tools/excel-oracle/odd_coupon_validation_cases.json`
+- Boundary cases: `tools/excel-oracle/odd_coupon_boundary_cases.json`
+- Negative yield / negative coupon validation: `tools/excel-oracle/odd_coupon_validation_cases.json`
 
 Current engine behavior:
 
@@ -107,6 +108,8 @@ Current engine behavior:
   - `issue <= settlement <= first_coupon <= maturity`
   - `issue < first_coupon` (rejects `issue == first_coupon` with `#NUM!`)
   - `settlement < maturity` (rejects `settlement == maturity` with `#NUM!`)
+  (see `tools/excel-oracle/odd_coupon_boundary_cases.json` and
+  `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
   dates **on or before** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).
