@@ -12,6 +12,7 @@ Goals:
 fixtures/xlsx/
   basic/
   metadata/
+  rich-data/
   formulas/
   styles/
   conditional-formatting/
@@ -23,6 +24,8 @@ fixtures/xlsx/
 
 `charts/` and `pivots/` will expand over time as we add more complex corpora.
 `macros/` contains small `.xlsm` fixtures used to validate VBA project preservation.
+`rich-data/` is reserved for modern Excel 365 “rich value” features (linked data
+types and images-in-cells) which require ground-truth workbooks saved by Excel.
 
 ## Notable fixtures
 
@@ -48,6 +51,10 @@ fixtures/xlsx/
 - `styles/`:
   - `styles.xlsx` - simple bold cell style.
   - `rich-text-shared-strings.xlsx` - shared strings with rich-text runs.
+- `rich-data/`:
+  - See `rich-data/README.md` for how to generate fixtures that include
+    `xl/metadata.xml`, `xl/richData/*`, and in-sheet `vm`/`cm` cell attributes
+    (linked data types like Stocks/Geography, and images placed in cells).
 - `conditional-formatting/`:
   - `conditional-formatting.xlsx` - simple `cfRule` example.
   - `conditional-formatting-2007.xlsx` - Excel 2007-style conditional formatting.

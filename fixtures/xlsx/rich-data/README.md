@@ -1,0 +1,131 @@
+# Excel rich data types + images-in-cells fixtures
+
+This folder is reserved for **real-world `.xlsx` files saved by modern Excel**
+that exercise:
+
+- **Rich data types** (a.k.a. *Linked Data Types* like **Stocks** / **Geography**)
+- **Images in cells** (Excel’s newer “place in cell” / `IMAGE()`-style behavior)
+
+These features typically introduce workbook parts that do **not** appear in older
+XLSX fixtures, most notably:
+
+- `xl/metadata.xml`
+- `xl/richData/*`
+- `vm="…"` / `cm="…"` attributes on `<c>` (cell) elements in sheet XML
+
+The purpose of this README is to make it easy for contributors to generate
+minimal fixtures in Excel 365 so we have ground-truth test files for parser /
+round-trip work (see implementation tasks like #199 / #201).
+
+## General guidance (keep fixtures tiny)
+
+- Prefer **one workbook per feature**.
+- Prefer a **single sheet** (`Sheet1`) and **one populated cell** (`A1`).
+- Avoid extra formatting, tables, charts, or additional sheets.
+- If an image is required, use a **very small PNG** (e.g. 16×16) to keep the
+  fixture small.
+- After saving, try not to repeatedly re-save the file; Excel can rewrite parts
+  and create noisy diffs.
+
+## Creating a minimal rich data type fixture (Excel 365)
+
+This produces a workbook with a single linked entity in `Sheet1!A1`.
+
+1. Open Excel 365 (desktop).
+2. Create a new blank workbook.
+3. In `Sheet1`:
+   - Set `A1` to something Excel can resolve as a data type:
+     - **Stocks**: `MSFT` (or `Microsoft`)
+     - **Geography**: `Seattle` (or any major city)
+4. Convert the cell to a rich data type:
+   - Select `A1`
+   - Go to **Data** → **Data Types** → **Stocks** (or **Geography**)
+   - Confirm you see the data-type icon in the cell.
+5. Do **not** insert additional “field” columns; keep only `A1` populated.
+6. Save as a new `.xlsx` under this folder, using a descriptive, kebab-case name:
+   - `stocks-min.xlsx` or `geography-min.xlsx`
+
+### Verify the parts inside the ZIP
+
+From repo root:
+
+```bash
+# List all parts in the workbook (central directory).
+unzip -Z1 fixtures/xlsx/rich-data/stocks-min.xlsx | sort
+```
+
+You should see (at minimum):
+
+- `xl/metadata.xml`
+- One or more `xl/richData/...` parts
+
+Also inspect the sheet XML to confirm the cell has metadata pointers:
+
+```bash
+unzip -p fixtures/xlsx/rich-data/stocks-min.xlsx xl/worksheets/sheet1.xml | rg ' r="A1"| vm="| cm="'
+```
+
+You are looking for `<c r="A1" ... vm="…" cm="…">` (attribute names and values
+may vary across Excel builds, but `vm`/`cm` should be present for these files).
+
+## Creating a minimal image-in-cell fixture (Excel 365)
+
+Excel supports two common ways to put an image *in* a cell:
+
+- **Insert → Pictures → Place in Cell** (preferred for offline, deterministic fixtures)
+- The `IMAGE()` function (may require network access and/or behave differently)
+
+### Option A (preferred): Insert a picture and “place in cell”
+
+1. Open Excel 365 (desktop).
+2. Create a new blank workbook.
+3. Select `Sheet1!A1`.
+4. Insert an image using the in-cell placement option:
+   - **Insert** → **Pictures** → **Place in Cell**
+   - Choose a **small local PNG**.
+5. Ensure the image is visibly constrained to cell `A1` (it should move/resize
+   with the cell).
+6. Save as:
+   - `image-in-cell-min.xlsx`
+
+### Option B: `IMAGE()` formula (use only if it embeds correctly offline)
+
+If your Excel build supports it and you can point at a local file (or have an
+approved offline URL), you can try:
+
+```excel
+=IMAGE("file:///absolute/path/to/image.png")
+```
+
+However, many `IMAGE()` examples are URL-based and can introduce external
+dependencies. Prefer Option A for committed fixtures.
+
+### Verify the parts inside the ZIP
+
+```bash
+unzip -Z1 fixtures/xlsx/rich-data/image-in-cell-min.xlsx | sort
+```
+
+Expected signals that this is truly an **in-cell** image (not a floating drawing):
+
+- `xl/metadata.xml`
+- `xl/richData/*`
+- `xl/media/*` (the actual image bytes are usually stored here)
+- `vm="…"` / `cm="…"` attributes in `xl/worksheets/sheet1.xml`
+
+If you only see drawing parts like `xl/drawings/drawing1.xml` and no
+`xl/metadata.xml` / `xl/richData/*`, you probably inserted a traditional floating
+image (see `fixtures/xlsx/basic/image.xlsx` for that case).
+
+## Naming conventions
+
+- Use **kebab-case** file names.
+- Include the feature name and keep it explicit:
+  - `stocks-min.xlsx`
+  - `geography-min.xlsx`
+  - `image-in-cell-min.xlsx`
+- Keep workbooks minimal and deterministic:
+  - `Sheet1` only
+  - Only `A1` populated
+  - No extra formatting
+
