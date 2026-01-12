@@ -319,6 +319,17 @@ function buildA1Address(startRow, startCol, endRow, endCol) {
   return start === end ? start : `${start}:${end}`;
 }
 
+function normalizeNonEmptyWorkbookPath(value) {
+  if (value == null) {
+    throw new Error("Workbook path must be a non-empty string");
+  }
+  const str = String(value);
+  if (str.trim().length === 0) {
+    throw new Error("Workbook path must be a non-empty string");
+  }
+  return str;
+}
+
 // When the host omits `formulas`, we synthesize a null matrix so the runtime matches the
 // `.d.ts` contract (`Range.formulas` always exists). However, unbounded ranges (eg: selecting
 // an entire Excel-sized sheet) would allocate millions of elements and can OOM the worker.
@@ -400,10 +411,8 @@ function enhanceWorkbook(workbook) {
       }
     },
     async saveAs(workbookPath) {
-      if (workbookPath == null) {
-        throw new Error("Workbook path must be a non-empty string");
-      }
-      await rpcCall("workbook", "saveAs", [String(workbookPath)]);
+      const path = normalizeNonEmptyWorkbookPath(workbookPath);
+      await rpcCall("workbook", "saveAs", [path]);
       const updated = await rpcCall("workbook", "getActiveWorkbook", []);
       if (updated && typeof updated === "object") {
         obj.name = updated.name;
@@ -547,10 +556,8 @@ const workbook = {
   },
 
   async openWorkbook(workbookPath) {
-    if (workbookPath == null) {
-      throw new Error("Workbook path must be a non-empty string");
-    }
-    const result = await rpcCall("workbook", "openWorkbook", [String(workbookPath)]);
+    const path = normalizeNonEmptyWorkbookPath(workbookPath);
+    const result = await rpcCall("workbook", "openWorkbook", [path]);
     return enhanceWorkbook(result);
   },
 
@@ -564,10 +571,8 @@ const workbook = {
   },
 
   async saveAs(workbookPath) {
-    if (workbookPath == null) {
-      throw new Error("Workbook path must be a non-empty string");
-    }
-    await rpcCall("workbook", "saveAs", [String(workbookPath)]);
+    const path = normalizeNonEmptyWorkbookPath(workbookPath);
+    await rpcCall("workbook", "saveAs", [path]);
   },
 
   async close() {
