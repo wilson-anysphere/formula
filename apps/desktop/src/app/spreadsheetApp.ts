@@ -3344,6 +3344,12 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Comment tooltips only apply to the sheet body (not row/col headers).
+    if (x < this.rowHeaderWidth || y < this.colHeaderHeight) {
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
+      return;
+    }
+
     const cachedRect = this.sharedHoverCellRect;
     if (
       cachedRect &&
