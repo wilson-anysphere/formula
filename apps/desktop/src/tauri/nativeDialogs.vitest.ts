@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as nativeDialogs from "./nativeDialogs";
@@ -57,5 +58,40 @@ describe("tauri/nativeDialogs", () => {
     await expect(nativeDialogs.confirm("Discard?")).resolves.toBe(false);
     await expect(nativeDialogs.confirm("Discard?", { fallbackValue: true })).resolves.toBe(true);
     await expect(nativeDialogs.alert("Something went wrong")).resolves.toBeUndefined();
+  });
+
+  it("avoids calling browser-native window.confirm/alert and falls back to a non-blocking <dialog>", async () => {
+    const originalToString = Function.prototype.toString;
+
+    const confirmSpy = vi.fn(() => true);
+    const alertSpy = vi.fn(() => undefined);
+
+    // Make the stubs appear "native" so nativeDialogs skips them.
+    vi.spyOn(Function.prototype, "toString").mockImplementation(function (this: unknown): string {
+      if (this === confirmSpy) return "function confirm() { [native code] }";
+      if (this === alertSpy) return "function alert() { [native code] }";
+      return originalToString.call(this as any);
+    });
+
+    vi.stubGlobal("__TAURI__", undefined);
+    vi.stubGlobal("window", { confirm: confirmSpy, alert: alertSpy });
+
+    const confirmPromise = nativeDialogs.confirm("Discard?");
+    const confirmDialog = document.querySelector('dialog[data-testid="quick-pick"]') as HTMLDialogElement | null;
+    expect(confirmDialog).not.toBeNull();
+    const ok = confirmDialog!.querySelector('[data-testid="quick-pick-item-0"]') as HTMLButtonElement | null;
+    expect(ok).not.toBeNull();
+    ok!.click();
+    await expect(confirmPromise).resolves.toBe(true);
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    const alertPromise = nativeDialogs.alert("Something went wrong");
+    const alertDialog = document.querySelector('dialog[data-testid="quick-pick"]') as HTMLDialogElement | null;
+    expect(alertDialog).not.toBeNull();
+    const alertOk = alertDialog!.querySelector('[data-testid="quick-pick-item-0"]') as HTMLButtonElement | null;
+    expect(alertOk).not.toBeNull();
+    alertOk!.click();
+    await expect(alertPromise).resolves.toBeUndefined();
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 });
