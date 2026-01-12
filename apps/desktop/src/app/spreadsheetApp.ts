@@ -1940,8 +1940,10 @@ export class SpreadsheetApp {
       return;
     }
 
-    this.clampScroll();
+    const didClamp = this.clampScroll();
+    if (didClamp) this.hideCommentTooltip();
     this.syncScrollbars();
+    if (didClamp) this.notifyScrollListeners();
     this.refresh();
   }
 
@@ -2224,8 +2226,10 @@ export class SpreadsheetApp {
       this.syncSharedGridAxisSizesFromDocument();
       this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
     } else {
-      this.clampScroll();
+      const didClamp = this.clampScroll();
+      if (didClamp) this.hideCommentTooltip();
       this.syncScrollbars();
+      if (didClamp) this.notifyScrollListeners();
     }
     this.renderGrid();
     this.renderCharts(true);
@@ -2264,8 +2268,10 @@ export class SpreadsheetApp {
         this.syncSharedGridAxisSizesFromDocument();
         this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       } else {
-        this.clampScroll();
+        const didClamp = this.clampScroll();
+        if (didClamp) this.hideCommentTooltip();
         this.syncScrollbars();
+        if (didClamp) this.notifyScrollListeners();
       }
       this.renderGrid();
       this.renderCharts(true);
@@ -2312,8 +2318,10 @@ export class SpreadsheetApp {
         this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
         this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
       } else {
-        this.clampScroll();
+        const didClamp = this.clampScroll();
+        if (didClamp) this.hideCommentTooltip();
         this.syncScrollbars();
+        if (didClamp) this.notifyScrollListeners();
       }
       this.renderGrid();
       this.renderCharts(true);
@@ -3370,8 +3378,10 @@ export class SpreadsheetApp {
     this.chartLayer.style.left = `${this.rowHeaderWidth}px`;
     this.chartLayer.style.top = `${this.colHeaderHeight}px`;
 
-    this.clampScroll();
+    const didClamp = this.clampScroll();
+    if (didClamp) this.hideCommentTooltip();
     this.syncScrollbars();
+    if (didClamp) this.notifyScrollListeners();
 
     this.renderGrid();
     this.renderCharts(true);
@@ -4505,8 +4515,10 @@ export class SpreadsheetApp {
     }
 
     // Outline changes can affect scrollable content size.
-    this.clampScroll();
+    const didClamp = this.clampScroll();
+    if (didClamp) this.hideCommentTooltip();
     this.syncScrollbars();
+    if (didClamp) this.notifyScrollListeners();
   }
 
   private viewportWidth(): number {
@@ -4549,17 +4561,22 @@ export class SpreadsheetApp {
     return Math.max(0, this.contentHeight() - this.viewportHeight());
   }
 
-  private clampScroll(): void {
+  private clampScroll(): boolean {
+    const prevX = this.scrollX;
+    const prevY = this.scrollY;
+
     if (this.sharedGrid) {
       const scroll = this.sharedGrid.getScroll();
       this.scrollX = scroll.x;
       this.scrollY = scroll.y;
-      return;
+      return this.scrollX !== prevX || this.scrollY !== prevY;
     }
+
     const maxX = this.maxScrollX();
     const maxY = this.maxScrollY();
     this.scrollX = Math.min(Math.max(0, this.scrollX), maxX);
     this.scrollY = Math.min(Math.max(0, this.scrollY), maxY);
+    return this.scrollX !== prevX || this.scrollY !== prevY;
   }
 
   private setScrollInternal(nextX: number, nextY: number): boolean {
