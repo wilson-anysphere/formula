@@ -139,6 +139,60 @@ fn row_and_col_properties_are_deduped() {
 }
 
 #[test]
+fn row_and_col_style_id_overrides_are_deduped_and_persist() {
+    let mut sheet = Worksheet::new(1, "Sheet1");
+
+    // Row style creates/removes entries.
+    assert!(sheet.row_properties(5).is_none());
+    sheet.set_row_style_id(5, Some(42));
+    let props = sheet.row_properties(5).unwrap();
+    assert_eq!(props.style_id, Some(42));
+    assert_eq!(props.height, None);
+    assert!(!props.hidden);
+
+    sheet.set_row_style_id(5, None);
+    assert!(sheet.row_properties(5).is_none());
+
+    // Column style creates/removes entries.
+    assert!(sheet.col_properties(7).is_none());
+    sheet.set_col_style_id(7, Some(24));
+    let props = sheet.col_properties(7).unwrap();
+    assert_eq!(props.style_id, Some(24));
+    assert_eq!(props.width, None);
+    assert!(!props.hidden);
+
+    sheet.set_col_style_id(7, None);
+    assert!(sheet.col_properties(7).is_none());
+
+    // Style overrides should not be dropped when other overrides are cleared.
+    let row = 10;
+    sheet.set_row_style_id(row, Some(1));
+    sheet.set_row_height(row, Some(12.5));
+    sheet.set_row_height(row, None);
+    assert_eq!(sheet.row_properties(row).unwrap().style_id, Some(1));
+
+    sheet.set_row_hidden(row, true);
+    sheet.set_row_hidden(row, false);
+    assert_eq!(sheet.row_properties(row).unwrap().style_id, Some(1));
+
+    sheet.set_row_style_id(row, None);
+    assert!(sheet.row_properties(row).is_none());
+
+    let col = 3;
+    sheet.set_col_style_id(col, Some(2));
+    sheet.set_col_width(col, Some(8.0));
+    sheet.set_col_width(col, None);
+    assert_eq!(sheet.col_properties(col).unwrap().style_id, Some(2));
+
+    sheet.set_col_hidden(col, true);
+    sheet.set_col_hidden(col, false);
+    assert_eq!(sheet.col_properties(col).unwrap().style_id, Some(2));
+
+    sheet.set_col_style_id(col, None);
+    assert!(sheet.col_properties(col).is_none());
+}
+
+#[test]
 fn clear_range_removes_cells_and_updates_used_range() {
     let mut sheet = Worksheet::new(1, "Sheet1");
 

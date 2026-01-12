@@ -65,9 +65,14 @@ fn writer_inserts_prefixed_sheet_views_and_cols() -> Result<(), Box<dyn std::err
         sheet.zoom = 1.25;
         sheet.frozen_rows = 2;
         sheet.frozen_cols = 1;
-        sheet
-            .col_properties
-            .insert(0, ColProperties { width: Some(12.0), hidden: false });
+        sheet.col_properties.insert(
+            0,
+            ColProperties {
+                width: Some(12.0),
+                hidden: false,
+                style_id: None,
+            },
+        );
     }
 
     let out = doc.save_to_vec()?;
@@ -108,4 +113,3 @@ fn writer_inserts_prefixed_sheet_views_and_cols() -> Result<(), Box<dyn std::err
 
     Ok(())
 }
-

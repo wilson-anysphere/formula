@@ -105,6 +105,9 @@ pub struct RowProperties {
     /// `Worksheet::outline.rows[*].hidden.user`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// Optional default style id for all cells in this row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style_id: Option<u32>,
 }
 
 /// Per-column overrides.
@@ -120,6 +123,9 @@ pub struct ColProperties {
     /// `Worksheet::outline.cols[*].hidden.user`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    /// Optional default style id for all cells in this column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style_id: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -791,7 +797,7 @@ impl Worksheet {
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.height = height;
-                if props.height.is_none() && !props.hidden {
+                if props.height.is_none() && !props.hidden && props.style_id.is_none() {
                     self.row_properties.remove(&row);
                 }
             }
@@ -804,6 +810,7 @@ impl Worksheet {
                     RowProperties {
                         height,
                         hidden: false,
+                        style_id: None,
                     },
                 );
             }
@@ -820,7 +827,7 @@ impl Worksheet {
         match self.row_properties.get_mut(&row) {
             Some(props) => {
                 props.hidden = hidden;
-                if props.height.is_none() && !props.hidden {
+                if props.height.is_none() && !props.hidden && props.style_id.is_none() {
                     self.row_properties.remove(&row);
                 }
             }
@@ -833,6 +840,36 @@ impl Worksheet {
                     RowProperties {
                         height: None,
                         hidden,
+                        style_id: None,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Set (or clear) the default style id for all cells in a row.
+    ///
+    /// Passing `None` removes the style override. If the row has no overrides
+    /// remaining, its entry is removed from the map.
+    pub fn set_row_style_id(&mut self, row_0based: u32, style_id: Option<u32>) {
+        self.row_count = self.row_count.max(row_0based.saturating_add(1));
+        match self.row_properties.get_mut(&row_0based) {
+            Some(props) => {
+                props.style_id = style_id;
+                if props.height.is_none() && !props.hidden && props.style_id.is_none() {
+                    self.row_properties.remove(&row_0based);
+                }
+            }
+            None => {
+                let Some(style_id) = style_id else {
+                    return;
+                };
+                self.row_properties.insert(
+                    row_0based,
+                    RowProperties {
+                        height: None,
+                        hidden: false,
+                        style_id: Some(style_id),
                     },
                 );
             }
@@ -849,7 +886,7 @@ impl Worksheet {
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.width = width;
-                if props.width.is_none() && !props.hidden {
+                if props.width.is_none() && !props.hidden && props.style_id.is_none() {
                     self.col_properties.remove(&col);
                 }
             }
@@ -862,6 +899,7 @@ impl Worksheet {
                     ColProperties {
                         width,
                         hidden: false,
+                        style_id: None,
                     },
                 );
             }
@@ -879,7 +917,7 @@ impl Worksheet {
         match self.col_properties.get_mut(&col) {
             Some(props) => {
                 props.hidden = hidden;
-                if props.width.is_none() && !props.hidden {
+                if props.width.is_none() && !props.hidden && props.style_id.is_none() {
                     self.col_properties.remove(&col);
                 }
             }
@@ -892,6 +930,40 @@ impl Worksheet {
                     ColProperties {
                         width: None,
                         hidden,
+                        style_id: None,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Set (or clear) the default style id for all cells in a column.
+    ///
+    /// Passing `None` removes the style override. If the column has no overrides
+    /// remaining, its entry is removed from the map.
+    pub fn set_col_style_id(&mut self, col_0based: u32, style_id: Option<u32>) {
+        assert!(
+            col_0based < crate::cell::EXCEL_MAX_COLS,
+            "col out of Excel bounds: {col_0based}"
+        );
+        self.col_count = self.col_count.max(col_0based.saturating_add(1));
+        match self.col_properties.get_mut(&col_0based) {
+            Some(props) => {
+                props.style_id = style_id;
+                if props.width.is_none() && !props.hidden && props.style_id.is_none() {
+                    self.col_properties.remove(&col_0based);
+                }
+            }
+            None => {
+                let Some(style_id) = style_id else {
+                    return;
+                };
+                self.col_properties.insert(
+                    col_0based,
+                    ColProperties {
+                        width: None,
+                        hidden: false,
+                        style_id: Some(style_id),
                     },
                 );
             }
@@ -1846,6 +1918,7 @@ impl Worksheet {
                 .or_insert_with(|| RowProperties {
                     height: None,
                     hidden: true,
+                    style_id: None,
                 });
         }
 
@@ -1867,6 +1940,7 @@ impl Worksheet {
                 .or_insert_with(|| ColProperties {
                     width: None,
                     hidden: true,
+                    style_id: None,
                 });
         }
     }
