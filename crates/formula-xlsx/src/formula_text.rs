@@ -11,11 +11,17 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "ACOT",
     "ACOTH",
     "AGGREGATE",
+    "BASE",
     "BETA.DIST",
     "BETA.INV",
     "BINOM.DIST",
     "BINOM.DIST.RANGE",
     "BINOM.INV",
+    "BITAND",
+    "BITLSHIFT",
+    "BITOR",
+    "BITRSHIFT",
+    "BITXOR",
     "BYCOL",
     "BYROW",
     "CEILING.MATH",
@@ -38,6 +44,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "CSC",
     "CSCH",
     "DAYS",
+    "DECIMAL",
     "DROP",
     "EXPAND",
     "EXPON.DIST",
@@ -54,6 +61,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "FORECAST.ETS.SEASONALITY",
     "FORECAST.ETS.STAT",
     "FORECAST.LINEAR",
+    "FORMULATEXT",
     "GAMMA",
     "GAMMA.DIST",
     "GAMMA.INV",
@@ -64,6 +72,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "IFNA",
     "IFS",
     "IMAGE",
+    "ISFORMULA",
     "ISO.CEILING",
     "ISO.WEEKNUM",
     "ISOMITTED",
@@ -78,6 +87,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "MINIFS",
     "MODE.MULT",
     "MODE.SNGL",
+    "MUNIT",
     "NEGBINOM.DIST",
     "NETWORKDAYS.INTL",
     "NORM.DIST",
@@ -85,6 +95,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "NORM.S.DIST",
     "NORM.S.INV",
     "NUMBERVALUE",
+    "PDURATION",
     "PERCENTILE.EXC",
     "PERCENTILE.INC",
     "PERCENTRANK.EXC",
@@ -103,6 +114,8 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "SEC",
     "SECH",
     "SEQUENCE",
+    "SHEET",
+    "SHEETS",
     "SKEW.P",
     "SORT",
     "SORTBY",
@@ -122,6 +135,8 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "TEXTSPLIT",
     "TOCOL",
     "TOROW",
+    "UNICHAR",
+    "UNICODE",
     "UNIQUE",
     "VALUETOTEXT",
     "VAR.P",
@@ -488,6 +503,40 @@ mod tests {
         let file = "_xlfn.FORECAST.ETS(1,2,3)+_xlfn.FORECAST.ETS.CONFINT(1,2,3)+_xlfn.FORECAST.ETS.SEASONALITY(1,2,3)+_xlfn.FORECAST.ETS.STAT(1,2,3)";
         assert_eq!(add_xlfn_prefixes(display), file);
         assert_eq!(strip_xlfn_prefixes(file), display);
+    }
+
+    #[test]
+    fn xl_fn_required_functions_is_sorted_and_unique() {
+        for window in XL_FN_REQUIRED_FUNCTIONS.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "XL_FN_REQUIRED_FUNCTIONS must be sorted (ASCII) and unique: {:?}",
+                window
+            );
+        }
+    }
+
+    #[test]
+    fn add_and_strip_xlfn_prefixes_roundtrip_required_functions() {
+        for func in XL_FN_REQUIRED_FUNCTIONS {
+            let display = format!("{func}(1)");
+            let file = format!("{XL_FN_PREFIX}{func}(1)");
+            assert_eq!(
+                add_xlfn_prefixes(&display),
+                file,
+                "add_xlfn_prefixes should prefix {func}"
+            );
+            assert_eq!(
+                strip_xlfn_prefixes(&file),
+                display,
+                "strip_xlfn_prefixes should strip {func}"
+            );
+            assert_eq!(
+                add_xlfn_prefixes(&strip_xlfn_prefixes(&file)),
+                file,
+                "add/strip roundtrip should preserve {func}"
+            );
+        }
     }
 
     #[test]

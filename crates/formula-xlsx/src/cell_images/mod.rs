@@ -285,6 +285,74 @@ fn parse_cell_images_part(
         });
     }
 
+    // Some Excel-generated `cellimages.xml` payloads use a lightweight schema where the
+    // relationship ID is stored directly on a `<cellImage r:id="…">` element (rather than
+    // embedding a full DrawingML `<pic>` subtree).
+    for cell_image in doc
+        .root_element()
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "cellImage")
+    {
+        let Some(embed_rel_id) = get_cell_image_rel_id(&cell_image) else {
+            continue;
+        };
+
+        // Avoid duplicating images already discovered via `<pic>`.
+        if images.iter().any(|img| img.embed_rel_id == embed_rel_id) {
+            continue;
+        }
+
+        let rel = rels_by_id.get(&embed_rel_id).ok_or_else(|| {
+            XlsxError::Invalid(format!(
+                "cellimages.xml references missing image relationship {embed_rel_id}"
+            ))
+        })?;
+
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        if rel.type_uri != REL_TYPE_IMAGE {
+            continue;
+        }
+
+        let target_path = resolve_target(path, &rel.target);
+        let file_name = target_path
+            .strip_prefix("xl/media/")
+            .unwrap_or(&target_path)
+            .to_string();
+        let image_id = ImageId::new(file_name);
+
+        if workbook.images.get(&image_id).is_none() {
+            let bytes = parts
+                .get(&target_path)
+                .ok_or_else(|| XlsxError::MissingPart(target_path.clone()))?
+                .clone();
+            let ext = image_id
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, ext)| ext)
+                .unwrap_or("");
+            workbook.images.insert(
+                image_id.clone(),
+                ImageData {
+                    bytes,
+                    content_type: Some(content_type_for_extension(ext).to_string()),
+                },
+            );
+        }
+
+        images.push(CellImageEntry {
+            embed_rel_id,
+            target_path,
+            image_id,
+            pic_xml: slice_node_xml(&cell_image, xml),
+        });
+    }
+
     Ok(CellImagesPart {
         path: path.to_string(),
         rels_path,
@@ -335,6 +403,17 @@ fn get_blip_embed_rel_id(blip_node: &roxmltree::Node<'_, '_>) -> Option<String> 
             // `{namespace}localname`.
             let clark = format!("{{{REL_NS}}}embed");
             blip_node.attribute(clark.as_str())
+        })
+        .map(|s| s.to_string())
+}
+
+fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<String> {
+    cell_image_node
+        .attribute((REL_NS, "id"))
+        .or_else(|| cell_image_node.attribute("r:id"))
+        .or_else(|| {
+            let clark = format!("{{{REL_NS}}}id");
+            cell_image_node.attribute(clark.as_str())
         })
         .map(|s| s.to_string())
 }
