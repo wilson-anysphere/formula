@@ -310,6 +310,10 @@ fn prefers_bound_verified_digital_signature_ext_over_unbound_verified_ex_candida
     h.update(&content_normalized);
     h.update(&forms);
     let agile_hash_md5: [u8; 16] = h.finalize().into();
+    assert_ne!(
+        content_hash_md5, agile_hash_md5,
+        "expected designer payload to affect the legacy Agile Content Hash transcript"
+    );
 
     let mut wrong_md5 = content_hash_md5;
     wrong_md5[0] = wrong_md5[0].wrapping_add(1);
@@ -397,10 +401,18 @@ fn prefers_bound_verified_digital_signature_ext_when_signatures_are_in_separate_
     let content_normalized = content_normalized_data(&project).expect("content normalized data");
     let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
     let forms = forms_normalized_data(&project).expect("forms normalized data");
+    assert!(
+        !forms.is_empty(),
+        "expected FormsNormalizedData to be non-empty (designer payload should contribute)"
+    );
     let mut h = Md5::new();
     h.update(&content_normalized);
     h.update(&forms);
     let agile_hash_md5: [u8; 16] = h.finalize().into();
+    assert_ne!(
+        content_hash_md5, agile_hash_md5,
+        "expected designer payload to affect the legacy Agile Content Hash transcript"
+    );
 
     let mut wrong_md5 = content_hash_md5;
     wrong_md5[0] = wrong_md5[0].wrapping_add(1);
