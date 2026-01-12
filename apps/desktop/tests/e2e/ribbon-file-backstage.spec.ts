@@ -17,7 +17,8 @@ test.describe("ribbon File backstage", () => {
 
     await expect(fileNew).toBeVisible();
     await expect(fileNew).toBeFocused();
-    await expect(fileNew).toHaveAttribute("aria-keyshortcuts", "Control+N");
+    const expectedShortcut = process.platform === "darwin" ? "Meta+N" : "Control+N";
+    await expect(fileNew).toHaveAttribute("aria-keyshortcuts", expectedShortcut);
 
     // Focus trap: Shift+Tab wraps back to the last action.
     await page.keyboard.press("Shift+Tab");
