@@ -286,7 +286,16 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     throwIfAborted(signal);
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
-    if (indexPromise) await awaitWithAbort(indexPromise, signal);
+    if (indexPromise) {
+      try {
+        await awaitWithAbort(indexPromise, signal);
+      } catch (error) {
+        // If a previous indexing run was canceled by a different request, allow this call
+        // to retry indexing. Only propagate AbortError when *this* call is aborted.
+        if (signal?.aborted) throw error;
+        if ((error as any)?.name !== "AbortError") throw error;
+      }
+    }
     throwIfAborted(signal);
 
     const versionNow = currentVersion();
@@ -371,7 +380,16 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     const sheetNamesKeyNow = sheetNamesCacheKeyFor({ spreadsheet: params.spreadsheet });
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
-    if (indexPromise) await awaitWithAbort(indexPromise, signal);
+    if (indexPromise) {
+      try {
+        await awaitWithAbort(indexPromise, signal);
+      } catch (error) {
+        // If a previous indexing run was canceled by a different request, allow this call
+        // to retry indexing. Only propagate AbortError when *this* call is aborted.
+        if (signal?.aborted) throw error;
+        if ((error as any)?.name !== "AbortError") throw error;
+      }
+    }
     throwIfAborted(signal);
 
     const versionNow = currentVersion();

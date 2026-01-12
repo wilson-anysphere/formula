@@ -270,4 +270,74 @@ describe("createDesktopRagService (embedder config)", () => {
 
     await service.dispose();
   });
+
+  it("retries indexing when a shared non-DLP indexing run aborts", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [["Header"], ["Value"]]);
+    const spreadsheet = new DocumentControllerSpreadsheetApi(controller);
+
+    let indexCalls = 0;
+    let resolveFirstIndexStarted: (() => void) | null = null;
+    const firstIndexStarted = new Promise<void>((resolve) => {
+      resolveFirstIndexStarted = resolve;
+    });
+
+    const service = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_retry_after_abort",
+      createRag: async () =>
+        ({
+          vectorStore: { close: async () => {} },
+          contextManager: {
+            buildWorkbookContextFromSpreadsheetApi: async () => ({ promptContext: "", retrieved: [], indexStats: null }),
+          },
+          indexWorkbook: async (_workbook: any, params: any) => {
+            indexCalls += 1;
+            if (indexCalls === 1) resolveFirstIndexStarted?.();
+            const signal: AbortSignal | undefined = params?.signal;
+            if (signal) {
+              return new Promise((_resolve, reject) => {
+                const onAbort = () => {
+                  const err = new Error("Aborted");
+                  err.name = "AbortError";
+                  reject(err);
+                };
+                signal.addEventListener("abort", onAbort, { once: true });
+                if (signal.aborted) onAbort();
+              });
+            }
+            return { indexed: indexCalls };
+          },
+        }) as any,
+    });
+
+    try {
+      const abortController = new AbortController();
+
+      const first = service.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb_retry_after_abort",
+        query: "hello",
+        signal: abortController.signal,
+      });
+
+      // Ensure the first request is actually indexing (and the second request will await
+      // a shared in-flight indexPromise) before aborting.
+      await firstIndexStarted;
+
+      // Start a second request while the first one is still indexing.
+      const second = service.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb_retry_after_abort",
+        query: "hello again",
+      });
+
+      abortController.abort();
+      await expect(first).rejects.toMatchObject({ name: "AbortError" });
+      await expect(second).resolves.toMatchObject({ promptContext: "" });
+      expect(indexCalls).toBe(2);
+    } finally {
+      await service.dispose();
+    }
+  });
 });
