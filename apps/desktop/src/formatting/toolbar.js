@@ -7,6 +7,9 @@ const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
 // Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
+// Full-width row formatting still requires enumerating each row in the selection
+// (DocumentController row formatting layer). Align with `DEFAULT_FORMATTING_BAND_ROW_LIMIT`.
+const MAX_RANGE_FORMATTING_BAND_ROWS = 50_000;
 
 function rangeCellCount(range) {
   const rows = Math.max(0, range.end.row - range.start.row + 1);
@@ -30,7 +33,26 @@ function ensureSafeFormattingRange(rangeOrRanges) {
 
   for (const range of normalizeRanges(rangeOrRanges)) {
     const r = normalizeCellRange(range);
-    if (isLayeredFormatRange(r)) continue;
+    if (isLayeredFormatRange(r)) {
+      // Full-width row selections are only scalable up to a row-count cap.
+      const isFullWidthRows = r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
+      const isFullSheet = isFullWidthRows && r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
+      if (isFullWidthRows && !isFullSheet) {
+        const rowCount = r.end.row - r.start.row + 1;
+        if (rowCount > MAX_RANGE_FORMATTING_BAND_ROWS) {
+          try {
+            showToast(
+              "Selection is too large to format. Try selecting fewer rows or formatting the entire sheet.",
+              "warning",
+            );
+          } catch {
+            // ignore (e.g. toast root missing in tests)
+          }
+          return false;
+        }
+      }
+      continue;
+    }
     const cellCount = rangeCellCount(r);
     // DocumentController.setRangeFormat stores very large rectangles as compressed "range runs"
     // (sheet.formatRunsByCol) rather than enumerating per-cell overrides, so those ranges are
