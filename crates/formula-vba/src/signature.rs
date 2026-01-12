@@ -813,6 +813,10 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
 
     // Keep a fallback candidate in case we can't find an "exact" DER match; prefer the one that
     // starts latest in the stream since the signature payload usually comes last.
+    //
+    // Similarly, if we find multiple "exact" DER matches (e.g. a decoy PKCS#7 inside a
+    // DigSigInfoSerialized certificate store), prefer the one that starts latest.
+    let mut best_exact: Option<(Pkcs7, usize)> = None;
     let mut fallback: Option<(Pkcs7, usize)> = None;
 
     // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
@@ -843,14 +847,15 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         let candidate = &slice[..len];
 
         if let Some(pkcs7) = parse_pkcs7_exact(candidate) {
-            return Some((pkcs7, start));
+            best_exact = Some((pkcs7, start));
+            continue;
         }
         if let Ok(pkcs7) = Pkcs7::from_der(candidate) {
             fallback = Some((pkcs7, start));
         }
     }
 
-    fallback
+    best_exact.or(fallback)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
