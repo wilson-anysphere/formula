@@ -104,3 +104,53 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(onExtensionsLoaded).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("registerBuiltinCommands: sheet navigation", () => {
+  it("uses DocumentController.getVisibleSheetIds when UI sheet-store order is not provided", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    let current = "Sheet1";
+    const activated: string[] = [];
+
+    const doc = {
+      getSheetIds: () => ["Sheet1", "Sheet2", "Sheet3"],
+      // Sheet2 is hidden, so visible order should skip it.
+      getVisibleSheetIds: () => ["Sheet1", "Sheet3"],
+    };
+
+    const app = {
+      getDocument: () => doc,
+      getCurrentSheetId: () => current,
+      activateSheet: (id: string) => {
+        current = id;
+        activated.push(id);
+      },
+      focusAfterSheetNavigation: () => {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("workbook.nextSheet");
+    expect(current).toBe("Sheet3");
+
+    // Wrap around.
+    await commandRegistry.executeCommand("workbook.nextSheet");
+    expect(current).toBe("Sheet1");
+
+    // Wrap around backwards too.
+    await commandRegistry.executeCommand("workbook.previousSheet");
+    expect(current).toBe("Sheet3");
+
+    expect(activated).toEqual(["Sheet3", "Sheet1", "Sheet3"]);
+  });
+});
