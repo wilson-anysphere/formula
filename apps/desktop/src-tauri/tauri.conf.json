@@ -51,6 +51,16 @@
         "role": "Editor"
       },
       {
+        "ext": ["xlt"],
+        "name": "Excel 97-2003 Template",
+        "role": "Editor"
+      },
+      {
+        "ext": ["xla"],
+        "name": "Excel 97-2003 Add-In",
+        "role": "Editor"
+      },
+      {
         "ext": ["xlsm"],
         "name": "Excel Macro-Enabled Spreadsheet",
         "role": "Editor"

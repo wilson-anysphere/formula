@@ -947,7 +947,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         return read_xlsx_or_xlsm_blocking(path);
     }
 
-    if matches!(extension.as_deref(), Some("xls")) {
+    if matches!(extension.as_deref(), Some("xls") | Some("xlt") | Some("xla")) {
         return read_xls_blocking(path);
     }
 
@@ -3226,6 +3226,39 @@ mod tests {
             second.get_cell(0, 0).computed_value,
             CellScalar::Text("Second sheet".to_string())
         );
+    }
+
+    #[test]
+    fn reads_xls_fixture_with_xlt_and_xla_extensions() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/basic.xls"
+        ));
+        let expected_date_system = formula_xls::import_xls_path(fixture_path)
+            .expect("import xls")
+            .workbook
+            .date_system;
+        let tmp = tempfile::tempdir().expect("temp dir");
+
+        for ext in ["xlt", "xla"] {
+            let renamed_path = tmp.path().join(format!("basic.{ext}"));
+            std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+            let workbook = read_xlsx_blocking(&renamed_path)
+                .expect("read legacy template/add-in as xls workbook");
+            assert!(workbook.origin_xlsx_bytes.is_none());
+            assert_eq!(workbook.date_system, expected_date_system);
+
+            let sheet1 = workbook
+                .sheets
+                .iter()
+                .find(|s| s.name == "Sheet1")
+                .expect("Sheet1 exists");
+            assert_eq!(
+                sheet1.get_cell(0, 0).computed_value,
+                CellScalar::Text("Hello".to_string())
+            );
+        }
     }
 
     #[test]
