@@ -146,4 +146,40 @@ test.describe("external hyperlink opening", () => {
     expect(shellCalls).toHaveLength(1);
     expect(shellCalls[0]).toMatch(/^https:\/\/example\.com\/?$/);
   });
+
+  test("blocked protocols (javascript:) are never opened via shell", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__shellOpenCalls = [];
+      (window as any).__TAURI__ = {
+        plugin: {
+          shell: {
+            open: (url: string) => {
+              (window as any).__shellOpenCalls.push(url);
+              return Promise.resolve();
+            },
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-js";
+      a.href = "javascript:alert(1)";
+      a.textContent = "bad link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-js");
+
+    const [shellCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.url(),
+    ]);
+
+    expect(shellCalls).toEqual([]);
+    expect(urlAfter).toBe(urlBefore);
+  });
 });
