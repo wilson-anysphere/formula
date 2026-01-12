@@ -398,7 +398,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           });
 
           try {
-            const manager = new WebExtensionManager({ host });
+            const manager = new WebExtensionManager({ host, engineVersion: "1.0.0" });
             await manager.install("formula.sample-hello");
             const id = await manager.loadInstalled("formula.sample-hello");
 
