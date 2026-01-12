@@ -46,6 +46,7 @@ SMOKE_INCLUDE_TAGS = [
     "DATEVALUE",
     "WORKDAY",
     "NETWORKDAYS",
+    "FVSCHEDULE",
     "XLOOKUP",
     "XMATCH",
     "FILTER",
