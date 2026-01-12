@@ -78,6 +78,59 @@ class CompareConfig:
     rel_tol: float
 
 
+def _parse_tag_tolerances(values: list[str], *, flag_name: str) -> dict[str, float]:
+    """
+    Parse `TAG=FLOAT` pairs into a mapping, taking the maximum for duplicate tags.
+    """
+
+    out: dict[str, float] = {}
+    for raw in values:
+        if not isinstance(raw, str) or "=" not in raw:
+            raise SystemExit(
+                f"Invalid {flag_name} value {raw!r}. Expected TAG=FLOAT (example: odd_coupon=1e-6)."
+            )
+        tag, value_str = raw.split("=", 1)
+        tag = tag.strip()
+        if not tag:
+            raise SystemExit(
+                f"Invalid {flag_name} value {raw!r}. Tag must be non-empty (example: odd_coupon=1e-6)."
+            )
+        try:
+            value = float(value_str)
+        except ValueError:
+            raise SystemExit(
+                f"Invalid {flag_name} value {raw!r}. {value_str!r} is not a float (example: odd_coupon=1e-6)."
+            ) from None
+        if not math.isfinite(value) or value < 0.0:
+            raise SystemExit(
+                f"Invalid {flag_name} value {raw!r}. Tolerance must be a finite, non-negative float."
+            )
+
+        prev = out.get(tag)
+        if prev is None or value > prev:
+            out[tag] = value
+    return out
+
+
+def _effective_cfg_for_tags(
+    default: CompareConfig,
+    *,
+    tags: set[str],
+    tag_abs_tol: dict[str, float],
+    tag_rel_tol: dict[str, float],
+) -> CompareConfig:
+    abs_tol = default.abs_tol
+    rel_tol = default.rel_tol
+    for t in tags:
+        v = tag_abs_tol.get(t)
+        if v is not None and v > abs_tol:
+            abs_tol = v
+        v = tag_rel_tol.get(t)
+        if v is not None and v > rel_tol:
+            rel_tol = v
+    return CompareConfig(abs_tol=abs_tol, rel_tol=rel_tol)
+
+
 def _is_number(value_obj: Any) -> bool:
     return (
         isinstance(value_obj, dict)
@@ -163,6 +216,24 @@ def main() -> int:
     )
     parser.add_argument("--abs-tol", type=float, default=1e-9)
     parser.add_argument("--rel-tol", type=float, default=1e-9)
+    parser.add_argument(
+        "--tag-abs-tol",
+        action="append",
+        default=[],
+        help=(
+            "Override numeric abs tolerance for cases that contain a tag. Format TAG=FLOAT "
+            "(example: odd_coupon=1e-6). Can be repeated; the maximum across matching tags wins."
+        ),
+    )
+    parser.add_argument(
+        "--tag-rel-tol",
+        action="append",
+        default=[],
+        help=(
+            "Override numeric rel tolerance for cases that contain a tag. Format TAG=FLOAT "
+            "(example: odd_coupon=1e-6). Can be repeated; the maximum across matching tags wins."
+        ),
+    )
     parser.add_argument(
         "--max-mismatch-rate",
         type=float,
@@ -255,7 +326,9 @@ def main() -> int:
     expected_index = _index_results(expected_results)
     actual_index = _index_results(actual_results)
 
-    cfg = CompareConfig(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
+    default_cfg = CompareConfig(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
+    tag_abs_tol = _parse_tag_tolerances(args.tag_abs_tol, flag_name="--tag-abs-tol")
+    tag_rel_tol = _parse_tag_tolerances(args.tag_rel_tol, flag_name="--tag-rel-tol")
 
     mismatches: list[dict[str, Any]] = []
     reason_counts: dict[str, int] = {}
@@ -323,6 +396,12 @@ def main() -> int:
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
 
         else:
+            cfg = _effective_cfg_for_tags(
+                default_cfg,
+                tags=tag_set,
+                tag_abs_tol=tag_abs_tol,
+                tag_rel_tol=tag_rel_tol,
+            )
             ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
             if not ok:
                 mismatch_reason = reason
@@ -395,6 +474,10 @@ def main() -> int:
             "includeTags": sorted(include_tags),
             "excludeTags": sorted(exclude_tags),
             "maxCases": args.max_cases,
+            "absTol": args.abs_tol,
+            "relTol": args.rel_tol,
+            "tagAbsTol": tag_abs_tol,
+            "tagRelTol": tag_rel_tol,
             "mismatches": mismatch_count,
             "mismatchRate": mismatch_rate,
             "maxMismatchRate": args.max_mismatch_rate,

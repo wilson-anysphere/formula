@@ -28,8 +28,9 @@ and exits non-zero if mismatches exceed the configured threshold.
 
 - `cases.json` — curated (~2k) formula + input-grid cases (deterministic).
 - `cases_odd_coupon_long.json` — supplemental **long odd-coupon** (`ODDF*` / `ODDL*`) cases.
-  This file is not part of the default CI corpus because those functions may not be implemented
-  in all builds yet, but it can be used with the Windows + Excel runner to capture oracle values.
+  This is a convenience subset file for running the Windows + Excel oracle quickly. The canonical
+  case corpus (`cases.json`) already includes these cases (tagged `odd_coupon` / `long_stub`), but
+  this smaller file is useful when you only want to (re)pin the long-stub scenarios.
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
@@ -209,4 +210,22 @@ python tools/excel-oracle/compare.py \
   --expected tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
   --actual   tests/compatibility/excel-oracle/datasets/engine-results.json \
   --report   tests/compatibility/excel-oracle/reports/mismatch-report.json
+```
+
+### Numeric tolerances
+
+`compare.py` uses a tight default numeric tolerance (`abs=rel=1e-9`). Some functions are
+inherently iterative (for example yield solvers), and may differ from Excel by small floating-point
+amounts even when the math is correct.
+
+You can override tolerances for a tag (or set of tags) without loosening the whole corpus:
+
+```bash
+python tools/excel-oracle/compare.py \
+  --cases    tests/compatibility/excel-oracle/cases.json \
+  --expected tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json \
+  --actual   tests/compatibility/excel-oracle/datasets/engine-results.json \
+  --report   tests/compatibility/excel-oracle/reports/mismatch-report.json \
+  --tag-abs-tol odd_coupon=1e-6 \
+  --tag-rel-tol odd_coupon=1e-6
 ```

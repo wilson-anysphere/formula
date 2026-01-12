@@ -91,6 +91,119 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(report["summary"]["reasonCounts"]["missing-expected"], 1)
 
 
+class CompareTagToleranceTests(unittest.TestCase):
+    def test_tag_specific_tolerance_allows_small_numeric_diffs(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {
+                        "id": "case-a",
+                        "formula": "=1/3",
+                        "inputs": [],
+                        "tags": ["loose"],
+                    }
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [{"caseId": "case-a", "result": {"t": "n", "v": 0.3333333333333333}}],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [{"caseId": "case-a", "result": {"t": "n", "v": 0.333333}}],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            # Without tag-specific tolerances this should fail (default abs/rel tolerances are 1e-9).
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--max-mismatch-rate",
+                    "0.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(
+                proc.returncode,
+                0,
+                f"Expected compare.py to fail without tag tolerance.\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--max-mismatch-rate",
+                    "0.0",
+                    "--tag-abs-tol",
+                    "loose=1e-6",
+                    "--tag-rel-tol",
+                    "loose=1e-6",
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if proc.returncode != 0:
+                self.fail(
+                    f"compare.py exited {proc.returncode} with tag tolerances\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["summary"]["mismatches"], 0)
+            self.assertEqual(report["summary"]["tagAbsTol"], {"loose": 1e-6})
+            self.assertEqual(report["summary"]["tagRelTol"], {"loose": 1e-6})
+
+
 if __name__ == "__main__":
     unittest.main()
-

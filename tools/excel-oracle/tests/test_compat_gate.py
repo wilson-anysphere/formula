@@ -145,6 +145,8 @@ class CompatGateTierPresetTests(unittest.TestCase):
             max_mismatch_rate=0.0,
             abs_tol=1e-9,
             rel_tol=1e-9,
+            tag_abs_tol=[],
+            tag_rel_tol=[],
         )
         # Ensure we only pass through the explicit tags.
         self.assertEqual(cmd.count("--include-tag"), 2)
