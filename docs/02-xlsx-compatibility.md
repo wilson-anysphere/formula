@@ -4,6 +4,10 @@
 
 Perfect XLSX compatibility is the foundation of user trust. Users must be confident that their complex financial models, scientific calculators, and business-critical workbooks will load, calculate, and save without any loss of fidelity.
 
+## Related docs
+
+- [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”)
+
 ---
 
 ## XLSX File Format Structure
