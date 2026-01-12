@@ -858,9 +858,10 @@ fn main() {
         // external URL opening goes through the `open_external_url` Rust command which enforces a
         // scheme allowlist.
         //
-        // SECURITY: The `allow-invoke` permission only gates *which command names* can be invoked.
-        // Commands touching filesystem/network/etc must still validate inputs and enforce
-        // scoping/authorization in Rust (trusted-origin + window-label checks, path/network scopes, etc).
+        // SECURITY: The `allow-invoke` permission only gates *which command names* can be invoked
+        // (we do not rely on `core:allow-invoke`). Commands touching filesystem/network/etc must
+        // still validate inputs and enforce scoping/authorization in Rust (trusted-origin +
+        // window-label checks, path/network scopes, etc).
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
