@@ -12601,6 +12601,386 @@
       "id": "floor_precise_50e867625242"
     },
     {
+      "formula": "=RADIANS(180)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "RADIANS"
+      ],
+      "id": "radians_b14947f6d6f0"
+    },
+    {
+      "formula": "=DEGREES(PI())",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "DEGREES"
+      ],
+      "id": "degrees_f4ac8fe6af00"
+    },
+    {
+      "formula": "=SINH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SINH"
+      ],
+      "id": "sinh_c364c3e5796b"
+    },
+    {
+      "formula": "=COSH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COSH"
+      ],
+      "id": "cosh_ee6d7514e6e8"
+    },
+    {
+      "formula": "=TANH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "TANH"
+      ],
+      "id": "tanh_81657530d0ab"
+    },
+    {
+      "formula": "=ASINH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ASINH"
+      ],
+      "id": "asinh_dbc39e7e371d"
+    },
+    {
+      "formula": "=ACOSH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOSH"
+      ],
+      "id": "acosh_fe2c908369fc"
+    },
+    {
+      "formula": "=ATANH(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ATANH"
+      ],
+      "id": "atanh_ed1d4b9c0683"
+    },
+    {
+      "formula": "=COT(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COT"
+      ],
+      "id": "cot_21a8297b9d49"
+    },
+    {
+      "formula": "=CSC(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CSC"
+      ],
+      "id": "csc_19197b189b58"
+    },
+    {
+      "formula": "=SEC(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SEC"
+      ],
+      "id": "sec_759d1d1c54f7"
+    },
+    {
+      "formula": "=ACOT(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOT"
+      ],
+      "id": "acot_7f76a8f2e6c5"
+    },
+    {
+      "formula": "=COTH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COTH"
+      ],
+      "id": "coth_3675c605e8fb"
+    },
+    {
+      "formula": "=CSCH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "CSCH"
+      ],
+      "id": "csch_13e05475ea79"
+    },
+    {
+      "formula": "=SECH(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SECH"
+      ],
+      "id": "sech_ee1e43d519a6"
+    },
+    {
+      "formula": "=ACOTH(2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ACOTH"
+      ],
+      "id": "acoth_d90da7433b7a"
+    },
+    {
+      "formula": "=FACT(5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FACT"
+      ],
+      "id": "fact_39ac156478f2"
+    },
+    {
+      "formula": "=FACTDOUBLE(6)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "FACTDOUBLE"
+      ],
+      "id": "factdouble_cf49da611307"
+    },
+    {
+      "formula": "=COMBIN(5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COMBIN"
+      ],
+      "id": "combin_ba8c13eeb6bb"
+    },
+    {
+      "formula": "=COMBINA(3,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "COMBINA"
+      ],
+      "id": "combina_bc715b790934"
+    },
+    {
+      "formula": "=PERMUT(5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "PERMUT"
+      ],
+      "id": "permut_ca5c3043713e"
+    },
+    {
+      "formula": "=PERMUTATIONA(3,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "PERMUTATIONA"
+      ],
+      "id": "permutationa_8c9d563762bd"
+    },
+    {
+      "formula": "=GCD(24,36)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "GCD"
+      ],
+      "id": "gcd_b1c052bacd2a"
+    },
+    {
+      "formula": "=LCM(4,6)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "LCM"
+      ],
+      "id": "lcm_00435b6fe74c"
+    },
+    {
+      "formula": "=MULTINOMIAL(1,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "MULTINOMIAL"
+      ],
+      "id": "multinomial_f7bd2ff29d75"
+    },
+    {
+      "formula": "=MROUND(10,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "MROUND"
+      ],
+      "id": "mround_f568f08290bc"
+    },
+    {
+      "formula": "=EVEN(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "EVEN"
+      ],
+      "id": "even_2b466b48bb43"
+    },
+    {
+      "formula": "=ODD(2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ODD"
+      ],
+      "id": "odd_6fa3a43b1e9c"
+    },
+    {
+      "formula": "=ISEVEN(2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ISEVEN"
+      ],
+      "id": "iseven_6624117ee074"
+    },
+    {
+      "formula": "=ISODD(3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "ISODD"
+      ],
+      "id": "isodd_5b0863908f8d"
+    },
+    {
+      "formula": "=QUOTIENT(5,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "QUOTIENT"
+      ],
+      "id": "quotient_ef437b9549b6"
+    },
+    {
+      "formula": "=SQRTPI(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SQRTPI"
+      ],
+      "id": "sqrtpi_264ea7e47e48"
+    },
+    {
+      "formula": "=DELTA(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "DELTA"
+      ],
+      "id": "delta_8f44bf7c9d57"
+    },
+    {
+      "formula": "=GESTEP(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "GESTEP"
+      ],
+      "id": "gestep_d8b36da0e755"
+    },
+    {
+      "formula": "=SERIESSUM(2,0,1,{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SERIESSUM"
+      ],
+      "id": "seriessum_59a97a0736ab"
+    },
+    {
+      "formula": "=SUMXMY2({1,2},{3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMXMY2"
+      ],
+      "id": "sumxmy2_69f8e50b38bc"
+    },
+    {
+      "formula": "=SUMX2MY2({1,2},{3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMX2MY2"
+      ],
+      "id": "sumx2my2_d9c5ff6acb0d"
+    },
+    {
+      "formula": "=SUMX2PY2({1,2},{3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "SUMX2PY2"
+      ],
+      "id": "sumx2py2_9f5fcf5d6049"
+    },
+    {
       "formula": "=SUM(A1:A3)",
       "outputCell": "C1",
       "inputs": [

@@ -1,17 +1,33 @@
 mod aggregates;
 pub mod criteria;
+mod combinatorics;
+mod hyperbolic;
+mod integer;
 mod random;
 mod rounding;
+mod series;
 mod trig;
+mod trig_more;
 
 pub use aggregates::{
     aggregate, averageif, averageifs, countifs, maxifs, minifs, subtotal, sumif, sumifs, sumproduct,
+};
+pub use combinatorics::{
+    combin, combina, fact, factdouble, multinomial, permut, permutationa,
+};
+pub use hyperbolic::{
+    acosh, acoth, asinh, atanh, cosh, coth, csch, sech, sinh, tanh,
+};
+pub use integer::{
+    delta, even, gestep, gcd, iseven, isodd, lcm, mround, odd, quotient, sqrtpi,
 };
 pub use random::{rand, randbetween};
 pub use rounding::{
     ceiling, ceiling_math, ceiling_precise, floor, floor_math, floor_precise, iso_ceiling,
 };
 pub use trig::{acos, asin, atan, atan2, cos, sin, tan};
+pub use trig_more::{acot, cot, csc, degrees, radians, sec};
+pub use series::{seriessum, sumxmy2, sumx2my2, sumx2py2};
 
 use crate::error::{ExcelError, ExcelResult};
 

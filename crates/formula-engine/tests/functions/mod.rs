@@ -25,6 +25,7 @@ mod math;
 mod math_aggregates;
 mod math_basic;
 mod math_extended;
+mod math_more;
 mod math_random;
 mod math_rounding;
 mod reference;

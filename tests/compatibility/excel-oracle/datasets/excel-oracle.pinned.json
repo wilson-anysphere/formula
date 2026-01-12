@@ -17,7 +17,7 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "36e8ab29dd766146e46aa19ac42ef2403c9015716f84a64051b93a14673f3f4f",
+    "sha256": "b2a9c69672430b0ac61f0a70897ec8105f66d7b6765f98559f02be9954ab5c37",
     "count": 1425
   },
   "results": [

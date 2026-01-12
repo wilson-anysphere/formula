@@ -44,6 +44,7 @@ mod builtins_logical_extended;
 mod builtins_lookup;
 mod builtins_math;
 mod builtins_math_extended;
+mod builtins_math_more;
 mod builtins_select;
 mod builtins_reference;
 mod builtins_statistical;

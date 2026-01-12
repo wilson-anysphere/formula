@@ -22,6 +22,36 @@ export default {
       ]
     },
     {
+      "name": "ACOSH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ACOT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ACOTH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ADDRESS",
       "min_args": 2,
       "max_args": 5,
@@ -78,6 +108,16 @@ export default {
       ]
     },
     {
+      "name": "ASINH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ATAN",
       "min_args": 1,
       "max_args": 1,
@@ -95,6 +135,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ATANH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },
@@ -270,6 +320,28 @@ export default {
       ]
     },
     {
+      "name": "COMBIN",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "COMBINA",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "CONCAT",
       "min_args": 1,
       "max_args": 255,
@@ -302,6 +374,36 @@ export default {
     },
     {
       "name": "COS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "COSH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "COT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "COTH",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
@@ -395,6 +497,26 @@ export default {
       ]
     },
     {
+      "name": "CSC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "CSCH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "DATE",
       "min_args": 3,
       "max_args": 3,
@@ -482,6 +604,27 @@ export default {
       ]
     },
     {
+      "name": "DEGREES",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "DELTA",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "DEVSQ",
       "min_args": 1,
       "max_args": 255,
@@ -557,6 +700,16 @@ export default {
       ]
     },
     {
+      "name": "EVEN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "EXACT",
       "min_args": 2,
       "max_args": 2,
@@ -588,6 +741,26 @@ export default {
         "number",
         "number",
         "any"
+      ]
+    },
+    {
+      "name": "FACT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "FACTDOUBLE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
       ]
     },
     {
@@ -703,6 +876,16 @@ export default {
       ]
     },
     {
+      "name": "GCD",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "GEOMEAN",
       "min_args": 1,
       "max_args": 255,
@@ -710,6 +893,17 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "GESTEP",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
       ]
     },
     {
@@ -906,6 +1100,16 @@ export default {
       ]
     },
     {
+      "name": "ISEVEN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ISLOGICAL",
       "min_args": 1,
       "max_args": 1,
@@ -952,6 +1156,16 @@ export default {
       "max_args": 1,
       "volatility": "non_volatile",
       "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "ISODD",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
       "arg_types": [
         "number"
       ]
@@ -1004,6 +1218,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any",
+        "number"
+      ]
+    },
+    {
+      "name": "LCM",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },
@@ -1302,6 +1526,27 @@ export default {
       ]
     },
     {
+      "name": "MROUND",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "MULTINOMIAL",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "N",
       "min_args": 1,
       "max_args": 1,
@@ -1406,6 +1651,16 @@ export default {
       ]
     },
     {
+      "name": "ODD",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "OFFSET",
       "min_args": 3,
       "max_args": 5,
@@ -1505,6 +1760,28 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PERMUT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PERMUTATIONA",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number",
         "number"
       ]
@@ -1618,6 +1895,27 @@ export default {
       "return_type": "number",
       "arg_types": [
         "any",
+        "number"
+      ]
+    },
+    {
+      "name": "QUOTIENT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "RADIANS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },
@@ -1867,6 +2165,26 @@ export default {
       ]
     },
     {
+      "name": "SEC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "SECH",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "SECOND",
       "min_args": 1,
       "max_args": 1,
@@ -1890,6 +2208,19 @@ export default {
       ]
     },
     {
+      "name": "SERIESSUM",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "any"
+      ]
+    },
+    {
       "name": "SIGN",
       "min_args": 1,
       "max_args": 1,
@@ -1901,6 +2232,16 @@ export default {
     },
     {
       "name": "SIN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "SINH",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
@@ -1966,6 +2307,16 @@ export default {
     },
     {
       "name": "SQRT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "SQRTPI",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
@@ -2135,6 +2486,39 @@ export default {
       ]
     },
     {
+      "name": "SUMX2MY2",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "SUMX2PY2",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "SUMXMY2",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "SWITCH",
       "min_args": 3,
       "max_args": 255,
@@ -2178,6 +2562,16 @@ export default {
     },
     {
       "name": "TAN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "TANH",
       "min_args": 1,
       "max_args": 1,
       "volatility": "non_volatile",
