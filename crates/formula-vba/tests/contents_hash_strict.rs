@@ -21,7 +21,25 @@ fn push_utf16le(out: &mut Vec<u8>, s: &str) {
     }
 }
 
-fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, module_name: &str) -> Vec<u8> {
+fn push_referencename_record(out: &mut Vec<u8>, name: &[u8]) {
+    // REFERENCENAME (0x0016) + Unicode marker (0x003E)
+    //
+    // This record does not contribute to v1/v2 ContentNormalizedData, but spec-compliant `VBA/dir`
+    // streams can include it before many reference records.
+    push_u16(out, 0x0016);
+    push_u32(out, name.len() as u32);
+    out.extend_from_slice(name);
+    // Reserved marker + Unicode bytes (empty for this synthetic fixture).
+    push_u16(out, 0x003E);
+    push_u32(out, 0);
+}
+
+fn build_dir_decompressed_spec_with_references(
+    project_name: &str,
+    project_constants: &str,
+    module_name: &str,
+    references: &[u8],
+) -> Vec<u8> {
     let project_name_bytes = project_name.as_bytes();
     let constants_bytes = project_constants.as_bytes();
 
@@ -92,8 +110,8 @@ fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, modu
     push_u32(&mut out, constants_unicode.len() as u32);
     out.extend_from_slice(&constants_unicode);
 
-    // --- PROJECTREFERENCES (empty) ---
-    // Directly start PROJECTMODULES (0x000F).
+    // --- PROJECTREFERENCES ---
+    out.extend_from_slice(references);
 
     // --- PROJECTMODULES (MS-OVBA §2.3.4.2.3) ---
     push_u16(&mut out, 0x000F);
@@ -158,14 +176,16 @@ fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, modu
     out
 }
 
-fn build_vba_project_bin_spec(module_source: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
-    let project_name = "VBAProject";
-    let module_name = "Module1";
-    let project_constants = "Answer=42";
+fn build_dir_decompressed_spec(project_name: &str, project_constants: &str, module_name: &str) -> Vec<u8> {
+    build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, &[])
+}
 
-    let dir_decompressed = build_dir_decompressed_spec(project_name, project_constants, module_name);
-    let dir_container = compress_container(&dir_decompressed);
-
+fn build_vba_project_bin_spec_with_dir(
+    dir_decompressed: &[u8],
+    module_source: &[u8],
+    signature_blob: Option<&[u8]>,
+) -> Vec<u8> {
+    let dir_container = compress_container(dir_decompressed);
     let module_container = compress_container(module_source);
 
     let cursor = Cursor::new(Vec::new());
@@ -196,6 +216,15 @@ fn build_vba_project_bin_spec(module_source: &[u8], signature_blob: Option<&[u8]
     }
 
     ole.into_inner().into_inner()
+}
+
+fn build_vba_project_bin_spec(module_source: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+
+    let dir_decompressed = build_dir_decompressed_spec(project_name, project_constants, module_name);
+    build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, signature_blob)
 }
 
 fn der_len(len: usize) -> Vec<u8> {
@@ -279,6 +308,147 @@ fn content_normalized_data_parses_spec_dir_stream() {
 }
 
 #[test]
+fn content_normalized_data_parses_spec_dir_stream_with_reference_records() {
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+
+    let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
+
+    let references = {
+        let mut out = Vec::new();
+
+        // Excluded record: REFERENCENAME (0x0016). Must not affect output.
+        push_referencename_record(&mut out, b"EXCLUDED_REF_NAME");
+
+        // Included record: REFERENCEREGISTERED (0x000D).
+        push_u16(&mut out, 0x000D);
+        push_u32(&mut out, 5);
+        out.extend_from_slice(b"{REG}");
+
+        // Included record: REFERENCECONTROL (0x002F), plus embedded REFERENCEEXTENDED (0x0030).
+        //
+        // Control record data:
+        // - u32 len + bytes (LibidTwiddled)
+        // - Reserved1 (u32)
+        // - Reserved2 (u16)
+        let libid_twiddled = b"CtrlLib";
+        let reserved1: u32 = 1; // 01 00 00 00
+        let reserved2: u16 = 0;
+        let mut control_data = Vec::new();
+        control_data.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        control_data.extend_from_slice(libid_twiddled);
+        control_data.extend_from_slice(&reserved1.to_le_bytes());
+        control_data.extend_from_slice(&reserved2.to_le_bytes());
+
+        // Optional NameRecordExtended (excluded from v1/v2 transcript).
+        push_u16(&mut out, 0x002F);
+        push_u32(&mut out, control_data.len() as u32);
+        out.extend_from_slice(&control_data);
+        push_referencename_record(&mut out, b"CONTROL_NAME_EXT");
+
+        // Embedded REFERENCEEXTENDED (0x0030) bytes are included verbatim.
+        push_u16(&mut out, 0x0030);
+        push_u32(&mut out, 3);
+        out.extend_from_slice(b"EXT");
+
+        // Included record: REFERENCEPROJECT (0x000E).
+        //
+        // Choose major=1 so the copy-until-NUL logic stops after copying 0x01.
+        let libid_absolute = b"ProjLib";
+        let libid_relative = b"";
+        let major: u32 = 1; // 01 00 00 00
+        let minor: u16 = 0;
+        let trailing = b"TRAIL";
+        let size_total = 4 + libid_absolute.len() + 4 + libid_relative.len() + 4 + 2 + trailing.len();
+        push_u16(&mut out, 0x000E);
+        push_u32(&mut out, size_total as u32);
+        push_u32(&mut out, libid_absolute.len() as u32);
+        out.extend_from_slice(libid_absolute);
+        push_u32(&mut out, libid_relative.len() as u32);
+        out.extend_from_slice(libid_relative);
+        push_u32(&mut out, major);
+        push_u16(&mut out, minor);
+        out.extend_from_slice(trailing);
+
+        // Included record: REFERENCEORIGINAL (0x0033), with an embedded REFERENCECONTROL that must
+        // be skipped (it is part of the REFERENCEORIGINAL structure).
+        let libid_original = b"OrigLib";
+        push_u16(&mut out, 0x0033);
+        push_u32(&mut out, libid_original.len() as u32);
+        out.extend_from_slice(libid_original);
+
+        // Embedded REFERENCECONTROL (0x002F) + REFERENCEEXTENDED (0x0030) that must be skipped.
+        let nested_libid_twiddled = b"SHOULD_NOT_APPEAR";
+        let nested_reserved1: u32 = 1;
+        let nested_reserved2: u16 = 0;
+        let mut nested_control_data = Vec::new();
+        nested_control_data.extend_from_slice(&(nested_libid_twiddled.len() as u32).to_le_bytes());
+        nested_control_data.extend_from_slice(nested_libid_twiddled);
+        nested_control_data.extend_from_slice(&nested_reserved1.to_le_bytes());
+        nested_control_data.extend_from_slice(&nested_reserved2.to_le_bytes());
+        push_u16(&mut out, 0x002F);
+        push_u32(&mut out, nested_control_data.len() as u32);
+        out.extend_from_slice(&nested_control_data);
+
+        push_u16(&mut out, 0x0030);
+        let nested_extended = b"SKIP_EXTENDED";
+        push_u32(&mut out, nested_extended.len() as u32);
+        out.extend_from_slice(nested_extended);
+
+        out
+    };
+
+    let dir_decompressed = build_dir_decompressed_spec_with_references(
+        project_name,
+        project_constants,
+        module_name,
+        &references,
+    );
+    let vba_project_bin = build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
+    let normalized = content_normalized_data(&vba_project_bin).expect("ContentNormalizedData");
+
+    let expected_module_normalized = b"Sub Foo()End Sub".as_slice();
+    let expected = [
+        project_name.as_bytes(),
+        project_constants.as_bytes(),
+        b"{REG}".as_slice(),
+        b"CtrlLib\x01".as_slice(),
+        b"EXT".as_slice(),
+        b"ProjLib\x01".as_slice(),
+        b"OrigLib".as_slice(),
+        expected_module_normalized,
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized
+            .windows(b"SHOULD_NOT_APPEAR".len())
+            .any(|w| w == b"SHOULD_NOT_APPEAR"),
+        "embedded REFERENCECONTROL inside REFERENCEORIGINAL must not contribute"
+    );
+    assert!(
+        !normalized
+            .windows(b"SKIP_EXTENDED".len())
+            .any(|w| w == b"SKIP_EXTENDED"),
+        "embedded REFERENCEEXTENDED inside REFERENCEORIGINAL must not contribute"
+    );
+    assert!(
+        !normalized
+            .windows(b"EXCLUDED_REF_NAME".len())
+            .any(|w| w == b"EXCLUDED_REF_NAME"),
+        "REFERENCENAME (0x0016) must not contribute to ContentNormalizedData"
+    );
+    assert!(
+        !normalized
+            .windows(b"CONTROL_NAME_EXT".len())
+            .any(|w| w == b"CONTROL_NAME_EXT"),
+        "NameRecordExtended inside REFERENCECONTROL must not contribute to ContentNormalizedData"
+    );
+}
+
+#[test]
 fn signature_binding_is_bound_for_spec_dir_stream() {
     let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
     let unsigned = build_vba_project_bin_spec(module_source, None);
@@ -310,4 +480,3 @@ fn signature_binding_is_bound_for_spec_dir_stream() {
     assert_eq!(sig2.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig2.binding, VbaSignatureBinding::NotBound);
 }
-

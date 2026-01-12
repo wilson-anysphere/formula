@@ -490,15 +490,27 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
 #[derive(Debug, Clone)]
 enum ReferenceForHash {
-    Registered,
+    /// `REFERENCEREGISTERED` (0x000D): contributes the `Libid` bytes.
+    Registered { libid: Vec<u8> },
+    /// `REFERENCEPROJECT` (0x000E): contributes a TempBuffer (see MS-OVBA §2.4.2.1) and then copies
+    /// bytes until the first NUL byte.
     Project {
-        size_of_libid_absolute: u32,
         libid_absolute: Vec<u8>,
-        size_of_libid_relative: u32,
         libid_relative: Vec<u8>,
         major_version: u32,
         minor_version: u16,
     },
+    /// `REFERENCECONTROL` (0x002F): contributes a TempBuffer derived from the twiddled Libid and
+    /// reserved fields (copy-until-NUL), plus the associated "extended" portion (treated as a
+    /// `REFERENCEEXTENDED`-like payload, included verbatim).
+    Control {
+        libid_twiddled: Vec<u8>,
+        reserved1: u32,
+        reserved2: u16,
+        extended: Vec<u8>,
+    },
+    /// `REFERENCEORIGINAL` (0x0033): contributes the `LibidOriginal` bytes (copy-until-NUL).
+    Original { libid_original: Vec<u8> },
 }
 
 #[derive(Debug, Clone)]
@@ -534,31 +546,35 @@ fn content_normalized_data_strict(
 
     for r in &dir.references {
         match r {
-            ReferenceForHash::Registered => out.push(0x7B),
+            ReferenceForHash::Registered { libid } => out.extend_from_slice(libid),
             ReferenceForHash::Project {
-                size_of_libid_absolute,
                 libid_absolute,
-                size_of_libid_relative,
                 libid_relative,
                 major_version,
                 minor_version,
             } => {
-                // MS-OVBA §2.4.2.1 REFERENCEPROJECT normalization.
                 let mut temp = Vec::new();
-                temp.extend_from_slice(&size_of_libid_absolute.to_le_bytes());
                 temp.extend_from_slice(libid_absolute);
-                temp.extend_from_slice(&size_of_libid_relative.to_le_bytes());
                 temp.extend_from_slice(libid_relative);
                 temp.extend_from_slice(&major_version.to_le_bytes());
                 temp.extend_from_slice(&minor_version.to_le_bytes());
-                temp.push(0x00);
-
-                for &b in &temp {
-                    if b == 0x00 {
-                        break;
-                    }
-                    out.push(b);
-                }
+                out.extend_from_slice(&copy_until_nul(&temp));
+            }
+            ReferenceForHash::Control {
+                libid_twiddled,
+                reserved1,
+                reserved2,
+                extended,
+            } => {
+                let mut temp = Vec::new();
+                temp.extend_from_slice(libid_twiddled);
+                temp.extend_from_slice(&reserved1.to_le_bytes());
+                temp.extend_from_slice(&reserved2.to_le_bytes());
+                out.extend_from_slice(&copy_until_nul(&temp));
+                out.extend_from_slice(extended);
+            }
+            ReferenceForHash::Original { libid_original } => {
+                out.extend_from_slice(&copy_until_nul(libid_original));
             }
         }
     }
@@ -759,6 +775,86 @@ fn parse_reference_control(cur: &mut DirCursor<'_>) -> Option<()> {
     Some(())
 }
 
+fn parse_reference_control_data_for_hash(data: &[u8]) -> Option<(Vec<u8>, u32, u16)> {
+    // `REFERENCECONTROL` record data used by MS-OVBA normalization pseudocode:
+    // - u32 len + bytes (LibidTwiddled)
+    // - Reserved1 (u32)
+    // - Reserved2 (u16)
+    //
+    // Some producers may omit the u32 length prefix; be tolerant by falling back to treating the
+    // final 6 bytes as the reserved fields.
+    if data.len() < 6 {
+        return None;
+    }
+
+    if data.len() >= 4 {
+        let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        let needed = 4usize
+            .checked_add(n)?
+            .checked_add(6)?;
+        if needed <= data.len() {
+            let start = 4usize;
+            let end = start.checked_add(n)?;
+            let reserved1_offset = end;
+            let reserved2_offset = reserved1_offset.checked_add(4)?;
+            let reserved1 = u32::from_le_bytes([
+                data[reserved1_offset],
+                data[reserved1_offset + 1],
+                data[reserved1_offset + 2],
+                data[reserved1_offset + 3],
+            ]);
+            let reserved2 = u16::from_le_bytes([data[reserved2_offset], data[reserved2_offset + 1]]);
+            return Some((data[start..end].to_vec(), reserved1, reserved2));
+        }
+    }
+
+    // Fallback: treat the final 6 bytes as Reserved1+Reserved2, with the leading bytes as Libid.
+    let reserved1_offset = data.len() - 6;
+    let reserved2_offset = reserved1_offset + 4;
+    let reserved1 = u32::from_le_bytes([
+        data[reserved1_offset],
+        data[reserved1_offset + 1],
+        data[reserved1_offset + 2],
+        data[reserved1_offset + 3],
+    ]);
+    let reserved2 = u16::from_le_bytes([data[reserved2_offset], data[reserved2_offset + 1]]);
+    Some((data[..reserved1_offset].to_vec(), reserved1, reserved2))
+}
+
+fn parse_reference_control_for_hash(cur: &mut DirCursor<'_>) -> Option<ReferenceForHash> {
+    let id = cur.read_u16()?;
+    if id != 0x002F {
+        return None;
+    }
+
+    // The `REFERENCECONTROL` record's u32 field is the record data length; the fields we need for
+    // hashing live inside that data (u32-len-prefixed libid + reserved ints).
+    let size_control = cur.read_u32()? as usize;
+    let control_data = cur.take(size_control)?.to_vec();
+    let (libid_twiddled, reserved1, reserved2) = parse_reference_control_data_for_hash(&control_data)?;
+
+    // Optional NameRecordExtended (REFERENCENAME).
+    if cur.peek_u16()? == 0x0016 {
+        parse_referencename_record(cur)?;
+    }
+
+    // ReferenceRecordExtended (0x0030) immediately follows the control record (as part of the
+    // `ReferenceControl` structure in MS-OVBA §2.3.4.2.2).
+    let reserved3 = cur.read_u16()?;
+    if reserved3 != 0x0030 {
+        return None;
+    }
+    let size_extended = cur.read_u32()? as usize;
+    let extended = cur.take(size_extended)?.to_vec();
+
+    Some(ReferenceForHash::Control {
+        libid_twiddled,
+        reserved1,
+        reserved2,
+        extended,
+    })
+}
+
 fn parse_reference_for_hash(cur: &mut DirCursor<'_>) -> Option<Option<ReferenceForHash>> {
     // Optional NameRecord.
     if cur.peek_u16()? == 0x0016 {
@@ -770,8 +866,8 @@ fn parse_reference_for_hash(cur: &mut DirCursor<'_>) -> Option<Option<ReferenceF
         0x000D => {
             let _id = cur.read_u16()?;
             let size = cur.read_u32()? as usize;
-            cur.skip(size)?;
-            Some(Some(ReferenceForHash::Registered))
+            let libid = cur.take(size)?.to_vec();
+            Some(Some(ReferenceForHash::Registered { libid }))
         }
         0x000E => {
             let _id = cur.read_u16()?;
@@ -787,30 +883,43 @@ fn parse_reference_for_hash(cur: &mut DirCursor<'_>) -> Option<Option<ReferenceF
 
             // Ensure we consumed exactly the expected number of bytes.
             let consumed = cur.offset.checked_sub(start)?;
-            if consumed != size_total {
+            if consumed > size_total {
                 return None;
+            }
+            if consumed < size_total {
+                cur.skip(size_total - consumed)?;
             }
 
             Some(Some(ReferenceForHash::Project {
-                size_of_libid_absolute: size_abs,
                 libid_absolute: libid_abs,
-                size_of_libid_relative: size_rel,
                 libid_relative: libid_rel,
                 major_version: major,
                 minor_version: minor,
             }))
         }
         0x002F => {
-            parse_reference_control(cur)?;
-            Some(None)
+            let r = parse_reference_control_for_hash(cur)?;
+            Some(Some(r))
         }
         0x0033 => {
             let _id = cur.read_u16()?;
             let size_libid = cur.read_u32()? as usize;
-            cur.skip(size_libid)?;
+            let libid_raw = cur.take(size_libid)?.to_vec();
+            let libid_original = if libid_raw.len() >= 4 {
+                let n =
+                    u32::from_le_bytes([libid_raw[0], libid_raw[1], libid_raw[2], libid_raw[3]])
+                        as usize;
+                if 4 + n <= libid_raw.len() {
+                    libid_raw[4..4 + n].to_vec()
+                } else {
+                    libid_raw
+                }
+            } else {
+                libid_raw
+            };
             // Nested REFERENCECONTROL.
             parse_reference_control(cur)?;
-            Some(None)
+            Some(Some(ReferenceForHash::Original { libid_original }))
         }
         _ => None,
     }
