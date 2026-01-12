@@ -3,9 +3,13 @@ use sha1::Sha1;
 use sha2::Sha256;
 use sha2::Digest as _;
 
-use crate::{OleFile, signature::SignatureError};
+use crate::{signature::SignatureError, OleFile};
 
-/// Digest algorithm used by MS-OVBA VBA project signatures.
+/// Digest algorithm used by [`compute_vba_project_digest`].
+///
+/// Note: actual Office VBA signature *binding* uses an MD5 digest (16 bytes) per MS-OSHARED §4.3.
+/// The hash algorithm OID stored in Authenticode `DigestInfo` is often SHA-256 in the wild, but is
+/// not used to select the VBA project digest algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigestAlg {
     /// MD5 (16 bytes). Per MS-OSHARED §4.3 this is the VBA project "source hash" algorithm even
@@ -47,11 +51,14 @@ impl Hasher {
     }
 }
 
-/// Best-effort MS-OVBA project digest over the VBA project's OLE streams.
+/// Deterministic fallback digest over the VBA project's OLE streams.
 ///
-/// This is intended to match how Office binds a `\x05DigitalSignature*` stream to the rest of the
-/// project. The exact MS-OVBA transcript is underspecified in our implementation, but we aim for a
-/// deterministic and collision-resistant digest:
+/// This is **not** the primary Office/MS-OVBA "Contents Hash" algorithm (which operates over
+/// `ContentNormalizedData` and optional `FormsNormalizedData`). It exists as a best-effort fallback
+/// for synthetic or partially-parseable `vbaProject.bin` files where MS-OVBA normalization cannot be
+/// computed.
+///
+/// Transcript (deterministic and collision-resistant):
 ///
 /// 1. Enumerate all streams in the OLE file.
 /// 2. Exclude any `DigitalSignature*` stream/storage.
