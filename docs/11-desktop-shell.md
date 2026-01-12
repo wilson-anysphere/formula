@@ -259,8 +259,8 @@ The updater dialog includes an **"Open release page"** action. If an update down
 that action is relabeled/promoted to **"Download manually"** and the dialog surfaces manual
 download/downgrade instructions.
 
-1. Open Formula's **Releases** page (in-app via the updater dialog's **"Open release page"** action,
-   or directly in your browser): https://github.com/wilson-anysphere/formula/releases
+1. Open Formula's **Releases** page (in-app via the updater dialog's **"Open release page"** / **"Download manually"**
+   action, or directly in your browser): https://github.com/wilson-anysphere/formula/releases
 2. Download the installer/bundle for the **older version** you want.
 3. Install it over your current install (or uninstall first if your platform's installer blocks
    downgrades).
