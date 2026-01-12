@@ -108,14 +108,16 @@ export class AiContextManager {
       };
     }
 
-    const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records);
     const maxAllowedRank = evaluation.maxAllowed === null ? null : classificationRank(evaluation.maxAllowed);
-    const policyAllowsRestrictedContent = Boolean(
-      policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent
-    );
+    const policyAllowsRestrictedContent = Boolean(policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
     const restrictedAllowed = includeRestrictedContent
       ? policyAllowsRestrictedContent
       : maxAllowedRank !== null && maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
+
+    const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records, {
+      // Under REDACT decisions, maxAllowed is always non-null, but keep this defensive.
+      maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
+    });
 
     const redactions = [];
     let redactedCount = 0;
@@ -186,8 +188,9 @@ function rangesIntersectNormalized(a, b) {
   return a.start.row <= b.end.row && b.start.row <= a.end.row && a.start.col <= b.end.col && b.start.col <= a.end.col;
 }
 
-function buildDlpRangeIndex(ref, records) {
+function buildDlpRangeIndex(ref, records, opts) {
   const selectionRange = ref.range;
+  const maxAllowedRank = opts?.maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK;
   let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
   let sheetClassificationMax = { ...DEFAULT_CLASSIFICATION };
   const columnClassificationByIndex = new Map();
@@ -199,6 +202,16 @@ function buildDlpRangeIndex(ref, records) {
     if (!record || !record.selector || typeof record.selector !== "object") continue;
     const selector = record.selector;
     if (selector.documentId !== ref.documentId) continue;
+
+    // Records at/below the policy `maxAllowed` threshold cannot change per-cell allow/redact
+    // decisions and are ignored for performance.
+    try {
+      const rank = classificationRank(record.classification?.level);
+      if (rank <= maxAllowedRank) continue;
+    } catch {
+      // Ignore invalid classifications so one bad row can't break enforcement.
+      continue;
+    }
 
     switch (selector.scope) {
       case "document": {
