@@ -174,7 +174,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 |----------|--------|
 | `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux) | Inline AI edit |
 | `Cmd+I` (desktop, macOS only) | Toggle AI sidebar |
-| `Tab` (while editing a formula) | Accept AI suggestion |
+| `Tab` (in formula bar, when an AI suggestion is shown) | Accept AI suggestion |
 
 Platform notes:
 
