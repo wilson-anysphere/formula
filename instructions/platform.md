@@ -81,6 +81,10 @@ Key config fields you'll touch most often:
 - `app.security.csp`: Content Security Policy for the desktop WebView
 - `plugins.*`: plugin configuration (e.g. updater)
 
+`app.security.headers` is especially important for the desktop app because the Pyodide-based Python runtime
+prefers running in a Worker with `SharedArrayBuffer` (requires `crossOriginIsolated === true`).
+See `docs/11-desktop-shell.md` for details.
+
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
