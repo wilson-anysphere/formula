@@ -131,6 +131,9 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 }
 ```
 
+Note: `core:event:allow-unlisten` is granted so the frontend can unregister event listeners it previously installed (to
+avoid leaking listeners for one-shot flows).
+
 Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
 shell plugin (`shell:allow-open`).

@@ -787,6 +787,8 @@ by the config schema (`tauri-build` will error). Scope capabilities using the ca
 - **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
   - Note: depending on Tauri/plugin versions these may be namespaced as `core:event:*`; see the allowlist in
     `apps/desktop/src-tauri/capabilities/main.json` (and the guardrail tests) for the exact identifiers.
+- **`core:event:allow-unlisten`**: allows the frontend to unregister event listeners it previously installed (so we don’t
+  leak listeners for one-shot flows like close/open/OAuth readiness signals).
 - Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`, `dialog:allow-confirm`, `dialog:allow-message`
   - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
@@ -824,6 +826,7 @@ High-level contents (see the file for the exhaustive list):
   - `close-prep-done`, `close-handled`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
+- `core:event:allow-unlisten` is granted so the frontend can clean up its own temporary listeners.
 - Plugin permissions include dialog/window/clipboard APIs plus updater permissions (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, required for the updater UI).
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro
