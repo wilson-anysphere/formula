@@ -28,14 +28,6 @@ pub struct CellData {
     pub value: JsonValue,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
-pub struct CellDataRich {
-    pub sheet: String,
-    pub address: String,
-    pub input: CellValue,
-    pub value: CellValue,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CellChange {
     pub sheet: String,
@@ -673,25 +665,6 @@ fn model_error_to_engine(err: formula_model::ErrorValue) -> ErrorKind {
     }
 }
 
-fn engine_error_to_model(err: ErrorKind) -> formula_model::ErrorValue {
-    match err {
-        ErrorKind::Null => formula_model::ErrorValue::Null,
-        ErrorKind::Div0 => formula_model::ErrorValue::Div0,
-        ErrorKind::Value => formula_model::ErrorValue::Value,
-        ErrorKind::Ref => formula_model::ErrorValue::Ref,
-        ErrorKind::Name => formula_model::ErrorValue::Name,
-        ErrorKind::Num => formula_model::ErrorValue::Num,
-        ErrorKind::NA => formula_model::ErrorValue::NA,
-        ErrorKind::GettingData => formula_model::ErrorValue::GettingData,
-        ErrorKind::Spill => formula_model::ErrorValue::Spill,
-        ErrorKind::Calc => formula_model::ErrorValue::Calc,
-        ErrorKind::Field => formula_model::ErrorValue::Field,
-        ErrorKind::Connect => formula_model::ErrorValue::Connect,
-        ErrorKind::Blocked => formula_model::ErrorValue::Blocked,
-        ErrorKind::Unknown => formula_model::ErrorValue::Unknown,
-    }
-}
-
 /// Convert a `formula-model` [`CellValue`] (including entity/record rich values) into a
 /// `formula-engine` runtime [`Value`](formula_engine::Value).
 ///
@@ -754,59 +727,6 @@ fn cell_value_to_engine_rich(value: &CellValue) -> Result<EngineValue, JsValue> 
     }
 }
 
-fn engine_value_to_cell_value_rich(value: EngineValue) -> CellValue {
-    match value {
-        EngineValue::Blank => CellValue::Empty,
-        EngineValue::Number(n) => CellValue::Number(n),
-        EngineValue::Text(s) => CellValue::String(s),
-        EngineValue::Bool(b) => CellValue::Boolean(b),
-        EngineValue::Error(err) => CellValue::Error(engine_error_to_model(err)),
-        EngineValue::Entity(entity) => {
-            let mut properties = BTreeMap::new();
-            for (k, v) in entity.fields {
-                properties.insert(k, engine_value_to_cell_value_rich(v));
-            }
-            CellValue::Entity(formula_model::EntityValue {
-                entity_type: entity.entity_type.unwrap_or_default(),
-                entity_id: entity.entity_id.unwrap_or_default(),
-                display_value: entity.display,
-                properties,
-            })
-        }
-        EngineValue::Record(record) => {
-            let mut fields = BTreeMap::new();
-            for (k, v) in record.fields {
-                fields.insert(k, engine_value_to_cell_value_rich(v));
-            }
-            CellValue::Record(formula_model::RecordValue {
-                fields,
-                display_field: record.display_field,
-                display_value: record.display,
-            })
-        }
-        EngineValue::Array(arr) => {
-            let mut data = Vec::with_capacity(arr.rows);
-            for r in 0..arr.rows {
-                let mut row = Vec::with_capacity(arr.cols);
-                for c in 0..arr.cols {
-                    row.push(engine_value_to_cell_value_rich(
-                        arr.get(r, c).cloned().unwrap_or(EngineValue::Blank),
-                    ));
-                }
-                data.push(row);
-            }
-            CellValue::Array(formula_model::ArrayValue { data })
-        }
-        EngineValue::Spill { origin } => CellValue::Spill(formula_model::SpillValue { origin }),
-        // These variants should not generally cross the rich-value boundary today. Degrade them
-        // into their Excel error equivalents so callers still get something meaningful.
-        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
-            CellValue::Error(formula_model::ErrorValue::Value)
-        }
-        EngineValue::Lambda(_) => CellValue::Error(formula_model::ErrorValue::Calc),
-    }
-}
-
 fn cell_value_to_engine(value: &CellValue) -> EngineValue {
     match value {
         CellValue::Empty => EngineValue::Blank,
@@ -822,10 +742,6 @@ fn cell_value_to_engine(value: &CellValue) -> EngineValue {
         // error rather than silently treating an array as a string.
         CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Error(ErrorKind::Spill),
     }
-}
-
-fn cell_value_to_json(value: &CellValue) -> JsonValue {
-    engine_value_to_json(cell_value_to_engine(value))
 }
 
 fn cell_value_to_scalar_json_input(value: &CellValue) -> JsonValue {
@@ -856,28 +772,6 @@ fn cell_value_to_scalar_json_input(value: &CellValue) -> JsonValue {
             .unwrap_or(JsonValue::Null),
         // Preserve the scalar spill error in legacy IO paths.
         CellValue::Spill(_) => JsonValue::String(ErrorKind::Spill.as_code().to_string()),
-    }
-}
-
-fn scalar_json_input_to_cell_value(input: &JsonValue) -> CellValue {
-    match input {
-        JsonValue::Null => CellValue::Empty,
-        JsonValue::Bool(b) => CellValue::Boolean(*b),
-        JsonValue::Number(n) => CellValue::Number(n.as_f64().unwrap_or(0.0)),
-        JsonValue::String(s) => {
-            // Preserve formulas / quote-prefixed strings exactly as stored in the legacy protocol.
-            if s.starts_with('\'') || is_formula_input(input) {
-                return CellValue::String(s.clone());
-            }
-
-            // Legacy scalar IO treats error literals as structured errors.
-            if let Some(kind) = ErrorKind::from_code(s) {
-                return CellValue::Error(engine_error_to_model(kind));
-            }
-
-            CellValue::String(s.clone())
-        }
-        JsonValue::Array(_) | JsonValue::Object(_) => CellValue::Empty,
     }
 }
 
@@ -1289,35 +1183,6 @@ impl WorkbookState {
         let value = engine_value_to_json(self.engine.get_cell_value(&sheet, &address));
 
         Ok(CellData {
-            sheet,
-            address,
-            input,
-            value,
-        })
-    }
-
-    fn get_cell_rich_data(&self, sheet: &str, address: &str) -> Result<CellDataRich, JsValue> {
-        let sheet = self.require_sheet(sheet)?.to_string();
-        let address = Self::parse_address(address)?.to_a1();
-
-        let input = self
-            .sheets_rich
-            .get(&sheet)
-            .and_then(|cells| cells.get(&address))
-            .cloned()
-            .unwrap_or_else(|| {
-                let scalar_input = self
-                    .sheets
-                    .get(&sheet)
-                    .and_then(|cells| cells.get(&address))
-                    .cloned()
-                    .unwrap_or(JsonValue::Null);
-                scalar_json_input_to_cell_value(&scalar_input)
-            });
-
-        let value = engine_value_to_cell_value_rich(self.engine.get_cell_value(&sheet, &address));
-
-        Ok(CellDataRich {
             sheet,
             address,
             input,
