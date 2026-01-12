@@ -1196,7 +1196,6 @@ fn push_column(col: u32, out: &mut String) {
 mod tests {
     use super::*;
     use formula_engine::{parse_formula, ParseOptions};
-    use formula_xlsx::print::{parse_print_area_defined_name, parse_print_titles_defined_name};
 
     fn assert_parseable(expr: &str) {
         let expr = expr.trim();
@@ -1208,11 +1207,15 @@ mod tests {
     }
 
     fn assert_print_area_parseable(sheet_name: &str, expr: &str) {
-        parse_print_area_defined_name(sheet_name, expr).expect("parse print area defined name");
+        let mut warnings = Vec::<crate::ImportWarning>::new();
+        crate::parse_print_area_refers_to(sheet_name, expr, &mut warnings)
+            .expect("parse print area defined name");
     }
 
     fn assert_print_titles_parseable(sheet_name: &str, expr: &str) {
-        parse_print_titles_defined_name(sheet_name, expr).expect("parse print titles defined name");
+        let mut warnings = Vec::<crate::ImportWarning>::new();
+        crate::parse_print_titles_refers_to(sheet_name, expr, &mut warnings)
+            .expect("parse print titles defined name");
     }
 
     const BIFF8_MAX_ROW: u16 = 0xFFFF;

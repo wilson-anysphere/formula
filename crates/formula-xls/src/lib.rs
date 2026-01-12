@@ -30,8 +30,9 @@ use std::path::{Path, PathBuf};
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
     normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind,
-    DefinedNameScope, ErrorValue, HyperlinkTarget, Range, SheetVisibility, Style, TabColor,
-    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
+    ColRange, DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange,
+    SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -1285,6 +1286,8 @@ fn import_xls_path_with_biff_reader(
         }
     }
 
+    populate_print_settings_from_defined_names(&mut out, &mut warnings);
+
     Ok(XlsImportResult {
         workbook: out,
         source: ImportSource {
@@ -1471,6 +1474,379 @@ fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
     a.chars()
         .flat_map(|ch| ch.to_uppercase())
         .eq(b.chars().flat_map(|ch| ch.to_uppercase()))
+}
+
+fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings: &mut Vec<ImportWarning>) {
+    // We need to snapshot the defined names up-front so we can mutably update print settings while
+    // iterating.
+    let builtins: Vec<(DefinedNameScope, String, String)> = workbook
+        .defined_names
+        .iter()
+        .filter(|n| matches!(n.scope, DefinedNameScope::Sheet(_)))
+        .filter(|n| {
+            n.name
+                .eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
+                || n.name
+                    .eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES)
+        })
+        .map(|n| (n.scope, n.name.clone(), n.refers_to.clone()))
+        .collect();
+
+    for (scope, name, refers_to) in builtins {
+        let DefinedNameScope::Sheet(sheet_id) = scope else {
+            continue;
+        };
+        let Some(sheet_name) = workbook.sheet(sheet_id).map(|s| s.name.clone()) else {
+            continue;
+        };
+
+        if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA) {
+            match parse_print_area_refers_to(&sheet_name, &refers_to, warnings) {
+                Some(ranges) => {
+                    workbook.set_sheet_print_area_by_name(&sheet_name, Some(ranges));
+                }
+                None => {}
+            }
+        } else if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES) {
+            match parse_print_titles_refers_to(&sheet_name, &refers_to, warnings) {
+                Some(titles) => {
+                    workbook.set_sheet_print_titles_by_name(&sheet_name, Some(titles));
+                }
+                None => {}
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsedA1Range {
+    Cell(Range),
+    Row(RowRange),
+    Col(ColRange),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParsedEndpoint {
+    Cell(CellRef),
+    Row(u32), // 0-based
+    Col(u32), // 0-based
+}
+
+fn parse_print_area_refers_to(
+    expected_sheet_name: &str,
+    refers_to: &str,
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<Vec<Range>> {
+    let refers_to = refers_to.trim();
+    if refers_to.is_empty() {
+        return None;
+    }
+
+    let areas = match split_print_name_areas(refers_to) {
+        Ok(areas) => areas,
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
+                formula_model::XLNM_PRINT_AREA
+            )));
+            return None;
+        }
+    };
+
+    let mut ranges: Vec<Range> = Vec::new();
+    for area in areas {
+        let (sheet_name, range_str) = match split_print_name_sheet_ref(area) {
+            Ok(v) => v,
+            Err(err) => {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_AREA
+                )));
+                continue;
+            }
+        };
+
+        if let Some(found_sheet_name) = sheet_name.as_deref() {
+            let found_sheet_name = strip_workbook_prefix_from_sheet_ref(found_sheet_name);
+            if !sheet_name_eq_case_insensitive(found_sheet_name, expected_sheet_name) {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
+                    formula_model::XLNM_PRINT_AREA
+                )));
+                continue;
+            }
+        }
+
+        match parse_print_name_range(range_str) {
+            Ok(ParsedA1Range::Cell(range)) => ranges.push(range),
+            Ok(ParsedA1Range::Row(_) | ParsedA1Range::Col(_)) => {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print area must be a cell range",
+                    formula_model::XLNM_PRINT_AREA
+                )));
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                formula_model::XLNM_PRINT_AREA
+            ))),
+        }
+    }
+
+    (!ranges.is_empty()).then_some(ranges)
+}
+
+fn parse_print_titles_refers_to(
+    expected_sheet_name: &str,
+    refers_to: &str,
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<PrintTitles> {
+    let refers_to = refers_to.trim();
+    if refers_to.is_empty() {
+        return None;
+    }
+
+    let areas = match split_print_name_areas(refers_to) {
+        Ok(areas) => areas,
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to parse `{}` for sheet `{expected_sheet_name}`: {err}",
+                formula_model::XLNM_PRINT_TITLES
+            )));
+            return None;
+        }
+    };
+
+    let mut titles = PrintTitles::default();
+    for area in areas {
+        let (sheet_name, range_str) = match split_print_name_sheet_ref(area) {
+            Ok(v) => v,
+            Err(err) => {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                    formula_model::XLNM_PRINT_TITLES
+                )));
+                continue;
+            }
+        };
+
+        if let Some(found_sheet_name) = sheet_name.as_deref() {
+            let found_sheet_name = strip_workbook_prefix_from_sheet_ref(found_sheet_name);
+            if !sheet_name_eq_case_insensitive(found_sheet_name, expected_sheet_name) {
+                warnings.push(ImportWarning::new(format!(
+                    "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: references different sheet `{found_sheet_name}`",
+                    formula_model::XLNM_PRINT_TITLES
+                )));
+                continue;
+            }
+        }
+
+        match parse_print_name_range(range_str) {
+            Ok(ParsedA1Range::Row(rows)) => titles.repeat_rows = Some(rows),
+            Ok(ParsedA1Range::Col(cols)) => titles.repeat_cols = Some(cols),
+            Ok(ParsedA1Range::Cell(_)) => warnings.push(ImportWarning::new(format!(
+                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print titles must be a row or column range",
+                formula_model::XLNM_PRINT_TITLES
+            ))),
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
+                formula_model::XLNM_PRINT_TITLES
+            ))),
+        }
+    }
+
+    (titles.repeat_rows.is_some() || titles.repeat_cols.is_some()).then_some(titles)
+}
+
+fn split_print_name_areas(formula: &str) -> Result<Vec<&str>, String> {
+    // Sheet names may be quoted (single quotes) and can contain commas. Split on commas only when
+    // not inside quotes.
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut in_quotes = false;
+    let bytes = formula.as_bytes();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' => {
+                if in_quotes {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        // Escaped quote in a sheet name.
+                        i += 1;
+                    } else {
+                        in_quotes = false;
+                    }
+                } else {
+                    in_quotes = true;
+                }
+            }
+            b',' if !in_quotes => {
+                let part = formula[start..i].trim();
+                if !part.is_empty() {
+                    parts.push(part);
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    let part = formula[start..].trim();
+    if !part.is_empty() {
+        parts.push(part);
+    }
+
+    Ok(parts)
+}
+
+/// Split an area reference like:
+/// - `Sheet1!$A$1:$B$2`
+/// - `'Sheet One'!$1:$1`
+///
+/// into `(sheet_name, range_str)`.
+///
+/// Returns `sheet_name=None` when the reference has no explicit `Sheet!` prefix.
+fn split_print_name_sheet_ref(input: &str) -> Result<(Option<String>, &str), String> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err("empty reference".to_string());
+    }
+
+    let bytes = input.as_bytes();
+    if bytes.first() == Some(&b'\'') {
+        let mut sheet = String::new();
+        let mut i = 1usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\'' => {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        sheet.push('\'');
+                        i += 2;
+                        continue;
+                    }
+
+                    // End of quoted sheet name.
+                    if i + 1 >= bytes.len() || bytes[i + 1] != b'!' {
+                        return Err(format!(
+                            "expected ! after quoted sheet name in {input:?}"
+                        ));
+                    }
+
+                    let rest = &input[(i + 2)..];
+                    return Ok((Some(sheet), rest));
+                }
+                _ => sheet.push(bytes[i] as char),
+            }
+            i += 1;
+        }
+
+        return Err(format!("unterminated quoted sheet name in {input:?}"));
+    }
+
+    let Some(idx) = input.find('!') else {
+        return Ok((None, input));
+    };
+
+    Ok((Some(input[..idx].to_string()), &input[(idx + 1)..]))
+}
+
+fn strip_workbook_prefix_from_sheet_ref(sheet_name: &str) -> &str {
+    // Best-effort: Excel can serialize sheet references as `'[Book1.xlsx]Sheet1'!A1`.
+    // If a workbook prefix exists, keep only the portion after the last `]`.
+    sheet_name
+        .rfind(']')
+        .and_then(|idx| (idx + 1 <= sheet_name.len()).then_some(&sheet_name[(idx + 1)..]))
+        .filter(|s| !s.is_empty())
+        .unwrap_or(sheet_name)
+}
+
+fn parse_print_name_range(ref_str: &str) -> Result<ParsedA1Range, String> {
+    let ref_str = ref_str.trim();
+    if ref_str.is_empty() {
+        return Err("empty range".to_string());
+    }
+
+    let (start, end) = match ref_str.split_once(':') {
+        Some((a, b)) => (a, b),
+        None => (ref_str, ref_str),
+    };
+
+    let start = parse_print_name_endpoint(start)?;
+    let end = parse_print_name_endpoint(end)?;
+
+    match (start, end) {
+        (ParsedEndpoint::Cell(a), ParsedEndpoint::Cell(b)) => Ok(ParsedA1Range::Cell(Range::new(a, b))),
+        (ParsedEndpoint::Row(a), ParsedEndpoint::Row(b)) => Ok(ParsedA1Range::Row(RowRange { start: a, end: b })),
+        (ParsedEndpoint::Col(a), ParsedEndpoint::Col(b)) => Ok(ParsedA1Range::Col(ColRange { start: a, end: b })),
+        _ => Err(format!("mismatched range endpoints in {ref_str:?}")),
+    }
+}
+
+fn parse_print_name_endpoint(s: &str) -> Result<ParsedEndpoint, String> {
+    let trimmed = s.trim().trim_matches('$');
+    if trimmed.is_empty() {
+        return Err("empty endpoint".to_string());
+    }
+
+    let mut letters = String::new();
+    let mut digits = String::new();
+
+    for ch in trimmed.chars() {
+        if ch == '$' {
+            continue;
+        }
+        if ch.is_ascii_alphabetic() && digits.is_empty() {
+            letters.push(ch);
+        } else if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else {
+            return Err(format!("invalid character {ch:?} in endpoint {s:?}"));
+        }
+    }
+
+    match (letters.is_empty(), digits.is_empty()) {
+        (false, false) => {
+            let cell_ref = format!("{letters}{digits}");
+            let cell = CellRef::from_a1(&cell_ref).map_err(|err| {
+                format!("invalid cell reference in endpoint {s:?}: {err}")
+            })?;
+            Ok(ParsedEndpoint::Cell(cell))
+        }
+        (false, true) => {
+            let col = parse_col_letters_to_index(&letters)?;
+            Ok(ParsedEndpoint::Col(col))
+        }
+        (true, false) => {
+            let row_1_based: u32 = digits
+                .parse()
+                .map_err(|_| format!("invalid row number in endpoint {s:?}"))?;
+            if row_1_based == 0 {
+                return Err(format!("invalid row number in endpoint {s:?}"));
+            }
+            Ok(ParsedEndpoint::Row(row_1_based - 1))
+        }
+        (true, true) => Err(format!("invalid endpoint {s:?}")),
+    }
+}
+
+fn parse_col_letters_to_index(letters: &str) -> Result<u32, String> {
+    let mut col: u32 = 0;
+    for ch in letters.chars() {
+        if !ch.is_ascii_alphabetic() {
+            return Err(format!("invalid column letters {letters:?}"));
+        }
+        let v = (ch.to_ascii_uppercase() as u8 - b'A') as u32 + 1;
+        col = col
+            .checked_mul(26)
+            .and_then(|c| c.checked_add(v))
+            .ok_or_else(|| format!("invalid column letters {letters:?}"))?;
+    }
+    if col == 0 {
+        return Err(format!("invalid column letters {letters:?}"));
+    }
+    Ok(col - 1)
 }
 
 fn sheet_name_taken(candidate: &str, existing_names: &[String]) -> bool {
