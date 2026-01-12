@@ -205,6 +205,8 @@ export class DesktopSharedGrid {
 
   private lastEmittedViewport: GridViewportState | null = null;
 
+  private devicePixelRatio = 1;
+
   private readonly a11yStatusId: string;
   private readonly a11yStatusEl: HTMLDivElement;
   private readonly a11yActiveCellId: string;
@@ -367,6 +369,21 @@ export class DesktopSharedGrid {
     return this.renderer.scroll.getScroll();
   }
 
+  private alignScroll(pos: { x: number; y: number }): { x: number; y: number } {
+    // Keep aligned with `CanvasGridRenderer.alignScrollToDevicePixels` (private), which ensures
+    // scroll offsets land on device-pixel boundaries for crisp rendering and stable blits.
+    const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+    const step = 1 / dpr;
+    const { maxScrollX, maxScrollY } = this.renderer.scroll.getMaxScroll();
+
+    const maxAlignedX = Math.floor(maxScrollX / step) * step;
+    const maxAlignedY = Math.floor(maxScrollY / step) * step;
+
+    const x = Math.min(maxAlignedX, Math.max(0, Math.round(pos.x / step) * step));
+    const y = Math.min(maxAlignedY, Math.max(0, Math.round(pos.y / step) * step));
+    return { x, y };
+  }
+
   scrollTo(x: number, y: number): void {
     // `CanvasGridRenderer.setScroll` invalidates for scroll unconditionally (even if the scroll
     // position doesn't actually change). Skip calling it when we're already at the requested
@@ -374,8 +391,9 @@ export class DesktopSharedGrid {
     const before = this.renderer.scroll.getScroll();
     const nextX = Number.isFinite(x) ? x : 0;
     const nextY = Number.isFinite(y) ? y : 0;
-    if (before.x !== nextX || before.y !== nextY) {
-      this.renderer.setScroll(nextX, nextY);
+    const aligned = this.alignScroll({ x: nextX, y: nextY });
+    if (before.x !== aligned.x || before.y !== aligned.y) {
+      this.renderer.setScroll(aligned.x, aligned.y);
     }
     this.syncScrollbars();
     this.emitScroll();
@@ -1890,7 +1908,10 @@ export class DesktopSharedGrid {
         const thumbOffset = pointerPos - trackRect.top - grabOffset;
         const clamped = clamp(thumbOffset, 0, thumbTravel);
         const nextScroll = thumbTravel === 0 ? 0 : (clamped / thumbTravel) * maxScroll;
-        renderer.setScroll(renderer.scroll.getScroll().x, nextScroll);
+        const before = renderer.scroll.getScroll();
+        const aligned = this.alignScroll({ x: before.x, y: nextScroll });
+        if (aligned.y === before.y) return;
+        renderer.setScroll(aligned.x, aligned.y);
         this.syncScrollbars();
         this.emitScroll();
       };
@@ -1928,7 +1949,10 @@ export class DesktopSharedGrid {
         const thumbOffset = pointerPos - trackRect.left - grabOffset;
         const clamped = clamp(thumbOffset, 0, thumbTravel);
         const nextScroll = thumbTravel === 0 ? 0 : (clamped / thumbTravel) * maxScroll;
-        renderer.setScroll(nextScroll, renderer.scroll.getScroll().y);
+        const before = renderer.scroll.getScroll();
+        const aligned = this.alignScroll({ x: nextScroll, y: before.y });
+        if (aligned.x === before.x) return;
+        renderer.setScroll(aligned.x, aligned.y);
         this.syncScrollbars();
         this.emitScroll();
       };
@@ -1971,7 +1995,10 @@ export class DesktopSharedGrid {
       const clampedOffset = clamp(targetOffset, 0, thumbTravel);
       const nextScroll = (clampedOffset / thumbTravel) * maxScrollY;
 
-      renderer.setScroll(renderer.scroll.getScroll().x, nextScroll);
+      const before = renderer.scroll.getScroll();
+      const aligned = this.alignScroll({ x: before.x, y: nextScroll });
+      if (aligned.y === before.y) return;
+      renderer.setScroll(aligned.x, aligned.y);
       this.syncScrollbars();
       this.emitScroll();
     };
@@ -2004,7 +2031,10 @@ export class DesktopSharedGrid {
       const clampedOffset = clamp(targetOffset, 0, thumbTravel);
       const nextScroll = (clampedOffset / thumbTravel) * maxScrollX;
 
-      renderer.setScroll(nextScroll, renderer.scroll.getScroll().y);
+      const before = renderer.scroll.getScroll();
+      const aligned = this.alignScroll({ x: nextScroll, y: before.y });
+      if (aligned.x === before.x) return;
+      renderer.setScroll(aligned.x, aligned.y);
       this.syncScrollbars();
       this.emitScroll();
     };
@@ -2119,6 +2149,7 @@ export class DesktopSharedGrid {
   }
 
   resize(width: number, height: number, devicePixelRatio: number): void {
+    this.devicePixelRatio = devicePixelRatio;
     this.renderer.resize(width, height, devicePixelRatio);
     if (this.selectionCanvasViewportOrigin) {
       this.cacheViewportOrigin();

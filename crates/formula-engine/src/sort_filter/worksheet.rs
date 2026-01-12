@@ -373,15 +373,15 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                     .get("value")
                                     .and_then(|v| v.as_f64())
                                     .map(CellValue::Number),
-                                "string" => display_value
-                                    .get("value")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| CellValue::Text(s.to_string())),
-                                "boolean" => display_value
-                                    .get("value")
-                                    .and_then(|v| v.as_bool())
-                                    .map(CellValue::Bool),
-                                "error" => display_value
+                                 "string" => display_value
+                                     .get("value")
+                                     .and_then(|v| v.as_str())
+                                     .map(|s| CellValue::Text(s.to_string())),
+                                 "boolean" => display_value
+                                     .get("value")
+                                     .and_then(|v| v.as_bool())
+                                     .map(CellValue::Bool),
+                                 "error" => display_value
                                     .get("value")
                                     .and_then(|v| v.as_str())
                                     .map(|err_str| {
@@ -399,18 +399,18 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                 // Degrade nested rich values (e.g. records whose display field is
                                 // an entity/record) using the same logic as the main conversion.
                                 //
-                                // Note: `"image"` is handled explicitly above so we can prefer its
-                                // alt text without an extra deserialize roundtrip.
-                                "entity" | "record" => serde_json::from_value(display_value.clone())
-                                    .ok()
-                                    .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
-                                _ => None,
-                            };
+                                 // Note: `"image"` is handled explicitly above so we can prefer its
+                                 // alt text without an extra deserialize roundtrip.
+                                 "entity" | "record" => serde_json::from_value(display_value.clone())
+                                     .ok()
+                                     .map(|v: ModelCellValue| model_cell_value_to_sort_value(&v)),
+                                 _ => None,
+                             };
 
-                            if parsed.is_some() {
-                                return parsed;
-                            }
-                        }
+                             if parsed.is_some() {
+                                 return parsed;
+                             }
+                         }
                     }
                 }
             }

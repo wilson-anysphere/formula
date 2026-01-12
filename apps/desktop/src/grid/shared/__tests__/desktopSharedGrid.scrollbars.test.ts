@@ -336,4 +336,31 @@ describe("DesktopSharedGrid scrollbars", () => {
     grid.destroy();
     container.remove();
   });
+
+  it("avoids calling renderer.setScroll when scrollTo aligns to the current device-pixel scroll", () => {
+    const { grid, container } = createGrid({
+      rowCount: 100,
+      colCount: 100,
+      defaultRowHeight: 10,
+      defaultColWidth: 10,
+    });
+
+    // Use a HiDPI device pixel ratio so scroll alignment happens in 0.5px steps.
+    grid.resize(300, 200, 2);
+
+    grid.scrollTo(0.5, 0.5);
+    expect(grid.getScroll()).toEqual({ x: 0.5, y: 0.5 });
+
+    const spy = vi.spyOn(grid.renderer, "setScroll");
+    spy.mockClear();
+
+    // 0.6px rounds back to 0.5px at dpr=2, so this should be a no-op (and should not trigger
+    // an unnecessary renderer scroll invalidation).
+    grid.scrollTo(0.6, 0.6);
+    expect(grid.getScroll()).toEqual({ x: 0.5, y: 0.5 });
+    expect(spy).not.toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
 });
