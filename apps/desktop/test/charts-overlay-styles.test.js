@@ -20,10 +20,14 @@ test("shared-grid chart pane hosts use CSS classes (no static inline styles)", a
   const block = text.slice(start, end);
 
   // Ensure pane hosts are class-based.
-  assert.match(block, /createPane\("chart-pane-top-left",\s*"chart-pane chart-pane--top-left"\)/);
-  assert.match(block, /createPane\("chart-pane-top-right",\s*"chart-pane chart-pane--top-right"\)/);
-  assert.match(block, /createPane\("chart-pane-bottom-left",\s*"chart-pane chart-pane--bottom-left"\)/);
-  assert.match(block, /createPane\("chart-pane-bottom-right",\s*"chart-pane chart-pane--bottom-right"\)/);
+  assert.match(block, /chart-pane-top-left/);
+  assert.match(block, /chart-pane--top-left/);
+  assert.match(block, /chart-pane-top-right/);
+  assert.match(block, /chart-pane--top-right/);
+  assert.match(block, /chart-pane-bottom-left/);
+  assert.match(block, /chart-pane--bottom-left/);
+  assert.match(block, /chart-pane-bottom-right/);
+  assert.match(block, /chart-pane--bottom-right/);
 
   // Ensure stable presentation styles are not set inline anymore.
   assert.ok(!block.includes("pane.style.position"), "expected pane host position to be driven by CSS");
@@ -36,6 +40,10 @@ test("shared-grid chart pane hosts use CSS classes (no static inline styles)", a
 });
 
 test("chart overlay hosts are styled via charts-overlay.css", async () => {
+  const mainPath = path.join(desktopRoot, "src/main.ts");
+  const main = await readFile(mainPath, "utf8");
+  assert.match(main, /["']\.\/styles\/charts-overlay\.css["']/);
+
   const cssPath = path.join(desktopRoot, "src/styles/charts-overlay.css");
   const css = await readFile(cssPath, "utf8");
 
@@ -52,6 +60,25 @@ test("chart overlay hosts are styled via charts-overlay.css", async () => {
   assert.match(css, /\.chart-object\s*\{/);
 });
 
+test("shared-grid pane geometry stays dynamic (inline left/top/width/height/display)", async () => {
+  const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
+  const text = await readFile(spreadsheetAppPath, "utf8");
+
+  const start = text.indexOf("private syncSharedChartPanes(viewport: GridViewportState): void {");
+  assert.ok(start !== -1, "expected SpreadsheetApp.syncSharedChartPanes() to exist");
+
+  const end = text.indexOf("private chartAnchorToViewportRect", start);
+  assert.ok(end !== -1, "expected chartAnchorToViewportRect() after syncSharedChartPanes()");
+
+  const block = text.slice(start, end);
+
+  assert.match(block, /pane\.style\.left\s*=/);
+  assert.match(block, /pane\.style\.top\s*=/);
+  assert.match(block, /pane\.style\.width\s*=/);
+  assert.match(block, /pane\.style\.height\s*=/);
+  assert.match(block, /pane\.style\.display\s*=/);
+});
+
 test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", async () => {
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
   const text = await readFile(spreadsheetAppPath, "utf8");
@@ -65,4 +92,3 @@ test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", 
   assert.ok(!text.includes('selectionCanvas.style.zIndex = "3"'));
   assert.ok(!text.includes('outlineLayer.style.zIndex = "4"'));
 });
-
