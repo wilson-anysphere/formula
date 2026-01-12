@@ -25,6 +25,11 @@ desktop = [
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-updater",
 ]
+# Enable Parquet/Arrow-backed columnar imports.
+#
+# This is kept behind an opt-in feature so default backend unit tests stay
+# lightweight (Arrow/Parquet pulls in a larger dependency surface).
+parquet = ["formula-columnar/arrow"]
 
 [dependencies]
 anyhow = "1.0"

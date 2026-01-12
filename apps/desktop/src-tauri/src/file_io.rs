@@ -385,6 +385,14 @@ pub async fn read_csv(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Resu
         .map_err(|e| anyhow::anyhow!(e.to_string()))?
 }
 
+#[cfg(all(feature = "desktop", feature = "parquet"))]
+pub async fn read_parquet(path: impl Into<PathBuf> + Send + 'static) -> anyhow::Result<Workbook> {
+    let path = path.into();
+    tauri::async_runtime::spawn_blocking(move || read_parquet_blocking(&path))
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?
+}
+
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let extension = path
         .extension()
@@ -788,6 +796,48 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
     )
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| format!("import csv {:?}", path))?;
+
+    let sheet_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("Sheet1")
+        .to_string();
+    let mut sheet = Sheet::new(sheet_name.clone(), sheet_name);
+    sheet.set_columnar_table(Arc::new(table));
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: None,
+        power_query_xml: None,
+        origin_xlsb_path: None,
+        vba_project_bin: None,
+        macro_fingerprint: None,
+        preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
+        theme_palette: None,
+        date_system: WorkbookDateSystem::Excel1900,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
+        sheets: vec![sheet],
+        print_settings: WorkbookPrintSettings::default(),
+        original_print_settings: WorkbookPrintSettings::default(),
+        original_power_query_xml: None,
+        cell_input_baseline: HashMap::new(),
+    };
+    out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
+    Ok(out)
+}
+
+#[cfg(feature = "parquet")]
+pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let table = formula_columnar::parquet::read_parquet_to_columnar(path)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .with_context(|| format!("import parquet {:?}", path))?;
 
     let sheet_name = path
         .file_stem()
@@ -2549,6 +2599,28 @@ mod tests {
             sheet.get_cell(1, 1).computed_value,
             CellScalar::Text("world".to_string())
         );
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn reads_parquet_into_columnar_backed_sheet() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/data-io/test/fixtures/simple.parquet"
+        ));
+
+        let workbook = read_parquet_blocking(fixture_path).expect("read parquet");
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+
+        // Schema: id, name, active, score
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(1, 1).computed_value,
+            CellScalar::Text("Bob".to_string())
+        );
+        assert_eq!(sheet.get_cell(2, 2).computed_value, CellScalar::Bool(true));
+        assert_eq!(sheet.get_cell(2, 3).computed_value, CellScalar::Number(3.75));
     }
 
     #[test]
