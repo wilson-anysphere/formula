@@ -140,6 +140,9 @@ The formula bar supports tab completion suggestions while you type. Suggestions 
 
 Backend completions are **time-bounded** and ignored on timeout/cancel so the formula bar stays responsive. If the backend is unavailable, the UI continues to show rule-based suggestions. Any dev/test backend URL overrides are Cursor/build-managed (not user-configurable).
 
+In dev/test builds, the Cursor backend base URL can be overridden via `VITE_CURSOR_AI_BASE_URL` (Vite/WebView) or
+`CURSOR_AI_BASE_URL` (Node/test). This is Cursor/build-managed (not a user-facing setting).
+
 Notes:
 
 - Structured-reference preview is evaluated for simple table column refs (`Table[Column]` / `Table[[#All],[Column]]`) when table range metadata is available. More complex structured refs still fall back to `(preview unavailable)`.
