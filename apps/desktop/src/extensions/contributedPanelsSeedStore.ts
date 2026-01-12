@@ -51,16 +51,20 @@ function normalizeIcon(value: unknown): string | null | undefined {
 
 export function readContributedPanelsSeedStore(storage: StorageLike): ContributedPanelsSeedStoreData {
   const raw = safeGetItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
-  if (!raw) return {};
+  if (raw == null) return {};
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
+    safeRemoveItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
     return {};
   }
 
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    safeRemoveItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    return {};
+  }
 
   const out: ContributedPanelsSeedStoreData = {};
   for (const [panelId, value] of Object.entries(parsed as Record<string, unknown>)) {
