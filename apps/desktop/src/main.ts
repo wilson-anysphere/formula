@@ -3051,6 +3051,7 @@ if (
   window.addEventListener("formula:sheet-metadata-changed", () => updateContextKeys());
 
   type ExtensionSelectionChangedEvent = {
+    sheetId: string;
     selection: {
       startRow: number;
       startCol: number;
@@ -3109,7 +3110,7 @@ if (
         values.push(row);
       }
 
-      const payload: ExtensionSelectionChangedEvent = { selection: { ...range, address, values } };
+      const payload: ExtensionSelectionChangedEvent = { sheetId: rect.sheetId, selection: { ...range, address, values } };
       for (const listener of [...selectionChangedEventListeners]) {
         try {
           listener(payload);

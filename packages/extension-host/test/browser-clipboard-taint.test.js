@@ -82,6 +82,140 @@ test("BrowserExtensionHost: records read taint for cells.getSelection/getCell/ge
   ]);
 });
 
+test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  /** @type {any} */
+  let guardArgs = null;
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async setCell() {},
+    },
+    clipboardApi: {
+      readText: async () => "",
+      writeText: async () => {},
+    },
+    clipboardWriteGuard: async (args) => {
+      guardArgs = args;
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.selection-event-taint";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "selection-event-taint",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["clipboard"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 1, values: [[1, 2]] },
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+  ]);
+
+  await host._executeApi("clipboard", "writeText", ["hello"], extension);
+
+  assert.deepEqual(guardArgs, {
+    extensionId,
+    taintedRanges: [{ sheetId: "sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 }],
+  });
+});
+
+test("BrowserExtensionHost: records taint for cellChanged events (and passes it to clipboard guard)", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  /** @type {any} */
+  let guardArgs = null;
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async setCell() {},
+    },
+    clipboardApi: {
+      readText: async () => "",
+      writeText: async () => {},
+    },
+    clipboardWriteGuard: async (args) => {
+      guardArgs = args;
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.cell-event-taint";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "cell-event-taint",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["clipboard"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  host._broadcastEvent("cellChanged", {
+    sheetId: "sheet1",
+    row: 5,
+    col: 6,
+    value: "secret",
+  });
+
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 5, startCol: 6, endRow: 5, endCol: 6 },
+  ]);
+
+  await host._executeApi("clipboard", "writeText", ["hello"], extension);
+
+  assert.deepEqual(guardArgs, {
+    extensionId,
+    taintedRanges: [{ sheetId: "sheet1", startRow: 5, startCol: 6, endRow: 5, endCol: 6 }],
+  });
+});
+
 test("BrowserExtensionHost: clipboard.writeText invokes guard with extensionId + tainted ranges", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -213,7 +347,6 @@ test("BrowserExtensionHost: clipboard.writeText blocks when guard throws", async
   await assert.rejects(() => host._executeApi("clipboard", "writeText", ["nope"], extension), /blocked/);
   assert.deepEqual(writes, []);
 });
-
 test("BrowserExtensionHost: taint list is capped to the most recent ranges", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 

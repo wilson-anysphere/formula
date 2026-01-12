@@ -2176,8 +2176,67 @@ class BrowserExtensionHost {
     extension.active = true;
   }
 
+  _maybeTaintEventPayload(extension, event, data) {
+    try {
+      if (!extension || typeof extension !== "object") return;
+      const evt = String(event ?? "");
+      if (!evt) return;
+
+      if (evt === "selectionChanged") {
+        const selection = data?.selection;
+        if (!selection || typeof selection !== "object") return;
+
+        const looksLikeRange =
+          Object.prototype.hasOwnProperty.call(selection, "startRow") &&
+          Object.prototype.hasOwnProperty.call(selection, "startCol") &&
+          Object.prototype.hasOwnProperty.call(selection, "endRow") &&
+          Object.prototype.hasOwnProperty.call(selection, "endCol");
+        if (!looksLikeRange) return;
+
+        const sheetId =
+          (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
+          (typeof selection?.sheetId === "string" && selection.sheetId.trim()) ||
+          (typeof this._activeSheetId === "string" && this._activeSheetId.trim()) ||
+          null;
+        if (!sheetId) return;
+
+        this._taintExtensionRange(extension, {
+          sheetId,
+          startRow: selection.startRow,
+          startCol: selection.startCol,
+          endRow: selection.endRow,
+          endCol: selection.endCol
+        });
+        return;
+      }
+
+      if (evt === "cellChanged") {
+        if (!data || typeof data !== "object") return;
+        if (!Object.prototype.hasOwnProperty.call(data, "row")) return;
+        if (!Object.prototype.hasOwnProperty.call(data, "col")) return;
+
+        const sheetId =
+          (typeof data?.sheetId === "string" && data.sheetId.trim()) ||
+          (typeof this._activeSheetId === "string" && this._activeSheetId.trim()) ||
+          null;
+        if (!sheetId) return;
+
+        this._taintExtensionRange(extension, {
+          sheetId,
+          startRow: data.row,
+          startCol: data.col,
+          endRow: data.row,
+          endCol: data.col
+        });
+      }
+    } catch {
+      // ignore - event-based taint tracking must never interfere with extension execution
+    }
+  }
+
   _sendEventToExtension(extension, event, data) {
     try {
+      this._maybeTaintEventPayload(extension, event, data);
       extension.worker.postMessage({ type: "event", event, data });
     } catch {
       // ignore
@@ -2186,15 +2245,7 @@ class BrowserExtensionHost {
 
   _broadcastEvent(event, data) {
     for (const extension of this._extensions.values()) {
-      try {
-        extension.worker.postMessage({
-          type: "event",
-          event,
-          data
-        });
-      } catch {
-        // ignore
-      }
+      this._sendEventToExtension(extension, event, data);
     }
   }
 }
