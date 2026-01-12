@@ -26,6 +26,11 @@ test("CellEditorOverlay avoids inline display/z-index style assignments", () => 
     /\bstyle\.setProperty\(\s*["']display["']\s*,/,
     /\.style\.setProperty\(\s*["']z-index["']\s*,/,
     /\bstyle\.setProperty\(\s*["']z-index["']\s*,/,
+    // Object.assign(...style, { display/zIndex: ... })
+    /Object\.assign\(\s*[^,]+\.style\s*,[\s\S]*?\bdisplay\s*:/,
+    /Object\.assign\(\s*[^,]+\.style\s*,[\s\S]*?\bzIndex\s*:/,
+    /Object\.assign\(\s*style\s*,[\s\S]*?\bdisplay\s*:/,
+    /Object\.assign\(\s*style\s*,[\s\S]*?\bzIndex\s*:/,
   ];
 
   for (const pattern of forbiddenAssignments) {
