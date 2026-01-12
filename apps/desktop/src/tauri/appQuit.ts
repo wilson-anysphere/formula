@@ -104,6 +104,7 @@ async function requestAppExit(
     }
 
     await exit(handlers);
+    await exit(handlers);
     return true;
   } finally {
     // If `quitApp` hard-exits, this `finally` never runs, which is fine.
@@ -112,6 +113,7 @@ async function requestAppExit(
 }
 
 export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promise<boolean> {
+  return requestAppExit((handlers) => handlers.quitApp(), options);
   return requestAppExit((handlers) => handlers.quitApp(), options);
 }
 
@@ -132,6 +134,14 @@ export async function requestAppRestart(options: {
       }
       await handlers.quitApp();
     },
+    {
+      beforeQuit: options.beforeQuit,
+      beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),
+      dirtyConfirmMessage: options.dirtyConfirmMessage,
+    },
+  );
+  return requestAppExit(
+    (handlers) => (handlers.restartApp ?? handlers.quitApp)(),
     {
       beforeQuit: options.beforeQuit,
       beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),

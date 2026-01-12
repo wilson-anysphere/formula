@@ -6695,7 +6695,15 @@ try {
       // without relying on capability-gated process relaunch APIs. Like `quit_app`, this promise
       // is expected to never resolve on success because the process terminates shortly after the
       // command is invoked.
-      await invoke("restart_app");
+      // without relying on capability-gated process relaunch APIs.
+      try {
+        await invoke("restart_app");
+      } catch (err) {
+        // Older builds may not expose `restart_app`; fall back to `quit_app` so the user
+        // can still install the update and relaunch manually.
+        console.warn("Failed to restart app; falling back to quit:", err);
+        await invoke("quit_app");
+      }
     },
   });
 
