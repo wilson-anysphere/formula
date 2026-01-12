@@ -4,6 +4,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Playwright sets `FORCE_COLOR` for its reporters, which causes some tooling
+// (eg `supports-color`) to warn when `NO_COLOR` is also present. Ensure `NO_COLOR`
+// is unset for the test runner + any spawned webServer processes so e2e output
+// stays warning-free.
+delete process.env.NO_COLOR;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..", "..");
@@ -57,6 +63,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     env: {
       ...process.env,
+      NO_COLOR: undefined,
       // Use a repo-local cargo home to avoid cross-agent contention on ~/.cargo
       // (and to avoid picking up any global cargo config such as rustc-wrapper).
       CARGO_HOME: cargoHome

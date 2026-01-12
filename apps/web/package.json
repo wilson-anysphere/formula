@@ -9,7 +9,7 @@
     "prebuild": "pnpm -w build:wasm",
     "build": "vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "node scripts/run-playwright.mjs"
   },
   "dependencies": {
     "@formula/extension-api": "workspace:*",
