@@ -19,6 +19,24 @@ test.describe("command palette shortcut hints", () => {
     await expect(item.locator(".command-palette__shortcut")).toHaveText(expectedCopyShortcut);
   });
 
+  test("renders the shortcut hint for Edit Cell (F2)", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.keyboard.press(`${modifier}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+
+    await page.getByTestId("command-palette-input").fill("edit cell");
+
+    const item = page
+      .locator("li.command-palette__item", { hasText: "Edit Cell" })
+      .filter({ hasText: "Edit the active cell" })
+      .first();
+    await expect(item).toBeVisible();
+    await expect(item.locator(".command-palette__shortcut")).toHaveText("F2");
+  });
+
   test("renders the platform shortcut hint for Replace", async ({ page }) => {
     await gotoDesktop(page);
 
