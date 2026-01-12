@@ -410,6 +410,8 @@ export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
   private readonly computedValuesByCoord = new Map<string, Map<number, SpreadsheetValue>>();
+  private lastComputedValuesSheetId: string | null = null;
+  private lastComputedValuesSheetCache: Map<number, SpreadsheetValue> | null = null;
   private uiReady = false;
   private readonly sheetNameResolver: SheetNameResolver | null;
   private readonly gridMode: DesktopGridMode;
@@ -2558,7 +2560,7 @@ export class SpreadsheetApp {
     try {
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
-      this.computedValuesByCoord.clear();
+      this.clearComputedValuesByCoord();
       this.document.applyState(snapshot);
       const sheetIds = this.document.getSheetIds();
       if (sheetIds.length > 0 && !sheetIds.includes(this.sheetId)) {
@@ -2630,7 +2632,7 @@ export class SpreadsheetApp {
             // navigation.
             for (let attempt = 0; attempt < 2; attempt += 1) {
               changedDuringInit = false;
-              this.computedValuesByCoord.clear();
+              this.clearComputedValuesByCoord();
               const changes = await engineHydrateFromDocument(engine, this.document);
               this.applyComputedChanges(changes);
               if (!changedDuringInit) break;
@@ -2646,7 +2648,7 @@ export class SpreadsheetApp {
               if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
               if (source === "applyState") {
-                this.computedValuesByCoord.clear();
+                this.clearComputedValuesByCoord();
                 void this.enqueueWasmSync(async (worker) => {
                   const changes = await engineHydrateFromDocument(worker, this.document);
                   this.applyComputedChanges(changes);
@@ -2691,7 +2693,7 @@ export class SpreadsheetApp {
             this.wasmEngine = null;
             this.wasmUnsubscribe?.();
             this.wasmUnsubscribe = null;
-            this.computedValuesByCoord.clear();
+            this.clearComputedValuesByCoord();
           }
       })
       .catch(() => {
@@ -8098,7 +8100,7 @@ export class SpreadsheetApp {
     if (useEngineCache) {
       // Hot path: shared-grid rendering calls this for *every* formula cell in view.
       // Avoid allocating A1/key strings on cache hits by using a numeric `{row,col}` cache.
-      const sheetCache = this.computedValuesByCoord.get(sheetId);
+      const sheetCache = this.getComputedValuesByCoordForSheet(sheetId);
       if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
         const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
         const cached = sheetCache.get(key);
@@ -8139,6 +8141,23 @@ export class SpreadsheetApp {
 
   private resolveSheetDisplayNameById(sheetId: string): string {
     return this.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+  }
+
+  private clearComputedValuesByCoord(): void {
+    this.computedValuesByCoord.clear();
+    this.lastComputedValuesSheetId = null;
+    this.lastComputedValuesSheetCache = null;
+  }
+
+  private getComputedValuesByCoordForSheet(sheetId: string): Map<number, SpreadsheetValue> | null {
+    if (this.lastComputedValuesSheetId === sheetId && this.lastComputedValuesSheetCache) {
+      return this.lastComputedValuesSheetCache;
+    }
+
+    const cache = this.computedValuesByCoord.get(sheetId) ?? null;
+    this.lastComputedValuesSheetId = sheetId;
+    this.lastComputedValuesSheetCache = cache;
+    return cache;
   }
 
   private invalidateComputedValues(changes: unknown): void {
@@ -8281,7 +8300,7 @@ export class SpreadsheetApp {
     options: { useEngineCache: boolean }
   ): SpreadsheetValue {
     if (options.useEngineCache) {
-      const sheetCache = this.computedValuesByCoord.get(sheetId);
+      const sheetCache = this.getComputedValuesByCoordForSheet(sheetId);
       if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
         const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
         const cached = sheetCache.get(key);
