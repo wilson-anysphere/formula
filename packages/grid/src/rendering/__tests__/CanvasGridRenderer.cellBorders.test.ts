@@ -948,4 +948,50 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 0, y1: 9.5, x2: 10, y2: 9.5 })).toBe(true);
     expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 0, y1: 11.5, x2: 10, y2: 11.5 })).toBe(true);
   });
+
+  it("pads blit-scroll dirty regions so border strokes are not clipped", () => {
+    const provider: CellProvider = {
+      getCell: () => null
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, rectCalls } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 100,
+      colCount: 100,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.setPerfStatsEnabled(true);
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(50, 20, 1);
+
+    // Clear initial render calls so we only inspect the scroll render.
+    rectCalls.length = 0;
+
+    // Scroll by 1px; with DPR=1 this should use blit, producing a narrow dirty stripe.
+    renderer.setScroll(1, 0);
+    expect(renderer.getPerfStats().blitUsed).toBe(true);
+
+    // Find the clip rect used for the dirty stripe render (should be narrower than the full viewport).
+    const stripeClip = rectCalls.find((rect) => rect.width < 50 && rect.height === 20);
+    expect(stripeClip).toEqual({ x: 47, y: 0, width: 3, height: 20 });
+  });
 });

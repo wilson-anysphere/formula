@@ -2047,7 +2047,11 @@ export class CanvasGridRenderer {
   }
 
   private markDirtyBoth(rect: Rect): void {
-    const padded: Rect = { x: rect.x - 1, y: rect.y - 1, width: rect.width + 2, height: rect.height + 2 };
+    // Similar to provider-update invalidation: explicit borders are strokes centered on cell edges,
+    // so they can extend beyond the newly-exposed scroll stripe. Pad slightly to ensure borders
+    // are cleared + redrawn correctly when using blit-based scrolling.
+    const borderDirtyPaddingPx = Math.max(1, Math.ceil(2 * this.zoom));
+    const padded = borderDirtyPaddingPx > 0 ? padRect(rect, borderDirtyPaddingPx) : rect;
     this.dirty.background.markDirty(padded);
     this.dirty.content.markDirty(padded);
   }
