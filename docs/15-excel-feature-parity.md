@@ -54,7 +54,7 @@ This document tracks every Excel feature and our implementation status. Features
 | INT | ⬜ | |
 | ISO.CEILING | ⬜ | |
 | LCM | ⬜ | |
-| LET | ⬜ | Important for readability |
+| LET | ✅ | Important for readability |
 | LN | ⬜ | |
 | LOG | ⬜ | |
 | LOG10 | ⬜ | |
@@ -193,25 +193,25 @@ This document tracks every Excel feature and our implementation status. Features
 
 | Function | Status | Notes |
 |----------|--------|-------|
-| AND | ⬜ | |
+| AND | ✅ | |
 | BYCOL | ✅ | Lambda helper |
 | BYROW | ✅ | Lambda helper |
-| FALSE | ⬜ | |
+| FALSE | ✅ | |
 | IF | ✅ | Most used function |
 | IFERROR | ✅ | |
-| IFNA | ⬜ | |
-| IFS | ⬜ | Multiple conditions |
-| LAMBDA | ⬜ | User-defined functions |
-| LET | ⬜ | Variable binding |
+| IFNA | ✅ | |
+| IFS | ✅ | Multiple conditions |
+| LAMBDA | ✅ | User-defined functions |
+| LET | ✅ | Variable binding |
 | MAKEARRAY | ✅ | Lambda helper |
 | MAP | ✅ | Lambda helper |
-| NOT | ⬜ | |
-| OR | ⬜ | |
+| NOT | ✅ | |
+| OR | ✅ | |
 | REDUCE | ✅ | Lambda helper |
 | SCAN | ✅ | Lambda helper |
-| SWITCH | ⬜ | |
-| TRUE | ⬜ | |
-| XOR | ⬜ | |
+| SWITCH | ✅ | |
+| TRUE | ✅ | |
+| XOR | ✅ | |
 
 ### Date & Time (P0)
 
