@@ -2886,11 +2886,11 @@ export class SpreadsheetApp {
   }
 
   private sharedHeaderRows(): number {
-    return 1;
+    return this.sharedGrid ? 1 : 0;
   }
 
   private sharedHeaderCols(): number {
-    return 1;
+    return this.sharedGrid ? 1 : 0;
   }
 
   private docCellFromGridCell(cell: { row: number; col: number }): CellCoord {
@@ -2917,8 +2917,12 @@ export class SpreadsheetApp {
   }
 
   private docRangeFromGridRange(range: GridCellRange): Range {
-    const headerRows = this.sharedHeaderRows();
-    const headerCols = this.sharedHeaderCols();
+    // Grid ranges used for formula reference insertion always come from a DesktopSharedGrid instance,
+    // which includes 1 frozen header row/col (row/col labels). This remains true even when the primary
+    // pane uses the legacy renderer (eg `/?grid=legacy`): the split-view secondary pane is still a
+    // shared-grid instance.
+    const headerRows = 1;
+    const headerCols = 1;
     return {
       startRow: Math.max(0, range.startRow - headerRows),
       endRow: Math.max(0, range.endRow - headerRows - 1),
