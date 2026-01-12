@@ -268,6 +268,10 @@ fn yearfrac_matches_basis_conventions() {
         1.0 + 1.0 / 366.0,
     );
     assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2019,2,28),1)"),
+        -(1.0 + 1.0 / 366.0),
+    );
+    assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2020,2,29),1)"),
         0.0,
     );
