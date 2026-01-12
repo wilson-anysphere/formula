@@ -703,6 +703,56 @@ test.describe("split view", () => {
 
       await expect(input).toHaveValue("=SUM(Sheet2!A1:A2");
     });
+
+    test(`secondary-pane in-place edits apply to the active sheet after switching sheets (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+
+      // Ensure split-view layout is deterministic (no persisted sheet/scroll/zoom surprises).
+      await page.evaluate(() => localStorage.clear());
+      await page.reload();
+      await waitForDesktopReady(page);
+      await waitForIdle(page);
+
+      // Seed distinct values so we can detect writes going to the wrong sheet.
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        doc.setCellValue("Sheet1", "A1", "sheet1");
+        doc.setCellValue("Sheet2", "A1", "sheet2");
+      });
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+      await waitForIdle(page);
+
+      await page.getByTestId("split-vertical").click();
+      const secondary = page.locator("#grid-secondary");
+      await expect(secondary).toBeVisible();
+      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+      // Switch to Sheet2 while split view is active.
+      await page.getByTestId("sheet-tab-Sheet2").click();
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      await waitForIdle(page);
+
+      // Edit A1 in the secondary pane; it should mutate Sheet2, not Sheet1.
+      await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+      await page.keyboard.press("e");
+      const editor = secondary.locator("textarea.cell-editor");
+      await expect(editor).toBeVisible();
+      await page.keyboard.type("dited");
+      await page.keyboard.press("Enter");
+      await waitForIdle(page);
+
+      const { sheet1, sheet2 } = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const doc = app.getDocument();
+        const s1 = doc.getCell("Sheet1", "A1");
+        const s2 = doc.getCell("Sheet2", "A1");
+        return { sheet1: s1?.value ?? null, sheet2: s2?.value ?? null };
+      });
+
+      expect(sheet1).toBe("sheet1");
+      expect(sheet2).toBe("edited");
+    });
   }
 
   test("secondary pane supports in-place editing without scrolling the primary pane", async ({ page }) => {

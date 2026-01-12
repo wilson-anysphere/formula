@@ -2618,7 +2618,13 @@ if (
       const pane = split.panes.secondary;
       const initialScroll = { scrollX: pane.scrollX ?? 0, scrollY: pane.scrollY ?? 0 };
       const initialZoom = pane.zoom ?? 1;
-      const getSecondarySheetId = () => layoutController.layout.splitView.panes.secondary.sheetId ?? app.getCurrentSheetId();
+      // Split view is two panes over the *same* active sheet (Excel-style). Keep the
+      // secondary pane sheet in lockstep with SpreadsheetApp's current sheet so:
+      // - selection sync stays correct
+      // - in-place edits / fill commits in the secondary pane apply to the visible sheet
+      // Note: Layout state may persist a `sheetId` per pane for future multi-sheet UX, but
+      // the current desktop UI sheet tabs always drive `app.getCurrentSheetId()`.
+      const getSecondarySheetId = () => app.getCurrentSheetId();
 
       // Use the same DocumentController / computed value cache as the primary grid so
       // the secondary pane stays live with edits and formula recalculation.
