@@ -2108,8 +2108,15 @@ fn bytecode_backend_recompiles_when_constant_defined_name_changes() {
 #[test]
 fn bytecode_backend_compiles_error_literals() {
     for (formula, expected) in [
+        ("=#NULL!", Value::Error(ErrorKind::Null)),
         ("=#N/A", Value::Error(ErrorKind::NA)),
         ("=#DIV/0!", Value::Error(ErrorKind::Div0)),
+        ("=#REF!", Value::Error(ErrorKind::Ref)),
+        ("=#VALUE!", Value::Error(ErrorKind::Value)),
+        ("=#NAME?", Value::Error(ErrorKind::Name)),
+        ("=#NUM!", Value::Error(ErrorKind::Num)),
+        ("=#SPILL!", Value::Error(ErrorKind::Spill)),
+        ("=#CALC!", Value::Error(ErrorKind::Calc)),
     ] {
         let mut engine = Engine::new();
         engine.set_cell_formula("Sheet1", "A1", formula).unwrap();

@@ -4805,13 +4805,13 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
 fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::NameRef(r) => r.workbook.is_some(),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
+        }
         crate::Expr::CellRef(r) => r.workbook.is_some(),
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
-        },
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
