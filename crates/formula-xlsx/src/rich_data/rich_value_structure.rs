@@ -206,4 +206,35 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn tolerates_wrapper_nodes_and_short_element_names() {
+        // Ensure we don't assume `<structure>` is a direct child of `<structures>`, and accept the
+        // alternate element spellings `s` and `m`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStruct xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <structures>
+    <wrapper>
+      <s id="s1">
+        <m n="imageRel" k="rel" extra="x"/>
+      </s>
+    </wrapper>
+  </structures>
+</rvStruct>"#;
+
+        let structures = parse_rich_value_structure_xml(xml.as_bytes()).unwrap();
+        assert_eq!(
+            structures,
+            HashMap::from([(
+                "s1".to_string(),
+                RichValueStructure {
+                    members: vec![RichValueStructureMember {
+                        name: "imageRel".to_string(),
+                        kind: Some("rel".to_string()),
+                        attributes: BTreeMap::from([("extra".to_string(), "x".to_string())]),
+                    }],
+                }
+            )])
+        );
+    }
 }

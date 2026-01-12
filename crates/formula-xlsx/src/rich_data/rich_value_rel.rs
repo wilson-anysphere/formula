@@ -113,7 +113,10 @@ fn get_rel_id(node: &roxmltree::Node<'_, '_>) -> Option<String> {
         .or_else(|| {
             // Absolute fallback: scan by local name.
             node.attributes()
-                .find(|attr| attr.name().eq_ignore_ascii_case("id"))
+                .find(|attr| {
+                    let local = attr.name().rsplit(':').next().unwrap_or(attr.name());
+                    local.eq_ignore_ascii_case("id")
+                })
                 .map(|attr| attr.value())
         })
         .map(|s| s.to_string())
@@ -173,5 +176,21 @@ mod tests {
 
         let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
         assert_eq!(parsed, vec!["rId3".to_string()]);
+    }
+
+    #[test]
+    fn parses_namespaced_id_attribute_with_weird_casing_for_tolerance() {
+        // XML is case-sensitive, but be extra tolerant in case a producer emits `Id` instead of
+        // `id` on a namespaced attribute.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:foo="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel foo:Id="rId7"/>
+  </rels>
+</rvRel>"#;
+
+        let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec!["rId7".to_string()]);
     }
 }

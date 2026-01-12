@@ -190,4 +190,29 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn tolerates_wrapper_nodes_and_rvtype_spelling() {
+        // Ensure we don't assume `type` is a direct child of `<types>`, and that we accept the
+        // alternative element spelling `rvType`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <types>
+    <wrapper>
+      <rvType id="5" n="someType" s="s5"/>
+    </wrapper>
+  </types>
+</rvTypes>"#;
+
+        let types = parse_rich_value_types_xml(xml.as_bytes()).unwrap();
+        assert_eq!(
+            types,
+            vec![RichValueType {
+                id: 5,
+                name: Some("someType".to_string()),
+                structure_id: Some("s5".to_string()),
+                attributes: BTreeMap::new(),
+            }]
+        );
+    }
 }
