@@ -244,30 +244,13 @@ If you use `persistence` or offline auto-connect gating, the initial WebSocket c
 
 Implementation: see `scheduleProviderConnectAfterHydration()` in [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts).
 
-### Offline persistence (`options.offline`)
+### Legacy offline option (`options.offline`, deprecated)
 
-In addition to the pluggable `options.persistence` interface, `@formula/collab-session` supports a convenience `offline` option backed by `@formula/collab-offline`.
+`@formula/collab-session` previously supported a separate `options.offline` API backed by `@formula/collab-offline`.
 
-This persists raw Yjs updates locally so edits survive reload/crash and merge on reconnect.
+This option is now **deprecated**. Prefer the unified `options.persistence` interface (`@formula/collab-persistence`) for all new code.
 
-Example (desktop/Node file log):
-
-```ts
-import { createCollabSession } from "@formula/collab-session";
-
-const session = createCollabSession({
-  connection: { wsUrl, docId, token },
-  offline: { mode: "file", filePath: "/path/to/doc.yjslog" },
-});
-
-await session.offline?.whenLoaded();
-await session.whenSynced();
-```
-
-Notes:
-
-- When `offline` is enabled alongside `connection`, the session can delay provider connection until offline state has loaded (`offline.autoConnectAfterLoad`, default `true`).
-- `offline.mode: "indexeddb"` is available in browser environments.
+For backwards compatibility, passing `options.offline` will internally construct an equivalent `CollabPersistence` implementation and still expose `session.offline.{whenLoaded,clear,destroy}` as a convenience layer.
 
 ### Schema initialization (default sheet + root normalization)
 
@@ -280,7 +263,7 @@ By default, `createCollabSession` will keep the shared workbook schema well-form
 To avoid creating “placeholder” sheets that later race with real hydrated state, schema initialization is *gated*:
 
 - when a sync provider is present (e.g. y-websocket), schema init waits until the first `sync=true` event
-- when offline persistence (`options.offline`) or pluggable persistence (`options.persistence`) is enabled, schema init waits until local state has loaded
+- when local persistence (`options.persistence`) is enabled, schema init waits until local state has loaded (legacy `options.offline` follows the same gating)
 
 Advanced control:
 
