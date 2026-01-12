@@ -1593,13 +1593,20 @@ export function bindYjsToDocumentController(options) {
         const beforeHadFormula = beforeFormula != null;
         const beforeHadValue = beforeValue != null;
 
-        // When formula conflict semantics are enabled, represent clears with explicit
-        // `null` markers so downstream conflict monitors can deterministically
+        // Represent formula clears with explicit `null` markers so downstream
+        // conflict monitors (FormulaConflictMonitor, etc) can deterministically
         // detect delete-vs-overwrite concurrency via causal Item.origin ids.
+        //
+        // Additionally, always clear formulas via an explicit `null` marker when
+        // writing a literal value (even when `formulaConflictsMode` is off) so
+        // other collaborators can reason about concurrent formula-vs-value edits.
+        // This mirrors `CollabSession.setCellValue`, which always writes
+        // `formula=null` rather than deleting the key.
         const shouldWriteFormulaNull =
-          formulaConflictSemanticsEnabled &&
           formula == null &&
-          (valueConflictSemanticsEnabled || (beforeHadFormula && value == null));
+          (value != null ||
+            (formulaConflictSemanticsEnabled &&
+              (valueConflictSemanticsEnabled || (beforeHadFormula && value == null))));
 
         // Preserve empty cell maps created by clears when we'd otherwise delete the
         // entire cell entry (which would discard the marker Items).
