@@ -97,6 +97,47 @@ class CompatGateDatasetSelectionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_repo_pinned_dataset_matches_selected_unknown_versioned_dataset(self) -> None:
+        """Ensure the repo's pinned + versioned datasets don't drift.
+
+        `compat_gate.py` prefers a versioned dataset if it exists for the current `cases.json` hash.
+        When that dataset is an `unknown-build-unknown` synthetic baseline, the versioned file should
+        be an exact copy of `excel-oracle.pinned.json` (as produced by `pin_dataset.py`).
+        """
+
+        compat_gate = self._load_compat_gate()
+
+        repo_root = Path(__file__).resolve().parents[3]
+        cases_path = repo_root / "tests/compatibility/excel-oracle/cases.json"
+        pinned_path = (
+            repo_root / "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json"
+        )
+        self.assertTrue(cases_path.is_file(), f"cases.json not found at {cases_path}")
+        self.assertTrue(pinned_path.is_file(), f"pinned dataset not found at {pinned_path}")
+
+        def _sha256_file(path: Path) -> str:
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(repo_root)
+            selected = compat_gate._default_expected_dataset(cases_path=cases_path).resolve()
+            self.assertTrue(selected.is_file(), f"selected dataset does not exist: {selected}")
+
+            if "-unknown-build-unknown-" in selected.name:
+                self.assertEqual(
+                    _sha256_file(selected),
+                    _sha256_file(pinned_path),
+                    "selected versioned dataset should match excel-oracle.pinned.json "
+                    "(run tools/excel-oracle/pin_dataset.py with --versioned-dir to regenerate)",
+                )
+        finally:
+            os.chdir(old_cwd)
+
 
 class CompatGateTierPresetTests(unittest.TestCase):
     def _load_compat_gate(self):
