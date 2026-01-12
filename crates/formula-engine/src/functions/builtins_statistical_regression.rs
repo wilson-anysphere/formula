@@ -11,15 +11,15 @@ struct MatrixArg {
     values: Vec<Option<f64>>,
 }
 
-fn scalar_to_number(value: Value) -> Result<Option<f64>, ErrorKind> {
+fn scalar_to_number(ctx: &dyn FunctionContext, value: Value) -> Result<Option<f64>, ErrorKind> {
     match value {
         Value::Error(e) => Err(e),
         Value::Number(n) => Ok(Some(n)),
         Value::Bool(b) => Ok(Some(if b { 1.0 } else { 0.0 })),
         Value::Blank => Ok(None),
-        Value::Text(s) => Ok(Some(Value::Text(s).coerce_to_number()?)),
+        Value::Text(s) => Ok(Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)),
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
-        Value::Array(arr) => Ok(Some(arr.top_left().coerce_to_number()?)),
+        Value::Array(arr) => Ok(Some(arr.top_left().coerce_to_number_with_ctx(ctx)?)),
         Value::Lambda(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
@@ -74,7 +74,7 @@ fn arg_to_matrix(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<MatrixArg, 
             other => Ok(MatrixArg {
                 rows: 1,
                 cols: 1,
-                values: vec![scalar_to_number(other)?],
+                values: vec![scalar_to_number(ctx, other)?],
             }),
         },
         ArgValue::Reference(r) => {

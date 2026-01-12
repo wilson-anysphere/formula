@@ -1,4 +1,5 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, ErrorKind, Value};
 
 fn assert_number_close(value: Value, expected: f64) {
@@ -51,6 +52,33 @@ fn linest_and_trend_simple_1d() {
     assert_eq!(end, parse_a1("D4").unwrap());
     assert_number_close(engine.get_cell_value("Sheet1", "D3"), 13.0);
     assert_number_close(engine.get_cell_value("Sheet1", "D4"), 15.0);
+}
+
+#[test]
+fn trend_parses_new_x_text_using_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // y = 2x + 1 for x=1..5
+    for (i, (x, y)) in [(1.0, 3.0), (2.0, 5.0), (3.0, 7.0), (4.0, 9.0), (5.0, 11.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let row = i + 1;
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), y)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), x)
+            .unwrap();
+    }
+
+    // new_x is provided as locale-formatted numeric text ("6,0" in de-DE).
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=TREND(A1:A5,B1:B5,"6,0")"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_number_close(engine.get_cell_value("Sheet1", "D1"), 13.0);
 }
 
 #[test]
@@ -171,4 +199,3 @@ fn linest_errors_on_shape_mismatch_and_insufficient_points() {
         Value::Error(ErrorKind::Div0)
     );
 }
-
