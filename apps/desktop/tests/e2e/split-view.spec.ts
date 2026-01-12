@@ -173,6 +173,11 @@ test.describe("split view", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
 
+    // Cell editor commit restores focus to the primary grid (`SpreadsheetApp.focus()`).
+    // Explicitly return focus to the secondary pane so we exercise the secondary-keydown
+    // shortcut wiring (not the primary grid's handlers).
+    await secondary.focus();
+
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     // Copy A1 and paste into B1, all while focus remains in secondary pane.
