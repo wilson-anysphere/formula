@@ -1076,7 +1076,8 @@ fn write_updated_cell<W: Write>(
                 }
             }
             value @ CellValue::Record(record) => {
-                let s = record.display_value.as_str();
+                let display = record.to_string();
+                let s = display.as_str();
                 match &value_kind {
                     CellValueKind::SharedString { .. } => {
                         let idx = super::shared_string_index(doc, meta, value, shared_lookup);

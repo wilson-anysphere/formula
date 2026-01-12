@@ -20,6 +20,9 @@ type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
+mod part_info;
+pub use part_info::{CellImageEmbed, CellImagesPartInfo};
+
 /// Best-effort loader for workbook-level "in-cell" images.
 ///
 /// This is intentionally best-effort/tolerant of incomplete or malformed workbooks:

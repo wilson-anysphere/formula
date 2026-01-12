@@ -827,7 +827,6 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
         _ => None,
     }
 }
-
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         DigestAlg::Md5 => "MD5",

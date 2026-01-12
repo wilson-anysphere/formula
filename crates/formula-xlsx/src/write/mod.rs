@@ -1426,7 +1426,8 @@ fn build_shared_strings_xml(
                     }
                 }
                 CellValue::Record(record) => {
-                    let text = record.display_value.as_str();
+                    let display = record.to_string();
+                    let text = display.as_str();
                     ref_count += 1;
                     if meta
                         .and_then(|m| m.value_kind.clone())
@@ -3149,7 +3150,8 @@ fn append_cell_xml(
                 }
             }
             value @ CellValue::Record(record) => {
-                let s = record.display_value.as_str();
+                let display = record.to_string();
+                let s = display.as_str();
                 match &value_kind {
                     CellValueKind::SharedString { .. } => {
                         let idx = shared_string_index(doc, meta, value, shared_lookup);
@@ -3434,7 +3436,8 @@ fn shared_string_index(
                 .unwrap_or(0)
         }
         CellValue::Record(record) => {
-            let text = record.display_value.as_str();
+            let display = record.to_string();
+            let text = display.as_str();
             if let Some(meta) = meta {
                 if let Some(CellValueKind::SharedString { index }) = &meta.value_kind {
                     if doc

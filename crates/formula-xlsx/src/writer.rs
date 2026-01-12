@@ -676,9 +676,10 @@ fn cell_xml(
         }
         CellValue::Record(record) => {
             attrs.push_str(r#" t="s""#);
+            let display = record.to_string();
             let idx = shared_strings
                 .index
-                .get(&record.display_value)
+                .get(&display)
                 .copied()
                 .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
@@ -783,11 +784,11 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 CellValue::Record(record) => {
-                    let s = &record.display_value;
-                    if !index.contains_key(s) {
+                    let s = record.to_string();
+                    if !index.contains_key(&s) {
                         let idx = values.len();
                         values.push(s.clone());
-                        index.insert(s.clone(), idx);
+                        index.insert(s, idx);
                     }
                 }
                 CellValue::RichText(r) => {

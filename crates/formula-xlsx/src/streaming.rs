@@ -1781,11 +1781,14 @@ fn plan_shared_strings<R: Read + Seek>(
                         .rich_at(idx)
                         .map(|rt| rt.text.as_str() == entity.display_value.as_str())
                         .unwrap_or(false),
-                    CellValue::Record(record) => shared_strings
-                        .editor
-                        .rich_at(idx)
-                        .map(|rt| rt.text.as_str() == record.display_value.as_str())
-                        .unwrap_or(false),
+                    CellValue::Record(record) => {
+                        let display = record.to_string();
+                        shared_strings
+                            .editor
+                            .rich_at(idx)
+                            .map(|rt| rt.text.as_str() == display.as_str())
+                            .unwrap_or(false)
+                    }
                     CellValue::RichText(rich) => shared_strings
                         .editor
                         .rich_at(idx)
@@ -1802,7 +1805,10 @@ fn plan_shared_strings<R: Read + Seek>(
         let idx = reuse_idx.unwrap_or_else(|| match &patch.value {
             CellValue::String(s) => shared_strings.get_or_insert_plain(s),
             CellValue::Entity(entity) => shared_strings.get_or_insert_plain(entity.display_value.as_str()),
-            CellValue::Record(record) => shared_strings.get_or_insert_plain(record.display_value.as_str()),
+            CellValue::Record(record) => {
+                let display = record.to_string();
+                shared_strings.get_or_insert_plain(display.as_str())
+            }
             CellValue::RichText(rich) => shared_strings.get_or_insert_rich(rich),
             _ => 0,
         });
@@ -3901,7 +3907,7 @@ fn cell_representation(
             cell_representation(&degraded, formula, existing_t, shared_string_idx)
         }
         CellValue::Record(record) => {
-            let degraded = CellValue::String(record.display_value.clone());
+            let degraded = CellValue::String(record.to_string());
             cell_representation(&degraded, formula, existing_t, shared_string_idx)
         }
         CellValue::RichText(rich) => {

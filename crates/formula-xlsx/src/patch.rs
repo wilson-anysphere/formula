@@ -1990,11 +1990,14 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
             ExistingCellValue::SharedString(rich) => rich.text == entity.display_value,
             _ => false,
         },
-        CellValue::Record(record) => match existing {
-            ExistingCellValue::String(v) => v == &record.display_value,
-            ExistingCellValue::SharedString(rich) => rich.text == record.display_value,
-            _ => false,
-        },
+        CellValue::Record(record) => {
+            let display = record.to_string();
+            match existing {
+                ExistingCellValue::String(v) => v == &display,
+                ExistingCellValue::SharedString(rich) => rich.text == display,
+                _ => false,
+            }
+        }
         CellValue::RichText(rich) => match existing {
             ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
             ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,
@@ -2081,7 +2084,7 @@ fn cell_representation_for_patch(
             )
         }
         CellValue::Record(record) => {
-            let degraded = CellValue::String(record.display_value.clone());
+            let degraded = CellValue::String(record.to_string());
             cell_representation_for_patch(
                 Some(&degraded),
                 formula,
