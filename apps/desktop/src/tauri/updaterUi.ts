@@ -853,11 +853,11 @@ export async function installUpdaterUi(listenArg?: TauriListen): Promise<void> {
         void handleUpdaterEvent(eventName, payload);
       }).catch((err) => {
         console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
-        return () => {};
+        throw err;
       });
     } catch (err) {
       console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
-      return Promise.resolve(() => {});
+      return Promise.reject(err);
     }
   });
 

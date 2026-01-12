@@ -6714,11 +6714,7 @@ try {
   // Updater events can fire very early (e.g. a fast startup update check). `listen()` is async,
   // so we wait for registration before signaling readiness to the backend. The Rust host will
   // defer the startup update check until it receives `updater-ui-ready`.
-  const updateAvailableListener = listen("update-available", () => {
-    // User-facing update UX (dialogs/toasts/system notification) is handled by `tauri/updaterUi.ts`.
-  });
-
-  void Promise.all([updaterUiListeners, updateAvailableListener])
+  void updaterUiListeners
     .then(() => {
       if (!emit) return;
       return Promise.resolve(emit("updater-ui-ready"));
