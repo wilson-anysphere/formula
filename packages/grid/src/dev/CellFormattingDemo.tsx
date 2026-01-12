@@ -273,7 +273,7 @@ class CellFormattingDemoProvider implements CellProvider {
     });
 
     // ---------------------------------------------------------------------------------------------
-    // Rich text runs (if Task 84 lands)
+    // Rich text runs
     // ---------------------------------------------------------------------------------------------
     const richTextValue = "Rich: bold + italic + underline + color";
     put(
@@ -435,7 +435,7 @@ export function CellFormattingDemo(): React.ReactElement {
                 <code>A18:C19</code>: vertical alignment + char wrap + RTL/LTR direction
               </li>
               <li>
-                <code>A20</code>: rich text runs (if Task 84 lands)
+                <code>A20</code>: rich text runs
               </li>
               <li>
                 <code>A22:C23</code>: number format display strings (Task 68)
