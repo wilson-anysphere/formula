@@ -59,6 +59,8 @@
   --selection-bg: var(--accent-bg);
   --selection-border: var(--accent-border);
   --selection-text: var(--text-primary);
+  /* Selection fill used for canvas overlays (must be translucent so cell text remains readable). */
+  --selection-fill: rgba(0, 102, 204, 0.12);
 
   /* Grid chrome */
   --grid-header-bg: var(--bg-secondary);
@@ -72,7 +74,7 @@
   --formula-grid-header-text: var(--grid-header-text);
   --formula-grid-cell-text: var(--text-primary);
   --formula-grid-error-text: var(--error);
-  --formula-grid-selection-fill: var(--selection-bg);
+  --formula-grid-selection-fill: var(--selection-fill);
   --formula-grid-selection-border: var(--selection-border);
   --formula-grid-selection-handle: var(--selection-border);
   --formula-grid-scrollbar-track: var(--bg-tertiary);
@@ -169,6 +171,8 @@
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
 
+  --selection-fill: rgba(77, 166, 255, 0.18);
+
   --formula-ref-color: #c4b5fd;
   --shadow-surface: 0 1px 2px rgba(0, 0, 0, 0.5);
 
@@ -214,6 +218,7 @@
 
   --text-on-accent: HighlightText;
   --selection-text: HighlightText;
+  --selection-fill: transparent;
 
   --panel-shadow: none;
   --shadow-surface: none;
@@ -266,6 +271,7 @@
 
     --text-on-accent: HighlightText;
     --selection-text: HighlightText;
+    --selection-fill: transparent;
 
     --shadow-surface: none;
     --formula-fn-color: var(--accent);

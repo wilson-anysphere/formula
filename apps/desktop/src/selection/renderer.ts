@@ -51,7 +51,7 @@ export type SelectionRenderDebugInfo = {
 
 function defaultStyleFromTheme(): SelectionRenderStyle {
   return {
-    fillColor: resolveCssVar("--selection-bg", { fallback: "transparent" }),
+    fillColor: resolveCssVar("--selection-fill", { fallback: "transparent" }),
     borderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
     activeBorderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
     borderWidth: 2,
