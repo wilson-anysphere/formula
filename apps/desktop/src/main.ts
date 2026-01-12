@@ -6806,11 +6806,97 @@ try {
 
   const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
   const primaryModifiers = () => ({ ctrlKey: !isMac, metaKey: isMac });
-  const isTextEditingTargetFocused = (): boolean => {
+  const getTextEditingTarget = (): HTMLElement | null => {
     const target = document.activeElement as HTMLElement | null;
-    if (!target) return false;
+    if (!target) return null;
     const tag = target.tagName;
-    return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+    if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return target;
+    return null;
+  };
+  const tryExecCommand = (command: string, value?: string): boolean => {
+    try {
+      return document.execCommand(command, false, value);
+    } catch {
+      return false;
+    }
+  };
+  const readClipboardTextBestEffort = async (): Promise<string | null> => {
+    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
+    const readText = navigatorClipboard?.readText as (() => Promise<string>) | undefined;
+    if (typeof readText === "function") {
+      try {
+        const text = await readText.call(navigatorClipboard);
+        if (typeof text === "string") return text;
+      } catch {
+        // ignore and fall through
+      }
+    }
+
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+    if (typeof invoke === "function") {
+      for (const cmd of ["clipboard_read", "read_clipboard"]) {
+        try {
+          const payload = await invoke(cmd);
+          const text = (payload as any)?.text;
+          if (typeof text === "string") return text;
+        } catch {
+          // try next
+        }
+      }
+    }
+
+    const legacyReadText = (globalThis as any).__TAURI__?.clipboard?.readText as (() => Promise<string>) | undefined;
+    if (typeof legacyReadText === "function") {
+      try {
+        const text = await legacyReadText();
+        if (typeof text === "string") return text;
+      } catch {
+        // ignore
+      }
+    }
+
+    return null;
+  };
+  const writeClipboardTextBestEffort = async (text: string): Promise<boolean> => {
+    const navigatorClipboard = (globalThis as any)?.navigator?.clipboard;
+    const writeText = navigatorClipboard?.writeText as ((text: string) => Promise<void>) | undefined;
+    if (typeof writeText === "function") {
+      try {
+        await writeText.call(navigatorClipboard, text);
+        return true;
+      } catch {
+        // ignore and fall through
+      }
+    }
+
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+    if (typeof invoke === "function") {
+      // Prefer the multi-format clipboard bridge (`clipboard_write`) when available.
+      try {
+        await invoke("clipboard_write", { payload: { text } });
+        return true;
+      } catch {
+        // fall through
+      }
+      try {
+        await invoke("write_clipboard", { text });
+        return true;
+      } catch {
+        // fall through
+      }
+    }
+
+    const legacyWriteText = (globalThis as any).__TAURI__?.clipboard?.writeText as ((text: string) => Promise<void>) | undefined;
+    if (typeof legacyWriteText === "function") {
+      try {
+        await legacyWriteText(text);
+        return true;
+      } catch {
+        // ignore
+      }
+    }
+
+    return false;
   };
   const dispatchSpreadsheetShortcut = (key: string, opts: { shift?: boolean; alt?: boolean } = {}) => {
     const { ctrlKey, metaKey } = primaryModifiers();
@@ -6828,68 +6914,163 @@ try {
   };
 
   void listen("menu-undo", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("undo");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
-      }
+    const target = getTextEditingTarget();
+    if (target) {
+      tryExecCommand("undo");
       return;
     }
     app.undo();
     app.focus();
   });
   void listen("menu-redo", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("redo");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
-      }
+    const target = getTextEditingTarget();
+    if (target) {
+      tryExecCommand("redo");
       return;
     }
     app.redo();
     app.focus();
   });
   void listen("menu-cut", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("cut");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
-      }
+    const target = getTextEditingTarget();
+    if (target) {
+      if (tryExecCommand("cut")) return;
+
+      // Best-effort fallback for WebViews that block execCommand cut/copy.
+      void (async () => {
+        const selectedText = (() => {
+          if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? start;
+            return start !== end ? target.value.slice(start, end) : "";
+          }
+          if (target.isContentEditable) {
+            return window.getSelection()?.toString() ?? "";
+          }
+          return "";
+        })();
+
+        if (!selectedText) return;
+        const ok = await writeClipboardTextBestEffort(selectedText);
+        if (!ok) return;
+
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart ?? 0;
+          const end = target.selectionEnd ?? start;
+          if (start !== end) {
+            try {
+              target.setRangeText("", start, end, "end");
+            } catch {
+              target.value = target.value.slice(0, start) + target.value.slice(end);
+            }
+            target.dispatchEvent(new Event("input", { bubbles: true }));
+            target.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        } else if (target.isContentEditable) {
+          try {
+            window.getSelection()?.deleteFromDocument();
+          } catch {
+            // ignore
+          }
+        }
+      })();
       return;
     }
     void app.cutToClipboard();
   });
   void listen("menu-copy", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("copy");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
-      }
+    const target = getTextEditingTarget();
+    if (target) {
+      if (tryExecCommand("copy")) return;
+
+      // Best-effort fallback for WebViews that block execCommand cut/copy.
+      void (async () => {
+        const selectedText = (() => {
+          if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+            const start = target.selectionStart ?? 0;
+            const end = target.selectionEnd ?? start;
+            return start !== end ? target.value.slice(start, end) : "";
+          }
+          if (target.isContentEditable) {
+            return window.getSelection()?.toString() ?? "";
+          }
+          return "";
+        })();
+
+        if (!selectedText) return;
+        await writeClipboardTextBestEffort(selectedText);
+      })();
       return;
     }
     void app.copyToClipboard();
   });
   void listen("menu-paste", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("paste");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
-      }
+    const target = getTextEditingTarget();
+    if (target) {
+      if (tryExecCommand("paste")) return;
+
+      // WebViews often block `execCommand("paste")`. Fall back to reading clipboard text
+      // and inserting it at the current selection.
+      void (async () => {
+        const text = await readClipboardTextBestEffort();
+        if (!text) return;
+
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          const start = target.selectionStart ?? target.value.length;
+          const end = target.selectionEnd ?? start;
+          try {
+            target.setRangeText(text, start, end, "end");
+          } catch {
+            target.value = target.value.slice(0, start) + text + target.value.slice(end);
+          }
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+          return;
+        }
+
+        if (target.isContentEditable) {
+          // Prefer execCommand insertText when available; it preserves undo history.
+          if (tryExecCommand("insertText", text)) return;
+          try {
+            const sel = window.getSelection();
+            if (!sel || sel.rangeCount === 0) return;
+            sel.deleteFromDocument();
+            const range = sel.getRangeAt(0);
+            const node = document.createTextNode(text);
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } catch {
+            // ignore
+          }
+        }
+      })();
       return;
     }
     void app.pasteFromClipboard();
   });
   void listen("menu-select-all", () => {
-    if (isTextEditingTargetFocused()) {
-      try {
-        document.execCommand("selectAll");
-      } catch {
-        // Ignore failures; some environments disable `execCommand`.
+    const target = getTextEditingTarget();
+    if (target) {
+      if (tryExecCommand("selectAll")) return;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+        try {
+          target.select();
+        } catch {
+          // ignore
+        }
+      } else if (target.isContentEditable) {
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        } catch {
+          // ignore
+        }
       }
       return;
     }
