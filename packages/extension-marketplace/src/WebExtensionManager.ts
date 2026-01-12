@@ -87,7 +87,15 @@ export interface BrowserExtensionHostLike {
    * Back-compat: clear persisted extension storage/config state.
    */
   clearExtensionStorage?(extensionId: string): Promise<void> | void;
-  listExtensions(): Array<{ id: string }>;
+  listExtensions(): Array<{
+    id: string;
+    /**
+     * Optional active flag (exposed by BrowserExtensionHost) indicating whether the extension has
+     * already been activated. Used by WebExtensionManager to decide whether calling `startup()`
+     * would risk re-broadcasting `workbookOpened` to already-running extensions.
+     */
+    active?: boolean;
+  }>;
   /**
    * Starts the host and delivers startup activation events + initial workbook snapshot.
    *
