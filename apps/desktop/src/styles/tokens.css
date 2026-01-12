@@ -300,7 +300,14 @@
     --selection-text: HighlightText;
     --selection-fill: transparent;
 
+    --panel-shadow: none;
     --shadow-surface: none;
+    --tooltip-bg: CanvasText;
+    --tooltip-text: Canvas;
+
+    --dialog-shadow: none;
+    --dialog-backdrop: transparent;
+
     --formula-fn-color: var(--accent);
     --formula-ref-color: LinkText;
     --formula-string-color: CanvasText;
