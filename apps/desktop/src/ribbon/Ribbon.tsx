@@ -466,6 +466,13 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   if (items.length === 0) return;
                   const currentIndex = items.findIndex((el) => el === document.activeElement);
 
+                  if (event.key === "Tab") {
+                    // Let the browser move focus (Tab / Shift+Tab), then close the menu on the
+                    // next frame so we don't unmount the focused element mid-navigation.
+                    requestAnimationFrame(() => closeTabMenu());
+                    return;
+                  }
+
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
                     const next = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
@@ -504,6 +511,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                       className={["ribbon__tab-menuitem", isActive ? "is-active" : null].filter(Boolean).join(" ")}
                       title={tab.label}
                       data-tab-id={tab.id}
+                      tabIndex={-1}
                       onClick={() => selectTabFromMenu(tab.id)}
                     >
                       {tab.label}

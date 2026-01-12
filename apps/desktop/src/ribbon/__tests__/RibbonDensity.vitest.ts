@@ -199,6 +199,48 @@ describe("Ribbon density + collapse toggle", () => {
     act(() => root.unmount());
   });
 
+  it("closes the hamburger tab menu when pressing Tab from a menu item", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    const { root, ribbonRoot, container } = renderRibbon();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      setRibbonWidth(ribbonRoot, 700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(ribbonRoot.dataset.density).toBe("hidden");
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="ribbon-tab-menu-toggle"]');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+    if (!toggle) throw new Error("Missing ribbon tab menu toggle");
+
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+
+    const menu = container.querySelector<HTMLElement>('[data-testid="ribbon-tab-menu"]');
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing ribbon tab menu");
+
+    const firstItem = menu.querySelector<HTMLButtonElement>(".ribbon__tab-menuitem");
+    expect(firstItem).toBeInstanceOf(HTMLButtonElement);
+    if (!firstItem) throw new Error("Missing ribbon tab menu item");
+    firstItem.focus();
+
+    await act(async () => {
+      firstItem.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    expect(container.querySelector('[data-testid="ribbon-tab-menu"]')).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it("moves focus into the flyout panel when pressing Tab on an active tab (density hidden)", async () => {
     vi.stubGlobal("localStorage", createStorageMock());
     const { root, ribbonRoot, container } = renderRibbon();
