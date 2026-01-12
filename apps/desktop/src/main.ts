@@ -1663,8 +1663,8 @@ function canRunAiPanelShortcut(event: KeyboardEvent): boolean {
   return true;
 }
 
-// Global shortcut: Cmd+I toggles the AI chat panel.
-// Install in the capture phase so we can preempt SpreadsheetApp's Ctrl/Cmd+I formatting shortcut.
+// Global shortcut: Meta+I toggles the AI chat panel (Cmd+I on macOS).
+// Install in the capture phase so we can preempt SpreadsheetApp's Ctrl+I formatting shortcut.
 window.addEventListener(
   "keydown",
   (e) => {
