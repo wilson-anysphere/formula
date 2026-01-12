@@ -206,6 +206,75 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
   });
 
+  test("workbooks with zero visible sheets still render a fallback tab + sheet position and allow unhiding", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "hidden" },
+        { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    // Even though all sheets are marked hidden, the UI should remain usable (defensive fallback):
+    // show exactly one sheet (prefer the active sheet) so users can reach the Unhide… menu.
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
+
+    const switcher = page.getByTestId("sheet-switcher");
+    await expect(switcher.locator("option")).toHaveText(["Sheet1"]);
+
+    // Unhide Sheet2 via the sheet tab context menu.
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
+
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await expect(menu.getByRole("button", { name: "Sheet2" })).toBeVisible();
+    await menu.getByRole("button", { name: "Sheet2" }).click();
+
+    // After unhiding, Sheet2 should become the active/visible sheet (since Sheet1 remains hidden).
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
+      .toBe("Sheet2");
+    await expect(switcher.locator("option")).toHaveText(["Sheet2"]);
+
+    // Ensure the unhide action persisted via the tauri backend.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            ((window as any).__tauriInvokeCalls ?? []).filter(
+              (c: any) => c?.cmd === "set_sheet_visibility" && c?.args?.sheet_id === "Sheet2" && c?.args?.visibility === "visible",
+            ).length,
+        ),
+      )
+      .toBe(1);
+  });
+
   test("unhide via the tab strip background context menu persists through the tauri backend", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests, {
       sheets: [
