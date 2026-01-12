@@ -13,6 +13,9 @@ test("desktop index.html exposes required shell containers and testids", () => {
   const requiredSnippets = [
     // Shell roots
     'id="app"',
+    'id="titlebar"',
+    'id="ribbon"',
+    'id="formula-bar"',
     'id="workspace"',
     'id="grid-split"',
     'id="grid"',
@@ -31,6 +34,8 @@ test("desktop index.html exposes required shell containers and testids", () => {
     'data-testid="selection-range"',
     'data-testid="active-value"',
     'data-testid="sheet-switcher"',
+    'data-testid="zoom-control"',
+    'data-testid="sheet-position"',
 
     // Debug/utility buttons (kept for now; used by some e2e flows)
     'data-testid="audit-precedents"',
@@ -43,6 +48,15 @@ test("desktop index.html exposes required shell containers and testids", () => {
     'data-testid="freeze-top-row"',
     'data-testid="freeze-first-column"',
     'data-testid="unfreeze-panes"',
+    'data-testid="open-panel-ai-chat"',
+    'data-testid="open-panel-ai-audit"',
+    'data-testid="open-data-queries-panel"',
+    'data-testid="open-macros-panel"',
+    'data-testid="open-script-editor-panel"',
+    'data-testid="open-python-panel"',
+    'data-testid="open-extensions-panel"',
+    'data-testid="open-vba-migrate-panel"',
+    'data-testid="open-comments-panel"',
   ];
 
   const missing = requiredSnippets.filter((snippet) => !html.includes(snippet));
@@ -51,5 +65,16 @@ test("desktop index.html exposes required shell containers and testids", () => {
     [],
     `apps/desktop/index.html is missing required shell markup:\\n${missing.map((m) => `- ${m}`).join("\\n")}`,
   );
-});
 
+  // The grid must remain focusable for keyboard navigation.
+  assert.match(
+    html,
+    /\bid="grid"[^>]*\btabindex="0"/,
+    "Expected #grid to have tabindex=\"0\" so it can receive focus",
+  );
+  assert.match(
+    html,
+    /\bid="grid-secondary"[^>]*\btabindex="0"/,
+    "Expected #grid-secondary to have tabindex=\"0\" so it can receive focus",
+  );
+});
