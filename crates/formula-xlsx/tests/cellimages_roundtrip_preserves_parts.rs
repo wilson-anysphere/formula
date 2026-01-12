@@ -63,7 +63,7 @@ fn build_cellimages_fixture_xlsx() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
 
     let cell_images_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
 </Relationships>
 "#
     .to_vec();
@@ -134,4 +134,3 @@ fn cellimages_roundtrip_preserves_parts() {
     assert_eq!(zip_part(&saved, "xl/_rels/cellImages.xml.rels"), cell_images_rels);
     assert_eq!(zip_part(&saved, "xl/media/image1.png"), image1_png);
 }
-
