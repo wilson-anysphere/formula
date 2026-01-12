@@ -453,7 +453,6 @@ mod tests {
             model_cell_value_to_sort_value(&entity_camel_case),
             CellValue::Text("Entity display (camelCase)".to_string())
         );
-
         let Some(record) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {

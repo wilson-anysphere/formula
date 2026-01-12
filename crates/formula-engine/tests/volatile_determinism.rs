@@ -18,6 +18,11 @@ fn now_is_frozen_within_single_recalc() {
 fn rand_changes_across_recalcs_but_is_stable_within_one() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=RAND()").unwrap();
+    assert_eq!(
+        engine.bytecode_program_count(),
+        1,
+        "expected RAND() to be bytecode-eligible"
+    );
 
     engine.recalculate();
     let first = engine.get_cell_value("Sheet1", "A1");
@@ -57,10 +62,20 @@ fn multithreaded_and_singlethreaded_recalc_match_for_rng() {
 
     let mut single = Engine::new();
     setup(&mut single);
+    assert_eq!(
+        single.bytecode_program_count(),
+        3,
+        "expected RAND/RANDBETWEEN and scalar arithmetic to compile to bytecode"
+    );
     single.recalculate_single_threaded();
 
     let mut multi = Engine::new();
     setup(&mut multi);
+    assert_eq!(
+        multi.bytecode_program_count(),
+        3,
+        "expected RAND/RANDBETWEEN and scalar arithmetic to compile to bytecode"
+    );
     multi.recalculate_multi_threaded();
 
     assert_eq!(

@@ -215,7 +215,7 @@ impl Function {
             "ROWS" => Function::Rows,
             "COLUMNS" => Function::Columns,
             "ADDRESS" => Function::Address,
-            _ => Function::Unknown(Arc::from(upper)),
+            other => Function::Unknown(Arc::from(other)),
         }
     }
 

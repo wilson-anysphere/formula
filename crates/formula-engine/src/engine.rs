@@ -7284,6 +7284,10 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             .unwrap_or(bytecode::Value::Empty)
     }
 
+    fn sheet_id(&self) -> usize {
+        self.sheet
+    }
+
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
         self.column_slice_impl(col, row_start, row_end, self.slice_mode)
     }
@@ -8088,6 +8092,14 @@ fn bytecode_expr_is_eligible_inner(
                 }
                 args.iter()
                     .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            },
+            bytecode::ast::Function::Rand => args.is_empty(),
+            bytecode::ast::Function::RandBetween => {
+                if args.len() != 2 {
+                    return false;
+                }
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::CountIf => {
                 if args.len() != 2 {
@@ -8273,9 +8285,7 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Today
             | bytecode::ast::Function::Db
             | bytecode::ast::Function::Vdb
-            | bytecode::ast::Function::Concat
-            | bytecode::ast::Function::Rand
-            | bytecode::ast::Function::RandBetween => args
+            | bytecode::ast::Function::Concat => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),
             bytecode::ast::Function::IsBlank

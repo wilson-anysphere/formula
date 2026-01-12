@@ -883,6 +883,7 @@ impl<'a> CompileCtx<'a> {
             Function::XMatch => arg_idx == 1,
             Function::XLookup => arg_idx == 1 || arg_idx == 2,
             Function::Row | Function::Column | Function::Rows | Function::Columns => true,
+            Function::Rand | Function::RandBetween => false,
             _ => false,
         };
 

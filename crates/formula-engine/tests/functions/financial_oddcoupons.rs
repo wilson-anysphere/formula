@@ -276,10 +276,10 @@ fn odd_coupon_settlement_boundary_behavior() {
         "expected finite number for worksheet ODDLPRICE when settlement < last_interest, got {v:?}"
     );
     let v = sheet.eval("=ODDLYIELD(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)");
-    assert!(
-        matches!(v, Value::Number(n) if (n - 0.06).abs() <= 1e-6),
-        "expected yield ~0.06 for worksheet ODDLYIELD when settlement < last_interest, got {v:?}"
-    );
+    match v {
+        Value::Number(n) => assert_close(n, 0.06, 1e-9),
+        other => panic!("expected number for worksheet ODDLYIELD when settlement < last_interest, got {other:?}"),
+    }
     let v = sheet.eval("=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
         matches!(v, Value::Number(n) if n.is_finite() && n > 0.0),

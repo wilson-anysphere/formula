@@ -14,6 +14,17 @@ pub trait Grid: Sync {
         self.get_value(coord)
     }
 
+    /// Source worksheet id for the grid.
+    ///
+    /// This is used for deterministic volatile behavior in the bytecode backend (e.g. RAND,
+    /// RANDBETWEEN) so results differ across sheets.
+    ///
+    /// Grids that are not associated with a particular sheet can rely on the default `0`.
+    #[inline]
+    fn sheet_id(&self) -> usize {
+        0
+    }
+
     #[inline]
     fn get_number(&self, coord: CellCoord) -> Option<f64> {
         match self.get_value(coord) {

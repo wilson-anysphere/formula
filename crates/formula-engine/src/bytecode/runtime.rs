@@ -274,6 +274,11 @@ pub fn eval_ast(
     base: CellCoord,
     locale: &crate::LocaleConfig,
 ) -> Value {
+    // Match `Vm::eval`: the RNG draw counter is reset per top-level evaluation, and the
+    // sheet context is set so deterministic volatile functions (e.g. RAND) can incorporate it.
+    set_thread_current_sheet_id(sheet_id);
+    reset_thread_rng_counter();
+
     let mut lexical_scopes: Vec<HashMap<Arc<str>, Value>> = Vec::new();
     // Match `Vm::eval`: top-level range references should deref dynamically (spill) instead of
     // remaining as a reference value.

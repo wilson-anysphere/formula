@@ -2143,7 +2143,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         })
                         .map(|(_, v)| v.clone())
                         .unwrap_or(Value::Error(ErrorKind::Field)),
-                    _ => Value::Error(ErrorKind::Field),
+                    // Field access on a non-rich value yields `#VALUE!` (type mismatch). `#FIELD!`
+                    // is reserved for missing fields on rich values.
+                    _ => Value::Error(ErrorKind::Value),
                 });
 
                 (

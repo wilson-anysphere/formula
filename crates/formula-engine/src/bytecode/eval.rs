@@ -352,8 +352,7 @@ impl Vm {
         // Treat each explicit evaluation call as its own "recalc tick" for volatile functions.
         // Use the supplied `now_utc` (which callers can freeze) to derive a deterministic id.
         let recalc_id = now_utc.timestamp_nanos_opt().unwrap_or(0) as u64;
-        let _guard =
-            super::runtime::set_thread_eval_context(date_system, value_locale, now_utc, recalc_id);
+        let _guard = super::runtime::set_thread_eval_context(date_system, value_locale, now_utc, recalc_id);
 
         // Criteria strings inside quotes should follow the workbook/value locale for numeric parsing.
         let mut locale_config = crate::LocaleConfig::en_us();
