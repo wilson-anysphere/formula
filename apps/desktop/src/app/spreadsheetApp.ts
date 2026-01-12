@@ -3799,9 +3799,11 @@ export class SpreadsheetApp {
     // reintroducing cross-sheet collisions.
     const legacyUnqualifiedSheetId = (() => {
       if (!this.collabMode) return null;
-      const ids = this.document.getSheetIds?.() ?? [];
+      // Some unit tests call `reindexCommentCells` on `Object.create(SpreadsheetApp.prototype)`
+      // without running the constructor/field initializers, so `this.document` may be undefined.
+      const ids = this.document?.getSheetIds?.() ?? [];
       if (ids.includes("Sheet1")) return "Sheet1";
-      return ids[0] ?? this.sheetId;
+      return ids[0] ?? this.sheetId || "Sheet1";
     })();
 
     for (const comment of this.commentManager.listAll()) {
