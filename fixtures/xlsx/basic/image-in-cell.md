@@ -4,6 +4,9 @@ This fixture is an XLSX produced by modern Excel that demonstrates **images stor
 
 Notably, this fixture **does _not_ contain** an `xl/cellimages.xml` part; instead, `xl/richData/_rels/richValueRel.xml.rels` points directly at `xl/media/image*.png`.
 
+See also: [`docs/xlsx-embedded-images-in-cells.md`](../../../docs/xlsx-embedded-images-in-cells.md) for a
+concrete schema walkthrough (relationships, content types, `_localImage` keys, etc.).
+
 ## ZIP part inventory (relevant parts only)
 
 Output of:
@@ -127,4 +130,3 @@ xl/worksheets/sheet1.xml
                                                                         │
                                                                         └→ xl/media/image1.png, xl/media/image2.png
 ```
-
