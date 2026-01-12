@@ -1,0 +1,227 @@
+import { expect, test } from "@playwright/test";
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
+
+// CJS helpers (shared/* is CommonJS). Playwright's TS loader may not always expose
+// named exports for CJS modules, so fall back to `.default`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const signingImport: any = await import("../../../../shared/crypto/signing.js");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extensionPackageImport: any = await import("../../../../shared/extension-package/index.js");
+
+const signingPkg: any = signingImport?.default ?? signingImport;
+const extensionPackagePkg: any = extensionPackageImport?.default ?? extensionPackageImport;
+
+const { generateEd25519KeyPair } = signingPkg;
+const { createExtensionPackageV2 } = extensionPackagePkg;
+
+test.describe("Marketplace install sync", () => {
+  test("installing + uninstalling via Marketplace updates command palette (no reload)", async ({ page }) => {
+    test.setTimeout(180_000);
+
+    await page.addInitScript(() => {
+      // Avoid permission modal flakiness in this suite; other e2e tests cover explicit
+      // permission prompt UI.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).__formulaPermissionPrompt = async () => true;
+    });
+
+    const extensionId = "e2e.marketplace-install-sync";
+    const extensionVersion = "1.0.0";
+    const displayName = "Marketplace Install Sync Test";
+    const commandId = "marketplaceInstallSync.hello";
+    const commandTitle = `Hello (${extensionId})`;
+
+    const keys = generateEd25519KeyPair();
+
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-e2e-marketplace-sync-"));
+    const extensionDir = path.join(tmp, "extension");
+    await fs.mkdir(path.join(extensionDir, "dist"), { recursive: true });
+
+    const manifest = {
+      name: "marketplace-install-sync",
+      displayName,
+      version: extensionVersion,
+      description: "E2E fixture extension for Marketplace → UI resync behavior.",
+      publisher: "e2e",
+      license: "UNLICENSED",
+      main: "./dist/extension.js",
+      module: "./dist/extension.mjs",
+      browser: "./dist/extension.mjs",
+      engines: {
+        formula: "^1.0.0",
+      },
+      activationEvents: ["onStartupFinished"],
+      contributes: {
+        commands: [
+          {
+            command: commandId,
+            title: commandTitle,
+            category: "Marketplace Test",
+          },
+        ],
+      },
+      permissions: ["ui.commands"],
+    };
+
+    const entrypointSource = `
+import { commands, ui } from "@formula/extension-api";
+
+export async function activate(context) {
+  context.subscriptions.push(
+    await commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+      await ui.showMessage("Hello from marketplace install sync!");
+      return "ok";
+    })
+  );
+}
+`.trimStart();
+
+    // `main` is required by the manifest validator but unused in browser builds.
+    await fs.writeFile(path.join(extensionDir, "dist", "extension.js"), "module.exports = {};\n", "utf8");
+    await fs.writeFile(path.join(extensionDir, "dist", "extension.mjs"), entrypointSource, "utf8");
+    await fs.writeFile(path.join(extensionDir, "package.json"), JSON.stringify(manifest, null, 2), "utf8");
+
+    const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+    const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
+
+    // Mock marketplace endpoints used by MarketplaceClient (/api).
+    await page.route("**/api/search**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total: 1,
+          results: [
+            {
+              id: extensionId,
+              name: "marketplace-install-sync",
+              displayName,
+              publisher: "e2e",
+              description: "E2E fixture extension for Marketplace → UI resync behavior.",
+              latestVersion: extensionVersion,
+              verified: true,
+              featured: false,
+              categories: [],
+              tags: [],
+              screenshots: [],
+              downloadCount: 0,
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+          nextCursor: null,
+        }),
+      });
+    });
+
+    // Provide a deterministic 404 fallback for unrelated extension detail requests so we don't
+    // accidentally fetch HTML from the dev server.
+    await page.route("**/api/extensions/**", async (route) => {
+      await route.fulfill({ status: 404, body: "" });
+    });
+
+    await page.route(`**/api/extensions/${encodeURIComponent(extensionId)}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: extensionId,
+          name: "marketplace-install-sync",
+          displayName,
+          publisher: "e2e",
+          description: "E2E fixture extension for Marketplace → UI resync behavior.",
+          categories: [],
+          tags: [],
+          screenshots: [],
+          verified: true,
+          featured: false,
+          deprecated: false,
+          blocked: false,
+          malicious: false,
+          downloadCount: 0,
+          latestVersion: extensionVersion,
+          versions: [],
+          readme: "",
+          publisherPublicKeyPem: keys.publicKeyPem,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.route(
+      `**/api/extensions/${encodeURIComponent(extensionId)}/download/${encodeURIComponent(extensionVersion)}`,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/octet-stream",
+          body: Buffer.from(pkgBytes),
+          headers: {
+            "x-package-sha256": pkgSha256,
+            "x-package-format-version": "2",
+            "x-package-scan-status": "passed",
+            "x-publisher": "e2e",
+          },
+        });
+      },
+    );
+
+    try {
+      await gotoDesktop(page);
+      await waitForDesktopReady(page);
+
+      await page.getByRole("tab", { name: "View", exact: true }).click();
+      await page.getByTestId("open-marketplace-panel").click();
+
+      const panel = page.getByTestId("panel-marketplace");
+      await expect(panel).toBeVisible();
+
+      await panel.getByPlaceholder("Search extensions…").fill("sync");
+      await panel.getByRole("button", { name: "Search", exact: true }).click();
+
+      const resultRow = panel.locator(".marketplace-result").filter({ hasText: extensionId });
+      await expect(resultRow).toBeVisible();
+
+      await resultRow.getByRole("button", { name: "Install", exact: true }).click();
+      await expect(resultRow).toContainText("Installed");
+
+      const primary = process.platform === "darwin" ? "Meta" : "Control";
+
+      // Verify the install triggers desktop UI re-sync without reloading: the command should show up
+      // in the command palette immediately.
+      await page.keyboard.press(`${primary}+Shift+P`);
+      await expect(page.getByTestId("command-palette-input")).toBeVisible();
+      await page.getByTestId("command-palette-input").fill(extensionId);
+
+      const commandItem = page
+        .getByTestId("command-palette-list")
+        .locator("li.command-palette__item")
+        .filter({ hasText: commandTitle });
+      await expect(commandItem).toBeVisible({ timeout: 30_000 });
+      await commandItem.first().click();
+
+      await expect(page.getByTestId("toast-root")).toContainText("Hello from marketplace install sync!");
+
+      // Re-render the search results so the Marketplace panel can show the uninstall button.
+      await panel.getByRole("button", { name: "Search", exact: true }).click();
+      const installedRow = panel.locator(".marketplace-result").filter({ hasText: extensionId });
+      await expect(installedRow).toBeVisible();
+
+      await installedRow.getByRole("button", { name: "Uninstall", exact: true }).click();
+      await expect(installedRow).toContainText("Uninstalled");
+
+      // Confirm the desktop command registry updates after uninstall (command should disappear).
+      await page.keyboard.press(`${primary}+Shift+P`);
+      await expect(page.getByTestId("command-palette-input")).toBeVisible();
+      await page.getByTestId("command-palette-input").fill(extensionId);
+      await expect(page.getByTestId("command-palette-list")).toContainText("No matching commands", { timeout: 30_000 });
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
