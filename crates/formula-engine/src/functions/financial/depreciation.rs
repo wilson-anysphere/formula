@@ -73,6 +73,7 @@ fn depreciation_step(cost: f64, salvage: f64, life: f64, factor: f64, accumulate
 /// Fixed-declining balance depreciation. Matches Excel behavior:
 /// - The depreciation rate is rounded to 3 decimals.
 /// - The first period is prorated by `month/12` (default `month = 12`).
+/// - If `month != 12`, Excel adds one extra period (`life + 1`) prorated by `(12-month)/12`.
 pub fn db(
     cost: f64,
     salvage: f64,
