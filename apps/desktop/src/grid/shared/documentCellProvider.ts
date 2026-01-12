@@ -56,6 +56,7 @@ export class DocumentCellProvider implements CellProvider {
 
   private readonly cache: LruCache<string, CellData | null>;
   private readonly styleCache = new Map<number, CellStyle | undefined>();
+  private readonly resolvedStyleCache = new WeakMap<object, CellStyle | undefined>();
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
 
@@ -93,6 +94,14 @@ export class DocumentCellProvider implements CellProvider {
     return style;
   }
 
+  private resolveResolvedStyle(docStyle: unknown): CellStyle | undefined {
+    if (!isPlainObject(docStyle)) return undefined;
+    if (this.resolvedStyleCache.has(docStyle)) return this.resolvedStyleCache.get(docStyle);
+    const style = this.convertDocStyleToGridStyle(docStyle);
+    this.resolvedStyleCache.set(docStyle, style);
+    return style;
+  }
+
   private convertDocStyleToGridStyle(docStyle: unknown): CellStyle | undefined {
     if (!isPlainObject(docStyle)) return undefined;
 
@@ -121,8 +130,8 @@ export class DocumentCellProvider implements CellProvider {
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
     const horizontal = alignment?.horizontal;
     if (horizontal === "center") out.textAlign = "center";
-    else if (horizontal === "left") out.textAlign = "left";
-    else if (horizontal === "right") out.textAlign = "right";
+    else if (horizontal === "left") out.textAlign = "start";
+    else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
     if (alignment?.wrapText === true) out.wrapMode = "word";
 
@@ -296,7 +305,12 @@ export class DocumentCellProvider implements CellProvider {
     }
 
     const styleId = typeof state.styleId === "number" ? state.styleId : 0;
-    const docStyle: DocStyle = this.options.document?.styleTable?.get?.(styleId) ?? {};
+    const controller: any = this.options.document as any;
+    const resolvedDocStyle: unknown =
+      typeof controller.getCellFormat === "function"
+        ? controller.getCellFormat(sheetId, { row: docRow, col: docCol })
+        : this.options.document?.styleTable?.get?.(styleId) ?? {};
+    const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
     const styleAny = docStyle as any;
     const numberFormat =
       typeof styleAny?.numberFormat === "string"
@@ -305,7 +319,7 @@ export class DocumentCellProvider implements CellProvider {
           ? (styleAny.number_format as string)
           : null;
 
-    let style = this.resolveStyle(state.styleId);
+    let style = typeof controller.getCellFormat === "function" ? this.resolveResolvedStyle(docStyle) : this.resolveStyle(styleId);
 
     if (typeof value === "number" && numberFormat !== null) {
       value = formatValueWithNumberFormat(value, numberFormat);
@@ -337,51 +351,195 @@ export class DocumentCellProvider implements CellProvider {
       // Coalesce document mutations into provider updates so the renderer can redraw
       // minimal dirty regions.
       this.unsubscribeDoc = this.options.document.on("change", (payload: any) => {
+        const sheetId = this.options.getSheetId();
         const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-        if (deltas.length === 0) {
+        const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+
+        // New layered formatting deltas (row/col/sheet style maps) may arrive without per-cell deltas.
+        const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
+        const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
+        const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
+
+        const recalc = payload?.recalc === true;
+        const hasFormatLayerDeltas = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+
+        // No cell deltas + no formatting deltas: preserve the sheet-view optimization.
+        if (deltas.length === 0 && !hasFormatLayerDeltas) {
           // Sheet view deltas (frozen panes, row/col sizes, etc.) do not affect cell contents.
           // Avoid evicting the provider cache in those cases; the renderer will be updated by
           // the view sync code (e.g. `syncFrozenPanes` / shared grid axis sync).
-          const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
-          if (sheetViewDeltas.length > 0 && payload?.recalc !== true) {
+          if (sheetViewDeltas.length > 0 && !recalc) {
             return;
           }
           this.invalidateAll();
           return;
         }
 
-        const sheetId = this.options.getSheetId();
-        let minRow = Infinity;
-        let maxRow = -Infinity;
-        let minCol = Infinity;
-        let maxCol = -Infinity;
-        let saw = false;
-
-        for (const delta of deltas) {
-          if (!delta) continue;
-          if (String(delta.sheetId ?? "") !== sheetId) continue;
-          const row = Number(delta.row);
-          const col = Number(delta.col);
-          if (!Number.isInteger(row) || row < 0) continue;
-          if (!Number.isInteger(col) || col < 0) continue;
-          saw = true;
-          minRow = Math.min(minRow, row);
-          maxRow = Math.max(maxRow, row);
-          minCol = Math.min(minCol, col);
-          maxCol = Math.max(maxCol, col);
-        }
-
-        if (!saw) {
+        // Sheet-level style changes affect all cells.
+        if (
+          sheetStyleDeltas.some((delta: any) => {
+            if (!delta) return false;
+            const id = delta.sheetId;
+            // If the delta doesn't specify a sheet, conservatively assume it impacts the visible sheet.
+            if (id == null) return true;
+            return String(id) === sheetId;
+          })
+        ) {
           this.invalidateAll();
           return;
         }
 
-        this.invalidateDocCells({
-          startRow: minRow,
-          endRow: maxRow + 1,
-          startCol: minCol,
-          endCol: maxCol + 1
-        });
+        const docRowCount = Math.max(0, this.options.rowCount - this.options.headerRows);
+        const docColCount = Math.max(0, this.options.colCount - this.options.headerCols);
+        const clampInt = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+        const invalidateRanges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+
+        const collectAxisSpan = (axisDeltas: any[], axis: "row" | "col"): { min: number; max: number } | null | "unknown" => {
+          if (!axisDeltas || axisDeltas.length === 0) return null;
+          let min = Infinity;
+          let max = -Infinity;
+          let sawAnyForSheet = false;
+          for (const delta of axisDeltas) {
+            if (!delta) continue;
+            if (String(delta.sheetId ?? "") !== sheetId) continue;
+            sawAnyForSheet = true;
+
+            const indices: number[] = [];
+
+            if (Array.isArray(delta.indices)) {
+              for (const v of delta.indices) indices.push(Number(v));
+            }
+            if (Array.isArray(delta.rows) && axis === "row") {
+              for (const v of delta.rows) indices.push(Number(v));
+            }
+            if (Array.isArray(delta.cols) && axis === "col") {
+              for (const v of delta.cols) indices.push(Number(v));
+            }
+
+            const direct = delta[axis];
+            if (direct != null) indices.push(Number(direct));
+
+            const index = delta.index;
+            if (index != null) indices.push(Number(index));
+
+            const startKey = axis === "row" ? "startRow" : "startCol";
+            const endKey = axis === "row" ? "endRow" : "endCol";
+            const endExclusiveKey = axis === "row" ? "endRowExclusive" : "endColExclusive";
+
+            const start = delta[startKey];
+            const end = delta[endKey];
+            const endExclusive = delta[endExclusiveKey];
+
+            const startNum = Number(start);
+            const endNum = Number(end);
+            const endExclusiveNum = Number(endExclusive);
+            if (Number.isInteger(startNum) && startNum >= 0) {
+              if (Number.isInteger(endExclusiveNum) && endExclusiveNum > startNum) {
+                // Exclusive end.
+                min = Math.min(min, startNum);
+                max = Math.max(max, endExclusiveNum - 1);
+                continue;
+              }
+              if (Number.isInteger(endNum) && endNum >= startNum) {
+                // Assume inclusive end.
+                min = Math.min(min, startNum);
+                max = Math.max(max, endNum);
+                continue;
+              }
+            }
+
+            for (const idx of indices) {
+              if (!Number.isInteger(idx) || idx < 0) continue;
+              min = Math.min(min, idx);
+              max = Math.max(max, idx);
+            }
+          }
+
+          if (!sawAnyForSheet) return null;
+          if (min === Infinity || max === -Infinity) return "unknown";
+          return { min, max };
+        };
+
+        // Cell-level deltas: keep existing minimal invalidation behavior.
+        if (deltas.length > 0) {
+          let minRow = Infinity;
+          let maxRow = -Infinity;
+          let minCol = Infinity;
+          let maxCol = -Infinity;
+          let saw = false;
+
+          for (const delta of deltas) {
+            if (!delta) continue;
+            if (String(delta.sheetId ?? "") !== sheetId) continue;
+            const row = Number(delta.row);
+            const col = Number(delta.col);
+            if (!Number.isInteger(row) || row < 0) continue;
+            if (!Number.isInteger(col) || col < 0) continue;
+            saw = true;
+            minRow = Math.min(minRow, row);
+            maxRow = Math.max(maxRow, row);
+            minCol = Math.min(minCol, col);
+            maxCol = Math.max(maxCol, col);
+          }
+
+          if (!saw) {
+            // If we can't determine the region (e.g. sheet mismatch), fall back.
+            // This mirrors the prior behavior and ensures we don't miss cross-sheet formula dependencies.
+            this.invalidateAll();
+            return;
+          }
+
+          invalidateRanges.push({
+            startRow: clampInt(minRow, 0, docRowCount),
+            endRow: clampInt(maxRow + 1, 0, docRowCount),
+            startCol: clampInt(minCol, 0, docColCount),
+            endCol: clampInt(maxCol + 1, 0, docColCount)
+          });
+        }
+
+        const rowSpan = collectAxisSpan(rowStyleDeltas, "row");
+        if (rowSpan === "unknown") {
+          this.invalidateAll();
+          return;
+        }
+        if (rowSpan) {
+          invalidateRanges.push({
+            startRow: clampInt(rowSpan.min, 0, docRowCount),
+            endRow: clampInt(rowSpan.max + 1, 0, docRowCount),
+            startCol: 0,
+            endCol: docColCount
+          });
+        }
+
+        const colSpan = collectAxisSpan(colStyleDeltas, "col");
+        if (colSpan === "unknown") {
+          this.invalidateAll();
+          return;
+        }
+        if (colSpan) {
+          invalidateRanges.push({
+            startRow: 0,
+            endRow: docRowCount,
+            startCol: clampInt(colSpan.min, 0, docColCount),
+            endCol: clampInt(colSpan.max + 1, 0, docColCount)
+          });
+        }
+
+        if (invalidateRanges.length === 0) {
+          // Formatting/view deltas did not apply to this sheet. Only invalidate on recalc.
+          if (recalc) {
+            this.invalidateAll();
+          }
+          return;
+        }
+
+        // Emit provider updates for each invalidation span. This is conservative but lets the renderer
+        // redraw without forcing a full-sheet invalidation for common row/col formatting operations.
+        for (const range of invalidateRanges) {
+          if (range.endRow <= range.startRow || range.endCol <= range.startCol) continue;
+          this.invalidateDocCells(range);
+        }
       });
     }
 
