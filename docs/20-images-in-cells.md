@@ -42,7 +42,7 @@ xl/
 │   └── metadata.xml.rels (commonly present when `metadata.xml` references `xl/richData/*`)
 └── richData/
     # Observed rich value stores (see notes below):
-    ├── richValue.xml                 # legacy/2017 variant rich values
+    ├── richValue.xml                 # legacy/2017 variant rich values (some producers use `richValues.xml`)
     ├── richValueTypes.xml            # optional legacy types table
     ├── richValueStructure.xml        # optional legacy structure table
     ├── rdrichvalue.xml               # modern “Place in Cell” rich values (rdRichValue naming)
@@ -76,7 +76,7 @@ Notes:
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
 - The exact `xl/richData/*` file set can vary across Excel builds; the part names shown above include the
   two **observed** naming schemes in this repo:
-  - legacy: `richValue*.xml`
+  - legacy: `richValue*.xml` (some producers/tests also use the plural `richValues*.xml`)
   - modern “Place in Cell”: `rdrichvalue*.xml` + supporting structure/types tables
   Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we explicitly
   implement rich-value editing.
