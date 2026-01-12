@@ -1649,14 +1649,14 @@ if (
     await extensionsLoadPromise;
   };
 
-  const executeExtensionCommand = (commandId: string, ...args: any[]) => {
-    void (async () => {
+  const executeExtensionCommand = async (commandId: string, ...args: any[]) => {
+    try {
       await ensureExtensionsLoaded();
       syncContributedCommands();
       await commandRegistry.executeCommand(commandId, ...args);
-    })().catch((err) => {
+    } catch (err) {
       showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-    });
+    }
   };
 
   const openExtensionPanel = (panelId: string) => {

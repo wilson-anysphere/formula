@@ -44,7 +44,7 @@ export function ExtensionsPanel({
   onOpenPanel,
 }: {
   manager: DesktopExtensionHostManager;
-  onExecuteCommand: (commandId: string, ...args: any[]) => void;
+  onExecuteCommand: (commandId: string, ...args: any[]) => Promise<unknown> | void;
   onOpenPanel: (panelId: string) => void;
 }) {
   const [, bump] = React.useState(0);
@@ -119,18 +119,26 @@ export function ExtensionsPanel({
     });
   }, [manager]);
 
+  const executeCommandAndRefreshPermissions = React.useCallback(
+    async (extensionId: string, commandId: string, args: any[] = []) => {
+      try {
+        await Promise.resolve(onExecuteCommand(commandId, ...args));
+      } finally {
+        await loadPermissionsForExtension(extensionId);
+      }
+    },
+    [loadPermissionsForExtension, onExecuteCommand],
+  );
+
   const runCommandWithArgs = React.useCallback(
-    (commandId: string) => {
+    (extensionId: string, commandId: string) => {
       const raw = globalThis.prompt?.("Command arguments (JSON array)", "[]");
       if (raw == null) return;
 
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          onExecuteCommand(commandId, ...parsed);
-        } else {
-          onExecuteCommand(commandId, parsed);
-        }
+        const args = Array.isArray(parsed) ? parsed : [parsed];
+        void executeCommandAndRefreshPermissions(extensionId, commandId, args);
       } catch (err) {
         try {
           globalThis.alert?.(`Invalid JSON: ${String((err as any)?.message ?? err)}`);
@@ -139,7 +147,7 @@ export function ExtensionsPanel({
         }
       }
     },
-    [onExecuteCommand],
+    [executeCommandAndRefreshPermissions],
   );
 
   if (!manager.ready) {
@@ -211,7 +219,9 @@ export function ExtensionsPanel({
                       <button
                         type="button"
                         data-testid={`run-command-${cmd.command}`}
-                        onClick={() => onExecuteCommand(cmd.command)}
+                        onClick={() => {
+                          void executeCommandAndRefreshPermissions(String(ext.id), cmd.command);
+                        }}
                         style={{
                           textAlign: "left",
                           padding: "10px 12px",
@@ -254,7 +264,7 @@ export function ExtensionsPanel({
                       <button
                         type="button"
                         data-testid={`run-command-with-args-${cmd.command}`}
-                        onClick={() => runCommandWithArgs(cmd.command)}
+                        onClick={() => runCommandWithArgs(String(ext.id), cmd.command)}
                         style={{
                           padding: "10px 12px",
                           borderRadius: "10px",
