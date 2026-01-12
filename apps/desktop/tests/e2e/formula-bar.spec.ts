@@ -112,6 +112,8 @@ test.describe("formula bar editing + range insertion", () => {
       // Switch to Sheet2 while still editing and pick A1.
       await page.getByTestId("sheet-tab-Sheet2").click();
       await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      // Sheet switching during formula editing should not steal focus away from the formula bar.
+      await expect(input).toBeFocused();
       await page.click("#grid", { position: { x: 53, y: 29 } });
       await expect(input).toHaveValue("=Sheet2!A1");
 
@@ -164,6 +166,8 @@ test.describe("formula bar editing + range insertion", () => {
       // Switch to Sheet2 and pick A1 to insert a reference.
       await page.getByTestId("sheet-tab-Sheet2").click();
       await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      // Sheet switching during formula editing should not steal focus away from the formula bar.
+      await expect(input).toBeFocused();
       await page.click("#grid", { position: { x: 53, y: 29 } });
       await expect(input).toHaveValue("=Sheet2!A1");
 
