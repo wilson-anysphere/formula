@@ -33,3 +33,31 @@ fn field_access_does_not_strip_brackets_from_key() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
 }
 
+#[test]
+fn field_access_does_not_trim_spaces_from_key() {
+    let mut engine = Engine::new();
+
+    let mut fields = HashMap::new();
+    fields.insert("Price".to_string(), Value::Number(1.0));
+    fields.insert(" Price ".to_string(), Value::Number(3.0));
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Entity(EntityValue {
+                display: "Example".to_string(),
+                entity_type: None,
+                entity_id: None,
+                fields,
+            }),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1.[" Price "]"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+}

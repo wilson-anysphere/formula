@@ -618,8 +618,8 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             Expr::NameRef(nref) => self.eval_name_ref(nref),
             Expr::FieldAccess { base, field } => {
                 let base = self.deref_eval_value_dynamic(self.eval_value(base));
-                let field_key = field.trim();
-                if field_key.is_empty() {
+                let field_key = field.as_str();
+                if field_key.trim().is_empty() {
                     return EvalValue::Scalar(Value::Error(ErrorKind::Value));
                 }
                 EvalValue::Scalar(elementwise_unary(&base, |elem| {
