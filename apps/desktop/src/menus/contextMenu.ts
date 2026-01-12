@@ -114,8 +114,13 @@ export class ContextMenu {
       if (!this.isShown) return;
       const target = e.target as Node | null;
       if (!target) return;
-      if (this.menu.contains(target)) return;
       if (this.submenu && this.submenu.contains(target)) return;
+      if (this.menu.contains(target)) {
+        // If the main menu scrolls while a submenu is open, the submenu would no longer
+        // be anchored to the correct parent item. Close it to avoid mis-positioning.
+        if (this.submenu) this.closeSubmenu();
+        return;
+      }
       this.close();
     };
     window.addEventListener("scroll", this.scrollListener, true);
@@ -126,8 +131,11 @@ export class ContextMenu {
       if (!this.isShown) return;
       const target = e.target as Node | null;
       if (!target) return;
-      if (this.menu.contains(target)) return;
       if (this.submenu && this.submenu.contains(target)) return;
+      if (this.menu.contains(target)) {
+        if (this.submenu) this.closeSubmenu();
+        return;
+      }
       this.close();
     };
     window.addEventListener("wheel", this.wheelListener, { capture: true, passive: true });
