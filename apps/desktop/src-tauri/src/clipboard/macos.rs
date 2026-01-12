@@ -436,6 +436,16 @@ mod tests {
 
     #[test]
     fn png_tiff_png_roundtrip_preserves_dimensions() {
+        // AppKit is not thread-safe, and the Rust test harness may execute unit tests on worker
+        // threads. Avoid calling into AppKit when we're not on the process main thread.
+        //
+        // This test still provides coverage when running with `--test-threads=1` (or when the
+        // harness happens to execute this test on the main thread), but is intentionally
+        // best-effort rather than risking deadlocks/crashes in CI/local runs.
+        if unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] } == false {
+            return;
+        }
+
         // 1x1 transparent PNG.
         let png = base64::engine::general_purpose::STANDARD
             .decode(
