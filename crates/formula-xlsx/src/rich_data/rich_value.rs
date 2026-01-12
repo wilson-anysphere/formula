@@ -11,6 +11,8 @@ use crate::{XlsxError, XlsxPackage};
 
 /// Conventional part name for `xl/richData/richValue.xml`.
 pub const RICH_VALUE_XML: &str = "xl/richData/richValue.xml";
+/// Some producers use the pluralized `xl/richData/richValues.xml` naming pattern.
+pub const RICH_VALUES_XML: &str = "xl/richData/richValues.xml";
 
 /// Parse `xl/richData/richValue.xml` and return a vector where each entry corresponds to a rich
 /// value record (0-based index).
@@ -125,10 +127,14 @@ pub struct RichValueFieldValue {
 impl RichValues {
     /// Parse `xl/richData/richValue.xml` from an [`XlsxPackage`].
     pub fn from_package(pkg: &XlsxPackage) -> Result<Option<Self>, XlsxError> {
-        let Some(bytes) = pkg.part(RICH_VALUE_XML) else {
-            return Ok(None);
-        };
-        Ok(Some(parse_rich_values_xml(bytes)?))
+        if let Some(bytes) = pkg.part(RICH_VALUE_XML) {
+            return Ok(Some(parse_rich_values_xml(bytes)?));
+        }
+        if let Some(bytes) = pkg.part(RICH_VALUES_XML) {
+            // Some producers use the pluralized naming pattern.
+            return Ok(Some(parse_rich_values_xml(bytes)?));
+        }
+        Ok(None)
     }
 }
 
@@ -274,13 +280,33 @@ fn parse_int_payload(node: &roxmltree::Node<'_, '_>) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Cursor, Write};
+
     use pretty_assertions::assert_eq;
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
 
     use super::parse_rich_value_relationship_indices;
     use super::parse_rich_values_xml;
     use super::RichValueFieldValue;
     use super::RichValueInstance;
     use super::RichValues;
+    use super::RICH_VALUES_XML;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> super::XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        super::XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
 
     #[test]
     fn parses_kind_rel_values() {
@@ -482,6 +508,23 @@ mod tests {
 </rvData>"#;
 
         let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed.values.len(), 1);
+        assert_eq!(parsed.values[0].type_id, Some(1));
+    }
+
+    #[test]
+    fn rich_values_from_package_supports_plural_richvalues_part_name() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv t="1"><v kind="string">x</v></rv>
+  </values>
+</rvData>"#;
+
+        let pkg = build_package(&[(RICH_VALUES_XML, xml)]);
+        let parsed = RichValues::from_package(&pkg)
+            .expect("parse")
+            .expect("should be present");
         assert_eq!(parsed.values.len(), 1);
         assert_eq!(parsed.values[0].type_id, Some(1));
     }
