@@ -523,6 +523,11 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     // Use a unique sentinel in case multiple Playwright workers run clipboard tests concurrently.
     const sentinel = `sentinel-${Date.now()}`;
 
+    // Ensure a clean slate in case previous tests left transient UI messages around.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
     // Seed A1 = Secret.
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
