@@ -424,9 +424,22 @@ pub async fn add_sheet(name: String, state: State<'_, SharedAppState>) -> Result
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+
         let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("Path is not a regular file".to_string());
+        }
         crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
-        std::fs::read_to_string(path).map_err(|e| e.to_string())
+
+        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
+
+        String::from_utf8(buf).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -472,9 +485,22 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {
+        use std::io::Read;
+
         let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("Path is not a regular file".to_string());
+        }
         crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
-        std::fs::read(path).map_err(|e| e.to_string())
+
+        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| e.to_string())?;
+        crate::ipc_file_limits::validate_full_read_size(buf.len() as u64).map_err(|e| e.to_string())?;
+
+        Ok::<_, String>(buf)
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -503,8 +529,11 @@ pub async fn read_binary_file_range(
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-
         let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("Path is not a regular file".to_string());
+        }
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| e.to_string())?;
 
