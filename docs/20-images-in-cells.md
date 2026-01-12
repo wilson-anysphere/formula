@@ -35,7 +35,7 @@ xl/
 │   └── image*.{png,jpg,gif,...}
 ├── metadata.xml
 ├── _rels/
-│   ├── cellImages.xml.rels
+│   ├── cellImages.xml.rels       # Optional (only if a cellImages.xml part exists)
 │   └── metadata.xml.rels (commonly present when `metadata.xml` references `xl/richData/*`)
 └── richData/
     ├── richValue.xml
