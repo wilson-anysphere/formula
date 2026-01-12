@@ -154,6 +154,9 @@ dialog.page-setup-dialog::backdrop {
   outline: none;
   background: var(--bg-primary);
   user-select: none;
+  /* Prevent DOM overlays (charts, scrollbars, outline buttons) from spilling
+     outside the grid viewport while we virtualize with negative coordinates. */
+  overflow: hidden;
 }
 
 .grid-canvas {

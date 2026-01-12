@@ -938,10 +938,6 @@ export class SpreadsheetApp {
       this.commentManager = new CommentManager(this.commentsDoc);
     }
 
-    // Prevent DOM overlays (charts, scrollbars, outline buttons) from spilling
-    // outside the grid viewport while we virtualize with negative coordinates.
-    this.root.style.overflow = "hidden";
-
     if (this.gridMode === "legacy") {
       // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
       this.outline.groupRows(2, 4);
