@@ -383,7 +383,7 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
     await page.keyboard.press(`${modifier}+Shift+V`);
     await expect(page.getByTestId("quick-pick")).toBeVisible();
-    await page.getByTestId("quick-pick-item-1").click(); // Paste Values
+    await page.getByRole("button", { name: "Paste Values" }).click();
     await waitForIdle(page);
 
     const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
@@ -438,7 +438,7 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
     await page.keyboard.press(`${modifier}+Shift+V`);
     await expect(page.getByTestId("quick-pick")).toBeVisible();
-    await page.getByTestId("quick-pick-item-2").click(); // Paste Formulas
+    await page.getByRole("button", { name: "Paste Formulas" }).click();
     await waitForIdle(page);
 
     const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
@@ -495,7 +495,7 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
 
     await page.keyboard.press(`${modifier}+Shift+V`);
     await expect(page.getByTestId("quick-pick")).toBeVisible();
-    await page.getByTestId("quick-pick-item-3").click(); // Paste Formats
+    await page.getByRole("button", { name: "Paste Formats" }).click();
     await waitForIdle(page);
 
     const c1Value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"));
