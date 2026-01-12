@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T21:10:57.402952437Z",
+  "generatedAt": "2026-01-12T19:58:58.10083313Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "21df5829473d5cc3d946833f3a1d4f257bd0af1d347e488aa0a0d34853167f5f",
-    "count": 1893
+    "sha256": "00aa5102ebcf90d77f025076eae2b0bfe40b616ad4b57258d18374a4487518e3",
+    "count": 1824
   },
   "results": [
     {
@@ -10588,436 +10588,6 @@
       "displayText": "53.999999999999986"
     },
     {
-      "caseId": "stat_dist_e762e2f7ac77",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.6808505641795356
-      },
-      "address": "C1",
-      "displayText": "0.6808505641795356"
-    },
-    {
-      "caseId": "stat_dist_4d535a564908",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.18160873382456155
-      },
-      "address": "C1",
-      "displayText": "0.18160873382456155"
-    },
-    {
-      "caseId": "stat_dist_86bfebb0c4a8",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3632174676491231
-      },
-      "address": "C1",
-      "displayText": "0.3632174676491231"
-    },
-    {
-      "caseId": "stat_dist_9b1acbc401c8",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -0.7266868438004208
-      },
-      "address": "C1",
-      "displayText": "-0.7266868438004208"
-    },
-    {
-      "caseId": "stat_dist_3528b6a462bf",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.7266868438004208
-      },
-      "address": "C1",
-      "displayText": "0.7266868438004208"
-    },
-    {
-      "caseId": "stat_dist_ac302c29a981",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3632174676491231
-      },
-      "address": "C1",
-      "displayText": "0.3632174676491231"
-    },
-    {
-      "caseId": "stat_dist_a8c693fa3017",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.7266868438004208
-      },
-      "address": "C1",
-      "displayText": "0.7266868438004208"
-    },
-    {
-      "caseId": "stat_dist_b56290ef1373",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873667
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873667"
-    },
-    {
-      "caseId": "stat_dist_8f97c3767fd8",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.6065306597126333
-      },
-      "address": "C1",
-      "displayText": "0.6065306597126333"
-    },
-    {
-      "caseId": "stat_dist_2d997698a7d0",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.3862943611198895
-      },
-      "address": "C1",
-      "displayText": "1.3862943611198895"
-    },
-    {
-      "caseId": "stat_dist_cb5f42456d2d",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.3862943611198895
-      },
-      "address": "C1",
-      "displayText": "1.3862943611198895"
-    },
-    {
-      "caseId": "stat_dist_5312ea376e14",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.6065306597126333
-      },
-      "address": "C1",
-      "displayText": "0.6065306597126333"
-    },
-    {
-      "caseId": "stat_dist_c9d5a71c0c23",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.3862943611198895
-      },
-      "address": "C1",
-      "displayText": "1.3862943611198895"
-    },
-    {
-      "caseId": "stat_dist_2233664b02b5",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5000000000000004
-      },
-      "address": "C1",
-      "displayText": "0.5000000000000004"
-    },
-    {
-      "caseId": "stat_dist_c158e96e449d",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5000000000000004
-      },
-      "address": "C1",
-      "displayText": "0.5000000000000004"
-    },
-    {
-      "caseId": "stat_dist_6788bdea9c37",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "stat_dist_4058e62ae4f7",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "stat_dist_6f62045eb376",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5000000000000004
-      },
-      "address": "C1",
-      "displayText": "0.5000000000000004"
-    },
-    {
-      "caseId": "stat_dist_f3c10c377b64",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "stat_dist_a1d4cb912046",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5000000000000013
-      },
-      "address": "C1",
-      "displayText": "0.5000000000000013"
-    },
-    {
-      "caseId": "stat_dist_4ff8637ed339",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5
-      },
-      "address": "C1",
-      "displayText": "0.5"
-    },
-    {
-      "caseId": "stat_dist_3372d0dc359b",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5000000000000013
-      },
-      "address": "C1",
-      "displayText": "0.5000000000000013"
-    },
-    {
-      "caseId": "stat_dist_cb7240ac835f",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5
-      },
-      "address": "C1",
-      "displayText": "0.5"
-    },
-    {
-      "caseId": "stat_dist_a6035b70dde1",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873667
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873667"
-    },
-    {
-      "caseId": "stat_dist_46a2709936af",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.3862943611198895
-      },
-      "address": "C1",
-      "displayText": "1.3862943611198895"
-    },
-    {
-      "caseId": "stat_dist_752324b216ac",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873667
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873667"
-    },
-    {
-      "caseId": "stat_dist_590ae256977e",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.3862943611198895
-      },
-      "address": "C1",
-      "displayText": "1.3862943611198895"
-    },
-    {
-      "caseId": "stat_dist_257fa71e858d",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 24.000000000000114
-      },
-      "address": "C1",
-      "displayText": "24.000000000000114"
-    },
-    {
-      "caseId": "stat_dist_b3d93ca363f3",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 3.1780538303479497
-      },
-      "address": "C1",
-      "displayText": "3.1780538303479497"
-    },
-    {
-      "caseId": "stat_dist_cc293ecb4cb3",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 3.1780538303479497
-      },
-      "address": "C1",
-      "displayText": "3.1780538303479497"
-    },
-    {
-      "caseId": "stat_dist_ed5efa986fc7",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5
-      },
-      "address": "C1",
-      "displayText": "0.5"
-    },
-    {
-      "caseId": "stat_dist_c038a2cd246d",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "stat_dist_0a24d1cbeeb2",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5
-      },
-      "address": "C1",
-      "displayText": "0.5"
-    },
-    {
-      "caseId": "stat_dist_4b8e3e986e93",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "C1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "stat_dist_9e6f25194bdd",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873666
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873666"
-    },
-    {
-      "caseId": "stat_dist_64c3d2dbd393",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873666
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873666"
-    },
-    {
-      "caseId": "stat_dist_42d4f73726b5",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873666
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873666"
-    },
-    {
-      "caseId": "stat_dist_5fb9926ccd80",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.3934693402873666
-      },
-      "address": "C1",
-      "displayText": "0.3934693402873666"
-    },
-    {
-      "caseId": "stat_dist_835170637f68",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5493061443340548
-      },
-      "address": "C1",
-      "displayText": "0.5493061443340548"
-    },
-    {
-      "caseId": "stat_dist_a2d027ddb216",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.49999999999999994
-      },
-      "address": "C1",
-      "displayText": "0.49999999999999994"
-    },
-    {
-      "caseId": "stat_dist_f21c05300667",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.19599639845400538
-      },
-      "address": "C1",
-      "displayText": "0.19599639845400538"
-    },
-    {
-      "caseId": "stat_dist_c7f1f6f32eaa",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.1984216951585909
-      },
-      "address": "C1",
-      "displayText": "0.1984216951585909"
-    },
-    {
-      "caseId": "stat_dist_ddd2a13415d4",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.19599639845400538
-      },
-      "address": "C1",
-      "displayText": "0.19599639845400538"
-    },
-    {
       "caseId": "and_95c1b28040be",
       "outputCell": "C1",
       "result": {
@@ -15553,126 +15123,6 @@
       "displayText": "1500"
     },
     {
-      "caseId": "database_daverage_computed_60822f0b9c52",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dcount_computed_66084942a0c3",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "J1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "database_dcounta_computed_fe2186fb5318",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1.0
-      },
-      "address": "J1",
-      "displayText": "1"
-    },
-    {
-      "caseId": "database_dget_computed_8662e48cda82",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dmax_computed_9430e819db16",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dmin_computed_e31950492c3a",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dproduct_computed_264b2209aa11",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
-      "caseId": "database_dstdev_computed_f820c3895e01",
-      "outputCell": "J1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "J1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "database_dstdevp_computed_99beefe8ab0e",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 0.0
-      },
-      "address": "J1",
-      "displayText": "0"
-    },
-    {
-      "caseId": "database_dvar_computed_de9796c689c4",
-      "outputCell": "J1",
-      "result": {
-        "t": "e",
-        "v": "#DIV/0!"
-      },
-      "address": "J1",
-      "displayText": "#DIV/0!"
-    },
-    {
-      "caseId": "database_dvarp_computed_2cd39fa18417",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 0.0
-      },
-      "address": "J1",
-      "displayText": "0"
-    },
-    {
-      "caseId": "database_dsum_computed_7c13191a1e32",
-      "outputCell": "J1",
-      "result": {
-        "t": "n",
-        "v": 1500.0
-      },
-      "address": "J1",
-      "displayText": "1500"
-    },
-    {
       "caseId": "database_dsum_computed_c22da892333a",
       "outputCell": "J1",
       "result": {
@@ -16063,16 +15513,6 @@
       "displayText": "132"
     },
     {
-      "caseId": "fvschedule_52861042a090",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 240.23999999999998
-      },
-      "address": "C1",
-      "displayText": "240.23999999999998"
-    },
-    {
       "caseId": "sln_61d0cf1afc0c",
       "outputCell": "C1",
       "result": {
@@ -16301,36 +15741,6 @@
       },
       "address": "C1",
       "displayText": "181"
-    },
-    {
-      "caseId": "coupdaybs_b4_eom_feb28_baf6f7ea73cf",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 75.0
-      },
-      "address": "C1",
-      "displayText": "75"
-    },
-    {
-      "caseId": "coupdays_b4_eom_feb28_aa1d1a6a6133",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 180.0
-      },
-      "address": "C1",
-      "displayText": "180"
-    },
-    {
-      "caseId": "coupdaysnc_b4_eom_feb28_d49eb1080971",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 105.0
-      },
-      "address": "C1",
-      "displayText": "105"
     },
     {
       "caseId": "disc_816f7b8fb795",
@@ -16893,46 +16303,6 @@
       "displayText": "5"
     },
     {
-      "caseId": "oddfprice_basis_omitted_yld0_03dad81a6f57",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 196.59861111111107
-      },
-      "address": "C1",
-      "displayText": "196.59861111111107"
-    },
-    {
-      "caseId": "oddfyield_basis_omitted_from_yld0_price_76cfab9b4bd7",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -1.6554281206748928e-14
-      },
-      "address": "C1",
-      "displayText": "-0.000000000000016554281206748928"
-    },
-    {
-      "caseId": "oddlprice_basis_omitted_yld0_917699f349fc",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 102.39861111111111
-      },
-      "address": "C1",
-      "displayText": "102.39861111111111"
-    },
-    {
-      "caseId": "oddlyield_basis_omitted_from_yld0_price_1eb28bd4feca",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -3.9476664800510696e-16
-      },
-      "address": "C1",
-      "displayText": "-0.00000000000000039476664800510696"
-    },
-    {
       "caseId": "oddfprice_basis0_da0074a10837",
       "outputCell": "C1",
       "result": {
@@ -17353,16 +16723,6 @@
       "displayText": "239.6576768188426"
     },
     {
-      "caseId": "oddlprice_neg_yld_below_minus1_settlement_before_last_interest_3bd6cf92538f",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 523.5423945534777
-      },
-      "address": "C1",
-      "displayText": "523.5423945534777"
-    },
-    {
       "caseId": "oddfprice_yld_eq_neg_frequency_5fb6b5e57e7d",
       "outputCell": "C1",
       "result": {
@@ -17483,16 +16843,6 @@
       "displayText": "-1.4999999998157394"
     },
     {
-      "caseId": "oddlyield_roundtrip_neg_yld_below_minus1_settlement_before_last_interest_f94c98fc0c2b",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": -1.4999999999903624
-      },
-      "address": "C1",
-      "displayText": "-1.4999999999903624"
-    },
-    {
       "caseId": "financial_oddfprice_zero_coupon_b8408a077367",
       "outputCell": "A1",
       "result": {
@@ -17593,26 +16943,6 @@
       "displayText": "0.050000000000000114"
     },
     {
-      "caseId": "oddlprice_settlement_before_last_interest_eom_caf13517e562",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 101.24831353052332
-      },
-      "address": "C1",
-      "displayText": "101.24831353052332"
-    },
-    {
-      "caseId": "oddlyield_settlement_before_last_interest_eom_c15580711fff",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.04999999999999971
-      },
-      "address": "C1",
-      "displayText": "0.04999999999999971"
-    },
-    {
       "caseId": "oddfprice_issue_eq_settlement_a2010fe89d14",
       "outputCell": "C1",
       "result": {
@@ -17671,26 +17001,6 @@
       },
       "address": "C1",
       "displayText": "0.03999999999999963"
-    },
-    {
-      "caseId": "oddfprice_settlement_eq_maturity_b623c4531ee4",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_settlement_eq_maturity_0d2709ada9b0",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_issue_eq_first_coupon_277cdeb14458",
@@ -19370,10 +18680,10 @@
       "outputCell": "C1",
       "result": {
         "t": "s",
-        "v": "Manual"
+        "v": "Automatic"
       },
       "address": "C1",
-      "displayText": "Manual"
+      "displayText": "Automatic"
     },
     {
       "caseId": "info_ffe59ed06a96",

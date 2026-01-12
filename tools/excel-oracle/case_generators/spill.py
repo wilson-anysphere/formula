@@ -32,6 +32,30 @@ def generate(
     )
     add_case(
         cases,
+        prefix="spill_minverse",
+        tags=["spill", "MINVERSE", "matrix"],
+        formula="=MINVERSE({1,2;3,5})",
+        output_cell="C1",
+        description="Matrix inverse spill",
+    )
+    add_case(
+        cases,
+        prefix="spill_mmult",
+        tags=["spill", "MMULT", "matrix"],
+        formula="=MMULT({1,2;3,4},{5;6})",
+        output_cell="C1",
+        description="Matrix multiply spill",
+    )
+    add_case(
+        cases,
+        prefix="spill_munit",
+        tags=["spill", "MUNIT", "matrix"],
+        formula="=MUNIT(3)",
+        output_cell="C1",
+        description="Identity matrix spill (Excel 365+)",
+    )
+    add_case(
+        cases,
         prefix="spill_sequence",
         tags=["spill", "SEQUENCE", "dynarr"],
         formula="=SEQUENCE(2,2,1,1)",

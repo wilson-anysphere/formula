@@ -12621,6 +12621,17 @@
       "id": "arabic_0f602467781d"
     },
     {
+      "formula": "=MDETERM({1,2;3,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "math",
+        "MDETERM",
+        "matrix"
+      ],
+      "id": "mdeterm_1ad7fa59287d"
+    },
+    {
       "formula": "=RADIANS(180)",
       "outputCell": "C1",
       "inputs": [],
@@ -36429,6 +36440,42 @@
       ],
       "description": "Function spill",
       "id": "spill_transpose_b72ce234f655"
+    },
+    {
+      "formula": "=MINVERSE({1,2;3,5})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "MINVERSE",
+        "matrix"
+      ],
+      "description": "Matrix inverse spill",
+      "id": "spill_minverse_4a4fe9df72f4"
+    },
+    {
+      "formula": "=MMULT({1,2;3,4},{5;6})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "MMULT",
+        "matrix"
+      ],
+      "description": "Matrix multiply spill",
+      "id": "spill_mmult_d3b2818b5632"
+    },
+    {
+      "formula": "=MUNIT(3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "MUNIT",
+        "matrix"
+      ],
+      "description": "Identity matrix spill (Excel 365+)",
+      "id": "spill_munit_0ce5a92bc7ca"
     },
     {
       "formula": "=SEQUENCE(2,2,1,1)",

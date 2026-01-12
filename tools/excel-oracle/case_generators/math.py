@@ -72,6 +72,7 @@ def generate(
     add_case(cases, prefix="floor_precise", tags=["math", "FLOOR.PRECISE"], formula="=FLOOR.PRECISE(1.2,1)")
     add_case(cases, prefix="roman", tags=["math", "ROMAN"], formula="=ROMAN(499,0)")
     add_case(cases, prefix="arabic", tags=["math", "ARABIC"], formula='=ARABIC("MCMXCIX")')
+    add_case(cases, prefix="mdeterm", tags=["math", "MDETERM", "matrix"], formula="=MDETERM({1,2;3,4})")
 
     # Math & trig backfill (more).
     add_case(cases, prefix="radians", tags=["math", "RADIANS"], formula="=RADIANS(180)")

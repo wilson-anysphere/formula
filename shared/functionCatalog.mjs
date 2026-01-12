@@ -2942,6 +2942,16 @@ export default {
       ]
     },
     {
+      "name": "MDETERM",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MDURATION",
       "min_args": 5,
       "max_args": 6,
@@ -3031,6 +3041,16 @@ export default {
       ]
     },
     {
+      "name": "MINVERSE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "MIRR",
       "min_args": 3,
       "max_args": 3,
@@ -3040,6 +3060,17 @@ export default {
         "any",
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "MMULT",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "any",
+      "arg_types": [
+        "any",
+        "any"
       ]
     },
     {
@@ -3110,6 +3141,16 @@ export default {
       "max_args": 255,
       "volatility": "non_volatile",
       "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "MUNIT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "any",
       "arg_types": [
         "number"
       ]

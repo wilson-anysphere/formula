@@ -3,6 +3,7 @@ mod combinatorics;
 pub mod criteria;
 mod hyperbolic;
 mod integer;
+pub(crate) mod matrix;
 mod random;
 mod roman;
 mod rounding;

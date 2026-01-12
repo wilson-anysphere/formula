@@ -51,6 +51,7 @@ mod builtins_logical;
 mod builtins_logical_extended;
 mod builtins_lookup;
 mod builtins_math;
+mod builtins_math_matrix;
 mod builtins_math_extended;
 mod builtins_math_more;
 mod builtins_engineering_complex;
