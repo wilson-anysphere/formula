@@ -751,7 +751,7 @@ impl<'a> Lexer<'a> {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
                 }
-                '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z' => {
+                c if is_ident_start_char(c) => {
                     if self.reference_style == ReferenceStyle::R1C1 {
                         if let Some(cell) = self.try_lex_r1c1_cell_ref() {
                             self.push(TokenKind::R1C1Cell(cell), start, self.idx);
@@ -920,12 +920,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_ident(&mut self) -> String {
-        self.take_while(|c| {
-            matches!(
-                c,
-                '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
-            )
-        })
+        self.take_while(is_ident_cont_char)
     }
 
     fn try_lex_cell_ref(&mut self) -> Option<CellToken> {
@@ -1231,11 +1226,15 @@ fn is_digit(c: char) -> bool {
     matches!(c, '0'..='9')
 }
 
+fn is_ident_start_char(c: char) -> bool {
+    matches!(c, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') || (!c.is_ascii() && c.is_alphabetic())
+}
+
 fn is_ident_cont_char(c: char) -> bool {
     matches!(
         c,
         '$' | '_' | '\\' | '.' | 'A'..='Z' | 'a'..='z' | '0'..='9'
-    )
+    ) || (!c.is_ascii() && c.is_alphanumeric())
 }
 
 const ERROR_LITERALS: &[&str] = &[

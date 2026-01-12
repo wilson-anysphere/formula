@@ -5,7 +5,7 @@ use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
 use crate::functions::{
     ArgValue, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
-use crate::value::{ErrorKind, Lambda, Value};
+use crate::value::{casefold, ErrorKind, Lambda, Value};
 
 const VAR_ARGS: usize = 255;
 
@@ -43,7 +43,7 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let Some(name) = bare_identifier(&pair[0]) else {
             return Value::Error(ErrorKind::Value);
         };
-        let name_key = name.trim().to_ascii_uppercase();
+        let name_key = casefold(name.trim());
 
         let value = ctx.eval_arg(&pair[1]);
         if let ArgValue::Scalar(Value::Error(e)) = &value {
@@ -82,7 +82,7 @@ fn lambda_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let Some(name) = bare_identifier(param_expr) else {
             return Value::Error(ErrorKind::Value);
         };
-        let name_key = name.trim().to_ascii_uppercase();
+        let name_key = casefold(name.trim());
         if !seen.insert(name_key.clone()) {
             return Value::Error(ErrorKind::Value);
         }
@@ -121,7 +121,7 @@ fn isomitted_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let key = format!(
         "{LAMBDA_OMITTED_PREFIX}{}",
-        name.trim().to_ascii_uppercase()
+        casefold(name.trim())
     );
     let env = ctx.capture_lexical_env();
     Value::Bool(matches!(env.get(&key), Some(Value::Bool(true))))

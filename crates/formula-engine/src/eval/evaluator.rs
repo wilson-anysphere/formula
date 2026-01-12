@@ -4,7 +4,7 @@ use crate::eval::address::CellAddr;
 use crate::eval::ast::{BinaryOp, CompareOp, CompiledExpr, Expr, PostfixOp, SheetReference, UnaryOp};
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, Reference as FnReference, SheetId as FnSheetId};
 use crate::locale::ValueLocaleConfig;
-use crate::value::{cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
+use crate::value::{casefold, cmp_case_insensitive, Array, ErrorKind, Lambda, NumberLocale, Value};
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -286,7 +286,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     }
 
     fn lookup_lexical_value(&self, name: &str) -> Option<Value> {
-        let key = name.trim().to_ascii_uppercase();
+        let key = casefold(name.trim());
         let scopes = self.lexical_scopes.borrow();
         for scope in scopes.iter().rev() {
             if let Some(value) = scope.get(&key) {
@@ -652,16 +652,17 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         let mut call_scope =
             HashMap::with_capacity(lambda.params.len().saturating_mul(2).saturating_add(1));
         call_scope.insert(
-            call_name.trim().to_ascii_uppercase(),
+            casefold(call_name.trim()),
             Value::Lambda(lambda.clone()),
         );
         for (idx, param) in lambda.params.iter().enumerate() {
             let value = evaluated_args.get(idx).cloned().unwrap_or(Value::Blank);
-            call_scope.insert(param.to_ascii_uppercase(), value);
+            let param_key = casefold(param.trim());
+            call_scope.insert(param_key.clone(), value);
 
             if idx >= args.len() {
                 call_scope.insert(
-                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param),
+                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param_key),
                     Value::Bool(true),
                 );
             }
@@ -759,7 +760,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         };
 
         // Prevent infinite recursion from self-referential name chains.
-        let key = (sheet_id, nref.name.to_ascii_uppercase());
+        let key = (sheet_id, casefold(nref.name.trim()));
         {
             let mut stack = self.name_stack.borrow_mut();
             if stack.contains(&key) {
@@ -1163,7 +1164,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
 
         let mut scope = HashMap::with_capacity(bindings.len());
         for (k, v) in bindings {
-            scope.insert(k.trim().to_ascii_uppercase(), v.clone());
+            scope.insert(casefold(k.trim()), v.clone());
         }
         let _guard = self.push_lexical_scope(scope);
         self.eval_formula(expr)
@@ -1222,7 +1223,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn set_local(&self, name: &str, value: FnArgValue) {
-        let key = name.trim().to_ascii_uppercase();
+        let key = casefold(name.trim());
         let mut scopes = self.lexical_scopes.borrow_mut();
         if scopes.is_empty() {
             scopes.push(HashMap::new());
@@ -1240,7 +1241,7 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     fn make_lambda(&self, params: Vec<String>, body: CompiledExpr) -> Value {
         let params: Vec<String> = params
             .into_iter()
-            .map(|p| p.trim().to_ascii_uppercase())
+            .map(|p| casefold(p.trim()))
             .collect();
 
         let mut env = self.capture_lexical_env_map();
@@ -1293,11 +1294,12 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
                 FnArgValue::Reference(r) => Value::Reference(r),
                 FnArgValue::ReferenceUnion(ranges) => Value::ReferenceUnion(ranges),
             };
-            call_scope.insert(param.to_ascii_uppercase(), value);
+            let param_key = casefold(param.trim());
+            call_scope.insert(param_key.clone(), value);
 
             if idx >= args.len() {
                 call_scope.insert(
-                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param),
+                    format!("{}{}", crate::eval::LAMBDA_OMITTED_PREFIX, param_key),
                     Value::Bool(true),
                 );
             }

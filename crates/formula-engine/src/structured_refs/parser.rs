@@ -340,11 +340,11 @@ fn unescape_column_name(name: &str) -> String {
 }
 
 fn is_name_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic() || ch == '_'
+    ch == '_' || (!ch.is_ascii() && ch.is_alphabetic()) || ch.is_ascii_alphabetic()
 }
 
 fn is_name_continue(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
+    ch == '_' || ch == '.' || (!ch.is_ascii() && ch.is_alphanumeric()) || ch.is_ascii_alphanumeric()
 }
 
 #[cfg(test)]

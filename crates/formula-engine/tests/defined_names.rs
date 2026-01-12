@@ -21,6 +21,24 @@ fn workbook_scoped_name_can_be_used_in_other_cells() {
 }
 
 #[test]
+fn unicode_defined_names_are_case_insensitive() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine
+        .define_name(
+            "ÜBER",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=über*2").unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(20.0));
+}
+
+#[test]
 fn sheet_scoped_names_shadow_workbook_names() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();

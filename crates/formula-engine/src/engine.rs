@@ -3983,7 +3983,9 @@ impl crate::eval::ValueResolver for Snapshot {
     fn sheet_id(&self, name: &str) -> Option<usize> {
         self.sheet_names_by_id
             .iter()
-            .position(|candidate| candidate.eq_ignore_ascii_case(name))
+            .position(|candidate| {
+                crate::value::cmp_case_insensitive(candidate, name) == Ordering::Equal
+            })
     }
 
     fn iter_sheet_cells(&self, sheet_id: usize) -> Option<Box<dyn Iterator<Item = CellAddr> + '_>> {
@@ -4023,7 +4025,7 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn resolve_name(&self, sheet_id: usize, name: &str) -> Option<crate::eval::ResolvedName> {
-        let key = name.trim().to_ascii_uppercase();
+        let key = normalize_defined_name(name);
         if let Some(map) = self.sheet_names.get(sheet_id) {
             if let Some(def) = map.get(&key) {
                 return Some(def.clone());
@@ -5648,7 +5650,7 @@ fn numeric_value(value: &Value) -> Option<f64> {
 }
 
 fn normalize_defined_name(name: &str) -> String {
-    name.trim().to_ascii_uppercase()
+    crate::value::casefold(name.trim())
 }
 
 fn rewrite_defined_name_structural(

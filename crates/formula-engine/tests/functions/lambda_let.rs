@@ -125,3 +125,15 @@ fn lambda_calls_can_be_used_as_reference_arguments() {
         10.0,
     );
 }
+
+#[test]
+fn lambda_and_let_names_are_case_insensitive_unicode() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(&sheet.eval("=LET(Ü,1,ü+1)"), 2.0);
+    assert_number(&sheet.eval("=LAMBDA(Ü,ü+1)(1)"), 2.0);
+    assert_eq!(
+        sheet.eval("=LET(f,LAMBDA(Ü,ISOMITTED(ü)),f())"),
+        Value::Bool(true)
+    );
+}

@@ -1,7 +1,9 @@
 use super::{StructuredColumn, StructuredColumns, StructuredRef, StructuredRefItem};
 use crate::eval::CellAddr;
+use crate::value::cmp_case_insensitive;
 use formula_model::table::{Table, TableArea};
 use formula_model::{CellRef, Range};
+use std::cmp::Ordering;
 
 fn addr_to_model(addr: CellAddr) -> CellRef {
     CellRef::new(addr.row, addr.col)
@@ -18,7 +20,7 @@ fn column_index_ci(table: &Table, name: &str) -> Option<u32> {
     table
         .columns
         .iter()
-        .position(|c| c.name.eq_ignore_ascii_case(name))
+        .position(|c| cmp_case_insensitive(&c.name, name) == Ordering::Equal)
         .map(|idx| idx as u32)
 }
 
@@ -151,7 +153,8 @@ fn find_table<'a>(
     if let Some(name) = &sref.table_name {
         for (sheet_id, tables) in tables_by_sheet.iter().enumerate() {
             if let Some(table) = tables.iter().find(|t| {
-                t.name.eq_ignore_ascii_case(name) || t.display_name.eq_ignore_ascii_case(name)
+                cmp_case_insensitive(&t.name, name) == Ordering::Equal
+                    || cmp_case_insensitive(&t.display_name, name) == Ordering::Equal
             }) {
                 return Ok((sheet_id, table));
             }
