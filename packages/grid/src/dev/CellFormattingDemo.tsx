@@ -1,0 +1,465 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
+import type { CellData, CellProvider, CellStyle } from "../model/CellProvider";
+import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
+
+type DemoCellStyle = CellStyle & Record<string, unknown>;
+type DemoCellData = CellData & Record<string, unknown>;
+
+function toColumnName(col0: number): string {
+  let value = col0 + 1;
+  let name = "";
+  while (value > 0) {
+    const rem = (value - 1) % 26;
+    name = String.fromCharCode(65 + rem) + name;
+    value = Math.floor((value - 1) / 26);
+  }
+  return name;
+}
+
+function cellKey(row: number, col: number): string {
+  return `${row},${col}`;
+}
+
+class CellFormattingDemoProvider implements CellProvider {
+  private readonly rowCount: number;
+  private readonly colCount: number;
+  private readonly cells = new Map<string, DemoCellData>();
+
+  private readonly headerStyle: DemoCellStyle = { fontWeight: "600", textAlign: "center" };
+  private readonly rowHeaderStyle: DemoCellStyle = { fontWeight: "600", textAlign: "end" };
+
+  constructor(options: { rowCount: number; colCount: number }) {
+    this.rowCount = options.rowCount;
+    this.colCount = options.colCount;
+
+    const put = (
+      row: number,
+      col: number,
+      value: CellData["value"],
+      style?: DemoCellStyle,
+      extras?: Record<string, unknown>
+    ) => {
+      const cell: DemoCellData = { row, col, value, style, ...(extras ?? {}) };
+      this.cells.set(cellKey(row, col), cell);
+    };
+
+    const sectionHeaderFill = "rgba(14, 101, 235, 0.10)";
+
+    // ---------------------------------------------------------------------------------------------
+    // Font styles (bold / italic / underline / strike) — these use extra fields so the demo can
+    // validate new formatting features as they land (Excel-style rendering).
+    // ---------------------------------------------------------------------------------------------
+    put(1, 1, "Text styles", { fill: sectionHeaderFill, fontWeight: "700" });
+
+    const baseTextStyle: DemoCellStyle = {
+      fill: "rgba(148, 163, 184, 0.08)",
+      textAlign: "center"
+    };
+
+    put(2, 1, "Bold", {
+      ...baseTextStyle,
+      fontWeight: "700",
+      // Future-facing (Excel-style) format payloads:
+      font: { bold: true }
+    });
+
+    put(2, 2, "Italic", {
+      ...baseTextStyle,
+      font: { italic: true },
+      fontStyle: "italic"
+    });
+
+    put(2, 3, "Underline", {
+      ...baseTextStyle,
+      font: { underline: "single" },
+      underline: true
+    });
+
+    put(2, 4, "Strike", {
+      ...baseTextStyle,
+      font: { strike: true },
+      strike: true,
+      strikethrough: true
+    });
+
+    put(3, 1, "Bold+Italic", {
+      ...baseTextStyle,
+      fontWeight: "700",
+      font: { bold: true, italic: true },
+      fontStyle: "italic"
+    });
+
+    put(3, 2, "Bold+Underline", {
+      ...baseTextStyle,
+      fontWeight: "700",
+      font: { bold: true, underline: "single" },
+      underline: true
+    });
+
+    put(3, 3, "Italic+Underline", {
+      ...baseTextStyle,
+      font: { italic: true, underline: "single" },
+      fontStyle: "italic",
+      underline: true
+    });
+
+    put(3, 4, "All", {
+      ...baseTextStyle,
+      fontWeight: "700",
+      font: { bold: true, italic: true, underline: "single", strike: true },
+      fontStyle: "italic",
+      underline: true,
+      strike: true
+    });
+
+    put(4, 1, "Underline+Strike", {
+      ...baseTextStyle,
+      font: { underline: "single", strike: true },
+      underline: true,
+      strike: true
+    });
+
+    put(4, 2, "Double underline", {
+      ...baseTextStyle,
+      font: { underline: "double" },
+      underline: "double"
+    });
+
+    put(4, 3, "Superscript?", {
+      ...baseTextStyle,
+      font: { vertAlign: "superscript" }
+    });
+
+    put(4, 4, "Subscript?", {
+      ...baseTextStyle,
+      font: { vertAlign: "subscript" }
+    });
+
+    // ---------------------------------------------------------------------------------------------
+    // Fills + font color
+    // ---------------------------------------------------------------------------------------------
+    put(5, 1, "Fill + font color", { fill: sectionHeaderFill, fontWeight: "700" });
+
+    put(6, 1, "Light fill", { fill: "#dbeafe", color: "#1e3a8a", fontWeight: "600" });
+    put(6, 2, "Dark fill", { fill: "#1e3a8a", color: "#ffffff", fontWeight: "600" });
+    put(6, 3, "Custom font", {
+      fill: "#ecfccb",
+      color: "#14532d",
+      fontWeight: "600",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    });
+
+    // ---------------------------------------------------------------------------------------------
+    // Borders — intentionally uses "Excel-like" border objects (thin/medium/thick, dashed/dotted/double),
+    // including conflicts across shared edges.
+    // ---------------------------------------------------------------------------------------------
+    put(8, 1, "Borders", { fill: sectionHeaderFill, fontWeight: "700" });
+
+    const borderCellBase: DemoCellStyle = { textAlign: "center", fill: "rgba(148, 163, 184, 0.06)" };
+    const mkEdge = (style: string, color: string) => ({ style, color });
+
+    put(9, 1, "Thin", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("thin", "#0f172a"),
+        right: mkEdge("thin", "#0f172a"),
+        bottom: mkEdge("thin", "#0f172a"),
+        left: mkEdge("thin", "#0f172a")
+      }
+    });
+
+    put(9, 2, "Medium", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("medium", "#0f172a"),
+        right: mkEdge("medium", "#0f172a"),
+        bottom: mkEdge("medium", "#0f172a"),
+        left: mkEdge("medium", "#0f172a")
+      }
+    });
+
+    put(9, 3, "Thick", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("thick", "#0f172a"),
+        right: mkEdge("thick", "#0f172a"),
+        bottom: mkEdge("thick", "#0f172a"),
+        left: mkEdge("thick", "#0f172a")
+      }
+    });
+
+    put(10, 1, "Dashed", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("dashed", "#ef4444"),
+        right: mkEdge("dashed", "#ef4444"),
+        bottom: mkEdge("dashed", "#ef4444"),
+        left: mkEdge("dashed", "#ef4444")
+      }
+    });
+
+    put(10, 2, "Dotted", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("dotted", "#3b82f6"),
+        right: mkEdge("dotted", "#3b82f6"),
+        bottom: mkEdge("dotted", "#3b82f6"),
+        left: mkEdge("dotted", "#3b82f6")
+      }
+    });
+
+    put(10, 3, "Double", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("double", "#a855f7"),
+        right: mkEdge("double", "#a855f7"),
+        bottom: mkEdge("double", "#a855f7"),
+        left: mkEdge("double", "#a855f7")
+      }
+    });
+
+    // Conflicting adjacent borders (shared edge). The renderer should pick the correct winner.
+    put(11, 1, "Conflict A", {
+      ...borderCellBase,
+      border: {
+        right: mkEdge("thick", "#ef4444")
+      }
+    });
+    put(11, 2, "Conflict B", {
+      ...borderCellBase,
+      border: {
+        left: mkEdge("thin", "#3b82f6")
+      }
+    });
+
+    // Conflicting top/bottom border (stacked).
+    put(12, 3, "Bottom thick", {
+      ...borderCellBase,
+      border: {
+        bottom: mkEdge("thick", "#22c55e")
+      }
+    });
+    put(13, 3, "Top thin", {
+      ...borderCellBase,
+      border: {
+        top: mkEdge("thin", "#f97316")
+      }
+    });
+
+    // ---------------------------------------------------------------------------------------------
+    // Alignment, wrapping, rotation
+    // ---------------------------------------------------------------------------------------------
+    put(14, 1, "Alignment / wrap / rotation", { fill: sectionHeaderFill, fontWeight: "700" });
+
+    put(15, 1, "Left", { textAlign: "start" });
+    put(15, 2, "Center", { textAlign: "center" });
+    put(15, 3, "Right", { textAlign: "end" });
+
+    put(16, 1, "Wrap off: This text should overflow →", { wrapMode: "none", textAlign: "start" });
+    put(16, 2, "Wrap on: This text should wrap within the cell (word wrap).", { wrapMode: "word", textAlign: "start" });
+
+    put(17, 1, "Rotated 45°", {
+      rotationDeg: 45,
+      textAlign: "center",
+      verticalAlign: "middle",
+      fill: "rgba(14, 101, 235, 0.12)",
+      fontWeight: "600",
+      alignment: { textRotation: 45 }
+    });
+
+    // ---------------------------------------------------------------------------------------------
+    // Rich text runs (if Task 84 lands)
+    // ---------------------------------------------------------------------------------------------
+    put(
+      20,
+      1,
+      "Rich text (if supported)",
+      {
+        wrapMode: "word",
+        textAlign: "start",
+        fill: "rgba(148, 163, 184, 0.08)"
+      },
+      {
+        richText: {
+          text: "Rich: bold + italic + underline + color",
+          runs: [
+            { start: 0, end: 6, style: { bold: true } },
+            { start: 7, end: 11, style: { italic: true } },
+            { start: 14, end: 23, style: { underline: "single" } },
+            { start: 26, end: 31, style: { color: "#ef4444" } }
+          ]
+        }
+      }
+    );
+
+    // ---------------------------------------------------------------------------------------------
+    // Number format display strings (if Task 68 lands)
+    // ---------------------------------------------------------------------------------------------
+    put(
+      22,
+      1,
+      1234.56,
+      {
+        textAlign: "end",
+        fontWeight: "600",
+        fill: "rgba(148, 163, 184, 0.08)",
+        numberFormat: "$#,##0.00"
+      },
+      {
+        // Candidate names for display strings (implementation may choose one).
+        displayValue: "$1,234.56",
+        formattedValue: "$1,234.56"
+      }
+    );
+  }
+
+  prefetch(): void {
+    // Synchronous demo provider.
+  }
+
+  getCell(row: number, col: number): CellData | null {
+    if (row < 0 || col < 0 || row >= this.rowCount || col >= this.colCount) return null;
+
+    // Header cells: avoid hard-coded colors so the demo respects `GridTheme.headerBg/headerText`.
+    if (row === 0) {
+      return {
+        row,
+        col,
+        value: col === 0 ? "" : toColumnName(col - 1),
+        style: this.headerStyle
+      };
+    }
+
+    if (col === 0) {
+      return {
+        row,
+        col,
+        value: row,
+        style: this.rowHeaderStyle
+      };
+    }
+
+    return this.cells.get(cellKey(row, col)) ?? null;
+  }
+}
+
+export function CellFormattingDemo(): React.ReactElement {
+  const rowCount = 30;
+  const colCount = 15;
+
+  const provider = useMemo(() => new CellFormattingDemoProvider({ rowCount, colCount }), [rowCount, colCount]);
+  const apiRef = useRef<GridApi | null>(null);
+  const [zoom, setZoom] = useState(1);
+
+  useEffect(() => {
+    apiRef.current?.setZoom(zoom);
+  }, [zoom]);
+
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+
+    // Give wrap/rotation rows a bit more room.
+    api.setRowHeight(16, 60);
+    api.setRowHeight(17, 60);
+    api.setRowHeight(20, 48);
+
+    // Slightly wider first few columns so labels are readable.
+    api.setColWidth(1, 160);
+    api.setColWidth(2, 220);
+    api.setColWidth(3, 180);
+  }, []);
+
+  return (
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          padding: 12,
+          borderBottom: "1px solid var(--formula-grid-line, #e5e7eb)",
+          background: "var(--formula-grid-header-bg, #fff)",
+          color: "var(--formula-grid-header-text, #0f172a)",
+          fontFamily: "system-ui, sans-serif",
+          fontSize: 14
+        }}
+      >
+        <div style={{ fontWeight: 600 }}>Cell formatting demo (Excel-style rendering)</div>
+        <div style={{ marginTop: 6, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.8 }}>
+          Use this view to manually verify cell formatting changes in <code>@formula/grid</code>.
+        </div>
+
+        <div style={{ marginTop: 10, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Legend</div>
+            <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.4, opacity: 0.9 }}>
+              <li>
+                <code>A1:D4</code>: bold / italic / underline / strike combinations
+              </li>
+              <li>
+                <code>A5:C6</code>: fills + explicit font color / font family
+              </li>
+              <li>
+                <code>A8:C13</code>: borders (thin/medium/thick, dashed/dotted/double) + conflicts
+              </li>
+              <li>
+                <code>A14:C17</code>: alignment, wrap on/off, rotation
+              </li>
+              <li>
+                <code>A20</code>: rich text runs (if Task 84 lands)
+              </li>
+              <li>
+                <code>A22</code>: number format display strings (if Task 68 lands)
+              </li>
+            </ul>
+          </div>
+
+          <div style={{ minWidth: 240 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Switch demos</div>
+            <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
+              <div>
+                <code>?demo=style</code> (this)
+              </div>
+              <div>
+                <code>?demo=perf</code> (performance harness)
+              </div>
+              <div>
+                <code>?demo=merged</code> (merged cells demo)
+              </div>
+            </div>
+          </div>
+
+          <div style={{ flex: "1 1 240px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              Zoom
+              <input
+                type="range"
+                min={0.5}
+                max={3}
+                step={0.1}
+                value={zoom}
+                onChange={(event) => setZoom(event.currentTarget.valueAsNumber)}
+              />
+              <span style={{ width: 44, textAlign: "right" }}>{Math.round(zoom * 100)}%</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, position: "relative" }}>
+        <CanvasGrid
+          provider={provider}
+          rowCount={rowCount}
+          colCount={colCount}
+          headerRows={1}
+          headerCols={1}
+          frozenRows={1}
+          frozenCols={1}
+          defaultRowHeight={24}
+          defaultColWidth={120}
+          onZoomChange={setZoom}
+          apiRef={apiRef}
+        />
+      </div>
+    </div>
+  );
+}
