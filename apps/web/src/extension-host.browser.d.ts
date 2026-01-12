@@ -2,6 +2,8 @@ declare module "@formula/extension-host/browser" {
   export class BrowserExtensionHost {
     constructor(options: any);
 
+    readonly engineVersion: string;
+
     loadExtension(args: {
       extensionId: string;
       extensionPath: string;
