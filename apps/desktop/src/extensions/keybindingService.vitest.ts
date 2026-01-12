@@ -200,4 +200,68 @@ describe("KeybindingService", () => {
     expect(event.defaultPrevented).toBe(false);
     expect(builtinRun).not.toHaveBeenCalled();
   });
+
+  it("respects weight when multiple built-in bindings match the same chord", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const lowRun = vi.fn();
+    const highRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.low", "Low", lowRun);
+    commandRegistry.registerBuiltinCommand("builtin.high", "High", highRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([
+      { command: "builtin.low", key: "ctrl+k", weight: 0 },
+      { command: "builtin.high", key: "ctrl+k", weight: 10 },
+    ]);
+
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(highRun).toHaveBeenCalledTimes(1);
+    expect(lowRun).not.toHaveBeenCalled();
+  });
+
+  it("accepts mac-specific builtin keybindings as alternates on other platforms (playwright compat)", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.replace", "Replace", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.replace", key: "ctrl+h", mac: "cmd+option+f" }]);
+
+    const event = makeKeydownEvent({ key: "f", metaKey: true, altKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts non-mac builtin keybindings as fallbacks on macOS", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.replace", "Replace", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
+    service.setBuiltinKeybindings([{ command: "builtin.replace", key: "ctrl+h", mac: "cmd+option+f" }]);
+
+    // Prefer Cmd+Option+F on macOS.
+    const event = makeKeydownEvent({ key: "f", metaKey: true, altKey: true });
+    const handled = await service.dispatchKeydown(event);
+    expect(handled).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+
+    // But still accept Ctrl+H as a fallback.
+    const fallbackEvent = makeKeydownEvent({ key: "h", ctrlKey: true });
+    const handledFallback = await service.dispatchKeydown(fallbackEvent);
+    expect(handledFallback).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(2);
+  });
 });
