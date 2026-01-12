@@ -3131,6 +3131,48 @@ export class SpreadsheetApp {
     if (focus) this.focus();
   }
 
+  /**
+   * Programmatically set selection ranges using shared-grid (CanvasGridRenderer) coordinates.
+   *
+   * This is primarily intended for split-view selection syncing, where the secondary pane uses
+   * `@formula/grid` selection ranges that include the header row/col.
+   */
+  setSharedGridSelectionRanges(
+    ranges: GridCellRange[] | null,
+    options?: {
+      activeIndex?: number;
+      activeCell?: { row: number; col: number } | null;
+      scrollIntoView?: boolean;
+      focus?: boolean;
+    },
+  ): void {
+    const scrollIntoView = options?.scrollIntoView !== false;
+    const focus = options?.focus !== false;
+
+    // Shared-grid mode: delegate to the shared grid so selection semantics (multi-range, active cell)
+    // match the renderer and we reuse its selection-change notifications.
+    if (this.sharedGrid) {
+      this.sharedGrid.setSelectionRanges(ranges, {
+        activeIndex: options?.activeIndex,
+        activeCell: options?.activeCell,
+        scrollIntoView,
+      });
+      if (focus) this.focus();
+      return;
+    }
+
+    // Legacy grid mode does not support multi-range or explicit active-cell selection. Mirror the
+    // active range only.
+    if (!ranges || ranges.length === 0) return;
+    const activeIndex = options?.activeIndex ?? 0;
+    const idx = Math.max(0, Math.min(activeIndex, ranges.length - 1));
+    const activeRange = ranges[idx] ?? ranges[0];
+    if (!activeRange) return;
+
+    const docRange = this.docRangeFromGridRange(activeRange);
+    this.selectRange({ range: docRange }, { scrollIntoView, focus });
+  }
+
   getSelectionRanges(): Range[] {
     return this.selection.ranges;
   }

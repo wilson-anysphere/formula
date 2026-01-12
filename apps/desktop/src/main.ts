@@ -3351,15 +3351,6 @@ if (
     };
   }
 
-  function docRangeFromGridRange(range: GridCellRange): Range {
-    return {
-      startRow: Math.max(0, range.startRow - SPLIT_HEADER_ROWS),
-      endRow: Math.max(0, range.endRow - SPLIT_HEADER_ROWS - 1),
-      startCol: Math.max(0, range.startCol - SPLIT_HEADER_COLS),
-      endCol: Math.max(0, range.endCol - SPLIT_HEADER_COLS - 1),
-    };
-  }
-
   function syncPrimarySelectionFromSecondary(): void {
     if (!secondaryGridView) return;
     if (splitSelectionSyncInProgress) return;
@@ -3371,31 +3362,16 @@ if (
 
     splitSelectionSyncInProgress = true;
     try {
-      // Prefer syncing via the primary shared-grid instance (when available) so we preserve:
-      // - multi-range selection
-      // - the shared-grid active cell semantics (mouse-drag keeps the anchor cell active)
-      // while still avoiding cross-pane scrolling.
-      const primarySharedGrid = (app as any).sharedGrid as
-        | { setSelectionRanges?: (ranges: GridCellRange[] | null, opts?: unknown) => void }
-        | null;
-      if (primarySharedGrid?.setSelectionRanges) {
-        primarySharedGrid.setSelectionRanges(gridRanges, {
-          activeIndex,
-          activeCell: gridSelection,
-          scrollIntoView: false,
-        });
-        return;
-      }
-
-      // Fallback (legacy grid mode): SpreadsheetApp does not currently support multi-range
-      // or explicit active-cell programmatic selection. Mirror the active range only.
-      const activeRange = gridRanges[Math.max(0, Math.min(activeIndex, gridRanges.length - 1))] ?? gridRanges[0];
-      if (!activeRange) return;
-
-      const docRange = docRangeFromGridRange(activeRange);
-
-      // Prevent the primary pane from scrolling/focusing when selection is driven from the secondary pane.
-      app.selectRange({ range: docRange }, { scrollIntoView: false, focus: false });
+      // Sync via SpreadsheetApp so we preserve shared-grid multi-range selection when available,
+      // while keeping the legacy grid fallback (single-range) consistent.
+      //
+      // Never cross-scroll or steal focus: selection sync should not disturb the destination pane.
+      app.setSharedGridSelectionRanges(gridRanges, {
+        activeIndex,
+        activeCell: gridSelection,
+        scrollIntoView: false,
+        focus: false,
+      });
     } finally {
       splitSelectionSyncInProgress = false;
     }
