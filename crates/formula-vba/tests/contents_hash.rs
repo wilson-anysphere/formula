@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use encoding_rs::WINDOWS_1252;
+use encoding_rs::{WINDOWS_1251, WINDOWS_1252};
 use formula_vba::{compress_container, content_normalized_data};
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -109,6 +109,61 @@ fn content_normalized_data_uses_module_record_order_from_dir_stream() {
         pos_a2 < pos_b2,
         "expected ModuleA bytes to appear before ModuleB bytes when dir order is A then B"
     );
+}
+
+#[test]
+fn content_normalized_data_decodes_cyrillic_module_stream_name_using_windows_1251() {
+    // A Cyrillic module stream name encoded with Windows-1251. This is not valid UTF-8, so
+    // `String::from_utf8_lossy` would corrupt it and fail to locate the matching OLE stream.
+    let stream_name = "Привет"; // "hello" in Russian
+    let (stream_name_bytes, _, _) = WINDOWS_1251.encode(stream_name);
+
+    let module_code = "Sub Hello()\r\n'привет\r\nEnd Sub\r\n";
+    let (module_code_bytes, _, _) = WINDOWS_1251.encode(module_code);
+    let module_container = compress_container(module_code_bytes.as_ref());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // PROJECTCODEPAGE (u16 LE)
+        push_record(&mut out, 0x0003, &1251u16.to_le_bytes());
+
+        // Module records.
+        push_record(&mut out, 0x0019, stream_name_bytes.as_ref()); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16.
+        let mut stream_name_record = Vec::new();
+        stream_name_record.extend_from_slice(stream_name_bytes.as_ref());
+        stream_name_record.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name_record);
+
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET (0: stream starts with a compressed container)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let path = format!("VBA/{stream_name}");
+        let mut s = ole.create_stream(&path).expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+
+    // No reference records, so ContentNormalizedData should consist of the normalized module bytes.
+    assert_eq!(normalized, module_code_bytes.as_ref());
 }
 
 #[test]
@@ -234,7 +289,6 @@ fn content_normalized_data_module_newlines_and_attribute_stripping() {
 
     assert_eq!(normalized, expected);
 }
-
 #[test]
 fn content_normalized_data_decodes_module_stream_name_using_dir_codepage() {
     let module_name = "Módülé1";

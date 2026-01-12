@@ -31,12 +31,15 @@ struct ModuleInfo {
 pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let mut ole = OleFile::open(vba_project_bin)?;
 
+    let project_stream_bytes = ole.read_stream_opt("PROJECT")?;
     let dir_bytes = ole
         .read_stream_opt("VBA/dir")?
         .ok_or(ParseError::MissingStream("VBA/dir"))?;
     let dir_decompressed = decompress_container(&dir_bytes)?;
-    let encoding = DirStream::detect_codepage(&dir_decompressed)
-        .map(encoding_for_codepage)
+    let encoding = project_stream_bytes
+        .as_deref()
+        .and_then(detect_project_codepage)
+        .or_else(|| DirStream::detect_codepage(&dir_decompressed).map(encoding_for_codepage))
         .unwrap_or(WINDOWS_1252);
 
     let mut out = Vec::new();
@@ -126,6 +129,40 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     }
 
     Ok(out)
+}
+
+fn detect_project_codepage(project_stream_bytes: &[u8]) -> Option<&'static Encoding> {
+    // The `PROJECT` stream is plain text; we can find the codepage by scanning
+    // the raw bytes for the ASCII `CodePage=` line.
+    let mut haystack = project_stream_bytes;
+    while let Some(idx) = find_subslice(haystack, b"CodePage=") {
+        let after = &haystack[idx + "CodePage=".len()..];
+        let mut digits = Vec::new();
+        for &b in after {
+            if b.is_ascii_digit() {
+                digits.push(b);
+            } else {
+                break;
+            }
+        }
+        if let Ok(n) = std::str::from_utf8(&digits).ok()?.parse::<u32>() {
+            if let Ok(cp) = u16::try_from(n) {
+                return Some(encoding_for_codepage(cp));
+            }
+            return Some(WINDOWS_1252);
+        }
+        haystack = after;
+    }
+    None
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn normalize_reference_project(data: &[u8]) -> Result<Vec<u8>, ParseError> {
