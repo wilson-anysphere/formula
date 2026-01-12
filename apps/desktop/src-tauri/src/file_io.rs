@@ -2587,6 +2587,17 @@ mod tests {
             Some(updated_xml.as_slice()),
             "expected updated save to write the new power-query.xml payload"
         );
+
+        // Removing the PQ payload should delete the part from the package.
+        let mut workbook = read_xlsx_blocking(&src_path).expect("read workbook for delete");
+        workbook.power_query_xml = None;
+        let deleted_path = tmp.path().join("deleted.xlsx");
+        let deleted_bytes = write_xlsx_blocking(&deleted_path, &workbook).expect("write deleted");
+        let deleted_pkg = XlsxPackage::from_bytes(deleted_bytes.as_ref()).expect("parse deleted");
+        assert!(
+            deleted_pkg.part(FORMULA_POWER_QUERY_PART).is_none(),
+            "expected deleted save to remove power-query.xml"
+        );
     }
 
     #[test]
