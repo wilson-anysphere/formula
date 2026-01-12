@@ -2794,6 +2794,27 @@ mountRibbon(ribbonRoot, {
       case "pageLayout.export.exportPdf":
         void handleRibbonExportPdf();
         return;
+      case "view.zoom.zoom100":
+        app.setZoom(1);
+        syncZoomControl();
+        app.focus();
+        return;
+      case "view.zoom.zoom":
+        void (async () => {
+          if (!app.supportsZoom()) return;
+          const baseOptions = [50, 75, 100, 125, 150, 200];
+          const current = Math.round(app.getZoom() * 100);
+          const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
+          const picked = await showQuickPick(
+            options.map((value) => ({ label: `${value}%`, value })),
+            { placeHolder: "Zoom" },
+          );
+          if (picked == null) return;
+          app.setZoom(picked / 100);
+          syncZoomControl();
+          app.focus();
+        })();
+        return;
       default:
         showToast(`Ribbon: ${commandId}`);
         return;
