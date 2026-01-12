@@ -13,6 +13,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", otherIndex)).toBe("Ctrl+Shift+V");
     expect(getPrimaryCommandKeybindingDisplay("edit.undo", otherIndex)).toBe("Ctrl+Z");
     expect(getPrimaryCommandKeybindingDisplay("edit.redo", otherIndex)).toBe("Ctrl+Y");
+    expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", otherIndex)).toBe("Ctrl+[");
+    expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", otherIndex)).toBe("Ctrl+]");
 
     const macIndex = buildCommandKeybindingDisplayIndex({ platform: "mac", contributed: [], builtin: builtinKeybindings });
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
@@ -22,5 +24,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", macIndex)).toBe("⇧⌘V");
     expect(getPrimaryCommandKeybindingDisplay("edit.undo", macIndex)).toBe("⌘Z");
     expect(getPrimaryCommandKeybindingDisplay("edit.redo", macIndex)).toBe("⇧⌘Z");
+    expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", macIndex)).toBe("⌘[");
+    expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", macIndex)).toBe("⌘]");
   });
 });
