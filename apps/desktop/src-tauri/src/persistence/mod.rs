@@ -292,7 +292,7 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
 }
 
 #[cfg(test)]
-mod storage_export_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -478,7 +478,7 @@ fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook
 }
 
 #[cfg(test)]
-mod tests {
+mod write_xlsx_from_storage_tests {
     use super::*;
     use anyhow::Context;
     use formula_storage::ImportModelWorkbookOptions;
