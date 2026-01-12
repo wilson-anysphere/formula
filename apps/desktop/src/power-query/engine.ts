@@ -474,12 +474,22 @@ function createDefaultFileAdapter(): FileAdapter {
   // The desktop app does not currently ship with the official Tauri FS plugin enabled.
   // Use our own invoke commands as a fallback.
   const invoke = getTauriInvoke();
+
+  // Must stay in sync with the backend IPC limit (`MAX_READ_FULL_BYTES`).
+  // This adapter may internally issue multiple range reads, but callers that request a single
+  // in-memory buffer should still be bounded to avoid crashing the desktop process.
+  const MAX_IN_MEMORY_FILE_BYTES = 64 * 1024 * 1024; // 64MiB
   return {
     readText: async (path) => String(await invoke("read_text_file", { path })),
     readBinary: async (path) => {
       const statPayload = await invoke("stat_file", { path });
       const fileSize = normalizeFileSize(statPayload);
       if (fileSize <= 0) return new Uint8Array(0);
+      if (fileSize > MAX_IN_MEMORY_FILE_BYTES) {
+        throw new Error(
+          `File is too large to read into memory (${fileSize} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}). Use streaming reads instead.`,
+        );
+      }
 
       // Keep single-call reads for small payloads, but avoid `read_binary_file` for large files
       // because the backend enforces a full-read size limit and base64 payloads get expensive.
@@ -574,6 +584,11 @@ function createDefaultFileAdapter(): FileAdapter {
         async arrayBuffer(): Promise<ArrayBuffer> {
           const length = this.size;
           if (length <= 0) return new ArrayBuffer(0);
+          if (length > MAX_IN_MEMORY_FILE_BYTES) {
+            throw new Error(
+              `File slice is too large to read into memory (${length} bytes, max ${MAX_IN_MEMORY_FILE_BYTES}).`,
+            );
+          }
           const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
           const chunks: Uint8Array[] = [];
           let offset = this.start;
