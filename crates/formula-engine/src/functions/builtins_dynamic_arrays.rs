@@ -454,15 +454,25 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
         Value::Number(n) => SortKeyValue::Number(*n),
         Value::Text(s) => SortKeyValue::Text(casefold(s)),
         Value::Bool(b) => SortKeyValue::Bool(*b),
+        Value::Entity(entity) if entity.display.is_empty() => SortKeyValue::Blank,
         Value::Entity(entity) => SortKeyValue::Text(casefold(&entity.display)),
+        Value::Record(record) if record.display.is_empty() => SortKeyValue::Blank,
         Value::Record(record) => SortKeyValue::Text(casefold(&record.display)),
         Value::Blank => SortKeyValue::Blank,
         Value::Error(e) => SortKeyValue::Error(*e),
-        Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => SortKeyValue::Error(ErrorKind::Value),
+        other => {
+            // Treat any future scalar-ish values as their display string for stable ordering.
+            // For non-scalar values, fall back to the existing #VALUE! behavior.
+            let display = match other.coerce_to_string() {
+                Ok(s) => s,
+                Err(_) => return SortKeyValue::Error(ErrorKind::Value),
+            };
+            if display.is_empty() {
+                SortKeyValue::Blank
+            } else {
+                SortKeyValue::Text(casefold(&display))
+            }
+        }
     }
 }
 
@@ -2201,4 +2211,56 @@ fn wrap_vector_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr], wrap_rows: b
     }
 
     Value::Array(Array::new(out_rows, out_cols, values))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::{EntityValue, RecordValue};
+
+    fn stable_sort_order(values: &[Value]) -> Vec<usize> {
+        let keys: Vec<_> = values.iter().map(sort_key).collect();
+        let mut order: Vec<usize> = (0..values.len()).collect();
+        order.sort_by(|&a, &b| {
+            let ord = compare_sort_keys(&keys[a], &keys[b], false);
+            if ord == Ordering::Equal { a.cmp(&b) } else { ord }
+        });
+        order
+    }
+
+    #[test]
+    fn compare_sort_keys_ranks_field_error_deterministically() {
+        let values = vec![
+            Value::Error(ErrorKind::Field),
+            Value::Error(ErrorKind::Div0),
+            Value::Error(ErrorKind::Calc),
+        ];
+
+        let order = stable_sort_order(&values);
+        let sorted: Vec<ErrorKind> = order
+            .into_iter()
+            .map(|idx| match values[idx] {
+                Value::Error(e) => e,
+                _ => unreachable!("expected error value"),
+            })
+            .collect();
+
+        assert_eq!(sorted, vec![ErrorKind::Div0, ErrorKind::Calc, ErrorKind::Field]);
+    }
+
+    #[test]
+    fn compare_sort_keys_sorts_entities_and_records_by_display_case_insensitive_and_stable() {
+        let values = vec![
+            Value::Record(RecordValue::new("b")),
+            Value::Entity(EntityValue::new("A")),
+            Value::Record(RecordValue::new("a")),
+            // Simulate missing display: empty string sorts like blank.
+            Value::Entity(EntityValue::new("")),
+        ];
+
+        let order = stable_sort_order(&values);
+
+        // Sorted by display string case-insensitively; ties preserve original order.
+        assert_eq!(order, vec![1, 2, 0, 3]);
+    }
 }
