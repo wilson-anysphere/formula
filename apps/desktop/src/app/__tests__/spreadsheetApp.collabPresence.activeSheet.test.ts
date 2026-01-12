@@ -127,6 +127,9 @@ describe("SpreadsheetApp collab presence", () => {
     app.activateSheet("Sheet2");
 
     expect(presence.localPresence.activeSheet).toBe("Sheet2");
+    // Presence should also be refreshed for the new sheet.
+    expect(presence.localPresence.cursor).toEqual({ row: 0, col: 0 });
+    expect(presence.localPresence.selections).toEqual([{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
 
     app.destroy();
     root.remove();
