@@ -162,8 +162,10 @@ export class DocumentCellProvider implements CellProvider {
     const fill = isPlainObject(docStyle.fill) ? docStyle.fill : null;
     const fillColor = normalizeCssColor(
       fill?.fgColor ??
+        fill?.fg_color ??
         fill?.background ??
         fill?.bgColor ??
+        fill?.bg_color ??
         (docStyle as any).backgroundColor ??
         (docStyle as any).background_color ??
         (docStyle as any).fillColor ??
@@ -219,16 +221,24 @@ export class DocumentCellProvider implements CellProvider {
                 : null;
     if (fontName && fontName.trim() !== "") out.fontFamily = fontName;
 
-    const fontSizePt =
-      typeof font?.size === "number"
-        ? font.size
-        : typeof (docStyle as any).fontSize === "number"
-          ? (docStyle as any).fontSize
-          : typeof (docStyle as any).font_size === "number"
-            ? (docStyle as any).font_size
-            : null;
-    if (fontSizePt != null && Number.isFinite(fontSizePt)) {
-      out.fontSize = (fontSizePt * 96) / 72;
+    const fontSize100Pt = typeof (font as any)?.size_100pt === "number" ? (font as any).size_100pt : null;
+    if (fontSize100Pt != null && Number.isFinite(fontSize100Pt)) {
+      // formula-model / XLSX import serializes font sizes in 1/100th of a point.
+      // Convert to CSS pixels assuming 96DPI.
+      const pt = fontSize100Pt / 100;
+      out.fontSize = (pt * 96) / 72;
+    } else {
+      const fontSizePt =
+        typeof font?.size === "number"
+          ? font.size
+          : typeof (docStyle as any).fontSize === "number"
+            ? (docStyle as any).fontSize
+            : typeof (docStyle as any).font_size === "number"
+              ? (docStyle as any).font_size
+              : null;
+      if (fontSizePt != null && Number.isFinite(fontSizePt)) {
+        out.fontSize = (fontSizePt * 96) / 72;
+      }
     }
     const fontColor = normalizeCssColor(
       font?.color ??
@@ -253,7 +263,7 @@ export class DocumentCellProvider implements CellProvider {
     else if (horizontal === "left") out.textAlign = "start";
     else if (horizontal === "right") out.textAlign = "end";
     // "general"/undefined: leave undefined so renderer can pick based on value type.
-    if (alignment?.wrapText === true) out.wrapMode = "word";
+    if (alignment?.wrapText === true || (alignment as any)?.wrap_text === true) out.wrapMode = "word";
 
     const vertical = alignment?.vertical;
     if (vertical === "top") out.verticalAlign = "top";

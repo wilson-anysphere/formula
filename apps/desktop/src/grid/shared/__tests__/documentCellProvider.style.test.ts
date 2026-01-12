@@ -51,4 +51,37 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
       bottom: { width: 1, style: "solid", color: "#000000" }
     });
   });
+
+  it("supports formula-model snake_case style patches (font.size_100pt, fill.fg_color, alignment.wrap_text)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Styled");
+    doc.setRangeFormat(sheetId, "A1", {
+      font: { size_100pt: 1200 },
+      fill: { fg_color: "#FFFF0000" },
+      alignment: { wrap_text: true }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+
+    const style = (cell as any).style as any;
+    expect(style).toBeTruthy();
+    // 1200 => 12pt => 16px @96DPI.
+    expect(style.fontSize).toBeCloseTo(16, 5);
+    expect(style.fill).toBe("#ff0000");
+    expect(style.wrapMode).toBe("word");
+  });
 });
