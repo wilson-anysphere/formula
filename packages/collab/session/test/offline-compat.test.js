@@ -284,7 +284,9 @@ test("CollabSession legacy `options.offline` binds before load so edits during l
     });
 
     // Let the persistence start/bind; load is still pending due to delayed readFile.
-    await sleep(0);
+    // Use a small delay here so dynamic imports + binding setup have time to run
+    // before we write (while still keeping load in-flight).
+    await sleep(20);
 
     await session.setCellValue("Sheet1:0:0", "during-load");
     await session.offline?.whenLoaded();
