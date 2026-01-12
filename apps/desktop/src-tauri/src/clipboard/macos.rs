@@ -31,6 +31,7 @@ const TYPE_PNG: &str = "public.png"; // NSPasteboardTypePNG
 const TYPE_TIFF: &str = "public.tiff"; // NSPasteboardTypeTIFF
 
 // NSBitmapImageFileType values (from AppKit).
+const NSBITMAP_IMAGE_FILE_TYPE_TIFF: usize = 0; // NSBitmapImageFileTypeTIFF
 const NSBITMAP_IMAGE_FILE_TYPE_PNG: usize = 4; // NSBitmapImageFileTypePNG
 
 fn ensure_main_thread() -> Result<(), ClipboardError> {
@@ -190,24 +191,26 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
 }
 
 unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
-    // [[NSImage alloc] initWithData:data]
+    // [NSBitmapImageRep imageRepWithData:data]
     let data = nsdata_from_bytes(png)?;
-    let cls = objc2::class!(NSImage);
-    let alloc: *mut AnyObject = objc2::msg_send![cls, alloc];
-    let img_ptr: *mut AnyObject = objc2::msg_send![alloc, initWithData: &*data];
-    if img_ptr.is_null() {
+    let rep: *mut AnyObject =
+        objc2::msg_send![objc2::class!(NSBitmapImageRep), imageRepWithData: &*data];
+    if rep.is_null() {
         return Err(ClipboardError::OperationFailed(
-            "failed to decode PNG via NSImage".to_string(),
+            "failed to decode PNG via NSBitmapImageRep".to_string(),
         ));
     }
-    // `alloc/init` returns a retained object; wrap it so we reliably release it.
-    let img: Id<AnyObject, Owned> = Id::from_retained_ptr(img_ptr);
 
-    // -[NSImage TIFFRepresentation]
-    let tiff_data: *mut AnyObject = objc2::msg_send![&*img, TIFFRepresentation];
+    // Pass an empty properties dictionary.
+    let props: *mut AnyObject = objc2::msg_send![objc2::class!(NSDictionary), dictionary];
+    let tiff_data: *mut AnyObject = objc2::msg_send![
+        rep,
+        representationUsingType: NSBITMAP_IMAGE_FILE_TYPE_TIFF
+        properties: props
+    ];
     if tiff_data.is_null() {
         return Err(ClipboardError::OperationFailed(
-            "failed to encode TIFF via NSImage::TIFFRepresentation".to_string(),
+            "failed to encode TIFF via NSBitmapImageRep".to_string(),
         ));
     }
 
