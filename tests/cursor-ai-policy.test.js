@@ -72,6 +72,32 @@ test("cursor AI policy guard fails when OpenAI appears in unrelated unit tests (
   }
 });
 
+test("cursor AI policy guard scans repo-level tests/ directory for unit tests", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-tests-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "tests/unrelated.test.js", 'const x = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans repo-level test/ directory for unit tests", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "test/unrelated.test.js", 'const x = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when OpenAI appears in *.vitest.* unit tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-openai-vitest-fail-"));
   try {

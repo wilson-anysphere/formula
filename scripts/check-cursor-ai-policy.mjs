@@ -20,7 +20,10 @@ import os from "node:os";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 
-const INCLUDED_DIRS = ["apps", "packages", "services", "crates", "tools"];
+// Default scan roots. We intentionally include top-level `test/` + `tests/` so the
+// "no provider names in unit tests" rule applies to both workspace tests and the
+// repo's node:test suites.
+const INCLUDED_DIRS = ["apps", "packages", "services", "crates", "tools", "test", "tests"];
 
 // Explicitly excluded paths (relative to repo root). We mostly avoid these by
 // only scanning included source directories, but keep them here as belt+suspenders.
