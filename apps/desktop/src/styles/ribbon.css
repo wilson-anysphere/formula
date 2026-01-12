@@ -8,7 +8,8 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  z-index: 0;
+  /* Ensure the File backstage (position:fixed) can sit above the grid canvases. */
+  z-index: 20;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
   user-select: none;
