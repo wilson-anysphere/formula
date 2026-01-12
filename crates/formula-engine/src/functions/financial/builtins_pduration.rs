@@ -1,0 +1,44 @@
+use crate::error::ExcelError;
+use crate::eval::CompiledExpr;
+use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::value::{ErrorKind, Value};
+
+inventory::submit! {
+    FunctionSpec {
+        name: "PDURATION",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: pduration_fn,
+    }
+}
+
+fn pduration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let rate = match eval_scalar_arg(ctx, &args[0]).coerce_to_number_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pv = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let fv = match eval_scalar_arg(ctx, &args[2]).coerce_to_number_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    match super::pduration(rate, pv, fv) {
+        Ok(n) => Value::Number(n),
+        Err(e) => Value::Error(match e {
+            ExcelError::Div0 => ErrorKind::Div0,
+            ExcelError::Value => ErrorKind::Value,
+            ExcelError::Num => ErrorKind::Num,
+        }),
+    }
+}
+

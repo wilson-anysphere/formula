@@ -30454,6 +30454,16 @@
       "id": "rri_bbd801af55f6"
     },
     {
+      "formula": "=PDURATION(0.025,2000,2200)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PDURATION"
+      ],
+      "id": "pduration_714b36cd13f7"
+    },
+    {
       "formula": "=SLN(30, 0, 3)",
       "outputCell": "C1",
       "inputs": [],

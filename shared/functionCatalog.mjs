@@ -2041,6 +2041,18 @@ export default {
       ]
     },
     {
+      "name": "PDURATION",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "PEARSON",
       "min_args": 2,
       "max_args": 2,

@@ -1647,6 +1647,7 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="effect", tags=["financial", "EFFECT"], formula="=EFFECT(0.1,12)")
     _add_case(cases, prefix="nominal", tags=["financial", "NOMINAL"], formula="=NOMINAL(0.1,12)")
     _add_case(cases, prefix="rri", tags=["financial", "RRI"], formula="=RRI(10,-100,200)")
+    _add_case(cases, prefix="pduration", tags=["financial", "PDURATION"], formula="=PDURATION(0.025,2000,2200)")
     _add_case(cases, prefix="sln", tags=["financial", "SLN"], formula="=SLN(30, 0, 3)")
     _add_case(cases, prefix="syd", tags=["financial", "SYD"], formula="=SYD(30, 0, 3, 1)")
     _add_case(cases, prefix="ddb", tags=["financial", "DDB"], formula="=DDB(1000, 100, 5, 1)")
