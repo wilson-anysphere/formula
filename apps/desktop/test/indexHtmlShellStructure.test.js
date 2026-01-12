@@ -92,6 +92,14 @@ test("desktop index.html exposes required shell containers and testids", () => {
     'data-testid="freeze-top-row"',
     'data-testid="freeze-first-column"',
     'data-testid="unfreeze-panes"',
+
+    // Other ribbon-mounted controls referenced directly by Playwright tests.
+    // Keep them out of `index.html` so `page.getByTestId(...)` remains unambiguous.
+    'data-testid="open-inline-ai-edit"',
+    'data-testid="open-marketplace-panel"',
+    'data-testid="open-version-history-panel"',
+    'data-testid="open-branch-manager-panel"',
+    'data-testid="theme-selector"',
   ];
 
   const forbiddenPresent = forbiddenSnippets.filter((snippet) => html.includes(snippet));
