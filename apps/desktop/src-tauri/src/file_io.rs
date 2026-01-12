@@ -27,6 +27,8 @@ use std::sync::Arc;
 
 use crate::macro_trust::compute_macro_fingerprint;
 
+const FORMULA_POWER_QUERY_PART: &str = "xl/formula/power-query.xml";
+
 #[derive(Clone, Debug)]
 pub struct Sheet {
     pub id: String,
@@ -240,6 +242,11 @@ pub struct Workbook {
     /// Raw bytes for the workbook we opened (XLSX/XLSM only). When present we use it as the base
     /// package and patch only the edited worksheet cell XML (+ print settings) on save.
     pub origin_xlsx_bytes: Option<Arc<[u8]>>,
+    /// Formula Power Query query definitions persisted inside the workbook package (XLSX/XLSM).
+    ///
+    /// This is stored as a dedicated OPC part (`xl/formula/power-query.xml`) containing an XML
+    /// wrapper with JSON inside a CDATA section.
+    pub power_query_xml: Option<Vec<u8>>,
     /// When the workbook was opened from an XLSB file, this stores the origin path so we can
     /// re-open the source package and write back using `formula-xlsb`'s lossless OPC writer.
     pub origin_xlsb_path: Option<String>,
@@ -262,6 +269,7 @@ pub struct Workbook {
     pub sheets: Vec<Sheet>,
     pub print_settings: WorkbookPrintSettings,
     pub(crate) original_print_settings: WorkbookPrintSettings,
+    pub(crate) original_power_query_xml: Option<Vec<u8>>,
     /// Baseline input snapshot for cells that have been edited since the last save/open.
     ///
     /// Keyed by `(sheet_id, row, col)` storing `(value, formula)` from the first time the cell
@@ -277,6 +285,7 @@ impl Workbook {
             origin_path: path.clone(),
             path,
             origin_xlsx_bytes: None,
+            power_query_xml: None,
             origin_xlsb_path: None,
             vba_project_bin: None,
             macro_fingerprint: None,
@@ -289,6 +298,7 @@ impl Workbook {
             sheets: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             original_print_settings: WorkbookPrintSettings::default(),
+            original_power_query_xml: None,
             cell_input_baseline: HashMap::new(),
         }
     }
@@ -399,6 +409,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             path: Some(path.to_string_lossy().to_string()),
             origin_path: Some(path.to_string_lossy().to_string()),
             origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
+            power_query_xml: None,
             origin_xlsb_path: None,
             vba_project_bin: None,
             macro_fingerprint: None,
@@ -411,6 +422,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
             sheets: Vec::new(),
             print_settings: print_settings.clone(),
             original_print_settings: print_settings,
+            original_power_query_xml: None,
             cell_input_baseline: HashMap::new(),
         };
         // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
@@ -420,6 +432,11 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
         if let Ok(pkg) = XlsxPackage::from_bytes(origin_xlsx_bytes.as_ref()) {
             out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
+            if let Some(power_query_xml) = pkg.part(FORMULA_POWER_QUERY_PART) {
+                let bytes = power_query_xml.to_vec();
+                out.power_query_xml = Some(bytes.clone());
+                out.original_power_query_xml = Some(bytes);
+            }
             if let (Some(origin), Some(vba)) =
                 (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
             {
@@ -512,6 +529,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
         macro_fingerprint: None,
@@ -525,6 +543,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
+        original_power_query_xml: None,
         cell_input_baseline: HashMap::new(),
     };
 
@@ -663,6 +682,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
         macro_fingerprint: None,
@@ -675,6 +695,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         sheets: vec![sheet],
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
+        original_power_query_xml: None,
         cell_input_baseline: HashMap::new(),
     };
     out.ensure_sheet_ids();
@@ -697,6 +718,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         path: Some(path.to_string_lossy().to_string()),
         origin_path: Some(path.to_string_lossy().to_string()),
         origin_xlsx_bytes: None,
+        power_query_xml: None,
         origin_xlsb_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
         macro_fingerprint: None,
@@ -709,6 +731,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         sheets: Vec::new(),
         print_settings: WorkbookPrintSettings::default(),
         original_print_settings: WorkbookPrintSettings::default(),
+        original_power_query_xml: None,
         cell_input_baseline: HashMap::new(),
     };
 
@@ -927,6 +950,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
 
     if let Some(origin_bytes) = workbook.origin_xlsx_bytes.as_deref() {
         let print_settings_changed = workbook.print_settings != workbook.original_print_settings;
+        let power_query_changed = workbook.power_query_xml != workbook.original_power_query_xml;
 
         let mut patches = WorkbookCellPatches::default();
         for sheet in &workbook.sheets {
@@ -976,7 +1000,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         let wants_drop_vba =
             matches!(extension.as_deref(), Some("xlsx")) && workbook.vba_project_bin.is_some();
 
-        if patches.is_empty() && !print_settings_changed && !wants_drop_vba {
+        if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
             std::fs::write(path, origin_bytes)
                 .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(workbook
@@ -986,7 +1010,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .clone());
         }
 
-        if patches.is_empty() && print_settings_changed && !wants_drop_vba {
+        if patches.is_empty() && print_settings_changed && !wants_drop_vba && !power_query_changed {
             let bytes = write_workbook_print_settings(origin_bytes, &workbook.print_settings)
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
@@ -996,7 +1020,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             return Ok(bytes);
         }
 
-        if !patches.is_empty() && !wants_drop_vba {
+        if !patches.is_empty() && !wants_drop_vba && !power_query_changed {
             let mut cursor = Cursor::new(Vec::new());
             patch_xlsx_streaming_workbook_cell_patches(
                 Cursor::new(origin_bytes),
@@ -1021,6 +1045,13 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         if !patches.is_empty() {
             pkg.apply_cell_patches(&patches)
                 .context("apply worksheet cell patches")?;
+        }
+
+        match workbook.power_query_xml.as_ref() {
+            Some(bytes) => pkg.set_part(FORMULA_POWER_QUERY_PART, bytes.clone()),
+            None => {
+                pkg.parts_map_mut().remove(FORMULA_POWER_QUERY_PART);
+            }
         }
 
         if wants_drop_vba {
@@ -1060,10 +1091,17 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         workbook.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook.preserved_pivot_parts.is_some();
+    let needs_date_system_update = matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
+        && matches!(workbook.date_system, WorkbookDateSystem::Excel1904);
+    let wants_power_query = workbook.power_query_xml.is_some();
 
-    if wants_vba || wants_preserved_drawings || wants_preserved_pivots {
-        let mut pkg =
-            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
+    if wants_vba
+        || wants_preserved_drawings
+        || wants_preserved_pivots
+        || wants_power_query
+        || needs_date_system_update
+    {
+        let mut pkg = XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
 
         if wants_vba {
             pkg.set_part(
@@ -1082,9 +1120,14 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .context("apply preserved pivot parts")?;
         }
 
-        if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
-            && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
-        {
+        match workbook.power_query_xml.as_ref() {
+            Some(bytes) => pkg.set_part(FORMULA_POWER_QUERY_PART, bytes.clone()),
+            None => {
+                pkg.parts_map_mut().remove(FORMULA_POWER_QUERY_PART);
+            }
+        }
+
+        if needs_date_system_update {
             pkg.set_workbook_date_system(xlsx_date_system)
                 .context("set workbook date system")?;
         }
@@ -1092,16 +1135,6 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         bytes = pkg
             .write_to_bytes()
             .context("repack workbook package with preserved parts")?;
-    } else if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm"))
-        && matches!(workbook.date_system, WorkbookDateSystem::Excel1904)
-    {
-        let mut pkg =
-            XlsxPackage::from_bytes(&bytes).context("parse generated workbook package")?;
-        pkg.set_workbook_date_system(xlsx_date_system)
-            .context("set workbook date system")?;
-        bytes = pkg
-            .write_to_bytes()
-            .context("repack workbook package with date system")?;
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
@@ -2488,6 +2521,72 @@ mod tests {
 
         let written_bytes = std::fs::read(&out_path).expect("read written workbook");
         assert_eq!(original_bytes, written_bytes);
+    }
+
+    #[test]
+    fn power_query_part_roundtrip_is_preserved_and_can_be_updated() {
+        // Create a minimal XLSX package in memory.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add sheet");
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write workbook");
+        let base_bytes = cursor.into_inner();
+
+        // Inject a Formula Power Query part.
+        let initial_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"q1"}]}]]></FormulaPowerQuery>"#.to_vec();
+        let mut pkg = XlsxPackage::from_bytes(&base_bytes).expect("parse generated package");
+        pkg.set_part(FORMULA_POWER_QUERY_PART, initial_xml.clone());
+        let injected_bytes = pkg.write_to_bytes().expect("write injected package");
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let src_path = tmp.path().join("src.xlsx");
+        std::fs::write(&src_path, &injected_bytes).expect("write src");
+
+        let mut workbook = read_xlsx_blocking(&src_path).expect("read workbook");
+        assert_eq!(
+            workbook.power_query_xml.as_deref(),
+            Some(initial_xml.as_slice())
+        );
+        assert_eq!(
+            workbook.original_power_query_xml.as_deref(),
+            Some(initial_xml.as_slice())
+        );
+
+        // Patch-based cell edits should preserve non-worksheet parts, including our PQ payload.
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+        let patched_path = tmp.path().join("patched.xlsx");
+        let patched_bytes = write_xlsx_blocking(&patched_path, &workbook).expect("write patched");
+        let patched_pkg = XlsxPackage::from_bytes(patched_bytes.as_ref()).expect("parse patched");
+        assert_eq!(
+            patched_pkg.part(FORMULA_POWER_QUERY_PART),
+            Some(initial_xml.as_slice()),
+            "expected patch-based save to preserve power-query.xml verbatim"
+        );
+
+        // Changing the PQ payload should switch to the XlsxPackage save path and update the part.
+        let mut workbook = read_xlsx_blocking(&src_path).expect("read workbook for update");
+        let updated_xml = br#"<FormulaPowerQuery version="1"><![CDATA[{"queries":[{"id":"q2"}]}]]></FormulaPowerQuery>"#.to_vec();
+        workbook.power_query_xml = Some(updated_xml.clone());
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Number(2.0))),
+        );
+
+        let updated_path = tmp.path().join("updated.xlsx");
+        let updated_bytes = write_xlsx_blocking(&updated_path, &workbook).expect("write updated");
+        let updated_pkg = XlsxPackage::from_bytes(updated_bytes.as_ref()).expect("parse updated");
+        assert_eq!(
+            updated_pkg.part(FORMULA_POWER_QUERY_PART),
+            Some(updated_xml.as_slice()),
+            "expected updated save to write the new power-query.xml payload"
+        );
     }
 
     #[test]

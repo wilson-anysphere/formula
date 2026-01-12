@@ -144,6 +144,8 @@ fn main() {
             commands::power_query_credential_list,
             commands::power_query_refresh_state_get,
             commands::power_query_refresh_state_set,
+            commands::power_query_state_get,
+            commands::power_query_state_set,
             commands::sql_query,
             commands::sql_get_schema,
             commands::save_workbook,

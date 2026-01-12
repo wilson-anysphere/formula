@@ -21,6 +21,13 @@ import { createPowerQueryRefreshStateStore, type RefreshStateStore } from "./ref
 import { loadOAuth2ProviderConfigs } from "./oauthProviders.ts";
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+function getTauriInvokeOrNull(): TauriInvoke | null {
+  const invoke = (globalThis as any)?.__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  if (!invoke || typeof invoke !== "function") return null;
+  return invoke;
+}
 
 function getLocalStorageOrNull(): StorageLike | null {
   if (typeof window !== "undefined") {
@@ -56,6 +63,43 @@ function queriesStorageKey(workbookId: string): string {
 
 function legacyQueryStorageKey(workbookId: string): string {
   return `formula.desktop.powerQuery.query:${normalizeWorkbookId(workbookId)}`;
+}
+
+function parseFormulaPowerQueryXml(xml: string): Query[] | null {
+  const start = xml.indexOf("<![CDATA[");
+  if (start === -1) return null;
+  const end = xml.indexOf("]]>", start + "<![CDATA[".length);
+  if (end === -1) return null;
+  const json = xml.slice(start + "<![CDATA[".length, end).trim();
+  const parsed = safeParseJson(json);
+  if (!parsed) return null;
+  if (Array.isArray((parsed as any).queries)) return (parsed as any).queries as Query[];
+  return null;
+}
+
+function sanitizeForWorkbookPersistence<T>(value: T): T {
+  // Best-effort redaction. Credentials should live in the credential store, not the workbook file.
+  const redactedKeys = new Set([
+    "credentials",
+    "password",
+    "secret",
+    "apiKey",
+    "token",
+    "accessToken",
+    "refreshToken",
+    "clientSecret",
+  ]);
+  return JSON.parse(
+    JSON.stringify(value, (key, v) => {
+      if (redactedKeys.has(key)) return undefined;
+      return v;
+    }),
+  ) as T;
+}
+
+function serializeFormulaPowerQueryXml(queries: Query[]): string {
+  const sanitized = sanitizeForWorkbookPersistence({ queries });
+  return `<FormulaPowerQuery version="1"><![CDATA[${JSON.stringify(sanitized)}]]></FormulaPowerQuery>`;
 }
 
 export function loadQueriesFromStorage(workbookId: string): Query[] {
@@ -129,10 +173,12 @@ export class DesktopPowerQueryService {
     delete: (scope: any) => Promise<void>;
   };
   readonly oauth2Manager: OAuth2Manager;
+  readonly ready: Promise<void>;
 
   private readonly emitter = new Emitter<DesktopPowerQueryServiceEvent>();
   private readonly refreshManager: DesktopPowerQueryRefreshManager;
   private readonly getContext: () => QueryExecutionContext;
+  private readonly invoke: TauriInvoke | null;
   private readonly queries = new Map<string, Query>();
   private readonly applyControllers = new Map<string, AbortController>();
   private readonly unsubscribeRefreshEvents: (() => void) | null;
@@ -141,6 +187,7 @@ export class DesktopPowerQueryService {
     this.workbookId = normalizeWorkbookId(options.workbookId);
     this.document = options.document;
     this.getContext = options.getContext ?? (() => getContextForDocument(this.document));
+    this.invoke = getTauriInvokeOrNull();
 
     const creds = createPowerQueryCredentialManager({ prompt: options.credentialPrompt });
     this.credentialStore = creds.store;
@@ -217,11 +264,7 @@ export class DesktopPowerQueryService {
       }
     });
 
-    const initialQueries = loadQueriesFromStorage(this.workbookId);
-    if (initialQueries.length > 0) {
-      this.setQueries(initialQueries);
-      this.refreshManager.triggerOnOpen();
-    }
+    this.ready = this.loadInitialQueries();
   }
 
   onEvent(handler: (event: DesktopPowerQueryServiceEvent) => void): () => void {
@@ -373,8 +416,77 @@ export class DesktopPowerQueryService {
     this.queries.clear();
   }
 
+  private applyQueries(queries: Query[], options?: { persist?: boolean; emit?: boolean }): void {
+    const persist = options?.persist ?? true;
+    const emit = options?.emit ?? true;
+
+    const nextIds = new Set(queries.map((q) => q.id));
+    for (const existingId of this.queries.keys()) {
+      if (!nextIds.has(existingId)) {
+        this.refreshManager.unregisterQuery(existingId);
+      }
+    }
+
+    this.queries.clear();
+    for (const query of queries) {
+      const policy = query.refreshPolicy ?? { type: "manual" };
+      const updated = { ...query, refreshPolicy: policy };
+      this.queries.set(updated.id, updated);
+      try {
+        this.refreshManager.registerQuery(updated, policy);
+      } catch {
+        const fallback: Query = { ...updated, refreshPolicy: { type: "manual" } };
+        this.queries.set(fallback.id, fallback);
+        try {
+          this.refreshManager.registerQuery(fallback, fallback.refreshPolicy);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (persist) this.persistQueries();
+    if (emit) this.emitter.emit({ type: "queries:changed", queries: this.getQueries() });
+  }
+
+  private async loadInitialQueries(): Promise<void> {
+    // Prefer workbook-backed state (portable, file-backed) and fall back to localStorage
+    // for backwards compatibility and non-Tauri contexts.
+    if (this.invoke) {
+      try {
+        const xml = await this.invoke("power_query_state_get");
+        if (typeof xml === "string" && xml.trim()) {
+          const workbookQueries = parseFormulaPowerQueryXml(xml);
+          if (workbookQueries) {
+            // Avoid round-tripping the XML back into the workbook on open; that can cause
+            // byte-for-byte differences even when the user hasn't changed queries.
+            this.applyQueries(workbookQueries, { persist: false, emit: true });
+            saveQueriesToStorage(this.workbookId, workbookQueries);
+            if (workbookQueries.length > 0) this.refreshManager.triggerOnOpen();
+            return;
+          }
+        }
+      } catch {
+        // ignore and fall back
+      }
+    }
+
+    const initialQueries = loadQueriesFromStorage(this.workbookId);
+    if (initialQueries.length > 0) {
+      this.setQueries(initialQueries);
+      this.refreshManager.triggerOnOpen();
+    }
+  }
+
   private persistQueries(): void {
-    saveQueriesToStorage(this.workbookId, this.getQueries());
+    const queries = this.getQueries();
+    saveQueriesToStorage(this.workbookId, queries);
+
+    if (!this.invoke) return;
+    const xml = serializeFormulaPowerQueryXml(queries);
+    this.invoke("power_query_state_set", { xml }).catch(() => {
+      // ignore
+    });
   }
 }
 

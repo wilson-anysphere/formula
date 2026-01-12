@@ -237,8 +237,9 @@ pub fn write_xlsx_from_storage(
         workbook_meta.vba_project_bin.is_some() && matches!(extension.as_deref(), Some("xlsm"));
     let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
+    let wants_power_query = workbook_meta.power_query_xml.is_some();
 
-    if wants_vba || wants_preserved_drawings || wants_preserved_pivots {
+    if wants_vba || wants_preserved_drawings || wants_preserved_pivots || wants_power_query {
         let mut pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).context("parse generated xlsx")?;
 
         if wants_vba {
@@ -259,6 +260,13 @@ pub fn write_xlsx_from_storage(
         if let Some(preserved) = workbook_meta.preserved_pivot_parts.as_ref() {
             pkg.apply_preserved_pivot_parts(preserved)
                 .context("apply preserved pivot parts")?;
+        }
+
+        match workbook_meta.power_query_xml.as_ref() {
+            Some(bytes) => pkg.set_part("xl/formula/power-query.xml", bytes.clone()),
+            None => {
+                pkg.parts_map_mut().remove("xl/formula/power-query.xml");
+            }
         }
 
         bytes = pkg.write_to_bytes().context("repack xlsx package")?;

@@ -188,30 +188,46 @@ export function QueryEditorPanelContainer(props: Props) {
 
   useEffect(() => {
     if (!service) return;
+    let cancelled = false;
 
-    const existing = service.getQueries();
-    if (existing.length > 0) {
-      setQueries(existing);
-      const preferredId = loadSelectedQueryId(workbookId);
-      const selected =
-        (preferredId && existing.find((q) => q.id === preferredId)) ?? existing.find((q) => q.id === activeQueryIdRef.current) ?? existing[0];
-      if (selected) {
-        setActiveQueryId(selected.id);
-        saveSelectedQueryId(workbookId, selected.id);
-        setQuery(selected);
+    void (async () => {
+      try {
+        await service.ready;
+      } catch {
+        // ignore
       }
-      return;
-    }
+      if (cancelled) return;
 
-    if (hasSeededDefaultQuery.current) return;
+      const existing = service.getQueries();
+      if (existing.length > 0) {
+        setQueries(existing);
+        const preferredId = loadSelectedQueryId(workbookId);
+        const selected =
+          (preferredId && existing.find((q) => q.id === preferredId)) ??
+          existing.find((q) => q.id === activeQueryIdRef.current) ??
+          existing[0];
+        if (selected) {
+          setActiveQueryId(selected.id);
+          saveSelectedQueryId(workbookId, selected.id);
+          setQuery(selected);
+        }
+        return;
+      }
 
-    const seeded = defaultQuery();
-    service.setQueries([seeded]);
-    hasSeededDefaultQuery.current = true;
-    setQueries([seeded]);
-    setActiveQueryId(seeded.id);
-    saveSelectedQueryId(workbookId, seeded.id);
-    setQuery(seeded);
+      if (hasSeededDefaultQuery.current) return;
+
+      const seeded = defaultQuery();
+      service.setQueries([seeded]);
+      hasSeededDefaultQuery.current = true;
+      setQueries([seeded]);
+      setActiveQueryId(seeded.id);
+      saveSelectedQueryId(workbookId, seeded.id);
+      setQuery(seeded);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [service, workbookId]);
 
   useEffect(() => {

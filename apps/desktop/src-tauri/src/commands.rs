@@ -665,6 +665,33 @@ pub async fn power_query_refresh_state_set(
     .map_err(|e| e.to_string())?
 }
 
+/// Power Query: get the workbook-backed query definition payload (if present).
+///
+/// This returns the raw XML part contents stored at `xl/formula/power-query.xml` (UTF-8) or `null`
+/// when no workbook is loaded / the part is absent.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn power_query_state_get(state: State<'_, SharedAppState>) -> Option<String> {
+    let state = state.inner().lock().unwrap();
+    let workbook = state.get_workbook().ok()?;
+    let bytes = workbook.power_query_xml.as_deref()?;
+    std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+}
+
+/// Power Query: set (or clear) the workbook-backed query definition payload in memory.
+///
+/// This updates the active workbook's `xl/formula/power-query.xml` part content but does not
+/// persist it to disk until the workbook is saved.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn power_query_state_set(xml: Option<String>, state: State<'_, SharedAppState>) {
+    let mut state = state.inner().lock().unwrap();
+    let Ok(workbook) = state.get_workbook_mut() else {
+        return;
+    };
+    workbook.power_query_xml = xml.map(String::into_bytes);
+}
+
 /// Execute a SQL query against a local database connection.
 ///
 /// Used by the desktop Power Query engine (`source.type === "database"`).

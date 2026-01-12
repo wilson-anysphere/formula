@@ -6,7 +6,7 @@ import { DataTable } from "../../../../../packages/power-query/src/table.js";
 import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
-import { DesktopPowerQueryService } from "../service.ts";
+import { DesktopPowerQueryService, saveQueriesToStorage } from "../service.ts";
 
 function createMemoryStorage() {
   const map = new Map();
@@ -193,6 +193,139 @@ test("DesktopPowerQueryService persists query definitions across instances", asy
       Object.defineProperty(globalThis, "localStorage", originalStorageDescriptor);
     } else {
       delete globalThis.localStorage;
+    }
+  }
+});
+
+test("DesktopPowerQueryService prefers workbook-backed queries over localStorage", async () => {
+  const originalStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
+  const storage = createMemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+
+  try {
+    const workbookId = "wb_workbook_part";
+
+    const localQuery = {
+      id: "q_local",
+      name: "LocalStorage",
+      source: { type: "range", range: { values: [["A"], [1]], hasHeaders: true } },
+      steps: [],
+      refreshPolicy: { type: "manual" },
+    };
+    saveQueriesToStorage(workbookId, [localQuery]);
+
+    const workbookQuery = {
+      id: "q_workbook",
+      name: "WorkbookPart",
+      source: { type: "range", range: { values: [["B"], [2]], hasHeaders: true } },
+      steps: [],
+      refreshPolicy: { type: "manual" },
+    };
+    const xml = `<FormulaPowerQuery version="1"><![CDATA[${JSON.stringify({ queries: [workbookQuery] })}]]></FormulaPowerQuery>`;
+
+    /** @type {{ cmd: string, args?: any }[]} */
+    const calls = [];
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (cmd, args) => {
+            calls.push({ cmd, args });
+            if (cmd === "power_query_state_get") return xml;
+            if (cmd === "power_query_state_set") return null;
+            throw new Error(`Unexpected invoke(${cmd})`);
+          },
+        },
+      },
+    });
+
+    const service = new DesktopPowerQueryService({
+      workbookId,
+      document: new DocumentController({ engine: new MockEngine() }),
+      engine: { async executeQueryWithMeta() { return { table: DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true }), meta: {} }; } },
+      getContext: () => ({}),
+    });
+    await service.ready;
+
+    const queries = service.getQueries();
+    assert.equal(queries.length, 1);
+    assert.equal(queries[0].id, workbookQuery.id);
+
+    assert.ok(calls.some((c) => c.cmd === "power_query_state_get"), "expected service to call power_query_state_get");
+    service.dispose();
+  } finally {
+    if (originalStorageDescriptor) {
+      Object.defineProperty(globalThis, "localStorage", originalStorageDescriptor);
+    } else {
+      delete globalThis.localStorage;
+    }
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+    } else {
+      delete globalThis.__TAURI__;
+    }
+  }
+});
+
+test("DesktopPowerQueryService persists queries to the workbook part via Tauri", async () => {
+  const originalStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
+  const storage = createMemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+
+  try {
+    /** @type {{ cmd: string, args?: any }[]} */
+    const calls = [];
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (cmd, args) => {
+            calls.push({ cmd, args });
+            if (cmd === "power_query_state_get") return null;
+            if (cmd === "power_query_state_set") return null;
+            throw new Error(`Unexpected invoke(${cmd})`);
+          },
+        },
+      },
+    });
+
+    const service = new DesktopPowerQueryService({
+      workbookId: "wb_persist_workbook_part",
+      document: new DocumentController({ engine: new MockEngine() }),
+      engine: { async executeQueryWithMeta() { return { table: DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true }), meta: {} }; } },
+      getContext: () => ({}),
+    });
+    await service.ready;
+
+    service.registerQuery({
+      id: "q1",
+      name: "Persisted",
+      source: { type: "range", range: { values: [["A"], [1]], hasHeaders: true } },
+      steps: [],
+      refreshPolicy: { type: "manual" },
+      credentials: { token: "should-not-be-persisted" },
+    });
+    await flushMicrotasks();
+
+    const setCalls = calls.filter((c) => c.cmd === "power_query_state_set");
+    assert.ok(setCalls.length >= 1, "expected persist to call power_query_state_set");
+    const last = setCalls[setCalls.length - 1];
+    assert.ok(typeof last.args?.xml === "string" && last.args.xml.includes("<FormulaPowerQuery"), "expected XML payload");
+    assert.ok(!last.args.xml.includes("should-not-be-persisted"), "expected credentials to be redacted");
+
+    service.dispose();
+  } finally {
+    if (originalStorageDescriptor) {
+      Object.defineProperty(globalThis, "localStorage", originalStorageDescriptor);
+    } else {
+      delete globalThis.localStorage;
+    }
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+    } else {
+      delete globalThis.__TAURI__;
     }
   }
 });

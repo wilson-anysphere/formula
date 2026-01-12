@@ -544,6 +544,8 @@ impl AppState {
             recovered.origin_path = workbook.origin_path.clone();
             recovered.origin_xlsx_bytes = workbook.origin_xlsx_bytes.clone();
             recovered.origin_xlsb_path = workbook.origin_xlsb_path.clone();
+            recovered.power_query_xml = workbook.power_query_xml.clone();
+            recovered.original_power_query_xml = workbook.original_power_query_xml.clone();
             recovered.vba_project_bin = workbook.vba_project_bin.clone();
             recovered.macro_fingerprint = workbook.macro_fingerprint.clone();
             recovered.preserved_drawing_parts = workbook.preserved_drawing_parts.clone();
@@ -692,6 +694,7 @@ impl AppState {
         // previously saved workbook bytes).
         workbook.cell_input_baseline.clear();
         workbook.original_print_settings = workbook.print_settings.clone();
+        workbook.original_power_query_xml = workbook.power_query_xml.clone();
         for sheet in &mut workbook.sheets {
             sheet.clear_dirty_cells();
         }
