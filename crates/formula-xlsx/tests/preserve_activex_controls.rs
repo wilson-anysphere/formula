@@ -25,6 +25,15 @@ fn relationship_target(rels_xml: &str, rel_id: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn sheet_control_rel_id(sheet_xml: &str) -> String {
+    let doc = Document::parse(sheet_xml).expect("parse sheet xml");
+    let control = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "control")
+        .expect("sheet must contain a control element");
+    attr_rel_id(control).expect("control missing r:id")
+}
+
 #[test]
 fn preserves_activex_controls_across_regeneration() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -98,14 +107,7 @@ fn preserves_activex_controls_across_regeneration() {
         "sheet1.xml missing control relationship id",
     );
 
-    let control_rel_id = {
-        let doc = Document::parse(sheet_xml).expect("parse sheet xml");
-        let control = doc
-            .descendants()
-            .find(|n| n.is_element() && n.tag_name().name() == "control")
-            .expect("sheet must contain a control element");
-        attr_rel_id(control).expect("control missing r:id")
-    };
+    let control_rel_id = sheet_control_rel_id(sheet_xml);
 
     let sheet_rels = std::str::from_utf8(
         merged_pkg
@@ -156,5 +158,86 @@ fn preserves_activex_controls_across_regeneration() {
     assert!(
         content_types.contains("Extension=\"bin\""),
         "content types missing default for .bin",
+    );
+}
+
+#[test]
+fn preserves_activex_controls_when_sheet_relationship_ids_conflict() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/activex-control.xlsx");
+    let fixture_bytes = std::fs::read(&fixture).expect("read activex-control fixture");
+    let source_pkg = XlsxPackage::from_bytes(&fixture_bytes).expect("load fixture package");
+    let preserved = source_pkg
+        .preserve_drawing_parts()
+        .expect("preserve drawing parts");
+
+    // Use a destination fixture that already has `rId1` in the worksheet `.rels`
+    // so applying the preserved `<controls>` fragment must remap relationship IDs.
+    let destination =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/image.xlsx");
+    let destination_bytes = std::fs::read(&destination).expect("read destination fixture");
+    let mut destination_pkg =
+        XlsxPackage::from_bytes(&destination_bytes).expect("load destination package");
+
+    let destination_rels_xml = std::str::from_utf8(
+        destination_pkg
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .expect("destination sheet rels exist"),
+    )
+    .expect("destination sheet rels is utf-8");
+    let destination_rels_doc =
+        Document::parse(destination_rels_xml).expect("parse destination rels");
+    let destination_rel_ids: std::collections::HashSet<String> = destination_rels_doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Relationship")
+        .filter_map(|n| n.attribute("Id").map(|s| s.to_string()))
+        .collect();
+    assert!(
+        destination_rel_ids.contains("rId1"),
+        "expected destination fixture to use rId1 already",
+    );
+    let drawing_target_before =
+        relationship_target(destination_rels_xml, "rId1").expect("destination drawing target");
+
+    destination_pkg
+        .apply_preserved_drawing_parts(&preserved)
+        .expect("apply preserved parts");
+    let merged_bytes = destination_pkg
+        .write_to_bytes()
+        .expect("write merged workbook");
+    let merged_pkg = XlsxPackage::from_bytes(&merged_bytes).expect("load merged package");
+
+    let merged_sheet_xml = std::str::from_utf8(
+        merged_pkg
+            .part("xl/worksheets/sheet1.xml")
+            .expect("merged sheet1.xml exists"),
+    )
+    .expect("merged sheet1.xml is utf-8");
+    let control_rel_id = sheet_control_rel_id(merged_sheet_xml);
+    assert!(
+        !destination_rel_ids.contains(&control_rel_id),
+        "control relationship id should be remapped when destination already uses {:?}; got {}",
+        destination_rel_ids,
+        control_rel_id,
+    );
+
+    let merged_rels_xml = std::str::from_utf8(
+        merged_pkg
+            .part("xl/worksheets/_rels/sheet1.xml.rels")
+            .expect("merged sheet rels exist"),
+    )
+    .expect("merged sheet rels is utf-8");
+    let drawing_target_after =
+        relationship_target(merged_rels_xml, "rId1").expect("merged drawing target");
+    assert_eq!(
+        drawing_target_before, drawing_target_after,
+        "existing drawing relationship should remain unchanged"
+    );
+
+    let control_target =
+        relationship_target(merged_rels_xml, &control_rel_id).expect("control relationship exists");
+    assert!(
+        control_target.ends_with("ctrlProps/ctrlProp1.xml"),
+        "control relationship should target ctrlProps: got {control_target}",
     );
 }
