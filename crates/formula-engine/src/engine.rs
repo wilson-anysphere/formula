@@ -5281,7 +5281,29 @@ fn bytecode_expr_within_grid_limits(
                 Err(BytecodeCompileReason::ExceedsRangeCellLimit)
             }
         }
-        bytecode::Expr::Unary { expr, .. } => bytecode_expr_within_grid_limits(expr, origin),
+        bytecode::Expr::Unary { op, expr } => match op {
+            bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
+                bytecode_expr_within_grid_limits(expr, origin)
+            }
+            bytecode::ast::UnaryOp::ImplicitIntersection => match expr.as_ref() {
+                // Implicit intersection only dereferences at most one cell from a range, so it
+                // doesn't require allocating columnar buffers proportional to the range size.
+                // Skip the range-cell-count limit here while still validating grid bounds.
+                bytecode::Expr::RangeRef(r) => {
+                    let resolved = r.resolve(origin);
+                    if resolved.row_start < 0
+                        || resolved.col_start < 0
+                        || resolved.row_end >= EXCEL_MAX_ROWS_I32
+                        || resolved.col_end >= EXCEL_MAX_COLS_I32
+                    {
+                        Err(BytecodeCompileReason::ExceedsGridLimits)
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => bytecode_expr_within_grid_limits(expr, origin),
+            },
+        },
         bytecode::Expr::Binary { left, right, .. } => {
             bytecode_expr_within_grid_limits(left, origin)?;
             bytecode_expr_within_grid_limits(right, origin)?;
@@ -7180,6 +7202,30 @@ mod tests {
         // Full-sheet ranges would require enormous columnar buffers; skip bytecode compilation
         // so evaluation uses the AST engine's sparse range handling instead.
         assert_eq!(engine.bytecode_program_count(), 0);
+    }
+
+    #[test]
+    fn bytecode_compiler_allows_huge_ranges_for_implicit_intersection() {
+        let mut engine = Engine::new();
+
+        // A nearly full-sheet range (excluding the last column) is far beyond the bytecode range
+        // cell-count limit, but implicit intersection only needs to check membership and/or
+        // dereference a single cell.
+        engine
+            .set_cell_formula("Sheet1", "XFD1", "=@A1:XFC1048576")
+            .unwrap();
+
+        // Ensure we're exercising the bytecode path.
+        assert_eq!(engine.bytecode_program_count(), 1);
+
+        engine.recalculate_single_threaded();
+
+        // XFD1 is outside the rectangle (the range ends at XFC), so implicit intersection should
+        // fail with #VALUE!.
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "XFD1"),
+            Value::Error(ErrorKind::Value)
+        );
     }
 
     #[test]
