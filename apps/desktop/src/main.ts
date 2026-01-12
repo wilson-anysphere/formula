@@ -594,6 +594,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const connected = (() => {
       if (providerStatus === "connected") return true;
+      if (providerStatus === "disconnected") return false;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const anyProvider = currentProvider as any;
@@ -608,19 +609,18 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       if (typeof anyProvider.wsconnecting === "boolean") return anyProvider.wsconnecting;
 
       // y-websocket reports `status: "disconnected"` both before the first connect and
-      // when reconnecting. Treat "disconnected before first sync" as Connecting.
+      // when reconnecting. Treat "not yet synced" as Connecting to avoid flashing
+      // Disconnected at startup.
+      if (!hasEverSynced && !connected) return true;
       if (!hasEverSynced && providerStatus === "disconnected") return true;
-
       return false;
     })();
 
-    const state = (() => {
-      if (connected) return synced ? "Synced" : "Connected";
-      if (connecting || !hasEverSynced) return "Connecting…";
-      return "Disconnected";
-    })();
+    const connectionLabel = connected ? "Connected" : connecting ? "Connecting…" : "Disconnected";
 
-    setIndicatorText(`${docId} • ${state}`);
+    const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : hasEverSynced ? "Not synced" : "Syncing…";
+
+    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`);
   };
 
   abortController.signal.addEventListener("abort", () => {
