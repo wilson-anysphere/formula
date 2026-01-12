@@ -133,6 +133,8 @@ variant shapes are documented further below.
   discover from a real Excel-generated file and preserve byte-for-byte until verified.
   - Candidate observed in a synthetic round-trip test:
     - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
+  - Candidate observed in synthetic fixtures / corpus tooling:
+    - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
 
 #### Minimal example (`xl/cellImages.xml`) (synthetic)
 
@@ -456,6 +458,9 @@ Observed values (from in-repo tests; preserve whatever is in the source workbook
 Excel uses Microsoft-specific content type strings for this part, and the exact string may vary across
 versions/builds.
 
+Note: MIME types are case-insensitive, but for round-trip safety we preserve the `ContentType` string
+byte-for-byte (including its original capitalization).
+
 **Round-trip rule:** treat any `<Override PartName="/xl/cellImages.xml" .../>` (or the lowercase variant) as
 authoritative and preserve its `ContentType` value byte-for-byte.
 
@@ -537,6 +542,8 @@ Partially known (fixture-driven details still recommended):
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
   - Candidate observed in `crates/formula-xlsx/tests/cellimages_roundtrip_preserves_parts.rs`:
     - `Type="http://schemas.microsoft.com/office/2020/07/relationships/cellImages"`
+  - Candidate observed in synthetic fixtures / corpus tooling:
+    - `Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"`
   - **Round-trip / detection rule:** identify the relationship by resolved `Target`
     (`/xl/cellImages.xml` or `/xl/cellimages.xml`) rather than hardcoding a single `Type`.
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
