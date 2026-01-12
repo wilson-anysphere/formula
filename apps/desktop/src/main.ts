@@ -2963,11 +2963,15 @@ function renderSheetPosition(sheets: SheetUiInfo[], activeId: string): void {
     // but guard so the UI doesn't render an impossible "Sheet 1 of 0" state if the
     // workbook metadata becomes inconsistent (e.g. corrupt/remote data).
     sheetPositionEl.textContent = tWithVars("statusBar.sheetPosition", { position: 0, total: 0 });
+    sheetPositionEl.dataset.sheetPosition = "0";
+    sheetPositionEl.dataset.sheetTotal = "0";
     return;
   }
   const index = sheets.findIndex((sheet) => sheet.id === activeId);
   const position = index >= 0 ? index + 1 : 1;
   sheetPositionEl.textContent = tWithVars("statusBar.sheetPosition", { position, total });
+  sheetPositionEl.dataset.sheetPosition = String(position);
+  sheetPositionEl.dataset.sheetTotal = String(total);
 }
 
 let syncingSheetUi = false;

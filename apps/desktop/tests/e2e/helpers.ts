@@ -332,6 +332,14 @@ export async function expectSheetPosition(
         try {
           return await page.evaluate(() => {
             const el = document.querySelector('[data-testid="sheet-position"]');
+            if (!el) return null;
+            const positionAttr = el.getAttribute("data-sheet-position");
+            const totalAttr = el.getAttribute("data-sheet-total");
+            if (positionAttr != null && totalAttr != null) {
+              const position = Number(positionAttr);
+              const total = Number(totalAttr);
+              if (Number.isFinite(position) && Number.isFinite(total)) return { position, total };
+            }
             const raw = (el?.textContent ?? "").trim();
             const nums = raw.match(/\d+/g) ?? [];
             if (nums.length < 2) return null;
