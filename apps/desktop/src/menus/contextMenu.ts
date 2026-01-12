@@ -2,7 +2,13 @@ export type ContextMenuSeparator = { type: "separator" };
 
 export type ContextMenuLeading = {
   type: "swatch";
-  color: string;
+  /**
+   * CSS variable token to use for the swatch background (e.g. `--sheet-tab-red`).
+   *
+   * This stays token-based so the context menu does not hardcode colors and can
+   * adapt to theme/forced-colors overrides.
+   */
+  token: string;
 };
 
 export type ContextMenuActionItem = {
@@ -452,7 +458,12 @@ export class ContextMenu {
         const swatch = document.createElement("span");
         swatch.className = "context-menu__leading context-menu__leading--swatch";
         swatch.setAttribute("aria-hidden", "true");
-        swatch.style.backgroundColor = item.leading.color;
+        const token = String(item.leading.token ?? "").trim();
+        const tokenName = token.startsWith("--") ? token.slice(2) : token;
+        if (tokenName) {
+          // See styles/context-menu.css for the token->background mapping.
+          swatch.classList.add(`context-menu__leading--swatch-${tokenName}`);
+        }
         btn.appendChild(swatch);
       }
 
