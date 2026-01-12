@@ -10,6 +10,7 @@ use formula_model::drawings::{ImageData, ImageId};
 use roxmltree::Document;
 
 use crate::drawings::content_type_for_extension;
+use crate::drawings::REL_TYPE_IMAGE;
 use crate::path::resolve_target;
 use crate::XlsxError;
 
