@@ -1,6 +1,6 @@
 import { createEngineClient, type CellChange, type CellScalar } from "@formula/engine";
 import { computeFillEdits, type FillSourceCell } from "@formula/fill-engine";
-import type { CellRange } from "@formula/grid";
+import type { CellRange, GridAxisSizeChange } from "@formula/grid";
 import { CanvasGrid, GridPlaceholder, MockCellProvider, type GridApi } from "@formula/grid";
 import {
   assignFormulaReferenceColors,
@@ -33,6 +33,21 @@ function EngineDemoApp() {
   const [provider, setProvider] = useState<EngineCellProvider | null>(null);
   const [activeSheet, setActiveSheet] = useState("Sheet1");
   const previousSheetRef = useRef<string | null>(null);
+  const activeSheetRef = useRef(activeSheet);
+  activeSheetRef.current = activeSheet;
+
+  // Persist per-sheet axis sizes (row heights / col widths). Values are stored in "base" units
+  // (CSS pixels at zoom=1) so they can be reapplied consistently across zoom changes.
+  const axisSizesBySheetRef = useRef(
+    new Map<
+      string,
+      {
+        cols: Map<number, number>;
+        rows: Map<number, number>;
+      }
+    >()
+  );
+  const lastAppliedAxisSheetRef = useRef<string | null>(null);
 
   // +1 for frozen header row/col.
   const rowCount = 1_000_000 + 1;
@@ -372,6 +387,46 @@ function EngineDemoApp() {
     if (previousSheet && previousSheet !== activeSheet) {
       void provider.recalculate(activeSheet);
     }
+
+    // Restore per-sheet row/col sizes. CanvasGridRenderer keeps axis sizes in-memory, so without
+    // this we'd end up carrying widths/heights from the previous sheet into the new one.
+    const api = gridApiRef.current;
+    if (!api) return;
+
+    const getSheetSizes = (sheet: string) => {
+      let entry = axisSizesBySheetRef.current.get(sheet);
+      if (!entry) {
+        entry = { cols: new Map(), rows: new Map() };
+        axisSizesBySheetRef.current.set(sheet, entry);
+      }
+      return entry;
+    };
+
+    const nextSheetSizes = getSheetSizes(activeSheet);
+    const prevSheet = lastAppliedAxisSheetRef.current;
+    const prevSheetSizes = prevSheet ? getSheetSizes(prevSheet) : null;
+
+    const zoom = api.getZoom();
+
+    const allCols = new Set<number>();
+    for (const col of nextSheetSizes.cols.keys()) allCols.add(col);
+    if (prevSheetSizes) for (const col of prevSheetSizes.cols.keys()) allCols.add(col);
+    for (const col of allCols) {
+      const base = nextSheetSizes.cols.get(col);
+      if (base === undefined) api.resetColWidth(col);
+      else api.setColWidth(col, base * zoom);
+    }
+
+    const allRows = new Set<number>();
+    for (const row of nextSheetSizes.rows.keys()) allRows.add(row);
+    if (prevSheetSizes) for (const row of prevSheetSizes.rows.keys()) allRows.add(row);
+    for (const row of allRows) {
+      const base = nextSheetSizes.rows.get(row);
+      if (base === undefined) api.resetRowHeight(row);
+      else api.setRowHeight(row, base * zoom);
+    }
+
+    lastAppliedAxisSheetRef.current = activeSheet;
   }, [provider, activeSheet]);
 
   useEffect(() => {
@@ -551,6 +606,28 @@ function EngineDemoApp() {
     if (isFormulaEditing || editingCell) return;
     activeCellRef.current = cell;
     setActiveCell(cell);
+  };
+
+  const onAxisSizeChange = (change: GridAxisSizeChange) => {
+    const sheet = activeSheetRef.current;
+    let entry = axisSizesBySheetRef.current.get(sheet);
+    if (!entry) {
+      entry = { cols: new Map(), rows: new Map() };
+      axisSizesBySheetRef.current.set(sheet, entry);
+    }
+
+    // Store sizes in base units (zoom=1) so we can restore regardless of current zoom.
+    const baseSize = change.size / change.zoom;
+    const baseDefault = change.defaultSize / change.zoom;
+    const isDefault = Math.abs(baseSize - baseDefault) < 1e-6;
+
+    if (change.kind === "col") {
+      if (isDefault) entry.cols.delete(change.index);
+      else entry.cols.set(change.index, baseSize);
+    } else {
+      if (isDefault) entry.rows.delete(change.index);
+      else entry.rows.set(change.index, baseSize);
+    }
   };
 
   const getCopyRange = (): CellRange | null => {
@@ -1185,6 +1262,7 @@ function EngineDemoApp() {
                 frozenRows={frozenRows}
                 frozenCols={frozenCols}
                 enableResize
+                onAxisSizeChange={onAxisSizeChange}
                 onZoomChange={setZoom}
                 apiRef={(api) => {
                   gridApiRef.current = api;
