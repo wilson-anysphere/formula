@@ -171,7 +171,7 @@ generate the capability JSON schema and list the available permissions:
 ```bash
 # Generates `apps/desktop/src-tauri/gen/schemas/desktop-schema.json` (ignored by git).
 # On Linux this requires the system WebView toolchain (gtk/webkit2gtk) because it compiles the desktop feature set.
-bash scripts/cargo_agent.sh check -p desktop --features desktop --lib
+bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --lib
 
 # Lists all permission identifiers available to this app (core + enabled plugins).
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
