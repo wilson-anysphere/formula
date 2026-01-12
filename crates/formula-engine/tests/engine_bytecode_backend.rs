@@ -4569,6 +4569,72 @@ fn bytecode_backend_let_binding_value_can_reference_defined_name_it_shadows() {
 }
 
 #[test]
+fn bytecode_backend_sheet_qualified_defined_name_constant_bypasses_let_locals() {
+    // LET locals should only shadow unqualified identifiers. A sheet-qualified defined name should
+    // bypass the LET local scope and resolve as a defined name.
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Sheet("Sheet1"),
+            NameDefinition::Constant(Value::Number(0.2)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(RATE, 1, Sheet1!RATE*2+RATE)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(1.4));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
+fn bytecode_backend_sheet_qualified_defined_name_static_ref_bypasses_let_locals() {
+    // Same as the constant case, but for reference defined names that are inlined to static
+    // cell/range references for bytecode eligibility.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 100.0).unwrap();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$B$1".to_string()),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(RATE, 1, SUM(Sheet1!RATE)+RATE)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(101.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_constant_defined_names_case_insensitive_and_recompiles() {
     // Exercise case-insensitive name matching and ensure bytecode programs are recompiled when
     // a constant defined name changes (since the constant is inlined into the bytecode AST).
