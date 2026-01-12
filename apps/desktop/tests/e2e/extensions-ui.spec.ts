@@ -89,6 +89,15 @@ test.describe("Extensions UI integration", () => {
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
     expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
 
+    const sandboxDescriptor = await webviewFrame!.evaluate(() => {
+      const desc = Object.getOwnPropertyDescriptor(window, "__formulaWebviewSandbox") as any;
+      if (!desc) return null;
+      return { writable: desc.writable, configurable: desc.configurable };
+    });
+    expect(sandboxDescriptor, "webview sandbox marker should be a defined window property").toBeTruthy();
+    expect(sandboxDescriptor?.writable, "webview sandbox marker should not be writable").toBe(false);
+    expect(sandboxDescriptor?.configurable, "webview sandbox marker should not be configurable").toBe(false);
+
     const tauriTypes = await webviewFrame!.evaluate(() => ({
       tauri: typeof (window as any).__TAURI__,
       tauriIpc: typeof (window as any).__TAURI_IPC__,
