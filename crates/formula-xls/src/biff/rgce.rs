@@ -294,6 +294,24 @@ pub(crate) fn decode_biff8_rgce_with_base(
         input = &input[1..];
 
         match ptg {
+            // PtgExp / PtgTbl: shared/array formula tokens.
+            //
+            // These are not expected in NAME records, but can appear in the wild. We don't have
+            // enough context to resolve them, so we render a parseable placeholder while still
+            // consuming the fixed-size payload to keep the token stream aligned.
+            //
+            // Payload: 4 bytes (row/col).
+            0x01 | 0x02 => {
+                if input.len() < 4 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[4..];
+                warnings.push(format!(
+                    "encountered unsupported rgce token 0x{ptg:02X} (PtgExp/PtgTbl); rendering #UNKNOWN!"
+                ));
+                stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
+            }
             // Binary operators.
             0x03..=0x11 => {
                 let Some(op) = op_str(ptg) else {
@@ -439,6 +457,21 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     return unsupported(ptg, warnings);
                 }
             },
+            // Ptg* token 0x18 (and class variants) has an opaque 5-byte payload.
+            //
+            // Some `.xls` files include this token (calamine treats it as a fixed-size payload and
+            // skips it). It does not affect the printed formula text, but we must consume the
+            // payload to keep the stream aligned so subsequent tokens can still be decoded.
+            0x18 | 0x38 | 0x58 | 0x78 => {
+                if input.len() < 5 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[5..];
+                warnings.push(format!(
+                    "skipped opaque 5-byte payload token 0x{ptg:02X} (Ptg18 variant) in rgce"
+                ));
+            }
             // PtgAttr: [grbit: u8][wAttr: u16]
             //
             // Most PtgAttr bits are evaluation hints (or formatting metadata) that do not affect
@@ -530,6 +563,20 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 bytes.copy_from_slice(&input[..8]);
                 input = &input[8..];
                 stack.push(ExprFragment::new(f64::from_le_bytes(bytes).to_string()));
+            }
+            // PtgArray: [unused: 7 bytes] + array constant values stored in rgcb.
+            //
+            // We only have access to the `rgce` token stream (as stored in the NAME record), not
+            // the trailing `rgcb` data blocks, so we cannot reconstruct the array literal. Instead
+            // we render a parseable placeholder and continue decoding.
+            0x20 | 0x40 | 0x60 => {
+                if input.len() < 7 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[7..];
+                warnings.push("PtgArray constant is not supported; rendering #UNKNOWN!".to_string());
+                stack.push(ExprFragment::new("#UNKNOWN!".to_string()));
             }
             // PtgFunc: [iftab: u16] (fixed arg count is implicit).
             0x21 | 0x41 | 0x61 => {
@@ -2007,6 +2054,55 @@ mod tests {
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(!decoded.warnings.is_empty(), "expected warnings");
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_array_as_unknown_error_literal_and_continues() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // 1 + {array_constant} where the array constant is stored out-of-band in rgcb (not
+        // available to the NAME rgce decoder). We should still keep the result parseable.
+        let rgce = [
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x20, // PtgArray
+            0, 0, 0, 0, 0, 0, 0, // 7-byte opaque header
+            0x03, // PtgAdd
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "1+#UNKNOWN!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgArray")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg18_opaque_payload_token_as_no_op() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Some `.xls` files include an unknown ptg=0x18 token with a 5-byte payload. It should be
+        // safe to skip for printing as long as we consume the payload.
+        let rgce = [
+            0x18, 0x11, 0x22, 0x33, 0x44, 0x55, // ptg=0x18 + 5-byte payload
+            0x1E, 0x01, 0x00, // PtgInt 1
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "1");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("Ptg18")),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
