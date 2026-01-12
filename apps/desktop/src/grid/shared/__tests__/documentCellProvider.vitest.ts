@@ -243,6 +243,31 @@ describe("DocumentCellProvider formatting integration", () => {
     const doc = new DocumentController();
 
     // Back-compat: some historical snapshots/tests/clipboard round-trips store flat keys.
+    doc.setRangeFormat("Sheet1", "A1", { bold: true, backgroundColor: "#FFFFFF00" });
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 2 + headerRows,
+      colCount: 2 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(headerRows, headerCols);
+    expect(cell).not.toBeNull();
+    expect(cell?.style?.fontWeight).toBe("700");
+    expect(cell?.style?.fill).toBe("#ffff00");
+  });
+
+  it("supports additional flat/clipboard-ish aliases (snake_case and legacy keys)", () => {
+    const doc = new DocumentController();
+
+    // Back-compat: some historical snapshots/tests/clipboard round-trips store flat keys.
     doc.setRangeFormat("Sheet1", "A1", {
       bold: true,
       backgroundColor: "#FFFFFF00",
