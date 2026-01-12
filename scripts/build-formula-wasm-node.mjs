@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
-import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -146,6 +145,13 @@ function assertCommand(cmd, args, message) {
 }
 
 function buildWithWasmPack() {
+  // wasm-pack will read an existing `package.json` from the output directory and treat it as a
+  // template. Its parser is stricter than npm's (e.g. `repository` must be a string, not the
+  // `{ type, url }` object form), which can make incremental builds fail after a successful build.
+  // Since we only call wasm-pack when we intend to rebuild, wipe the output dir to match CI's
+  // clean builds and avoid brittle template parsing.
+  rmSync(outDir, { recursive: true, force: true });
+
   const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? defaultJobs;
   const makeflags = process.env.MAKEFLAGS ?? `-j${jobs}`;
   const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
