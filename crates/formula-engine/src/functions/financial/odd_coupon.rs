@@ -192,6 +192,73 @@ fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> Ex
     }
 }
 
+fn is_end_of_month(date: i32, system: ExcelDateSystem) -> ExcelResult<bool> {
+    Ok(date_time::eomonth(date, 0, system)? == date)
+}
+
+fn coupon_date_with_eom(
+    anchor: i32,
+    months: i32,
+    eom: bool,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    if eom {
+        date_time::eomonth(anchor, months, system)
+    } else {
+        date_time::edate(anchor, months, system)
+    }
+}
+
+fn coupon_schedule_from_maturity(
+    first_coupon: i32,
+    maturity: i32,
+    months_per_period: i32,
+    system: ExcelDateSystem,
+) -> ExcelResult<Vec<i32>> {
+    let eom = is_end_of_month(maturity, system)?;
+
+    // Generate coupon dates by stepping from maturity backward in fixed month increments.
+    // This matches Excel's COUP* schedule behavior: the month-step anchor is the maturity date,
+    // not the first coupon date (which may be clamped in shorter months).
+    let mut dates_rev = Vec::new();
+
+    // Hard cap to avoid pathological loops on invalid inputs. Excel itself errors in these cases.
+    const MAX_COUPON_DATES: usize = 1000;
+
+    for k in 0..MAX_COUPON_DATES {
+        let months_back = i32::try_from(k).map_err(|_| ExcelError::Num)?;
+        let offset = months_back
+            .checked_mul(months_per_period)
+            .ok_or(ExcelError::Num)?;
+        let offset = -offset;
+
+        let d = coupon_date_with_eom(maturity, offset, eom, system)?;
+        if d < first_coupon {
+            break;
+        }
+        dates_rev.push(d);
+        if d == first_coupon {
+            break;
+        }
+    }
+
+    if dates_rev.is_empty() {
+        return Err(ExcelError::Num);
+    }
+
+    dates_rev.reverse();
+    if dates_rev[0] != first_coupon {
+        return Err(ExcelError::Num);
+    }
+    if *dates_rev.last().unwrap() != maturity {
+        // This can only happen if `first_coupon > maturity` (validated elsewhere) or if date
+        // stepping failed to hit maturity due to an inconsistent input schedule.
+        return Err(ExcelError::Num);
+    }
+
+    Ok(dates_rev)
+}
+
 /// Coupon-period length `E` in days, following the same basis conventions as the regular bond
 /// functions (`COUP*`, `PRICE`, `YIELD`).
 fn coupon_period_e(
@@ -257,18 +324,9 @@ fn oddf_equation(
     let _ = crate::date::serial_to_ymd(maturity, system)?;
 
     let months_per_period = 12 / frequency;
-    let mut coupon_dates = Vec::new();
-    let mut d = first_coupon;
-    loop {
-        if d > maturity {
-            return Err(ExcelError::Num);
-        }
-        coupon_dates.push(d);
-        if d == maturity {
-            break;
-        }
-        d = date_time::edate(d, months_per_period, system)?;
-    }
+    let coupon_dates =
+        coupon_schedule_from_maturity(first_coupon, maturity, months_per_period, system)?;
+    let eom = is_end_of_month(maturity, system)?;
 
     // Compute day-count quantities:
     // - A: accrued days from issue to settlement
@@ -284,7 +342,13 @@ fn oddf_equation(
     }
 
     // Regular coupon period length `E` (days).
-    let prev_coupon = date_time::edate(first_coupon, -months_per_period, system)?;
+    let n = i32::try_from(coupon_dates.len()).map_err(|_| ExcelError::Num)?;
+    let offset_prev = n
+        .checked_mul(months_per_period)
+        .ok_or(ExcelError::Num)?
+        .checked_neg()
+        .ok_or(ExcelError::Num)?;
+    let prev_coupon = coupon_date_with_eom(maturity, offset_prev, eom, system)?;
     let e = coupon_period_e(prev_coupon, first_coupon, basis, freq, system)?;
 
     // Regular coupon payment per period.
@@ -363,6 +427,7 @@ fn oddl_equation(
     let _ = crate::date::serial_to_ymd(maturity, system)?;
 
     let months_per_period = 12 / frequency;
+    let eom = is_end_of_month(last_interest, system)?;
 
     // Day-count quantities.
     let a = days_between(last_interest, settlement, basis, system)?;
@@ -373,7 +438,7 @@ fn oddl_equation(
     }
 
     // Regular coupon period length `E` (days).
-    let prev_coupon = date_time::edate(last_interest, -months_per_period, system)?;
+    let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system)?;
     let e = coupon_period_e(prev_coupon, last_interest, basis, freq, system)?;
 
     // Regular coupon payment.

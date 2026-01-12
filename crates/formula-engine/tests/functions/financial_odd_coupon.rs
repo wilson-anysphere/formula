@@ -1,5 +1,6 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::error::ExcelError;
+use formula_engine::functions::date_time;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
 use formula_engine::{ErrorKind, Value};
 
@@ -30,6 +31,144 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
         Value::Error(ErrorKind::Name) => None,
         other => Some(other),
     }
+}
+
+fn is_end_of_month(date: i32, system: ExcelDateSystem) -> bool {
+    date_time::eomonth(date, 0, system).unwrap() == date
+}
+
+fn coupon_date_with_eom(anchor: i32, months: i32, eom: bool, system: ExcelDateSystem) -> i32 {
+    if eom {
+        date_time::eomonth(anchor, months, system).unwrap()
+    } else {
+        date_time::edate(anchor, months, system).unwrap()
+    }
+}
+
+fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> f64 {
+    match basis {
+        0 => date_time::days360(start, end, false, system).unwrap() as f64,
+        4 => date_time::days360(start, end, true, system).unwrap() as f64,
+        1 | 2 | 3 => (end - start) as f64,
+        _ => panic!("invalid basis {basis}"),
+    }
+}
+
+fn coupon_period_e(pcd: i32, ncd: i32, basis: i32, frequency: i32) -> f64 {
+    let freq = frequency as f64;
+    match basis {
+        0 | 2 | 4 => 360.0 / freq,
+        3 => 365.0 / freq,
+        1 => (ncd - pcd) as f64,
+        _ => panic!("invalid basis {basis}"),
+    }
+}
+
+fn oddf_coupon_schedule(first_coupon: i32, maturity: i32, frequency: i32, system: ExcelDateSystem) -> Vec<i32> {
+    let months_per_period = 12 / frequency;
+    let eom = is_end_of_month(maturity, system);
+
+    let mut dates_rev = Vec::new();
+    for k in 0..1000 {
+        let offset = -(k as i32) * months_per_period;
+        let d = coupon_date_with_eom(maturity, offset, eom, system);
+        if d < first_coupon {
+            break;
+        }
+        dates_rev.push(d);
+        if d == first_coupon {
+            break;
+        }
+    }
+    dates_rev.reverse();
+    dates_rev
+}
+
+fn oddf_price_excel_model(
+    settlement: i32,
+    maturity: i32,
+    issue: i32,
+    first_coupon: i32,
+    rate: f64,
+    yld: f64,
+    redemption: f64,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> f64 {
+    let freq = frequency as f64;
+    let c = redemption * rate / freq;
+
+    let a = days_between(issue, settlement, basis, system);
+    let dfc = days_between(issue, first_coupon, basis, system);
+    let dsc = days_between(settlement, first_coupon, basis, system);
+
+    let months_per_period = 12 / frequency;
+    let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, frequency, system);
+    assert_eq!(coupon_dates[0], first_coupon, "schedule must start at first_coupon");
+    assert_eq!(*coupon_dates.last().unwrap(), maturity, "schedule must end at maturity");
+
+    let eom = is_end_of_month(maturity, system);
+    let n = coupon_dates.len() as i32;
+    let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+    let e = coupon_period_e(prev_coupon, first_coupon, basis, frequency);
+
+    let odd_first_coupon = c * (dfc / e);
+    let accrued_interest = c * (a / e);
+
+    let base = 1.0 + yld / freq;
+    let t0 = dsc / e;
+
+    let mut pv = 0.0;
+    for (idx, date) in coupon_dates.iter().copied().enumerate() {
+        let t = t0 + idx as f64;
+        let amount = if date == maturity {
+            if idx == 0 {
+                redemption + odd_first_coupon
+            } else {
+                redemption + c
+            }
+        } else if idx == 0 {
+            odd_first_coupon
+        } else {
+            c
+        };
+        pv += amount / base.powf(t);
+    }
+
+    pv - accrued_interest
+}
+
+fn oddl_price_excel_model(
+    settlement: i32,
+    maturity: i32,
+    last_interest: i32,
+    rate: f64,
+    yld: f64,
+    redemption: f64,
+    frequency: i32,
+    basis: i32,
+    system: ExcelDateSystem,
+) -> f64 {
+    let freq = frequency as f64;
+    let c = redemption * rate / freq;
+
+    let a = days_between(last_interest, settlement, basis, system);
+    let dlm = days_between(last_interest, maturity, basis, system);
+    let dsm = days_between(settlement, maturity, basis, system);
+
+    let months_per_period = 12 / frequency;
+    let eom = is_end_of_month(last_interest, system);
+    let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
+    let e = coupon_period_e(prev_coupon, last_interest, basis, frequency);
+
+    let accrued_interest = c * (a / e);
+    let odd_last_coupon = c * (dlm / e);
+    let amount = redemption + odd_last_coupon;
+
+    let base = 1.0 + yld / freq;
+    let t = dsm / e;
+    (amount / base.powf(t)) - accrued_interest
 }
 
 #[test]
@@ -1424,5 +1563,128 @@ fn odd_last_coupon_bond_functions_round_trip_long_stub() {
             "expected positive finite price, got {price}"
         );
         assert_close(y, yield_target, 1e-9);
+    }
+}
+
+#[test]
+fn oddfprice_matches_excel_model_for_actual_day_bases() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Maturity on the 30th, with the first coupon clamped in February (leap year).
+    // This case exercises Excel's maturity-anchored schedule stepping and day-count
+    // conventions for bases 1/2/3.
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 20), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 8, 30), system).unwrap();
+
+    let rate = 0.08;
+    let yld = 0.075;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    for basis in [1, 2, 3] {
+        let expected = oddf_price_excel_model(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+
+        let actual = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        assert_close(actual, expected, 1e-10);
+
+        let recovered = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            expected,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(recovered, yld, 1e-10);
+    }
+}
+
+#[test]
+fn oddlprice_matches_excel_model_for_actual_day_bases_with_eom_last_interest() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Last interest date is an end-of-month date (April 30). Excel treats this as an EOM
+    // coupon schedule, so the prior regular coupon date is January 31 (not January 30).
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 4, 30), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2021, 5, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 6, 15), system).unwrap();
+
+    let rate = 0.06;
+    let yld = 0.055;
+    let redemption = 100.0;
+    let frequency = 4;
+
+    for basis in [1, 2, 3] {
+        let expected = oddl_price_excel_model(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        );
+
+        let actual = oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        assert_close(actual, expected, 1e-10);
+
+        let recovered = oddlyield(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            expected,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(recovered, yld, 1e-10);
     }
 }
