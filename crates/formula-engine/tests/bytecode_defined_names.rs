@@ -85,3 +85,50 @@ fn bytecode_defined_name_formula_cycles_fall_back_without_recursing_forever() {
         Value::Error(ErrorKind::Name)
     );
 }
+
+#[test]
+fn bytecode_inlines_defined_name_constants_inside_let_when_unshadowed() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(5.0)),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(y,1,X+1)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path (name constant is inlined; lowering does not
+    // support NameRef directly).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(6.0));
+}
+
+#[test]
+fn bytecode_does_not_inline_defined_name_constants_shadowed_by_let() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(5.0)),
+        )
+        .unwrap();
+
+    // LET-bound variables shadow workbook defined names of the same identifier.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X,1,X+1)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+}

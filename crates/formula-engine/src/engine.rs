@@ -6042,16 +6042,26 @@ fn resolve_defined_name<'a>(
 /// This is only intended for bytecode compilation. AST evaluation should continue to
 /// resolve names dynamically at runtime so defined-name changes are observable.
 ///
-/// The rewrite is deliberately conservative: it skips inlining when the formula contains
-/// LET/LAMBDA constructs because those introduce lexical bindings that can shadow defined
-/// names.
+/// LET/LAMBDA introduce lexical bindings that can shadow defined names. We track those bindings
+/// while walking the expression so we only inline name constants when they cannot be shadowed by
+/// a local identifier.
 fn rewrite_defined_name_constants_for_bytecode(
     expr: &crate::Expr,
     current_sheet: SheetId,
     workbook: &Workbook,
 ) -> Option<crate::Expr> {
-    if canonical_expr_contains_let_or_lambda(expr) {
-        return None;
+    fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name_key))
+    }
+
+    fn bare_identifier(expr: &crate::Expr) -> Option<String> {
+        match expr {
+            crate::Expr::NameRef(nref) if nref.workbook.is_none() && nref.sheet.is_none() => {
+                let name_key = normalize_defined_name(&nref.name);
+                (!name_key.is_empty()).then_some(name_key)
+            }
+            _ => None,
+        }
     }
 
     fn value_to_bytecode_literal_expr(value: &Value) -> Option<crate::Expr> {
@@ -6074,6 +6084,7 @@ fn rewrite_defined_name_constants_for_bytecode(
         nref: &crate::NameRef,
         current_sheet: SheetId,
         workbook: &Workbook,
+        lexical_scopes: &[HashSet<String>],
     ) -> Option<crate::Expr> {
         // Bytecode can't interact with external workbooks and we don't maintain an external
         // defined-name map, so never inline external prefixes.
@@ -6093,6 +6104,13 @@ fn rewrite_defined_name_constants_for_bytecode(
         if name_key.is_empty() {
             return None;
         }
+
+        // LET/LAMBDA lexical bindings are only visible for unqualified identifiers.
+        // Explicit sheet-qualified names (e.g. `Sheet1!X`) should still resolve as defined names.
+        if nref.sheet.is_none() && name_is_local(lexical_scopes, &name_key) {
+            return None;
+        }
+
         let def = resolve_defined_name(workbook, sheet_id, &name_key)?;
         match &def.definition {
             NameDefinition::Constant(v) => value_to_bytecode_literal_expr(v),
@@ -6104,15 +6122,106 @@ fn rewrite_defined_name_constants_for_bytecode(
         expr: &crate::Expr,
         current_sheet: SheetId,
         workbook: &Workbook,
+        lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
-            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook),
-            crate::Expr::FieldAccess(access) => rewrite_inner(access.base.as_ref(), current_sheet, workbook).map(|inner| {
-                crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                    base: Box::new(inner),
-                    field: access.field.clone(),
-                })
-            }),
+            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook, lexical_scopes),
+            crate::Expr::FieldAccess(access) => rewrite_inner(access.base.as_ref(), current_sheet, workbook, lexical_scopes)
+                .map(|inner| {
+                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                        base: Box::new(inner),
+                        field: access.field.clone(),
+                    })
+                }),
+            crate::Expr::FunctionCall(call) if call.name.name_upper == "LET" => {
+                if call.args.len() < 3 || call.args.len() % 2 == 0 {
+                    return None;
+                }
+
+                lexical_scopes.push(HashSet::new());
+                let mut changed = false;
+                let mut args = Vec::with_capacity(call.args.len());
+
+                for pair in call.args[..call.args.len() - 1].chunks_exact(2) {
+                    let Some(name_key) = bare_identifier(&pair[0]) else {
+                        lexical_scopes.pop();
+                        return None;
+                    };
+
+                    // LET binding identifiers are not evaluated; keep them as written.
+                    args.push(pair[0].clone());
+
+                    if let Some(rewritten) =
+                        rewrite_inner(&pair[1], current_sheet, workbook, lexical_scopes)
+                    {
+                        args.push(rewritten);
+                        changed = true;
+                    } else {
+                        args.push(pair[1].clone());
+                    }
+
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name_key);
+                }
+
+                if let Some(rewritten) = rewrite_inner(
+                    &call.args[call.args.len() - 1],
+                    current_sheet,
+                    workbook,
+                    lexical_scopes,
+                ) {
+                    args.push(rewritten);
+                    changed = true;
+                } else {
+                    args.push(call.args[call.args.len() - 1].clone());
+                }
+
+                lexical_scopes.pop();
+                changed.then_some(crate::Expr::FunctionCall(crate::FunctionCall {
+                    name: call.name.clone(),
+                    args,
+                }))
+            }
+            crate::Expr::FunctionCall(call) if call.name.name_upper == "LAMBDA" => {
+                if call.args.is_empty() {
+                    return None;
+                }
+
+                let mut scope = HashSet::new();
+                for param in &call.args[..call.args.len() - 1] {
+                    let Some(name_key) = bare_identifier(param) else {
+                        return None;
+                    };
+                    if !scope.insert(name_key) {
+                        return None;
+                    }
+                }
+
+                lexical_scopes.push(scope);
+                let mut changed = false;
+                let mut args = Vec::with_capacity(call.args.len());
+                args.extend(call.args[..call.args.len() - 1].iter().cloned());
+
+                if let Some(rewritten) = rewrite_inner(
+                    &call.args[call.args.len() - 1],
+                    current_sheet,
+                    workbook,
+                    lexical_scopes,
+                ) {
+                    args.push(rewritten);
+                    changed = true;
+                } else {
+                    args.push(call.args[call.args.len() - 1].clone());
+                }
+
+                lexical_scopes.pop();
+                changed.then_some(crate::Expr::FunctionCall(crate::FunctionCall {
+                    name: call.name.clone(),
+                    args,
+                }))
+            }
             crate::Expr::FunctionCall(call) => {
                 if matches!(
                     bytecode::ast::Function::from_name(&call.name.name_upper),
@@ -6122,7 +6231,9 @@ fn rewrite_defined_name_constants_for_bytecode(
                 }
                 let mut args: Option<Vec<crate::Expr>> = None;
                 for (idx, arg) in call.args.iter().enumerate() {
-                    if let Some(rewritten) = rewrite_inner(arg, current_sheet, workbook) {
+                    if let Some(rewritten) =
+                        rewrite_inner(arg, current_sheet, workbook, lexical_scopes)
+                    {
                         let vec = args.get_or_insert_with(|| {
                             let mut out = Vec::with_capacity(call.args.len());
                             out.extend(call.args[..idx].iter().cloned());
@@ -6141,12 +6252,13 @@ fn rewrite_defined_name_constants_for_bytecode(
                 })
             }
             crate::Expr::Call(_) => None,
-            crate::Expr::Unary(u) => rewrite_inner(&u.expr, current_sheet, workbook).map(|inner| {
-                crate::Expr::Unary(crate::UnaryExpr {
-                    op: u.op,
-                    expr: Box::new(inner),
-                })
-            }),
+            crate::Expr::Unary(u) => rewrite_inner(&u.expr, current_sheet, workbook, lexical_scopes)
+                .map(|inner| {
+                    crate::Expr::Unary(crate::UnaryExpr {
+                        op: u.op,
+                        expr: Box::new(inner),
+                    })
+                }),
             crate::Expr::Postfix(_) => None,
             crate::Expr::Binary(b) => {
                 if matches!(
@@ -6155,8 +6267,8 @@ fn rewrite_defined_name_constants_for_bytecode(
                 ) {
                     return None;
                 }
-                let left = rewrite_inner(&b.left, current_sheet, workbook);
-                let right = rewrite_inner(&b.right, current_sheet, workbook);
+                let left = rewrite_inner(&b.left, current_sheet, workbook, lexical_scopes);
+                let right = rewrite_inner(&b.right, current_sheet, workbook, lexical_scopes);
                 (left.is_some() || right.is_some()).then_some(crate::Expr::Binary(crate::BinaryExpr {
                     op: b.op,
                     left: Box::new(left.unwrap_or_else(|| (*b.left).clone())),
@@ -6176,7 +6288,8 @@ fn rewrite_defined_name_constants_for_bytecode(
         }
     }
 
-    rewrite_inner(expr, current_sheet, workbook)
+    let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
+    rewrite_inner(expr, current_sheet, workbook, &mut lexical_scopes)
 }
 
 pub trait ExternalValueProvider: Send + Sync {
