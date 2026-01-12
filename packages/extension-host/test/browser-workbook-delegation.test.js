@@ -217,6 +217,74 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
   });
 });
 
+test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-saveas-whitespace";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-saveas-whitespace/",
+    mainUrl: "memory://workbook-saveas-whitespace/main.mjs",
+    manifest: {
+      name: "workbook-saveas-whitespace",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: ["   "],
+  });
+
+  await done;
+
+  assert.equal(apiError?.message, "Workbook path must be a non-empty string");
+});
+
 test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi and emits workbookOpened", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
