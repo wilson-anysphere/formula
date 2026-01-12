@@ -9,10 +9,21 @@ fn eval_formula(formula: &str) -> Value {
     engine.get_cell_value("Sheet1", "A1")
 }
 
+fn assert_number_close(v: Value, expected: f64, tol: f64) {
+    match v {
+        Value::Number(n) => assert!(
+            (n - expected).abs() <= tol,
+            "expected {expected}, got {n}"
+        ),
+        other => panic!("expected number, got {other:?}"),
+    }
+}
+
 #[test]
 fn oddfprice_allows_issue_equal_settlement() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 104.49129250312109, 1e-6);
 }
 
 #[test]
@@ -29,7 +40,8 @@ fn oddfyield_allows_issue_equal_settlement() {
 #[test]
 fn oddfprice_allows_settlement_equal_first_coupon() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 104.08111835318353, 1e-6);
 }
 
 #[test]
@@ -48,7 +60,8 @@ fn oddfprice_allows_first_coupon_equal_maturity() {
     let v = eval_formula(
         "=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
     );
-    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
+    // Pinned by excel-oracle boundary cases.
+    assert_number_close(v, 100.3223801273643, 1e-6);
 }
 
 #[test]
