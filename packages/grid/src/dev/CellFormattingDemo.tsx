@@ -7,7 +7,6 @@ import type {
   CellData,
   CellRange,
   CellProvider,
-  CellRange,
   CellStyle
 } from "../model/CellProvider";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
