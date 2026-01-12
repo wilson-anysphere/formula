@@ -119,8 +119,8 @@ fn cellimages_missing_media_is_best_effort() -> Result<(), Box<dyn std::error::E
 #[test]
 fn load_from_bytes_extracts_images_from_fixture_cellimages_blip_schema(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // `fixtures/xlsx/basic/cellimages.xlsx` uses the newer 2022 cellImages schema:
-    // `<cellImage><a:blip r:embed="rId1"/></cellImage>` (no `<xdr:pic>` and no `r:id` on
+    // The **synthetic** fixture `fixtures/xlsx/basic/cellimages.xlsx` uses a lightweight
+    // `<cellImage><a:blip r:embed="rId1"/></cellImage>` shape (no `<xdr:pic>` and no `r:id` on
     // `<cellImage>`). Ensure we can still discover and load the referenced image into
     // `Workbook.images`.
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
