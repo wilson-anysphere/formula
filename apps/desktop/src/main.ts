@@ -336,6 +336,7 @@ try {
 
 // Exposed to Playwright tests via `window.__formulaExtensionHostManager`.
 let extensionHostManagerForE2e: DesktopExtensionHostManager | null = null;
+let sharedContextMenu: ContextMenu | null = null;
 
 type SheetActivatedEvent = { sheet: { id: string; name: string } };
 const sheetActivatedListeners = new Set<(event: SheetActivatedEvent) => void>();
@@ -1451,6 +1452,16 @@ const sheetTabsRootEl = sheetTabsRoot;
 sheetTabsRootEl.classList.add("sheet-bar");
 sheetTabsRootEl.classList.remove("sheet-tabs");
 
+sheetTabsRootEl.addEventListener("contextmenu", (evt) => {
+  const e = evt as MouseEvent;
+  const target = ((e.target as HTMLElement | null)?.closest?.("[data-sheet-id]") as HTMLElement | null) ?? null;
+  if (!target) return;
+  const sheetId = target.getAttribute("data-sheet-id");
+  if (!sheetId) return;
+  e.preventDefault();
+  openSheetTabsContextMenu(sheetId, e.clientX, e.clientY);
+});
+
 let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
 let addSheetInFlight = false;
@@ -1773,6 +1784,53 @@ function listSheetsForUi(): SheetUiInfo[] {
   if (visible.length > 0) return visible.map((s) => ({ id: s.id, name: s.name }));
   const ids = listDocumentSheetIds();
   return ids.map((id) => ({ id, name: id }));
+}
+
+function openSheetTabsContextMenu(sheetId: string, x: number, y: number): void {
+  const menu = sharedContextMenu;
+  if (!menu) return;
+
+  const sheet = workbookSheetStore.getById(sheetId);
+  if (!sheet) return;
+
+  const visibleSheets = workbookSheetStore.listVisible();
+  const hiddenSheets = workbookSheetStore.listAll().filter((s) => s.visibility !== "visible");
+
+  const items: ContextMenuItem[] = [
+    {
+      type: "item",
+      label: "Hide sheet",
+      enabled: sheet.visibility === "visible" && visibleSheets.length > 1,
+      onSelect: () => {
+        try {
+          workbookSheetStore.hide(sheetId);
+        } catch (err) {
+          showToast(`Failed to hide sheet: ${String((err as any)?.message ?? err)}`, "error");
+        }
+        syncSheetUi();
+      },
+    },
+  ];
+
+  if (hiddenSheets.length > 0) {
+    items.push({ type: "separator" });
+    for (const hidden of hiddenSheets) {
+      items.push({
+        type: "item",
+        label: `Unhide ${hidden.name}`,
+        onSelect: () => {
+          try {
+            workbookSheetStore.unhide(hidden.id);
+          } catch (err) {
+            showToast(`Failed to unhide sheet: ${String((err as any)?.message ?? err)}`, "error");
+          }
+          syncSheetUi();
+        },
+      });
+    }
+  }
+
+  menu.open({ x, y, items });
 }
 
 async function handleAddSheet(): Promise<void> {
@@ -3808,6 +3866,7 @@ if (
       app.focus();
     },
   });
+  sharedContextMenu = contextMenu;
 
   const executeBuiltinCommand = (commandId: string, ...args: any[]) => {
     void commandRegistry.executeCommand(commandId, ...args).catch((err) => {
@@ -6783,7 +6842,10 @@ function renderSheetSwitcher(sheets: { id: string; name: string }[], activeId: s
     option.textContent = sheet.name;
     sheetSwitcherEl.appendChild(option);
   }
-  sheetSwitcherEl.value = activeId;
+  // If the active sheet is hidden (or otherwise missing from the visible list),
+  // fall back to the first visible option so the <select> always has a value.
+  const hasActive = sheets.some((sheet) => sheet.id === activeId);
+  sheetSwitcherEl.value = hasActive ? activeId : sheets[0]?.id ?? "";
 }
 
 sheetSwitcherEl.addEventListener("change", () => {

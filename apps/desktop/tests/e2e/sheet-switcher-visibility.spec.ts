@@ -1,0 +1,55 @@
+import { expect, test } from "@playwright/test";
+
+import { gotoDesktop } from "./helpers";
+
+test.describe("sheet switcher", () => {
+  test("only lists visible sheets (hide/unhide)", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create Sheet2 + Sheet3.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+
+      doc.setCellValue("Sheet2", "A1", "Hello from Sheet2");
+      doc.setCellValue("Sheet3", "A1", "Hello from Sheet3");
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+
+    const switcher = page.getByTestId("sheet-switcher");
+
+    await expect(switcher.locator("option")).toHaveCount(3);
+    await expect(switcher.locator("option", { hasText: "Sheet2" })).toHaveCount(1);
+
+    // Hide Sheet2 via context menu.
+    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide sheet" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(switcher.locator("option")).toHaveCount(2);
+    await expect(switcher.locator("option", { hasText: "Sheet2" })).toHaveCount(0);
+    {
+      const optionLabels = await switcher.locator("option").allTextContents();
+      expect(optionLabels).toEqual(["Sheet1", "Sheet3"]);
+    }
+
+    // Unhide Sheet2 via context menu on any visible tab.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(switcher.locator("option")).toHaveCount(3);
+    {
+      const optionLabels = await switcher.locator("option").allTextContents();
+      expect(optionLabels).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+    }
+  });
+});
