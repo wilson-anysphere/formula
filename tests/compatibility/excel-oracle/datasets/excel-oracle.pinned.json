@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T11:36:48.022922086Z",
+  "generatedAt": "2026-01-12T12:16:29.506052555Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "aa524c0c101182107abb934a1b485089120be1819c3edb6310a65658fe90a0d7",
-    "count": 1673
+    "sha256": "f1702fa8b730e2c152794812a420d1e5192c82ba1f334ee0b0965fa8504f9208",
+    "count": 1693
   },
   "results": [
     {
@@ -15445,6 +15445,206 @@
       "displayText": "25"
     },
     {
+      "caseId": "oddfprice_basis0_da0074a10837",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.7587975656606
+      },
+      "address": "C1",
+      "displayText": "100.7587975656606"
+    },
+    {
+      "caseId": "oddfyield_basis0_8e654bd55a78",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0937415823142431
+      },
+      "address": "C1",
+      "displayText": "0.0937415823142431"
+    },
+    {
+      "caseId": "oddlprice_basis0_99ad304144b2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.06126030022395
+      },
+      "address": "C1",
+      "displayText": "100.06126030022395"
+    },
+    {
+      "caseId": "oddlyield_basis0_441590e38373",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.23089149550037363
+      },
+      "address": "C1",
+      "displayText": "0.23089149550037363"
+    },
+    {
+      "caseId": "oddfprice_basis1_f39522c553da",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.75647673538599
+      },
+      "address": "C1",
+      "displayText": "100.75647673538599"
+    },
+    {
+      "caseId": "oddfyield_basis1_a7aa308a7ed9",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0937758520141009
+      },
+      "address": "C1",
+      "displayText": "0.0937758520141009"
+    },
+    {
+      "caseId": "oddlprice_basis1_3f5118f59db1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.06132785681875
+      },
+      "address": "C1",
+      "displayText": "100.06132785681875"
+    },
+    {
+      "caseId": "oddlyield_basis1_68d300c3367a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.23081908821809888
+      },
+      "address": "C1",
+      "displayText": "0.23081908821809888"
+    },
+    {
+      "caseId": "oddfprice_basis2_5ba7ba301c80",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.75738863184641
+      },
+      "address": "C1",
+      "displayText": "100.75738863184641"
+    },
+    {
+      "caseId": "oddfyield_basis2_2e71c2664ae1",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.09376219330826542
+      },
+      "address": "C1",
+      "displayText": "0.09376219330826542"
+    },
+    {
+      "caseId": "oddlprice_basis2_e5936599c26c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.06259125204714
+      },
+      "address": "C1",
+      "displayText": "100.06259125204714"
+    },
+    {
+      "caseId": "oddlyield_basis2_00c298f57fe4",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.22701325462241037
+      },
+      "address": "C1",
+      "displayText": "0.22701325462241037"
+    },
+    {
+      "caseId": "oddfprice_basis3_1d221605b94f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.75662681113548
+      },
+      "address": "C1",
+      "displayText": "100.75662681113548"
+    },
+    {
+      "caseId": "oddfyield_basis3_39ec8d48d71c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.09377360606984751
+      },
+      "address": "C1",
+      "displayText": "0.09377360606984751"
+    },
+    {
+      "caseId": "oddlprice_basis3_a3160bcabf54",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.06179564185648
+      },
+      "address": "C1",
+      "displayText": "100.06179564185648"
+    },
+    {
+      "caseId": "oddlyield_basis3_59ee3352913d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.22939154360216016
+      },
+      "address": "C1",
+      "displayText": "0.22939154360216016"
+    },
+    {
+      "caseId": "oddfprice_basis4_0679b2004f6c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.75597490147861
+      },
+      "address": "C1",
+      "displayText": "100.75597490147861"
+    },
+    {
+      "caseId": "oddfyield_basis4_b8c7df4a447f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.0937828362065177
+      },
+      "address": "C1",
+      "displayText": "0.0937828362065177"
+    },
+    {
+      "caseId": "oddlprice_basis4_546c496042bd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.06126030022395
+      },
+      "address": "C1",
+      "displayText": "100.06126030022395"
+    },
+    {
+      "caseId": "oddlyield_basis4_45ff4139618f",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.23089149550037363
+      },
+      "address": "C1",
+      "displayText": "0.23089149550037363"
+    },
+    {
       "caseId": "oddfprice_neg_yld_7d02a1e3e38e",
       "outputCell": "C1",
       "result": {
@@ -15588,41 +15788,41 @@
       "caseId": "oddfprice_issue_eq_settlement_a2010fe89d14",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 104.49129250312109
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "104.49129250312109"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfyield_issue_eq_settlement_c09bb6a4ba69",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.04000000000000014
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.04000000000000014"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 104.08111835318353
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "104.08111835318353"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfyield_settlement_eq_first_coupon_8d835f172837",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.039999999999979614
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.039999999999979614"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddfprice_first_coupon_eq_maturity_9d33aace26e7",
@@ -15668,21 +15868,21 @@
       "caseId": "oddlprice_settlement_eq_last_interest_2aaeec2068c7",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 100.49019607843137
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "100.49019607843137"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddlyield_settlement_eq_last_interest_478517910c3d",
       "outputCell": "C1",
       "result": {
-        "t": "n",
-        "v": 0.039999999999999813
+        "t": "e",
+        "v": "#NUM!"
       },
       "address": "C1",
-      "displayText": "0.039999999999999813"
+      "displayText": "#NUM!"
     },
     {
       "caseId": "oddlprice_last_interest_eq_maturity_6a12d560c779",

@@ -372,6 +372,52 @@ def generate(
     # Keep these cases small + focused on:
     # - input validation semantics (negative yields / negative coupon rates)
     # - date coercion (ISO-like date text should be accepted and coerced to a date serial)
+    #
+    # Also include basis-coverage cases across 0..4. These functions use coupon-period day-count
+    # ratios (DSC/E, etc) rather than YEARFRAC-based coupon sizing, which is parity-sensitive for
+    # actual-day bases (1/2/3) when regular coupon periods have different day lengths.
+    for basis in [0, 1, 2, 3, 4]:
+        add_case(
+            cases,
+            prefix=f"oddfprice_basis{basis}",
+            tags=["financial", "odd_coupon", "ODDFPRICE", f"basis{basis}"],
+            formula=(
+                "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),"
+                f"0.08,0.075,100,2,{basis})"
+            ),
+            description=f"ODDFPRICE basis={basis} (semiannual; clamped Feb coupon)",
+        )
+        add_case(
+            cases,
+            prefix=f"oddfyield_basis{basis}",
+            tags=["financial", "odd_coupon", "ODDFYIELD", f"basis{basis}"],
+            formula=(
+                "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),"
+                f"0.08,98,100,2,{basis})"
+            ),
+            description=f"ODDFYIELD basis={basis} (semiannual; fixed price)",
+        )
+        add_case(
+            cases,
+            prefix=f"oddlprice_basis{basis}",
+            tags=["financial", "odd_coupon", "ODDLPRICE", f"basis{basis}"],
+            formula=(
+                "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),"
+                f"0.06,0.055,100,4,{basis})"
+            ),
+            description=f"ODDLPRICE basis={basis} (quarterly; short odd last)",
+        )
+        add_case(
+            cases,
+            prefix=f"oddlyield_basis{basis}",
+            tags=["financial", "odd_coupon", "ODDLYIELD", f"basis{basis}"],
+            formula=(
+                "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),"
+                f"0.06,98,100,4,{basis})"
+            ),
+            description=f"ODDLYIELD basis={basis} (quarterly; fixed price)",
+        )
+
     add_case(
         cases,
         prefix="oddfprice_neg_yld",

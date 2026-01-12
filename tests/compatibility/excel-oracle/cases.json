@@ -31885,6 +31885,266 @@
       "id": "accrint_07705eb064f2"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis0"
+      ],
+      "description": "ODDFPRICE basis=0 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis0_da0074a10837"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis0"
+      ],
+      "description": "ODDFYIELD basis=0 (semiannual; fixed price)",
+      "id": "oddfyield_basis0_8e654bd55a78"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis0"
+      ],
+      "description": "ODDLPRICE basis=0 (quarterly; short odd last)",
+      "id": "oddlprice_basis0_99ad304144b2"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis0"
+      ],
+      "description": "ODDLYIELD basis=0 (quarterly; fixed price)",
+      "id": "oddlyield_basis0_441590e38373"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis1"
+      ],
+      "description": "ODDFPRICE basis=1 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis1_f39522c553da"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis1"
+      ],
+      "description": "ODDFYIELD basis=1 (semiannual; fixed price)",
+      "id": "oddfyield_basis1_a7aa308a7ed9"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis1"
+      ],
+      "description": "ODDLPRICE basis=1 (quarterly; short odd last)",
+      "id": "oddlprice_basis1_3f5118f59db1"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis1"
+      ],
+      "description": "ODDLYIELD basis=1 (quarterly; fixed price)",
+      "id": "oddlyield_basis1_68d300c3367a"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis2"
+      ],
+      "description": "ODDFPRICE basis=2 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis2_5ba7ba301c80"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis2"
+      ],
+      "description": "ODDFYIELD basis=2 (semiannual; fixed price)",
+      "id": "oddfyield_basis2_2e71c2664ae1"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis2"
+      ],
+      "description": "ODDLPRICE basis=2 (quarterly; short odd last)",
+      "id": "oddlprice_basis2_e5936599c26c"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis2"
+      ],
+      "description": "ODDLYIELD basis=2 (quarterly; fixed price)",
+      "id": "oddlyield_basis2_00c298f57fe4"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis3"
+      ],
+      "description": "ODDFPRICE basis=3 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis3_1d221605b94f"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis3"
+      ],
+      "description": "ODDFYIELD basis=3 (semiannual; fixed price)",
+      "id": "oddfyield_basis3_39ec8d48d71c"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis3"
+      ],
+      "description": "ODDLPRICE basis=3 (quarterly; short odd last)",
+      "id": "oddlprice_basis3_a3160bcabf54"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis3"
+      ],
+      "description": "ODDLYIELD basis=3 (quarterly; fixed price)",
+      "id": "oddlyield_basis3_59ee3352913d"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis4"
+      ],
+      "description": "ODDFPRICE basis=4 (semiannual; clamped Feb coupon)",
+      "id": "oddfprice_basis4_0679b2004f6c"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,98,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis4"
+      ],
+      "description": "ODDFYIELD basis=4 (semiannual; fixed price)",
+      "id": "oddfyield_basis4_b8c7df4a447f"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,0.055,100,4,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis4"
+      ],
+      "description": "ODDLPRICE basis=4 (quarterly; short odd last)",
+      "id": "oddlprice_basis4_546c496042bd"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2021,7,1),DATE(2021,8,15),DATE(2021,6,15),0.06,98,100,4,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis4"
+      ],
+      "description": "ODDLYIELD basis=4 (quarterly; fixed price)",
+      "id": "oddlyield_basis4_45ff4139618f"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
