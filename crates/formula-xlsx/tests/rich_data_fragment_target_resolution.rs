@@ -35,10 +35,14 @@ fn rich_data_relationship_targets_strip_uri_fragments() {
 
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read test package");
     let media = pkg.rich_data_media_parts();
+    let media_via_legacy = pkg
+        .extract_rich_data_images()
+        .expect("extract richData images via legacy helper");
 
     assert_eq!(
         media.get("xl/media/image1.png").map(|v| v.as_slice()),
         Some(b"png-bytes".as_slice())
     );
-}
 
+    assert_eq!(media_via_legacy, media);
+}
