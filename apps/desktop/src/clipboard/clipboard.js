@@ -728,8 +728,11 @@ export function pasteClipboardContent(doc, sheetId, start, content, options = {}
 
   const values = grid.map((row) =>
     row.map((cell) => {
-      if (mode === "values") return cell.value ?? null;
-      if (mode === "formulas") return cell.formula != null ? { formula: cell.formula } : cell.value ?? null;
+      // Note: pass values via object form (`{ value }`) so DocumentController does not
+      // reinterpret strings like "=1+1" as formulas or coerce ID-like values (e.g. "00123")
+      // into numbers.
+      if (mode === "values") return { value: cell.value ?? null };
+      if (mode === "formulas") return cell.formula != null ? { formula: cell.formula } : { value: cell.value ?? null };
       if (mode === "formats") return { format: clipboardFormatToDocStyle(cell.format ?? null) };
 
       // mode === "all"
