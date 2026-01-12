@@ -64,20 +64,20 @@ export function BranchManagerPanel({
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
 
   return (
-    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
-      <h3>{t("branchManager.title")}</h3>
+    <div className="branch-manager">
+      <h3 className="branch-manager__title">{t("branchManager.title")}</h3>
       {!canManage && (
-        <div style={{ color: "var(--text-secondary)", marginBottom: 8 }}>
+        <div className="branch-manager__permission-warning">
           {t("branchManager.permissionWarning")}
         </div>
       )}
       {error && (
-        <div style={{ color: "var(--error)", marginBottom: 8 }}>
+        <div className="branch-manager__error">
           {error}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div className="branch-manager__new-branch">
         <input
           value={newBranchName}
           onChange={(e) => setNewBranchName(e.target.value)}
@@ -100,23 +100,17 @@ export function BranchManagerPanel({
         </button>
       </div>
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      <ul className="branch-manager__list">
         {branches.map((b) => (
           <li
             key={b.id}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "6px 0",
-              borderBottom: "1px solid var(--border)"
-            }}
+            className="branch-manager__item"
           >
-            <div>
-              <div style={{ fontWeight: 600 }}>{b.name}</div>
-              {b.description ? <div style={{ color: "var(--text-secondary)" }}>{b.description}</div> : null}
+            <div className="branch-manager__item-content">
+              <div className="branch-manager__item-title">{b.name}</div>
+              {b.description ? <div className="branch-manager__item-description">{b.description}</div> : null}
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div className="branch-manager__item-actions">
               <button
                 disabled={!canManage}
                 onClick={async () => {

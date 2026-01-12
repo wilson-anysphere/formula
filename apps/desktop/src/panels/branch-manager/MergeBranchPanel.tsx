@@ -200,68 +200,68 @@ export function MergeBranchPanel({
 
   if (!canManage) {
     return (
-      <div style={{ padding: 12 }}>
-        <div>{t("branchMerge.permissionWarning")}</div>
+      <div className="branch-merge branch-merge--permission">
+        <div className="branch-merge__permission-warning">{t("branchMerge.permissionWarning")}</div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>
-      <h3>{tWithVars("branchMerge.titleWithSource", { sourceBranch })}</h3>
-      {error && <div style={{ color: "var(--error)" }}>{error}</div>}
+    <div className="branch-merge">
+      <h3 className="branch-merge__title">{tWithVars("branchMerge.titleWithSource", { sourceBranch })}</h3>
+      {error && <div className="branch-merge__error">{error}</div>}
       {!preview ? (
-        <div>{t("branchMerge.loading")}</div>
+        <div className="branch-merge__loading">{t("branchMerge.loading")}</div>
       ) : (
         <>
-          <div style={{ marginBottom: 8 }}>
+          <div className="branch-merge__summary">
             {tWithVars("branchMerge.conflictsCount", { count: preview.conflicts.length })}
           </div>
 
            {preview.conflicts.map((c, idx) => (
-             <div
-               key={`${c.type}-${idx}`}
-               style={{ border: "1px solid var(--border)", padding: 8, marginBottom: 8 }}
-             >
-              <div style={{ fontWeight: 600 }}>{conflictHeader(c, sheetNameResolver)}</div>
+              <div
+                key={`${c.type}-${idx}`}
+                className="branch-merge__conflict"
+              >
+              <div className="branch-merge__conflict-title">{conflictHeader(c, sheetNameResolver)}</div>
               {c.type === "cell" ? (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div className="branch-merge__conflict-grid">
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.base")}</div>
-                    <div>{cellSummary(c.base)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.base")}</div>
+                    <div className="branch-merge__conflict-value">{cellSummary(c.base)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.ours")}</div>
-                    <div>{cellSummary(c.ours)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.ours")}</div>
+                    <div className="branch-merge__conflict-value">{cellSummary(c.ours)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.theirs")}</div>
-                    <div>{cellSummary(c.theirs)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.theirs")}</div>
+                    <div className="branch-merge__conflict-value">{cellSummary(c.theirs)}</div>
                   </div>
                 </div>
               ) : c.type === "move" ? (
-                <div style={{ display: "flex", gap: 8 }}>
+                <div className="branch-merge__conflict-move">
                   <div>{tWithVars("branchMerge.conflict.move.oursTo", { to: c.ours?.to ?? "?" })}</div>
                   <div>{tWithVars("branchMerge.conflict.move.theirsTo", { to: c.theirs?.to ?? "?" })}</div>
                 </div>
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div className="branch-merge__conflict-grid">
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.base")}</div>
-                    <div>{jsonSummary(c.base)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.base")}</div>
+                    <div className="branch-merge__conflict-value">{jsonSummary(c.base)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.ours")}</div>
-                    <div>{jsonSummary(c.ours)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.ours")}</div>
+                    <div className="branch-merge__conflict-value">{jsonSummary(c.ours)}</div>
                   </div>
                   <div>
-                    <div style={{ color: "var(--text-secondary)" }}>{t("branchMerge.conflict.theirs")}</div>
-                    <div>{jsonSummary(c.theirs)}</div>
+                    <div className="branch-merge__conflict-label">{t("branchMerge.conflict.theirs")}</div>
+                    <div className="branch-merge__conflict-value">{jsonSummary(c.theirs)}</div>
                   </div>
                 </div>
               )}
 
-              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <div className="branch-merge__resolution-actions">
                 <button
                   onClick={() => {
                     setResolutions(new Map(resolutions).set(idx, { conflictIndex: idx, choice: "ours" }));
@@ -344,7 +344,7 @@ export function MergeBranchPanel({
             </div>
           ))}
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <div className="branch-merge__footer-actions">
             <button onClick={onClose}>{t("branchMerge.cancel")}</button>
             <button
               disabled={preview.conflicts.length !== resolutions.size}
