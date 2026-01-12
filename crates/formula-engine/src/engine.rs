@@ -142,7 +142,8 @@ struct Sheet {
     names: HashMap<String, DefinedName>,
     /// Logical row count for the worksheet grid.
     ///
-    /// Defaults to Excel's row limit, but can be increased to support larger-than-Excel sheets.
+    /// Defaults to Excel's row limit, but can grow beyond Excel to support very large sheets. The
+    /// evaluator uses this for out-of-bounds `#REF!` semantics.
     row_count: u32,
     /// Logical column count for the worksheet grid.
     ///
@@ -206,6 +207,19 @@ impl Workbook {
         if let Some(s) = self.sheets.get_mut(sheet) {
             s.tables = tables;
         }
+    }
+
+    fn grow_sheet_dimensions(&mut self, sheet: SheetId, addr: CellAddr) -> bool {
+        let Some(s) = self.sheets.get_mut(sheet) else {
+            return false;
+        };
+        // Dimensions are stored as counts (1-based), while addresses are 0-based.
+        let new_row_count = s.row_count.max(addr.row.saturating_add(1));
+        let new_col_count = s.col_count.max(addr.col.saturating_add(1));
+        let changed = new_row_count != s.row_count || new_col_count != s.col_count;
+        s.row_count = new_row_count;
+        s.col_count = new_col_count;
+        changed
     }
 }
 
@@ -751,16 +765,12 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
-        let sheet_state = self
-            .workbook
-            .sheets
-            .get(sheet_id)
-            .expect("sheet just ensured must exist");
-        if addr.row >= sheet_state.row_count {
-            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
-        }
-        if addr.col >= sheet_state.col_count {
-            return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            // Sheet dimensions affect out-of-bounds `#REF!` semantics for references. If the sheet
+            // grows, formulas that previously evaluated to `#REF!` may now become valid (and vice
+            // versa for any future shrinking API), so conservatively mark all compiled formulas
+            // dirty to ensure results refresh on the next recalculation.
+            self.mark_all_compiled_cells_dirty();
         }
         let key = CellKey {
             sheet: sheet_id,
@@ -1174,16 +1184,8 @@ impl Engine {
     ) -> Result<(), EngineError> {
         let sheet_id = self.workbook.ensure_sheet(sheet);
         let addr = parse_a1(addr)?;
-        let sheet_state = self
-            .workbook
-            .sheets
-            .get(sheet_id)
-            .expect("sheet just ensured must exist");
-        if addr.row >= sheet_state.row_count {
-            return Err(EngineError::Address(crate::eval::AddressParseError::RowOutOfRange));
-        }
-        if addr.col >= sheet_state.col_count {
-            return Err(EngineError::Address(crate::eval::AddressParseError::ColumnOutOfRange));
+        if self.workbook.grow_sheet_dimensions(sheet_id, addr) {
+            self.mark_all_compiled_cells_dirty();
         }
         let key = CellKey {
             sheet: sheet_id,
@@ -1372,8 +1374,8 @@ impl Engine {
         let Ok(addr) = parse_a1(addr) else {
             return Value::Error(ErrorKind::Ref);
         };
-        if let Some(sheet_state) = self.workbook.sheets.get(sheet_id) {
-            if addr.row >= sheet_state.row_count || addr.col >= sheet_state.col_count {
+        if let Some(sheet) = self.workbook.sheets.get(sheet_id) {
+            if addr.row >= sheet.row_count || addr.col >= sheet.col_count {
                 return Value::Error(ErrorKind::Ref);
             }
         }
@@ -5210,6 +5212,7 @@ fn rewrite_structured_refs_for_bytecode(
 struct Snapshot {
     sheets: HashSet<SheetId>,
     sheet_names_by_id: Vec<String>,
+    sheet_dimensions: Vec<(u32, u32)>,
     values: HashMap<CellKey, Value>,
     formulas: HashMap<CellKey, String>,
     /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
@@ -5237,6 +5240,11 @@ impl Snapshot {
     ) -> Self {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
+        let sheet_dimensions: Vec<(u32, u32)> = workbook
+            .sheets
+            .iter()
+            .map(|s| (s.row_count, s.col_count))
+            .collect();
         let mut values = HashMap::new();
         let mut formulas = HashMap::new();
         let mut ordered_cells = BTreeSet::new();
@@ -5312,6 +5320,7 @@ impl Snapshot {
         Self {
             sheets,
             sheet_names_by_id,
+            sheet_dimensions,
             values,
             formulas,
             ordered_cells,
@@ -5345,6 +5354,10 @@ impl crate::eval::ValueResolver for Snapshot {
         self.sheet_names_by_id.get(sheet_id).map(|s| s.as_str())
     }
 
+    fn sheet_dimensions(&self, sheet_id: usize) -> (u32, u32) {
+        self.sheet_dimensions.get(sheet_id).copied().unwrap_or((0, 0))
+    }
+
     fn get_cell_formula(&self, sheet_id: usize, addr: CellAddr) -> Option<&str> {
         self.formulas
             .get(&CellKey { sheet: sheet_id, addr })
@@ -5352,6 +5365,11 @@ impl crate::eval::ValueResolver for Snapshot {
     }
 
     fn get_cell_value(&self, sheet_id: usize, addr: CellAddr) -> Value {
+        let (rows, cols) = self.sheet_dimensions(sheet_id);
+        if addr.row >= rows || addr.col >= cols {
+            return Value::Error(ErrorKind::Ref);
+        }
+
         if let Some(v) = self.values.get(&CellKey {
             sheet: sheet_id,
             addr,
@@ -5645,8 +5663,8 @@ pub trait ExternalDataProvider: Send + Sync {
     ) -> Value;
 }
 
-const EXCEL_MAX_ROWS_I32: i32 = 1_048_576;
-const EXCEL_MAX_COLS_I32: i32 = 16_384;
+const EXCEL_MAX_ROWS_I32: i32 = EXCEL_MAX_ROWS as i32;
+const EXCEL_MAX_COLS_I32: i32 = EXCEL_MAX_COLS as i32;
 const BYTECODE_MAX_RANGE_CELLS: i64 = 5_000_000;
 
 fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
@@ -5869,10 +5887,17 @@ impl BytecodeColumnCache {
                     continue;
                 }
                 let resolved = range.resolve(base);
+                let (sheet_rows, sheet_cols) = snapshot
+                    .sheet_dimensions
+                    .get(key.sheet)
+                    .copied()
+                    .unwrap_or((0, 0));
+                let sheet_rows = i32::try_from(sheet_rows).unwrap_or(i32::MAX);
+                let sheet_cols = i32::try_from(sheet_cols).unwrap_or(i32::MAX);
                 if resolved.row_start < 0
                     || resolved.col_start < 0
-                    || resolved.row_end >= EXCEL_MAX_ROWS_I32
-                    || resolved.col_end >= EXCEL_MAX_COLS_I32
+                    || resolved.row_end >= sheet_rows
+                    || resolved.col_end >= sheet_cols
                 {
                     // Out-of-bounds ranges must evaluate via per-cell access so `#REF!` can be
                     // surfaced. Don't build a cache that would otherwise treat them as empty/NaN.
@@ -6122,10 +6147,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         if !self.snapshot.sheets.contains(&sheet) {
             return bytecode::Value::Error(bytecode::ErrorKind::Ref);
         }
+        let (rows, cols) = self.bounds_on_sheet(sheet);
         if coord.row < 0
             || coord.col < 0
-            || coord.row >= EXCEL_MAX_ROWS_I32
-            || coord.col >= EXCEL_MAX_COLS_I32
+            || coord.row >= rows
+            || coord.col >= cols
         {
             return bytecode::Value::Error(bytecode::ErrorKind::Ref);
         }
@@ -6241,15 +6267,30 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn bounds(&self) -> (i32, i32) {
-        (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
+        let (rows, cols) = self
+            .snapshot
+            .sheet_dimensions
+            .get(self.sheet)
+            .copied()
+            .unwrap_or((0, 0));
+        let rows = i32::try_from(rows).unwrap_or(i32::MAX);
+        let cols = i32::try_from(cols).unwrap_or(i32::MAX);
+        (rows, cols)
     }
 
     fn bounds_on_sheet(&self, sheet: usize) -> (i32, i32) {
-        if self.snapshot.sheets.contains(&sheet) {
-            (EXCEL_MAX_ROWS_I32, EXCEL_MAX_COLS_I32)
-        } else {
-            (0, 0)
+        if !self.snapshot.sheets.contains(&sheet) {
+            return (0, 0);
         }
+        let (rows, cols) = self
+            .snapshot
+            .sheet_dimensions
+            .get(sheet)
+            .copied()
+            .unwrap_or((0, 0));
+        let rows = i32::try_from(rows).unwrap_or(i32::MAX);
+        let cols = i32::try_from(cols).unwrap_or(i32::MAX);
+        (rows, cols)
     }
 }
 
@@ -8584,10 +8625,11 @@ mod tests {
             engine.external_value_provider.clone(),
             engine.external_data_provider.clone(),
         );
+        let sheet_cols = i32::try_from(snapshot.sheet_dimensions[0].1).unwrap_or(i32::MAX);
 
         let mut cols = HashMap::new();
         cols.insert(
-            EXCEL_MAX_COLS_I32,
+            sheet_cols,
             BytecodeColumn {
                 segments: vec![BytecodeColumnSegment {
                     row_start: 0,
@@ -8607,7 +8649,7 @@ mod tests {
         };
 
         assert!(
-            bytecode::grid::Grid::column_slice(&grid, EXCEL_MAX_COLS_I32, 0, 0).is_none(),
+            bytecode::grid::Grid::column_slice(&grid, sheet_cols, 0, 0).is_none(),
             "out-of-bounds columns should never be eligible for SIMD slicing"
         );
     }

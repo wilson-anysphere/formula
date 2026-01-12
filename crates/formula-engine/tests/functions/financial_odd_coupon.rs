@@ -3,6 +3,7 @@ use formula_engine::error::ExcelError;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
 use formula_engine::{ErrorKind, Value};
 
+use super::financial_bonds_invariants::eval_number_or_skip;
 use super::harness::TestSheet;
 
 fn assert_close(actual: f64, expected: f64, tol: f64) {

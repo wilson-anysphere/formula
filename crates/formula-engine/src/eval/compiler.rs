@@ -11,10 +11,16 @@ use crate::SheetRef;
 /// The engine data model assumes a fixed 16,384-column grid.
 const MAX_COL: u32 = 16_383;
 
-/// Excel-compatible row limit (0-indexed).
+/// Maximum row index supported by the engine (0-indexed).
 ///
-/// Rows can be configured per-sheet via engine sheet dimensions; this constant is used as the
-/// default/fallback when sheet dimensions are unknown (e.g. external workbook references).
+/// Rows are **not** capped here: references beyond Excel's default row count remain syntactically
+/// valid and are validated dynamically at evaluation time using per-sheet dimensions.
+const MAX_ROW: u32 = u32::MAX;
+
+/// Excel-compatible row limit (0-indexed, 1,048,576 rows).
+///
+/// Used for constructs that represent an "entire column" reference like `A:A` and as a fallback
+/// when sheet dimensions are unknown.
 const EXCEL_MAX_ROW: u32 = 1_048_575;
 
 fn parse_number(raw: &str) -> Option<f64> {
@@ -61,7 +67,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW) else {
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::CellRef(CellRef {
@@ -85,7 +91,7 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
         }
         crate::Expr::RowRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
-            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW) else {
+            let Some(row) = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
@@ -342,7 +348,7 @@ fn try_lower_static_range_operand(
     match expr {
         crate::Expr::CellRef(r) => {
             let col = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL)?;
-            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW)?;
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
             let addr = CellAddr { row, col };
             Some(StaticRangeOperandUnresolved {
                 workbook: r.workbook.clone(),
@@ -364,7 +370,7 @@ fn try_lower_static_range_operand(
             })
         }
         crate::Expr::RowRef(r) => {
-            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), EXCEL_MAX_ROW)?;
+            let row = coord_to_index_opt(&r.row, origin.map(|o| o.row), MAX_ROW)?;
             Some(StaticRangeOperandUnresolved {
                 workbook: r.workbook.clone(),
                 sheet: r.sheet.clone(),
@@ -446,12 +452,10 @@ fn compile_expr_inner(
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let Some(col) = coord_to_index(&r.col, current_cell.col, max_col) else {
+            let Some(col) = coord_to_index(&r.col, current_cell.col, MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
-            let Some(row) = coord_to_index(&r.row, current_cell.row, max_row) else {
+            let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::CellRef(CellRef {
@@ -462,29 +466,28 @@ fn compile_expr_inner(
         crate::Expr::ColRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let Some(col) = coord_to_index(&r.col, current_cell.col, max_col) else {
+            let Some(col) = coord_to_index(&r.col, current_cell.col, MAX_COL) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
                 sheet,
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: max_row, col },
+                end: CellAddr {
+                    row: EXCEL_MAX_ROW,
+                    col,
+                },
             })
         }
         crate::Expr::RowRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let Some(row) = coord_to_index(&r.row, current_cell.row, max_row) else {
+            let Some(row) = coord_to_index(&r.row, current_cell.row, MAX_ROW) else {
                 return Expr::Error(ErrorKind::Ref);
             };
             Expr::RangeRef(RangeRef {
                 sheet,
                 start: CellAddr { row, col: 0 },
-                end: CellAddr { row, col: max_col },
+                end: CellAddr { row, col: MAX_COL },
             })
         }
         crate::Expr::StructuredRef(r) => {
@@ -873,35 +876,6 @@ fn coord_to_index(coord: &crate::Coord, origin: u32, max: u32) -> Option<u32> {
     Some(idx)
 }
 
-fn sheet_max_indices(
-    sheet: &SheetReference<usize>,
-    current_sheet: usize,
-    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
-) -> (u32, u32) {
-    match sheet {
-        SheetReference::Sheet(id) => {
-            let (rows, cols) = sheet_dimensions(*id);
-            (rows.saturating_sub(1), cols.saturating_sub(1))
-        }
-        SheetReference::Current => {
-            let (rows, cols) = sheet_dimensions(current_sheet);
-            (rows.saturating_sub(1), cols.saturating_sub(1))
-        }
-        SheetReference::SheetRange(a, b) => {
-            let (start, end) = if a <= b { (*a, *b) } else { (*b, *a) };
-            let mut max_rows = 0u32;
-            let mut max_cols = 0u32;
-            for sheet_id in start..=end {
-                let (rows, cols) = sheet_dimensions(sheet_id);
-                max_rows = max_rows.max(rows);
-                max_cols = max_cols.max(cols);
-            }
-            (max_rows.saturating_sub(1), max_cols.saturating_sub(1))
-        }
-        SheetReference::External(_) => (EXCEL_MAX_ROW, MAX_COL),
-    }
-}
-
 fn compile_sheet_reference(
     workbook: &Option<String>,
     sheet: &Option<SheetRef>,
@@ -1060,16 +1034,14 @@ fn try_compile_static_range_operand(
     current_sheet: usize,
     current_cell: CellAddr,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
-    sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
+    _sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> Option<StaticRangeOperand> {
     match expr {
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let col = coord_to_index(&r.col, current_cell.col, max_col)?;
-            let row = coord_to_index(&r.row, current_cell.row, max_row)?;
+            let col = coord_to_index(&r.col, current_cell.col, MAX_COL)?;
+            let row = coord_to_index(&r.row, current_cell.row, MAX_ROW)?;
             let addr = CellAddr { row, col };
             Some(StaticRangeOperand {
                 sheet,
@@ -1080,25 +1052,24 @@ fn try_compile_static_range_operand(
         crate::Expr::ColRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let col = coord_to_index(&r.col, current_cell.col, max_col)?;
+            let col = coord_to_index(&r.col, current_cell.col, MAX_COL)?;
             Some(StaticRangeOperand {
                 sheet,
                 start: CellAddr { row: 0, col },
-                end: CellAddr { row: max_row, col },
+                end: CellAddr {
+                    row: EXCEL_MAX_ROW,
+                    col,
+                },
             })
         }
         crate::Expr::RowRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);
-            let (max_row, max_col) =
-                sheet_max_indices(&sheet, current_sheet, sheet_dimensions);
-            let row = coord_to_index(&r.row, current_cell.row, max_row)?;
+            let row = coord_to_index(&r.row, current_cell.row, MAX_ROW)?;
             Some(StaticRangeOperand {
                 sheet,
                 start: CellAddr { row, col: 0 },
-                end: CellAddr { row, col: max_col },
+                end: CellAddr { row, col: MAX_COL },
             })
         }
         _ => None,

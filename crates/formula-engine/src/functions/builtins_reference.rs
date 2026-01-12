@@ -68,13 +68,16 @@ fn offset_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let end_row = start_row + height - 1;
     let end_col = start_col + width - 1;
 
-    let within_bounds = |row: i64, col: i64| {
-        row >= 0
-            && col >= 0
-            && row < formula_model::EXCEL_MAX_ROWS as i64
-            && col < formula_model::EXCEL_MAX_COLS as i64
-    };
-    if !within_bounds(start_row, start_col) || !within_bounds(end_row, end_col) {
+    // Excel treats OFFSET results that point outside the current sheet dimensions as `#REF!`.
+    // Sheet dimensions are dynamic in this engine, so we only validate that the coordinates are
+    // representable and non-negative here; the evaluator will apply sheet-dimension-based bounds
+    // checks uniformly for all reference values (including those produced by OFFSET).
+    let within_u32 = |n: i64| n >= 0 && n <= (u32::MAX as i64);
+    if !within_u32(start_row)
+        || !within_u32(start_col)
+        || !within_u32(end_row)
+        || !within_u32(end_col)
+    {
         return Value::Error(ErrorKind::Ref);
     }
 
