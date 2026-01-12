@@ -503,6 +503,7 @@ export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
   private readonly computedValuesByCoord = new Map<string, Map<number, SpreadsheetValue>>();
+  private computedValuesVersion = 0;
   private lastComputedValuesSheetId: string | null = null;
   private lastComputedValuesSheetCache: Map<number, SpreadsheetValue> | null = null;
   private uiReady = false;
@@ -764,6 +765,15 @@ export class SpreadsheetApp {
   private pendingRenderMode: "full" | "scroll" = "full";
   private statusUpdateScheduled = false;
   private selectionStatsFormatter: Intl.NumberFormat | null = null;
+  private selectionSummaryCache:
+    | {
+        sheetId: string;
+        sheetContentVersion: number;
+        computedValuesVersion: number;
+        rangesKey: number[];
+        summary: SpreadsheetSelectionSummary;
+      }
+    | null = null;
   private chartContentRefreshScheduled = false;
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
@@ -3216,12 +3226,60 @@ export class SpreadsheetApp {
    *   DocumentController's sparse cell map (not every coordinate in the rectangular ranges).
    */
   getSelectionSummary(): SpreadsheetSelectionSummary {
-    const ranges = this.selection.ranges.map((r) => ({
-      startRow: Math.min(r.startRow, r.endRow),
-      endRow: Math.max(r.startRow, r.endRow),
-      startCol: Math.min(r.startCol, r.endCol),
-      endCol: Math.max(r.startCol, r.endCol),
-    }));
+    const sheetId = this.sheetId;
+    const sheetContentVersion = this.document.getSheetContentVersion(sheetId);
+    const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
+ 
+    // Encode the selection ranges as a compact numeric key:
+    // [startRow, endRow, startCol, endCol, ...] (normalized to start<=end).
+    const rangesKey: number[] = [];
+    let selectionArea = 0;
+    for (const r of this.selection.ranges) {
+      const startRow = Math.min(r.startRow, r.endRow);
+      const endRow = Math.max(r.startRow, r.endRow);
+      const startCol = Math.min(r.startCol, r.endCol);
+      const endCol = Math.max(r.startCol, r.endCol);
+      rangesKey.push(startRow, endRow, startCol, endCol);
+
+      if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
+        const rows = Math.max(0, endRow - startRow + 1);
+        const cols = Math.max(0, endCol - startCol + 1);
+        selectionArea += rows * cols;
+        if (selectionArea > SELECTION_AREA_SCAN_THRESHOLD) {
+          // We only need to distinguish "small" vs "large"; clamp to avoid pointless arithmetic
+          // once we've crossed the threshold.
+          selectionArea = SELECTION_AREA_SCAN_THRESHOLD + 1;
+        }
+      }
+    }
+
+    const cached = this.selectionSummaryCache;
+    if (
+      cached &&
+      cached.sheetId === sheetId &&
+      cached.sheetContentVersion === sheetContentVersion &&
+      cached.computedValuesVersion === this.computedValuesVersion &&
+      cached.rangesKey.length === rangesKey.length
+    ) {
+      let sameRanges = true;
+      for (let i = 0; i < rangesKey.length; i += 1) {
+        if (cached.rangesKey[i] !== rangesKey[i]) {
+          sameRanges = false;
+          break;
+        }
+      }
+      if (sameRanges) return cached.summary;
+    }
+
+    const ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
+    for (let i = 0; i < rangesKey.length; i += 4) {
+      ranges.push({
+        startRow: rangesKey[i]!,
+        endRow: rangesKey[i + 1]!,
+        startCol: rangesKey[i + 2]!,
+        endCol: rangesKey[i + 3]!,
+      });
+    }
     let countNonEmpty = 0;
     let numericCount = 0;
     let numericSum = 0;
@@ -3232,15 +3290,6 @@ export class SpreadsheetApp {
     // Reuse a single coord object while scanning selection cells to avoid allocating
     // `{row,col}` objects for every visited coordinate.
     const coordScratch = { row: 0, col: 0 };
-
-    let selectionArea = 0;
-    const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
-    for (const r of ranges) {
-      const rows = Math.max(0, r.endRow - r.startRow + 1);
-      const cols = Math.max(0, r.endCol - r.startCol + 1);
-      selectionArea += rows * cols;
-      if (selectionArea > SELECTION_AREA_SCAN_THRESHOLD) break;
-    }
 
     if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
       const visited = ranges.length > 1 ? new Set<number>() : null;
@@ -3309,13 +3358,23 @@ export class SpreadsheetApp {
     const sum = numericCount > 0 ? numericSum : null;
     const average = numericCount > 0 ? numericSum / numericCount : null;
 
-    return {
+    const summary: SpreadsheetSelectionSummary = {
       sum,
       average,
       count: countNonEmpty,
       numericCount,
       countNonEmpty,
     };
+
+    this.selectionSummaryCache = {
+      sheetId,
+      sheetContentVersion,
+      computedValuesVersion: this.computedValuesVersion,
+      rangesKey,
+      summary,
+    };
+
+    return summary;
   }
 
   getActiveCell(): CellCoord {
@@ -8833,6 +8892,9 @@ export class SpreadsheetApp {
     this.computedValuesByCoord.clear();
     this.lastComputedValuesSheetId = null;
     this.lastComputedValuesSheetCache = null;
+    // Clearing computed values affects the semantics of `getCellComputedValue` for formulas
+    // (it may fall back to in-process evaluation until the engine repopulates the cache).
+    this.computedValuesVersion += 1;
   }
 
   private getComputedValuesByCoordForSheet(sheetId: string): Map<number, SpreadsheetValue> | null {
@@ -8851,6 +8913,7 @@ export class SpreadsheetApp {
     const coordScratch = { row: 0, col: 0 };
     let lastSheetId: string | null = null;
     let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
+    let invalidated = false;
     for (const change of changes) {
       const ref = change as EngineCellRef;
 
@@ -8890,9 +8953,10 @@ export class SpreadsheetApp {
           lastSheetId = sheetId;
           lastSheetCache = this.computedValuesByCoord.get(sheetId) ?? null;
         }
-        lastSheetCache?.delete(key);
+        if (lastSheetCache?.delete(key)) invalidated = true;
       }
     }
+    if (invalidated) this.computedValuesVersion += 1;
   }
 
   private applyComputedChanges(changes: unknown): void {
@@ -8996,6 +9060,10 @@ export class SpreadsheetApp {
     }
 
     if (updated) {
+      // Computed values can change asynchronously relative to user edits (and without bumping the
+      // DocumentController's sheet content version). Keep derived caches (e.g. selection summary)
+      // from going stale by tracking a separate version counter.
+      this.computedValuesVersion += 1;
       // Keep the status/formula bar in sync once computed values arrive.
       if (this.uiReady) this.updateStatus();
       if (this.uiReady && shouldInvalidate && sawActiveSheet) {

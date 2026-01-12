@@ -455,4 +455,77 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("caches selection summary when selection and sheet content are unchanged", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellValue(sheetId, "A1", 1);
+    doc.setCellValue(sheetId, "B1", 2);
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 } }); // A1:B1
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const first = app.getSelectionSummary();
+    expect(getCellSpy).toHaveBeenCalled();
+
+    getCellSpy.mockClear();
+    const second = app.getSelectionSummary();
+    expect(second).toEqual(first);
+    expect(getCellSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("recomputes selection summary when computed values change without a content-version bump", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellFormula(sheetId, "A1", "=1+1");
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } }); // A1
+
+    const before = app.getSelectionSummary();
+    expect(before).toEqual({
+      sum: 2,
+      average: 2,
+      count: 1,
+      numericCount: 1,
+      countNonEmpty: 1,
+    });
+
+    // Simulate the engine delivering a computed-value update without a document content change.
+    // `applyComputedChanges` bumps an internal version counter that should invalidate the cached
+    // selection summary.
+    (app as any).applyComputedChanges([{ sheetId, row: 0, col: 0, value: 3 }]);
+
+    const after = app.getSelectionSummary();
+    expect(after).toEqual({
+      sum: 3,
+      average: 3,
+      count: 1,
+      numericCount: 1,
+      countNonEmpty: 1,
+    });
+
+    app.destroy();
+    root.remove();
+  });
 });
