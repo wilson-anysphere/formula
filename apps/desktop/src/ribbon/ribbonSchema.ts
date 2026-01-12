@@ -15,12 +15,6 @@ export interface RibbonMenuItemDefinition {
    */
   iconId?: RibbonIconId;
   /**
-   * Legacy text glyph fallback.
-   *
-   * Prefer `iconId` for consistent SVG icons.
-   */
-  icon?: string;
-  /**
    * Optional E2E hook.
    */
   testId?: string;
@@ -40,12 +34,6 @@ export interface RibbonButtonDefinition {
    * Stable icon identifier.
    */
   iconId?: RibbonIconId;
-  /**
-   * Legacy text glyph fallback.
-   *
-   * Prefer `iconId` for consistent SVG icons.
-   */
-  icon?: string;
   kind?: RibbonButtonKind;
   size?: RibbonButtonSize;
   /**

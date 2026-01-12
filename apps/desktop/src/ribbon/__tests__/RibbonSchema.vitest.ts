@@ -99,19 +99,19 @@ describe("defaultRibbonSchema", () => {
     ).toBe(true);
   });
 
-  it("does not include legacy icon glyph strings in the schema", () => {
+  it("does not include legacy icon properties in the schema", () => {
     const offenders: string[] = [];
     for (const tab of defaultRibbonSchema.tabs) {
       for (const group of tab.groups) {
         for (const button of group.buttons) {
-          if (typeof button.icon === "string") offenders.push(`button:${button.id} (${button.icon})`);
+          if ("icon" in (button as any)) offenders.push(`button:${button.id}`);
           for (const item of button.menuItems ?? []) {
-            if (typeof item.icon === "string") offenders.push(`menuItem:${item.id} (${item.icon})`);
+            if ("icon" in (item as any)) offenders.push(`menuItem:${item.id}`);
           }
         }
       }
     }
-    expect(offenders, `Found legacy icon glyph strings: ${offenders.join(", ")}`).toEqual([]);
+    expect(offenders, `Found legacy icon fields: ${offenders.join(", ")}`).toEqual([]);
   });
 
   it("ensures sibling ids are unique (tabs, groups, buttons, menu items)", () => {

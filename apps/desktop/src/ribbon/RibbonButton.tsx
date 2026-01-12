@@ -267,7 +267,6 @@ export const RibbonButton = React.memo(function RibbonButton({
                   label: item.label,
                   ariaLabel: item.ariaLabel,
                   iconId: item.iconId,
-                  icon: item.icon,
                   kind: "button",
                   size: "small",
                   testId: item.testId,
