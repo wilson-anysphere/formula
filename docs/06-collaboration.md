@@ -33,8 +33,11 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
 - Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
 - Version store kept *inside the Y.Doc*: [`packages/versioning/src/store/yjsVersionStore.js`](../packages/versioning/src/store/yjsVersionStore.js) (`YjsVersionStore`)
+- Version store backed by the Formula API (cloud DB): [`packages/versioning/src/store/apiVersionStore.js`](../packages/versioning/src/store/apiVersionStore.js) (`ApiVersionStore`)
+- Version store backed by local SQLite (Node/desktop): [`packages/versioning/src/store/sqliteVersionStore.js`](../packages/versioning/src/store/sqliteVersionStore.js) (`SQLiteVersionStore`)
 - Branching glue: [`packages/collab/branching/index.js`](../packages/collab/branching/index.js) (`CollabBranchingWorkflow`)
 - Branch graph store kept *inside the Y.Doc*: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js) (`YjsBranchStore`)
+- Branch graph store backed by local SQLite (Node/desktop): [`packages/versioning/branches/src/store/SQLiteBranchStore.js`](../packages/versioning/branches/src/store/SQLiteBranchStore.js) (`SQLiteBranchStore`)
 - BranchService + snapshot adapter: [`packages/versioning/branches/src/`](../packages/versioning/branches/src/) (`BranchService`, `yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
 
 ---
@@ -809,6 +812,15 @@ Use `@formula/collab-versioning` to store and restore workbook snapshots in a co
 
 Source: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts)
 
+> **Deployment note (sync-server reserved roots):**
+> `services/sync-server` includes a **reserved root mutation guard** that can reject Yjs updates touching
+> `versions`, `versionsMeta`, or `branching:*`.
+>
+> - Env var: `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` (defaults to **enabled** when `NODE_ENV=production`, **disabled** otherwise)
+> - Implementation: [`services/sync-server/src/server.ts`](../services/sync-server/src/server.ts) + [`services/sync-server/src/ywsSecurity.ts`](../services/sync-server/src/ywsSecurity.ts)
+>
+> If this guard is enabled, in-doc stores like `YjsVersionStore` and `YjsBranchStore` will not work unless you disable it (or use non-Yjs stores).
+
 ### “Use this in collaborative mode” snippet
 
 ```ts
@@ -826,6 +838,28 @@ await versioning.createCheckpoint({ name: "Q3 Approved", annotations: "Signed of
 const versions = await versioning.listVersions();
 await versioning.restoreVersion(versions[0].id);
 ```
+
+### VersionStore choices (in-doc vs API vs SQLite)
+
+`createCollabVersioning` accepts a `store` option (see defaulting logic in
+[`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts)).
+The choice affects how version history is persisted and whether it flows through Yjs/sync-server.
+
+- **`YjsVersionStore`** (in-doc, default)
+  - Stores history inside the live collaborative `Y.Doc` under the `versions` and `versionsMeta` roots.
+  - Version history **syncs via Yjs** (y-websocket/sync-server) and is included in sync-server persistence.
+  - Requires the sync-server reserved root guard to be **disabled**, otherwise writes will be rejected.
+  - Implementation: [`packages/versioning/src/store/yjsVersionStore.js`](../packages/versioning/src/store/yjsVersionStore.js)
+- **`ApiVersionStore`** (cloud DB / Formula API)
+  - Stores versions in the API-backed `document_versions` table (out-of-doc).
+  - Does **not** mutate `versions*` roots in the shared Yjs document, so it is compatible with the sync-server reserved root guard.
+  - Implementation: [`packages/versioning/src/store/apiVersionStore.js`](../packages/versioning/src/store/apiVersionStore.js)
+- **`SQLiteVersionStore`** (local desktop / Node)
+  - Stores versions in a local SQLite file (out-of-doc).
+  - Does **not** mutate `versions*` roots in the shared Yjs document, so it is compatible with the sync-server reserved root guard.
+  - Implementation: [`packages/versioning/src/store/sqliteVersionStore.js`](../packages/versioning/src/store/sqliteVersionStore.js)
+
+Note: there are additional stores (e.g. `IndexedDBVersionStore`) under `packages/versioning/src/store/`, but the key deployment split is **in-doc (Yjs)** vs **out-of-doc (API/SQLite)**.
 
 ### How history is stored (YjsVersionStore)
 
@@ -864,6 +898,11 @@ Note: `CollabBranchingWorkflow` supports customizing the branch graph `rootName`
 ## Branching + merging (collab mode)
 
 Formula supports Git-like **branch + merge** workflows for collaborative spreadsheets by storing the branch/commit graph **inside the shared Y.Doc**.
+
+> **Deployment note (sync-server reserved roots):**
+> `YjsBranchStore` writes to `branching:*` roots. When the sync-server reserved root mutation guard is enabled
+> (see [`services/sync-server/src/server.ts`](../services/sync-server/src/server.ts) / [`services/sync-server/src/ywsSecurity.ts`](../services/sync-server/src/ywsSecurity.ts)),
+> those updates will be rejected unless you disable `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` (or use a non-Yjs store such as `SQLiteBranchStore`).
 
 ### Required Yjs roots (default `rootName = "branching"`)
 

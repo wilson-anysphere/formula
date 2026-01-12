@@ -4,6 +4,7 @@
 
 - Opaque token or JWT (HS256) authentication
 - Role-based enforcement for read-only users
+- Reserved-root mutation guard for internal versioning/branching metadata (see below)
 - Awareness anti-spoofing / identity sanitization
 - Connection attempt + message rate limiting
 - Persistence to disk (file or LevelDB) with optional at-rest encryption
@@ -337,6 +338,45 @@ Notable metrics (prefix `sync_server_`):
 - Optional JWT cell-range restriction enforcement (fail-closed):
 
   - `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS` (default: `true` in production)
+
+### Reserved root mutation guard (versioning/branching roots)
+
+`services/sync-server` can defensively reject Yjs updates that attempt to mutate **reserved top-level roots** inside the shared `Y.Doc`.
+
+This exists because some deployments store **version history** and/or **branching metadata** outside the Yjs document (e.g. in an API/DB or local SQLite), and do not want arbitrary clients to be able to write to those internal roots.
+
+Configuration:
+
+- `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED`
+  - If set to `1`/`true`, the guard is enabled.
+  - If set to `0`/`false`, the guard is disabled.
+  - If **unset**, it defaults to:
+    - **enabled** when `NODE_ENV=production`
+    - **disabled** otherwise
+
+Default reserved roots:
+
+- Exact root names:
+  - `versions`
+  - `versionsMeta`
+- Root prefixes:
+  - `branching:` (so `branching:branches`, `branching:commits`, `branching:meta`, etc.)
+
+Behavior:
+
+- When the guard detects a reserved-root write, the server closes the websocket with code `1008` and reason `"reserved root mutation"`.
+- Implementation/config:
+  - guard wiring + env var default: [`src/server.ts`](./src/server.ts)
+  - update inspection + enforcement: [`src/ywsSecurity.ts`](./src/ywsSecurity.ts)
+
+Implications for Formula collaboration deployments:
+
+- `@formula/collab-versioning` defaults to `YjsVersionStore` (history stored *inside* the Y.Doc under `versions`/`versionsMeta`). This requires the guard to be **disabled**, otherwise version snapshot/checkpoint writes will be rejected.
+- Formula’s Yjs-backed branching store (`YjsBranchStore`, graph stored *inside* the Y.Doc under `branching:*`) also requires the guard to be **disabled**.
+- If you want to keep the guard enabled in production, use non-Yjs stores instead (where applicable), for example:
+  - `ApiVersionStore` (cloud DB/API): `packages/versioning/src/store/apiVersionStore.js`
+  - `SQLiteVersionStore` (local desktop): `packages/versioning/src/store/sqliteVersionStore.js`
+  - `SQLiteBranchStore` (local desktop): `packages/versioning/branches/src/store/SQLiteBranchStore.js`
 
 Limits are enforced both at the `ws` server (`maxPayload`) and defensively in message handlers.
 
