@@ -7,7 +7,7 @@ type FillStyle = string | CanvasGradient | CanvasPattern;
 
 function createMock2dContext(options: {
   canvas: HTMLCanvasElement;
-  onFillText?: (args: { text: string; x: number; y: number; font: string }) => void;
+  onFillText?: (args: { text: string; x: number; y: number; font: string; fillStyle: FillStyle }) => void;
   onStroke?: () => void;
 }): CanvasRenderingContext2D {
   const noop = () => {};
@@ -59,7 +59,7 @@ function createMock2dContext(options: {
     rotate: noop,
     setLineDash: noop,
     fillText: (text: string, x: number, y: number) => {
-      options.onFillText?.({ text, x, y, font });
+      options.onFillText?.({ text, x, y, font, fillStyle });
     },
     measureText: (text: string) =>
       ({
@@ -99,7 +99,7 @@ describe("CanvasGridRenderer rich text rendering", () => {
       runs: [
         // Only style the first run; the renderer should fill the remaining range with defaults.
         // Also explicitly disable bold/italic so we exercise the "false overrides defaults" behavior.
-        { start: 0, end: 5, style: { italic: false, bold: false, underline: true } }
+        { start: 0, end: 5, style: { italic: false, bold: false, underline: true, color: "#80FF0000", size_100pt: 1200 } }
       ]
     };
 
@@ -114,7 +114,7 @@ describe("CanvasGridRenderer rich text rendering", () => {
     const contentCanvas = document.createElement("canvas");
     const selectionCanvas = document.createElement("canvas");
 
-    const fillTextCalls: Array<{ text: string; x: number; y: number; font: string }> = [];
+    const fillTextCalls: Array<{ text: string; x: number; y: number; font: string; fillStyle: FillStyle }> = [];
     const strokeCalls: number[] = [];
 
     const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
@@ -144,6 +144,11 @@ describe("CanvasGridRenderer rich text rendering", () => {
     expect(uniqueFonts.size).toBeGreaterThanOrEqual(2);
     expect(fillTextCalls.some((c) => c.font.startsWith("normal normal"))).toBe(true);
     expect(fillTextCalls.some((c) => c.font.startsWith("italic 700"))).toBe(true);
+    expect(fillTextCalls.some((c) => c.font.includes("16px"))).toBe(true);
+
+    const styledRun = fillTextCalls.find((c) => c.text === "Hello");
+    expect(styledRun).toBeTruthy();
+    expect(typeof styledRun?.fillStyle === "string" ? styledRun.fillStyle : "").toMatch(/^rgba\(255,\s*0,\s*0,/);
     // We expect at least one underline stroke from the italic+underline run.
     expect(strokeCalls.length).toBeGreaterThan(0);
   });
