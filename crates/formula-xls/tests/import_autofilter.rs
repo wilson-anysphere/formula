@@ -1,12 +1,11 @@
 use std::io::Write;
 
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::Range;
 use formula_model::{DefinedNameScope, XLNM_FILTER_DATABASE};
 
 mod common;
 
-use common::xls_fixture_builder;
+use common::{assert_parseable_formula, xls_fixture_builder};
 
 fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
@@ -18,14 +17,6 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
     formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls")
-}
-
-fn assert_parseable(expr: &str) {
-    let expr = expr.trim();
-    assert!(!expr.is_empty(), "expected expression to be non-empty");
-    parse_formula(expr, ParseOptions::default()).unwrap_or_else(|e| {
-        panic!("expected expression to be parseable, expr={expr:?}, err={e:?}")
-    });
 }
 
 #[test]
@@ -48,7 +39,7 @@ fn imports_autofilter_range_from_filterdatabase_defined_name() {
         .workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
         .expect("expected _FilterDatabase defined name");
-    assert_parseable(&filter_db.refers_to);
+    assert_parseable_formula(&filter_db.refers_to);
 }
 
 #[test]
@@ -71,7 +62,7 @@ fn imports_autofilter_fixture_range_and_empty_state() {
         .workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
         .expect("expected _FilterDatabase defined name");
-    assert_parseable(&filter_db.refers_to);
+    assert_parseable_formula(&filter_db.refers_to);
 }
 
 #[test]
@@ -116,7 +107,7 @@ fn imports_autofilter_range_via_calamine_defined_name_fallback_when_biff_unavail
         .workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
     {
-        assert_parseable(&filter_db.refers_to);
+        assert_parseable_formula(&filter_db.refers_to);
     }
 }
 
@@ -140,7 +131,7 @@ fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_via_externsh
         .workbook
         .get_defined_name(DefinedNameScope::Workbook, XLNM_FILTER_DATABASE)
         .expect("expected workbook-scoped _FilterDatabase defined name");
-    assert_parseable(&filter_db.refers_to);
+    assert_parseable_formula(&filter_db.refers_to);
 }
 
 #[test]
@@ -241,7 +232,7 @@ fn imports_autofilter_range_from_filterdatabase_defined_name_even_when_rgce_is_p
         .workbook
         .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
         .expect("expected _FilterDatabase defined name");
-    assert_parseable(&filter_db.refers_to);
+    assert_parseable_formula(&filter_db.refers_to);
 }
 
 #[test]

@@ -1,14 +1,10 @@
 use std::path::PathBuf;
 
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{CellRef, CellValue};
 
-fn assert_parseable(formula_body: &str) {
-    let expr = formula_body.trim();
-    assert!(!expr.is_empty(), "expected formula to be non-empty");
-    parse_formula(expr, ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected formula to be parseable, expr={expr:?}, err={e:?}"));
-}
+mod common;
+
+use common::assert_parseable_formula;
 
 #[test]
 fn imports_basic_xls() {
@@ -35,7 +31,7 @@ fn imports_basic_xls() {
 
     let c3 = CellRef::from_a1("C3").unwrap();
     assert_eq!(sheet1.formula(c3), Some("B2*2"));
-    assert_parseable("B2*2");
+    assert_parseable_formula("B2*2");
 
     let sheet2 = result
         .workbook

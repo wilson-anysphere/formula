@@ -1,19 +1,11 @@
 use std::io::Write;
 
 use calamine::{open_workbook, Reader, Xls};
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{validate_defined_name, DefinedNameScope};
 
 mod common;
 
-use common::xls_fixture_builder;
-
-fn assert_parseable(expr: &str) {
-    let expr = expr.trim();
-    assert!(!expr.is_empty(), "expected expression to be non-empty");
-    parse_formula(expr, ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
-}
+use common::{assert_parseable_formula, xls_fixture_builder};
 
 #[test]
 fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
@@ -43,7 +35,7 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
         })
         .find(|(name, _)| validate_defined_name(name).is_ok())
         .expect("expected at least one valid defined name from calamine");
-    assert_parseable(&expected_refers_to);
+    assert_parseable_formula(&expected_refers_to);
 
     // Force BIFF workbook-stream parsing to be unavailable so the importer has to use the
     // calamine fallback path.
@@ -67,7 +59,7 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
                 result.workbook.defined_names
             )
         });
-    assert_parseable(&imported.refers_to);
+    assert_parseable_formula(&imported.refers_to);
 
     assert!(
         result.warnings.iter().any(|w| w

@@ -1,18 +1,10 @@
 use std::io::Write;
 
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::DefinedNameScope;
 
 mod common;
 
-use common::xls_fixture_builder;
-
-fn assert_parseable(expr: &str) {
-    let expr = expr.trim();
-    assert!(!expr.is_empty(), "expected expression to be non-empty");
-    parse_formula(expr, ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
-}
+use common::{assert_parseable_formula, xls_fixture_builder};
 
 #[test]
 fn rewrites_defined_name_sheet_refs_to_sanitized_sheet_names() {
@@ -39,7 +31,7 @@ fn rewrites_defined_name_sheet_refs_to_sanitized_sheet_names() {
         .expect("MyRange missing");
     assert_eq!(dn.scope, DefinedNameScope::Workbook);
     assert_eq!(dn.refers_to, "Bad_Name!$A$1");
-    assert_parseable(&dn.refers_to);
+    assert_parseable_formula(&dn.refers_to);
 }
 
 #[test]
@@ -65,5 +57,5 @@ fn does_not_cascade_defined_name_rewrites_when_sanitization_collides_with_anothe
     // The defined name refers to sheet 0 (invalid `Bad/Name`), which sanitizes to `Bad_Name`.
     // Ensure rewriting did not mistakenly redirect it to `Bad_Name (2)`.
     assert_eq!(dn.refers_to, "Bad_Name!$A$1");
-    assert_parseable(&dn.refers_to);
+    assert_parseable_formula(&dn.refers_to);
 }

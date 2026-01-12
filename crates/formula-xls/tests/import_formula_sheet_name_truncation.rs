@@ -1,11 +1,8 @@
 use std::io::Write;
 
-use formula_engine::{parse_formula, ParseOptions};
 use formula_model::CellRef;
 
 mod common;
-
-use common::xls_fixture_builder;
 
 fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
@@ -13,12 +10,7 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
     formula_xls::import_xls_path(tmp.path()).expect("import xls")
 }
 
-fn assert_parseable(formula_body: &str) {
-    let expr = formula_body.trim();
-    assert!(!expr.is_empty(), "expected formula to be non-empty");
-    parse_formula(expr, ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected formula to be parseable, expr={expr:?}, err={e:?}"));
-}
+use common::{assert_parseable_formula, xls_fixture_builder};
 
 #[test]
 fn rewrites_cross_sheet_formulas_after_sheet_name_truncation() {
@@ -40,5 +32,5 @@ fn rewrites_cross_sheet_formulas_after_sheet_name_truncation() {
         .expect("expected formula in Ref!A1");
     let expected = format!("{new_name}!A1");
     assert_eq!(formula, expected.as_str());
-    assert_parseable(formula);
+    assert_parseable_formula(formula);
 }
