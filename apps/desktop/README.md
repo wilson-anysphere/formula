@@ -169,6 +169,8 @@ At a high level:
   - Source: `packages/extension-marketplace/src/WebExtensionManager.ts`
   - Downloads signed `.fextpkg` packages from the marketplace, verifies SHA-256 + Ed25519 signatures **in the
     WebView**, and persists verified bytes + metadata to IndexedDB.
+  - **Boot:** `WebExtensionManager.loadAllInstalled()` loads all installed extensions and triggers startup semantics
+    (`onStartupFinished` + initial `workbookOpened`) in a way that avoids spamming already-running extensions.
 
 Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a
 restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts or
