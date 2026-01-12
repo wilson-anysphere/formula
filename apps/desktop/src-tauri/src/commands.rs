@@ -258,7 +258,7 @@ use crate::{
     file_io::Workbook,
     macro_trust::{compute_macro_fingerprint, SharedMacroTrustStore},
 };
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 use std::path::PathBuf;
 #[cfg(feature = "desktop")]
 use std::sync::Arc;
@@ -270,13 +270,17 @@ fn app_error(err: AppStateError) -> String {
     err.to_string()
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 fn coerce_save_path_to_xlsx(path: &str) -> String {
     let mut buf = PathBuf::from(path);
     if buf
         .extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("xls") || ext.eq_ignore_ascii_case("csv"))
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("xls")
+                || ext.eq_ignore_ascii_case("csv")
+                || ext.eq_ignore_ascii_case("parquet")
+        })
     {
         buf.set_extension("xlsx");
         return buf.to_string_lossy().to_string();
@@ -3489,6 +3493,30 @@ mod tests {
     use crate::file_io::read_xlsx_blocking;
     use std::path::Path;
     use tempfile::TempDir;
+
+    #[test]
+    fn coerce_save_path_to_xlsx_rewrites_non_workbook_origins() {
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.csv"),
+            "/tmp/foo.xlsx",
+            "expected .csv saves to coerce to .xlsx"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xls"),
+            "/tmp/foo.xlsx",
+            "expected .xls saves to coerce to .xlsx"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.parquet"),
+            "/tmp/foo.xlsx",
+            "expected .parquet saves to coerce to .xlsx"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xlsx"),
+            "/tmp/foo.xlsx",
+            "expected .xlsx saves to remain unchanged"
+        );
+    }
 
     #[test]
     fn workbook_theme_palette_is_exposed_for_rt_simple_fixture() {
