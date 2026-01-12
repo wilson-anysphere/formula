@@ -17,7 +17,9 @@ class LongStubSubsetSyncTests(unittest.TestCase):
 
           tests/compatibility/excel-oracle/cases.json
 
-        so the subset file never silently diverges (wrong formulas / missing tags).
+        by requiring it to contain *exactly* the cases tagged with BOTH:
+          - odd_coupon
+          - long_stub
         """
 
         repo_root = Path(__file__).resolve().parents[3]
@@ -30,22 +32,50 @@ class LongStubSubsetSyncTests(unittest.TestCase):
         corpus_cases = [c for c in corpus.get("cases", []) if isinstance(c, dict)]
         subset_cases = [c for c in subset.get("cases", []) if isinstance(c, dict)]
 
-        # Match subset cases by their exact formula; the subset file uses hand-written IDs.
-        corpus_by_formula = {str(c.get("formula", "")): c for c in corpus_cases}
+        long_stub_cases = [
+            c
+            for c in corpus_cases
+            if isinstance(c.get("tags"), list)
+            and "odd_coupon" in c["tags"]
+            and "long_stub" in c["tags"]
+        ]
+        self.assertTrue(long_stub_cases, "Expected at least one odd_coupon+long_stub case in cases.json")
 
+        expected_ids = {c.get("id") for c in long_stub_cases if isinstance(c.get("id"), str)}
+        subset_ids = {c.get("id") for c in subset_cases if isinstance(c.get("id"), str)}
+        self.assertEqual(
+            subset_ids,
+            expected_ids,
+            "Long-stub subset file must contain exactly the odd_coupon+long_stub case IDs from cases.json",
+        )
+
+        corpus_by_id = {c["id"]: c for c in corpus_cases if isinstance(c.get("id"), str)}
         for case in subset_cases:
-            formula = str(case.get("formula", ""))
-            self.assertTrue(formula, "subset case is missing formula")
-            self.assertIn(formula, corpus_by_formula, f"subset formula not present in cases.json: {formula!r}")
+            cid = case.get("id")
+            self.assertIsInstance(cid, str, "subset case is missing id")
+            self.assertIn(cid, corpus_by_id, f"subset caseId not present in cases.json: {cid!r}")
 
-            corpus_case = corpus_by_formula[formula]
+            corpus_case = corpus_by_id[cid]
 
-            # Ensure the subset's tags are all present on the canonical case (canonical can have extras).
+            # Ensure the subset case matches the canonical one, so any drift is obvious.
+            self.assertEqual(case.get("formula"), corpus_case.get("formula"), f"formula drift for {cid!r}")
+            self.assertEqual(case.get("outputCell"), corpus_case.get("outputCell"), f"outputCell drift for {cid!r}")
+            self.assertEqual(case.get("inputs"), corpus_case.get("inputs"), f"inputs drift for {cid!r}")
+            self.assertEqual(
+                case.get("description"),
+                corpus_case.get("description"),
+                f"description drift for {cid!r}",
+            )
+
             subset_tags = set(case.get("tags", [])) if isinstance(case.get("tags"), list) else set()
             corpus_tags = set(corpus_case.get("tags", [])) if isinstance(corpus_case.get("tags"), list) else set()
-            self.assertTrue(subset_tags.issubset(corpus_tags), f"tag drift for {formula!r}: {subset_tags} ⊄ {corpus_tags}")
+            self.assertIn("odd_coupon", subset_tags, f"subset case is missing odd_coupon tag: {cid!r}")
+            self.assertIn("long_stub", subset_tags, f"subset case is missing long_stub tag: {cid!r}")
+            self.assertTrue(
+                subset_tags.issubset(corpus_tags),
+                f"tag drift for {cid!r}: {subset_tags} ⊄ {corpus_tags}",
+            )
 
 
 if __name__ == "__main__":
     unittest.main()
-

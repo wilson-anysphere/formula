@@ -149,8 +149,8 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
 ```
 
-To regenerate the derived odd-coupon subset corpora (boundary + validation) from the canonical
-corpus, run:
+To regenerate the derived odd-coupon subset corpora (boundary + validation + long-stub) from the
+canonical corpus, run:
 
 ```bash
 python tools/excel-oracle/regenerate_subset_corpora.py
