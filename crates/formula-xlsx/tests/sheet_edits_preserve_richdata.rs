@@ -286,6 +286,12 @@ fn sheet_edits_preserve_richdata_parts_and_relationships() {
         Some("metadata.xml"),
         "workbook.xml.rels must retain the metadata relationship (rId9 -> metadata.xml)"
     );
+    assert!(
+        !workbook_rels
+            .values()
+            .any(|target| target == "worksheets/sheet2.xml"),
+        "workbook.xml.rels must remove relationship target for deleted sheet2"
+    );
 
     let added_rid = workbook_sheet_rids
         .iter()
