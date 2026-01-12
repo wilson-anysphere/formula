@@ -17,6 +17,7 @@ use crate::recalc_policy::{
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
 use crate::RecalcPolicy;
+use crate::WorkbookKind;
 use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 
 const REL_TYPE_STYLES: &str =
@@ -211,8 +212,18 @@ pub fn strip_vba_project_streaming<R: Read + Seek, W: Write + Seek>(
     input: R,
     output: W,
 ) -> Result<(), StreamingPatchError> {
+    strip_vba_project_streaming_with_kind(input, output, WorkbookKind::Workbook)
+}
+
+/// Remove macro-related parts from an XLSX/XLSM archive streamingly, rewriting the workbook
+/// "main" content type in `[Content_Types].xml` based on `target_kind`.
+pub fn strip_vba_project_streaming_with_kind<R: Read + Seek, W: Write + Seek>(
+    input: R,
+    output: W,
+    target_kind: WorkbookKind,
+) -> Result<(), StreamingPatchError> {
     let mut archive = ZipArchive::new(input)?;
-    macro_strip_streaming::strip_vba_project_streaming_with_archive(&mut archive, output)?;
+    macro_strip_streaming::strip_vba_project_streaming_with_archive(&mut archive, output, target_kind)?;
     Ok(())
 }
 
@@ -496,6 +507,8 @@ mod macro_strip_streaming {
     use zip::write::FileOptions;
     use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+    use crate::WorkbookKind;
+
     use super::{read_zip_part, StreamingPatchError};
 
     const CUSTOM_UI_REL_TYPES: [&str; 2] = [
@@ -513,6 +526,7 @@ mod macro_strip_streaming {
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         archive: &mut ZipArchive<R>,
         output: W,
+        target_kind: WorkbookKind,
     ) -> Result<(), StreamingPatchError> {
         let part_names = list_part_names(archive)?;
 
@@ -533,6 +547,7 @@ mod macro_strip_streaming {
             &mut delete_parts,
             &mut read_cache,
             &mut updated_parts,
+            target_kind,
         )?;
 
         let mut zip = ZipWriter::new(output);
@@ -875,11 +890,12 @@ mod macro_strip_streaming {
         delete_parts: &mut BTreeSet<String>,
         read_cache: &mut HashMap<String, Vec<u8>>,
         updated_parts: &mut HashMap<String, Vec<u8>>,
+        target_kind: WorkbookKind,
     ) -> Result<(), StreamingPatchError> {
         let ct_name = "[Content_Types].xml";
         if !delete_parts.contains(ct_name) && zip_part_exists(archive, ct_name)? {
             let existing = read_zip_part(archive, ct_name, read_cache)?;
-            if let Some(updated) = strip_content_types(&existing, delete_parts)? {
+            if let Some(updated) = strip_content_types(&existing, delete_parts, target_kind)? {
                 updated_parts.insert(ct_name.to_string(), updated);
             }
         }
@@ -1185,6 +1201,7 @@ mod macro_strip_streaming {
     fn strip_content_types(
         xml: &[u8],
         delete_parts: &BTreeSet<String>,
+        target_kind: WorkbookKind,
     ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
         let mut reader = XmlReader::from_reader(xml);
         reader.config_mut().trim_text(false);
@@ -1211,7 +1228,7 @@ mod macro_strip_streaming {
             match ev {
                 Event::Eof => break,
                 Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
-                    if let Some(updated) = patched_override(&e, delete_parts)? {
+                    if let Some(updated) = patched_override(&e, delete_parts, target_kind)? {
                         if updated.is_none() {
                             changed = true;
                             buf.clear();
@@ -1228,7 +1245,7 @@ mod macro_strip_streaming {
                 }
                 Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
                     // `<Override>` parts are expected to be empty, but handle the non-empty form.
-                    if let Some(updated) = patched_override(&e, delete_parts)? {
+                    if let Some(updated) = patched_override(&e, delete_parts, target_kind)? {
                         if updated.is_none() {
                             changed = true;
                             skip_depth = 1;
@@ -1264,6 +1281,7 @@ mod macro_strip_streaming {
     fn patched_override(
         e: &BytesStart<'_>,
         delete_parts: &BTreeSet<String>,
+        target_kind: WorkbookKind,
     ) -> Result<Option<Option<BytesStart<'static>>>, StreamingPatchError> {
         let mut part_name = None;
         let mut content_type = None;
@@ -1294,8 +1312,9 @@ mod macro_strip_streaming {
             .as_deref()
             .is_some_and(|ty| ty.contains("macroEnabled.main+xml"))
         {
-            const WORKBOOK_MAIN: &str =
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+            let workbook_main_type = target_kind
+                .macro_free_kind()
+                .workbook_content_type();
 
             // Preserve the original element's qualified name (including any namespace prefix).
             let tag_name = e.name();
@@ -1311,13 +1330,13 @@ mod macro_strip_streaming {
                     .eq_ignore_ascii_case(b"ContentType")
                 {
                     saw_content_type = true;
-                    updated.push_attribute((attr.key.as_ref(), WORKBOOK_MAIN.as_bytes()));
+                    updated.push_attribute((attr.key.as_ref(), workbook_main_type.as_bytes()));
                 } else {
                     updated.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
                 }
             }
             if !saw_content_type {
-                updated.push_attribute(("ContentType", WORKBOOK_MAIN));
+                updated.push_attribute(("ContentType", workbook_main_type));
             }
 
             return Ok(Some(Some(updated.into_owned())));

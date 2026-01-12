@@ -32,6 +32,7 @@ use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
 };
+use crate::WorkbookKind;
 
 mod rich_values;
 
@@ -380,6 +381,40 @@ fn read_zip_part_optional<R: Read + std::io::Seek>(
     }
 }
 
+fn detect_workbook_kind_from_content_types(xml: &[u8]) -> Option<WorkbookKind> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).ok()? {
+            Event::Start(e) | Event::Empty(e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Override") =>
+            {
+                let mut part_name = None;
+                let mut content_type = None;
+                for attr in e.attributes().with_checks(false).flatten() {
+                    match crate::openxml::local_name(attr.key.as_ref()) {
+                        b"PartName" => part_name = attr.unescape_value().ok().map(|v| v.into_owned()),
+                        b"ContentType" => {
+                            content_type = attr.unescape_value().ok().map(|v| v.into_owned())
+                        }
+                        _ => {}
+                    }
+                }
+                if part_name.as_deref() == Some("/xl/workbook.xml") {
+                    return content_type
+                        .as_deref()
+                        .and_then(WorkbookKind::from_workbook_main_content_type);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    None
+}
+
 pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
@@ -399,6 +434,11 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         file.read_to_end(&mut buf)?;
         parts.insert(name, buf);
     }
+
+    let workbook_kind = parts
+        .get("[Content_Types].xml")
+        .and_then(|bytes| detect_workbook_kind_from_content_types(bytes))
+        .unwrap_or(WorkbookKind::Workbook);
 
     let workbook_xml = parts
         .get(WORKBOOK_PART)
@@ -599,6 +639,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             rich_value_cells,
         },
         calc_affecting_edits: false,
+        workbook_kind,
     })
 }
 

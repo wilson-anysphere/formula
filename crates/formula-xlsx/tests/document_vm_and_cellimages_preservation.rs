@@ -118,7 +118,7 @@ fn build_fixture_xlsx_with_vm_and_cellimages() -> Vec<u8> {
 }
 
 #[test]
-fn preserves_vm_cell_attribute_and_cellimages_parts_through_document_roundtrip() {
+fn preserves_cellimages_parts_through_document_roundtrip_even_when_vm_is_dropped() {
     let fixture = build_fixture_xlsx_with_vm_and_cellimages();
 
     // Capture original bytes for the parts that must survive byte-for-byte.

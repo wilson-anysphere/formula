@@ -83,6 +83,37 @@ impl WorkbookKind {
     pub fn is_macro_free(self) -> bool {
         matches!(self, WorkbookKind::Workbook | WorkbookKind::Template)
     }
+
+    /// Detect a [`WorkbookKind`] from the `/xl/workbook.xml` "main" content type string.
+    pub fn from_workbook_main_content_type(content_type: &str) -> Option<Self> {
+        match content_type.trim() {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" => {
+                Some(Self::Workbook)
+            }
+            "application/vnd.ms-excel.sheet.macroEnabled.main+xml" => Some(Self::MacroEnabledWorkbook),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.template.main+xml" => {
+                Some(Self::Template)
+            }
+            "application/vnd.ms-excel.template.macroEnabled.main+xml" => {
+                Some(Self::MacroEnabledTemplate)
+            }
+            "application/vnd.ms-excel.addin.macroEnabled.main+xml" => Some(Self::MacroEnabledAddIn),
+            _ => None,
+        }
+    }
+
+    /// Return the closest macro-free kind for this workbook kind.
+    ///
+    /// Note: Excel does not define a macro-free add-in extension; callers that strip macros from
+    /// `.xlam` packages should treat the result as a standard `.xlsx` workbook.
+    pub fn macro_free_kind(self) -> Self {
+        match self {
+            Self::MacroEnabledWorkbook => Self::Workbook,
+            Self::MacroEnabledTemplate => Self::Template,
+            Self::MacroEnabledAddIn => Self::Workbook,
+            other => other,
+        }
+    }
 }
 
 /// Rewrite an existing `[Content_Types].xml` payload so that the `/xl/workbook.xml` override
@@ -988,6 +1019,15 @@ impl XlsxPackage {
     /// This is used when saving a macro-enabled workbook (`.xlsm`) as `.xlsx`.
     pub fn remove_vba_project(&mut self) -> Result<(), XlsxError> {
         crate::macro_strip::strip_macros(&mut self.parts)
+    }
+
+    /// Remove macro-related parts and relationships from the package, targeting a specific output
+    /// workbook kind.
+    ///
+    /// This controls how the workbook "main" content type is rewritten in `[Content_Types].xml`
+    /// after stripping macros.
+    pub fn remove_vba_project_with_kind(&mut self, target_kind: WorkbookKind) -> Result<(), XlsxError> {
+        crate::macro_strip::strip_macros_with_kind(&mut self.parts, target_kind)
     }
 }
 

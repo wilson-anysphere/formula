@@ -4,6 +4,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 
 use crate::package::XlsxError;
+use crate::WorkbookKind;
 
 const CUSTOM_UI_REL_TYPES: [&str; 2] = [
     "http://schemas.microsoft.com/office/2006/relationships/ui/extensibility",
@@ -69,6 +70,13 @@ fn get_part_cloned_with_key(
 }
 
 pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
+    strip_macros_with_kind(parts, WorkbookKind::Workbook)
+}
+
+pub(crate) fn strip_macros_with_kind(
+    parts: &mut BTreeMap<String, Vec<u8>>,
+    target_kind: WorkbookKind,
+) -> Result<(), XlsxError> {
     let delete_parts = compute_macro_delete_set(parts)?;
 
     for part in &delete_parts {
@@ -80,7 +88,7 @@ pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), 
     }
 
     clean_relationship_parts(parts, &delete_parts)?;
-    clean_content_types(parts, &delete_parts)?;
+    clean_content_types(parts, &delete_parts, target_kind)?;
 
     Ok(())
 }
@@ -361,13 +369,14 @@ fn clean_relationship_parts(
 fn clean_content_types(
     parts: &mut BTreeMap<String, Vec<u8>>,
     delete_parts: &BTreeSet<String>,
+    target_kind: WorkbookKind,
 ) -> Result<(), XlsxError> {
     let ct_name = "[Content_Types].xml";
     let Some(existing) = parts.get(ct_name).cloned() else {
         return Ok(());
     };
 
-    if let Some(updated) = strip_content_types(&existing, delete_parts)? {
+    if let Some(updated) = strip_content_types(&existing, delete_parts, target_kind)? {
         parts.insert(ct_name.to_string(), updated);
     }
 
@@ -542,6 +551,7 @@ fn relationship_id(e: &BytesStart<'_>) -> Result<Option<String>, XlsxError> {
 fn strip_content_types(
     xml: &[u8],
     delete_parts: &BTreeSet<String>,
+    target_kind: WorkbookKind,
 ) -> Result<Option<Vec<u8>>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -568,7 +578,7 @@ fn strip_content_types(
         match ev {
             Event::Eof => break,
             Event::Empty(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
-                if let Some(updated) = patched_override(&e, delete_parts)? {
+                if let Some(updated) = patched_override(&e, delete_parts, target_kind)? {
                     if updated.is_none() {
                         changed = true;
                         buf.clear();
@@ -586,7 +596,7 @@ fn strip_content_types(
             Event::Start(e) if crate::openxml::local_name(e.name().as_ref()) == b"Override" => {
                 // `<Override>` parts are expected to be empty, but handle the non-empty form just
                 // in case by skipping the entire element when needed.
-                if let Some(updated) = patched_override(&e, delete_parts)? {
+                if let Some(updated) = patched_override(&e, delete_parts, target_kind)? {
                     if updated.is_none() {
                         changed = true;
                         skip_depth = 1;
@@ -622,6 +632,7 @@ fn strip_content_types(
 fn patched_override(
     e: &BytesStart<'_>,
     delete_parts: &BTreeSet<String>,
+    target_kind: WorkbookKind,
 ) -> Result<Option<Option<BytesStart<'static>>>, XlsxError> {
     let mut part_name = None;
     let mut content_type = None;
@@ -652,8 +663,9 @@ fn patched_override(
         .as_deref()
         .is_some_and(|ty| ty.contains("macroEnabled.main+xml"))
     {
-        const WORKBOOK_MAIN: &str =
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml";
+        let workbook_main_type = target_kind
+            .macro_free_kind()
+            .workbook_content_type();
 
         // Preserve the original element's qualified name (including any namespace prefix).
         let tag_name = e.name();
@@ -667,15 +679,14 @@ fn patched_override(
             let attr = attr?;
             if crate::openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"ContentType") {
                 saw_content_type = true;
-                updated.push_attribute((attr.key.as_ref(), WORKBOOK_MAIN.as_bytes()));
+                updated.push_attribute((attr.key.as_ref(), workbook_main_type.as_bytes()));
             } else {
                 updated.push_attribute((attr.key.as_ref(), attr.value.as_ref()));
             }
         }
         if !saw_content_type {
-            updated.push_attribute(("ContentType", WORKBOOK_MAIN));
+            updated.push_attribute(("ContentType", workbook_main_type));
         }
-
         return Ok(Some(Some(updated.into_owned())));
     }
 

@@ -22,7 +22,7 @@ use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
-use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, XlsxDocument, XlsxError};
+use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, WorkbookKind, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
@@ -615,7 +615,7 @@ fn build_parts(
 
     let sheet_plan = plan_sheet_structure(doc, &mut parts, is_new)?;
     if is_new {
-        parts = generate_minimal_package(&sheet_plan.sheets)?;
+        parts = generate_minimal_package(&sheet_plan.sheets, doc.workbook_kind)?;
     }
 
     let (mut styles_part_name, mut shared_strings_part_name) = (
@@ -3844,7 +3844,10 @@ fn shared_string_index(
     }
 }
 
-fn generate_minimal_package(sheets: &[SheetMeta]) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
+fn generate_minimal_package(
+    sheets: &[SheetMeta],
+    workbook_kind: WorkbookKind,
+) -> Result<BTreeMap<String, Vec<u8>>, WriteError> {
     let mut parts = BTreeMap::new();
 
     parts.insert(
@@ -3865,7 +3868,7 @@ fn generate_minimal_package(sheets: &[SheetMeta]) -> Result<BTreeMap<String, Vec
 
     parts.insert(
         "[Content_Types].xml".to_string(),
-        minimal_content_types_xml(sheets).into_bytes(),
+        minimal_content_types_xml(sheets, workbook_kind).into_bytes(),
     );
 
     Ok(parts)
@@ -3932,13 +3935,15 @@ fn relative_target(base_dir: &str, part_name: &str) -> String {
     }
 }
 
-fn minimal_content_types_xml(sheets: &[SheetMeta]) -> String {
+fn minimal_content_types_xml(sheets: &[SheetMeta], workbook_kind: WorkbookKind) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#);
     xml.push_str(r#"<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>"#);
     xml.push_str(r#"<Default Extension="xml" ContentType="application/xml"/>"#);
-    xml.push_str(r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#);
+    xml.push_str(r#"<Override PartName="/xl/workbook.xml" ContentType=""#);
+    xml.push_str(workbook_kind.workbook_content_type());
+    xml.push_str(r#""/>"#);
     for sheet_meta in sheets {
         xml.push_str(r#"<Override PartName="/"#);
         xml.push_str(&escape_attr(&sheet_meta.path));

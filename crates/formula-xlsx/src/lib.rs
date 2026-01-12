@@ -128,7 +128,8 @@ pub use streaming::{
     patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles,
     patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy,
-    strip_vba_project_streaming, PartOverride, StreamingPatchError, WorksheetCellPatch,
+    strip_vba_project_streaming, strip_vba_project_streaming_with_kind, PartOverride,
+    StreamingPatchError, WorksheetCellPatch,
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
@@ -249,10 +250,15 @@ pub struct XlsxDocument {
     shared_strings: Vec<RichText>,
     pub meta: XlsxMeta,
     calc_affecting_edits: bool,
+    workbook_kind: WorkbookKind,
 }
 
 impl XlsxDocument {
     pub fn new(workbook: Workbook) -> Self {
+        Self::new_with_kind(workbook, WorkbookKind::Workbook)
+    }
+
+    pub fn new_with_kind(workbook: Workbook, workbook_kind: WorkbookKind) -> Self {
         let date_system = match workbook.date_system {
             formula_model::DateSystem::Excel1900 => DateSystem::V1900,
             formula_model::DateSystem::Excel1904 => DateSystem::V1904,
@@ -281,6 +287,7 @@ impl XlsxDocument {
                 ..XlsxMeta::default()
             },
             calc_affecting_edits: false,
+            workbook_kind,
         }
     }
 
@@ -313,6 +320,14 @@ impl XlsxDocument {
 
     pub fn rich_value_index(&self, sheet: WorksheetId, cell: CellRef) -> Option<u32> {
         self.rich_value_index_for_cell(sheet, cell).ok().flatten()
+    }
+
+    pub fn workbook_kind(&self) -> WorkbookKind {
+        self.workbook_kind
+    }
+
+    pub fn set_workbook_kind(&mut self, workbook_kind: WorkbookKind) {
+        self.workbook_kind = workbook_kind;
     }
 
     pub fn save_to_vec(&self) -> Result<Vec<u8>, write::WriteError> {

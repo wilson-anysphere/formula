@@ -7,6 +7,7 @@ use formula_vba::{
     VbaProjectBindingVerification, VbaSignatureVerification,
 };
 use formula_xlsx::XlsxPackage;
+use openssl::hash::{hash, MessageDigest};
 use zip::write::FileOptions;
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -120,18 +121,21 @@ fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
 
-fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
-    // SHA-1 OID: 1.3.14.3.2.26
-    let sha1_oid = [0x2B, 0x0E, 0x03, 0x02, 0x1A];
+fn build_spc_indirect_data_content_sha256_oid_with_md5_digest(md5_digest: &[u8]) -> Vec<u8> {
+    // SHA-256 OID: 2.16.840.1.101.3.4.2.1
+    let sha256_oid = [0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01];
+    build_spc_indirect_data_content(&sha256_oid, md5_digest)
+}
 
+fn build_spc_indirect_data_content(oid: &[u8], digest: &[u8]) -> Vec<u8> {
     let mut alg_id = Vec::new();
-    alg_id.extend_from_slice(&der_oid_raw(&sha1_oid));
+    alg_id.extend_from_slice(&der_oid_raw(oid));
     alg_id.extend_from_slice(&der_null());
     let alg_id = der_sequence(&alg_id);
 
     let mut digest_info = Vec::new();
     digest_info.extend_from_slice(&alg_id);
-    digest_info.extend_from_slice(&der_octet_string(project_digest));
+    digest_info.extend_from_slice(&der_octet_string(digest));
     let digest_info = der_sequence(&digest_info);
 
     let mut spc = Vec::new();
@@ -142,6 +146,42 @@ fn build_spc_indirect_data_content_sha1(project_digest: &[u8]) -> Vec<u8> {
 }
 
 fn build_vba_project_bin(module_byte: u8) -> Vec<u8> {
+    fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(data);
+    }
+
+    // Minimal MS-OVBA-ish VBA project structure that is valid for `content_normalized_data`.
+    let module_source = {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"Sub Hello");
+        out.push(module_byte);
+        out.extend_from_slice(b"()\r\nEnd Sub\r\n");
+        out
+    };
+    let module_container = compress_container(&module_source);
+
+    // Minimal `dir` stream (decompressed form) describing a single module named `Module1`.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTNAME
+        push_record(&mut out, 0x0004, b"VBAProject");
+        // MODULENAME
+        push_record(&mut out, 0x0019, b"Module1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
 
@@ -154,33 +194,12 @@ fn build_vba_project_bin(module_byte: u8) -> Vec<u8> {
     ole.create_storage("VBA").expect("VBA storage");
 
     {
-        // Minimal, parseable `VBA/dir` stream:
-        // - Each record is `u16 id || u32 len || data`.
-        // - We include the bare minimum for `content_normalized_data`:
-        //   MODULENAME (0x0019), MODULESTREAMNAME (0x001A), MODULETEXTOFFSET (0x0031).
-        let mut dir_decompressed = Vec::new();
-        dir_decompressed.extend_from_slice(&0x0019u16.to_le_bytes());
-        dir_decompressed.extend_from_slice(&(b"Module1".len() as u32).to_le_bytes());
-        dir_decompressed.extend_from_slice(b"Module1");
-
-        dir_decompressed.extend_from_slice(&0x001Au16.to_le_bytes());
-        dir_decompressed.extend_from_slice(&(b"Module1".len() as u32).to_le_bytes());
-        dir_decompressed.extend_from_slice(b"Module1");
-
-        dir_decompressed.extend_from_slice(&0x0031u16.to_le_bytes());
-        dir_decompressed.extend_from_slice(&(4u32).to_le_bytes());
-        dir_decompressed.extend_from_slice(&0u32.to_le_bytes()); // TextOffset = 0
-
-        let dir_bytes = compress_container(&dir_decompressed);
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(&dir_bytes).unwrap();
+        s.write_all(&dir_container).unwrap();
     }
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        // Store the compressed module source starting at TextOffset=0. Changing `module_byte`
-        // changes ContentNormalizedData and thus the expected binding digest.
-        let module_bytes = compress_container(&[module_byte]);
-        s.write_all(&module_bytes).unwrap();
+        s.write_all(&module_container).unwrap();
     }
 
     ole.into_inner().into_inner()
@@ -224,24 +243,16 @@ fn build_xlsm_with_external_signature(project_ole: &[u8], signature_ole: &[u8]) 
 
 #[test]
 fn verifies_project_digest_binding_with_external_signature_part() {
-    use openssl::hash::{hash, MessageDigest};
-
     let project_ole = build_vba_project_bin(b'A');
-    // Per MS-OSHARED §4.3, VBA signature DigestInfo digest bytes are MD5 (16 bytes) even when the
-    // DigestInfo algorithm OID indicates SHA-1/SHA-256.
-    //
-    // For MS-OVBA binding, this MD5 is computed over `ContentNormalizedData` (§2.4.2.1).
-    let normalized = content_normalized_data(&project_ole).expect("content normalized data");
-    let digest = hash(MessageDigest::md5(), &normalized)
-        .expect("md5 digest")
-        .as_ref()
-        .to_vec();
-    assert_eq!(digest.len(), 16);
+    let normalized = content_normalized_data(&project_ole).expect("ContentNormalizedData");
+    let digest = hash(MessageDigest::md5(), &normalized).expect("md5 digest");
+    assert_eq!(digest.as_ref().len(), 16, "expected 16-byte MD5 digest");
 
-    // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo is the
-    // project digest. We store it as:
+    // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo digest bytes
+    // are the MS-OVBA project ContentNormalizedData hash (MD5), even when the DigestInfo algorithm
+    // OID indicates SHA-256. We store it as:
     //   signed_content || pkcs7_detached_signature(signed_content)
-    let signed_content = build_spc_indirect_data_content_sha1(digest.as_ref());
+    let signed_content = build_spc_indirect_data_content_sha256_oid_with_md5_digest(digest.as_ref());
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
     let mut signature_stream_payload = signed_content.clone();
     signature_stream_payload.extend_from_slice(&pkcs7);
