@@ -2728,6 +2728,25 @@ mod tests {
     }
 
     #[test]
+    fn decodes_unknown_error_code_to_unknown_error_literal() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgErr with an unknown error code byte.
+        let rgce = [0x1C, 0xFF];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0xFF")),
+            "expected warning to include unknown error code, warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_to_ref_placeholder() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
