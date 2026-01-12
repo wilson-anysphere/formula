@@ -975,6 +975,27 @@ pub fn build_autofilterinfo_only_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where the `_xlnm._FilterDatabase` NAME record uses a `PtgAreaN`
+/// token (relative area reference) rather than `PtgArea`.
+///
+/// The importer has a dedicated `_FilterDatabase` scanner that only understands a subset of rgce
+/// tokens (e.g. PtgArea/PtgArea3d). This fixture ensures we still recover the correct AutoFilter
+/// range from the fully-decoded defined name, even when that specialized scanner cannot interpret
+/// the rgce bytes.
+pub fn build_autofilter_filterdatabase_arean_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_autofilter_filterdatabase_arean_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with workbook calculation settings set to non-default values.
 ///
 /// This is used to verify BIFF `CALCMODE`/`ITERATION`/`CALCCOUNT`/`DELTA`/`PRECISION`/`SAVERECALC`
@@ -1235,6 +1256,92 @@ fn build_autofilterinfo_only_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // AUTOFILTERINFO: 2 columns (A..B). No FILTERMODE present.
     push_record(&mut sheet, RECORD_AUTOFILTERINFO, &2u16.to_le_bytes());
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_autofilter_filterdatabase_arean_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    // One "cell" XF for NUMBER records.
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "AreaNFilterDb");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // `_xlnm._FilterDatabase` (built-in id 0x0D) scoped to the sheet (`itab=1`), but encoded as a
+    // relative-area token (PtgAreaN) rather than PtgArea. This should still decode to `A1:B3`.
+    //
+    // PtgAreaN token (ref class): [ptg=0x2D][rwFirst][rwLast][colFirst][colLast].
+    // Row/col are relative when the corresponding bits are set in the col fields.
+    let mut filter_db_rgce = Vec::<u8>::new();
+    filter_db_rgce.push(0x2D); // PtgAreaN
+    filter_db_rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst (offset 0)
+    filter_db_rgce.extend_from_slice(&2u16.to_le_bytes()); // rwLast (offset 2 => row 3)
+    let col_first_field: u16 = 0xC000 | 0; // A, row+col relative
+    let col_last_field: u16 = 0xC000 | 1; // B, row+col relative
+    filter_db_rgce.extend_from_slice(&col_first_field.to_le_bytes());
+    filter_db_rgce.extend_from_slice(&col_last_field.to_le_bytes());
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &builtin_name_record(true, 1, 0x0D, &filter_db_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_autofilter_filterdatabase_arean_sheet_stream(xf_cell);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_autofilter_filterdatabase_arean_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 10) cols [0, 4) => A1:D10.
+    // This intentionally exceeds the `_FilterDatabase` range so we can verify we prefer the defined
+    // name over DIMENSIONS-based inference.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&4u16.to_le_bytes()); // last col + 1 (A..D)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // AUTOFILTERINFO: 4 columns (A..D). This will cause DIMENSIONS-based inference to yield A1:D10.
+    push_record(&mut sheet, RECORD_AUTOFILTERINFO, &4u16.to_le_bytes());
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet

@@ -1613,16 +1613,26 @@ fn import_xls_path_with_biff_reader(
             )));
             continue;
         };
-        if sheet.auto_filter.is_some() {
-            continue;
+        match sheet.auto_filter.as_mut() {
+            Some(existing) => {
+                // Prefer ranges derived from `_FilterDatabase` NAME records (or other defined-name
+                // based recovery) over any earlier best-effort inference from worksheet DIMENSIONS
+                // / AUTOFILTERINFO / FILTERMODE.
+                //
+                // We only update the range and preserve any existing (future) filter state fields.
+                if existing.range != range {
+                    existing.range = range;
+                }
+            }
+            None => {
+                sheet.auto_filter = Some(SheetAutoFilter {
+                    range,
+                    filter_columns: Vec::new(),
+                    sort_state: None,
+                    raw_xml: Vec::new(),
+                });
+            }
         }
-
-        sheet.auto_filter = Some(SheetAutoFilter {
-            range,
-            filter_columns: Vec::new(),
-            sort_state: None,
-            raw_xml: Vec::new(),
-        });
     }
     Ok(XlsImportResult {
         workbook: out,

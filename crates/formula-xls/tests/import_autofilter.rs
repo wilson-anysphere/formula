@@ -219,3 +219,27 @@ fn recovers_missing_autofilter_ranges_when_calamine_import_is_partial() {
     });
     assert_eq!(builtin_af.range, Range::from_a1("A1:B3").unwrap());
 }
+
+#[test]
+fn imports_autofilter_range_from_filterdatabase_defined_name_even_when_rgce_is_ptg_arean() {
+    let bytes = xls_fixture_builder::build_autofilter_filterdatabase_arean_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("AreaNFilterDb")
+        .expect("AreaNFilterDb missing");
+
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected auto_filter to be set");
+    assert_eq!(af.range, Range::from_a1("A1:B3").unwrap());
+
+    // The defined name should still be present and parseable.
+    let filter_db = result
+        .workbook
+        .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
+        .expect("expected _FilterDatabase defined name");
+    assert_parseable(&filter_db.refers_to);
+}
