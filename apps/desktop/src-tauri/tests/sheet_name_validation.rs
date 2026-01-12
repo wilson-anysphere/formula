@@ -229,6 +229,23 @@ fn add_sheet_disambiguates_unicode_nfkc_equivalent_duplicate() {
 }
 
 #[test]
+fn add_sheet_disambiguates_unicode_case_folding_expansion_duplicate() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("straße".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // German ß uppercases to "SS". Excel compares sheet names case-insensitively across Unicode,
+    // so adding "STRASSE" should be treated as a duplicate of "straße".
+    let added = state
+        .add_sheet("STRASSE".to_string(), None, None, None)
+        .expect("expected add_sheet to disambiguate unicode duplicate");
+    assert_eq!(added.name, "STRASSE 2");
+}
+
+#[test]
 fn create_sheet_rejects_invalid_character() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
@@ -436,6 +453,31 @@ fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding() {
     // case-insensitively across Unicode.
     let err = state
         .rename_sheet(&sheet2_id, "É".to_string())
+        .expect_err("expected duplicate sheet name error");
+
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding_expansion() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("straße".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    let sheet2_id = workbook.sheets[1].id.clone();
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // German ß uppercases to "SS". Excel compares sheet names case-insensitively across Unicode, so
+    // this should be treated as a duplicate.
+    let err = state
+        .rename_sheet(&sheet2_id, "STRASSE".to_string())
         .expect_err("expected duplicate sheet name error");
 
     match err {
