@@ -478,63 +478,67 @@ pub fn normalized_key(expr: &Expr) -> Arc<str> {
     Arc::from(s)
 }
 
+fn value_to_key(v: &Value, out: &mut String) {
+    match v {
+        Value::Number(n) => {
+            out.push_str("N");
+            out.push_str(&format!("{:016x}", n.to_bits()));
+        }
+        Value::Bool(b) => {
+            out.push_str(if *b { "B1" } else { "B0" });
+        }
+        Value::Text(t) => {
+            out.push_str("S");
+            out.push_str(t);
+            out.push('\0');
+        }
+        Value::Empty => out.push_str("E"),
+        Value::Error(e) => {
+            out.push_str("ERR");
+            out.push_str(&format!("{:?}", e));
+            out.push('\0');
+        }
+        Value::Range(r) => {
+            out.push_str("RANGE(");
+            ref_to_key(r.start, out);
+            out.push(',');
+            ref_to_key(r.end, out);
+            out.push(')');
+        }
+        Value::MultiRange(r) => {
+            out.push_str("MRANGE(");
+            out.push_str(&r.areas.len().to_string());
+            out.push(':');
+            for area in r.areas.iter() {
+                sheet_range_to_key(*area, out);
+                out.push(',');
+            }
+            out.push(')');
+        }
+        Value::Array(a) => {
+            out.push_str("ARR(");
+            out.push_str(&a.rows.to_string());
+            out.push('x');
+            out.push_str(&a.cols.to_string());
+            out.push(':');
+            for v in &a.values {
+                value_to_key(v, out);
+                out.push(',');
+            }
+            out.push(')');
+        }
+        // Rich value variants (e.g. entity / record types) can be carried through the bytecode
+        // runtime for pass-through semantics, but are not currently produced by parsing/lowering
+        // as literals. Encode them as an opaque marker so cache keys stay deterministic without
+        // needing to serialize the rich payload.
+        #[allow(unreachable_patterns)]
+        _ => out.push_str("RICH"),
+    }
+}
+
 fn expr_to_key(expr: &Expr, out: &mut String) {
     match expr {
-        Expr::Literal(v) => match v {
-            Value::Number(n) => {
-                out.push_str("N");
-                out.push_str(&format!("{:016x}", n.to_bits()));
-            }
-            Value::Bool(b) => {
-                out.push_str(if *b { "B1" } else { "B0" });
-            }
-            Value::Text(t) => {
-                out.push_str("S");
-                out.push_str(t);
-                out.push('\0');
-            }
-            Value::Empty => out.push_str("E"),
-            Value::Error(e) => {
-                out.push_str("ERR");
-                out.push_str(&format!("{:?}", e));
-                out.push('\0');
-            }
-            Value::Range(r) => {
-                out.push_str("RANGE(");
-                ref_to_key(r.start, out);
-                out.push(',');
-                ref_to_key(r.end, out);
-                out.push(')');
-            }
-            Value::MultiRange(r) => {
-                out.push_str("MRANGE(");
-                out.push_str(&r.areas.len().to_string());
-                out.push(':');
-                for area in r.areas.iter() {
-                    sheet_range_to_key(*area, out);
-                    out.push(',');
-                }
-                out.push(')');
-            }
-            Value::Array(a) => {
-                out.push_str("ARR(");
-                out.push_str(&a.rows.to_string());
-                out.push('x');
-                out.push_str(&a.cols.to_string());
-                out.push(':');
-                for v in &a.values {
-                    out.push_str(&format!("{:016x}", v.to_bits()));
-                    out.push(',');
-                }
-                out.push(')');
-            }
-            // Rich value variants (e.g. entity / record types) can be carried through the bytecode
-            // runtime for pass-through semantics, but are not currently produced by
-            // parsing/lowering as literals. Encode them as an opaque marker so cache keys stay
-            // deterministic without needing to serialize the rich payload.
-            #[allow(unreachable_patterns)]
-            _ => out.push_str("RICH"),
-        },
+        Expr::Literal(v) => value_to_key(v, out),
         Expr::CellRef(r) => {
             out.push_str("CELL(");
             ref_to_key(*r, out);

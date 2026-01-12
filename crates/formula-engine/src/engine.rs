@@ -5752,6 +5752,29 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
         bytecode::Value::Empty => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
+        bytecode::Value::Array(arr) => {
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for v in arr.values {
+                // Arrays should only contain scalar values. If nested arrays/ranges appear, treat them
+                // as errors rather than attempting to spill recursively.
+                values.push(match v {
+                    bytecode::Value::Array(_)
+                    | bytecode::Value::Range(_)
+                    | bytecode::Value::MultiRange(_) => {
+                        Value::Error(ErrorKind::Value)
+                    }
+                    other => bytecode_value_to_engine(other),
+                });
+            }
+            Value::Array(Array::new(arr.rows, arr.cols, values))
+        }
         // Bytecode arrays/refs are "spill" markers in the engine layer; other (future) rich values
         // should also degrade safely rather than panicking.
         _ => Value::Error(ErrorKind::Spill),
@@ -6390,7 +6413,9 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     let mut lexical_scopes: Vec<HashSet<Arc<str>>> = Vec::new();
-    bytecode_expr_is_eligible_inner(expr, false, false, &mut lexical_scopes)
+    // Top-level formulas use dynamic reference dereference, so range references are eligible and
+    // may spill (e.g. `=A1:A3` / `=A1:A3+1`).
+    bytecode_expr_is_eligible_inner(expr, true, false, &mut lexical_scopes)
 }
 
 fn bytecode_expr_within_grid_limits(
@@ -6533,7 +6558,7 @@ fn bytecode_expr_is_eligible_inner(
         bytecode::Expr::MultiRangeRef(_) => allow_range,
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
-                bytecode_expr_is_eligible_inner(expr, false, false, lexical_scopes)
+                bytecode_expr_is_eligible_inner(expr, allow_range, allow_array_literals, lexical_scopes)
             }
             // Implicit intersection accepts ranges, but should not treat array literals as eligible
             // until the bytecode backend can represent typed/mixed arrays.
@@ -6555,8 +6580,8 @@ fn bytecode_expr_is_eligible_inner(
                     | bytecode::ast::BinaryOp::Le
                     | bytecode::ast::BinaryOp::Gt
                     | bytecode::ast::BinaryOp::Ge
-            ) && bytecode_expr_is_eligible_inner(left, false, false, lexical_scopes)
-                && bytecode_expr_is_eligible_inner(right, false, false, lexical_scopes)
+            ) && bytecode_expr_is_eligible_inner(left, allow_range, allow_array_literals, lexical_scopes)
+                && bytecode_expr_is_eligible_inner(right, allow_range, allow_array_literals, lexical_scopes)
         }
         bytecode::Expr::FuncCall { func, args } => match func {
             bytecode::ast::Function::If => {
@@ -8836,21 +8861,22 @@ mod tests {
     }
 
     #[test]
-    fn bytecode_compile_report_classifies_ineligible_range_expressions() {
+    fn bytecode_compile_report_allows_range_expressions() {
         let mut engine = Engine::new();
         engine
             .set_cell_formula("Sheet1", "A1", "=A2:A3")
             .unwrap();
 
         let report = engine.bytecode_compile_report(10);
-        assert_eq!(report.len(), 1);
-        assert_eq!(report[0].reason, BytecodeCompileReason::IneligibleExpr);
+        assert_eq!(report.len(), 0);
     }
 
     #[test]
     fn bytecode_compile_report_classifies_unsupported_operators() {
         let mut engine = Engine::new();
-        engine.set_cell_formula("Sheet1", "B1", "=A1#").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=A1:A2 A2:A3")
+            .unwrap();
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);

@@ -219,12 +219,13 @@ impl From<ErrorKind> for crate::value::ErrorKind {
 pub struct Array {
     pub rows: usize,
     pub cols: usize,
-    pub values: Vec<f64>,
+    /// Row-major order values (length = rows * cols).
+    pub values: Vec<Value>,
 }
 
 impl Array {
     #[inline]
-    pub fn new(rows: usize, cols: usize, values: Vec<f64>) -> Self {
+    pub fn new(rows: usize, cols: usize, values: Vec<Value>) -> Self {
         debug_assert_eq!(rows * cols, values.len());
         Self { rows, cols, values }
     }
@@ -235,8 +236,16 @@ impl Array {
     }
 
     #[inline]
-    pub fn as_slice(&self) -> &[f64] {
-        &self.values
+    pub fn get(&self, row: usize, col: usize) -> Option<&Value> {
+        if row >= self.rows || col >= self.cols {
+            return None;
+        }
+        self.values.get(row * self.cols + col)
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+        self.values.iter()
     }
 }
 
@@ -277,13 +286,7 @@ impl PartialEq for Value {
             (Range(a), Range(b)) => a == b,
             (MultiRange(a), MultiRange(b)) => a == b,
             (Array(a), Array(b)) => {
-                a.rows == b.rows
-                    && a.cols == b.cols
-                    && a.values.len() == b.values.len()
-                    && a.values
-                        .iter()
-                        .zip(&b.values)
-                        .all(|(x, y)| x.to_bits() == y.to_bits())
+                a.rows == b.rows && a.cols == b.cols && a.values == b.values
             }
             _ => false,
         }

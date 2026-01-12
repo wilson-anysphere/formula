@@ -1,6 +1,8 @@
 use super::ast::{BinaryOp, UnaryOp};
 use super::grid::Grid;
-use super::runtime::{apply_binary, apply_implicit_intersection, apply_unary, call_function};
+use super::runtime::{
+    apply_binary, apply_implicit_intersection, apply_unary, call_function, deref_value_dynamic,
+};
 use super::value::{CellCoord, Value};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
@@ -77,11 +79,11 @@ impl Vm {
                 }
                 OpCode::UnaryPlus => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(apply_unary(UnaryOp::Plus, v));
+                    self.stack.push(apply_unary(UnaryOp::Plus, v, grid, base));
                 }
                 OpCode::UnaryNeg => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    self.stack.push(apply_unary(UnaryOp::Neg, v));
+                    self.stack.push(apply_unary(UnaryOp::Neg, v, grid, base));
                 }
                 OpCode::ImplicitIntersection => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
@@ -115,7 +117,7 @@ impl Vm {
                         OpCode::Ge => BinaryOp::Ge,
                         _ => unreachable!(),
                     };
-                    self.stack.push(apply_binary(op, left, right));
+                    self.stack.push(apply_binary(op, left, right, grid, base));
                 }
                 OpCode::CallFunc => {
                     let func = &program.funcs[inst.a() as usize];
@@ -136,7 +138,7 @@ impl Vm {
                 }
                 OpCode::JumpIfFalseOrError => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
-                    match super::runtime::coerce_to_bool(v) {
+                    match super::runtime::coerce_to_bool(&v) {
                         Ok(true) => {}
                         Ok(false) => {
                             pc = inst.a() as usize;
@@ -168,7 +170,10 @@ impl Vm {
             }
             pc += 1;
         }
-        self.stack.pop().unwrap_or(Value::Empty)
+        let v = self.stack.pop().unwrap_or(Value::Empty);
+        // Match the AST evaluator: the final result uses dynamic dereference, so range references
+        // spill instead of producing a scalar `#SPILL!`.
+        deref_value_dynamic(v, grid, base)
     }
 
     pub fn eval_with_value_locale(

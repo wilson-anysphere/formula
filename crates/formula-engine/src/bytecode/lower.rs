@@ -255,24 +255,24 @@ fn parse_error_kind(raw: &str) -> crate::value::ErrorKind {
     crate::value::ErrorKind::from_code(raw).unwrap_or(crate::value::ErrorKind::Value)
 }
 
-fn lower_array_literal_element(expr: &crate::Expr) -> Result<Option<f64>, LowerError> {
+fn lower_array_literal_element(expr: &crate::Expr) -> Result<Value, LowerError> {
     match expr {
-        crate::Expr::Number(raw) => Ok(Some(parse_number(raw)?)),
-        crate::Expr::Missing | crate::Expr::Boolean(_) | crate::Expr::String(_) => Ok(None),
+        crate::Expr::Number(raw) => Ok(Value::Number(parse_number(raw)?)),
+        crate::Expr::String(s) => Ok(Value::Text(Arc::from(s.as_str()))),
+        crate::Expr::Boolean(b) => Ok(Value::Bool(*b)),
+        crate::Expr::Error(raw) => Ok(Value::Error(BytecodeErrorKind::from(parse_error_kind(raw)))),
+        crate::Expr::Missing => Ok(Value::Empty),
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => match lower_array_literal_element(&u.expr)? {
-                Some(n) => Ok(Some(n)),
-                None => Err(LowerError::Unsupported),
+                Value::Number(n) => Ok(Value::Number(n)),
+                _ => Err(LowerError::Unsupported),
             },
             crate::UnaryOp::Minus => match lower_array_literal_element(&u.expr)? {
-                Some(n) => Ok(Some(-n)),
-                None => Err(LowerError::Unsupported),
+                Value::Number(n) => Ok(Value::Number(-n)),
+                _ => Err(LowerError::Unsupported),
             },
             crate::UnaryOp::ImplicitIntersection => Err(LowerError::Unsupported),
         },
-        // Array literals can contain error constants, but the bytecode backend's numeric-only
-        // arrays cannot represent them yet (they must be preserved for correct propagation).
-        crate::Expr::Error(_) => Err(LowerError::Unsupported),
         // Reject any non-literal element (e.g. references or function calls).
         _ => Err(LowerError::Unsupported),
     }
@@ -294,8 +294,7 @@ fn lower_array_literal(arr: &crate::ArrayLiteral) -> Result<Value, LowerError> {
     let mut values = Vec::with_capacity(rows.saturating_mul(cols));
     for row in &arr.rows {
         for el in row {
-            let n = lower_array_literal_element(el)?;
-            values.push(n.unwrap_or(f64::NAN));
+            values.push(lower_array_literal_element(el)?);
         }
     }
 
