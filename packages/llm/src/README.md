@@ -1,0 +1,51 @@
+# `packages/llm` (Cursor backend)
+
+This package provides a small, dependency-free LLM client that talks to the **Cursor-managed backend**.
+
+## Cursor-only constraints
+
+- No provider selection (Cursor controls routing/model choice).
+- No user-supplied API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_HOST`, etc. are **not** used by the Cursor client).
+- Callers must inject auth using **request headers**.
+
+## Backend protocol
+
+The Cursor backend is expected to expose an **OpenAI-compatible** endpoint:
+
+- `POST /chat/completions`
+- `messages` + `tools` + `tool_calls` follow the OpenAI Chat Completions tool-calling format.
+
+## Auth injection
+
+Authentication is supplied by the embedding environment (desktop app, web app, etc) and injected via:
+
+- `getAuthHeaders(): Record<string,string> | Promise<Record<string,string>>` (merged into request headers)
+- `authToken` (adds `Authorization: Bearer <token>`)
+
+## Minimal usage
+
+### `createLLMClient()`
+
+```ts
+import { createLLMClient } from "./createLLMClient.js";
+
+// Uses the Cursor backend. Auth is expected to be handled by the embedding
+// environment (for example, session cookies in a browser runtime).
+const client = createLLMClient();
+
+const res = await client.chat({
+  messages: [{ role: "user", content: "Hello" }],
+});
+console.log(res.message.content);
+```
+
+### `new CursorLLMClient(...)`
+
+```ts
+import { CursorLLMClient } from "./cursor.js";
+
+const client = new CursorLLMClient({
+  baseUrl: "https://api.cursor.sh/v1",
+  authToken: "cursor-managed-token",
+});
+```
