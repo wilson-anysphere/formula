@@ -45,6 +45,17 @@ function injectWebviewCsp(html: string): string {
     } catch {
       // Ignore.
     }
+    try {
+      // If a global is present and configurable, attempt to lock it down to `undefined` so it
+      // can't be re-populated later in the page lifecycle.
+      Object.defineProperty(window, key, {
+        value: undefined,
+        writable: false,
+        configurable: false,
+      });
+    } catch {
+      // Ignore.
+    }
   }
   try {
     // Marker used by desktop e2e tests to verify the hardening script ran in the iframe.
@@ -54,24 +65,40 @@ function injectWebviewCsp(html: string): string {
   }
 })();
 </script>`;
+  const injectedHeadContent = `${cspMeta}${hardenTauriGlobalsScript}`;
   const src = String(html ?? "");
 
-  // If the extension already provides a `<head>`, inject our CSP as early as possible.
   const headMatch = /<head(\s[^>]*)?>/i.exec(src);
-  if (headMatch && typeof headMatch.index === "number") {
+  const scriptMatch = /<script\b/i.exec(src);
+  if (headMatch && typeof headMatch.index === "number" && (!scriptMatch || headMatch.index < scriptMatch.index)) {
     const insertAt = headMatch.index + headMatch[0].length;
-    return `${src.slice(0, insertAt)}${cspMeta}${hardenTauriGlobalsScript}${src.slice(insertAt)}`;
+    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
   }
 
-  // Otherwise, inject a `<head>` right after the `<html>` element when present.
   const htmlMatch = /<html(\s[^>]*)?>/i.exec(src);
-  if (htmlMatch && typeof htmlMatch.index === "number") {
+  if (htmlMatch && typeof htmlMatch.index === "number" && (!scriptMatch || htmlMatch.index < scriptMatch.index)) {
     const insertAt = htmlMatch.index + htmlMatch[0].length;
-    return `${src.slice(0, insertAt)}<head>${cspMeta}${hardenTauriGlobalsScript}</head>${src.slice(insertAt)}`;
+    // If the extension's markup is malformed (e.g. scripts before `<head>`), inserting right
+    // after `<html>` ensures our CSP and hardening script execute before any extension scripts.
+    // We intentionally avoid closing a `<head>` tag here so any extension-provided head markup
+    // still ends up inside the parsed `<head>` element.
+    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
+  }
+
+  if (scriptMatch && typeof scriptMatch.index === "number") {
+    // If we can't safely inject via `<head>` or `<html>`, inject as early as possible (after an
+    // initial doctype when present) so the CSP/hardening code runs before any extension scripts.
+    let insertAt = 0;
+    const doctypeMatch = /^\s*<!doctype[^>]*>/i.exec(src);
+    if (doctypeMatch && typeof doctypeMatch.index === "number") {
+      const doctypeEnd = doctypeMatch.index + doctypeMatch[0].length;
+      if (doctypeEnd <= scriptMatch.index) insertAt = doctypeEnd;
+    }
+    return `${src.slice(0, insertAt)}${injectedHeadContent}${src.slice(insertAt)}`;
   }
 
   // Fall back to wrapping arbitrary markup in a full document.
-  return `<!doctype html><html><head>${cspMeta}${hardenTauriGlobalsScript}</head><body>${src}</body></html>`;
+  return `<!doctype html><html><head>${injectedHeadContent}</head><body>${src}</body></html>`;
 }
 
 export function ExtensionPanelBody({ panelId, bridge }: { panelId: string; bridge: ExtensionPanelBridge }) {
