@@ -3,6 +3,7 @@ use encoding_rs::{
     WINDOWS_1252, WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257,
     WINDOWS_1258, WINDOWS_874,
 };
+use md5::Md5;
 use sha2::Digest as _;
 use sha2::Sha256;
 
