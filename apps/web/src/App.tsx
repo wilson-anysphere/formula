@@ -102,6 +102,12 @@ function EngineDemoApp() {
   }, [draft]);
 
   useEffect(() => {
+    // Reset any persisted sizing when swapping providers (e.g. importing a new workbook).
+    axisSizesBySheetRef.current.clear();
+    lastAppliedAxisSheetRef.current = null;
+  }, [provider]);
+
+  useEffect(() => {
     zoomRef.current = zoom;
     gridApiRef.current?.setZoom(zoom);
   }, [zoom]);
