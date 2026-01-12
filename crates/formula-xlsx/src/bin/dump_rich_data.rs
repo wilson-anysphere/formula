@@ -837,6 +837,8 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
 
         let mut written = 0usize;
         let mut failed = 0usize;
+        let mut printed_failures = 0usize;
+        let max_printed_failures = 10usize;
 
         for ((sheet, cell), bytes) in &images_by_cell {
             let sheet_sanitized = sanitize_filename_component(sheet);
@@ -867,7 +869,16 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
                         file_name
                     ));
                 }
-                Err(_) => failed += 1,
+                Err(err) => {
+                    failed += 1;
+                    if printed_failures < max_printed_failures {
+                        println!(
+                            "  warning: failed to write {}: {err}",
+                            path.display()
+                        );
+                        printed_failures += 1;
+                    }
+                }
             }
         }
 
