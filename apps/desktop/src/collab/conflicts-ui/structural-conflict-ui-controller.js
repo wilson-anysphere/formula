@@ -225,7 +225,7 @@ export class StructuralConflictUiController {
 
     const editor = document.createElement("div");
     editor.dataset.testid = "structural-conflict-manual-editor";
-    editor.style.marginTop = "12px";
+    editor.className = "conflict-dialog__manual-editor";
 
     if (conflict.type === "move") {
       const destLabel = document.createElement("div");
@@ -239,10 +239,10 @@ export class StructuralConflictUiController {
       destInput.value = conflict.local?.toCellKey ?? conflict.remote?.toCellKey ?? "";
       editor.appendChild(destInput);
 
-      const cellLabel = document.createElement("div");
-      cellLabel.style.marginTop = "8px";
-      cellLabel.textContent = "Optional moved cell JSON (leave blank to use ours/theirs content)";
-      editor.appendChild(cellLabel);
+       const cellLabel = document.createElement("div");
+       cellLabel.className = "conflict-dialog__manual-label";
+       cellLabel.textContent = "Optional moved cell JSON (leave blank to use ours/theirs content)";
+       editor.appendChild(cellLabel);
 
       const textarea = document.createElement("textarea");
       textarea.rows = 5;
