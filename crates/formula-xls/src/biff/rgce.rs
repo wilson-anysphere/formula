@@ -1399,14 +1399,19 @@ fn push_column(col: u32, out: &mut String) {
 mod tests {
     use super::*;
     use formula_engine::{parse_formula, ParseOptions};
+    use std::str::FromStr;
 
     fn assert_parseable(expr: &str) {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
-        // BIFF decode can return Excel error literals (`#REF!`) or best-effort placeholders (e.g.
-        // `#UNSUPPORTED_PTG_0x..`). These are intentionally allowed even if they don't parse as
-        // formulas.
+        // BIFF decode can return a bare Excel error literal (`#REF!`, `#NAME?`, `#UNKNOWN!`, …).
+        // Validate that the token is a *known* Excel error literal so we don't regress back to
+        // emitting custom, unsupported error-like placeholders.
         if expr.starts_with('#') {
+            assert!(
+                formula_model::ErrorValue::from_str(expr).is_ok(),
+                "unexpected Excel error literal: {expr:?}"
+            );
             return;
         }
 
