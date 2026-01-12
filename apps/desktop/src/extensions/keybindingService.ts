@@ -48,13 +48,17 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
   "ctrl+c",
   "cmd+c",
+  "ctrl+cmd+c",
   "ctrl+x",
   "cmd+x",
+  "ctrl+cmd+x",
   "ctrl+v",
   "cmd+v",
+  "ctrl+cmd+v",
   // Paste Special (built-in chord; extensions should not claim it).
   "ctrl+shift+v",
   "cmd+shift+v",
+  "ctrl+cmd+shift+v",
   // Command palette (extensions should not claim it).
   "ctrl+shift+p",
   "cmd+shift+p",

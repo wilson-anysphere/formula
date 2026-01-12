@@ -87,9 +87,21 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "clipboard.pasteSpecial",
+    key: "ctrl+cmd+shift+v",
+    when: null,
+  },
+  {
     command: "clipboard.copy",
     key: "ctrl+c",
     mac: "cmd+c",
+    when: null,
+  },
+  {
+    // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
+    // common clipboard chords. Add explicit bindings so copy remains reliable.
+    command: "clipboard.copy",
+    key: "ctrl+cmd+c",
     when: null,
   },
   {
@@ -99,9 +111,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "clipboard.cut",
+    key: "ctrl+cmd+x",
+    when: null,
+  },
+  {
     command: "clipboard.paste",
     key: "ctrl+v",
     mac: "cmd+v",
+    when: null,
+  },
+  {
+    command: "clipboard.paste",
+    key: "ctrl+cmd+v",
     when: null,
   },
   {
