@@ -310,6 +310,13 @@ mod tests {
     }
 
     #[test]
+    fn add_xlfn_prefixes_handles_shape_functions() {
+        let input = "DROP(A1:A3,1)+TAKE(B1:B3,1)+CHOOSECOLS(C1:E1,1)+CHOOSEROWS(C1:C3,1)+EXPAND(D1:E2,3,4)";
+        let expected = "_xlfn.DROP(A1:A3,1)+_xlfn.TAKE(B1:B3,1)+_xlfn.CHOOSECOLS(C1:E1,1)+_xlfn.CHOOSEROWS(C1:C3,1)+_xlfn.EXPAND(D1:E2,3,4)";
+        assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
     fn add_xlfn_prefixes_handles_lambda_helpers() {
         let input = "MAP(SEQUENCE(3),LAMBDA(x,x))";
         let expected = "_xlfn.MAP(_xlfn.SEQUENCE(3),_xlfn.LAMBDA(x,x))";
