@@ -111,6 +111,9 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+shift+a", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+shift+a", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+shift+m", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealAIChat", key: "cmd+shift+m", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealAIChat", key: "ctrl+cmd+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
     ]);
@@ -213,6 +216,26 @@ describe("KeybindingService", () => {
     expect(handled15).toBe(false);
     expect(event15.defaultPrevented).toBe(false);
     expect(extRun).not.toHaveBeenCalled();
+
+    // Toggle Comments Panel (core UX): Ctrl/Cmd+Shift+M.
+    const event16 = makeKeydownEvent({ key: "M", ctrlKey: true, shiftKey: true });
+    const handled16 = await service.dispatchKeydown(event16);
+    expect(handled16).toBe(false);
+    expect(event16.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    const event17 = makeKeydownEvent({ key: "M", metaKey: true, shiftKey: true });
+    const handled17 = await service.dispatchKeydown(event17);
+    expect(handled17).toBe(false);
+    expect(event17.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Some environments emit both Ctrl+Meta for a single chord.
+    const event18 = makeKeydownEvent({ key: "M", ctrlKey: true, metaKey: true, shiftKey: true });
+    const handled18 = await service.dispatchKeydown(event18);
+    expect(handled18).toBe(false);
+    expect(event18.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
   });
 
   it("does not advertise reserved shortcuts in the command keybinding display index", () => {
@@ -227,6 +250,7 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealInlineAI", key: "ctrl+k", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealEditCell", key: "f2", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealAddComment", key: "shift+f2", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealEditCell", key: "ctrl+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 

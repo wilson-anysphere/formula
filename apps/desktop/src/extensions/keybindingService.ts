@@ -76,7 +76,7 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "ctrl+cmd+k",
   // Edit cell (Excel-style).
   "f2",
-  // Add comment (Excel-style).
+  // Add Comment (Excel-style).
   "shift+f2",
   // AI Chat toggle (core UX shortcut; extensions should not claim it).
   // - Windows/Linux: Ctrl+Shift+A
@@ -84,6 +84,11 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "ctrl+shift+a",
   "cmd+shift+a",
   "ctrl+cmd+shift+a",
+  // Comments panel toggle (core UX shortcut; extensions should not claim it).
+  "ctrl+shift+m",
+  "cmd+shift+m",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+shift+m",
   // macOS system shortcut: Hide (Cmd+H). Extensions should never be able to claim it.
   "cmd+h",
   // Some keyboards emit both ctrl+meta on the same chord.
