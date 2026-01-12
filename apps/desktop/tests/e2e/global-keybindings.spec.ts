@@ -1,0 +1,77 @@
+import { expect, test } from "@playwright/test";
+
+import { gotoDesktop } from "./helpers";
+
+test.describe("global keybindings", () => {
+  test("routes command palette, find/replace, and extension bindings through a single handler with input focus scoping", async ({
+    page,
+  }) => {
+    await gotoDesktop(page);
+
+    const primary = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Ensure the grid has focus.
+    await page.locator("#grid").click();
+
+    // Ctrl/Cmd+F opens Find.
+    await page.keyboard.press(`${primary}+F`);
+    await expect(page.getByTestId("find-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("find-dialog")).not.toBeVisible();
+
+    // Ctrl/Cmd+Shift+P opens the command palette.
+    await page.keyboard.press(`${primary}+Shift+P`);
+    await expect(page.getByTestId("command-palette")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("command-palette")).not.toBeVisible();
+
+    // Extension keybinding still works.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+      doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+      doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+      doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    await page.getByTestId("open-extensions-panel").click();
+    await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
+
+    await page.keyboard.press(`${primary}+Shift+Y`);
+    await expect(page.getByTestId("toast-root")).toContainText("Sum: 10");
+
+    // Clear toasts before the "while typing in input" assertions.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
+    // Focus the formula bar editor (which focuses the hidden textarea) and ensure global shortcuts do not fire.
+    await page.getByTestId("formula-highlight").click();
+    await expect(page.getByTestId("formula-input")).toBeFocused();
+
+    // Ctrl/Cmd+F should not open our Find dialog while typing in an input.
+    await page.keyboard.press(`${primary}+F`);
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("find-dialog")).not.toBeVisible();
+
+    // Ctrl/Cmd+Shift+P should not open our command palette while typing in an input.
+    await page.keyboard.press(`${primary}+Shift+P`);
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("command-palette")).not.toBeVisible();
+
+    // Extension keybinding should not fire while typing in an input.
+    await page.keyboard.press(`${primary}+Shift+Y`);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("toast")).toHaveCount(0);
+  });
+});

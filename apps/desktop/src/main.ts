@@ -2517,6 +2517,7 @@ if (
   }
 
   const contextKeys = new ContextKeyService();
+  keybindingService.setContextKeyLookup(contextKeys.asLookup());
 
   let lastSelection: SelectionState | null = null;
 
@@ -4739,7 +4740,6 @@ if (
     e.preventDefault();
     executeBuiltinCommand("clipboard.pasteSpecial");
   });
-
   layoutController.on("change", () => {
     renderLayout();
     scheduleRibbonSelectionFormatStateUpdate();
@@ -6287,7 +6287,6 @@ mountRibbon(ribbonRoot, {
     }
   },
 });
-
 // In Yjs-backed collaboration mode the workbook is continuously persisted, but
 // DocumentController's `isDirty` flips to true on essentially every local/remote
 // change (including `applyExternalDeltas`). That makes the browser/Tauri

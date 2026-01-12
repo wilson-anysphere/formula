@@ -15,6 +15,7 @@ function el(tag, attrs = {}, children = []) {
 
 export function createFindReplaceDialog(controller, { mode = "find" } = {}) {
   const dialog = el("dialog", { className: "find-replace-dialog" });
+  dialog.dataset.testid = mode === "replace" ? "replace-dialog" : "find-dialog";
 
   const findInput = el("input", { type: "text", placeholder: "Find what…" });
   const replaceInput = el("input", { type: "text", placeholder: "Replace with…" });
