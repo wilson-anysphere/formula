@@ -17,6 +17,7 @@ function createRecording2dContext(options: {
   let font = "";
   let lineWidth = 1;
   let lineDash: number[] = [];
+  let lineCap: CanvasLineCap = "butt";
 
   const record = (name: string, ...args: any[]) => options.calls.push([name, ...args]);
 
@@ -48,6 +49,12 @@ function createRecording2dContext(options: {
     set lineWidth(value: number) {
       lineWidth = value;
     },
+    get lineCap() {
+      return lineCap;
+    },
+    set lineCap(value: CanvasLineCap) {
+      lineCap = value;
+    },
     textAlign: "left",
     textBaseline: "alphabetic",
     globalAlpha: 1,
@@ -60,7 +67,7 @@ function createRecording2dContext(options: {
     rect: (...args: any[]) => record("rect", ...args),
     clip: (...args: any[]) => record("clip", ...args),
     fill: (...args: any[]) => record("fill", ...args),
-    stroke: (...args: any[]) => record("stroke", { strokeStyle, lineWidth, lineDash: [...lineDash] }, ...args),
+    stroke: (...args: any[]) => record("stroke", { strokeStyle, lineWidth, lineDash: [...lineDash], lineCap }, ...args),
     moveTo: (...args: any[]) => record("moveTo", ...args),
     lineTo: (...args: any[]) => record("lineTo", ...args),
     closePath: (...args: any[]) => record("closePath", ...args),
@@ -94,7 +101,7 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
 
   const segmentsForStroke = (
     calls: Array<[string, ...any[]]>,
-    predicate: (strokeState: { strokeStyle: FillStyle; lineWidth: number; lineDash: number[] }) => boolean
+    predicate: (strokeState: { strokeStyle: FillStyle; lineWidth: number; lineDash: number[]; lineCap: CanvasLineCap }) => boolean
   ): Array<{ x1: number; y1: number; x2: number; y2: number }> => {
     const strokeIndex = calls.findIndex((call) => call[0] === "stroke" && predicate(call[1]));
     expect(strokeIndex).toBeGreaterThanOrEqual(0);
@@ -310,6 +317,79 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
 
     const uniqueYs = new Set(borderSegments.map((s) => s.y1));
     expect(uniqueYs.size).toBe(2);
+  });
+
+  it("uses dash patterns and round caps for dashed/dotted borders", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: {
+                top: { width: 1, style: "dashed", color: "rgb(255,0,0)" },
+                bottom: { width: 1, style: "dotted", color: "rgb(0,0,255)" }
+              }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const contentCalls: Array<[string, ...any[]]> = [];
+    const selectionCalls: Array<[string, ...any[]]> = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: contentCalls }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: selectionCalls }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 120, 1);
+    renderer.renderImmediately();
+
+    // dashed width=1 => dashForStyle => [4, 3]
+    expect(
+      gridCalls.some(
+        (call) =>
+          call[0] === "stroke" &&
+          call[1]?.strokeStyle === "rgb(255,0,0)" &&
+          call[1]?.lineWidth === 1 &&
+          Array.isArray(call[1]?.lineDash) &&
+          call[1].lineDash.join(",") === "4,3" &&
+          call[1]?.lineCap === "butt"
+      )
+    ).toBe(true);
+
+    // dotted width=1 => dashForStyle => [1, 2] with round caps.
+    expect(
+      gridCalls.some(
+        (call) =>
+          call[0] === "stroke" &&
+          call[1]?.strokeStyle === "rgb(0,0,255)" &&
+          call[1]?.lineWidth === 1 &&
+          Array.isArray(call[1]?.lineDash) &&
+          call[1].lineDash.join(",") === "1,2" &&
+          call[1]?.lineCap === "round"
+      )
+    ).toBe(true);
   });
 
   it("draws merged anchor borders around the merged perimeter", () => {
