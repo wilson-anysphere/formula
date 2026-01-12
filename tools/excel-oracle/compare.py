@@ -152,48 +152,60 @@ def _numbers_close(a: float, b: float, cfg: CompareConfig) -> bool:
     return math.isclose(a, b, rel_tol=cfg.rel_tol, abs_tol=cfg.abs_tol)
 
 
-def _compare_value(expected: Any, actual: Any, cfg: CompareConfig) -> tuple[bool, str]:
+def _compare_value(expected: Any, actual: Any, cfg: CompareConfig) -> tuple[bool, str, Any | None]:
     if expected == actual:
-        return True, "ok"
+        return True, "ok", None
 
     if not isinstance(expected, dict) or not isinstance(actual, dict):
-        return False, "type-mismatch"
+        return False, "type-mismatch", None
 
     et = expected.get("t")
     at = actual.get("t")
     if et != at:
-        return False, "type-mismatch"
+        return False, "type-mismatch", None
 
     if et == "n":
         av = float(actual.get("v"))
         ev = float(expected.get("v"))
-        return (_numbers_close(ev, av, cfg), "number-mismatch")
+        return (_numbers_close(ev, av, cfg), "number-mismatch", None)
 
     if et in ("s", "b", "e"):
-        return (expected.get("v") == actual.get("v"), f"{et}-mismatch")
+        return (expected.get("v") == actual.get("v"), f"{et}-mismatch", None)
 
     if et == "blank":
-        return True, "ok"
+        return True, "ok", None
 
     if et == "arr":
         erows = expected.get("rows")
         arows = actual.get("rows")
         if not isinstance(erows, list) or not isinstance(arows, list):
-            return False, "array-shape-mismatch"
+            return False, "array-shape-mismatch", None
         if len(erows) != len(arows):
-            return False, "array-shape-mismatch"
+            return (
+                False,
+                "array-shape-mismatch",
+                {"expectedRows": len(erows), "actualRows": len(arows)},
+            )
         for r in range(len(erows)):
             if not isinstance(erows[r], list) or not isinstance(arows[r], list):
-                return False, "array-shape-mismatch"
+                return False, "array-shape-mismatch", {"row": r}
             if len(erows[r]) != len(arows[r]):
-                return False, "array-shape-mismatch"
+                return (
+                    False,
+                    "array-shape-mismatch",
+                    {"row": r, "expectedCols": len(erows[r]), "actualCols": len(arows[r])},
+                )
             for c in range(len(erows[r])):
-                ok, reason = _compare_value(erows[r][c], arows[r][c], cfg)
+                ok, reason, detail = _compare_value(erows[r][c], arows[r][c], cfg)
                 if not ok:
-                    return False, f"array-mismatch:{reason}"
-        return True, "ok"
+                    return (
+                        False,
+                        f"array-mismatch:{reason}",
+                        {"row": r, "col": c, "reason": reason, "detail": detail},
+                    )
+        return True, "ok", None
 
-    return False, "unknown-type"
+    return False, "unknown-type", None
 
 
 def main() -> int:
@@ -446,7 +458,7 @@ def main() -> int:
                 tag_abs_tol=tag_abs_tol,
                 tag_rel_tol=tag_rel_tol,
             )
-            ok, reason = _compare_value(exp.get("result"), act.get("result"), cfg)
+            ok, reason, mismatch_detail = _compare_value(exp.get("result"), act.get("result"), cfg)
             if not ok:
                 mismatch_reason = reason
                 entry: dict[str, Any] = {
@@ -469,6 +481,8 @@ def main() -> int:
                 description = _maybe_nonempty_str(case.get("description"))
                 if description is not None:
                     entry["description"] = description
+                if mismatch_detail is not None:
+                    entry["mismatchDetail"] = mismatch_detail
 
                 if isinstance(exp, dict):
                     expected_address = _maybe_nonempty_str(exp.get("address"))
