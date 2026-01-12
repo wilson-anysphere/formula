@@ -1176,6 +1176,15 @@ impl AppState {
             }
         }
 
+        // The UI/setters currently only support direct ARGB (CT_Color rgb="AARRGGBB") updates.
+        // Non-RGB representations (theme/indexed/auto/tint) can be round-tripped when reading and
+        // saving existing files, but are rejected for user-initiated updates.
+        if tab_color.is_some() && tab_color.as_ref().and_then(|c| c.rgb.as_deref()).is_none() {
+            return Err(AppStateError::WhatIf(
+                "tab color must be specified as an ARGB hex value".to_string(),
+            ));
+        }
+
         // Persist first so we don't leave the in-memory workbook in a partially-updated state if
         // the storage backend rejects the write.
         if let Some(persistent) = self.persistent.as_ref() {
