@@ -235,6 +235,30 @@ fn bytecode_backend_compiles_structured_refs_and_recompiles_on_table_changes() {
     engine_ast.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "E1"), engine_ast.get_cell_value("Sheet1", "E1"));
 }
+
+#[test]
+fn bytecode_backend_reuses_program_for_this_row_structured_refs() {
+    let mut engine = Engine::new();
+
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D4")]);
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 3.0).unwrap();
+
+    // `[@Col]` depends on the current row; the bytecode backend should still be able to compile it
+    // and reuse the same program pattern across rows.
+    engine.set_cell_formula("Sheet1", "D2", "=[@Col1]").unwrap();
+    engine.set_cell_formula("Sheet1", "D3", "=[@Col1]").unwrap();
+    engine.set_cell_formula("Sheet1", "D4", "=[@Col1]").unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D4"), Value::Number(3.0));
+}
+
 #[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
