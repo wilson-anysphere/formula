@@ -211,6 +211,8 @@ test.describe("sheet tabs", () => {
 
     await page.getByTestId("sheet-add").click();
     await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toBeVisible();
+    // New sheets are activated on creation; sheet position should reflect that.
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
     const initialSheetIds = await page.evaluate(() => {
       const app = (window as any).__formulaApp;
@@ -236,6 +238,8 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" }).click();
 
     await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
 
     // Undo should restore the deleted sheet and return to the last-saved dirty state.
