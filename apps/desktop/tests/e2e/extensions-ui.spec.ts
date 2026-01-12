@@ -11,6 +11,10 @@ function getOpenExtensionsPanelButton(page: Page) {
 
 async function grantSampleHelloPermissions(page: Page): Promise<void> {
   await page.evaluate(() => {
+    // E2E stability: auto-accept any permission prompts so modal dialogs don't
+    // intercept pointer events during UI interactions.
+    (window as any).__formulaPermissionPrompt = () => true;
+
     const extensionId = "formula.sample-hello";
     const key = "formula.extensionHost.permissions";
     const existing = (() => {
@@ -28,7 +32,10 @@ async function grantSampleHelloPermissions(page: Page): Promise<void> {
       "ui.panels": true,
       "cells.read": true,
       "cells.write": true,
+      "workbook.manage": true,
+      network: true,
       clipboard: true,
+      storage: true,
     };
 
     localStorage.setItem(key, JSON.stringify(existing));
