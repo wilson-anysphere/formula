@@ -1,6 +1,7 @@
 import React from "react";
 
 import type { DesktopExtensionHostManager } from "./extensionHostManager.js";
+import { buildCommandKeybindingDisplayIndex, getPrimaryCommandKeybindingDisplay } from "./keybindings.js";
 
 type NetworkPolicy = {
   mode: "full" | "deny" | "allowlist" | string;
@@ -52,6 +53,9 @@ export function ExtensionsPanel({
   const extensions = manager.host.listExtensions();
   const commands = manager.getContributedCommands() as ContributedCommand[];
   const panels = manager.getContributedPanels() as ContributedPanel[];
+  const keybindings = manager.getContributedKeybindings() as Array<{ command: string; key: string; mac?: string | null }>;
+  const platform = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
+  const keybindingIndex = buildCommandKeybindingDisplayIndex({ platform, contributed: keybindings });
 
   const commandsByExt = groupByExtension(commands);
   const panelsByExt = groupByExtension(panels);
@@ -195,9 +199,29 @@ export function ExtensionsPanel({
                         cursor: "pointer",
                       }}
                     >
-                      <div style={{ fontWeight: 600 }}>
-                        {cmd.category ? `${cmd.category}: ` : ""}
-                        {cmd.title}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+                        <div style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {cmd.category ? `${cmd.category}: ` : ""}
+                          {cmd.title}
+                        </div>
+                        {(() => {
+                          const shortcut = getPrimaryCommandKeybindingDisplay(cmd.command, keybindingIndex);
+                          if (!shortcut) return null;
+                          return (
+                            <div
+                              aria-hidden="true"
+                              style={{
+                                fontSize: "12px",
+                                color: "var(--text-secondary)",
+                                whiteSpace: "nowrap",
+                                fontFamily:
+                                  "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                              }}
+                            >
+                              {shortcut}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>{cmd.command}</div>
                     </button>
