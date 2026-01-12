@@ -237,18 +237,27 @@ impl TryFrom<i64> for SearchMode {
 }
 
 fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s.as_str()),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     // Blank coerces to the other type for comparisons (Excel semantics).
     match (a, b) {
         (Value::Blank, Value::Number(y)) => return 0.0_f64.partial_cmp(y).unwrap_or(Ordering::Equal),
         (Value::Number(x), Value::Blank) => return x.partial_cmp(&0.0_f64).unwrap_or(Ordering::Equal),
         (Value::Blank, Value::Bool(y)) => return false.cmp(y),
         (Value::Bool(x), Value::Blank) => return x.cmp(&false),
-        (Value::Blank, Value::Text(y)) => return cmp_case_insensitive("", y),
-        (Value::Text(x), Value::Blank) => return cmp_case_insensitive(x, ""),
-        (Value::Blank, Value::Entity(entity)) => return cmp_case_insensitive("", &entity.display),
-        (Value::Entity(entity), Value::Blank) => return cmp_case_insensitive(&entity.display, ""),
-        (Value::Blank, Value::Record(record)) => return cmp_case_insensitive("", &record.display),
-        (Value::Record(record), Value::Blank) => return cmp_case_insensitive(&record.display, ""),
+        (Value::Blank, other) if text_like_str(other).is_some() => {
+            return cmp_case_insensitive("", text_like_str(other).unwrap())
+        }
+        (other, Value::Blank) if text_like_str(other).is_some() => {
+            return cmp_case_insensitive(text_like_str(other).unwrap(), "")
+        }
         _ => {}
     }
 
@@ -275,15 +284,9 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
 
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-        (Value::Text(x), Value::Text(y)) => cmp_case_insensitive(x, y),
-        (Value::Text(x), Value::Entity(y)) => cmp_case_insensitive(x, &y.display),
-        (Value::Text(x), Value::Record(y)) => cmp_case_insensitive(x, &y.display),
-        (Value::Entity(x), Value::Text(y)) => cmp_case_insensitive(&x.display, y),
-        (Value::Record(x), Value::Text(y)) => cmp_case_insensitive(&x.display, y),
-        (Value::Entity(x), Value::Entity(y)) => cmp_case_insensitive(&x.display, &y.display),
-        (Value::Record(x), Value::Record(y)) => cmp_case_insensitive(&x.display, &y.display),
-        (Value::Entity(x), Value::Record(y)) => cmp_case_insensitive(&x.display, &y.display),
-        (Value::Record(x), Value::Entity(y)) => cmp_case_insensitive(&x.display, &y.display),
+        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
+        }
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Error(x), Value::Error(y)) => x.code().cmp(&y.code()),

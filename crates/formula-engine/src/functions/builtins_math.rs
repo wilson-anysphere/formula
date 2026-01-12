@@ -11,6 +11,10 @@ use crate::value::{parse_number, Array, ErrorKind, Value};
 const VAR_ARGS: usize = 255;
 const SIMD_AGGREGATE_BLOCK: usize = 1024;
 
+// Rich values (Entity/Record) are treated like text for aggregate functions:
+// - In scalar positions (e.g. `=SUM(A1, Entity)`), they are non-numeric and return `#VALUE!`.
+// - When iterating references/arrays (e.g. `=SUM(A1:A2)`), they are ignored like text/logicals.
+
 // Criteria aggregates (SUMIF/AVERAGEIF) require extra per-element coercion work before the SIMD
 // kernels can run. Avoid paying that overhead for tiny ranges.
 const SIMD_CRITERIA_ARRAY_MIN_LEN: usize = 32;

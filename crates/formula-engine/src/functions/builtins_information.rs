@@ -268,9 +268,7 @@ fn t_value(v: &Value) -> Value {
         | Value::ReferenceUnion(_)
         | Value::Array(_)
         | Value::Lambda(_)
-        | Value::Spill { .. } => {
-            Value::Text(String::new())
-        }
+        | Value::Spill { .. } => Value::Text(String::new()),
     }
 }
 

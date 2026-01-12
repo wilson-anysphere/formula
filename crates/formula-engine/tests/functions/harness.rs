@@ -40,7 +40,9 @@ impl TestSheet {
     }
 
     pub fn recalc(&mut self) {
-        self.engine.recalculate();
+        // Use the single-threaded recalc path in tests to avoid initializing a global Rayon pool
+        // (which can fail on shared CI/agent hosts due to OS thread limits).
+        self.engine.recalculate_single_threaded();
     }
 
     pub fn recalculate(&mut self) {

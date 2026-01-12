@@ -338,6 +338,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 .get("displayValue")
                 .or_else(|| record.get("display_value"))
                 .or_else(|| record.get("display"))
+                .or_else(|| record.get("display_value"))
                 .and_then(|v| v.as_str())
             {
                 return if display.is_empty() {
