@@ -132,6 +132,11 @@
   color: var(--text-secondary);
 }
 
+.formula-titlebar.formula-titlebar--component .formula-titlebar__document-name::before {
+  content: "— ";
+  color: var(--text-secondary);
+}
+
 .formula-titlebar.formula-titlebar--component .formula-titlebar__actions {
   display: flex;
   align-items: center;

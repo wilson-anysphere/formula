@@ -70,7 +70,11 @@ export function Titlebar({
   const redoTitle = undoRedo?.redoLabel ? `Redo ${undoRedo.redoLabel}` : "Redo";
 
   return (
-    <div className={["formula-titlebar", "formula-titlebar--component", className].filter(Boolean).join(" ")}>
+    <div
+      className={["formula-titlebar", "formula-titlebar--component", className].filter(Boolean).join(" ")}
+      role="banner"
+      aria-label="Titlebar"
+    >
       <div className="formula-titlebar__window-controls" aria-label="Window controls">
         <button
           type="button"
@@ -160,7 +164,7 @@ export function Titlebar({
         </div>
       </div>
 
-      <div className="formula-titlebar__actions" aria-label="Titlebar actions">
+      <div className="formula-titlebar__actions" role="toolbar" aria-label="Titlebar actions">
         {actions.map((action) => {
           const variantClass =
             action.variant === "primary" ? "formula-titlebar__action-button--primary" : "";
