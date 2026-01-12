@@ -3085,7 +3085,14 @@ function installSheetStoreSubscription(): void {
           // Order changes.
           const prevKey = prevOrder.join("|");
           const nextKey = nextOrder.join("|");
-          if (prevKey && nextKey && prevKey !== nextKey) {
+          // Avoid spamming `move_sheet` calls during add/remove flows. When sheets are added we
+          // already pass an explicit insertion index to `add_sheet`, and when sheets are removed
+          // the remaining sheets keep their relative order.
+          //
+          // We still need to persist true reorder operations (undo/redo/applyState reorder) which
+          // surface as "same ids, different order" diffs (no added/removed).
+          const shouldPersistReorder = added.length === 0 && removed.length === 0;
+          if (shouldPersistReorder && prevKey && nextKey && prevKey !== nextKey) {
             schedulePersistDocDrivenReorder(prevOrder, nextOrder);
           }
         }
