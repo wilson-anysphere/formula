@@ -2170,7 +2170,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "view.zoom.zoom.custom", label: "Custom…", ariaLabel: "Custom Zoom", iconId: "settings" },
               ],
             },
-            { id: "view.zoom.zoom100", label: "100%", ariaLabel: "Zoom to 100%", icon: "100%" },
+            { id: "view.zoom.zoom100", label: "100%", ariaLabel: "Zoom to 100%", iconId: "percent" },
             { id: "view.zoom.zoomToSelection", label: "Zoom to Selection", ariaLabel: "Zoom to Selection", iconId: "find" },
           ],
         },
