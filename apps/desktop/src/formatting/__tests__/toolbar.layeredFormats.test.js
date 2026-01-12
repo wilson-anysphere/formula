@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DocumentController } from "../../document/documentController.js";
-import { toggleBold, toggleWrap } from "../toolbar.js";
+import { toggleBold, toggleItalic, toggleUnderline, toggleWrap } from "../toolbar.js";
 
 test("toggleBold reads full-column formatting from the column layer (no per-cell scan)", () => {
   const doc = new DocumentController();
@@ -42,10 +42,47 @@ test("toggleWrap reads full-column formatting from the column layer (no per-cell
   assert.ok(sheet);
   assert.equal(sheet.cells.size, 0, "Full-column formatting should not materialize per-cell overrides");
 
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleWrap performed O(rows) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
   // Toggling again should flip wrap OFF (because all cells are currently wrapped).
   toggleWrap(doc, "Sheet1", "A1:A1048576");
+  doc.getCellFormat = originalGetCellFormat;
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").alignment?.wrapText), false);
+  assert.equal(sheet.cells.size, 0);
+});
+
+test("toggleItalic reads full-column formatting from the column layer (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { italic: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleItalic performed O(rows) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
+  toggleItalic(doc, "Sheet1", "A1:A1048576");
+  doc.getCellFormat = originalGetCellFormat;
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.italic), false);
   assert.equal(sheet.cells.size, 0);
 });
 
@@ -182,6 +219,32 @@ test("toggleBold treats a single conflicting cell override in a full-row selecti
   assert.ok(sheet.cells.size <= 1, "Should not materialize per-cell overrides across the full row");
 });
 
+test("toggleUnderline reads full-row formatting from the row layer (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { underline: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleUnderline performed O(cols) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
+  toggleUnderline(doc, "Sheet1", "A1:XFD1");
+  doc.getCellFormat = originalGetCellFormat;
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.underline), false);
+  assert.equal(sheet.cells.size, 0);
+});
+
 test("toggleBold reads full-sheet formatting from the sheet layer (no per-cell scan)", () => {
   const doc = new DocumentController();
 
@@ -209,5 +272,35 @@ test("toggleBold reads full-sheet formatting from the sheet layer (no per-cell s
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "XFD1048576").font?.bold), false);
+  assert.equal(sheet.cells.size, 0);
+});
+
+test("toggleWrap toggles OFF for large rectangles formatted via range runs (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  const hugeRect = "A1:C100000"; // 300k cells -> range-run layer
+  doc.setRangeFormat("Sheet1", hugeRect, { alignment: { wrapText: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0, "Range-run formatting should not materialize cells");
+  assert.equal(sheet.formatRunsByCol.size, 3, "Expected per-column range runs for A:C");
+
+  const originalGetCellFormat = doc.getCellFormat.bind(doc);
+  let getCellFormatCalls = 0;
+  doc.getCellFormat = (...args) => {
+    getCellFormatCalls += 1;
+    if (getCellFormatCalls > 10_000) {
+      throw new Error(`toggleWrap performed O(area) getCellFormat calls (${getCellFormatCalls})`);
+    }
+    return originalGetCellFormat(...args);
+  };
+
+  toggleWrap(doc, "Sheet1", hugeRect);
+  doc.getCellFormat = originalGetCellFormat;
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").alignment?.wrapText), false);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "C99999").alignment?.wrapText), false);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "D1").alignment?.wrapText), false);
   assert.equal(sheet.cells.size, 0);
 });
