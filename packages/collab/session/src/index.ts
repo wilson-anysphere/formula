@@ -1600,6 +1600,9 @@ export class CollabSession {
 
       cell.delete("enc");
       cell.set("value", value ?? null);
+      // Preserve explicit formula clear markers (`formula=null`) so other
+      // clients can reason about delete-vs-overwrite causality via Yjs Item
+      // origin ids (Y.Map deletes do not create a new Item).
       cell.set("formula", null);
       cell.set("modified", modified);
       if (userId) cell.set("modifiedBy", userId);
@@ -1709,6 +1712,10 @@ export class CollabSession {
       cell.delete("enc");
 
       if (nextFormula) cell.set("formula", nextFormula);
+      // Store a null marker rather than deleting the key so subsequent writes
+      // can causally reference this deletion via Item.origin. Yjs map deletes
+      // do not create a new Item, which makes delete-vs-overwrite concurrency
+      // ambiguous without an explicit marker.
       else cell.set("formula", null);
 
       cell.set("value", null);
