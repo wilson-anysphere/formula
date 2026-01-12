@@ -93,6 +93,9 @@ import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
+import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
+import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
+import { loadCollabToken, storeCollabToken } from "./sharing/collabTokenStore.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -1051,6 +1054,231 @@ function computeTitlebarDocumentName(): string {
   return basename(activeWorkbook.path);
 }
 
+function getSharingWorkbookKeys(): string[] {
+  // The SpreadsheetApp constructor only knows about `workbookId`, so store under that
+  // key to allow best-effort reconnects after reload.
+  //
+  // When running under Tauri we also store under the workbook file path (when known)
+  // so future wiring (or other subsystems) can key by path without losing metadata.
+  const keys = new Set<string>();
+  const primary = String(workbookId ?? "").trim();
+  if (primary) keys.add(primary);
+  const path = typeof activeWorkbook?.path === "string" ? activeWorkbook.path.trim() : "";
+  if (path) keys.add(path);
+  return Array.from(keys);
+}
+
+function loadSharingCollabConnection(): { wsUrl: string; docId: string } | null {
+  for (const key of getSharingWorkbookKeys()) {
+    const stored = loadCollabConnectionForWorkbook({ workbookKey: key });
+    if (stored) return { wsUrl: stored.wsUrl, docId: stored.docId };
+  }
+  return null;
+}
+
+function saveSharingCollabConnection(wsUrl: string, docId: string): void {
+  for (const key of getSharingWorkbookKeys()) {
+    saveCollabConnectionForWorkbook({ workbookKey: key, wsUrl, docId });
+  }
+}
+
+function generateCollabDocId(): string {
+  const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
+  if (typeof randomUuid === "function") {
+    try {
+      return randomUuid.call((globalThis as any).crypto);
+    } catch {
+      // Fall through to pseudo-random below.
+    }
+  }
+  return `doc_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+}
+
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  const value = String(text ?? "");
+  if (!value) return false;
+
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to execCommand fallback.
+  }
+
+  // Best-effort fallback: execCommand("copy").
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    textarea.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function baseAppUrlForSharing(): string {
+  return `${window.location.origin}${window.location.pathname}`;
+}
+
+function getCurrentCollabConnectionFromUrlOrStore(): { wsUrl: string; docId: string } | null {
+  // Prefer the current URL (in collab mode, wsUrl/docId are in query params).
+  const fromUrl = parseCollabShareLink(window.location.href, { baseUrl: baseAppUrlForSharing() });
+  if (fromUrl) return { wsUrl: fromUrl.wsUrl, docId: fromUrl.docId };
+
+  // Fall back to persisted metadata for this workbook.
+  return loadSharingCollabConnection();
+}
+
+async function promptForWsUrl(): Promise<string | null> {
+  const stored = loadSharingCollabConnection();
+  const defaultValue = stored?.wsUrl ?? "ws://127.0.0.1:1234";
+  const wsUrl = await showInputBox({
+    prompt: "Sync server WebSocket URL (ws://…)",
+    value: defaultValue,
+    placeHolder: "ws://127.0.0.1:1234",
+  });
+  if (wsUrl == null) return null;
+  const trimmed = wsUrl.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+async function promptForToken(): Promise<string | null> {
+  const token = await showInputBox({
+    prompt: "Sync token (never share publicly)",
+    value: "dev-token",
+    placeHolder: "dev-token / JWT",
+  });
+  if (token == null) return null;
+  const trimmed = token.trim();
+  if (!trimmed) return null;
+  return trimmed;
+}
+
+async function copyCurrentCollabLink(): Promise<void> {
+  const connection = getCurrentCollabConnectionFromUrlOrStore();
+  if (!connection) {
+    showToast("Not connected to collaboration yet.", "warning");
+    return;
+  }
+
+  const token = loadCollabToken({ wsUrl: connection.wsUrl, docId: connection.docId });
+  const link = serializeCollabShareLink(
+    { wsUrl: connection.wsUrl, docId: connection.docId, ...(token ? { token } : {}) },
+    { baseUrl: baseAppUrlForSharing() },
+  );
+
+  const copied = await copyTextToClipboard(link);
+  if (copied) showToast("Copied collaboration link to clipboard.");
+  else {
+    showToast("Failed to copy collaboration link. Showing it for manual copy…", "warning", { timeoutMs: 6_000 });
+    // Show the link in a modal so the user can manually copy it without printing
+    // the token to the console.
+    await showInputBox({ prompt: "Collaboration link", value: link });
+  }
+}
+
+async function startCollaborationAndCopyLink(): Promise<void> {
+  const wsUrl = await promptForWsUrl();
+  if (!wsUrl) return;
+  const token = await promptForToken();
+  if (!token) return;
+
+  const docId = generateCollabDocId();
+
+  // Persist non-secret metadata so reopening the workbook can attempt to reconnect.
+  saveSharingCollabConnection(wsUrl, docId);
+  // Store token only for this session (no localStorage persistence).
+  storeCollabToken({ wsUrl, docId, token });
+
+  const link = serializeCollabShareLink({ wsUrl, docId, token }, { baseUrl: baseAppUrlForSharing() });
+  const copied = await copyTextToClipboard(link);
+  if (copied) showToast("Copied collaboration link. Reloading into collaboration mode…");
+  else showToast("Reloading into collaboration mode…");
+
+  // Navigate to the collab link. `SpreadsheetApp` will stash the token in sessionStorage
+  // and scrub it from the URL on load.
+  window.location.assign(link);
+}
+
+async function joinCollaborationFromLinkOrToken(): Promise<void> {
+  const input = await showInputBox({
+    prompt: "Paste a collaboration link (or a token)",
+    value: "",
+    placeHolder: "http://…/?collab=1&wsUrl=…&docId=…#token=…",
+  });
+  if (input == null) return;
+
+  const parsed = parseCollabShareLink(input, { baseUrl: baseAppUrlForSharing() });
+  if (parsed) {
+    // Persist non-secret connection metadata + store token for this session.
+    saveSharingCollabConnection(parsed.wsUrl, parsed.docId);
+    if (parsed.token) storeCollabToken({ wsUrl: parsed.wsUrl, docId: parsed.docId, token: parsed.token });
+    window.location.assign(
+      serializeCollabShareLink(
+        { wsUrl: parsed.wsUrl, docId: parsed.docId, ...(parsed.token ? { token: parsed.token } : {}) },
+        { baseUrl: baseAppUrlForSharing() },
+      ),
+    );
+    return;
+  }
+
+  // Treat the input as a raw token and ask for the remaining fields.
+  const token = input.trim();
+  if (!token) return;
+
+  const wsUrl = await promptForWsUrl();
+  if (!wsUrl) return;
+
+  const docId = await showInputBox({ prompt: "Document ID (docId)", value: "", placeHolder: "my-doc-id" });
+  if (docId == null) return;
+  const trimmedDocId = docId.trim();
+  if (!trimmedDocId) return;
+
+  saveSharingCollabConnection(wsUrl, trimmedDocId);
+  storeCollabToken({ wsUrl, docId: trimmedDocId, token });
+  window.location.assign(
+    serializeCollabShareLink({ wsUrl, docId: trimmedDocId, token }, { baseUrl: baseAppUrlForSharing() }),
+  );
+}
+
+async function handleShareClick(): Promise<void> {
+  const collabSession = app.getCollabSession?.() ?? null;
+
+  const items: Array<{ label: string; value: string; description?: string }> = [];
+  if (collabSession) {
+    items.push({ label: "Copy collaboration link", value: "copy", description: "Share this document with others" });
+  } else {
+    items.push({ label: "Start collaboration", value: "start", description: "Create a new shared document" });
+  }
+  items.push({ label: "Join collaboration link…", value: "join", description: "Open a shared document" });
+
+  const action = await showQuickPick(items, { placeHolder: "Collaboration" });
+  if (!action) return;
+
+  if (action === "copy") {
+    await copyCurrentCollabLink();
+    return;
+  }
+  if (action === "start") {
+    await startCollaborationAndCopyLink();
+    return;
+  }
+  if (action === "join") {
+    await joinCollaborationFromLinkOrToken();
+    return;
+  }
+}
+
 const buildTitlebarProps = () => ({
   documentName: computeTitlebarDocumentName(),
   actions: [
@@ -1072,7 +1300,13 @@ const buildTitlebarProps = () => ({
       label: "Share",
       ariaLabel: "Share document",
       variant: "primary" as const,
-      onClick: () => showToast("Share is not implemented yet."),
+      onClick: () => {
+        void handleShareClick().catch(() => {
+          // Do not log tokens (or links that may contain tokens).
+          console.error("Share failed");
+          showToast("Sharing failed.", "error");
+        });
+      },
     },
   ],
   windowControls: titlebarWindowControls,

@@ -82,6 +82,8 @@ import { shellOpen } from "../tauri/shellOpen.js";
 import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
+import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
+import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
@@ -376,7 +378,8 @@ export type SpreadsheetAppCollabOptions = {
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
   if (typeof window === "undefined") return null;
   try {
-    const params = new URLSearchParams(window.location.search);
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
     const enabled = params.get("collab");
     if (enabled !== "1" && enabled !== "true") return null;
 
@@ -384,7 +387,29 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const wsUrl = params.get("collabWsUrl") ?? params.get("wsUrl") ?? "";
     if (!docId || !wsUrl) return null;
 
-    const token = params.get("collabToken") ?? params.get("token") ?? undefined;
+    // Tokens are accepted from either query params (legacy) or the URL hash (recommended),
+    // but they should never remain in the address bar. Stash in session storage and scrub.
+    const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+    const tokenFromUrl =
+      params.get("collabToken") ?? params.get("token") ?? hashParams.get("collabToken") ?? hashParams.get("token") ?? undefined;
+    const tokenFromUrlTrimmed = typeof tokenFromUrl === "string" && tokenFromUrl.trim() !== "" ? tokenFromUrl : undefined;
+    if (tokenFromUrlTrimmed) {
+      storeCollabToken({ wsUrl, docId, token: tokenFromUrlTrimmed });
+      // Best-effort: remove tokens from query/hash so we don't leak secrets into screenshots,
+      // error reports, or browser history.
+      try {
+        params.delete("collabToken");
+        params.delete("token");
+        hashParams.delete("collabToken");
+        hashParams.delete("token");
+        url.hash = hashParams.toString();
+        history.replaceState(null, "", url.toString());
+      } catch {
+        // ignore history errors
+      }
+    }
+
+    const token = tokenFromUrlTrimmed ?? loadCollabToken({ wsUrl, docId }) ?? undefined;
     const identity = getCollabUserIdentity({ search: window.location.search });
     const disableBcRaw = params.get("collabDisableBc") ?? params.get("disableBc");
     const disableBc = disableBcRaw === "1" || disableBcRaw === "true" || disableBcRaw === "yes";
@@ -404,6 +429,28 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
   } catch {
     return null;
   }
+}
+
+function resolveCollabOptionsFromStoredConnection(workbookId: string | undefined): SpreadsheetAppCollabOptions | null {
+  if (typeof window === "undefined") return null;
+  const workbookKey = String(workbookId ?? "").trim();
+  if (!workbookKey) return null;
+
+  const stored = loadCollabConnectionForWorkbook({ workbookKey });
+  if (!stored) return null;
+
+  // Tokens are never persisted across app restarts unless we have OS keychain integration.
+  // Only auto-reconnect when the token is still present for this session.
+  const token = loadCollabToken({ wsUrl: stored.wsUrl, docId: stored.docId });
+  if (!token) return null;
+
+  return {
+    wsUrl: stored.wsUrl,
+    docId: stored.docId,
+    token,
+    offlineEnabled: true,
+    user: getCollabUserIdentity({ search: window.location.search }),
+  };
 }
 
 export class SpreadsheetApp {
@@ -711,12 +758,22 @@ export class SpreadsheetApp {
             maxCols: 200
           });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
-    const collab = opts.collab ?? resolveCollabOptionsFromUrl();
+    const collab = opts.collab ?? resolveCollabOptionsFromUrl() ?? resolveCollabOptionsFromStoredConnection(opts.workbookId);
     const collabEnabled = Boolean(collab);
     this.collabMode = collabEnabled || Boolean(opts.collabMode);
     this.currentUser = collab ? { id: collab.user.id, name: collab.user.name } : { id: "local", name: t("chat.role.user") };
 
     if (collab) {
+      // Best-effort: cache the token for this (wsUrl, docId) in session-scoped storage
+      // so UI surfaces (sharing/reconnect) can access it without leaving it in the URL.
+      if (collab.token) {
+        try {
+          storeCollabToken({ wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token });
+        } catch {
+          // ignore
+        }
+      }
+
       // Binder writes (DocumentController -> Yjs) must use an origin that is *distinct* from
       // `session.origin` so Yjs writes performed directly through the session (e.g. versioning
       // operations) still propagate back into the DocumentController.
