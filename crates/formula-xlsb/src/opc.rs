@@ -238,6 +238,10 @@ impl XlsbWorkbook {
 
         let (shared_strings, shared_strings_table) = shared_strings;
 
+        // Treat part names as case-insensitive and tolerate a leading `/` in ZIP entries (some
+        // producers emit them). Use normalized lowercase names for comparison so we don't
+        // accidentally preserve known parts twice (e.g. both `[Content_Types].xml` and
+        // `/[Content_Types].xml`).
         let mut known_parts: HashSet<String> = [
             "[Content_Types].xml",
             "_rels/.rels",
@@ -247,21 +251,26 @@ impl XlsbWorkbook {
             DEFAULT_STYLES_PART,
         ]
         .into_iter()
-        .map(str::to_string)
+        .map(|name| normalize_zip_part_name(name).to_ascii_lowercase())
         .collect();
-        known_parts.insert(workbook_part.clone());
-        known_parts.insert(workbook_rels_part.clone());
+        known_parts.insert(normalize_zip_part_name(&workbook_part).to_ascii_lowercase());
+        known_parts.insert(normalize_zip_part_name(&workbook_rels_part).to_ascii_lowercase());
         if let Some(part) = &shared_strings_part {
-            known_parts.insert(part.clone());
+            known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
         }
         if let Some(part) = &styles_part {
-            known_parts.insert(part.clone());
+            known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
         }
 
-        let worksheet_paths: HashSet<String> = sheets.iter().map(|s| s.part_path.clone()).collect();
+        let worksheet_paths: HashSet<String> = sheets
+            .iter()
+            .map(|s| normalize_zip_part_name(&s.part_path).to_ascii_lowercase())
+            .collect();
         if options.preserve_unknown_parts {
             for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
-                let is_known = known_parts.contains(&name) || worksheet_paths.contains(&name);
+                let normalized = normalize_zip_part_name(&name).to_ascii_lowercase();
+                let is_known =
+                    known_parts.contains(&normalized) || worksheet_paths.contains(&normalized);
                 if is_known {
                     continue;
                 }
@@ -1803,24 +1812,42 @@ fn find_zip_entry_case_insensitive<R: Read + Seek>(
     name: &str,
 ) -> Option<String> {
     let target = name.trim_start_matches('/').replace('\\', "/");
-    let target_lc = target.to_ascii_lowercase();
-    zip.file_names()
-        .find(|n| n.to_ascii_lowercase() == target_lc)
-        .map(str::to_string)
+
+    for candidate in zip.file_names() {
+        let mut normalized = candidate.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+        if normalized.eq_ignore_ascii_case(&target) {
+            return Some(candidate.to_string());
+        }
+    }
+
+    None
 }
 
 fn read_zip_entry<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, ParseError> {
-    match zip.by_name(name) {
-        Ok(mut entry) => {
-            let mut bytes = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut bytes)?;
-            Ok(Some(bytes))
+    let try_read = |zip: &mut ZipArchive<R>, entry_name: &str| -> Result<Vec<u8>, ParseError> {
+        let mut entry = zip.by_name(entry_name)?;
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    };
+
+    match try_read(zip, name) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(ParseError::Zip(zip::result::ZipError::FileNotFound)) => {
+            let Some(actual) = find_zip_entry_case_insensitive(zip, name) else {
+                return Ok(None);
+            };
+            Ok(Some(try_read(zip, &actual)?))
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(e) => Err(e.into()),
+        Err(err) => Err(err),
     }
 }
 
@@ -1845,8 +1872,8 @@ fn load_table_definitions<R: Read + Seek>(
     let table_parts: Vec<String> = zip
         .file_names()
         .filter(|name| {
-            let name = name.to_ascii_lowercase();
-            name.starts_with("xl/tables/") && name.ends_with(".xml")
+            let normalized = normalize_zip_part_name(name).to_ascii_lowercase();
+            normalized.starts_with("xl/tables/") && normalized.ends_with(".xml")
         })
         .map(str::to_string)
         .collect();
