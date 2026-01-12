@@ -3,6 +3,33 @@ use formula_engine::{ErrorKind, Value};
 use super::harness::{assert_number, TestSheet};
 
 #[test]
+fn choose_ifs_and_switch_are_lazy_in_scalar_mode() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(sheet.bytecode_program_count(), 0);
+
+    assert_number(&sheet.eval("=CHOOSE(2, 1/0, 7)"), 7.0);
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        1,
+        "expected CHOOSE scalar form to compile to bytecode"
+    );
+
+    assert_number(&sheet.eval("=IFS(FALSE, 1/0, TRUE, 9)"), 9.0);
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        2,
+        "expected IFS scalar form to compile to bytecode"
+    );
+
+    assert_number(&sheet.eval("=SWITCH(2, 1, 1/0, 2, 8)"), 8.0);
+    assert_eq!(
+        sheet.bytecode_program_count(),
+        3,
+        "expected SWITCH scalar form to compile to bytecode"
+    );
+}
+
+#[test]
 fn ifs_short_circuits_in_scalar_mode_and_returns_na() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=IFS(TRUE, 1, TRUE, 1/0)"), 1.0);

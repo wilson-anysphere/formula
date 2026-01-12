@@ -506,6 +506,7 @@ fn odd_coupon_price_and_yield_handle_zero_yield() {
     .expect("oddlyield should invert yld=0 price");
     assert_close(recovered_last, 0.0, 1e-7);
 }
+
 #[test]
 fn oddfprice_invalid_date_text_returns_value_error() {
     let mut sheet = TestSheet::new();

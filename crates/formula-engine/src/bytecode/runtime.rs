@@ -403,6 +403,32 @@ fn eval_ast_inner(
                         lexical_scopes,
                     );
                 }
+                Function::Choose => {
+                    if args.len() < 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+
+                    let index_value =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    if let Value::Error(e) = &index_value {
+                        return Value::Error(*e);
+                    }
+                    let idx = match coerce_to_number(&index_value) {
+                        Ok(n) => n.trunc() as i64,
+                        Err(e) => return Value::Error(e),
+                    };
+                    if idx < 1 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let choice_idx = match usize::try_from(idx - 1) {
+                        Ok(v) => v,
+                        Err(_) => return Value::Error(ErrorKind::Value),
+                    };
+                    let Some(expr) = args.get(choice_idx + 1) else {
+                        return Value::Error(ErrorKind::Value);
+                    };
+                    return eval_ast_inner(expr, grid, sheet_id, base, locale, lexical_scopes);
+                }
                 Function::Ifs => {
                     if args.len() % 2 != 0 {
                         return Value::Error(ErrorKind::Value);
