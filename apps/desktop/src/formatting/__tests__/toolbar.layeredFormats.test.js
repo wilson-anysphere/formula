@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { DocumentController } from "../../document/documentController.js";
-import { toggleBold } from "../toolbar.js";
+import { toggleBold, toggleWrap } from "../toolbar.js";
 
 test("toggleBold reads full-column formatting from the column layer (no per-cell scan)", () => {
   const doc = new DocumentController();
@@ -31,6 +31,22 @@ test("toggleBold reads full-column formatting from the column layer (no per-cell
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
   assert.equal(sheet.cells.size, 0, "Toggling full-column formatting should not materialize per-cell overrides");
+});
+
+test("toggleWrap reads full-column formatting from the column layer (no per-cell scan)", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { alignment: { wrapText: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0, "Full-column formatting should not materialize per-cell overrides");
+
+  // Toggling again should flip wrap OFF (because all cells are currently wrapped).
+  toggleWrap(doc, "Sheet1", "A1:A1048576");
+
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").alignment?.wrapText), false);
+  assert.equal(sheet.cells.size, 0);
 });
 
 test("toggleBold on a full-column selection treats a single conflicting cell override as mixed state", () => {
