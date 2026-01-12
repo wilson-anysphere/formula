@@ -2612,6 +2612,18 @@ try {
 
   const listen = getTauriListen();
   const emit = getTauriEmit();
+  let pendingOpenFiles: Promise<void> = Promise.resolve();
+
+  const queueOpenWorkbook = (path: string) => {
+    pendingOpenFiles = pendingOpenFiles.then(async () => {
+      try {
+        await openWorkbookFromPath(path);
+      } catch (err) {
+        console.error("Failed to open workbook:", err);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+      }
+    });
+  };
 
   // When the Rust host receives a close request, it asks the frontend to flush any pending
   // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
@@ -2662,16 +2674,33 @@ try {
     }
   });
 
+  const openFileListener = listen("open-file", (event) => {
+    const payload = (event as any)?.payload;
+    if (!Array.isArray(payload)) return;
+    const paths = payload.filter((p) => typeof p === "string" && p.trim() !== "");
+    if (paths.length === 0) return;
+
+    // Serialize opens to avoid overlapping prompts / backend state swaps.
+    for (const path of paths) {
+      queueOpenWorkbook(path);
+    }
+  });
+
+  // Signal that we're ready to receive (and flush any queued) open-file requests.
+  void openFileListener
+    .then(() => {
+      if (!emit) return;
+      return Promise.resolve(emit("open-file-ready"));
+    })
+    .catch((err) => {
+      console.error("Failed to signal open-file readiness:", err);
+    });
+
   void listen("file-dropped", async (event) => {
     const paths = (event as any)?.payload;
     const first = Array.isArray(paths) ? paths[0] : null;
     if (typeof first !== "string" || first.trim() === "") return;
-    try {
-      await openWorkbookFromPath(first);
-    } catch (err) {
-      console.error("Failed to open workbook:", err);
-      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
-    }
+    queueOpenWorkbook(first);
   });
 
   void listen("tray-open", () => {

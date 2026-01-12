@@ -51,6 +51,11 @@
         "role": "Editor"
       },
       {
+        "ext": ["xlsb"],
+        "name": "Excel Binary Spreadsheet",
+        "role": "Editor"
+      },
+      {
         "ext": ["csv"],
         "name": "CSV File",
         "role": "Editor"

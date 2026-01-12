@@ -86,15 +86,21 @@ mod tests {
         let file_path = dir.path().join("pq_refresh_state.json");
         let store = PowerQueryRefreshStateStore::new(file_path.clone(), InMemoryKeychainProvider::default());
 
+        // Use a long query id to avoid false positives where the ciphertext's base64 encoding
+        // happens to contain a short plaintext substring (e.g. "q1").
+        let query_id = "power-query-test-id-1234567890";
         let state = json!({
-            "q1": { "policy": { "type": "interval", "intervalMs": 123 }, "lastRunAtMs": 456 }
+            query_id: { "policy": { "type": "interval", "intervalMs": 123 }, "lastRunAtMs": 456 }
         });
         store.save("workbook-1", state.clone()).expect("save");
 
         let on_disk = fs::read_to_string(&file_path).expect("read store file");
         assert!(on_disk.contains("\"encrypted\": true"));
         assert!(!on_disk.contains("intervalMs"), "expected encrypted blob not to contain plaintext schedule");
-        assert!(!on_disk.contains("q1"), "expected encrypted blob not to contain plaintext query ids");
+        assert!(
+            !on_disk.contains(query_id),
+            "expected encrypted blob not to contain plaintext query ids"
+        );
 
         let loaded = store.load("workbook-1").expect("load").expect("present");
         assert_eq!(loaded, state);

@@ -12,8 +12,11 @@ use formula_desktop_tauri::macro_trust::{
     compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore,
 };
 use formula_desktop_tauri::macros::MacroExecutionOptions;
+use formula_desktop_tauri::open_file;
 use formula_desktop_tauri::state::{AppState, CellUpdateData, SharedAppState};
 use serde::Serialize;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Listener, Manager};
@@ -25,6 +28,17 @@ const WORKBOOK_ID: &str = "local-workbook";
 
 static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
+const OPEN_FILE_EVENT: &str = "open-file";
+const OPEN_FILE_READY_EVENT: &str = "open-file-ready";
+
+#[derive(Debug, Default)]
+struct OpenFileState {
+    ready: bool,
+    pending_paths: Vec<String>,
+}
+
+type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
+
 #[derive(Clone, Debug, Serialize)]
 struct CloseRequestedPayload {
     token: String,
@@ -33,6 +47,78 @@ struct CloseRequestedPayload {
     /// Note: if the user cancels the close in the frontend (e.g. via an unsaved-changes prompt),
     /// applying these updates keeps the frontend `DocumentController` consistent with the backend.
     updates: Vec<commands::CellUpdate>,
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn emit_open_file_event(app: &tauri::AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+
+    show_main_window(app);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit(OPEN_FILE_EVENT, paths);
+    } else {
+        let _ = app.emit(OPEN_FILE_EVENT, paths);
+    }
+}
+
+fn normalize_open_file_request_paths(paths: Vec<String>) -> Vec<String> {
+    // Best-effort de-dupe (avoids double-opens if both argv and macOS open-document events fire).
+    let mut seen = HashSet::<String>::new();
+    let mut out = Vec::new();
+    for path in paths {
+        if path.trim().is_empty() {
+            continue;
+        }
+        if seen.insert(path.clone()) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+fn handle_open_file_request(app: &tauri::AppHandle, paths: Vec<String>) {
+    let paths = normalize_open_file_request_paths(paths);
+    if paths.is_empty() {
+        // Still focus the existing window on "warm start" launches with no file args.
+        show_main_window(app);
+        return;
+    }
+
+    show_main_window(app);
+
+    let open_file_state = app.state::<SharedOpenFileState>().inner().clone();
+    let mut state = open_file_state.lock().unwrap();
+
+    if state.ready {
+        drop(state);
+        emit_open_file_event(app, paths);
+    } else {
+        state.pending_paths.extend(paths);
+    }
+}
+
+fn extract_open_file_paths(argv: &[String], cwd: Option<&Path>) -> Vec<String> {
+    open_file::extract_open_file_paths_from_argv(argv, cwd)
+        .into_iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect()
+}
+
+fn cwd_from_single_instance_callback(cwd: String) -> Option<PathBuf> {
+    let trimmed = cwd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
 }
 
 fn signature_status(vba_project_bin: &[u8]) -> commands::MacroSignatureStatus {
@@ -111,7 +197,22 @@ fn main() {
         }),
     ));
 
-    tauri::Builder::default()
+    let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
+    let initial_argv: Vec<String> = std::env::args().collect();
+    let initial_cwd = std::env::current_dir().ok();
+    let initial_paths =
+        normalize_open_file_request_paths(extract_open_file_paths(&initial_argv, initial_cwd.as_deref()));
+    if !initial_paths.is_empty() {
+        let mut guard = open_file_state.lock().unwrap();
+        guard.pending_paths.extend(initial_paths);
+    }
+
+    let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            let cwd = cwd_from_single_instance_callback(cwd);
+            let paths = extract_open_file_paths(&argv, cwd.as_deref());
+            handle_open_file_request(app, paths);
+        }))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(
@@ -130,6 +231,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .manage(macro_trust)
+        .manage(open_file_state)
         .invoke_handler(tauri::generate_handler![
             commands::open_workbook,
             commands::new_workbook,
@@ -186,19 +288,6 @@ fn main() {
             commands::fire_worksheet_change,
             commands::fire_selection_change,
         ])
-        .setup(|app| {
-            tray::init(app)?;
-
-            // Register global shortcuts (handled by the frontend via the Tauri plugin).
-            shortcuts::register(app.handle())?;
-
-            // Auto-update is configured via `tauri.conf.json`. We do a lightweight startup check
-            // in release builds; users can also trigger checks from the tray menu.
-            #[cfg(not(debug_assertions))]
-            updater::spawn_update_check(app.handle(), updater::UpdateCheckSource::Startup);
-
-            Ok(())
-        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 // Keep the process alive so the tray icon stays available.
@@ -354,6 +443,52 @@ fn main() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .setup(|app| {
+            tray::init(app)?;
+
+            // Register global shortcuts (handled by the frontend via the Tauri plugin).
+            shortcuts::register(app.handle())?;
+
+            // Auto-update is configured via `tauri.conf.json`. We do a lightweight startup check
+            // in release builds; users can also trigger checks from the tray menu.
+            #[cfg(not(debug_assertions))]
+            updater::spawn_update_check(app.handle(), updater::UpdateCheckSource::Startup);
+
+            // Queue `open-file` requests until the frontend has installed its event listeners.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.listen(OPEN_FILE_READY_EVENT, move |_event| {
+                    let state = handle.state::<SharedOpenFileState>().inner().clone();
+                    let pending = {
+                        let mut guard = state.lock().unwrap();
+                        if guard.ready {
+                            return;
+                        }
+                        guard.ready = true;
+                        std::mem::take(&mut guard.pending_paths)
+                    };
+                    let pending = normalize_open_file_request_paths(pending);
+
+                    if !pending.is_empty() {
+                        emit_open_file_event(&handle, pending);
+                    }
+                });
+            }
+
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        // macOS: when the app is already running and the user opens a file via Finder,
+        // the running instance receives an "open documents" event. Route it through the
+        // same open-file pipeline.
+        tauri::RunEvent::Opened { urls, .. } => {
+            let argv: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
+            let paths = extract_open_file_paths(&argv, None);
+            handle_open_file_request(app_handle, paths);
+        }
+        _ => {}
+    });
 }

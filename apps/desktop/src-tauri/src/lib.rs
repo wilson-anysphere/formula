@@ -2,6 +2,7 @@ pub mod commands;
 pub mod file_io;
 pub mod macro_trust;
 pub mod macros;
+pub mod open_file;
 pub mod persistence;
 pub mod python;
 pub mod sql;
