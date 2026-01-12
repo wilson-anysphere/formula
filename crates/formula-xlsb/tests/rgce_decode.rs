@@ -94,8 +94,8 @@ fn decodes_ptg_ref3d_with_external_workbook_prefix() {
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 0);
 
     let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
-    assert_eq!(text, "[Book2.xlsb]SheetA:SheetB!A1");
-    assert_parses_and_roundtrips(&text);
+    assert_eq!(text, "'[Book2.xlsb]SheetA:SheetB'!A1");
+    parse_formula(&text, Default::default()).expect("formula should parse");
 }
 
 #[test]

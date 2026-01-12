@@ -418,18 +418,12 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
 
 fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
     let same_sheet = first.eq_ignore_ascii_case(last);
-    let needs_quotes = if same_sheet {
-        sheet_name_needs_quotes(first)
-    } else {
-        sheet_name_needs_quotes(first) || sheet_name_needs_quotes(last)
-    };
-
-    if needs_quotes {
-        let combined = if same_sheet {
-            format!("[{book}]{first}")
-        } else {
-            format!("[{book}]{first}:{last}")
-        };
+    if !same_sheet {
+        // Keep external workbook 3D spans parseable by `formula-engine` by emitting a single
+        // quoted identifier before `!` (e.g. `'[Book.xlsx]Sheet1:Sheet3'!A1`).
+        //
+        // Excel sheet names cannot contain ':' so this representation is unambiguous.
+        let combined = format!("[{book}]{first}:{last}");
         let mut out = String::new();
         out.push('\'');
         for ch in combined.chars() {
@@ -445,10 +439,23 @@ fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
         return out;
     }
 
-    if same_sheet {
-        format!("[{book}]{first}!")
+    if sheet_name_needs_quotes(first) {
+        let combined = format!("[{book}]{first}");
+        let mut out = String::new();
+        out.push('\'');
+        for ch in combined.chars() {
+            if ch == '\'' {
+                out.push('\'');
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+        out.push('\'');
+        out.push('!');
+        out
     } else {
-        format!("[{book}]{first}:{last}!")
+        format!("[{book}]{first}!")
     }
 }
 
@@ -1141,9 +1148,12 @@ fn decode_rgce_impl(
                 let col_field = u16::from_le_bytes([rgce[i + 6], rgce[i + 7]]);
                 i += 8;
 
-                let (workbook, first, last) = ctx
-                    .extern_sheet_target(ixti)
-                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                let (workbook, first, last) =
+                    ctx.extern_sheet_target(ixti)
+                        .ok_or(DecodeError::UnknownPtg {
+                            offset: ptg_offset,
+                            ptg,
+                        })?;
                 let prefix = match workbook {
                     None => format_sheet_prefix(first, last),
                     Some(book) => format_external_sheet_prefix(book, first, last),
@@ -1178,9 +1188,12 @@ fn decode_rgce_impl(
                 let col_last = u16::from_le_bytes([rgce[i + 12], rgce[i + 13]]);
                 i += 14;
 
-                let (workbook, first, last) = ctx
-                    .extern_sheet_target(ixti)
-                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                let (workbook, first, last) =
+                    ctx.extern_sheet_target(ixti)
+                        .ok_or(DecodeError::UnknownPtg {
+                            offset: ptg_offset,
+                            ptg,
+                        })?;
                 let prefix = match workbook {
                     None => format_sheet_prefix(first, last),
                     Some(book) => format_external_sheet_prefix(book, first, last),
@@ -2939,8 +2952,7 @@ fn emit_ref(
                 },
                 SheetSpec::Range(a, b) => (a.as_str(), b.as_str()),
             };
-            let ixti = ctx
-                .extern_sheet_range_index(first, last)
+            let ixti = extern_sheet_range_index_with_fallback(ctx, first, last)
                 .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
 
             out.push(ptg_with_class(PTG_REF3D, class));
@@ -2956,8 +2968,7 @@ fn emit_ref(
                 },
                 SheetSpec::Range(a, b) => (a.as_str(), b.as_str()),
             };
-            let ixti = ctx
-                .extern_sheet_range_index(first, last)
+            let ixti = extern_sheet_range_index_with_fallback(ctx, first, last)
                 .ok_or_else(|| EncodeError::UnknownSheet(format!("{first}:{last}")))?;
 
             out.push(ptg_with_class(PTG_AREA3D, class));
@@ -2966,6 +2977,65 @@ fn emit_ref(
         }
     }
     Ok(())
+}
+
+fn extern_sheet_range_index_with_fallback(
+    ctx: &WorkbookContext,
+    first: &str,
+    last: &str,
+) -> Option<u16> {
+    // Fast path.
+    if let Some(ixti) = ctx.extern_sheet_range_index(first, last) {
+        return Some(ixti);
+    }
+
+    // For external workbook refs, our decoded text format uses the Excel form
+    // `'[Book]Sheet1:Sheet3'!A1` (workbook prefix appears once). The AST encoder
+    // (`sheet_spec_from_ref_prefix`) expands this into `"[Book]Sheet1"` and `"[Book]Sheet3"`.
+    // Try both representations so callers can register ExternSheet entries either way.
+    if let Some((prefix, _sheet)) = split_external_workbook_prefix(first) {
+        if split_external_workbook_prefix(last).is_none() {
+            let last_with_prefix = format!("{prefix}{last}");
+            if let Some(ixti) = ctx.extern_sheet_range_index(first, &last_with_prefix) {
+                return Some(ixti);
+            }
+        }
+    }
+
+    if let Some((prefix, last_sheet)) = split_external_workbook_prefix(last) {
+        if split_external_workbook_prefix(first).is_none() {
+            let first_with_prefix = format!("{prefix}{first}");
+            if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last) {
+                return Some(ixti);
+            }
+            if let Some(ixti) = ctx.extern_sheet_range_index(&first_with_prefix, last_sheet) {
+                return Some(ixti);
+            }
+        }
+    }
+
+    if let (Some((prefix1, _)), Some((prefix2, last_sheet))) = (
+        split_external_workbook_prefix(first),
+        split_external_workbook_prefix(last),
+    ) {
+        if prefix1.eq_ignore_ascii_case(prefix2) {
+            if let Some(ixti) = ctx.extern_sheet_range_index(first, last_sheet) {
+                return Some(ixti);
+            }
+        }
+    }
+
+    None
+}
+
+fn split_external_workbook_prefix(raw: &str) -> Option<(&str, &str)> {
+    let rest = raw.strip_prefix('[')?;
+    let end = rest.find(']')?;
+    let prefix_len = end.saturating_add(2); // '[' + ... + ']'
+    if prefix_len > raw.len() {
+        return None;
+    }
+    Some((&raw[..prefix_len], &raw[prefix_len..]))
 }
 
 fn emit_cell_ref_fields(cell: &CellRef, out: &mut Vec<u8>) {
