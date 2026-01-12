@@ -292,6 +292,20 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
   -SubsetCasesPath tools/excel-oracle/odd_coupon_boundary_cases.json
 ```
 
+Example (patch only the odd-coupon long-stub scenarios):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_long_stub_cases.json
+```
+
+Example (patch only the odd-coupon schedule alignment / misalignment scenarios):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tools/excel-oracle/odd_coupon_invalid_schedule_cases.json
+```
+
 You can also patch by **tag filter** without a dedicated subset file by running against the
 canonical corpus and passing through `-IncludeTags`/`-ExcludeTags`:
 

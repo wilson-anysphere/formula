@@ -22,6 +22,7 @@
     - tools/excel-oracle/odd_coupon_boundary_cases.json (odd-coupon date boundary scenarios)
     - tools/excel-oracle/odd_coupon_basis4_cases.json (odd-coupon basis=4 (European 30/360) scenarios)
     - tools/excel-oracle/odd_coupon_validation_cases.json (negative yields / yield-domain edges / negative rate)
+    - tools/excel-oracle/odd_coupon_invalid_schedule_cases.json (odd-coupon schedule alignment / misalignment scenarios)
 
 .PARAMETER CasesPath
   Path to the canonical cases.json corpus (default: tests/compatibility/excel-oracle/cases.json).
