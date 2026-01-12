@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::sync::Arc;
 
 use csv::ByteRecord;
+use encoding_rs::WINDOWS_1252;
 use formula_columnar::{
     ColumnSchema, ColumnType as ColumnarType, ColumnarTable, ColumnarTableBuilder, PageCacheConfig,
     TableOptions, Value as ColumnarValue,
@@ -18,6 +20,8 @@ pub struct CsvOptions {
     pub sample_rows: usize,
     pub page_size_rows: usize,
     pub cache_entries: usize,
+    /// How to decode raw CSV bytes into text fields.
+    pub encoding: CsvTextEncoding,
     /// Decimal separator used when parsing numbers.
     ///
     /// `.` matches inputs like `1,234.56`. `,` matches inputs like `1.234,56`.
@@ -38,12 +42,25 @@ impl Default for CsvOptions {
             sample_rows: 100,
             page_size_rows: 65_536,
             cache_entries: 64,
+            encoding: CsvTextEncoding::Auto,
             decimal_separator: '.',
             date_order: CsvDateOrder::default(),
             timestamp_tz_policy: CsvTimestampTzPolicy::default(),
             currency_symbols: vec!['$', '€', '£', '¥'],
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CsvTextEncoding {
+    /// Attempt to decode as UTF-8; if a field contains invalid UTF-8, fall back to Windows-1252.
+    ///
+    /// This matches common Excel behavior when opening CSV files on Windows.
+    Auto,
+    /// Decode as UTF-8 and reject invalid byte sequences.
+    Utf8,
+    /// Decode as Windows-1252 (aka CP-1252).
+    Windows1252,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,10 +136,10 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     let mut column_count: usize;
 
     if options.has_header {
-        header_names = decode_record_to_strings(&record, record_index)?;
+        header_names = decode_record_to_strings(&record, record_index, options.encoding)?;
         column_count = header_names.len();
     } else {
-        let row = decode_record_to_strings(&record, record_index)?;
+        let row = decode_record_to_strings(&record, record_index, options.encoding)?;
         column_count = row.len();
         sample_rows.push(row);
     }
@@ -133,7 +150,7 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
             Ok(false) => break,
             Ok(true) => {
                 record_index += 1;
-                let row = decode_record_to_strings(&record, record_index)?;
+                let row = decode_record_to_strings(&record, record_index, options.encoding)?;
                 column_count = column_count.max(row.len());
                 sample_rows.push(row);
             }
@@ -197,8 +214,14 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
                 record_index += 1;
                 for i in 0..column_count {
                     let raw = record.get(i).unwrap_or(b"");
-                    let field = decode_field(raw, record_index, i as u64 + 1)?;
-                    row_values[i] = parse_typed_value(field, column_types[i], &options, &mut string_pool);
+                    let field =
+                        decode_field(raw, record_index, i as u64 + 1, options.encoding)?;
+                    row_values[i] = parse_typed_value(
+                        field.as_ref(),
+                        column_types[i],
+                        &options,
+                        &mut string_pool,
+                    );
                 }
 
                 builder.append_row(&row_values);
@@ -723,25 +746,56 @@ fn parse_tz_offset_millis(tz: &str) -> Option<i64> {
     Some(sign * ((hours * 3600 + mins * 60) * 1000))
 }
 
-fn decode_record_to_strings(record: &ByteRecord, row: u64) -> Result<Vec<String>, CsvImportError> {
+fn decode_record_to_strings(
+    record: &ByteRecord,
+    row: u64,
+    encoding: CsvTextEncoding,
+) -> Result<Vec<String>, CsvImportError> {
     if record.len() == 0 {
         return Ok(vec![String::new()]);
     }
 
     let mut out = Vec::with_capacity(record.len());
     for (idx, field) in record.iter().enumerate() {
-        let s = decode_field(field, row, idx as u64 + 1)?;
-        out.push(s.to_string());
+        let s = decode_field(field, row, idx as u64 + 1, encoding)?;
+        out.push(s.into_owned());
     }
     Ok(out)
 }
 
-fn decode_field<'a>(field: &'a [u8], row: u64, column: u64) -> Result<&'a str, CsvImportError> {
-    std::str::from_utf8(field).map_err(|e| CsvImportError::Parse {
-        row,
-        column,
-        reason: format!("invalid UTF-8: {e}"),
-    })
+fn decode_field<'a>(
+    field: &'a [u8],
+    row: u64,
+    column: u64,
+    encoding: CsvTextEncoding,
+) -> Result<Cow<'a, str>, CsvImportError> {
+    // Handle UTF-8 BOM at the start of the file. This commonly appears in Excel-exported CSVs.
+    let field = if row == 1 && column == 1 && field.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &field[3..]
+    } else {
+        field
+    };
+
+    match encoding {
+        CsvTextEncoding::Utf8 => std::str::from_utf8(field)
+            .map(Cow::Borrowed)
+            .map_err(|e| CsvImportError::Parse {
+                row,
+                column,
+                reason: format!("invalid UTF-8: {e}"),
+            }),
+        CsvTextEncoding::Windows1252 => {
+            let (cow, _, _) = WINDOWS_1252.decode(field);
+            Ok(cow)
+        }
+        CsvTextEncoding::Auto => match std::str::from_utf8(field) {
+            Ok(s) => Ok(Cow::Borrowed(s)),
+            Err(_) => {
+                let (cow, _, _) = WINDOWS_1252.decode(field);
+                Ok(cow)
+            }
+        },
+    }
 }
 
 fn map_csv_error(err: csv::Error, fallback_row: u64) -> CsvImportError {

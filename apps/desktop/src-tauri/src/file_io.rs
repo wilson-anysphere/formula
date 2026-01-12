@@ -3,7 +3,7 @@ use anyhow::Context;
 use calamine::{open_workbook_auto, Data, Reader};
 use formula_columnar::{ColumnType as ColumnarType, ColumnarTable, Value as ColumnarValue};
 use formula_model::{
-    import::{import_csv_to_columnar_table, CsvOptions},
+    import::{import_csv_to_columnar_table, CsvOptions, CsvTextEncoding},
     CellValue as ModelCellValue, DateSystem as WorkbookDateSystem, WorksheetId,
 };
 use formula_xlsb::{
@@ -666,7 +666,14 @@ fn formula_model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
 pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
     let file = std::fs::File::open(path).with_context(|| format!("open csv {:?}", path))?;
     let reader = BufReader::new(file);
-    let table = import_csv_to_columnar_table(reader, CsvOptions::default())
+    // Default to Excel-like behavior: attempt UTF-8 first, then fall back to Windows-1252.
+    let table = import_csv_to_columnar_table(
+        reader,
+        CsvOptions {
+            encoding: CsvTextEncoding::Auto,
+            ..CsvOptions::default()
+        },
+    )
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .with_context(|| format!("import csv {:?}", path))?;
 

@@ -1966,6 +1966,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "csv",
+ "encoding_rs",
  "formula-columnar",
  "formula-format",
  "getrandom 0.3.4",

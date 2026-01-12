@@ -1,5 +1,5 @@
 use formula_model::import::{
-    import_csv_to_columnar_table, import_csv_to_worksheet, CsvDateOrder, CsvImportError, CsvOptions,
+    import_csv_to_columnar_table, import_csv_to_worksheet, CsvDateOrder, CsvOptions,
     CsvTimestampTzPolicy,
 };
 use formula_model::{CellRef, CellValue};
@@ -190,13 +190,30 @@ fn csv_import_reports_invalid_utf8_with_row_and_column() {
     bytes.push(0xFF);
     bytes.extend_from_slice(b"\"\n");
 
-    let err = import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap_err();
-    match err {
-        CsvImportError::Parse { row, column, reason } => {
-            assert_eq!(row, 2);
-            assert_eq!(column, 2);
-            assert!(reason.contains("UTF-8"));
-        }
-        other => panic!("expected CsvImportError::Parse, got {other:?}"),
-    }
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
+        .expect("CSV import should fall back to Windows-1252 in Auto mode");
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("helloÿ".to_string())
+    );
+}
+
+#[test]
+fn csv_import_decodes_windows1252_fallback() {
+    // "café" with Windows-1252 byte 0xE9 for "é" (invalid UTF-8).
+    let bytes = b"id,text\n1,caf\xe9\n".to_vec();
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
+        .expect("CSV import should decode Windows-1252 bytes in Auto mode");
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("café".to_string())
+    );
+}
+
+#[test]
+fn csv_import_strips_utf8_bom_from_first_header_field() {
+    let bytes = b"\xEF\xBB\xBFid,text\n1,hello\n".to_vec();
+    let table =
+        import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
+    assert_eq!(table.schema()[0].name, "id");
 }
