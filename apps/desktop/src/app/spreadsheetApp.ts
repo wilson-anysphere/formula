@@ -3514,7 +3514,10 @@ export class SpreadsheetApp {
     this.commentPreviewByCoord.clear();
     this.commentThreadsByCellRef.clear();
     for (const comment of this.commentManager.listAll()) {
-      const cellRef = comment.cellRef;
+      const rawCellRef = comment.cellRef;
+      const isPlainA1 = A1_CELL_REF_RE.test(rawCellRef);
+      // Normalize A1 refs so `$A$1`, `a1`, etc map to the same cell key.
+      const cellRef = isPlainA1 ? rawCellRef.replaceAll("$", "").toUpperCase() : rawCellRef;
       this.commentCells.add(cellRef);
 
       const resolved = Boolean(comment.resolved);
@@ -3532,9 +3535,9 @@ export class SpreadsheetApp {
 
       // Only populate coord-keyed maps when the stored cellRef looks like a plain A1 address.
       // This prevents corrupt/non-canonical refs from being mis-indexed into A1 (0,0).
-      if (!A1_CELL_REF_RE.test(cellRef)) continue;
+      if (!isPlainA1) continue;
 
-      const coord = parseA1(cellRef);
+      const coord = parseA1(rawCellRef);
       const coordKey = coord.row * COMMENT_COORD_COL_STRIDE + coord.col;
       const existingCoord = this.commentMetaByCoord.get(coordKey);
       if (!existingCoord) this.commentMetaByCoord.set(coordKey, { resolved });

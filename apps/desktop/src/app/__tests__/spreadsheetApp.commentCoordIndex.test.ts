@@ -90,5 +90,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     // $A$1 should map to (0,0)
     expect((app as any).commentMetaByCoord.get(0)).toEqual({ resolved: true });
     expect((app as any).commentPreviewByCoord.get(0)).toBe("Absolute");
+    // A1-keyed maps should normalize away $ markers.
+    expect((app as any).commentThreadsByCellRef.get("A1")).toHaveLength(1);
   });
 });
