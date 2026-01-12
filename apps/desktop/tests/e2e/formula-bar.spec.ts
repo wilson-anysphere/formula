@@ -143,7 +143,7 @@ test.describe("formula bar editing + range insertion", () => {
       expect(c1Value).toBe("7");
     });
 
-    test(`Ctrl/Cmd+PgDn does not switch sheets while editing a formula (formula bar focused) (${mode})`, async ({
+    test(`Ctrl/Cmd+PgDn switches sheets while editing a formula (formula bar focused) (${mode})`, async ({
       page,
     }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
@@ -165,7 +165,18 @@ test.describe("formula bar editing + range insertion", () => {
       await expect(input).toBeVisible();
       await input.fill("=");
 
-      // Ctrl/Cmd+PgDn should NOT switch sheets while the user is editing text in the formula bar.
+      // Wait for the app to recognize this as a formula-editing session so sheet navigation is allowed
+      // (Excel behavior for cross-sheet reference building).
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const app = (window as any).__formulaApp;
+            return Boolean(app?.isFormulaBarFormulaEditing?.());
+          }),
+        )
+        .toBe(true);
+
+      // Ctrl/Cmd+PgDn should switch sheets while editing a formula in the formula bar.
       // Dispatch synthetically to avoid any browser tab-switching shortcuts.
       const ctrlKey = process.platform !== "darwin";
       const metaKey = process.platform === "darwin";
@@ -178,13 +189,13 @@ test.describe("formula bar editing + range insertion", () => {
         },
         { ctrlKey, metaKey },
       );
-      await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
       await expect(input).toBeFocused();
 
-      // Picking a cell should insert a reference from the current sheet.
+      // Picking a cell should insert a sheet-qualified reference (because the reference is on a different sheet).
       // Click inside A1 (avoid the shared-grid corner header/select-all region).
       await page.click("#grid", { position: { x: 80, y: 40 } });
-      await expect(input).toHaveValue("=A1");
+      await expect(input).toHaveValue("=Sheet2!A1");
     });
 
     test(`sheet switcher <select> switches sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({

@@ -86,12 +86,26 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
 
+    // In view mode the formula bar input is hidden and click events are handled by the
+    // highlighted <pre> below, so click the highlight to enter edit mode and focus the textarea.
+    await page.getByTestId("formula-highlight").click();
     const formulaInput = page.getByTestId("formula-input");
     await expect(formulaInput).toBeVisible();
-    await formulaInput.click();
     await expect(formulaInput).toBeFocused();
     await formulaInput.fill("=");
     await expect(formulaInput).toHaveValue("=");
+
+    // `fill()` updates the DOM value immediately, but the formula bar model updates via an `input`
+    // event handler. Wait until the app reports it is in formula-editing mode so the global
+    // Ctrl/Cmd+PgUp/PgDn handler can treat this as an Excel-like cross-sheet reference session.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const app = (window as any).__formulaApp;
+          return Boolean(app?.isFormulaBarFormulaEditing?.());
+        }),
+      )
+      .toBe(true);
 
     // While editing a formula, Ctrl/Cmd+PgDn should still switch sheets (Excel-like cross-sheet reference building).
     await page.evaluate((isMac) => {
