@@ -13,7 +13,7 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
   const sheet = new Y.Map();
   sheet.set("id", "Sheet1");
   sheet.set("name", "Sheet1");
-  sheet.set("view", { frozenRows: 2, frozenCols: 1 });
+  sheet.set("view", { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
   sheets.push([sheet]);
 
   const cellA1 = new Y.Map();
@@ -37,7 +37,7 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
     sheets: {
       order: ["Sheet1"],
       metaById: {
-        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 2, frozenCols: 1 } },
+        Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } } },
       },
     },
     cells: {
@@ -57,7 +57,7 @@ test("yjs document adapter: normalizes formulas + handles legacy cell keys", () 
 
   const sheet2 = doc2.getArray("sheets").get(0);
   assert.ok(sheet2 instanceof Y.Map);
-  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1 });
+  assert.deepEqual(sheet2.get("view"), { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
 
   const cells2 = doc2.getMap("cells");
   assert.equal(cells2.has("Sheet1:0:0"), true);

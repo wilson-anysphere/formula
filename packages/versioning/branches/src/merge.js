@@ -874,12 +874,7 @@ export function applyConflictResolutions(mergeResult, resolutions) {
         merged.sheets.metaById[sheetId] = {
           id: sheetId,
           name: chosen.meta.name == null ? null : String(chosen.meta.name),
-          view: isRecord(chosen.meta.view)
-            ? {
-                frozenRows: Number.isFinite(Number(chosen.meta.view.frozenRows)) ? Math.max(0, Math.trunc(chosen.meta.view.frozenRows)) : 0,
-                frozenCols: Number.isFinite(Number(chosen.meta.view.frozenCols)) ? Math.max(0, Math.trunc(chosen.meta.view.frozenCols)) : 0,
-              }
-            : { frozenRows: 0, frozenCols: 0 },
+          view: isRecord(chosen.meta.view) ? structuredClone(chosen.meta.view) : { frozenRows: 0, frozenCols: 0 },
         };
         merged.cells[sheetId] = structuredClone(chosen.cells);
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);

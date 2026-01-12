@@ -355,6 +355,33 @@ export class BranchService {
         }
       }
 
+      // Preserve axis size overrides when the caller omits them from the view payload.
+      // (e.g. older schemaVersion=1 clients that know about frozen panes but not row/col sizing).
+      for (const sheetId of Object.keys(merged.sheets.metaById ?? {})) {
+        const sheets = nextState.sheets;
+        if (!isRecord(sheets) || !isRecord(sheets.metaById)) continue;
+        const rawMeta = sheets.metaById[sheetId];
+        if (!isRecord(rawMeta)) continue;
+        const rawView = rawMeta.view;
+        if (!isRecord(rawView)) continue;
+
+        const currentView = currentState.sheets.metaById?.[sheetId]?.view;
+        if (!isRecord(currentView)) continue;
+
+        const mergedView = merged.sheets.metaById[sheetId].view;
+        if (!isRecord(mergedView)) continue;
+
+        if (!("colWidths" in rawView) && currentView.colWidths !== undefined) {
+          mergedView.colWidths = structuredClone(currentView.colWidths);
+          didOverlay = true;
+        }
+
+        if (!("rowHeights" in rawView) && currentView.rowHeights !== undefined) {
+          mergedView.rowHeights = structuredClone(currentView.rowHeights);
+          didOverlay = true;
+        }
+      }
+
       if (didOverlay) effectiveNextState = merged;
     }
 

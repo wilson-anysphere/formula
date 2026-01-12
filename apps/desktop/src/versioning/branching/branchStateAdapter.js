@@ -149,7 +149,14 @@ export function applyBranchStateToDocumentController(doc, state) {
     }
 
     cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
-    return { id: sheetId, frozenRows: view.frozenRows ?? 0, frozenCols: view.frozenCols ?? 0, cells };
+    return {
+      id: sheetId,
+      frozenRows: view.frozenRows ?? 0,
+      frozenCols: view.frozenCols ?? 0,
+      colWidths: view.colWidths,
+      rowHeights: view.rowHeights,
+      cells
+    };
   });
 
   const snapshot = { schemaVersion: 1, sheets };

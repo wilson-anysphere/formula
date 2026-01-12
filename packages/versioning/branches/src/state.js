@@ -36,12 +36,56 @@ function normalizeFrozenCount(value) {
 
 /**
  * @param {any} value
- * @returns {{ frozenRows: number, frozenCols: number }}
+ * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
  */
 function normalizeSheetView(value) {
   const frozenRows = normalizeFrozenCount(isRecord(value) ? value.frozenRows : undefined);
   const frozenCols = normalizeFrozenCount(isRecord(value) ? value.frozenCols : undefined);
-  return { frozenRows, frozenCols };
+
+  const normalizeAxisSize = (raw) => {
+    const num = Number(raw);
+    if (!Number.isFinite(num)) return null;
+    if (num <= 0) return null;
+    return num;
+  };
+
+  const normalizeAxisOverrides = (raw) => {
+    if (!raw) return null;
+    /** @type {Record<string, number>} */
+    const out = {};
+
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const index = Array.isArray(entry) ? entry[0] : entry?.index;
+        const size = Array.isArray(entry) ? entry[1] : entry?.size;
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(size);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    } else if (isRecord(raw)) {
+      for (const [key, value] of Object.entries(raw)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(value);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    }
+
+    return Object.keys(out).length === 0 ? null : out;
+  };
+
+  const colWidths = isRecord(value) ? normalizeAxisOverrides(value.colWidths) : null;
+  const rowHeights = isRecord(value) ? normalizeAxisOverrides(value.rowHeights) : null;
+
+  return {
+    frozenRows,
+    frozenCols,
+    ...(colWidths ? { colWidths } : {}),
+    ...(rowHeights ? { rowHeights } : {}),
+  };
 }
 
 /**

@@ -46,7 +46,18 @@
  * `view` stores per-sheet UI state that should survive undo/redo and semantic merges
  * (e.g. frozen panes).
  *
- * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewState
+ * @typedef {{
+ *   frozenRows: number,
+ *   frozenCols: number,
+ *   /**
+ *    * Sparse column width overrides (base units, zoom=1), keyed by 0-based column index.
+ *    *\/
+ *   colWidths?: Record<string, number>,
+ *   /**
+ *    * Sparse row height overrides (base units, zoom=1), keyed by 0-based row index.
+ *    *\/
+ *   rowHeights?: Record<string, number>,
+ * }} SheetViewState
  *
  * @typedef {{ id: string, name: string | null, view?: SheetViewState }} SheetMeta
  */
