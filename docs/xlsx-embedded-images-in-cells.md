@@ -50,6 +50,19 @@ xl/richData/_rels/richValueRel.xml.rels  Target="../media/imageN.png"
 xl/media/imageN.png         (actual image bytes)
 ```
 
+### Index/indirection summary
+
+This schema uses multiple indices; the most important ones are:
+
+| Field | Where it lives | Meaning | Index-base / ordering notes |
+|------:|----------------|---------|-----------------------------|
+| `c/@vm` | `xl/worksheets/sheetN.xml` | Selects a record in `xl/metadata.xml/valueMetadata` | **Ambiguous base** (0- or 1-based). Preserve and resolve via `metadata.xml`. |
+| `rc/@t` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `metadataTypes` (`XLRICHVALUE`) | Appears **1-based** (`t="1"` in observed files). |
+| `rc/@v` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `futureMetadata name="XLRICHVALUE"` `bk` list | Appears **0-based**. |
+| `xlrd:rvb/@i` | `xl/metadata.xml` (`futureMetadata/XLRICHVALUE` extension) | Index into `xl/richData/rdrichvalue.xml` `<rv>` list | **0-based** rich value index. |
+| `_rvRel:LocalImageIdentifier` (first `<v>` inside `<rv>`) | `xl/richData/rdrichvalue.xml` | Relationship-slot index | **0-based index** into the ordered `<rel>` list in `richValueRel.xml`. |
+| `rel/@r:id` | `xl/richData/richValueRel.xml` | Relationship ID string | Resolve via `.rels` by matching `Id="..."` (not by element order). |
+
 ## 1) Worksheet cell encoding: `t="e" vm="1"` + `#VALUE!`
 
 The worksheet stores an error value but attaches “rich value” metadata via the `vm` attribute:
