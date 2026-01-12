@@ -58,6 +58,29 @@ function getDocumentControllerSheetMeta(doc, sheetId) {
 }
 
 /**
+ * Read a field off an unknown sheet meta value.
+ *
+ * Supports both plain JS objects and Map-like objects (including Yjs maps)
+ * during gradual rollouts of Task 201.
+ *
+ * @param {any} meta
+ * @param {string} key
+ * @returns {any}
+ */
+function readSheetMetaField(meta, key) {
+  if (!meta) return undefined;
+  if (typeof meta.get === "function") {
+    try {
+      return meta.get(key);
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof meta === "object") return meta[key];
+  return undefined;
+}
+
+/**
  * @template T
  * @param {T} value
  * @returns {T}
@@ -217,11 +240,13 @@ export function documentControllerToBranchState(doc) {
 
     cells[sheetId] = outSheet;
     const sheetMeta = getDocumentControllerSheetMeta(doc, sheetId);
+    const rawName = readSheetMetaField(sheetMeta, "name");
+    const rawDisplayName = readSheetMetaField(sheetMeta, "displayName");
     const name =
-      typeof sheetMeta?.name === "string" && sheetMeta.name.length > 0
-        ? sheetMeta.name
-        : typeof sheetMeta?.displayName === "string" && sheetMeta.displayName.length > 0
-          ? sheetMeta.displayName
+      typeof rawName === "string" && rawName.length > 0
+        ? rawName
+        : typeof rawDisplayName === "string" && rawDisplayName.length > 0
+          ? rawDisplayName
           : sheetId;
 
     const rawView = doc.getSheetView(sheetId);
@@ -278,17 +303,19 @@ export function documentControllerToBranchState(doc) {
     /** @type {Record<string, any>} */
     const metaOut = { id: sheetId, name, view };
 
-    const visibility = sheetMeta?.visibility;
+    const visibility = readSheetMetaField(sheetMeta, "visibility");
     if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") {
       metaOut.visibility = visibility;
     }
 
-    if (sheetMeta && ("tabColor" in sheetMeta || "tab_color" in sheetMeta)) {
+    const rawTabColor = readSheetMetaField(sheetMeta, "tabColor");
+    const rawTabColorLegacy = readSheetMetaField(sheetMeta, "tab_color");
+    if (sheetMeta && (rawTabColor !== undefined || rawTabColorLegacy !== undefined)) {
       // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes
       // (e.g. { rgb }) during Task 201 rollout.
       let tabColor;
-      if ("tabColor" in sheetMeta) tabColor = sheetMeta.tabColor;
-      else tabColor = sheetMeta.tab_color;
+      if (rawTabColor !== undefined) tabColor = rawTabColor;
+      else tabColor = rawTabColorLegacy;
       if (tabColor && typeof tabColor === "object" && typeof tabColor.rgb === "string") {
         tabColor = tabColor.rgb;
       }
