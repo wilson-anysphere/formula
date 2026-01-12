@@ -3,15 +3,15 @@ import { newDb } from "pg-mem";
 import type { Pool } from "pg";
 import { Writable } from "node:stream";
 import { trace } from "@opentelemetry/api";
-import type { AppConfig } from "../config";
+import Fastify from "fastify";
 import { createLogger } from "../observability/logger";
+import { createMetrics, instrumentDb } from "../observability/metrics";
 import { initOpenTelemetry } from "../observability/otel";
+import { genRequestId, registerRequestId } from "../observability/request-id";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
-import { deriveSecretStoreKey } from "../secrets/secretStore";
 
 describe("observability: request-id, log correlation, db spans", () => {
   let db: Pool;
-  let config: AppConfig;
   let app: any;
   const logs: string[] = [];
   const exporter = new InMemorySpanExporter();
@@ -23,41 +23,35 @@ describe("observability: request-id, log correlation, db spans", () => {
     const pgAdapter = mem.adapters.createPg();
     db = new pgAdapter.Pool();
 
-    config = {
-      port: 0,
-      databaseUrl: "postgres://unused",
-      publicBaseUrl: "http://localhost",
-      publicBaseUrlHostAllowlist: ["localhost"],
-      trustProxy: false,
-      sessionCookieName: "formula_session",
-      sessionTtlSeconds: 60 * 60,
-      cookieSecure: false,
-      corsAllowedOrigins: [],
-      syncTokenSecret: "test-sync-secret",
-      syncTokenTtlSeconds: 60,
-      secretStoreKeys: {
-        currentKeyId: "legacy",
-        keys: { legacy: deriveSecretStoreKey("test-secret-store-key") }
-      },
-      localKmsMasterKey: "test-local-kms-master-key",
-      awsKmsEnabled: false,
-      retentionSweepIntervalMs: null,
-      oidcAuthStateCleanupIntervalMs: null
-    };
+    const metrics = createMetrics();
+    instrumentDb(db, metrics);
 
+    let buffer = "";
     const stream = new Writable({
       write(chunk, _encoding, callback) {
-        logs.push(chunk.toString());
+        buffer += chunk.toString();
+        let idx = buffer.indexOf("\n");
+        while (idx !== -1) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (line) logs.push(line);
+          idx = buffer.indexOf("\n");
+        }
         callback();
       }
     });
 
     const logger = createLogger({ level: "info", stream });
 
-    // Ensure OTel is initialized before importing Fastify/app.
-    const { buildApp } = await import("../app");
-    app = buildApp({ db, config, logger });
+    app = Fastify({
+      loggerInstance: logger as any,
+      genReqId: genRequestId,
+      requestIdLogLabel: "requestId"
+    });
+    app.decorate("db", db);
+    registerRequestId(app);
 
+    app.get("/health", async () => ({ status: "ok" }));
     app.get("/_test/log", async (request: any) => {
       request.log.info("test_log");
       return { ok: true };
@@ -70,7 +64,7 @@ describe("observability: request-id, log correlation, db spans", () => {
     });
 
     await app.ready();
-  }, 60_000);
+  });
 
   afterAll(async () => {
     await app?.close?.();
