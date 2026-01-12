@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
+import { ContextKeyService } from "../../extensions/contextKeys.js";
 import { createCommandPalette } from "../createCommandPalette.js";
 
 function createInMemoryLocalStorage(): Storage {
@@ -67,7 +68,7 @@ describe("command palette performance safeguards", () => {
 
     const palette = createCommandPalette({
       commandRegistry: registry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -104,7 +105,7 @@ describe("command palette performance safeguards", () => {
 
     const palette = createCommandPalette({
       commandRegistry: registry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -144,7 +145,7 @@ describe("command palette performance safeguards", () => {
 
     const palette = createCommandPalette({
       commandRegistry: registry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -189,7 +190,7 @@ describe("command palette performance safeguards", () => {
 
     const palette = createCommandPalette({
       commandRegistry: registry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -246,7 +247,7 @@ describe("command palette performance safeguards", () => {
 
       const palette = createCommandPalette({
         commandRegistry: registry,
-        contextKeys: {} as any,
+        contextKeys: new ContextKeyService(),
         keybindingIndex: new Map(),
         ensureExtensionsLoaded: async () => {},
         onCloseFocus: () => {},

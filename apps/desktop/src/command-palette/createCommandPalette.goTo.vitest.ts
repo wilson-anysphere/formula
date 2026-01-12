@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoToWorkbookLookup } from "../../../../packages/search/index.js";
 
 import { CommandRegistry } from "../extensions/commandRegistry.js";
+import { ContextKeyService } from "../extensions/contextKeys.js";
 
 import { createCommandPalette } from "./createCommandPalette.js";
 
@@ -27,8 +28,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      // `createCommandPalette` doesn't currently consult context keys, but keep the type contract.
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -64,7 +64,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -115,7 +115,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -158,7 +158,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -195,7 +195,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -236,7 +236,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
@@ -280,7 +280,7 @@ describe("createCommandPalette Go to suggestion", () => {
 
     const palette = createCommandPalette({
       commandRegistry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex: new Map(),
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},

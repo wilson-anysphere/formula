@@ -92,6 +92,7 @@ export type CreateCommandPaletteOptions = {
 export type CommandPaletteController = {
   open: () => void;
   close: () => void;
+  isOpen: () => boolean;
   dispose: () => void;
 };
 
@@ -284,7 +285,7 @@ function renderHighlightedText(text: string, ranges: MatchRange[]): DocumentFrag
 export function createCommandPalette(options: CreateCommandPaletteOptions): CommandPaletteController {
   const {
     commandRegistry,
-    contextKeys: _contextKeys,
+    contextKeys,
     keybindingIndex,
     ensureExtensionsLoaded,
     onCloseFocus,
@@ -296,6 +297,11 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     inputDebounceMs = 70,
     onSelectFunction,
   } = options;
+
+  const COMMAND_PALETTE_OPEN_CONTEXT_KEY = "workbench.commandPaletteOpen";
+  // Ensure the key is always defined so `workbench.commandPaletteOpen == false` works
+  // (and so `!workbench.commandPaletteOpen` behaves consistently across runtimes).
+  contextKeys.set(COMMAND_PALETTE_OPEN_CONTEXT_KEY, false);
 
   const overlay = document.createElement("div");
   overlay.className = "command-palette-overlay";
@@ -419,6 +425,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   };
 
   function close(): void {
+    // Keep the context key authoritative even if `close()` is called redundantly.
+    contextKeys.set(COMMAND_PALETTE_OPEN_CONTEXT_KEY, false);
     if (!isOpen) return;
     isOpen = false;
     debouncedRender.cancel();
@@ -452,6 +460,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   }
 
   function open(): void {
+    // Keep the context key authoritative even if `open()` is called redundantly.
+    contextKeys.set(COMMAND_PALETTE_OPEN_CONTEXT_KEY, true);
     if (isOpen) {
       input.focus();
       input.select();
@@ -1178,6 +1188,9 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   list.addEventListener("keydown", onInputKeyDown);
 
   function dispose(): void {
+    // Treat disposal as a hard-close for context key purposes.
+    contextKeys.set(COMMAND_PALETTE_OPEN_CONTEXT_KEY, false);
+    isOpen = false;
     document.removeEventListener("focusin", handleDocumentFocusIn);
     debouncedRender.cancel();
     abortChunkedSearch();
@@ -1195,5 +1208,5 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     overlay.remove();
   }
 
-  return { open, close, dispose };
+  return { open, close, isOpen: () => isOpen, dispose };
 }

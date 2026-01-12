@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry } from "../../extensions/commandRegistry.js";
+import { ContextKeyService } from "../../extensions/contextKeys.js";
 import { createCommandPalette } from "../createCommandPalette.js";
 
 function createInMemoryLocalStorage(): Storage {
@@ -81,7 +82,7 @@ describe("createCommandPalette shortcut search mode", () => {
 
     const palette = createCommandPalette({
       commandRegistry: registry,
-      contextKeys: {} as any,
+      contextKeys: new ContextKeyService(),
       keybindingIndex,
       ensureExtensionsLoaded: async () => {},
       onCloseFocus: () => {},
