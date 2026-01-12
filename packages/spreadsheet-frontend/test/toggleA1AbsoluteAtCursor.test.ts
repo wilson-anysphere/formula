@@ -7,7 +7,7 @@ describe("toggleA1AbsoluteAtCursor", () => {
     const step1 = toggleA1AbsoluteAtCursor("=A1", 2, 2);
     expect(step1).not.toBeNull();
     expect(step1?.text).toBe("=$A$1");
-    // Excel-style: selecting the updated token keeps repeated F4 presses cycling it.
+    // Selecting the updated token keeps repeated F4 presses cycling it.
     expect(step1?.cursorStart).toBe(1);
     expect(step1?.cursorEnd).toBe(5);
 

@@ -1,7 +1,8 @@
 import React from "react";
 
-import type { RibbonButtonDefinition, RibbonButtonKind, RibbonButtonSize } from "./ribbonSchema.js";
 import { getRibbonIcon } from "../ui/icons/ribbonIconMap.js";
+import type { RibbonButtonDefinition, RibbonButtonKind, RibbonButtonSize } from "./ribbonSchema.js";
+import { RibbonIcon } from "./icons/RibbonIcon.js";
 
 export interface RibbonButtonProps {
   button: RibbonButtonDefinition;
@@ -35,9 +36,14 @@ function classForSize(size: RibbonButtonSize): string {
   }
 }
 
-function getRibbonIconNode(commandId: string): React.ReactNode {
+function getRibbonIconNode(
+  commandId: string,
+  iconId?: RibbonButtonDefinition["iconId"],
+): React.ReactNode {
+  if (iconId) return <RibbonIcon id={iconId} />;
   const IconComponent = getRibbonIcon(commandId);
-  return IconComponent ? <IconComponent width="100%" height="100%" /> : null;
+  if (IconComponent) return <IconComponent width="100%" height="100%" />;
+  return null;
 }
 
 export const RibbonButton = React.memo(function RibbonButton({
@@ -50,7 +56,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const isPressed = Boolean(pressed);
-  const iconNode = getRibbonIconNode(button.id);
+  const iconNode = getRibbonIconNode(button.id, button.iconId);
   const hasIcon = Boolean(iconNode);
   const ariaPressed = kind === "toggle" ? isPressed : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
@@ -260,6 +266,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                   id: item.id,
                   label: item.label,
                   ariaLabel: item.ariaLabel,
+                  iconId: item.iconId,
                   icon: item.icon,
                   kind: "button",
                   size: "small",
@@ -270,7 +277,7 @@ export const RibbonButton = React.memo(function RibbonButton({
               }}
             >
               {(() => {
-                const menuIconNode = getRibbonIconNode(item.id);
+                const menuIconNode = getRibbonIconNode(item.id, item.iconId);
                 return menuIconNode ? (
                   <span className="ribbon-dropdown__icon" aria-hidden="true">
                     {menuIconNode}

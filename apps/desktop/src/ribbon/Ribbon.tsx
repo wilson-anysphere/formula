@@ -5,6 +5,7 @@ import { defaultRibbonSchema } from "./ribbonSchema.js";
 import { RibbonGroup } from "./RibbonGroup.js";
 import { getRibbonUiStateSnapshot, subscribeRibbonUiState } from "./ribbonUiState.js";
 import { FileBackstage } from "./FileBackstage.js";
+import { RibbonIcon } from "./icons/RibbonIcon.js";
 
 import "../styles/ribbon.css";
 
@@ -446,7 +447,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 }
               }}
             >
-              ☰
+              <RibbonIcon id="menu" width={16} height={16} />
             </button>
             {tabMenuOpen ? (
               <div

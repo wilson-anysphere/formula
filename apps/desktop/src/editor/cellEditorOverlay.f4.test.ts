@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CellEditorOverlay } from "./cellEditorOverlay.js";
 
 describe("CellEditorOverlay F4 absolute reference toggle", () => {
-  it("toggles the active A1 reference and selects the updated token", () => {
+  it("toggles the active A1 reference and selects the toggled token", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
@@ -40,6 +40,7 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(overlay.element.value).toBe("=$A$1");
+    // Excel UX: keep the full reference token selected.
     expect(overlay.element.selectionStart).toBe(1);
     expect(overlay.element.selectionEnd).toBe(5);
 
@@ -79,7 +80,7 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
 
     expect(overlay.element.value).toBe("='My Sheet'!$A$1:$B$2");
-    // Keep the full toggled token selected.
+    // Keep the full reference token selected.
     expect(overlay.element.selectionStart).toBe(1);
     expect(overlay.element.selectionEnd).toBe(overlay.element.value.length);
 

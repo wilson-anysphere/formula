@@ -322,6 +322,8 @@
 .ribbon-button__icon svg,
 .ribbon-dropdown__icon svg,
 .ribbon-backstage__icon svg {
+  width: 100%;
+  height: 100%;
   display: block;
 }
 
