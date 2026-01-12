@@ -183,13 +183,13 @@ test("desktop index.html exposes required shell containers and testids", () => {
   // need to depend on the translated text content.
   assert.match(
     html,
-    /data-testid="sheet-position"[^>]*\bdata-sheet-position=["'][^"']+["']/,
-    'Expected sheet-position element to include data-sheet-position',
+    /data-testid="sheet-position"[^>]*\bdata-sheet-position=["']\d+["']/,
+    'Expected sheet-position element to include numeric data-sheet-position',
   );
   assert.match(
     html,
-    /data-testid="sheet-position"[^>]*\bdata-sheet-total=["'][^"']+["']/,
-    'Expected sheet-position element to include data-sheet-total',
+    /data-testid="sheet-position"[^>]*\bdata-sheet-total=["']\d+["']/,
+    'Expected sheet-position element to include numeric data-sheet-total',
   );
 
   // Debug controls should live in the ribbon (React) rather than being duplicated in the
