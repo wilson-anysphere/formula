@@ -286,6 +286,7 @@ fn build_project_with_ansi_and_unicode_module_stream_name_records() -> Vec<u8> {
 fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u8; 4]) {
     // Distinctive compat version payload so the regression assertion is unambiguous.
     let compat_version = 0xDEADBEEFu32.to_le_bytes();
+    let project_cookie = 0xBEEFu16.to_le_bytes();
 
     // Keep module source already in normalized form to make expected bytes simple.
     let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
@@ -338,7 +339,14 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
         // PROJECTCONSTANTS (0x000C): MBCS string.
         push_record(&mut out, 0x000C, b"Constants");
 
-        // ---- ProjectModules (minimal) ----
+        // ---- ProjectModules ----
+        //
+        // Include the ProjectModules/ProjectCookie headers and the dir terminator record so this
+        // fixture more closely mirrors real-world `VBA/dir` layouts.
+        push_record(&mut out, 0x000F, &1u16.to_le_bytes()); // PROJECTMODULES (Count=1)
+        push_record(&mut out, 0x0013, &project_cookie); // PROJECTCOOKIE (Cookie; excluded from transcript)
+
+        // ---- Module record group (minimal) ----
         push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
 
         // MODULESTREAMNAME + reserved u16.
@@ -349,6 +357,9 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
 
         push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
         push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+
+        // Dir stream terminator + reserved (treated as a record with Size=0 in TLV-style fixtures).
+        push_record(&mut out, 0x0010, &[]);
         out
     };
     let dir_container = compress_container(&dir_decompressed);
@@ -789,6 +800,19 @@ fn v3_content_normalized_data_skips_projectcompatversion_record() {
             .windows(compat_version.len())
             .any(|w| w == compat_version),
         "V3ContentNormalizedData must skip PROJECTCOMPATVERSION payload bytes"
+    );
+
+    // Stronger assertion: the full record header+payload must not appear contiguously in the
+    // transcript either.
+    let compat_record = [
+        0x004Au16.to_le_bytes().as_slice(),
+        4u32.to_le_bytes().as_slice(),
+        compat_version.as_slice(),
+    ]
+    .concat();
+    assert!(
+        !contains_subslice(&normalized_without, &compat_record),
+        "V3ContentNormalizedData must not include PROJECTCOMPATVERSION record bytes"
     );
 }
 
