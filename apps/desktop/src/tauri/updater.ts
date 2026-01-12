@@ -22,7 +22,7 @@ export async function installUpdateAndRestart(): Promise<void> {
   const updater = tauri?.updater ?? tauri?.plugin?.updater;
 
   if (!updater) {
-    throw new Error("Updater API not available");
+    throw new Error(t("updater.unavailable"));
   }
 
   // Tauri v2 updater plugin API shape (tauri-plugin-updater 2.x):
@@ -34,25 +34,25 @@ export async function installUpdateAndRestart(): Promise<void> {
   // extra `updater:allow-download-and-install` capability permission.
   const check = updater.check ?? updater.checkUpdate ?? updater.checkForUpdate ?? null;
   if (typeof check !== "function") {
-    throw new Error("Updater check API not available");
+    throw new Error(t("updater.unavailable"));
   }
 
   const result = await check.call(updater);
   if (!result) {
-    throw new Error("No update available");
+    throw new Error(t("updater.updateNoLongerAvailable"));
   }
 
   // Some APIs return `{ available: boolean, ... }`, others return an update object directly.
   const update =
     typeof result === "object" && result && "available" in result ? ((result as any).available ? result : null) : result;
   if (!update) {
-    throw new Error("No update available");
+    throw new Error(t("updater.updateNoLongerAvailable"));
   }
 
   const download = (update as any).download ?? null;
   const install = (update as any).install ?? (update as any).installUpdate ?? null;
   if (typeof download !== "function" || typeof install !== "function") {
-    throw new Error("Updater install API not available");
+    throw new Error(t("updater.unavailable"));
   }
 
   await download.call(update);
