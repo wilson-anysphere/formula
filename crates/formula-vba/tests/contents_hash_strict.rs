@@ -643,8 +643,7 @@ fn project_normalized_data_v3_dir_records_accepts_projectversion_reserved_4() {
         &[],
     );
     let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
-    let vba_project_bin =
-        build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
+    let vba_project_bin = build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
 
     let normalized = project_normalized_data_v3_dir_records(&vba_project_bin)
         .expect("ProjectNormalizedDataV3 dir-record transcript");
@@ -683,6 +682,47 @@ fn project_normalized_data_v3_dir_records_accepts_projectversion_reserved_4() {
     expected.extend_from_slice(&stream_name_unicode);
     // - MODULEHELPCONTEXT (u32)
     expected.extend_from_slice(&0u32.to_le_bytes());
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn project_normalized_data_accepts_spec_dir_stream_with_fixed_length_projectversion_reserved_4() {
+    // Same as the previous regression, but uses the MS-OVBA mandated Reserved=4 value for the
+    // fixed-length PROJECTVERSION record.
+    let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
+
+    let project_name = "VBAProject";
+    let module_name = "Module1";
+    let project_constants = "Answer=42";
+    let dir_decompressed =
+        build_dir_decompressed_spec_with_references(project_name, project_constants, module_name, 4, &[]);
+    let vba_project_bin =
+        build_vba_project_bin_spec_with_dir(&dir_decompressed, module_source, None);
+
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut expected = Vec::new();
+    // Selected ProjectInformation record data bytes.
+    expected.extend_from_slice(&0x0000_0003u32.to_le_bytes()); // PROJECTSYSKIND.SysKind
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes()); // PROJECTLCID.Lcid
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes()); // PROJECTLCIDINVOKE.LcidInvoke
+    expected.extend_from_slice(&1252u16.to_le_bytes()); // PROJECTCODEPAGE.CodePage
+    expected.extend_from_slice(b"VBAProject"); // PROJECTNAME.ProjectName
+    expected.extend_from_slice(&0u32.to_le_bytes()); // PROJECTHELPCONTEXT.HelpContext
+    expected.extend_from_slice(&0u32.to_le_bytes()); // PROJECTLIBFLAGS.ProjectLibFlags
+    // PROJECTVERSION: Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+    expected.extend_from_slice(&4u32.to_le_bytes());
+    expected.extend_from_slice(&1u32.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    // PROJECTCONSTANTSUNICODE payload bytes ("Answer=42" as UTF-16LE).
+    let mut constants_unicode = Vec::new();
+    push_utf16le(&mut constants_unicode, "Answer=42");
+    expected.extend_from_slice(&constants_unicode);
+
+    // No designer modules, so FormsNormalizedData is empty.
+    // ProjectProperties token bytes from the `PROJECT` stream.
+    expected.extend_from_slice(b"NameVBAProjectModuleModule1");
 
     assert_eq!(normalized, expected);
 }
