@@ -730,7 +730,7 @@ fn extract_source_hash_from_sig_data_v1_serialized_asn1(
     // }
     //
     // This is the normative MS-OSHARED structure used by `SpcIndirectDataContentV2`, where the VBA
-    // project digest bytes live in `sourceHash` (MD5, 16 bytes).
+    // signature binding digest bytes live in `sourceHash` (MD5, 16 bytes).
     let mut cur = content;
     for _ in 0..6 {
         let (tag, _len, _rest) = match parse_tag_and_length(cur) {
