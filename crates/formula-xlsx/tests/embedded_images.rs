@@ -337,6 +337,54 @@ fn extracts_when_richdata_parts_are_related_from_metadata_rels() {
 }
 
 #[test]
+fn extracts_when_workbook_relationships_part_is_missing() {
+    // Some synthetic/minimal packages may omit `xl/_rels/workbook.xml.rels`. The extractor should
+    // still work via canonical-path fallbacks.
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/richData/rdrichvalue.xml",
+        RDRICHVALUE_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/richValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes.clone());
+
+    // Remove the workbook relationships part entirely to force canonical fallbacks.
+    pkg.parts_map_mut().remove("xl/_rels/workbook.xml.rels");
+
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].image_target, "xl/media/image1.png");
+    assert_eq!(images[0].bytes, png_bytes);
+    assert_eq!(images[0].alt_text.as_deref(), Some("ExampleAltText"));
+}
+
+#[test]
 fn preserves_rich_value_rel_placeholders_to_avoid_index_shifts() {
     let png_bytes = STANDARD
         .decode(PNG_1X1_TRANSPARENT_B64)

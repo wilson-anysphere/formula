@@ -187,12 +187,10 @@ fn resolve_image_target_for_local_image_identifier<'a>(
 /// Only invalid ZIP/XML/UTF-8 errors are returned as [`XlsxError`].
 pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCell>, XlsxError> {
     // Discover the relevant rich data parts via `xl/_rels/workbook.xml.rels`.
-    let workbook_rels_xml = match pkg.part("xl/_rels/workbook.xml.rels") {
-        Some(bytes) => bytes,
-        None => return Ok(Vec::new()),
+    let relationships = match pkg.part("xl/_rels/workbook.xml.rels") {
+        Some(bytes) => openxml::parse_relationships(bytes)?,
+        None => Vec::new(),
     };
-
-    let relationships = openxml::parse_relationships(workbook_rels_xml)?;
     let mut metadata_part: Option<String> = None;
     let mut rich_value_part: Option<String> = None;
     let mut rdrichvalue_part: Option<String> = None;
