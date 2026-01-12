@@ -53,7 +53,7 @@ Enterprise adoption requires meeting the highest bars for security, compliance, 
 
 ### SSO Integration
 
-See also: [docs/saml.md](./saml.md)
+See also: [docs/saml.md](./saml.md), [docs/oidc.md](./oidc.md)
 
 #### OIDC SSO administration (services/api)
 
