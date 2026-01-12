@@ -320,9 +320,12 @@ export function setSplitDirection(layout, direction, ratio) {
  * @param {number} ratio
  */
 export function setSplitRatio(layout, ratio) {
-  const next = clone(layout);
-  next.splitView.ratio = clamp(ratio, 0.1, 0.9);
-  return next;
+  // Split ratio is updated at high frequency (splitter drag). Avoid `structuredClone(layout)`
+  // here: LayoutController normalizes layouts on every commit anyway, and the split ratio update
+  // only needs a shallow copy with an updated `splitView` object.
+  const clamped = clamp(ratio, 0.1, 0.9);
+  if (layout?.splitView?.ratio === clamped) return layout;
+  return { ...layout, splitView: { ...layout.splitView, ratio: clamped } };
 }
 
 /**
