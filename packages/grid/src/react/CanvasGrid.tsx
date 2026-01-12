@@ -936,9 +936,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
         event.preventDefault();
 
-        const rect = container.getBoundingClientRect();
-        const anchorX = event.clientX - rect.left;
-        const anchorY = event.clientY - rect.top;
+        // Avoid layout reads in the hot zoom path: when the wheel event targets the grid canvases
+        // (positioned at 0,0 in the container), `offsetX/offsetY` are already viewport coords.
+        const target = event.target;
+        const useOffsets = target === container || target instanceof HTMLCanvasElement;
+        const rect = useOffsets ? null : container.getBoundingClientRect();
+        const anchorX = useOffsets ? event.offsetX : event.clientX - rect!.left;
+        const anchorY = useOffsets ? event.offsetY : event.clientY - rect!.top;
 
         // `delta` is in pixels (after normalization). Use an exponential scale so
         // small trackpad deltas feel smooth while mouse wheels produce ~10% steps.

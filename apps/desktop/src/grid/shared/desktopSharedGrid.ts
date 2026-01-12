@@ -624,7 +624,13 @@ export class DesktopSharedGrid {
         if (delta === 0) return;
         event.preventDefault();
 
-        const point = this.getViewportPoint(event);
+        // Avoid layout reads during high-frequency pinch-zoom: when the wheel event targets one of
+        // the full-size canvas layers (positioned at 0,0 in the container), `offsetX/offsetY` are
+        // already viewport coords.
+        const target = event.target;
+        const useOffsets =
+          target === this.container || target === this.selectionCanvas || target === this.gridCanvas || target === this.contentCanvas;
+        const point = useOffsets ? { x: event.offsetX, y: event.offsetY } : this.getViewportPoint(event);
         const zoomFactor = Math.exp(-delta * 0.001);
         const nextZoom = startZoom * zoomFactor;
 
