@@ -8492,6 +8492,13 @@ try {
     }
     void app.pasteFromClipboard();
   });
+  void listen("menu-paste-special", () => {
+    // Paste Special is a spreadsheet command; do not invoke it while focus is inside
+    // text editors (formula bar, dialogs, etc.).
+    const target = getTextEditingTarget();
+    if (target) return;
+    void commandRegistry.executeCommand("clipboard.pasteSpecial");
+  });
   void listen("menu-select-all", () => {
     const target = getTextEditingTarget();
     if (target) {

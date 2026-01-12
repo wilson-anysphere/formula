@@ -13,6 +13,7 @@ pub const ITEM_REDO: &str = "menu-redo";
 pub const ITEM_CUT: &str = "menu-cut";
 pub const ITEM_COPY: &str = "menu-copy";
 pub const ITEM_PASTE: &str = "menu-paste";
+pub const ITEM_PASTE_SPECIAL: &str = "menu-paste-special";
 pub const ITEM_SELECT_ALL: &str = "menu-select-all";
 pub const ITEM_ABOUT: &str = "menu-about";
 pub const ITEM_CHECK_UPDATES: &str = "menu-check-updates";
@@ -82,6 +83,10 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         ITEM_PASTE => {
             show_main_window(app);
             let _ = app.emit(ITEM_PASTE, ());
+        }
+        ITEM_PASTE_SPECIAL => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_PASTE_SPECIAL, ());
         }
         ITEM_SELECT_ALL => {
             show_main_window(app);
@@ -166,6 +171,9 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
     let cut = MenuItem::with_id(handle, ITEM_CUT, "Cut", true, Some("CmdOrCtrl+X"))?;
     let copy = MenuItem::with_id(handle, ITEM_COPY, "Copy", true, Some("CmdOrCtrl+C"))?;
     let paste = MenuItem::with_id(handle, ITEM_PASTE, "Paste", true, Some("CmdOrCtrl+V"))?;
+    // No accelerator: Cmd/Ctrl+Shift+V is handled by the WebView (Paste Special command).
+    // Adding a menu accelerator risks triggering both the menu event and the keybinding handler.
+    let paste_special = MenuItem::with_id(handle, ITEM_PASTE_SPECIAL, "Paste Special…", true, None::<&str>)?;
     let select_all = MenuItem::with_id(
         handle,
         ITEM_SELECT_ALL,
@@ -248,6 +256,7 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
             &cut,
             &copy,
             &paste,
+            &paste_special,
             &sep_edit_2,
             &select_all,
         ],
