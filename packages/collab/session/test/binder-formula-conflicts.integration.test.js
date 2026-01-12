@@ -191,6 +191,7 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   // cannot fall back to attribution metadata.
   await sessionB.setCellFormula("Sheet1:0:0", "=0");
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=0");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
 
   // Ensure DocumentController has hydrated before we simulate user edits.
   await waitForCondition(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).formula === "=0");
@@ -204,6 +205,7 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
 
   // Binder writes are async (queued). Wait for the Yjs doc to reflect the local edit.
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=1");
+  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.modifiedBy, null);
 
   await sessionB.setCellFormula("Sheet1:0:0", "=2");
 
@@ -213,6 +215,7 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   await waitForCondition(() => conflictsA.length >= 1);
   const conflict = conflictsA[0];
   assert.equal(conflict.kind, "formula");
+  assert.equal(conflict.remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is missing");
 
   // Optional: resolve the conflict and assert convergence.
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
