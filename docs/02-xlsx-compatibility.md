@@ -36,6 +36,8 @@ workbook.xlsx (ZIP archive)
 │   │   └── sheet2.xml
 │   ├── drawings/
 │   │   └── drawing1.xml         # Charts, shapes, images
+│   ├── media/
+│   │   └── image1.png           # Embedded image blobs (used by drawings and in-cell images)
 │   ├── charts/
 │   │   └── chart1.xml           # Chart definitions
 │   ├── tables/
