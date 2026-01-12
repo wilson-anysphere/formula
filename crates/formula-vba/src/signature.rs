@@ -114,6 +114,7 @@ pub struct VbaProjectDigestDebugInfo {
     ///   SHA-256.
     /// - v3: binding compares the signed digest bytes to `ContentsHashV3` (SHA-256) regardless of
     ///   the OID (some producers emit inconsistent OIDs).
+    ///
     /// We still surface the OID for debugging/UI display.
     pub hash_algorithm_oid: Option<String>,
     /// Human-readable name for the hash algorithm (best-effort).

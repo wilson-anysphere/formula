@@ -272,7 +272,7 @@ ProjectNormalizedData = (filtered PROJECT stream properties; `[Workspace]` ignor
 ContentsHashV3        = SHA-256(ProjectNormalizedData)
 ```
 
-Where `(filtered PROJECT stream properties)` is derived from the textual `PROJECT` stream:
+The `(filtered PROJECT stream properties)` prefix is derived from the textual `PROJECT` stream:
 
 - Split on NWLN (CRLF or LFCR; tolerate lone CR/LF)
 - Trim ASCII whitespace from each line and strip a leading UTF-8 BOM if present
@@ -285,14 +285,14 @@ Where `(filtered PROJECT stream properties)` is derived from the textual `PROJEC
 
 In this repo:
 
+- `formula_vba::project_normalized_data_v3` builds `ProjectNormalizedData`
+  (`crates/formula-vba/src/contents_hash.rs`)
+- `formula_vba::contents_hash_v3` computes `ContentsHashV3 = SHA-256(ProjectNormalizedData)`
+  (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::v3_content_normalized_data` builds `V3ContentNormalizedData`
   (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::forms_normalized_data` builds `FormsNormalizedData`
   (`crates/formula-vba/src/normalized_data.rs`)
-- `formula_vba::project_normalized_data_v3` builds v3 `ProjectNormalizedData`
-  (`crates/formula-vba/src/contents_hash.rs`)
-- `formula_vba::contents_hash_v3` computes `ContentsHashV3` (`SHA-256(ProjectNormalizedData)`)
-  (`crates/formula-vba/src/contents_hash.rs`)
 - `formula_vba::project_normalized_data_v3_dir_records` builds a metadata-only dir-record transcript
   derived from selected `VBA/dir` records (useful for debugging/spec work; not the full v3 binding transcript)
   (`crates/formula-vba/src/project_normalized_data.rs`)
@@ -375,6 +375,9 @@ To bind the signature to the VBA project contents, `formula-vba`:
    - v1 (`DigitalSignature`): compute **MD5** of `ContentNormalizedData`
    - v2 (`DigitalSignatureEx`): compute **MD5** of (`ContentNormalizedData || FormsNormalizedData`)
    - v3 (`DigitalSignatureExt`): compute **SHA-256** over v3 `ProjectNormalizedData` (`ContentsHashV3`)
+   - When the signature stream kind is unknown (for example, a raw PKCS#7/CMS blob from
+     `vbaProjectSignature.bin`), `formula-vba` best-effort attempts v3 binding first, then falls back
+     to legacy binding.
 4. Compares the computed digest bytes to the signed digest bytes.
 
 Result interpretation:
@@ -403,7 +406,8 @@ If you need to update or extend signature handling, start with:
   - MS-OVBA normalized-data transcript builders
 - `crates/formula-vba/src/project_digest.rs`
   - `compute_vba_project_digest` (hash over `ContentNormalizedData || FormsNormalizedData`; equivalent to v1 when `FormsNormalizedData` is empty; strict transcript-only, no raw-stream fallback)
-  - `compute_vba_project_digest_v3` (hash over v3 `ProjectNormalizedData` with a caller-selected algorithm; useful for debugging/tests; spec-correct `DigitalSignatureExt` binding uses `ContentsHashV3` = `SHA-256(ProjectNormalizedData)`)
+  - `compute_vba_project_digest_v3` (computes a digest over v3 `ProjectNormalizedData` using a chosen
+    algorithm; spec-correct `DigitalSignatureExt` binding uses `ContentsHashV3 = SHA-256(ProjectNormalizedData)`)
 
 ## Tests / examples in this repo
 
