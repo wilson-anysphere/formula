@@ -96,6 +96,26 @@ class MockWorker implements WorkerLike {
           this.serverPort?.postMessage(response);
           return;
         }
+        if (req.method === "setSheetDimensions") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: null
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
+        if (req.method === "getSheetDimensions") {
+          const response: WorkerOutboundMessage = {
+            type: "response",
+            id: req.id,
+            ok: true,
+            result: { rows: 2_100_000, cols: 16_384 }
+          };
+          this.serverPort?.postMessage(response);
+          return;
+        }
 
         // Default: echo response.
         const response: WorkerOutboundMessage = {
@@ -217,6 +237,45 @@ describe("EngineWorker RPC", () => {
       .map((msg) => msg.method);
 
     expect(methods).toEqual(["setCells", "loadFromXlsxBytes"]);
+  });
+
+  it("flushes pending setCell batches before setSheetDimensions", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Simulate a caller firing-and-forgetting setCell; setSheetDimensions should
+    // flush the pending microtask-batched setCells first.
+    void engine.setCell("A1", 1);
+
+    await engine.setSheetDimensions("Sheet1", 2_100_000, 16_384);
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "setSheetDimensions"]);
+  });
+
+  it("supports getSheetDimensions RPC requests", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const dims = await engine.getSheetDimensions("Sheet1");
+    expect(dims).toEqual({ rows: 2_100_000, cols: 16_384 });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "getSheetDimensions"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ sheet: "Sheet1" });
   });
 
   it("supports request cancellation via AbortSignal", async () => {
