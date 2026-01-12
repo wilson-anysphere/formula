@@ -99,6 +99,7 @@ const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 // Encode (row, col) into a single numeric key for allocation-free lookups.
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
+const A1_CELL_REF_RE = /^[A-Za-z]+[1-9][0-9]*$/;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
@@ -414,6 +415,7 @@ export class SpreadsheetApp {
   private sharedProvider: DocumentCellProvider | null = null;
   private readonly commentMeta = new Map<string, { resolved: boolean }>();
   private readonly commentMetaByCoord = new Map<number, { resolved: boolean }>();
+  private readonly commentPreviewByCoord = new Map<number, string>();
   private sharedGridSelectionSyncInProgress = false;
   private sharedGridZoom = 1;
   private readonly sharedGridAxisCols = new Set<number>();
@@ -2927,9 +2929,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    const cellRef = cellToA1(docCell);
-    const comments = this.commentManager.listForCell(cellRef);
-    const preview = comments[0]?.content ?? "";
+    const preview = this.commentPreviewByCoord.get(metaKey) ?? "";
     if (!preview) {
       this.hideCommentTooltip();
       return;
@@ -3303,6 +3303,7 @@ export class SpreadsheetApp {
     this.commentCells.clear();
     this.commentMeta.clear();
     this.commentMetaByCoord.clear();
+    this.commentPreviewByCoord.clear();
     for (const comment of this.commentManager.listAll()) {
       const cellRef = comment.cellRef;
       this.commentCells.add(cellRef);
@@ -3316,11 +3317,21 @@ export class SpreadsheetApp {
         existing.resolved = existing.resolved && resolved;
       }
 
+      // Only populate coord-keyed maps when the stored cellRef looks like a plain A1 address.
+      // This prevents corrupt/non-canonical refs from being mis-indexed into A1 (0,0).
+      if (!A1_CELL_REF_RE.test(cellRef)) continue;
+
       const coord = parseA1(cellRef);
       const coordKey = coord.row * COMMENT_COORD_COL_STRIDE + coord.col;
       const existingCoord = this.commentMetaByCoord.get(coordKey);
       if (!existingCoord) this.commentMetaByCoord.set(coordKey, { resolved });
       else existingCoord.resolved = existingCoord.resolved && resolved;
+
+      // Tooltip previews show the first (oldest) thread content for a cell, matching the
+      // previous behavior of taking `commentManager.listForCell(...)[0]`.
+      if (!this.commentPreviewByCoord.has(coordKey)) {
+        this.commentPreviewByCoord.set(coordKey, comment.content ?? "");
+      }
     }
 
     // The shared renderer caches cell metadata, so comment indicator updates require a provider invalidation.
@@ -5885,9 +5896,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    const cellRef = cellToA1(cell);
-    const comments = this.commentManager.listForCell(cellRef);
-    const preview = comments[0]?.content ?? "";
+    const preview = this.commentPreviewByCoord.get(metaKey) ?? "";
     if (!preview) {
       this.hideCommentTooltip();
       return;
