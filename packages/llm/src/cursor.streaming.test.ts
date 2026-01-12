@@ -64,6 +64,42 @@ describe("CursorLLMClient.streamChat", () => {
     }
   });
 
+  it("yields ChatStreamEvents from an NDJSON stream", async () => {
+    const originalBaseUrl = process.env.CURSOR_AI_BASE_URL;
+    process.env.CURSOR_AI_BASE_URL = "https://cursor.test";
+
+    try {
+      const chunks = [
+        '{"type":"text","delta":"Hel',
+        'lo"}\n',
+        '{"type":"done","usage":{"promptTokens":1,"completionTokens":2,"totalTokens":3}}\n',
+      ];
+
+      const fetchMock = vi.fn(async () => {
+        return new Response(readableStreamFromChunks(chunks), {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      });
+
+      vi.stubGlobal("fetch", fetchMock as any);
+
+      const client = new CursorLLMClient();
+      const events: ChatStreamEvent[] = [];
+      for await (const event of client.streamChat({ messages: [{ role: "user", content: "hi" }] as any })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { type: "text", delta: "Hello" },
+        { type: "done", usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3 } },
+      ]);
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.CURSOR_AI_BASE_URL;
+      else process.env.CURSOR_AI_BASE_URL = originalBaseUrl;
+    }
+  });
+
   it("falls back to chat() when the streaming body is unavailable", async () => {
     const originalBaseUrl = process.env.CURSOR_AI_BASE_URL;
     process.env.CURSOR_AI_BASE_URL = "https://cursor.test";
@@ -112,4 +148,3 @@ describe("CursorLLMClient.streamChat", () => {
     }
   });
 });
-
