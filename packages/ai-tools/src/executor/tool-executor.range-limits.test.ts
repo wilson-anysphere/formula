@@ -7,6 +7,7 @@ import type { CellData } from "../spreadsheet/types.js";
 class CountingSpreadsheet implements SpreadsheetApi {
   readCalls = 0;
   setCalls = 0;
+  formatCalls = 0;
 
   listSheets(): string[] {
     return ["Sheet1"];
@@ -34,6 +35,7 @@ class CountingSpreadsheet implements SpreadsheetApi {
   }
 
   applyFormatting(): number {
+    this.formatCalls += 1;
     return 0;
   }
 
@@ -84,6 +86,9 @@ describe("ToolExecutor range size limits", () => {
     expect(result.tool).toBe("apply_formatting");
     if (!result.ok) throw new Error(`Expected apply_formatting to succeed: ${result.error?.message ?? "unknown error"}`);
     expect(result.data?.formatted_cells).toBe(0);
+    expect(api.formatCalls).toBe(1);
+    // Ensure we still don't materialize cell grids for formatting operations.
+    expect(api.readCalls).toBe(0);
   });
 
   it("blocks apply_formula_column before writing an unbounded number of cells", async () => {
