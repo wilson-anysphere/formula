@@ -210,8 +210,11 @@ Security notes:
 
 - The Rust command `show_system_notification` (exposed via `__TAURI__.core.invoke(...)`) is restricted to the
   main window and to trusted app-local origins.
-- The frontend `notify(...)` helper prefers the Rust-side command above (so the origin/window checks are enforced).
-  On non-Tauri builds (or if desktop notification APIs are unavailable/blocked), it can fall back to the Web Notification API.
+- The frontend `notify(...)` helper tries the Tauri notification plugin API first; if that API is unavailable or blocked by
+  permissions, it falls back to `invoke("show_system_notification", ...)` so the origin/window checks are enforced.
+- In **web builds** (no `__TAURI__`), `notify(...)` can fall back to the Web Notification API (permission-gated). In **desktop
+  builds**, it intentionally does **not** fall back to the Web Notification API to avoid untrusted/navigated-to content
+  triggering system notifications outside the hardened Rust command path.
 
 Minimal excerpt (not copy/pasteable; see the full file for everything):
 
@@ -327,7 +330,8 @@ The window-close sequence is:
 
 1. Rust receives `WindowEvent::CloseRequested` and calls `api.prevent_close()`.
 2. Rust emits `close-prep` with a random token.
-3. Frontend (in `apps/desktop/src/main.ts`) flushes pending workbook sync and calls `set_macro_ui_context`, then emits `close-prep-done` with the same token.
+3. Frontend (in `apps/desktop/src/main.ts`) commits any in-progress edits, flushes pending workbook sync, calls
+   `set_macro_ui_context`, then emits `close-prep-done` with the same token.
 4. Rust runs a best-effort `Workbook_BeforeClose` macro (if trusted) and collects any cell updates.
 5. Rust emits `close-requested` with `{ token, updates }`.
 6. Frontend applies any macro cell updates, prompts for unsaved changes if needed, then either:
@@ -413,7 +417,7 @@ The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and i
 Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.ts`:
 
 - `oauth-redirect` → route deep-link redirects into the OAuth broker (buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered); emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
-- `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
+- `close-prep` → `app.commitPendingEditsForCommand()` + flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side; helper: `installOpenFileIpc` in `apps/desktop/src/tauri/openFileIpc.ts`)
 - `file-dropped` → open the first dropped path
@@ -488,6 +492,8 @@ For update-driven restarts prefer `restart_app` (graceful).
   - `report_startup_webview_loaded`, `report_startup_tti`
 - **Notifications**
   - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
+- **External URLs**
+  - `open_external_url` (opens `http:`, `https:`, and `mailto:` URLs in the OS via `tauri_plugin_shell`; validates scheme at the Rust boundary)
 
 ### Backend → frontend events
 
@@ -572,6 +578,7 @@ Rust implementation:
 - Tauri commands: `apps/desktop/src-tauri/src/clipboard/mod.rs` (`clipboard_read`, `clipboard_write`)
 - Legacy clipboard commands (fallback path / main-thread bridging on macOS): `apps/desktop/src-tauri/src/commands.rs` (`read_clipboard`, `write_clipboard`)
 - Platform backends: `apps/desktop/src-tauri/src/clipboard/platform/*` (delegates into OS-specific modules like `clipboard/macos.rs`)
+- Linux clipboard fallback heuristics (X11 `PRIMARY` vs `CLIPBOARD`): `apps/desktop/src-tauri/src/clipboard_fallback.rs`
 
 Provider selection:
 
@@ -638,6 +645,7 @@ Known platform limitations:
 - **Web Clipboard API permission gating**: `navigator.clipboard.read/write` is user-gesture gated and may be denied by the OS/WebView permission model.
 - **HTML/RTF availability varies** by WebView and OS: some platforms allow reading `text/html`/`text/rtf` but deny writing them (or vice versa).
 - **Image clipboard support varies**: `image/png` via `ClipboardItem` is not consistently supported across all embedded WebViews.
+- **Linux selection semantics**: when running under X11, if `CLIPBOARD` has no usable content, the native GTK clipboard backend may fall back to `PRIMARY` selection (middle-click paste). This fallback is skipped on Wayland.
 - The native clipboard commands are implemented per-OS; when they are missing or unimplemented, the provider falls back to Web Clipboard (and then plain text).
 
 Security boundaries:
