@@ -4149,6 +4149,60 @@ fn bytecode_backend_matches_ast_for_vlookup_and_hlookup() {
 }
 
 #[test]
+fn bytecode_backend_vlookup_hlookup_accept_array_literal_tables() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=VLOOKUP(3,{1,10;3,30;5,50},2,FALSE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=VLOOKUP(4,{1,10;3,30;5,50},2)")
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            "=LET(t,{1,10;3,30;5,50},VLOOKUP(5,t,2,FALSE))",
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=HLOOKUP(3,{1,3,5;10,30,50},2,FALSE)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=HLOOKUP(4,{1,3,5;10,30,50},2)")
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B3",
+            "=LET(t,{1,3,5;10,30,50},HLOOKUP(5,t,2,FALSE))",
+        )
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 6);
+    assert_eq!(
+        stats.compiled, 6,
+        "expected VLOOKUP/HLOOKUP to compile for array table literals and LET array locals"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=VLOOKUP(3,{1,10;3,30;5,50},2,FALSE)", "A1"),
+        ("=VLOOKUP(4,{1,10;3,30;5,50},2)", "A2"),
+        ("=LET(t,{1,10;3,30;5,50},VLOOKUP(5,t,2,FALSE))", "A3"),
+        ("=HLOOKUP(3,{1,3,5;10,30,50},2,FALSE)", "B1"),
+        ("=HLOOKUP(4,{1,3,5;10,30,50},2)", "B2"),
+        ("=LET(t,{1,3,5;10,30,50},HLOOKUP(5,t,2,FALSE))", "B3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_applies_implicit_intersection_for_lookup_value_ranges() {
     let mut engine = Engine::new();
 
