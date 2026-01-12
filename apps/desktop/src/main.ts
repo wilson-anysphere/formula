@@ -2488,6 +2488,22 @@ function installSheetStoreSubscription(): void {
         }
 
         // Delete sheets (undoable).
+        //
+        // Important: if the currently-active UI sheet is being deleted, switch the app to a
+        // remaining sheet *before* mutating the DocumentController. SpreadsheetApp reacts to
+        // DocumentController change events by reading from the active sheet; if that active
+        // sheet id has just been deleted, a read can recreate the sheet (DocumentController
+        // sheets are created lazily on access), effectively undoing the delete.
+        if (removed.length > 0) {
+          const activeId = app.getCurrentSheetId();
+          if (activeId && removed.includes(activeId)) {
+            const fallback = nextOrder[0] ?? null;
+            if (fallback && fallback !== activeId) {
+              app.activateSheet(fallback);
+              restoreFocusAfterSheetNavigation();
+            }
+          }
+        }
         for (const sheetId of removed) {
           try {
             doc.deleteSheet(sheetId);
