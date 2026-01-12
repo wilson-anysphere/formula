@@ -3524,4 +3524,39 @@ mod tests {
             other => panic!("expected FieldAccess, got {other:?}"),
         }
     }
+
+    #[test]
+    fn parse_spanned_formula_accepts_all_excel_error_literals() {
+        let cases = [
+            ("#NULL!", ErrorKind::Null),
+            ("#DIV/0!", ErrorKind::Div0),
+            ("#VALUE!", ErrorKind::Value),
+            ("#REF!", ErrorKind::Ref),
+            ("#NAME?", ErrorKind::Name),
+            ("#NUM!", ErrorKind::Num),
+            ("#N/A", ErrorKind::NA),
+            ("#GETTING_DATA", ErrorKind::GettingData),
+            ("#SPILL!", ErrorKind::Spill),
+            ("#CALC!", ErrorKind::Calc),
+            ("#FIELD!", ErrorKind::Field),
+            ("#CONNECT!", ErrorKind::Connect),
+            ("#BLOCKED!", ErrorKind::Blocked),
+            ("#UNKNOWN!", ErrorKind::Unknown),
+        ];
+
+        for (lit, kind) in cases {
+            let formula = format!("={lit}");
+            let expr = parse_spanned_formula(&formula).expect("parse should succeed");
+            assert_eq!(
+                expr.span,
+                Span::new(1, 1 + lit.len()),
+                "unexpected span for {lit}"
+            );
+            assert_eq!(
+                expr.kind,
+                SpannedExprKind::Error(kind),
+                "unexpected kind for {lit}"
+            );
+        }
+    }
 }
