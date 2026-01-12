@@ -2,7 +2,7 @@
 
 use formula_vba::{
     extract_signer_certificate_info, list_vba_digital_signatures, verify_vba_digital_signature,
-    VbaSignatureVerification,
+    VbaSignatureStreamKind, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -344,8 +344,9 @@ fn prefers_verified_signature_stream_over_invalid_candidate() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureEx"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
         "expected to pick verified signature stream, got {}",
         sig.stream_path
     );
@@ -385,8 +386,9 @@ fn prefers_verified_stream_over_parse_error_candidate() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureEx"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
         "expected to pick verified signature stream, got {}",
         sig.stream_path
     );
@@ -407,8 +409,9 @@ fn prefers_digital_signature_ex_over_legacy_when_both_verify() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureEx"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
         "expected DigitalSignatureEx to be treated as authoritative when both legacy and Ex signatures verify, got {}",
         sig.stream_path
     );
@@ -430,8 +433,9 @@ fn prefers_digital_signature_ext_over_ex_when_both_verify() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureExt"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureExt,
         "expected DigitalSignatureExt to be treated as authoritative when both Ex and Ext signatures verify, got {}",
         sig.stream_path
     );
@@ -457,8 +461,9 @@ fn prefers_digital_signature_ex_over_invalid_ext_candidate() {
         .expect("signature should be present");
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureEx"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
         "expected DigitalSignatureEx to be selected when DigitalSignatureExt is invalid, got {}",
         sig.stream_path
     );
