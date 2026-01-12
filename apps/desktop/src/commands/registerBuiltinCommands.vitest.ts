@@ -246,6 +246,11 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       await commandRegistry.executeCommand("view.toggleShowFormulas");
       await commandRegistry.executeCommand("audit.togglePrecedents");
       await commandRegistry.executeCommand("audit.toggleDependents");
+      await commandRegistry.executeCommand("audit.tracePrecedents");
+      await commandRegistry.executeCommand("audit.traceDependents");
+      await commandRegistry.executeCommand("audit.traceBoth");
+      await commandRegistry.executeCommand("audit.clearAuditing");
+      await commandRegistry.executeCommand("audit.toggleTransitive");
     } finally {
       if (prevDocument === undefined) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

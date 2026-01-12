@@ -483,6 +483,8 @@ export function registerBuiltinCommands(params: {
     "audit.tracePrecedents",
     t("command.audit.tracePrecedents"),
     () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingPrecedents();
       app.focus();
@@ -499,6 +501,8 @@ export function registerBuiltinCommands(params: {
     "audit.traceDependents",
     t("command.audit.traceDependents"),
     () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingDependents();
       app.focus();
@@ -515,6 +519,8 @@ export function registerBuiltinCommands(params: {
     "audit.traceBoth",
     t("command.audit.traceBoth"),
     () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.toggleAuditingPrecedents();
       app.toggleAuditingDependents();
@@ -532,6 +538,8 @@ export function registerBuiltinCommands(params: {
     "audit.clearAuditing",
     t("command.audit.clearAuditing"),
     () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.clearAuditing();
       app.focus();
     },
@@ -547,6 +555,8 @@ export function registerBuiltinCommands(params: {
     "audit.toggleTransitive",
     t("command.audit.toggleTransitive"),
     () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
       app.toggleAuditingTransitive();
       app.focus();
     },
