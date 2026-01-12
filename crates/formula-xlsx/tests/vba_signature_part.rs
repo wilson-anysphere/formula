@@ -422,6 +422,29 @@ fn verify_signature_part_binding_matches_vba_project_bin() {
 }
 
 #[test]
+fn verify_signature_part_binding_matches_vba_project_bin_when_digsig_blob_wrapped() {
+    let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
+    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
+    let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
+    let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
+
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+    let signature_part = build_vba_signature_ole(&wrapped);
+
+    let xlsm_bytes = build_xlsm_zip(&vba_project_bin, &signature_part);
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
 fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
