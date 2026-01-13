@@ -993,6 +993,29 @@ test("Typing =FORECAST.ETS(1, A suggests a range but does not auto-close parens 
   );
 });
 
+test("Typing =WORKDAY(1, 5, A suggests a range and auto-closes (optional holidays arg)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=WORKDAY(1, 5, A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=WORKDAY(1, 5, A1:A10)"),
+    `Expected a WORKDAY holidays range suggestion with closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =ROWS(A suggests a range and auto-closes (min args satisfied)", async () => {
   const engine = new TabCompletionEngine();
 

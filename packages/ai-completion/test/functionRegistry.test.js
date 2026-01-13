@@ -148,4 +148,12 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");
   assert.ok(registry.isRangeArg("FORECAST.ETS", 2), "Expected FORECAST.ETS timeline to be a range");
+
+  // Date functions with optional holiday ranges
+  assert.equal(registry.isRangeArg("WORKDAY", 0), false, "Expected WORKDAY start_date not to be a range");
+  assert.equal(registry.isRangeArg("WORKDAY", 1), false, "Expected WORKDAY days not to be a range");
+  assert.ok(registry.isRangeArg("WORKDAY", 2), "Expected WORKDAY holidays to be a range");
+  assert.ok(registry.isRangeArg("WORKDAY.INTL", 3), "Expected WORKDAY.INTL holidays to be a range");
+  assert.ok(registry.isRangeArg("NETWORKDAYS", 2), "Expected NETWORKDAYS holidays to be a range");
+  assert.ok(registry.isRangeArg("NETWORKDAYS.INTL", 3), "Expected NETWORKDAYS.INTL holidays to be a range");
 });

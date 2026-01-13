@@ -212,6 +212,44 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "WORKDAY",
+    description: "Returns a date that is a specified number of working days before or after a start date.",
+    args: [
+      { name: "start_date", type: "number" },
+      { name: "days", type: "number" },
+      { name: "holidays", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "WORKDAY.INTL",
+    description: "Returns a date that is a specified number of working days before or after a start date with custom weekends.",
+    args: [
+      { name: "start_date", type: "number" },
+      { name: "days", type: "number" },
+      { name: "weekend", type: "value", optional: true },
+      { name: "holidays", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "NETWORKDAYS",
+    description: "Returns the number of whole working days between two dates.",
+    args: [
+      { name: "start_date", type: "number" },
+      { name: "end_date", type: "number" },
+      { name: "holidays", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "NETWORKDAYS.INTL",
+    description: "Returns the number of whole working days between two dates with custom weekends.",
+    args: [
+      { name: "start_date", type: "number" },
+      { name: "end_date", type: "number" },
+      { name: "weekend", type: "value", optional: true },
+      { name: "holidays", type: "range", optional: true },
+    ],
+  },
+  {
     name: "BYROW",
     description: "Applies a LAMBDA to each row in an array and returns the result as an array.",
     args: [
