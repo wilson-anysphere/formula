@@ -105,7 +105,38 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertTrue(any(v.startswith("sha256=") for v in rels_types))
         self.assertFalse(any("corp.example.com" in v for v in rels_types))
 
+    def test_triage_workbook_private_mode_preserves_xlsb_extension(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            # A minimal ZIP is enough for the feature scan path; Rust triage is mocked.
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED):
+                pass
+            data = buf.getvalue()
+
+            wb = WorkbookInput(display_name="book.xlsb", data=data)
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        expected_sha = sha256_hex(data)
+        self.assertEqual(report["display_name"], f"workbook-{expected_sha[:16]}.xlsb")
+
 
 if __name__ == "__main__":
     unittest.main()
-

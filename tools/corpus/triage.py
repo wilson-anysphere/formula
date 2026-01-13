@@ -93,7 +93,7 @@ def _anonymized_display_name(*, sha256: str, original_name: str) -> str:
     # Keep the extension as a lightweight hint (xlsx vs xlsm) while avoiding leaking the original
     # filename. Fall back to `.xlsx` for unknown extensions.
     suffix = Path(original_name).suffix.lower()
-    if suffix not in (".xlsx", ".xlsm"):
+    if suffix not in (".xlsx", ".xlsm", ".xlsb"):
         suffix = ".xlsx"
     return f"workbook-{sha256[:16]}{suffix}"
 
