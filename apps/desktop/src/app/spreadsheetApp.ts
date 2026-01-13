@@ -2153,7 +2153,11 @@ export class SpreadsheetApp {
       this.collaboratorsListContainer = document.createElement("div");
       this.collaboratorsListContainer.classList.add("presence-collaborators-overlay");
       this.root.appendChild(this.collaboratorsListContainer);
-      this.collaboratorsListUi = new CollaboratorsListUiController({ container: this.collaboratorsListContainer });
+      // Cap visible items to keep the overlay compact; show a "+N" pill when more are present.
+      this.collaboratorsListUi = new CollaboratorsListUiController({
+        container: this.collaboratorsListContainer,
+        maxVisible: 5,
+      });
 
       this.conflictUi = new ConflictUiController({
         container: this.conflictUiContainer,

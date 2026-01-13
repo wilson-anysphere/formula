@@ -31,6 +31,7 @@ export class CollaboratorsListUiController {
     this._rootEl.className = "presence-collaborators";
     this._rootEl.dataset.testid = "presence-collaborators";
     this._rootEl.setAttribute("role", "list");
+    this._rootEl.setAttribute("aria-label", "Collaborators");
     this.container.appendChild(this._rootEl);
   }
 
@@ -94,6 +95,7 @@ export class CollaboratorsListUiController {
         item.appendChild(sheetEl);
       }
 
+      item.title = sheet ? `${entry.name} • ${sheet}` : entry.name;
       frag.appendChild(item);
     }
 
@@ -102,6 +104,7 @@ export class CollaboratorsListUiController {
       more.className = "presence-collaborators__overflow";
       more.dataset.testid = "presence-collaborator-overflow";
       more.textContent = `+${overflow}`;
+      more.title = `${overflow} more collaborator${overflow === 1 ? "" : "s"}`;
       frag.appendChild(more);
     }
 
