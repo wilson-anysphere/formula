@@ -2,6 +2,7 @@ use crate::backend::TableBackend;
 use crate::model::{Cardinality, CrossFilterDirection, DataModel, RelationshipInfo};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 pub type DaxResult<T> = Result<T, DaxError>;
@@ -323,6 +324,14 @@ impl DaxEngine {
                     BinaryOp::Divide => l / r,
                     _ => unreachable!(),
                 };
+                Ok(Value::from(out))
+            }
+            BinaryOp::Concat => {
+                let l = coerce_text(&left);
+                let r = coerce_text(&right);
+                let mut out = String::with_capacity(l.len() + r.len());
+                out.push_str(&l);
+                out.push_str(&r);
                 Ok(Value::from(out))
             }
             BinaryOp::Equals
@@ -2030,6 +2039,18 @@ fn coerce_number(value: &Value) -> DaxResult<f64> {
         Value::Boolean(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Ok(0.0),
         Value::Text(_) => Err(DaxError::Type(format!("cannot coerce {value} to number"))),
+    }
+}
+
+fn coerce_text(value: &Value) -> Cow<'_, str> {
+    match value {
+        Value::Text(s) => Cow::Borrowed(s.as_ref()),
+        // DAX has nuanced formatting semantics. For now we use Rust's default formatting.
+        Value::Number(n) => Cow::Owned(n.0.to_string()),
+        // In DAX, BLANK coerces to the empty string for text operations like concatenation.
+        Value::Blank => Cow::Borrowed(""),
+        // DAX displays boolean values as TRUE/FALSE.
+        Value::Boolean(b) => Cow::Borrowed(if *b { "TRUE" } else { "FALSE" }),
     }
 }
 

@@ -443,7 +443,6 @@ fn switch_supports_simple_and_true_idiom_forms() {
             .unwrap(),
         Value::from("b")
     );
-
     assert_eq!(
         engine
             .evaluate(
@@ -455,7 +454,6 @@ fn switch_supports_simple_and_true_idiom_forms() {
             .unwrap(),
         Value::from("c")
     );
-
     assert_eq!(
         engine
             .evaluate(
@@ -466,6 +464,46 @@ fn switch_supports_simple_and_true_idiom_forms() {
             )
             .unwrap(),
         Value::from("yes")
+    );
+}
+
+#[test]
+fn concat_operator_ampersand_concatenates_strings_and_coerces_blank() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                r#""A" & "B""#,
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("AB")
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                r#""A" & BLANK()"#,
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("A")
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                r#"BLANK() & "B""#,
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("B")
     );
 }
 

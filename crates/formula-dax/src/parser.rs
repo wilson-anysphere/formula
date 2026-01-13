@@ -37,6 +37,7 @@ pub enum BinaryOp {
     Subtract,
     Multiply,
     Divide,
+    Concat,
     Equals,
     NotEquals,
     Less,
@@ -60,6 +61,7 @@ enum Token {
     Minus,
     Star,
     Slash,
+    Ampersand,
     Equals,
     NotEquals,
     Less,
@@ -185,10 +187,7 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     Ok(Token::AndAnd)
                 } else {
-                    Err(DaxError::Parse(format!(
-                        "unexpected character '&' in {:?}",
-                        self.input
-                    )))
+                    Ok(Token::Ampersand)
                 }
             }
             '|' => {
@@ -358,7 +357,7 @@ impl<'a> Parser<'a> {
         match &self.lookahead {
             Token::Minus => {
                 self.bump()?;
-                let expr = self.parse_expr(6)?;
+                let expr = self.parse_expr(7)?;
                 Ok(Expr::UnaryOp {
                     op: UnaryOp::Negate,
                     expr: Box::new(expr),
@@ -436,10 +435,13 @@ impl<'a> Parser<'a> {
             Token::LessEquals => Some((BinaryOp::LessEquals, 3)),
             Token::Greater => Some((BinaryOp::Greater, 3)),
             Token::GreaterEquals => Some((BinaryOp::GreaterEquals, 3)),
-            Token::Plus => Some((BinaryOp::Add, 4)),
-            Token::Minus => Some((BinaryOp::Subtract, 4)),
-            Token::Star => Some((BinaryOp::Multiply, 5)),
-            Token::Slash => Some((BinaryOp::Divide, 5)),
+            // DAX operator precedence (higher binds tighter):
+            //   * /  >  + -  >  &  >  comparisons  >  &&  >  ||
+            Token::Ampersand => Some((BinaryOp::Concat, 4)),
+            Token::Plus => Some((BinaryOp::Add, 5)),
+            Token::Minus => Some((BinaryOp::Subtract, 5)),
+            Token::Star => Some((BinaryOp::Multiply, 6)),
+            Token::Slash => Some((BinaryOp::Divide, 6)),
             _ => None,
         }
     }
