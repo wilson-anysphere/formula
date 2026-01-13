@@ -566,6 +566,74 @@ fn canonicalize_and_localize_true_false_functions() {
 }
 
 #[test]
+fn canonicalize_and_localize_additional_function_translations_for_es_es() {
+    fn assert_roundtrip(localized: &str, canonical: &str) {
+        assert_eq!(
+            locale::canonicalize_formula(localized, &locale::ES_ES).unwrap(),
+            canonical
+        );
+        assert_eq!(
+            locale::localize_formula(canonical, &locale::ES_ES).unwrap(),
+            localized
+        );
+    }
+
+    // Common translated worksheet functions.
+    assert_roundtrip(
+        "=CONTAR.SI(A1:A10;\">0\")",
+        "=COUNTIF(A1:A10,\">0\")",
+    );
+    assert_roundtrip(
+        "=BUSCARV(1;A1:B3;2;FALSO)",
+        "=VLOOKUP(1,A1:B3,2,FALSE)",
+    );
+    assert_roundtrip(
+        "=BUSCARH(1;A1:C2;2;VERDADERO)",
+        "=HLOOKUP(1,A1:C2,2,TRUE)",
+    );
+    assert_roundtrip(
+        "=SUMAR.SI(A1:A10;\">0\";B1:B10)",
+        "=SUMIF(A1:A10,\">0\",B1:B10)",
+    );
+    assert_roundtrip(
+        "=SUMAR.SI.CONJUNTO(B1:B10;A1:A10;\">0\";A1:A10;\"<10\")",
+        "=SUMIFS(B1:B10,A1:A10,\">0\",A1:A10,\"<10\")",
+    );
+    assert_roundtrip(
+        "=PROMEDIO.SI(A1:A10;\">0\")",
+        "=AVERAGEIF(A1:A10,\">0\")",
+    );
+    assert_roundtrip(
+        "=PROMEDIO.SI.CONJUNTO(B1:B10;A1:A10;\">0\";A1:A10;\"<10\")",
+        "=AVERAGEIFS(B1:B10,A1:A10,\">0\",A1:A10,\"<10\")",
+    );
+    assert_roundtrip("=SI.ERROR(1/0;0)", "=IFERROR(1/0,0)");
+    assert_roundtrip(
+        "=SI.ND(BUSCARV(1;A1:B2;2;FALSO);0)",
+        "=IFNA(VLOOKUP(1,A1:B2,2,FALSE),0)",
+    );
+    assert_roundtrip(
+        "=SI.CONJUNTO(1=1;\"A\";1=2;\"B\")",
+        "=IFS(1=1,\"A\",1=2,\"B\")",
+    );
+    assert_roundtrip("=INDICE(A1:B2;2;1)", "=INDEX(A1:B2,2,1)");
+    assert_roundtrip("=COINCIDIR(5;A1:A10;0)", "=MATCH(5,A1:A10,0)");
+    assert_roundtrip("=DESREF(A1;1;1)", "=OFFSET(A1,1,1)");
+    assert_roundtrip("=INDIRECTO(\"A1\")", "=INDIRECT(\"A1\")");
+    assert_roundtrip("=HOY()", "=TODAY()");
+
+    // TRUE()/FALSE() as zero-argument functions (not just boolean literals).
+    assert_roundtrip("=VERDADERO()", "=TRUE()");
+    assert_roundtrip("=FALSO()", "=FALSE()");
+
+    // `_xlfn.`-prefixed functions should translate their base name.
+    assert_roundtrip(
+        "=_xlfn.BUSCARX(1;A1:A3;B1:B3)",
+        "=_xlfn.XLOOKUP(1,A1:A3,B1:B3)",
+    );
+}
+
+#[test]
 fn localized_boolean_keywords_are_not_translated_inside_structured_refs() {
     // `WAHR` is the de-DE TRUE keyword, but table names can still be identifiers; separators
     // inside structured refs should never be touched by translation.

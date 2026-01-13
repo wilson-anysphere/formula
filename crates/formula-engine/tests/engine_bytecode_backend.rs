@@ -7639,8 +7639,9 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
 #[test]
 fn bytecode_compile_diagnostics_accepts_indirect() {
     let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
     engine
-        .set_cell_formula("Sheet1", "A1", "=INDIRECT(\"A1\")")
+        .set_cell_formula("Sheet1", "A1", "=SUM(INDIRECT(\"A2\"))")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -7656,8 +7657,9 @@ fn bytecode_compile_diagnostics_accepts_indirect() {
 #[test]
 fn bytecode_compile_diagnostics_accepts_offset() {
     let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A2", 1.0).unwrap();
     engine
-        .set_cell_formula("Sheet1", "A1", "=OFFSET(A2,0,0)")
+        .set_cell_formula("Sheet1", "A1", "=SUM(OFFSET(A2,0,0))")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();

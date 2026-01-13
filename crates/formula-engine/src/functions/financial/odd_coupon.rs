@@ -274,7 +274,7 @@ fn coupon_period_e(
     //
     // In particular, for basis=4 (European 30E/360), Excel models `E` as a fixed `360/frequency`
     // (consistent with `COUPDAYS`), even though `DAYS360(PCD, NCD, TRUE)` can differ for some
-    // end-of-month schedules.
+    // end-of-month schedules involving February.
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 
@@ -284,22 +284,23 @@ mod tests {
     use crate::date::{ymd_to_serial, ExcelDate};
 
     #[test]
-    fn odd_coupon_e_basis4_matches_coupon_schedule_e() {
+    fn odd_coupon_e_uses_coupondays_convention_for_basis_4() {
         // Regression test for basis=4 (30E/360):
-        // - odd-coupon bond functions model `E` the same way as COUPDAYS: `360/frequency`
-        // - this can differ from `DAYS360(PCD, NCD, TRUE)` for some EOM schedules involving February
+        // - day-count quantities (A, DSC, etc.) use European DAYS360.
+        // - but the modeled regular coupon period length `E` matches COUPDAYS, i.e. `360/frequency`.
+        //
+        // Using `DAYS360(PCD, NCD, TRUE)` for `E` breaks Excel parity for schedules involving
+        // February (see `crates/formula-engine/tests/odd_coupon_oracle_regressions.rs`).
         let system = ExcelDateSystem::EXCEL_1900;
-        let pcd = ymd_to_serial(ExcelDate::new(2001, 2, 28), system).unwrap();
-        let ncd = ymd_to_serial(ExcelDate::new(2001, 8, 31), system).unwrap();
+        let pcd = ymd_to_serial(ExcelDate::new(2019, 8, 30), system).unwrap();
+        let ncd = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
         let basis = 4;
         let frequency = 2;
         let freq = normalize_frequency(frequency).unwrap();
 
-        // European 30/360 between these dates is 182 days (not 180), but Excel still models the
-        // coupon period length `E` as a fixed `360/frequency` for basis=4.
-        let days360 =
-            super::super::coupon_schedule::days_between(pcd, ncd, basis, system).unwrap();
-        assert_eq!(days360, 182);
+        // European 30/360 between these coupon dates differs from the modeled `E`.
+        let days360 = super::super::coupon_schedule::days_between(pcd, ncd, basis, system).unwrap();
+        assert_eq!(days360, 179);
 
         let e = coupon_period_e(pcd, ncd, basis, freq, system).unwrap();
         assert_eq!(e, 360.0 / (frequency as f64));

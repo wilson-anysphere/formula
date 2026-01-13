@@ -6447,7 +6447,8 @@ fn rewrite_all_formulas_structural(
 ) -> Vec<FormulaRewrite> {
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    let mut sheet_order_indices: HashMap<String, usize> =
+        HashMap::with_capacity(workbook.sheet_order.len());
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
         let Some(name) = workbook.sheet_name(sheet_id) else {
             continue;
@@ -6493,7 +6494,8 @@ fn rewrite_all_formulas_range_map(
 ) -> Vec<FormulaRewrite> {
     // 3D references (`Sheet1:Sheet3!A1`) use sheet *tab order* to define span membership, so use
     // the workbook's current sheet ordering rather than stable sheet ids.
-    let mut sheet_order_indices: HashMap<String, usize> = HashMap::new();
+    let mut sheet_order_indices: HashMap<String, usize> =
+        HashMap::with_capacity(workbook.sheet_order.len());
     for (order_index, &sheet_id) in workbook.sheet_ids_in_order().iter().enumerate() {
         let Some(name) = workbook.sheet_name(sheet_id) else {
             continue;
@@ -8621,8 +8623,10 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Array(arr) => {
             // The engine generally stores spilled array results in a dedicated spill table rather
             // than as `Value::Array` in the grid. However, callers can still populate cells with
-            // `Value::Array` directly (e.g. via the external value provider or tests). Bytecode
-            // evaluation should be able to consume these values as proper arrays.
+            // `Value::Array` directly (e.g. via `set_cell_value`, rich-value fields, external value
+            // providers, or tests). Bytecode evaluation should preserve these as materialized
+            // arrays (bounded by `MAX_MATERIALIZED_ARRAY_CELLS`) rather than coercing them to
+            // `#SPILL!`.
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
                 None => return bytecode::Value::Error(bytecode::ErrorKind::Spill),
@@ -15184,23 +15188,34 @@ mod tests {
     #[test]
     fn bytecode_compiler_handles_huge_ranges_via_sparse_iteration() {
         let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet2");
+
+        // Put some sparse values on Sheet2 so the full-sheet range has a non-trivial result.
+        engine.set_cell_value("Sheet2", "A1", 1.0).unwrap();
+        engine.set_cell_value("Sheet2", "C3", 2.0).unwrap();
+
+        // A full-sheet range reference is extremely large (rows * cols), but bytecode evaluation
+        // can still handle it efficiently via sparse iteration over the stored cells.
+        //
+        // Avoid self-references by summing a different sheet than the formula cell.
         engine
-            .set_cell_formula("Sheet1", "B1", "=SUM(A1:XFD1048576)")
+            .set_cell_formula("Sheet1", "B1", "=SUM(Sheet2!A1:XFD1048576)")
             .unwrap();
 
-        // Full-sheet ranges are enormous; the bytecode runtime can evaluate aggregates over these
-        // ranges via sparse iteration, but the column cache must not allocate dense buffers for
+        // Full-sheet ranges are enormous; the bytecode runtime can still evaluate aggregates over
+        // these ranges via sparse iteration. The column cache must not allocate dense buffers for
         // them.
         assert_eq!(engine.bytecode_program_count(), 1);
 
-        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
-        let key = CellKey {
-            sheet: sheet_id,
+        let sheet1_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let sheet2_id = engine.workbook.sheet_id("Sheet2").expect("sheet exists");
+        let key_b1 = CellKey {
+            sheet: sheet1_id,
             addr: parse_a1("B1").unwrap(),
         };
         let compiled = engine
             .workbook
-            .get_cell(key)
+            .get_cell(key_b1)
             .and_then(|c| c.compiled.clone())
             .expect("compiled formula stored");
         assert!(
@@ -15216,15 +15231,18 @@ mod tests {
             engine.info.clone(),
             engine.pivot_registry.clone(),
         );
-        let column_cache =
-            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+        let column_cache = BytecodeColumnCache::build(
+            engine.workbook.sheets.len(),
+            &snapshot,
+            &[(key_b1, compiled)],
+        );
         assert!(
-            column_cache.by_sheet[sheet_id].is_empty(),
+            column_cache.by_sheet[sheet2_id].is_empty(),
             "expected full-sheet range to skip column-slice cache allocation"
         );
 
         engine.recalculate_single_threaded();
-        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
     }
 
     fn assert_bytecode_matches_ast(formula: &str, expected: Value) {
