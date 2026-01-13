@@ -1007,6 +1007,27 @@ pub fn build_shared_formula_ptgexp_u32_row_u16_col_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing a shared formula (`SHRFMLA` + `PtgExp`).
+///
+/// The fixture contains a single sheet (`Sheet1`) with:
+/// - `Sheet1!B1` formula: `A1+1`
+/// - `Sheet1!B2` FORMULA record containing only `PtgExp` referencing `B1`
+/// - a `SHRFMLA` record covering `B1:B2` with a shared token stream using `PtgRefN` so the
+///   per-cell formula decodes as `A1+1` / `A2+1`.
+pub fn build_shared_formula_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a worksheet formula that uses an array constant
 /// (`PtgArray` + trailing `rgcb`).
 ///
@@ -7782,6 +7803,80 @@ fn build_shared_formula_ptgexp_u32_row_u16_col_sheet_stream(xf_cell: u16) -> Vec
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_shared_formula_workbook_stream() -> Vec<u8> {
+    // Use the generic single-sheet workbook builder: it creates a minimal BIFF8 globals stream
+    // including a default cell XF at index 16.
+    let xf_cell = 16u16;
+    let sheet_stream = build_shared_formula_sheet_stream(xf_cell);
+    build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252)
+}
+
+fn build_shared_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // A1/A2: number cells (values not important for formula decoding).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0));
+
+    // B1: base formula cell, `A1+1` (PtgRef + PtgInt + PtgAdd).
+    let rgce_b1: Vec<u8> = [
+        vec![0x24],                       // PtgRef
+        0u16.to_le_bytes().to_vec(),      // rw = 0 (A1 row)
+        0xC000u16.to_le_bytes().to_vec(), // col = 0 with row+col relative flags (A)
+        vec![0x1E],                       // PtgInt
+        1u16.to_le_bytes().to_vec(),      // 1
+        vec![0x03],                       // PtgAdd
+    ]
+    .concat();
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_cell, 0.0, &rgce_b1),
+    );
+
+    // Shared formula token stream for B1:B2: `A?+1` using `PtgRefN` so the reference shifts with
+    // the base cell. From B1 the ref is A1 (col_off=-1); from B2 it becomes A2.
+    let rgce_shared: Vec<u8> = [
+        vec![0x2C],                       // PtgRefN
+        0u16.to_le_bytes().to_vec(),      // row_off = 0
+        0xFFFFu16.to_le_bytes().to_vec(), // col_off = -1 (14-bit) + row/col relative flags
+        vec![0x1E],                       // PtgInt
+        1u16.to_le_bytes().to_vec(),      // 1
+        vec![0x03],                       // PtgAdd
+    ]
+    .concat();
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &rgce_shared),
+    );
+
+    // B2: FORMULA record contains only PtgExp referencing the base cell (B1).
+    let rgce_b2: Vec<u8> = [vec![0x01], 0u16.to_le_bytes().to_vec(), 1u16.to_le_bytes().to_vec()]
+        .concat();
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &rgce_b2),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
 
