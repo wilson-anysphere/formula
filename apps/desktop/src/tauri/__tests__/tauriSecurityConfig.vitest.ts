@@ -34,6 +34,16 @@ function isFalsyOrEmpty(value: unknown): boolean {
 }
 
 describe("tauri.conf.json security guardrails", () => {
+  it("uses an HTTPS Authenticode timestamp server on Windows", () => {
+    const config = loadTauriConfig();
+    const timestampUrl = config?.bundle?.windows?.timestampUrl as unknown;
+    expect(typeof timestampUrl, "expected bundle.windows.timestampUrl to be a string").toBe("string");
+    expect(
+      (timestampUrl as string).startsWith("https://"),
+      `bundle.windows.timestampUrl must use HTTPS (got: ${String(timestampUrl)})`,
+    ).toBe(true);
+  });
+
   it("enables COOP/COEP headers for cross-origin isolation (SharedArrayBuffer)", () => {
     const config = loadTauriConfig();
     const headers = config?.app?.security?.headers as unknown;
