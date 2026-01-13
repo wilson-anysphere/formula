@@ -14,6 +14,78 @@ function escapeRegExp(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Remove CSS string literals, comments, and url(...) bodies so we don't match named colors
+ * inside unrelated text (e.g. asset paths like `url("/icons/red.png")`).
+ *
+ * This is not a full CSS parser; it's just enough to keep the `noHardcodedColors` guardrail
+ * high-signal while avoiding common false positives.
+ *
+ * @param {string} css
+ */
+function stripCssNonSemanticText(css) {
+  let out = String(css);
+  // Block comments.
+  out = out.replace(/\/\*[\s\S]*?\*\//g, " ");
+  // Quoted strings (handles escapes).
+  out = out.replace(/"(?:\\.|[^"\\])*"/g, '""');
+  out = out.replace(/'(?:\\.|[^'\\])*'/g, "''");
+
+  // Strip url(...) bodies, handling nested parens in a minimal way and respecting quotes.
+  let idx = 0;
+  let result = "";
+  while (idx < out.length) {
+    const m = /\burl\s*\(/gi.exec(out.slice(idx));
+    if (!m) {
+      result += out.slice(idx);
+      break;
+    }
+    const start = idx + (m.index ?? 0);
+    result += out.slice(idx, start);
+
+    // Find the opening '(' we matched.
+    const openParen = out.indexOf("(", start);
+    if (openParen === -1) {
+      // Shouldn't happen, but fall back to copying the rest.
+      result += out.slice(start);
+      break;
+    }
+
+    let i = openParen + 1;
+    let depth = 1;
+    /** @type {string | null} */
+    let quote = null;
+    while (i < out.length && depth > 0) {
+      const ch = out[i];
+      if (quote) {
+        if (ch === "\\") {
+          i += 2;
+          continue;
+        }
+        if (ch === quote) {
+          quote = null;
+        }
+        i += 1;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        i += 1;
+        continue;
+      }
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      i += 1;
+    }
+
+    // Replace the entire url(...) with a stub so declaration parsing stays roughly intact.
+    result += "url()";
+    idx = i;
+  }
+
+  return result;
+}
+
 function walk(dirPath) {
   /** @type {string[]} */
   const entries = [];
@@ -94,11 +166,37 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // Treat hyphenated identifiers as "words" so we don't match things like:
   // - `white-space`
   // - `var(--sheet-tab-red)`
-  const namedColorToken = `(?<![\\w-])(?<color>${disallowedNamedColors.map(escapeRegExp).join("|")})(?![\\w-])`;
-  const cssNamedColor = new RegExp(`:[^;{}]*${namedColorToken}`, "gi");
+  // Also treat `/` and `.` as "word-ish" boundaries so we don't match file paths like `icons/red.png`.
+  const namedColorToken = `(?<![\\w\\-/.])(?<color>${disallowedNamedColors.map(escapeRegExp).join("|")})(?![\\w\\-/.])`;
+  const namedColorTokenRe = new RegExp(namedColorToken, "gi");
+  const cssDeclaration = /(?:^|[;{])\s*(?<prop>[-\w]+)\s*:\s*(?<value>[^;{}]*)/gi;
+  const cssColorProps = new Set([
+    "accent-color",
+    "background",
+    "background-color",
+    "background-image",
+    "border",
+    "border-color",
+    "border-top",
+    "border-top-color",
+    "border-right",
+    "border-right-color",
+    "border-bottom",
+    "border-bottom-color",
+    "border-left",
+    "border-left-color",
+    "box-shadow",
+    "caret-color",
+    "color",
+    "fill",
+    "outline",
+    "outline-color",
+    "stroke",
+    "text-shadow",
+  ]);
   const jsStyleColor = new RegExp(
     // style objects + style literals (e.g. `style={{ color: "red" }}`)
-    String.raw`\b(?:accentColor|background|backgroundColor|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|outline|outlineColor|stroke|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
+    String.raw`\b(?:accentColor|background|backgroundColor|backgroundImage|border|borderColor|borderBottom|borderBottomColor|borderLeft|borderLeftColor|borderRight|borderRightColor|borderTop|borderTopColor|boxShadow|caretColor|color|fill|outline|outlineColor|stroke|textShadow)\b\s*:\s*(["'\`])[^"'\`]*${namedColorToken}[^"'\`]*\1`,
     "gi",
   );
   const domStyleColor = new RegExp(
@@ -123,9 +221,20 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     /** @type {string | null} */
     let named = null;
     if (ext === ".css") {
-      const match = cssNamedColor.exec(content);
-      cssNamedColor.lastIndex = 0;
-      named = match?.groups?.color ?? null;
+      const stripped = stripCssNonSemanticText(content);
+      for (const decl of stripped.matchAll(cssDeclaration)) {
+        const prop = decl?.groups?.prop?.toLowerCase() ?? "";
+        const value = decl?.groups?.value ?? "";
+        if (!prop) continue;
+        const isCustomProp = prop.startsWith("--");
+        if (!isCustomProp && !cssColorProps.has(prop)) continue;
+        const match = namedColorTokenRe.exec(value);
+        namedColorTokenRe.lastIndex = 0;
+        if (match?.groups?.color) {
+          named = match.groups.color;
+          break;
+        }
+      }
     } else {
       const match =
         jsStyleColor.exec(content) ??
