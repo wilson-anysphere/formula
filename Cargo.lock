@@ -8664,6 +8664,8 @@ dependencies = [
  "globset",
  "pretty_assertions",
  "roxmltree",
+ "serde",
+ "serde_json",
  "tempfile",
  "walkdir",
  "zip 2.4.2",
