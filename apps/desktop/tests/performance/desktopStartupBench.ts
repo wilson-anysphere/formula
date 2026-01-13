@@ -13,6 +13,10 @@
  * - Windows: `APPDATA`, `LOCALAPPDATA`, `TEMP`, `TMP` => `target/perf-home/*`
  * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
  *
+ * Reset toggle:
+ * - `FORMULA_DESKTOP_BENCH_RESET_HOME=1` deletes the per-run profile directory before spawning
+ *   the desktop process. (This is also used internally by the cold/warm startup modes below.)
+ *
  * Startup modes (profile reset behavior):
  * - `FORMULA_DESKTOP_STARTUP_MODE=cold` (default when enabled): each iteration uses a fresh
  *   profile directory under `target/perf-home` so every launch is a true cold start.
