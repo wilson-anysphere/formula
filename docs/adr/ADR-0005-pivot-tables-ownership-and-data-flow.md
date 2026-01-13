@@ -213,6 +213,14 @@ Application:
 - **Range/table pivots (`formula-engine`)**: filter rows in the pivot cache by checking whether the row’s field value is in the allowed set.
 - **Data Model pivots (`formula-dax`)**: translate to filter-context constraints on the referenced column; relationship propagation is handled by the model/engine.
 
+OpenXML note:
+
+- XLSX slicer caches may store item identifiers as either display strings or indices (e.g. `<slicerCacheItem x="...">`)
+  into a pivot cache shared-items table.
+- Resolving these identifiers into **typed values** (number/date/text/bool) is owned by `formula-xlsx` (because it requires
+  OpenXML pivot cache parsing). When a typed mapping is unavailable, best-effort text matching is acceptable but should be
+  treated as a fidelity gap.
+
 #### Timeline mapping (date range selection)
 
 - Timeline selection is an inclusive range: `[start, end]` (either endpoint may be missing).
