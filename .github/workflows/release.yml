@@ -772,10 +772,22 @@ jobs:
           echo "Verifying entitlements embedded in: $app"
           codesign --verify --deep --strict --verbose=2 "$app"
           tmp_entitlements="$(mktemp -t formula-entitlements.XXXXXX)"
+          tmp_raw="$(mktemp -t formula-entitlements-raw.XXXXXX)"
+          trap 'rm -f "$tmp_entitlements" "$tmp_raw"' EXIT
+
           # `codesign -d` may print non-XML metadata (e.g. "Executable=...") alongside the entitlements.
           # Extract just the plist so we can lint + validate it using the same guardrail script.
-          codesign -d --entitlements :- "$app" 2>&1 \
-            | sed -n '/^<\\?xml/,/^[[:space:]]*<\\/plist>/p' > "$tmp_entitlements"
+          codesign -d --entitlements :- "$app" 2>&1 | tee "$tmp_raw" \
+            | awk 'BEGIN{p=0} /^<\\?xml/{p=1} /^<plist/{if(p==0)p=1} p{print} p && /<\\/plist>/{exit}' \
+            > "$tmp_entitlements"
+
+          if [[ ! -s "$tmp_entitlements" ]]; then
+            echo "::error::Failed to extract entitlements plist from codesign output." >&2
+            echo "Raw codesign output:" >&2
+            cat "$tmp_raw" >&2 || true
+            exit 1
+          fi
+
           node scripts/check-macos-entitlements.mjs --path "$tmp_entitlements"
 
       - name: Setup MSVC cross-compilation environment (amd64 → arm64)
