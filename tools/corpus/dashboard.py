@@ -13,6 +13,9 @@ from typing import Any
 from .util import ensure_dir, github_commit_sha, github_run_url, utc_now_iso, write_json
 
 
+TIMING_STEPS: tuple[str, ...] = ("load", "round_trip", "diff", "recalc", "render")
+
+
 def _status(value: Any) -> str:
     if value is True:
         return "PASS"
@@ -215,6 +218,49 @@ def _append_trend_file(
     write_json(trend_path, entries)
     return entries, prev
 
+
+def _timing_stats(values: list[int]) -> dict[str, Any]:
+    values_sorted = sorted(values)
+    if not values_sorted:
+        return {
+            "count": 0,
+            "mean_ms": None,
+            "p50_ms": None,
+            "p90_ms": None,
+            "max_ms": None,
+        }
+
+    float_values = [float(v) for v in values_sorted]
+    return {
+        "count": len(values_sorted),
+        "mean_ms": statistics.fmean(float_values),
+        "p50_ms": _percentile(float_values, 0.50),
+        "p90_ms": _percentile(float_values, 0.90),
+        "max_ms": values_sorted[-1],
+    }
+
+
+def _compute_timings(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-step `duration_ms` metrics across triage reports."""
+
+    durations: dict[str, list[int]] = {step: [] for step in TIMING_STEPS}
+    for r in reports:
+        steps = r.get("steps")
+        if not isinstance(steps, dict):
+            continue
+        for step in TIMING_STEPS:
+            step_out = steps.get(step)
+            if not isinstance(step_out, dict):
+                continue
+            duration = step_out.get("duration_ms")
+            # JSON booleans are ints in python, so explicitly exclude bools.
+            if isinstance(duration, bool):
+                continue
+            if isinstance(duration, (int, float)):
+                durations[step].append(int(duration))
+
+    return {step: _timing_stats(vals) for step, vals in durations.items()}
+
 def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) -> str:
     counts = summary["counts"]
     rates = summary["rates"]
@@ -256,6 +302,40 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
             f"- Diff totals (critical/warn/info): **{diff_totals.get('critical', 0)} / {diff_totals.get('warning', 0)} / {diff_totals.get('info', 0)}**"
         )
     lines.append("")
+
+    timings = summary.get("timings") or {}
+    if timings:
+        lines.append("## Timings")
+        lines.append("")
+        lines.append("| Step | Count | Mean (ms) | P50 (ms) | P90 (ms) | Max (ms) |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+
+        def _fmt_ms(v: Any) -> str:
+            if v is None:
+                return "—"
+            if isinstance(v, float):
+                if v.is_integer():
+                    return str(int(v))
+                return f"{v:.1f}"
+            return str(v)
+
+        for step in TIMING_STEPS:
+            row = timings.get(step) or {}
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        step,
+                        str(row.get("count", 0)),
+                        _fmt_ms(row.get("mean_ms")),
+                        _fmt_ms(row.get("p50_ms")),
+                        _fmt_ms(row.get("p90_ms")),
+                        _fmt_ms(row.get("max_ms")),
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
 
     overhead = summary.get("round_trip_size_overhead") or {}
     lines.append("## Round-trip size overhead")
@@ -460,6 +540,16 @@ def main() -> int:
         type=Path,
         help="Append a compact time-series entry for this run to the given JSON list file.",
     )
+    parser.add_argument(
+        "--gate-load-p90-ms",
+        type=int,
+        help="Optional CI gate: fail if load p90 exceeds this threshold (ms).",
+    )
+    parser.add_argument(
+        "--gate-round-trip-p90-ms",
+        type=int,
+        help="Optional CI gate: fail if round_trip p90 exceeds this threshold (ms).",
+    )
     args = parser.parse_args()
 
     triage_dir = args.triage_dir
@@ -637,6 +727,8 @@ def main() -> int:
             {"workbook": name, "cellXfs": cellxfs}
             for cellxfs, name in failing_cellxfs_by_workbook[:20]
         ]
+
+    timings = _compute_timings(reports)
     summary: dict[str, Any] = {
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
@@ -661,6 +753,7 @@ def main() -> int:
         "round_trip_size_overhead": _round_trip_size_overhead(reports),
         "failures_by_category": dict(failures_by_category),
         "diff_totals": dict(diff_totals),
+        "timings": timings,
         "top_diff_parts_critical": top_diff_parts_critical,
         "top_diff_parts_total": top_diff_parts_total,
         "top_diff_part_groups_critical": top_diff_part_groups_critical,
@@ -694,6 +787,25 @@ def main() -> int:
 
     if args.append_trend:
         _append_trend_file(args.append_trend, summary=summary)
+
+    gate_failures: list[str] = []
+    if args.gate_load_p90_ms is not None:
+        load_p90 = (timings.get("load") or {}).get("p90_ms")
+        if isinstance(load_p90, (int, float)) and load_p90 > args.gate_load_p90_ms:
+            gate_failures.append(
+                f"load_p90_ms={load_p90} exceeds threshold {args.gate_load_p90_ms}"
+            )
+    if args.gate_round_trip_p90_ms is not None:
+        rt_p90 = (timings.get("round_trip") or {}).get("p90_ms")
+        if isinstance(rt_p90, (int, float)) and rt_p90 > args.gate_round_trip_p90_ms:
+            gate_failures.append(
+                f"round_trip_p90_ms={rt_p90} exceeds threshold {args.gate_round_trip_p90_ms}"
+            )
+
+    if gate_failures:
+        for msg in gate_failures:
+            print(f"TIMING REGRESSION: {msg}")
+        return 1
 
     return 0
 
