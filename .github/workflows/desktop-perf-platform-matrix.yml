@@ -15,6 +15,7 @@ jobs:
   desktop-startup-perf:
     name: Desktop startup perf (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
