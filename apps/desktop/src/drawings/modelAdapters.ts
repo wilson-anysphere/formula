@@ -274,7 +274,7 @@ function convertModelDrawingObjectKind(
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
       const label = extractDrawingObjectName(rawXml);
-      return { type: "shape", rawXml, label };
+      return { type: "shape", rawXml, raw_xml: rawXml, label };
     }
     case "chartplaceholder": {
       const relIdValue = pick(value, ["rel_id", "relId", "chart_id", "chartId"]);
@@ -290,7 +290,12 @@ function convertModelDrawingObjectKind(
       // When the rel id is unknown, treat the object as `unknown` so overlay
       // rendering can use `graphicFramePlaceholderLabel(...)` for a stable label.
       if (relId.trim() === "" || relId === "unknown") {
-        return { type: "unknown", rawXml, label: label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined };
+        return {
+          type: "unknown",
+          rawXml,
+          raw_xml: rawXml,
+          label: label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined,
+        };
       }
 
       const sheetId = context?.sheetId;
@@ -301,21 +306,25 @@ function convertModelDrawingObjectKind(
           : // Back-compat: when the sheet context isn't available, fall back to the drawing rel id.
             relId;
 
-      return { type: "chart", chartId, label: label ?? `Chart (${relId})`, rawXml };
+      return { type: "chart", chartId, label: label ?? `Chart (${relId})`, rawXml, raw_xml: rawXml };
     }
     case "chart": {
       // UI/other internal representations may already use `{ type: "chart", chartId }`.
       const chartId = readOptionalString(pick(value, ["chart_id", "chartId", "rel_id", "relId"]));
       const rawXml = readOptionalString(pick(value, ["raw_xml", "rawXml"]));
       const label = readOptionalString(pick(value, ["label"])) ?? extractDrawingObjectName(rawXml);
-      return { type: "chart", chartId: chartId ?? undefined, rawXml, label: label ?? undefined };
+      return { type: "chart", chartId: chartId ?? undefined, rawXml, raw_xml: rawXml, label: label ?? undefined };
     }
     case "unknown":
-      return {
-        type: "unknown",
-        rawXml: readOptionalString(pick(value, ["raw_xml", "rawXml"])),
-        label: extractDrawingObjectName(readOptionalString(pick(value, ["raw_xml", "rawXml"]))),
-      };
+      {
+        const rawXml = readOptionalString(pick(value, ["raw_xml", "rawXml"]));
+        return {
+          type: "unknown",
+          rawXml,
+          raw_xml: rawXml,
+          label: extractDrawingObjectName(rawXml),
+        };
+      }
     default:
       return { type: "unknown", label: `unsupported:${tag}` };
   }
