@@ -14,6 +14,14 @@ describe("registerDesktopCommands", () => {
     const openGoTo = vi.fn();
     const openFormatCells = vi.fn();
     const applyFormattingToSelection = vi.fn();
+    const pageLayoutHandlers = {
+      openPageSetupDialog: vi.fn(),
+      updatePageSetup: vi.fn(),
+      setPrintArea: vi.fn(),
+      clearPrintArea: vi.fn(),
+      addToPrintArea: vi.fn(),
+      exportPdf: vi.fn(),
+    };
 
     const handlers = {
       newWorkbook: vi.fn(),
@@ -37,6 +45,7 @@ describe("registerDesktopCommands", () => {
       openFormatCells,
       showQuickPick: async () => null,
       findReplace: { openFind, openReplace, openGoTo },
+      pageLayoutHandlers,
       workbenchFileHandlers: handlers,
       openCommandPalette,
     });
@@ -49,6 +58,8 @@ describe("registerDesktopCommands", () => {
     expect(commandRegistry.getCommand("edit.find")).toBeTruthy();
     // From registerWorkbenchFileCommands(...)
     expect(commandRegistry.getCommand("workbench.saveWorkbook")).toBeTruthy();
+    // From registerPageLayoutCommands (when enabled via registerDesktopCommands param)
+    expect(commandRegistry.getCommand("pageLayout.pageSetup.pageSetupDialog")).toBeTruthy();
 
     await commandRegistry.executeCommand("workbench.showCommandPalette");
     expect(openCommandPalette).toHaveBeenCalledTimes(1);
@@ -61,6 +72,20 @@ describe("registerDesktopCommands", () => {
 
     await commandRegistry.executeCommand("workbench.setAutoSaveEnabled", true);
     expect(handlers.setAutoSaveEnabled).toHaveBeenCalledWith(true);
+
+    await commandRegistry.executeCommand("pageLayout.pageSetup.pageSetupDialog");
+    expect(pageLayoutHandlers.openPageSetupDialog).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("pageLayout.pageSetup.margins.normal");
+    expect(pageLayoutHandlers.updatePageSetup).toHaveBeenCalledTimes(1);
+    const patch = pageLayoutHandlers.updatePageSetup.mock.calls[0]?.[0];
+    expect(typeof patch).toBe("function");
+
+    await commandRegistry.executeCommand("pageLayout.printArea.setPrintArea");
+    expect(pageLayoutHandlers.setPrintArea).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("pageLayout.export.exportPdf");
+    expect(pageLayoutHandlers.exportPdf).toHaveBeenCalledTimes(1);
 
     // Ensure we didn't accidentally override registerBuiltinCommands' richer formatting command
     // registrations (which include keywords and accept pressed-state args for ribbon toggles).
