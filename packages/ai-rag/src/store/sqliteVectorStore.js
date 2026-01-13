@@ -186,6 +186,7 @@ export class SqliteVectorStore {
    *   dimension: number,
    *   autoSave?: boolean,
    *   resetOnCorrupt?: boolean,
+   *   resetOnDimensionMismatch?: boolean,
    *   locateFile?: (file: string, prefix?: string) => string
    * }} opts
    * @param {boolean} [opts.resetOnCorrupt]
@@ -193,6 +194,11 @@ export class SqliteVectorStore {
    *   database causes the underlying storage to be cleared (via `storage.remove()`
    *   when available) and a fresh empty database to be created. When false, the
    *   initialization error is rethrown.
+   * @param {boolean} [opts.resetOnDimensionMismatch]
+   *   When true (default), if a persisted DB exists with a different embedding
+   *   dimension than requested, the underlying storage is cleared (via
+   *   `storage.remove()` when available) and a fresh empty database is created.
+   *   When false, the dimension mismatch error is rethrown.
    */
   static async create(opts) {
     if (!opts || !Number.isFinite(opts.dimension) || opts.dimension <= 0) {
