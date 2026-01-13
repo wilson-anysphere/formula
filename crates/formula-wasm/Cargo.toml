@@ -32,3 +32,10 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+# wasm-pack runs wasm-opt in release mode. Newer Rust toolchains emit bulk memory
+# operations (e.g. `memory.copy`) and non-trapping float-to-int conversions
+# (e.g. `i32.trunc_sat_*`) which require enabling the corresponding wasm-opt
+# feature flags during validation/optimization.
+wasm-opt = ["-O", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
