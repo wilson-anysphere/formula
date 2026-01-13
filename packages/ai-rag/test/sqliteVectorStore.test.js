@@ -12,7 +12,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let sqlJsAvailable = true;
 try {
-  await import("sql.js");
+  // Keep this as a computed dynamic import (no literal bare specifier) so
+  // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+  // is missing.
+  const sqlJsModuleName = "sql" + ".js";
+  await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
 }

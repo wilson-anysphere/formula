@@ -10,7 +10,11 @@ function sortIds(records) {
 
 let sqlJsAvailable = true;
 try {
-  await import("sql.js");
+  // Keep this as a computed dynamic import (no literal bare specifier) so
+  // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+  // is missing.
+  const sqlJsModuleName = "sql" + ".js";
+  await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
 }
@@ -45,4 +49,3 @@ test("SqliteVectorStore.deleteWorkbook + clear (autoSave persists)", { skip: !sq
   await store2.close();
   await store3.close();
 });
-
