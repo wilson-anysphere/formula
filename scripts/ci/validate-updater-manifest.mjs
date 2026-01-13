@@ -246,6 +246,20 @@ async function main() {
   /** @type {any[] | undefined} */
   let assets;
 
+  /**
+   * Linux release requirements:
+   * - Tagged releases must ship .AppImage + .deb + .rpm artifacts.
+   * - Each artifact must have a corresponding Tauri updater signature file: <artifact>.sig
+   *
+   * Note: these `.sig` files are *not* RPM/DEB GPG signatures; they are Ed25519 signatures used by
+   * Tauri's updater.
+   */
+  const linuxRequiredArtifacts = [
+    { ext: ".AppImage", label: "Linux bundle (.AppImage)" },
+    { ext: ".deb", label: "Linux package (.deb)" },
+    { ext: ".rpm", label: "Linux package (.rpm)" },
+  ];
+
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     try {
       release = await fetchRelease({ repo, tag, token });
@@ -256,7 +270,28 @@ async function main() {
       assets = await fetchAllReleaseAssets({ repo, releaseId, token });
 
       const names = new Set(assets.map((a) => a?.name).filter((n) => typeof n === "string"));
-      if (names.has("latest.json") && names.has("latest.json.sig")) {
+      const nameList = Array.from(names);
+      const linuxMissing = [];
+      const linuxMissingSigs = [];
+      for (const req of linuxRequiredArtifacts) {
+        const matches = nameList.filter((n) => n.endsWith(req.ext));
+        if (matches.length === 0) {
+          linuxMissing.push(req.label);
+          continue;
+        }
+        for (const match of matches) {
+          if (!names.has(`${match}.sig`)) {
+            linuxMissingSigs.push(`${match}.sig`);
+          }
+        }
+      }
+
+      if (
+        names.has("latest.json") &&
+        names.has("latest.json.sig") &&
+        linuxMissing.length === 0 &&
+        linuxMissingSigs.length === 0
+      ) {
         break;
       }
 
@@ -300,6 +335,37 @@ async function main() {
         ...available.map((name) => `  - ${name}`),
         "",
         `If this is a freshly-created draft release, a platform build may have failed before uploading the updater manifest.`,
+      ].join("\n"),
+    );
+  }
+
+  // Guardrail: ensure Linux release artifacts are present on the GitHub Release (not just produced
+  // locally in the Linux build job).
+  /** @type {string[]} */
+  const linuxArtifactFailures = [];
+  for (const req of linuxRequiredArtifacts) {
+    const matches = Array.from(assetNames).filter((n) => n.endsWith(req.ext));
+    if (matches.length === 0) {
+      linuxArtifactFailures.push(`Missing ${req.label} asset.`);
+      continue;
+    }
+    for (const match of matches) {
+      const sigName = `${match}.sig`;
+      if (!assetNames.has(sigName)) {
+        linuxArtifactFailures.push(`Missing signature asset: ${sigName}`);
+      }
+    }
+  }
+  if (linuxArtifactFailures.length > 0) {
+    const available = Array.from(assetNames).sort();
+    fatal(
+      [
+        `Linux release artifact validation failed for release ${tag}.`,
+        "",
+        ...linuxArtifactFailures.map((m) => `- ${m}`),
+        "",
+        `Release assets (${available.length}):`,
+        ...available.map((name) => `  - ${name}`),
       ].join("\n"),
     );
   }
