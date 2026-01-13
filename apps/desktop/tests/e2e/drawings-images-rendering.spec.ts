@@ -208,30 +208,65 @@ test.describe("drawing + image rendering regressions", () => {
       }
       doc.setImage(fixture.imageId, { bytes, mimeType: "image/png" });
 
-      const viewport = (app as any).syncDrawingOverlayViewport?.();
-      if (!viewport) throw new Error("Missing SpreadsheetApp.syncDrawingOverlayViewport()");
+      if (typeof doc.setSheetDrawings !== "function") {
+        throw new Error("Missing DocumentController.setSheetDrawings()");
+      }
 
-      const obj = {
-        id: 1,
-        zOrder: 0,
-        kind: { type: "image", imageId: fixture.imageId },
-        anchor: {
-          type: "twoCell",
-          from: {
-            cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
-            offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
-          },
-          to: {
-            cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
-            offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+      // Capture the *app-driven* render pass (DocumentController change -> SpreadsheetApp.renderDrawings -> DrawingOverlay.render).
+      // This is more realistic than calling `overlay.render(...)` directly and will fail if the integration
+      // between document drawings and the overlay regresses.
+      const origRender = overlay.render.bind(overlay);
+      (overlay as any).render = (objects: any, viewport: any, ...rest: any[]) => {
+        const promise = origRender(objects, viewport, ...rest);
+        (window as any).__testLastDrawingOverlayRender = { promise, objects, viewport };
+        return promise;
+      };
+      (window as any).__testLastDrawingOverlayRender = null;
+
+      const sheetId = app.getCurrentSheetId?.();
+      if (!sheetId) throw new Error("Missing SpreadsheetApp.getCurrentSheetId()");
+
+      // Store a formula-model style drawing object (JSON-serializable) and let SpreadsheetApp convert it
+      // through `convertModelWorksheetDrawingsToUiDrawingObjects(...)`.
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "1",
+          zOrder: 0,
+          kind: { type: "image", imageId: fixture.imageId },
+          anchor: {
+            type: "twoCell",
+            from: {
+              cell: { row: fixture.anchor.fromRow, col: fixture.anchor.fromCol },
+              offset: { xEmu: fixture.anchor.fromColOff, yEmu: fixture.anchor.fromRowOff },
+            },
+            to: {
+              cell: { row: fixture.anchor.toRow, col: fixture.anchor.toCol },
+              offset: { xEmu: fixture.anchor.toColOff, yEmu: fixture.anchor.toRowOff },
+            },
           },
         },
-      };
+      ]);
 
-      await overlay.render([obj], viewport);
+      const last = (window as any).__testLastDrawingOverlayRender as
+        | { promise: Promise<void>; objects: any[]; viewport: any }
+        | null;
+      if (!last) throw new Error("Expected SpreadsheetApp to invoke DrawingOverlay.render after setSheetDrawings");
+
+      const renderedHasImage = Array.isArray(last.objects)
+        ? last.objects.some((o) => o?.kind?.type === "image" && o?.kind?.imageId === fixture.imageId)
+        : false;
+      if (!renderedHasImage) {
+        throw new Error(`DrawingOverlay.render was invoked, but the rendered object list did not include imageId=${fixture.imageId}`);
+      }
+
+      await last.promise;
 
       const geom = (overlay as any).geom;
       if (!geom) throw new Error("Missing DrawingOverlay.geom");
+      const obj = (last.objects as any[]).find((o) => o?.kind?.type === "image" && o?.kind?.imageId === fixture.imageId);
+      if (!obj) throw new Error("Expected rendered image object to exist");
+      const viewport = last.viewport;
+      if (!viewport) throw new Error("Missing drawing overlay viewport from render()");
       const rect = anchorToRectPx(obj.anchor, geom);
       const sampleRect = (() => {
         const centerX = rect.x + rect.width / 2 - viewport.scrollX;
