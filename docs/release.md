@@ -342,6 +342,18 @@ CI guardrail (run on macOS release builds):
 node scripts/check-macos-entitlements.mjs
 ```
 
+This guardrail enforces:
+
+- Required entitlements:
+  - `com.apple.security.cs.allow-jit` (WKWebView/JavaScriptCore JIT)
+  - `com.apple.security.cs.allow-unsigned-executable-memory` (WKWebView/JavaScriptCore executable JIT memory)
+  - `com.apple.security.network.client` (outbound network; updater + HTTPS)
+- Forbidden entitlements (should not be enabled for Developer ID distribution unless there is a concrete, justified need):
+  - `com.apple.security.get-task-allow`
+  - `com.apple.security.cs.disable-library-validation`
+  - `com.apple.security.cs.disable-executable-page-protection`
+  - `com.apple.security.cs.allow-dyld-environment-variables`
+
 Release workflow note: when macOS signing secrets are configured, CI extracts the entitlements from the built `.app` (`codesign -d --entitlements :-`) and validates them with `node scripts/check-macos-entitlements.mjs`. This ensures the entitlements are actually embedded in the signed bundle (protects against config drift where the plist exists but isn’t used during signing).
 
 If these entitlements are missing, a notarized build can still pass notarization but launch with a **blank window** or a crashing WebView process.
