@@ -162,8 +162,14 @@ function findFunctionNameBeforeParen(input, openParenIndex) {
 function getArgContext(input, openParenIndex, cursorPosition) {
   const baseDepth = 1;
   let depth = baseDepth;
-  let argIndex = 0;
-  let lastArgSeparatorIndex = -1;
+  // Excel locales that use `;` as the argument separator typically use `,` as the
+  // decimal separator. To keep completions working in those locales, we prefer
+  // semicolons as separators when any are present at the base depth, and otherwise
+  // fall back to commas.
+  let commaArgIndex = 0;
+  let lastCommaIndex = -1;
+  let semicolonArgIndex = 0;
+  let lastSemicolonIndex = -1;
   let inString = false;
   let inSheetQuote = false;
   let bracketDepth = 0;
@@ -217,11 +223,20 @@ function getArgContext(input, openParenIndex, cursorPosition) {
     }
     if (ch === "(" && bracketDepth === 0) depth++;
     else if (ch === ")" && bracketDepth === 0) depth = Math.max(baseDepth, depth - 1);
-    else if ((ch === "," || ch === ";") && depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
-      argIndex++;
-      lastArgSeparatorIndex = i;
+    else if (depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
+      if (ch === ",") {
+        commaArgIndex++;
+        lastCommaIndex = i;
+      } else if (ch === ";") {
+        semicolonArgIndex++;
+        lastSemicolonIndex = i;
+      }
     }
   }
+
+  const useSemicolons = lastSemicolonIndex !== -1;
+  const argIndex = useSemicolons ? semicolonArgIndex : commaArgIndex;
+  const lastArgSeparatorIndex = useSemicolons ? lastSemicolonIndex : lastCommaIndex;
 
   let rawStart = lastArgSeparatorIndex === -1 ? openParenIndex + 1 : lastArgSeparatorIndex + 1;
   let start = rawStart;

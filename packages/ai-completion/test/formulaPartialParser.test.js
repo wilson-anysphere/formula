@@ -25,3 +25,12 @@ test("parsePartialFormula ignores ';' inside array constants { ... }", () => {
   assert.equal(parsed.currentArg?.text, "A");
 });
 
+test("parsePartialFormula prefers ';' as the separator when both ';' and ',' appear (decimal comma locale)", () => {
+  const registry = new FunctionRegistry();
+  const input = "=VLOOKUP(1,2; A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  // The comma is part of a decimal literal in many locales; the semicolon is the arg separator.
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});

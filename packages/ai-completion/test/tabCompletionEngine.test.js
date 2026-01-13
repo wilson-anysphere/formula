@@ -647,6 +647,30 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   );
 });
 
+test("Range suggestions work for ';' separators even when the formula contains decimal commas", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  // In semicolon locales, `,` is often used as the decimal separator.
+  const currentInput = "=VLOOKUP(1,2; A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP(1,2; A1:A10"),
+    `Expected a VLOOKUP range suggestion for the 2nd arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =VLOOKUP(A1, A suggests a 2D table range when adjacent columns form a table", async () => {
   const engine = new TabCompletionEngine();
 
