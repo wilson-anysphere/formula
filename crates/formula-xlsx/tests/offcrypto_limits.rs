@@ -97,12 +97,12 @@ fn decoded_len_limit_allows_padded_base64_exact_size() {
                saltValue="{salt_16b}"/>
                 <keyEncryptors>
                 <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-                   <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
-                                   spinCount="1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
-                                   saltValue="{salt_16b}"
-                                   encryptedVerifierHashInput="AA=="
-                                   encryptedVerifierHashValue="AA=="
-                                   encryptedKeyValue="AA=="/>
+                  <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                                  spinCount="1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                                  saltValue="{salt_16b}"
+                                  encryptedVerifierHashInput="AA=="
+                                  encryptedVerifierHashValue="AA=="
+                                  encryptedKeyValue="AA=="/>
                 </keyEncryptor>
               </keyEncryptors>
             </encryption>"#

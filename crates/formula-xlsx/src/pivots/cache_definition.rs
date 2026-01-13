@@ -826,6 +826,7 @@ mod tests {
     use super::*;
 
     use pretty_assertions::assert_eq;
+    use formula_engine::pivot::PivotFieldRef;
 
     #[test]
     fn parses_shared_items_and_resolves_indices() {
@@ -1156,7 +1157,7 @@ mod tests {
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(
             cfg.value_fields[0].source_field,
-            formula_engine::pivot::PivotFieldRef::CacheFieldName("Profit".to_string())
+            PivotFieldRef::CacheFieldName("Profit".to_string())
         );
     }
 

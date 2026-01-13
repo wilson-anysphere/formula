@@ -14,6 +14,7 @@ use std::io::{Cursor, Seek, Write};
 use std::path::Path;
 use thiserror::Error;
 use zip::ZipWriter;
+use formula_model::rich_text::{RichText, Underline};
 
 #[derive(Debug, Error)]
 pub enum XlsxWriteError {
@@ -119,7 +120,9 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     // Shared strings
     if !shared_strings.values.is_empty() {
         zip.start_file("xl/sharedStrings.xml", options)?;
-        zip.write_all(shared_strings_xml(&shared_strings).as_bytes())?;
+        let xml = crate::shared_strings::write_shared_strings_xml(&shared_strings.values)
+            .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+        zip.write_all(xml.as_bytes())?;
     }
 
     // Tables are written globally and then referenced from sheets.
@@ -1378,26 +1381,21 @@ fn cell_xml(
         }
         CellValue::String(s) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings.index.get(s).copied().unwrap_or_default();
+            let key = SharedStringKey::plain(s);
+            let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Entity(entity) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(&entity.display_value)
-                .copied()
-                .unwrap_or_default();
+            let key = SharedStringKey::plain(&entity.display_value);
+            let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Record(record) => {
             let display = record_display_string(record);
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(&display)
-                .copied()
-                .unwrap_or_default();
+            let key = SharedStringKey::plain(&display);
+            let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Error(e) => {
@@ -1406,11 +1404,8 @@ fn cell_xml(
         }
         CellValue::RichText(r) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(&r.text)
-                .copied()
-                .unwrap_or_default();
+            let key = SharedStringKey::from_rich_text(r);
+            let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Image(image) => {
@@ -1418,7 +1413,8 @@ fn cell_xml(
             // plain text when alt text is available; otherwise omit the cached value.
             if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
                 attrs.push_str(r#" t="s""#);
-                let idx = shared_strings.index.get(alt).copied().unwrap_or_default();
+                let key = SharedStringKey::plain(alt);
+                let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
                 value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
             }
         }
@@ -1449,11 +1445,8 @@ fn columnar_cell_xml(
         }
         ColumnarValue::String(s) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(s.as_ref())
-                .copied()
-                .unwrap_or_default();
+            let key = SharedStringKey::plain(s.as_ref());
+            let idx = shared_strings.index.get(&key).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         ColumnarValue::DateTime(v) => {
@@ -1486,8 +1479,8 @@ fn columnar_cell_xml(
 
 #[derive(Debug, Clone)]
 struct SharedStrings {
-    values: Vec<String>,
-    index: HashMap<String, usize>,
+    values: crate::shared_strings::SharedStrings,
+    index: HashMap<SharedStringKey, usize>,
 }
 
 fn record_display_string(record: &formula_model::RecordValue) -> String {
@@ -1495,49 +1488,54 @@ fn record_display_string(record: &formula_model::RecordValue) -> String {
 }
 
 fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
-    let mut values: Vec<String> = Vec::new();
-    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut values = crate::shared_strings::SharedStrings::default();
+    let mut index: HashMap<SharedStringKey, usize> = HashMap::new();
 
     for sheet in &workbook.sheets {
         for (_cell_ref, cell) in sheet.iter_cells() {
             match &cell.value {
                 CellValue::String(s) => {
-                    if !index.contains_key(s) {
-                        let idx = values.len();
-                        values.push(s.clone());
-                        index.insert(s.clone(), idx);
+                    let key = SharedStringKey::plain(s);
+                    if !index.contains_key(&key) {
+                        let idx = values.items.len();
+                        values.items.push(RichText::new(s.clone()));
+                        index.insert(key, idx);
                     }
                 }
                 CellValue::Entity(entity) => {
                     let s = entity.display_value.clone();
-                    if !index.contains_key(&s) {
-                        let idx = values.len();
-                        values.push(s.clone());
-                        index.insert(s, idx);
+                    let key = SharedStringKey::plain(&s);
+                    if !index.contains_key(&key) {
+                        let idx = values.items.len();
+                        values.items.push(RichText::new(s.clone()));
+                        index.insert(key, idx);
                     }
                 }
                 CellValue::Record(record) => {
                     let s = record_display_string(record);
-                    if !index.contains_key(&s) {
-                        let idx = values.len();
-                        values.push(s.clone());
-                        index.insert(s, idx);
+                    let key = SharedStringKey::plain(&s);
+                    if !index.contains_key(&key) {
+                        let idx = values.items.len();
+                        values.items.push(RichText::new(s.clone()));
+                        index.insert(key, idx);
                     }
                 }
                 CellValue::Image(image) => {
                     if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
-                        if !index.contains_key(alt) {
-                            let idx = values.len();
-                            values.push(alt.to_string());
-                            index.insert(alt.to_string(), idx);
+                        let key = SharedStringKey::plain(alt);
+                        if !index.contains_key(&key) {
+                            let idx = values.items.len();
+                            values.items.push(RichText::new(alt.to_string()));
+                            index.insert(key, idx);
                         }
                     }
                 }
                 CellValue::RichText(r) => {
-                    if !index.contains_key(&r.text) {
-                        let idx = values.len();
-                        values.push(r.text.clone());
-                        index.insert(r.text.clone(), idx);
+                    let key = SharedStringKey::from_rich_text(r);
+                    if !index.contains_key(&key) {
+                        let idx = values.items.len();
+                        values.items.push(r.clone());
+                        index.insert(key, idx);
                     }
                 }
                 _ => {}
@@ -1551,11 +1549,11 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     for col in 0..cols {
                         if let ColumnarValue::String(s) = table.get_cell(row, col) {
                             let text = s.as_ref();
-                            if !index.contains_key(text) {
-                                let idx = values.len();
-                                let owned = text.to_string();
-                                values.push(owned.clone());
-                                index.insert(owned, idx);
+                            let key = SharedStringKey::plain(text);
+                            if !index.contains_key(&key) {
+                                let idx = values.items.len();
+                                values.items.push(RichText::new(text.to_string()));
+                                index.insert(key, idx);
                             }
                         }
                     }
@@ -1567,27 +1565,69 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
     SharedStrings { values, index }
 }
 
-fn shared_strings_xml(shared: &SharedStrings) -> String {
-    let count = shared.values.len();
-    let mut si = String::new();
-    for v in &shared.values {
-        let preserve = v.chars().next().map(|c| c.is_whitespace()).unwrap_or(false)
-            || v.chars().last().map(|c| c.is_whitespace()).unwrap_or(false);
-        if preserve {
-            si.push_str(&format!(
-                r#"<si><t xml:space="preserve">{}</t></si>"#,
-                escape_xml(v)
-            ));
-        } else {
-            si.push_str(&format!(r#"<si><t>{}</t></si>"#, escape_xml(v)));
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringKey {
+    text: String,
+    runs: Vec<SharedStringRunKey>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringRunKey {
+    start: usize,
+    end: usize,
+    style: SharedStringRunStyleKey,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SharedStringRunStyleKey {
+    bold: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<u8>,
+    color: Option<u32>,
+    font: Option<String>,
+    size_100pt: Option<u16>,
+}
+
+impl SharedStringKey {
+    fn plain(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            runs: Vec::new(),
         }
     }
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{count}" uniqueCount="{count}">
-  {si}
-</sst>"#
-    )
+
+    fn from_rich_text(rich: &RichText) -> Self {
+        let runs = rich
+            .runs
+            .iter()
+            .map(|run| SharedStringRunKey {
+                start: run.start,
+                end: run.end,
+                style: SharedStringRunStyleKey {
+                    bold: run.style.bold,
+                    italic: run.style.italic,
+                    underline: run.style.underline.map(underline_key),
+                    color: run.style.color.and_then(|c| c.argb()),
+                    font: run.style.font.clone(),
+                    size_100pt: run.style.size_100pt,
+                },
+            })
+            .collect();
+        Self {
+            text: rich.text.clone(),
+            runs,
+        }
+    }
+}
+
+fn underline_key(underline: Underline) -> u8 {
+    match underline {
+        Underline::None => 0,
+        Underline::Single => 1,
+        Underline::Double => 2,
+        Underline::SingleAccounting => 3,
+        Underline::DoubleAccounting => 4,
+    }
 }
 
 fn content_types_xml(
