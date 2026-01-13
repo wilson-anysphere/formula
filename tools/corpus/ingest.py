@@ -7,8 +7,28 @@ from pathlib import Path
 
 from .crypto import get_fernet_key_from_env
 from .sanitize import SanitizeOptions, sanitize_xlsx_bytes, scan_xlsx_bytes_for_leaks
-from .triage import triage_workbook
-from .util import WorkbookInput, ensure_dir, sha256_hex, utc_now_iso, write_json
+from . import triage as triage_mod
+from .util import WorkbookInput, ensure_dir, read_workbook_input, sha256_hex, utc_now_iso, write_json
+
+
+def _triage_sanitized_workbook(workbook: WorkbookInput) -> dict:
+    """Run corpus triage on an in-memory workbook blob.
+
+    This is intentionally a small wrapper around `tools.corpus.triage.triage_workbook` so we can
+    share defaults between `triage.py` and `ingest.py` and unit test the invocation without
+    requiring a Rust toolchain.
+    """
+
+    rust_exe = triage_mod._build_rust_helper()
+    diff_ignore = set(triage_mod.DEFAULT_DIFF_IGNORE)
+    return triage_mod.triage_workbook(
+        workbook,
+        rust_exe=rust_exe,
+        diff_ignore=diff_ignore,
+        diff_limit=25,
+        recalc=False,
+        render_smoke=False,
+    )
 
 
 def main() -> int:
@@ -48,9 +68,10 @@ def main() -> int:
 
     fernet_key = get_fernet_key_from_env(args.fernet_key_env)
 
-    raw = args.input.read_bytes()
+    workbook = read_workbook_input(args.input)
+    raw = workbook.data
     workbook_id = sha256_hex(raw)[:16]
-    ext = "".join(args.input.suffixes) or ".xlsx"
+    ext = "".join(Path(workbook.display_name).suffixes) or ".xlsx"
 
     corpus_dir: Path = args.corpus_dir
     originals_dir = corpus_dir / "originals"
@@ -104,7 +125,9 @@ def main() -> int:
     )
 
     if not args.no_triage:
-        report = triage_workbook(WorkbookInput(display_name=args.input.name, data=sanitized_bytes))
+        report = _triage_sanitized_workbook(
+            WorkbookInput(display_name=workbook.display_name, data=sanitized_bytes)
+        )
         write_json(reports_dir / f"{workbook_id}.json", report)
 
     print(f"Ingested {args.input} -> {workbook_id}")
