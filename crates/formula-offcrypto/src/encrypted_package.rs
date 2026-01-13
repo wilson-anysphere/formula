@@ -1,4 +1,4 @@
-use crate::{AgileEncryptionInfo, OffcryptoError, Reader};
+use crate::{AgileEncryptionInfo, DecryptOptions, OffcryptoError, Reader};
 
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
@@ -41,6 +41,21 @@ fn checked_output_len(total_size: u64) -> Result<usize, OffcryptoError> {
 /// segment; the remainder contains padding.
 pub fn decrypt_encrypted_package<F>(
     encrypted_package: &[u8],
+    decrypt_block: F,
+) -> Result<Vec<u8>, OffcryptoError>
+where
+    F: FnMut(u32, &[u8], &mut [u8]) -> Result<(), OffcryptoError>,
+{
+    decrypt_encrypted_package_with_options(encrypted_package, &DecryptOptions::default(), decrypt_block)
+}
+
+/// Decrypt an `EncryptedPackage` stream using the provided per-block decryptor, with configurable
+/// limits.
+///
+/// See [`decrypt_encrypted_package`] for details on the `decrypt_block` callback.
+pub fn decrypt_encrypted_package_with_options<F>(
+    encrypted_package: &[u8],
+    options: &DecryptOptions,
     mut decrypt_block: F,
 ) -> Result<Vec<u8>, OffcryptoError>
 where
@@ -48,6 +63,11 @@ where
 {
     let mut reader = Reader::new(encrypted_package);
     let total_size = reader.read_u64_le("EncryptedPackageHeader.original_size")?;
+    if let Some(max) = options.limits.max_output_size {
+        if total_size > max {
+            return Err(OffcryptoError::OutputTooLarge { total_size, max });
+        }
+    }
     let output_len = checked_output_len(total_size)?;
 
     // Validate ciphertext framing before allocating based on attacker-controlled `total_size`.
@@ -397,6 +417,40 @@ mod tests {
         assert!(
             matches!(err, OffcryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
             "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+        );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 1024 * 1024,
+            "expected no large allocations, observed max allocation request: {max_alloc} bytes"
+        );
+    }
+
+    #[test]
+    fn output_too_large_errors_without_large_allocation() {
+        // Choose a very large size that would be a dangerous allocation on 64-bit platforms.
+        let total_size: u64 = 4 * 1024 * 1024 * 1024; // 4GiB
+        let max: u64 = 1024 * 1024; // 1MiB
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&total_size.to_le_bytes());
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let opts = crate::DecryptOptions {
+            verify_integrity: true,
+            limits: crate::DecryptLimits {
+                max_output_size: Some(max),
+                ..Default::default()
+            },
+        };
+        let err =
+            decrypt_encrypted_package_with_options(bytes.as_slice(), &opts, |_idx, _ct, _pt| Ok(()))
+                .expect_err("expected output too large");
+
+        assert!(
+            matches!(err, OffcryptoError::OutputTooLarge { total_size: got, max: m } if got == total_size && m == max),
+            "expected OutputTooLarge({total_size}, {max}), got {err:?}"
         );
 
         let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);

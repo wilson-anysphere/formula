@@ -419,6 +419,7 @@ mod tests {
             verify_integrity: true,
             limits: crate::DecryptLimits {
                 max_spin_count: Some(10),
+                ..Default::default()
             },
         };
 

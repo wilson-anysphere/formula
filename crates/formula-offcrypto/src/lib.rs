@@ -59,12 +59,20 @@ pub struct DecryptLimits {
     ///
     /// `None` disables the limit.
     pub max_spin_count: Option<u32>,
+    /// Maximum allowed size (in bytes) of a decrypted `EncryptedPackage` output.
+    ///
+    /// This guards against malicious/corrupt `EncryptedPackage` headers claiming pathological
+    /// plaintext sizes, which could otherwise lead to huge allocations.
+    ///
+    /// `None` disables the limit.
+    pub max_output_size: Option<u64>,
 }
 
 impl Default for DecryptLimits {
     fn default() -> Self {
         Self {
             max_spin_count: Some(DEFAULT_MAX_SPIN_COUNT),
+            max_output_size: None,
         }
     }
 }
@@ -491,6 +499,11 @@ pub enum OffcryptoError {
         "EncryptedPackage declared original size {total_size} exceeds ciphertext length {ciphertext_len}"
     )]
     EncryptedPackageSizeMismatch { total_size: u64, ciphertext_len: usize },
+    /// The decrypted package size exceeds a caller-specified limit.
+    #[error(
+        "EncryptedPackage declared plaintext size {total_size} exceeds maximum allowed output size {max}"
+    )]
+    OutputTooLarge { total_size: u64, max: u64 },
     /// The `EncryptionInfo` version is not supported by the current parser.
     #[error("unsupported EncryptionInfo version {major}.{minor}")]
     UnsupportedVersion { major: u16, minor: u16 },
@@ -2028,6 +2041,20 @@ pub fn validate_agile_segment_decrypt_inputs(
     Ok(())
 }
 
+/// Decrypt an ECMA-376 Standard-encrypted `EncryptedPackage` stream using an already-derived AES key.
+///
+/// This performs the per-segment AES-ECB decryption described in MS-OFFCRYPTO and returns the
+/// decrypted OPC package bytes.
+pub fn standard_decrypt_encrypted_package(
+    key: &[u8],
+    encrypted_package: &[u8],
+    options: &DecryptOptions,
+) -> Result<Vec<u8>, OffcryptoError> {
+    crate::encrypted_package::decrypt_encrypted_package_with_options(encrypted_package, options, |_idx, ct, pt| {
+        pt.copy_from_slice(ct);
+        aes_ecb_decrypt_in_place(key, pt)
+    })
+}
 fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(password.len().saturating_mul(2));
     for unit in password.encode_utf16() {
@@ -3422,19 +3449,13 @@ fn read_stream_from_ole<F: Read + Seek>(
     ole: &mut cfb::CompoundFile<F>,
     stream: &'static str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    let mut s = match open_stream_best_effort(ole, stream) {
-        Ok(s) => s,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Err(OffcryptoError::InvalidStructure(format!(
-                "missing `{stream}` stream"
-            )));
+    let mut s = open_stream_best_effort(ole, stream).map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            OffcryptoError::InvalidStructure(format!("missing `{stream}` stream"))
+        } else {
+            OffcryptoError::InvalidStructure(format!("failed to open `{stream}` stream: {err}"))
         }
-        Err(err) => {
-            return Err(OffcryptoError::InvalidStructure(format!(
-                "failed to open `{stream}`: {err}"
-            )));
-        }
-    };
+    })?;
 
     let mut buf = Vec::new();
     s.read_to_end(&mut buf)
@@ -4065,6 +4086,7 @@ mod tests {
     fn agile_spin_count_just_below_limit_succeeds() {
         let limits = DecryptLimits {
             max_spin_count: Some(10),
+            ..Default::default()
         };
 
         let spin_count = 9;
@@ -4086,6 +4108,7 @@ mod tests {
     fn agile_spin_count_above_limit_errors_without_iterating() {
         let limits = DecryptLimits {
             max_spin_count: Some(10),
+            ..Default::default()
         };
 
         // A huge spinCount that would be a CPU DoS without an up-front check.

@@ -201,6 +201,34 @@ pub struct OpenOptions {
     pub password: Option<String>,
 }
 
+/// Default maximum plaintext size allowed when decrypting an OOXML `EncryptedPackage`.
+///
+/// This is a defensive guardrail against malicious/corrupt encrypted workbooks that claim a
+/// pathological decrypted size in the `EncryptedPackage` header.
+///
+/// Note: the decrypted bytes are a ZIP/OPC package (already compressed), so the plaintext size
+/// should be close to the ciphertext size. We allow some slack and also apply an absolute cap.
+const DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE: u64 = 1024 * 1024 * 1024; // 1GiB
+
+fn default_offcrypto_max_output_size(encrypted_package_len: usize) -> u64 {
+    let len = encrypted_package_len as u64;
+    let scaled = len.saturating_mul(4);
+    scaled.min(DEFAULT_MAX_OFFCRYPTO_OUTPUT_SIZE)
+}
+
+/// Decrypt an ECMA-376 Standard-encrypted `EncryptedPackage` stream with a derived AES key.
+///
+/// This is a low-level helper used by encrypted workbook implementations. Callers that do not
+/// explicitly supply size limits get a conservative default derived from `encrypted_package.len()`.
+pub fn standard_decrypt_encrypted_package(
+    key: &[u8],
+    encrypted_package: &[u8],
+) -> Result<Vec<u8>, formula_offcrypto::OffcryptoError> {
+    let mut opts = formula_offcrypto::DecryptOptions::default();
+    opts.limits.max_output_size = Some(default_offcrypto_max_output_size(encrypted_package.len()));
+    formula_offcrypto::standard_decrypt_encrypted_package(key, encrypted_package, &opts)
+}
+
 fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
