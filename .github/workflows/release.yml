@@ -873,7 +873,7 @@ jobs:
           )
 
           if ($msis.Count -eq 0 -and $exes.Count -eq 0) {
-            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir"
+            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir`n`nCommon causes:`n- WiX Toolset missing (candle.exe/light.exe not on PATH) so MSI bundling was skipped/failed`n- NSIS missing (makensis.exe not on PATH) so EXE bundling was skipped/failed`n- Tauri bundler failed earlier; inspect the tauri build logs for the root error"
           }
 
           Write-Host "windows-bundle: OK (found $($msis.Count) MSI + $($exes.Count) EXE installer file(s))"
