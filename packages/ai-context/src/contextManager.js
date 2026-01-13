@@ -448,6 +448,7 @@ export class ContextManager {
     let dlpHeuristicApplied = false;
     let dlpAuditDocumentId = null;
     let dlpAuditSheetId = null;
+    const policyAllowsRestrictedContent = Boolean(dlp?.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
 
     if (dlp) {
       const documentId = dlp.documentId;
@@ -512,6 +513,36 @@ export class ContextManager {
         throw new DlpViolationError(structuredDecision);
       }
 
+      // Workbook DLP enforcement treats heuristic sensitive patterns as Restricted when evaluating
+      // AI cloud processing policies. Mirror that behavior in the single-sheet context path so
+      // callers can't accidentally leak sensitive content even when no structured selectors are present.
+      dlpHeuristic = classifyValuesForDlp(valuesForContext, { signal });
+      const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
+      const combinedClassification = maxClassification(structuredSelectionClassification, heuristicPolicyClassification);
+      dlpSelectionClassification = combinedClassification;
+      if (heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC) {
+        dlpHeuristicApplied = true;
+        dlpDecision = evaluatePolicy({
+          action: DLP_ACTION.AI_CLOUD_PROCESSING,
+          classification: combinedClassification,
+          policy: dlp.policy,
+          options: { includeRestrictedContent },
+        });
+      }
+
+      if (dlpDecision.decision === DLP_DECISION.BLOCK) {
+        dlp.auditLogger?.log({
+          type: "ai.context",
+          documentId,
+          sheetId,
+          sheetName: rawSheet.name,
+          decision: dlpDecision,
+          selectionClassification: dlpSelectionClassification,
+          redactedCellCount: 0,
+        });
+        throw new DlpViolationError(dlpDecision);
+      }
+
       // Only do per-cell enforcement under REDACT decisions; in ALLOW cases the range max
       // classification is within the threshold so every in-range cell must be allowed.
       let nextValues;
@@ -522,7 +553,6 @@ export class ContextManager {
           maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
           signal,
         });
-        const policyAllowsRestrictedContent = Boolean(dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
         const cellCheck = { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent, signal };
 
         // Redact at cell level (deterministic placeholder).
@@ -551,46 +581,17 @@ export class ContextManager {
 
       sheetForContext = { ...rawSheet, values: nextValues };
 
-      // Workbook DLP enforcement treats heuristic sensitive patterns as Restricted when evaluating
-      // AI cloud processing policies. Mirror that behavior in the single-sheet context path so
-      // callers can't accidentally leak sensitive content when no structured selectors are present.
-      if (structuredDecision.decision === DLP_DECISION.ALLOW) {
-        dlpHeuristic = classifyValuesForDlp(nextValues, { signal });
-        const heuristicPolicyClassification = heuristicToPolicyClassification(dlpHeuristic);
-        const combinedClassification = maxClassification(structuredSelectionClassification, heuristicPolicyClassification);
-        // Preserve the structured classification for audit/debug, but evaluate policy on the max.
-        if (heuristicPolicyClassification.level !== CLASSIFICATION_LEVEL.PUBLIC) {
-          dlpHeuristicApplied = true;
-          dlpSelectionClassification = combinedClassification;
-          dlpDecision = evaluatePolicy({
-            action: DLP_ACTION.AI_CLOUD_PROCESSING,
-            classification: combinedClassification,
-            policy: dlp.policy,
-            options: { includeRestrictedContent },
-          });
-        }
-      }
-
-      if (dlpDecision.decision === DLP_DECISION.BLOCK) {
-        dlp.auditLogger?.log({
-          type: "ai.context",
-          documentId,
-          sheetId,
-          sheetName: rawSheet.name,
-          decision: dlpDecision,
-          selectionClassification: dlpSelectionClassification,
-          redactedCellCount: 0,
-        });
-        throw new DlpViolationError(dlpDecision);
-      }
-
       // Under REDACT decisions, defensively apply heuristic redaction to the context sheet so:
       //  - schema / sampling / retrieval don't contain raw sensitive strings in structured outputs
       //  - in-memory RAG text doesn't retain sensitive patterns (defense-in-depth)
       if (dlpDecision.decision === DLP_DECISION.REDACT) {
         sheetForContext = {
           ...sheetForContext,
-          values: redactValuesForDlp(sheetForContext.values, this.redactor, { signal, includeRestrictedContent }),
+          values: redactValuesForDlp(sheetForContext.values, this.redactor, {
+            signal,
+            includeRestrictedContent,
+            policyAllowsRestrictedContent,
+          }),
         };
       }
     }
@@ -602,7 +603,25 @@ export class ContextManager {
     // reuses that work (or cached results) so we don't run schema extraction twice.
     const { schema } = await this._ensureSheetIndexed(sheetForContext, { signal, maxChunkRows });
     throwIfAborted(signal);
-    const retrieved = await this.ragIndex.search(params.query, this.sheetRagTopK, { signal });
+    let queryForRag = params.query;
+    if (dlp) {
+      const queryHeuristic = classifyText(params.query);
+      const queryClassification = heuristicToPolicyClassification(queryHeuristic);
+      const queryDecision = evaluatePolicy({
+        action: DLP_ACTION.AI_CLOUD_PROCESSING,
+        classification: queryClassification,
+        policy: dlp.policy,
+        options: { includeRestrictedContent: dlp.includeRestrictedContent },
+      });
+      if (queryDecision.decision !== DLP_DECISION.ALLOW) {
+        queryForRag = this.redactor(params.query);
+        const restrictedAllowed = dlp.includeRestrictedContent && policyAllowsRestrictedContent;
+        if (!restrictedAllowed && classifyText(queryForRag).level === "sensitive") {
+          queryForRag = "[REDACTED]";
+        }
+      }
+    }
+    const retrieved = await this.ragIndex.search(queryForRag, this.sheetRagTopK, { signal });
     throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;
@@ -644,13 +663,25 @@ export class ContextManager {
     const includeRestrictedContentForStructured =
       dlp?.includeRestrictedContent ?? dlp?.include_restricted_content ?? false;
     const schemaOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(schema, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
+      ? redactStructuredValue(schema, this.redactor, {
+          signal,
+          includeRestrictedContent: includeRestrictedContentForStructured,
+          policyAllowsRestrictedContent,
+        })
       : schema;
     const sampledOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(sampled, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
+      ? redactStructuredValue(sampled, this.redactor, {
+          signal,
+          includeRestrictedContent: includeRestrictedContentForStructured,
+          policyAllowsRestrictedContent,
+        })
       : sampled;
     const retrievedOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(retrieved, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
+      ? redactStructuredValue(retrieved, this.redactor, {
+          signal,
+          includeRestrictedContent: includeRestrictedContentForStructured,
+          policyAllowsRestrictedContent,
+        })
       : retrieved;
     const schemaForPrompt = compactSheetSchemaForPrompt(schemaOut);
 
@@ -1485,6 +1516,8 @@ function heuristicToPolicyClassification(heuristic) {
 function redactValuesForDlp(values, redactor, options = {}) {
   const signal = options.signal;
   const includeRestrictedContent = options.includeRestrictedContent ?? false;
+  const policyAllowsRestrictedContent = options.policyAllowsRestrictedContent ?? false;
+  const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
   /** @type {unknown[][]} */
   const out = [];
   for (const row of values || []) {
@@ -1503,7 +1536,7 @@ function redactValuesForDlp(values, redactor, options = {}) {
       const redacted = redactor(cell);
       // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
       // ensure heuristic sensitive patterns never slip through under DLP redaction.
-      if (!includeRestrictedContent && classifyText(redacted).level === "sensitive") {
+      if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
         nextRow.push("[REDACTED]");
         continue;
       }
@@ -1529,11 +1562,13 @@ function redactValuesForDlp(values, redactor, options = {}) {
 function redactStructuredValue(value, redactor, options = {}) {
   const signal = options.signal;
   const includeRestrictedContent = options.includeRestrictedContent ?? false;
+  const policyAllowsRestrictedContent = options.policyAllowsRestrictedContent ?? false;
+  const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
   throwIfAborted(signal);
 
   if (typeof value === "string") {
     const redacted = redactor(value);
-    if (!includeRestrictedContent && classifyText(redacted).level === "sensitive") {
+    if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
       return /** @type {T} */ ("[REDACTED]");
     }
     return /** @type {T} */ (redacted);
@@ -1544,7 +1579,9 @@ function redactStructuredValue(value, redactor, options = {}) {
 
   if (Array.isArray(value)) {
     return /** @type {T} */ (
-      value.map((v) => redactStructuredValue(v, redactor, { signal, includeRestrictedContent }))
+      value.map((v) =>
+        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
+      )
     );
   }
 
@@ -1558,7 +1595,7 @@ function redactStructuredValue(value, redactor, options = {}) {
   const out = {};
   for (const [key, v] of Object.entries(value)) {
     throwIfAborted(signal);
-    out[key] = redactStructuredValue(v, redactor, { signal, includeRestrictedContent });
+    out[key] = redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent });
   }
   return out;
 }
