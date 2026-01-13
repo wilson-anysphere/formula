@@ -2771,6 +2771,14 @@ export class SpreadsheetApp {
     }
 
     this.dispatchReadOnlyChanged();
+
+    // Permissions changes can also affect comment capabilities (e.g. viewer ↔ commenter).
+    // If the comments panel is open, re-render so composer/action disabled states stay in sync.
+    try {
+      this.renderCommentsPanel();
+    } catch {
+      // ignore (tests may construct partial app instances)
+    }
   }
 
   destroy(): void {
