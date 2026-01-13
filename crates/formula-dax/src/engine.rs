@@ -152,6 +152,17 @@ impl FilterContext {
         self.clear_column_filter(table, column);
     }
 
+    pub(crate) fn relationship_overrides(&self) -> &HashSet<usize> {
+        &self.active_relationship_overrides
+    }
+
+    pub(crate) fn is_relationship_disabled(&self, relationship_idx: usize) -> bool {
+        matches!(
+            self.cross_filter_overrides.get(&relationship_idx).copied(),
+            Some(RelationshipOverride::Disabled)
+        )
+    }
+
     fn activate_relationship(&mut self, relationship_idx: usize) {
         self.active_relationship_overrides.insert(relationship_idx);
     }
@@ -836,7 +847,7 @@ impl DaxEngine {
                 let [arg] = args else {
                     return Err(DaxError::Eval("RELATED expects 1 argument".into()));
                 };
-                self.eval_related(model, arg, row_ctx)
+                self.eval_related(model, arg, filter, row_ctx)
             }
             "EARLIER" => {
                 if args.is_empty() || args.len() > 2 {
@@ -1967,6 +1978,7 @@ impl DaxEngine {
         &self,
         model: &DataModel,
         arg: &Expr,
+        filter: &FilterContext,
         row_ctx: &RowContext,
     ) -> DaxResult<Value> {
         let Expr::ColumnRef { table, column } = arg else {
@@ -1976,6 +1988,12 @@ impl DaxEngine {
             return Err(DaxError::Eval("RELATED requires row context".into()));
         };
 
+        let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+        for &idx in filter.relationship_overrides() {
+            if let Some(rel) = model.relationships().get(idx) {
+                override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+            }
+        }
         let current_row = row_ctx
             .row_for(current_table)
             .ok_or_else(|| DaxError::Eval("missing row for current table".into()))?;
@@ -1984,7 +2002,16 @@ impl DaxEngine {
             current_table,
             table,
             RelationshipPathDirection::ManyToOne,
-            |_, rel| rel.rel.is_active,
+            |idx, rel| {
+                let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+                let is_active = if override_pairs.contains(&pair) {
+                    filter.relationship_overrides().contains(&idx)
+                } else {
+                    rel.rel.is_active
+                };
+
+                is_active && !filter.is_relationship_disabled(idx)
+            },
         )?
         else {
             return Err(DaxError::Eval(format!(
@@ -2773,15 +2800,35 @@ impl DaxEngine {
                         return Err(DaxError::Eval("RELATEDTABLE requires row context".into()));
                     };
 
+                    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+                    for &idx in filter.relationship_overrides() {
+                        if let Some(rel) = model.relationships().get(idx) {
+                            override_pairs
+                                .insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+                        }
+                    }
+
+                    let is_relationship_active = |idx: usize, rel: &RelationshipInfo| {
+                        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+                        let is_active = if override_pairs.contains(&pair) {
+                            filter.relationship_overrides().contains(&idx)
+                        } else {
+                            rel.rel.is_active
+                        };
+
+                        is_active && !filter.is_relationship_disabled(idx)
+                    };
+
                     let current_row = row_ctx
                         .row_for(current_table)
                         .ok_or_else(|| DaxError::Eval("missing current row".into()))?;
 
                     // Fast path: direct relationship `target_table (many) -> current_table (one)`.
-                    if let Some(rel) = model.relationships().iter().find(|rel| {
-                        rel.rel.is_active
-                            && rel.rel.from_table == *target_table
+                    if let Some(rel) = model.relationships().iter().enumerate().find_map(|(idx, rel)| {
+                        (rel.rel.from_table == *target_table
                             && rel.rel.to_table == current_table
+                            && is_relationship_active(idx, rel))
+                        .then_some(rel)
                     }) {
                         let to_table_ref = model
                             .table(current_table)
@@ -2849,7 +2896,7 @@ impl DaxEngine {
                         current_table,
                         target_table,
                         RelationshipPathDirection::OneToMany,
-                        |_, rel| rel.rel.is_active,
+                        |idx, rel| is_relationship_active(idx, rel),
                     )?
                     else {
                         return Err(DaxError::Eval(format!(

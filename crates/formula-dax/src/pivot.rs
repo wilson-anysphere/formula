@@ -163,10 +163,28 @@ fn build_group_key_accessors<'a>(
     model: &'a DataModel,
     base_table: &'a str,
     group_by: &'a [GroupByColumn],
+    filter: &FilterContext,
 ) -> DaxResult<(&'a crate::model::Table, Vec<GroupKeyAccessor<'a>>)> {
     let base_table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+    for &idx in filter.relationship_overrides() {
+        if let Some(rel) = model.relationships().get(idx) {
+            override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+        }
+    }
+    let is_relationship_active = |idx: usize, rel: &crate::model::RelationshipInfo| {
+        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+        let is_active = if override_pairs.contains(&pair) {
+            filter.relationship_overrides().contains(&idx)
+        } else {
+            rel.rel.is_active
+        };
+
+        is_active && !filter.is_relationship_disabled(idx)
+    };
 
     let mut accessors = Vec::with_capacity(group_by.len());
     for col in group_by {
@@ -186,7 +204,7 @@ fn build_group_key_accessors<'a>(
             base_table,
             &col.table,
             RelationshipPathDirection::ManyToOne,
-            |_, rel| rel.rel.is_active,
+            |idx, rel| is_relationship_active(idx, rel),
         )?
         else {
             return Err(DaxError::Eval(format!(
@@ -1308,7 +1326,8 @@ fn pivot_planned_row_group_by(
         return Ok(None);
     }
 
-    let (table_ref, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
+    let (table_ref, group_key_accessors) =
+        build_group_key_accessors(model, base_table, group_by, filter)?;
 
     let mut agg_specs: Vec<AggregationSpec> = Vec::new();
     let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
@@ -1505,7 +1524,7 @@ fn pivot_row_scan(
         .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
         .transpose()?;
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
-    let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by)?;
+    let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
 
     // Build the set of groups by scanning the base table rows. This ensures we only create

@@ -1711,6 +1711,82 @@ fn userelationship_activates_inactive_relationship_and_overrides_active() {
 }
 
 #[test]
+fn related_respects_userelationship_overrides() {
+    let mut model = DataModel::new();
+    let mut dates = Table::new("Date", vec!["DateKey"]);
+    dates.push_row(vec![1.into()]).unwrap();
+    dates.push_row(vec![2.into()]).unwrap();
+    model.add_table(dates).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["OrderDateKey", "ShipDateKey", "Amount"]);
+    sales
+        .push_row(vec![1.into(), 2.into(), 10.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![2.into(), 1.into(), 5.0.into()])
+        .unwrap();
+    sales
+        .push_row(vec![2.into(), 2.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_OrderDate".into(),
+            from_table: "Sales".into(),
+            from_column: "OrderDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Sales_ShipDate".into(),
+            from_table: "Sales".into(),
+            from_column: "ShipDateKey".into(),
+            to_table: "Date".into(),
+            to_column: "DateKey".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: false,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Sales", "OrderDateViaRelated", "RELATED(Date[DateKey])")
+        .unwrap();
+    model
+        .add_calculated_column(
+            "Sales",
+            "ShipDateViaRelated",
+            "CALCULATE(RELATED(Date[DateKey]), USERELATIONSHIP(Sales[ShipDateKey], Date[DateKey]))",
+        )
+        .unwrap();
+
+    let sales = model.table("Sales").unwrap();
+    let values: Vec<(Value, Value, Value, Value)> = (0..sales.row_count())
+        .map(|row| {
+            (
+                sales.value(row, "OrderDateKey").unwrap(),
+                sales.value(row, "ShipDateKey").unwrap(),
+                sales.value(row, "OrderDateViaRelated").unwrap(),
+                sales.value(row, "ShipDateViaRelated").unwrap(),
+            )
+        })
+        .collect();
+
+    for (order_key, ship_key, order_related, ship_related) in values {
+        assert_eq!(order_related, order_key);
+        assert_eq!(ship_related, ship_key);
+    }
+}
+
+#[test]
 fn bidirectional_relationship_propagates_filters_to_dimension() {
     let model = build_model_bidirectional();
     let filter = FilterContext::empty().with_column_equals("Orders", "Amount", 20.0.into());
