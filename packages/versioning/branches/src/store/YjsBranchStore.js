@@ -387,7 +387,8 @@ export class YjsBranchStore {
     const patchEncoding = commitMap.get("patchEncoding");
     if (patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined) {
       if (!this.#isCommitComplete(commitMap)) return false;
-      return getYArray(commitMap.get("patchChunks")) !== null;
+      const arr = getYArray(commitMap.get("patchChunks"));
+      return arr !== null && arr.length > 0;
     }
     return commitMap.get("patch") !== undefined;
   }
@@ -398,7 +399,8 @@ export class YjsBranchStore {
   #commitHasSnapshot(commitMap) {
     if (commitMap.get("snapshot") !== undefined) return true;
     if (!this.#isCommitComplete(commitMap)) return false;
-    return getYArray(commitMap.get("snapshotChunks")) !== null;
+    const arr = getYArray(commitMap.get("snapshotChunks"));
+    return arr !== null && arr.length > 0;
   }
 
   /**
