@@ -3,6 +3,7 @@ import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "./hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
+import { extractXfrmOff, patchXfrmExt, patchXfrmOff } from "./drawingml/patch";
 
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
@@ -150,7 +151,41 @@ export class DrawingInteractionController {
   };
 
   private readonly onPointerUp = (e: PointerEvent) => {
-    if (!this.dragging && !this.resizing) return;
+    const dragging = this.dragging;
+    const resizing = this.resizing;
+    if (!dragging && !resizing) return;
+
+    // Commit-time patching only: pointermove updates anchors for live previews,
+    // while pointerup updates preserved DrawingML fragments (`rawXml`, `xlsx.pic_xml`)
+    // so inner `<a:xfrm>` values (when present) stay consistent with the new anchor.
+    const objects = this.callbacks.getObjects();
+
+    const active = dragging ?? resizing;
+    const startObj = active.startObjects.find((o) => o.id === active.id);
+    const currentObj = objects.find((o) => o.id === active.id);
+
+    if (startObj && currentObj) {
+      const startRect = anchorToRectPx(startObj.anchor, this.geom);
+      const endRect = anchorToRectPx(currentObj.anchor, this.geom);
+
+      const dxEmu = pxToEmu(endRect.x - startRect.x);
+      const dyEmu = pxToEmu(endRect.y - startRect.y);
+      const cxEmu = pxToEmu(endRect.width);
+      const cyEmu = pxToEmu(endRect.height);
+
+      let patched = currentObj;
+      if (resizing) {
+        patched = patchDrawingXmlForResize(patched, cxEmu, cyEmu);
+      }
+      if (dxEmu !== 0 || dyEmu !== 0) {
+        patched = patchDrawingXmlForMove(patched, dxEmu, dyEmu);
+      }
+
+      if (patched !== currentObj) {
+        this.callbacks.setObjects(objects.map((obj) => (obj.id === active.id ? patched : obj)));
+      }
+    }
+
     this.dragging = null;
     this.resizing = null;
     this.canvas.releasePointerCapture(e.pointerId);
@@ -210,6 +245,47 @@ export class DrawingInteractionController {
   }
 }
 
+function patchDrawingXmlForResize(obj: DrawingObject, cxEmu: number, cyEmu: number): DrawingObject {
+  return patchDrawingInnerXml(obj, (xml) => patchXfrmExt(xml, cxEmu, cyEmu));
+}
+
+function patchDrawingXmlForMove(obj: DrawingObject, dxEmu: number, dyEmu: number): DrawingObject {
+  // Only patch a:xfrm/a:off when the existing representation uses non-zero off
+  // values. When off is already 0, we keep it at 0 and rely on anchors.
+  return patchDrawingInnerXml(obj, (xml) => {
+    const off = extractXfrmOff(xml);
+    if (!off) return xml;
+    if (off.xEmu === 0 && off.yEmu === 0) return xml;
+    return patchXfrmOff(xml, off.xEmu + dxEmu, off.yEmu + dyEmu);
+  });
+}
+
+function patchDrawingInnerXml(obj: DrawingObject, patch: (xml: string) => string): DrawingObject {
+  if (obj.kind.type === "image") {
+    const picXml = obj.preserved?.["xlsx.pic_xml"];
+    if (typeof picXml !== "string") return obj;
+    const patched = patch(picXml);
+    if (patched === picXml) return obj;
+    return {
+      ...obj,
+      preserved: {
+        ...(obj.preserved ?? {}),
+        "xlsx.pic_xml": patched,
+      },
+    };
+  }
+
+  const kindAny = obj.kind as any;
+  const rawXml: unknown = kindAny.rawXml ?? kindAny.raw_xml;
+  if (typeof rawXml !== "string") return obj;
+  const patched = patch(rawXml);
+  if (patched === rawXml) return obj;
+  return {
+    ...obj,
+    kind: { ...kindAny, rawXml: patched, raw_xml: patched },
+  };
+}
+ 
 export function shiftAnchor(
   anchor: DrawingObject["anchor"],
   dxPx: number,

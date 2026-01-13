@@ -5,3 +5,4 @@ export * from "./hitTest";
 export * from "./interaction";
 export * from "./insertImage";
 export * from "./modelAdapters";
+export * from "./duplicate";

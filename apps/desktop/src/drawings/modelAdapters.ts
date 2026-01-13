@@ -313,7 +313,17 @@ export function convertModelDrawingObjectToUiDrawingObject(modelObjJson: unknown
   const size =
     sizeValue == null ? undefined : convertModelEmuSize(sizeValue, "DrawingObject.size");
 
-  return { id, kind, anchor, zOrder, size };
+  const preservedValue = pick(modelObjJson, ["preserved"]);
+  let preserved: Record<string, string> | undefined;
+  if (isRecord(preservedValue)) {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(preservedValue)) {
+      if (typeof v === "string") out[k] = v;
+    }
+    if (Object.keys(out).length > 0) preserved = out;
+  }
+
+  return { id, kind, anchor, zOrder, size, preserved };
 }
 
 class MapImageStore implements ImageStore {

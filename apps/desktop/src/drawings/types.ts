@@ -30,7 +30,7 @@ export type Anchor =
 export type DrawingObjectKind =
   | { type: "image"; imageId: string }
   | { type: "shape"; label?: string; rawXml?: string; raw_xml?: string }
-  | { type: "chart"; chartId?: string; label?: string; rawXml?: string; raw_xml?: string }
+  | { type: "chart"; chartId?: string; label?: string; relId?: string; rawXml?: string; raw_xml?: string }
   | { type: "unknown"; label?: string; rawXml?: string; raw_xml?: string };
 
 export interface DrawingObject {
@@ -41,6 +41,14 @@ export interface DrawingObject {
   zOrder: number;
   /** Optional extracted size; used for preview/handles. */
   size?: EmuSize;
+  /**
+   * Optional preserved metadata passed through for format compatibility layers.
+   *
+   * For XLSX drawings this may include:
+   * - `xlsx.pic_xml` (the `<xdr:pic>…</xdr:pic>` subtree for images)
+   * - `xlsx.embed_rel_id`
+   */
+  preserved?: Record<string, string>;
 }
 
 export interface ImageEntry {
