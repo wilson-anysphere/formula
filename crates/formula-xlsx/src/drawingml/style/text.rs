@@ -8,32 +8,62 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
         return None;
     }
 
-    // Prefer default run properties from the list style if present, but allow fallback to a run
-    // (`a:rPr`) or paragraph end properties (`a:endParaRPr`) for any properties that are not
-    // specified on `a:defRPr`.
-    let def_rpr = node
+    // DrawingML text styles can come from multiple run property sources. For chart `txPr` we
+    // model a single "effective" run style by merging a best-effort cascade:
+    //
+    //   1) list-style defaults (`a:lstStyle/*/a:defRPr`)
+    //   2) first paragraph defaults (`a:p/a:pPr/a:defRPr`)
+    //   3) first run overrides (`a:p/a:r/a:rPr`)
+    //   4) paragraph-end run props (`a:p/a:endParaRPr`)
+    //
+    // This matches how Excel often structures chart text, while remaining resilient to
+    // missing/empty elements.
+    let first_paragraph = node
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "defRPr");
-    let run_rpr = node
-        .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "rPr");
-    let end_para_rpr = node
-        .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "endParaRPr");
+        .find(|n| n.is_element() && n.tag_name().name() == "p");
+
+    let list_style_def_rpr = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "lstStyle")
+        .and_then(|lst| {
+            lst.descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "defRPr")
+        });
+
+    let paragraph_def_rpr = first_paragraph.and_then(|p| {
+        p.children()
+            .find(|n| n.is_element() && n.tag_name().name() == "pPr")
+            .and_then(|ppr| {
+                ppr.children()
+                    .find(|n| n.is_element() && n.tag_name().name() == "defRPr")
+            })
+    });
+
+    let run_rpr = first_paragraph.and_then(|p| {
+        p.descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "rPr")
+    });
+
+    let end_para_rpr = first_paragraph
+        .and_then(|p| p.children().find(|n| n.is_element() && n.tag_name().name() == "endParaRPr"));
 
     let mut style = TextRunStyle::default();
-    if let Some(def_rpr) = def_rpr {
-        apply_rpr(&mut style, def_rpr);
-    }
-    if let Some(run_rpr) = run_rpr {
-        apply_rpr_fallback(&mut style, run_rpr);
-    }
-    if let Some(end_para_rpr) = end_para_rpr {
-        apply_rpr_fallback(&mut style, end_para_rpr);
+    let mut saw_rpr = false;
+
+    for rpr in [
+        list_style_def_rpr,
+        paragraph_def_rpr,
+        run_rpr,
+        end_para_rpr,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        saw_rpr = true;
+        apply_rpr_override(&mut style, rpr);
     }
 
-    // Bail early if we didn't find any `a:*RPr` nodes at all.
-    if def_rpr.is_none() && run_rpr.is_none() && end_para_rpr.is_none() {
+    if !saw_rpr {
         return None;
     }
 
@@ -44,41 +74,30 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     }
 }
 
-fn apply_rpr(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
-    style.font_family = parse_font_family(rpr);
-    style.size_100pt = rpr.attribute("sz").and_then(|v| v.parse::<u32>().ok());
-    style.bold = rpr.attribute("b").and_then(parse_bool_attr);
-    style.italic = rpr.attribute("i").and_then(parse_bool_attr);
-    style.underline = rpr.attribute("u").and_then(parse_underline_attr);
-    style.strike = rpr.attribute("strike").and_then(parse_strike_attr);
-    style.baseline = rpr.attribute("baseline").and_then(|v| v.parse::<i32>().ok());
-    style.color = parse_color(rpr);
-}
-
-fn apply_rpr_fallback(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
-    if style.font_family.is_none() {
-        style.font_family = parse_font_family(rpr);
+fn apply_rpr_override(style: &mut TextRunStyle, rpr: Node<'_, '_>) {
+    if let Some(font_family) = parse_font_family(rpr) {
+        style.font_family = Some(font_family);
     }
-    if style.size_100pt.is_none() {
-        style.size_100pt = rpr.attribute("sz").and_then(|v| v.parse::<u32>().ok());
+    if let Some(sz) = rpr.attribute("sz").and_then(|v| v.parse::<u32>().ok()) {
+        style.size_100pt = Some(sz);
     }
-    if style.bold.is_none() {
-        style.bold = rpr.attribute("b").and_then(parse_bool_attr);
+    if let Some(bold) = rpr.attribute("b").and_then(parse_bool_attr) {
+        style.bold = Some(bold);
     }
-    if style.italic.is_none() {
-        style.italic = rpr.attribute("i").and_then(parse_bool_attr);
+    if let Some(italic) = rpr.attribute("i").and_then(parse_bool_attr) {
+        style.italic = Some(italic);
     }
-    if style.underline.is_none() {
-        style.underline = rpr.attribute("u").and_then(parse_underline_attr);
+    if let Some(underline) = rpr.attribute("u").and_then(parse_underline_attr) {
+        style.underline = Some(underline);
     }
-    if style.strike.is_none() {
-        style.strike = rpr.attribute("strike").and_then(parse_strike_attr);
+    if let Some(strike) = rpr.attribute("strike").and_then(parse_strike_attr) {
+        style.strike = Some(strike);
     }
-    if style.baseline.is_none() {
-        style.baseline = rpr.attribute("baseline").and_then(|v| v.parse::<i32>().ok());
+    if let Some(baseline) = rpr.attribute("baseline").and_then(|v| v.parse::<i32>().ok()) {
+        style.baseline = Some(baseline);
     }
-    if style.color.is_none() {
-        style.color = parse_color(rpr);
+    if let Some(color) = parse_color(rpr) {
+        style.color = Some(color);
     }
 }
 

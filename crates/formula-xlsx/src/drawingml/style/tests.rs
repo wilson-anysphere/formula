@@ -210,3 +210,29 @@ fn txpr_falls_back_to_ea_font_when_latin_missing() {
     let style = parse_txpr(doc.root_element()).unwrap();
     assert_eq!(style.font_family.as_deref(), Some("MS Gothic"));
 }
+
+#[test]
+fn txpr_paragraph_defrpr_overrides_lststyle_defrpr() {
+    let xml = r#"<c:txPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:bodyPr/>
+        <a:lstStyle>
+            <a:lvl1pPr>
+                <a:defRPr sz="1000">
+                    <a:latin typeface="Calibri"/>
+                </a:defRPr>
+            </a:lvl1pPr>
+        </a:lstStyle>
+        <a:p>
+            <a:pPr>
+                <a:defRPr sz="1200">
+                    <a:latin typeface="Arial"/>
+                </a:defRPr>
+            </a:pPr>
+        </a:p>
+    </c:txPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let style = parse_txpr(doc.root_element()).unwrap();
+    assert_eq!(style.font_family.as_deref(), Some("Arial"));
+    assert_eq!(style.size_100pt, Some(1200));
+}
