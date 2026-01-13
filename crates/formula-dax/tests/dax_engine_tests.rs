@@ -429,6 +429,47 @@ fn calculate_keepfilters_preserves_existing_filters_for_boolean_expressions() {
 }
 
 #[test]
+fn calculate_keepfilters_on_table_expression_preserves_existing_table_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Override East Customers",
+            "CALCULATE([Total Sales], FILTER(ALL(Customers), Customers[Region] = \"East\"))",
+        )
+        .unwrap();
+    model
+        .add_measure(
+            "Keep East Customers",
+            "CALCULATE([Total Sales], KEEPFILTERS(FILTER(ALL(Customers), Customers[Region] = \"East\")))",
+        )
+        .unwrap();
+
+    let alice_filter =
+        FilterContext::empty().with_column_equals("Customers", "Name", "Alice".into());
+
+    // The table expression targets Customers. Without KEEPFILTERS it replaces the existing
+    // Customers[Name] filter, expanding from Alice-only to all East customers.
+    assert_eq!(
+        model
+            .evaluate_measure("Override East Customers", &alice_filter)
+            .unwrap(),
+        38.0.into()
+    );
+
+    // With KEEPFILTERS, the row set from the table expression is intersected with the existing
+    // Customers filters, preserving Customers[Name] = \"Alice\".
+    assert_eq!(
+        model
+            .evaluate_measure("Keep East Customers", &alice_filter)
+            .unwrap(),
+        30.0.into()
+    );
+}
+
+#[test]
 fn calculate_treatas_can_simulate_relationships() {
     let model = build_model_without_relationship();
     let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
