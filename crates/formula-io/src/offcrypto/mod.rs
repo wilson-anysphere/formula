@@ -10,8 +10,14 @@
 
 pub mod cryptoapi;
 pub mod encrypted_package;
+pub mod standard;
 
 pub use encrypted_package::{
     decrypt_standard_cryptoapi_rc4_encrypted_package_stream,
     decrypt_standard_encrypted_package_stream, EncryptedPackageError,
+};
+pub use standard::{
+    parse_encryption_info_standard, verify_password_standard, EncryptionHeader, EncryptionVerifier,
+    OffcryptoError, StandardEncryptionInfo, CALG_AES_128, CALG_AES_192, CALG_AES_256, CALG_MD5,
+    CALG_RC4, CALG_SHA1,
 };

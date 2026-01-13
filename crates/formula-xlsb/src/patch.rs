@@ -1582,7 +1582,9 @@ fn convert_value_record_to_formula<W: io::Write>(
         )));
     }
 
-    // Value records do not carry formula flags; default to 0 unless the caller overrides.
+    // Value records do not carry `BrtFmla*` flags. When converting a value record into a formula
+    // record, default to `0` unless the caller explicitly overrides. This mirrors Excel's behavior
+    // for newly-created formula cells.
     let flags = edit.new_formula_flags.unwrap_or(0);
     match &edit.new_value {
         CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, flags, rgce, rgcb),
