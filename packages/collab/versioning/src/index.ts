@@ -72,6 +72,10 @@ export type CollabVersioningOptions = {
    * Options used when constructing the default {@link YjsVersionStore}.
    *
    * This is ignored when `store` is provided.
+   *
+   * Defaults are tuned to be robust under sync-server websocket message limits:
+   * `writeMode: "stream"`, `chunkSize: 64KiB`, and a conservative
+   * `maxChunksPerTransaction` (8 at the default chunk size).
    */
   yjsStoreOptions?: DefaultYjsVersionStoreOptions;
   user?: Partial<CollabVersioningUser>;
