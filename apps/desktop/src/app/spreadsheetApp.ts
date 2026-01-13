@@ -36,11 +36,13 @@ import {
 import { insertImageFromFile } from "../drawings/insertImage";
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
+import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes } from "../drawings/insertImage";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
   createClipboardProvider,
   clipboardFormatToDocStyle,
+  CLIPBOARD_LIMITS,
   getCellGridFromRange,
   parseClipboardContentToCellGrid,
   serializeCellGridToClipboardPayload,
@@ -217,6 +219,39 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function readPngDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  // PNG signature (8 bytes) + IHDR chunk header (8 bytes) + width/height (8 bytes).
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 24) return null;
+
+  if (
+    bytes[0] !== 0x89 ||
+    bytes[1] !== 0x50 ||
+    bytes[2] !== 0x4e ||
+    bytes[3] !== 0x47 ||
+    bytes[4] !== 0x0d ||
+    bytes[5] !== 0x0a ||
+    bytes[6] !== 0x1a ||
+    bytes[7] !== 0x0a
+  ) {
+    return null;
+  }
+
+  // The first chunk should be IHDR: length (4) + type (4) + data...
+  if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) {
+    return null;
+  }
+
+  try {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    if (width === 0 || height === 0) return null;
+    return { width, height };
+  } catch {
+    return null;
+  }
 }
 
 function inferMimeTypeFromId(id: string, bytes?: Uint8Array): string {
@@ -13299,6 +13334,124 @@ export class SpreadsheetApp {
     }
   }
 
+  private async pasteClipboardImageAsDrawing(content: unknown): Promise<boolean> {
+    const maxBytes = Number(CLIPBOARD_LIMITS?.maxImageBytes) > 0 ? Number(CLIPBOARD_LIMITS.maxImageBytes) : 5 * 1024 * 1024;
+
+    const bytes: Uint8Array | null = (() => {
+      const anyContent = content as any;
+      const direct = anyContent?.imagePng;
+      if (direct instanceof Uint8Array && direct.byteLength > 0) return direct;
+
+      const base64 = anyContent?.pngBase64;
+      if (typeof base64 === "string" && base64.trim() !== "") {
+        return decodeClipboardImageBase64ToBytes(base64, { maxBytes });
+      }
+
+      return null;
+    })();
+
+    if (!bytes) return false;
+
+    if (bytes.byteLength > maxBytes) {
+      try {
+        showToast(`Image too large to paste (>${Math.round(maxBytes / 1024 / 1024)}MB).`, "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return true;
+    }
+
+    // Guard against PNG decompression bombs: small compressed bytes can still decode into huge bitmaps.
+    const dims = readPngDimensions(bytes);
+    if (dims) {
+      const MAX_DIMENSION = 10_000;
+      const MAX_PIXELS = 50_000_000;
+      if (dims.width > MAX_DIMENSION || dims.height > MAX_DIMENSION || dims.width * dims.height > MAX_PIXELS) {
+        try {
+          showToast("Image too large to paste.", "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return true;
+      }
+    }
+
+    const docAny = this.document as any;
+    if (typeof docAny.setImage !== "function" || typeof docAny.insertDrawing !== "function") {
+      return false;
+    }
+
+    const uuid = (): string => {
+      const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
+      if (typeof randomUuid === "function") {
+        try {
+          return randomUuid.call((globalThis as any).crypto);
+        } catch {
+          // Fall through to pseudo-random below.
+        }
+      }
+      return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+    };
+
+    const DEFAULT_PICTURE_WIDTH_COLS = 5;
+    const DEFAULT_PICTURE_HEIGHT_ROWS = 11;
+
+    const existingDrawings = (() => {
+      try {
+        const raw = (this.document as any).getSheetDrawings?.(this.sheetId);
+        return Array.isArray(raw) ? raw : [];
+      } catch {
+        return [];
+      }
+    })();
+    let nextZOrder = existingDrawings.length;
+    for (const raw of existingDrawings) {
+      const maybe = raw as any;
+      const z = Number(maybe?.zOrder ?? maybe?.z_order);
+      if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
+    }
+
+    const base = this.selection.active;
+    const startRow = base.row;
+    const startCol = base.col;
+
+    const imageId = `image_${uuid()}.png`;
+    const drawingId = createDrawingObjectId();
+    const drawing = {
+      id: drawingId,
+      kind: { type: "image", imageId },
+      anchor: {
+        type: "twoCell",
+        from: { cell: { row: startRow, col: startCol }, offset: { xEmu: 0, yEmu: 0 } },
+        to: {
+          cell: { row: startRow + DEFAULT_PICTURE_HEIGHT_ROWS, col: startCol + DEFAULT_PICTURE_WIDTH_COLS },
+          offset: { xEmu: 0, yEmu: 0 },
+        },
+      },
+      zOrder: nextZOrder,
+    };
+
+    this.document.beginBatch({ label: "Paste Picture" });
+    try {
+      docAny.setImage(imageId, { bytes, mimeType: "image/png" });
+      try {
+        this.imageBytesBinder?.onLocalImageInserted({ id: imageId, bytes, mimeType: "image/png" });
+      } catch {
+        // Best-effort: never fail paste due to collab image propagation.
+      }
+      docAny.insertDrawing(this.sheetId, drawing);
+      this.document.endBatch();
+    } catch (err) {
+      this.document.cancelBatch();
+      throw err;
+    }
+
+    this.drawingObjectsCache = null;
+    this.selectedDrawingId = drawingId;
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+    return true;
+  }
+
   async pasteClipboardToSelection(
     options: { mode?: "all" | "values" | "formulas" | "formats"; transpose?: boolean } = {}
   ): Promise<void> {
@@ -13340,7 +13493,16 @@ export class SpreadsheetApp {
           if (len > colCount) colCount = len;
         }
       }
-      if (rowCount === 0 || colCount === 0) return;
+      if (rowCount === 0 || colCount === 0) {
+        // Excel-style behavior: if the clipboard only contains an image (and no
+        // tabular text/HTML), paste it as a floating picture anchored at the
+        // active cell.
+        if (mode === "all" && !internalCells) {
+          const handled = await this.pasteClipboardImageAsDrawing(content);
+          if (handled) return;
+        }
+        return;
+      }
 
       const pastedCellCount = rowCount * colCount;
       if (pastedCellCount > MAX_CLIPBOARD_CELLS) {
