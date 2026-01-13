@@ -42,8 +42,11 @@ test("Desktop main.ts wires Data → Queries & Connections controls to the panel
   assert.match(main, /\bPanelIds\.DATA_QUERIES\b/);
 
   // Pressed state syncs from layout placement.
-  assert.match(main, /"data\.queriesConnections\.queriesConnections":/);
-  assert.match(main, /\bgetPanelPlacement\([^)]*PanelIds\.DATA_QUERIES\)/);
+  assert.match(
+    main,
+    /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/,
+    "Expected ribbon pressed state to reflect whether the Data Queries panel is open",
+  );
 
   // Refresh All wires to powerQueryService.refreshAll().
   const refreshCommandIds = [
