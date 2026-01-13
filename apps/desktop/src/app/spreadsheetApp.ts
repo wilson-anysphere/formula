@@ -11390,6 +11390,132 @@ export class SpreadsheetApp {
       return null;
     };
 
+    const rewriteStructuredReferencesToA1 = (text: string): string | null => {
+      // Supported patterns (matching the structured ref tokenizer):
+      // - TableName[ColumnName]
+      // - TableName[[#All],[ColumnName]]
+      if (!text.includes("[")) return null;
+
+      const findColumnIndex = (columns: unknown, columnName: string): number | null => {
+        if (!Array.isArray(columns)) return null;
+        const target = columnName.trim().toUpperCase();
+        if (!target) return null;
+        for (let i = 0; i < columns.length; i += 1) {
+          const col = String(columns[i] ?? "").trim();
+          if (!col) continue;
+          if (col.toUpperCase() === target) return i;
+        }
+        return null;
+      };
+
+      const resolveStructuredColumnRef = (params: {
+        tableName: string;
+        columnName: string;
+        includeHeader: boolean;
+      }): string | null => {
+        const tableName = params.tableName.trim();
+        if (!tableName) return null;
+        const table: any = this.searchWorkbook.getTable(tableName);
+        if (!table) return null;
+
+        const startRow = typeof table.startRow === "number" ? Math.trunc(table.startRow) : null;
+        const startCol = typeof table.startCol === "number" ? Math.trunc(table.startCol) : null;
+        const endRow = typeof table.endRow === "number" ? Math.trunc(table.endRow) : null;
+        const endCol = typeof table.endCol === "number" ? Math.trunc(table.endCol) : null;
+        if (startRow == null || startCol == null || endRow == null || endCol == null) return null;
+        if (startRow < 0 || startCol < 0 || endRow < 0 || endCol < 0) return null;
+
+        const colIdx = findColumnIndex(table.columns, params.columnName);
+        if (colIdx == null) return null;
+
+        // Table coordinates include the header row. For `Table[Column]` refs, approximate Excel
+        // semantics by skipping the header row. (Totals rows are not currently represented.)
+        const dataStartRow = params.includeHeader ? startRow : startRow + 1;
+        if (dataStartRow > endRow) return null;
+
+        const col = startCol + colIdx;
+        if (col < startCol || col > endCol) return null;
+
+        const range = rangeToA1({ startRow: dataStartRow, endRow, startCol: col, endCol: col });
+        if (!range) return null;
+
+        const sheet = typeof table.sheetName === "string" && table.sheetName.trim() ? table.sheetName.trim() : sheetId;
+        const token = formatSheetNameForA1(sheet);
+        const prefix = token ? `${token}!` : "";
+        return `${prefix}${range}`;
+      };
+
+      let changed = false;
+      let failed = false;
+
+      const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[#All\],\[([^\]]+)\]\]/gi;
+      const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)([^\]]+)\]/gi;
+
+      const rewriteSegment = (segment: string): string => {
+        let out = segment;
+        out = out.replace(allPattern, (match, tableName, colName) => {
+          const replacement = resolveStructuredColumnRef({ tableName, columnName: colName, includeHeader: true });
+          if (!replacement) {
+            failed = true;
+            return match;
+          }
+          changed = true;
+          return replacement;
+        });
+
+        out = out.replace(simplePattern, (match, tableName, colName) => {
+          const replacement = resolveStructuredColumnRef({ tableName, columnName: colName, includeHeader: false });
+          if (!replacement) {
+            failed = true;
+            return match;
+          }
+          changed = true;
+          return replacement;
+        });
+        return out;
+      };
+
+      const rewriteOutsideStrings = (input: string, transform: (segment: string) => string): string => {
+        let out = "";
+        let segment = "";
+        let inString = false;
+
+        for (let i = 0; i < input.length; i += 1) {
+          const ch = input[i];
+          if (ch !== '"') {
+            if (inString) out += ch;
+            else segment += ch;
+            continue;
+          }
+
+          if (!inString) {
+            out += transform(segment);
+            segment = "";
+            inString = true;
+            out += '"';
+            continue;
+          }
+
+          // Escaped quote inside a string literal: "" -> "
+          if (input[i + 1] === '"') {
+            out += '""';
+            i += 1;
+            continue;
+          }
+
+          inString = false;
+          out += '"';
+        }
+
+        out += transform(segment);
+        return out;
+      };
+
+      const rewritten = rewriteOutsideStrings(text, rewriteSegment);
+      if (!changed || failed) return null;
+      return rewritten;
+    };
+
     let reads = 0;
     const memo = new Map<string, SpreadsheetValue>();
     const stack = new Set<string>();
@@ -11458,7 +11584,8 @@ export class SpreadsheetApp {
     };
 
     try {
-      const value = evaluateFormula(`=${trimmedExpr}`, getCellValue, {
+      const evalExpr = rewriteStructuredReferencesToA1(trimmedExpr) ?? trimmedExpr;
+      const value = evaluateFormula(`=${evalExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         maxRangeCells: MAX_CELL_READS,
