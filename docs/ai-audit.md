@@ -209,6 +209,11 @@ These are useful integrations when composing more complex setups:
 - `CompositeAIAuditStore` – fans out `logEntry(...)` writes to multiple stores (mode `"best_effort"` by default, or `"all"`),
   while delegating reads to the first configured store.
 
+### Utility stores (optional)
+
+- `NoopAIAuditStore` – a store that intentionally does nothing (useful to explicitly disable audit logging without null checks).
+- `FailingAIAuditStore` – a store that always throws (useful for tests validating best-effort audit logging behavior).
+
 ---
 
 ## 3) Security posture (privacy/compliance)
