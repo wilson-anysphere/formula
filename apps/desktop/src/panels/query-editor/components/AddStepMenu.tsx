@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { stableStringify, type ArrowTableAdapter, type DataTable, type Query, type QueryOperation } from "@formula/power-query";
-import { t } from "../../../i18n/index.js";
+import { getLocale, t } from "../../../i18n/index.js";
 import { formatQueryOperationLabel } from "../operationLabels";
 
 function prettyJson(value: unknown): string {
@@ -29,6 +29,8 @@ export function AddStepMenu(props: {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const locale = getLocale();
 
   const schema = props.aiContext.preview?.columns ?? [];
   const columnNames = useMemo(() => schema.map((col) => col.name).filter((name) => name.trim().length > 0), [schema]);
@@ -140,7 +142,7 @@ export function AddStepMenu(props: {
         ] satisfies MenuItem[],
       },
     ];
-  }, [firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
+  }, [locale, firstColumnName, schemaReady, schemaRequiredReason, secondColumnName]);
 
   useEffect(() => {
     if (!menuOpen) return;
