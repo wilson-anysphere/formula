@@ -22,18 +22,47 @@ export interface SqliteAIAuditStoreOptions {
   storage?: SqliteBinaryStorage;
   locateFile?: (file: string, prefix?: string) => string;
   retention?: SqliteAIAuditStoreRetention;
+  /**
+   * When true (default), changes are persisted automatically after `logEntry()`.
+   *
+   * Set to false to buffer writes in-memory and call `flush()` explicitly.
+   */
+  auto_persist?: boolean;
+  /**
+   * Optional debounce interval for automatic persistence.
+   *
+   * When set (and `auto_persist` is true), multiple `logEntry()` calls within the
+   * interval will result in a single persistence write.
+   */
+  auto_persist_interval_ms?: number;
 }
 
 export class SqliteAIAuditStore implements AIAuditStore {
   private readonly db: SqlJsDatabase;
   private readonly storage: SqliteBinaryStorage;
   private readonly retention: SqliteAIAuditStoreRetention;
+  private readonly autoPersist: boolean;
+  private readonly autoPersistIntervalMs: number | undefined;
   private schemaDirty: boolean = false;
 
-  private constructor(db: SqlJsDatabase, storage: SqliteBinaryStorage, retention: SqliteAIAuditStoreRetention) {
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistSerial: Promise<void> = Promise.resolve();
+  private writeRevision = 0;
+  private persistedRevision = 0;
+  private closed = false;
+
+  private constructor(
+    db: SqlJsDatabase,
+    storage: SqliteBinaryStorage,
+    retention: SqliteAIAuditStoreRetention,
+    autoPersist: boolean,
+    autoPersistIntervalMs: number | undefined,
+  ) {
     this.db = db;
     this.storage = storage;
     this.retention = retention;
+    this.autoPersist = autoPersist;
+    this.autoPersistIntervalMs = autoPersistIntervalMs;
     this.ensureSchema();
   }
 
@@ -42,12 +71,14 @@ export class SqliteAIAuditStore implements AIAuditStore {
     const SQL = await initSqlJs({ locateFile: options.locateFile ?? locateSqlJsFile });
     const existing = await storage.load();
     const db = existing ? new SQL.Database(existing) : new SQL.Database();
-    const store = new SqliteAIAuditStore(db, storage, options.retention ?? {});
+    const autoPersist = options.auto_persist ?? true;
+    const autoPersistIntervalMs = options.auto_persist_interval_ms;
+    const store = new SqliteAIAuditStore(db, storage, options.retention ?? {}, autoPersist, autoPersistIntervalMs);
     // Persist schema migrations/backfills eagerly for existing databases so that
     // upgraded clients won't need to redo work on every load.
     if (existing && store.schemaDirty) {
       try {
-        await store.persist();
+        await store.persistOnce();
       } catch {
         // Persistence is best-effort; if it fails (e.g. read-only storage), the
         // in-memory migration/backfill still allows workbook filtering to work
@@ -59,6 +90,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
   }
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
+    this.assertOpen();
     const tokenUsage = normalizeTokenUsage(entry.token_usage);
     const workbookId = entry.workbook_id ?? extractWorkbookIdFromInput(entry.input) ?? extractWorkbookIdFromSessionId(entry.session_id);
     const stmt = this.db.prepare(
@@ -101,10 +133,21 @@ export class SqliteAIAuditStore implements AIAuditStore {
     stmt.free();
 
     this.enforceRetention();
-    await this.persist();
+    this.writeRevision++;
+
+    if (!this.autoPersist) return;
+
+    const interval = this.autoPersistIntervalMs;
+    if (typeof interval === "number" && Number.isFinite(interval) && interval > 0) {
+      this.schedulePersist(interval);
+      return;
+    }
+
+    await this.flush();
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
+    this.assertOpen();
     const params: any[] = [];
     let sql = "SELECT * FROM ai_audit_log";
     const where: string[] = [];
@@ -145,6 +188,46 @@ export class SqliteAIAuditStore implements AIAuditStore {
     }
     stmt.free();
     return rows;
+  }
+
+  /**
+   * Forces persistence of the in-memory database to the underlying
+   * {@link SqliteBinaryStorage}.
+   *
+   * When `auto_persist=false`, callers must invoke this periodically (or via
+   * {@link close}) to durably save audit entries.
+   */
+  async flush(): Promise<void> {
+    this.assertOpen();
+    this.clearPersistTimer();
+
+    const targetRevision = this.writeRevision;
+    // If a persistence operation is already queued/running, wait for it to
+    // complete before deciding whether we still need to write.
+    await this.persistSerial;
+
+    if (this.persistedRevision >= targetRevision) return;
+    await this.enqueuePersist();
+  }
+
+  /**
+   * Flushes any pending persistence and releases the sql.js database.
+   */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    try {
+      await this.flush();
+    } finally {
+      this.clearPersistTimer();
+      try {
+        if (this.db && typeof this.db.close === "function") {
+          this.db.close();
+        }
+      } catch {
+        // Best-effort close: sql.js may throw if the db is already closed.
+      }
+      this.closed = true;
+    }
   }
 
   private ensureSchema(): void {
@@ -215,9 +298,47 @@ export class SqliteAIAuditStore implements AIAuditStore {
     }
   }
 
-  private async persist(): Promise<void> {
+  private schedulePersist(intervalMs: number): void {
+    this.clearPersistTimer();
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      // Auto-persistence is best-effort; callers can use `flush()`/`close()` if
+      // they need error visibility.
+      void this.flush().catch(() => {});
+    }, intervalMs);
+  }
+
+  private clearPersistTimer(): void {
+    if (!this.persistTimer) return;
+    clearTimeout(this.persistTimer as any);
+    this.persistTimer = null;
+  }
+
+  private enqueuePersist(): Promise<void> {
+    const run = async () => {
+      await this.persistOnce();
+    };
+
+    const next = this.persistSerial.then(run, run);
+    // Keep the serialization chain alive regardless of errors, while still
+    // allowing callers awaiting `next` to observe failures.
+    this.persistSerial = next.catch(() => {});
+    return next;
+  }
+
+  private async persistOnce(): Promise<void> {
+    const revisionAtStart = this.writeRevision;
     const data = this.db.export() as Uint8Array;
     await this.storage.save(data);
+    // The export() snapshot corresponds to the state at the time persistOnce()
+    // began; if new writes land while storage.save() is inflight, a subsequent
+    // persist will still be required.
+    this.persistedRevision = Math.max(this.persistedRevision, revisionAtStart);
+  }
+
+  private assertOpen(): void {
+    if (!this.closed) return;
+    throw new Error("SqliteAIAuditStore is closed");
   }
 }
 

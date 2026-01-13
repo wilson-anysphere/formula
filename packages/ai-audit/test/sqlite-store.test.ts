@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import initSqlJs from "sql.js";
 import { InMemoryBinaryStorage } from "../src/storage.js";
 import { SqliteAIAuditStore } from "../src/sqlite-store.js";
@@ -291,5 +291,71 @@ describe("SqliteAIAuditStore", () => {
 
     expect(entries.map((e) => e.id)).toEqual([legacyId]);
     expect(entries[0]!.workbook_id).toBe(workbookId);
+  });
+
+  it("supports auto_persist=false by deferring storage writes until flush()", async () => {
+    const storage = new InMemoryBinaryStorage();
+    const saveSpy = vi.spyOn(storage, "save");
+    const store = await SqliteAIAuditStore.create({ storage, auto_persist: false });
+
+    const entry: AIAuditEntry = {
+      id: randomUUID(),
+      timestamp_ms: Date.now(),
+      session_id: "session-buffered",
+      mode: "chat",
+      input: { prompt: "hello" },
+      model: "unit-test-model",
+      tool_calls: []
+    };
+
+    await store.logEntry(entry);
+
+    expect(saveSpy).not.toHaveBeenCalled();
+
+    await store.flush();
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+
+    const roundTrip = await SqliteAIAuditStore.create({ storage });
+    const entries = await roundTrip.listEntries({ session_id: "session-buffered" });
+    expect(entries.map((e) => e.id)).toEqual([entry.id]);
+  });
+
+  it("debounces persistence when auto_persist_interval_ms is set", async () => {
+    const storage = new InMemoryBinaryStorage();
+    const saveSpy = vi.spyOn(storage, "save");
+    const store = await SqliteAIAuditStore.create({ storage, auto_persist_interval_ms: 100 });
+
+    vi.useFakeTimers();
+    try {
+      await store.logEntry({
+        id: randomUUID(),
+        timestamp_ms: Date.now(),
+        session_id: "session-debounce",
+        mode: "chat",
+        input: { prompt: "one" },
+        model: "unit-test-model",
+        tool_calls: []
+      });
+
+      await store.logEntry({
+        id: randomUUID(),
+        timestamp_ms: Date.now(),
+        session_id: "session-debounce",
+        mode: "chat",
+        input: { prompt: "two" },
+        model: "unit-test-model",
+        tool_calls: []
+      });
+
+      expect(saveSpy).toHaveBeenCalledTimes(0);
+
+      await vi.advanceTimersByTimeAsync(99);
+      expect(saveSpy).toHaveBeenCalledTimes(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
