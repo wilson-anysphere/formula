@@ -303,9 +303,12 @@ mod gtk_backend {
             let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
             let content = read_from_clipboard(&clipboard);
 
-            // On X11, some apps only populate PRIMARY selection (middle-click paste).
-            // Only fall back to PRIMARY when CLIPBOARD has no usable content, and skip on Wayland to
-            // avoid changing semantics where PRIMARY may not exist or behave differently.
+            // On X11, some apps only populate PRIMARY selection (middle-click paste). When
+            // CLIPBOARD has no usable content we may fall back to PRIMARY.
+            //
+            // By default we skip this fallback on Wayland to avoid changing semantics where
+            // PRIMARY may not exist or behave differently, but users can override via:
+            // `FORMULA_CLIPBOARD_PRIMARY_SELECTION=0|1` (see `clipboard_fallback`).
             let has_usable_data = clipboard_fallback::has_usable_clipboard_data(
                 content.text.as_deref(),
                 content.html.as_deref(),
@@ -444,6 +447,7 @@ mod gtk_backend {
             clipboard.store();
 
             // Optional: also populate X11 PRIMARY selection (middle-click paste) when available.
+            // This is controlled by the same env/heuristic gate as the read-time PRIMARY fallback.
             if clipboard_fallback::should_attempt_primary_selection_from_env() {
                 let primary = gtk::Clipboard::get(&gdk::SELECTION_PRIMARY);
                 let _ = set_clipboard_data(&primary);

@@ -773,7 +773,7 @@ Known platform limitations:
 - **Web Clipboard API permission gating**: `navigator.clipboard.read/write` is user-gesture gated and may be denied by the OS/WebView permission model.
 - **HTML/RTF availability varies** by WebView and OS: some platforms allow reading `text/html`/`text/rtf` but deny writing them (or vice versa).
 - **Image clipboard support varies**: `image/png` via `ClipboardItem` is not consistently supported across all embedded WebViews.
-- **Linux selection semantics**: when running under X11, if `CLIPBOARD` has no usable content, the native GTK clipboard backend may fall back to `PRIMARY` selection (middle-click paste). This fallback is skipped on Wayland.
+- **Linux selection semantics**: when running under X11, if `CLIPBOARD` has no usable content, the native GTK clipboard backend may fall back to `PRIMARY` selection (middle-click paste). This fallback is skipped on Wayland by default, but can be overridden via `FORMULA_CLIPBOARD_PRIMARY_SELECTION=0|1`.
 - The native clipboard commands are implemented per-OS; when they are missing or unimplemented, the provider falls back to Web Clipboard (and then plain text).
 
 Security boundaries:
