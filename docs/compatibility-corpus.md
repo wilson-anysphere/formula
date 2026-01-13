@@ -383,6 +383,11 @@ changes:
   enables this by default.
 - `render_smoke`: run `tools.corpus.triage --render-smoke` (Render smoke / L3).
 
+Note: `--recalc` compares engine results against **cached formula values stored in the workbook**. If your
+corpus inputs were aggressively sanitized (e.g. redacting cell values), cached formula results are often
+removed, which will cause the calculate step to show `SKIP` with `0 attempted` workbooks. In that case,
+run triage against inputs that still contain cached values (commonly the encrypted `originals/` corpus).
+
 These inputs apply to both the public and private corpus jobs; the private job will still skip if the
 required secrets/corpus archive are not configured.
 
