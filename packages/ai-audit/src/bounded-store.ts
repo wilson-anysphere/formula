@@ -98,8 +98,22 @@ function compactAuditEntry(entry: AIAuditEntry, maxChars: number): AIAuditEntry 
       includeOptionalFields
     });
 
-    const serialized = safeJsonStringify(candidate);
-    if (serialized.length <= maxChars) return candidate;
+    let serialized: string | null = null;
+    try {
+      serialized = JSON.stringify(candidate);
+    } catch {
+      // Non-serializable candidate (e.g. circular optional fields). We'll retry
+      // with optional fields removed.
+    }
+    if (serialized && serialized.length <= maxChars) return candidate;
+    if (!serialized) {
+      if (includeOptionalFields) {
+        includeOptionalFields = false;
+        valueBudget = Math.min(valueBudget, 64);
+        continue;
+      }
+      break;
+    }
 
     if (valueBudget > 64) {
       valueBudget = Math.max(32, Math.floor(valueBudget * 0.5));

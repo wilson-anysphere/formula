@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { BoundedAIAuditStore, LocalStorageAIAuditStore, MemoryAIAuditStore } from "../src/index.js";
+import type { AIAuditStore } from "../src/store.js";
 import type { AIAuditEntry } from "../src/types.js";
 
 describe("BoundedAIAuditStore", () => {
@@ -268,6 +269,52 @@ describe("BoundedAIAuditStore", () => {
     const storedInput = stored[0]!.input as any;
     expect(storedInput?.audit_truncated).toBe(true);
     expect(typeof storedInput?.audit_json).toBe("string");
+  });
+
+  it("drops non-serializable optional fields during compaction so underlying stores can JSON.stringify", async () => {
+    class JsonStringifyStore implements AIAuditStore {
+      readonly entries: AIAuditEntry[] = [];
+      async logEntry(entry: AIAuditEntry): Promise<void> {
+        JSON.stringify(entry);
+        this.entries.push(entry);
+      }
+      async listEntries(): Promise<AIAuditEntry[]> {
+        return this.entries.slice();
+      }
+    }
+
+    const underlying = new JsonStringifyStore();
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: 2_000 });
+
+    const circular: any = {};
+    circular.self = circular;
+
+    const huge = "x".repeat(50_000);
+
+    const entry: AIAuditEntry = {
+      id: "entry-circular-verification-1",
+      timestamp_ms: Date.now(),
+      session_id: "session-circular-verification-1",
+      mode: "chat",
+      input: { prompt: huge },
+      model: "unit-test-model",
+      tool_calls: [],
+      verification: {
+        needs_tools: false,
+        used_tools: false,
+        verified: false,
+        confidence: 0,
+        warnings: [],
+        claims: [{ claim: "x", verified: false, toolEvidence: circular }]
+      }
+    };
+
+    await expect(store.logEntry(entry)).resolves.toBeUndefined();
+
+    const stored = underlying.entries[0]!;
+    expect(stored.verification).toBeUndefined();
+    expect((stored.input as any)?.audit_truncated).toBe(true);
+    expect(JSON.stringify(stored).length).toBeLessThanOrEqual(2_000);
   });
 
   it("drops excess tool calls when needed to fit the entry budget", async () => {
