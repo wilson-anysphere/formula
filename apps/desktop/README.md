@@ -79,6 +79,17 @@ python3 scripts/desktop_binary_size_report.py --no-build
 The report is emitted as Markdown to stdout, and is also published to the GitHub Actions step summary in the
 `Performance` workflow.
 
+### Optional: enforce a size budget
+
+The report is informational by default. To turn it into a regression gate (locally or in CI), set:
+
+```bash
+export FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB=XX
+export FORMULA_ENFORCE_DESKTOP_BINARY_SIZE=1
+```
+
+Or pass `--limit-mb` / `--enforce` to `scripts/desktop_binary_size_report.py`.
+
 ## Workbook load limits (snapshot loading)
 
 When opening a workbook in the desktop app, the renderer fetches a **cell snapshot** from the backend to populate the UI.
