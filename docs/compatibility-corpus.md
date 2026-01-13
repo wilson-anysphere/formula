@@ -216,6 +216,9 @@ python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
 cat tools/corpus/out/public/summary.md
 ```
 
+The generated `summary.md` includes a **Timings** section (per-step `duration_ms` stats like `p50`/`p90`),
+and the same data is emitted in `summary.json` under `timings` for machine-readable dashboards and CI gates.
+
 ### Append a trend time series entry (machine-readable)
 
 Each corpus dashboard run can also append a compact JSON entry (rates, diff totals, etc.) to a
@@ -226,6 +229,9 @@ python -m tools.corpus.dashboard \
   --triage-dir tools/corpus/out/private \
   --append-trend tools/corpus/out/private/trend.json
 ```
+
+Trend entries are intentionally compact (rates + diff totals + a few key size/timing percentiles) so they can
+be cached in CI and plotted over time.
 
 The scheduled private corpus workflow (`.github/workflows/corpus.yml`) restores/saves this
 `trend.json` file via GitHub Actions cache so it grows over time, and uploads it as part of the
@@ -311,6 +317,17 @@ Supported thresholds:
 - `--min-round-trip-rate`
 - `--min-calc-rate` *(when triage is run with `--recalc`)*
 - `--min-render-rate` *(when triage is run with `--render-smoke`)*
+
+### Optional performance gates (scheduled/private)
+
+The dashboard also supports opt-in **performance regression gates** on p90 step durations:
+
+- `--gate-load-p90-ms <ms>`
+- `--gate-round-trip-p90-ms <ms>`
+
+In CI, these are intended to be enabled for the private corpus workflow (via workflow dispatch inputs
+or repo variables; see `.github/workflows/corpus.yml`). They are **off by default** so PR CI behavior
+does not change.
 
 ### Expected secrets (scheduled CI)
 
