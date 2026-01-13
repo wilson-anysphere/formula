@@ -7,12 +7,13 @@ fn build_models(rows: usize) -> (DataModel, DataModel) {
     let groups = ["A", "B", "C", "D"];
 
     let mut vec_model = DataModel::new();
-    let mut vec_fact = Table::new("Fact", vec!["Group", "Amount"]);
+    let mut vec_fact = Table::new("Fact", vec!["Group", "Amount", "Maybe"]);
     for i in 0..rows {
         let g = groups[i % groups.len()];
         let amount = (i % 100) as f64;
+        let maybe = if i % 3 == 0 { Value::Blank } else { Value::from(amount) };
         vec_fact
-            .push_row(vec![Value::from(g), Value::from(amount)])
+            .push_row(vec![Value::from(g), Value::from(amount), maybe])
             .unwrap();
     }
     vec_model.add_table(vec_fact).unwrap();
@@ -31,6 +32,10 @@ fn build_models(rows: usize) -> (DataModel, DataModel) {
             name: "Amount".to_string(),
             column_type: ColumnType::Number,
         },
+        ColumnSchema {
+            name: "Maybe".to_string(),
+            column_type: ColumnType::Number,
+        },
     ];
     let options = TableOptions {
         page_size_rows: 1024,
@@ -39,9 +44,16 @@ fn build_models(rows: usize) -> (DataModel, DataModel) {
     let mut builder = ColumnarTableBuilder::new(schema, options);
     for i in 0..rows {
         let g = groups[i % groups.len()];
+        let amount = (i % 100) as f64;
+        let maybe = if i % 3 == 0 {
+            formula_columnar::Value::Null
+        } else {
+            formula_columnar::Value::Number(amount)
+        };
         builder.append_row(&[
             formula_columnar::Value::String(Arc::<str>::from(g)),
-            formula_columnar::Value::Number((i % 100) as f64),
+            formula_columnar::Value::Number(amount),
+            maybe,
         ]);
     }
 
@@ -68,6 +80,9 @@ fn pivot_matches_between_vec_and_columnar_backends() {
         PivotMeasure::new("Double", "[Double]").unwrap(),
         PivotMeasure::new("Big Total", "[Big Total]").unwrap(),
         PivotMeasure::new("Rows", "COUNTROWS(Fact)").unwrap(),
+        PivotMeasure::new("Count", "COUNT(Fact[Maybe])").unwrap(),
+        PivotMeasure::new("CountA", "COUNTA(Fact[Maybe])").unwrap(),
+        PivotMeasure::new("Blank Count", "COUNTBLANK(Fact[Maybe])").unwrap(),
         PivotMeasure::new("Avg", "AVERAGE(Fact[Amount])").unwrap(),
         PivotMeasure::new("Distinct Amount", "DISTINCTCOUNT(Fact[Amount])").unwrap(),
     ];

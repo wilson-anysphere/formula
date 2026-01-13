@@ -11,6 +11,10 @@ pub enum AggregationKind {
     Min,
     Max,
     CountRows,
+    /// Count non-blank (non-null) values in a column.
+    CountNonBlank,
+    /// Count non-blank numeric values in a column (DAX `COUNT` semantics).
+    CountNumbers,
     DistinctCount,
 }
 
@@ -353,6 +357,23 @@ impl ColumnarTableBackend {
                 AggregationKind::CountRows => Plan::Direct {
                     col: ensure(AggOp::Count, None),
                 },
+                AggregationKind::CountNonBlank => {
+                    let col_idx = spec.column_idx?;
+                    Plan::Direct {
+                        col: ensure(AggOp::Count, Some(col_idx)),
+                    }
+                }
+                AggregationKind::CountNumbers => {
+                    let col_idx = spec.column_idx?;
+                    let column_type = schema.get(col_idx)?.column_type;
+                    if Self::is_dax_numeric_column(column_type) {
+                        Plan::Direct {
+                            col: ensure(AggOp::CountNumbers, Some(col_idx)),
+                        }
+                    } else {
+                        Plan::Constant(Value::from(0))
+                    }
+                }
                 AggregationKind::Sum => {
                     let col_idx = spec.column_idx?;
                     let column_type = schema.get(col_idx)?.column_type;
@@ -507,6 +528,8 @@ impl ColumnarTableBackend {
             Min { best: Option<f64> },
             Max { best: Option<f64> },
             CountRows { count: usize },
+            CountNonBlank { count: usize },
+            CountNumbers { count: usize },
             DistinctCount { set: HashSet<Value> },
         }
 
@@ -518,6 +541,8 @@ impl ColumnarTableBackend {
                     AggregationKind::Min => AggState::Min { best: None },
                     AggregationKind::Max => AggState::Max { best: None },
                     AggregationKind::CountRows => AggState::CountRows { count: 0 },
+                    AggregationKind::CountNonBlank => AggState::CountNonBlank { count: 0 },
+                    AggregationKind::CountNumbers => AggState::CountNumbers { count: 0 },
                     AggregationKind::DistinctCount => AggState::DistinctCount {
                         set: HashSet::new(),
                     },
@@ -528,6 +553,21 @@ impl ColumnarTableBackend {
                 match (self, spec.kind) {
                     (AggState::CountRows { count }, AggregationKind::CountRows) => {
                         *count += 1;
+                    }
+                    (AggState::CountNonBlank { count }, AggregationKind::CountNonBlank) => {
+                        if let Some(v) = value {
+                            if !matches!(v, formula_columnar::Value::Null) {
+                                *count += 1;
+                            }
+                        }
+                    }
+                    (AggState::CountNumbers { count }, AggregationKind::CountNumbers) => {
+                        if value
+                            .and_then(ColumnarTableBackend::numeric_from_columnar)
+                            .is_some()
+                        {
+                            *count += 1;
+                        }
                     }
                     (AggState::Sum { sum, count }, AggregationKind::Sum) => {
                         if let Some(v) = value.and_then(ColumnarTableBackend::numeric_from_columnar)
@@ -584,6 +624,8 @@ impl ColumnarTableBackend {
                     AggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
                     AggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
                     AggState::CountRows { count } => Value::from(count as i64),
+                    AggState::CountNonBlank { count } => Value::from(count as i64),
+                    AggState::CountNumbers { count } => Value::from(count as i64),
                     AggState::DistinctCount { set } => Value::from(set.len() as i64),
                 }
             }

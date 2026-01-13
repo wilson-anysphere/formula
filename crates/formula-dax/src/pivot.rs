@@ -588,6 +588,7 @@ fn plan_pivot_expr(
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
+            | BinaryOp::Concat
             | BinaryOp::Equals
             | BinaryOp::NotEquals
             | BinaryOp::Less
@@ -830,7 +831,7 @@ fn plan_pivot_expr(
                     alternate,
                 }))
             }
-            "SUM" | "AVERAGE" | "MIN" | "MAX" | "DISTINCTCOUNT" => {
+            "SUM" | "AVERAGE" | "MIN" | "MAX" | "DISTINCTCOUNT" | "COUNT" | "COUNTA" => {
                 let [arg] = args.as_slice() else {
                     return Ok(None);
                 };
@@ -851,11 +852,36 @@ fn plan_pivot_expr(
                     "AVERAGE" => AggregationKind::Average,
                     "MIN" => AggregationKind::Min,
                     "MAX" => AggregationKind::Max,
+                    "COUNT" => AggregationKind::CountNumbers,
+                    "COUNTA" => AggregationKind::CountNonBlank,
                     "DISTINCTCOUNT" => AggregationKind::DistinctCount,
                     _ => unreachable!(),
                 };
                 let agg_idx = ensure_agg(kind, Some(idx), agg_specs, agg_map);
                 Ok(Some(PlannedExpr::AggRef(agg_idx)))
+            }
+            "COUNTBLANK" => {
+                let [arg] = args.as_slice() else {
+                    return Ok(None);
+                };
+                let Expr::ColumnRef { table, column } = arg else {
+                    return Ok(None);
+                };
+                if table != base_table_name {
+                    return Ok(None);
+                }
+                let idx = base_table.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                let count_rows = ensure_agg(AggregationKind::CountRows, None, agg_specs, agg_map);
+                let count_non_blank =
+                    ensure_agg(AggregationKind::CountNonBlank, Some(idx), agg_specs, agg_map);
+                Ok(Some(PlannedExpr::Binary {
+                    op: BinaryOp::Subtract,
+                    left: Box::new(PlannedExpr::AggRef(count_rows)),
+                    right: Box::new(PlannedExpr::AggRef(count_non_blank)),
+                }))
             }
             "COUNTROWS" => {
                 let [arg] = args.as_slice() else {
@@ -1383,6 +1409,8 @@ fn pivot_planned_row_group_by(
         Min { best: Option<f64> },
         Max { best: Option<f64> },
         CountRows { count: usize },
+        CountNonBlank { count: usize },
+        CountNumbers { count: usize },
         DistinctCount { set: HashSet<Value> },
     }
 
@@ -1394,6 +1422,8 @@ fn pivot_planned_row_group_by(
                 AggregationKind::Min => AggState::Min { best: None },
                 AggregationKind::Max => AggState::Max { best: None },
                 AggregationKind::CountRows => AggState::CountRows { count: 0 },
+                AggregationKind::CountNonBlank => AggState::CountNonBlank { count: 0 },
+                AggregationKind::CountNumbers => AggState::CountNumbers { count: 0 },
                 AggregationKind::DistinctCount => AggState::DistinctCount {
                     set: HashSet::new(),
                 },
@@ -1404,6 +1434,26 @@ fn pivot_planned_row_group_by(
             match (self, spec.kind) {
                 (AggState::CountRows { count }, AggregationKind::CountRows) => {
                     *count += 1;
+                }
+                (AggState::CountNonBlank { count }, AggregationKind::CountNonBlank) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if !table
+                        .value_by_idx(row, idx)
+                        .unwrap_or(Value::Blank)
+                        .is_blank()
+                    {
+                        *count += 1;
+                    }
+                }
+                (AggState::CountNumbers { count }, AggregationKind::CountNumbers) => {
+                    let Some(idx) = spec.column_idx else {
+                        return;
+                    };
+                    if matches!(table.value_by_idx(row, idx), Some(Value::Number(_))) {
+                        *count += 1;
+                    }
                 }
                 (AggState::Sum { sum, count }, AggregationKind::Sum) => {
                     let Some(idx) = spec.column_idx else {
@@ -1469,6 +1519,8 @@ fn pivot_planned_row_group_by(
                 AggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
                 AggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
                 AggState::CountRows { count } => Value::from(count as i64),
+                AggState::CountNonBlank { count } => Value::from(count as i64),
+                AggState::CountNumbers { count } => Value::from(count as i64),
                 AggState::DistinctCount { set } => Value::from(set.len() as i64),
             }
         }
