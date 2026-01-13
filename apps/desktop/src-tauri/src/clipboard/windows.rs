@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::Globalization::{
     MultiByteToWideChar, CP_ACP, CP_OEMCP, MB_ERR_INVALID_CHARS, MULTI_BYTE_TO_WIDE_CHAR_FLAGS,
 };
@@ -13,6 +13,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{
     GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetOpenClipboardWindow, GetWindowThreadProcessId};
 
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
 use super::retry::{retry_with_delays_if, total_delay, OPEN_CLIPBOARD_RETRY_DELAYS};
@@ -77,6 +78,18 @@ fn is_retryable_open_clipboard_error(err: &windows::core::Error) -> bool {
     code == E_ACCESSDENIED || code == E_BUSY
 }
 
+fn get_open_clipboard_lock_holder() -> Option<(HWND, u32)> {
+    unsafe {
+        let hwnd = GetOpenClipboardWindow();
+        if hwnd.0 == 0 {
+            return None;
+        }
+        let mut pid = 0u32;
+        let _tid = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        Some((hwnd, pid))
+    }
+}
+
 fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     // The clipboard is a shared global resource. `OpenClipboard` can fail temporarily when another
     // process is holding the clipboard lock. Use a deterministic exponential backoff (bounded total
@@ -85,6 +98,7 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     let max_total_sleep = total_delay(OPEN_CLIPBOARD_RETRY_DELAYS);
     let mut attempts = 0usize;
     let mut slept = Duration::from_millis(0);
+    let mut lock_holder = None::<(HWND, u32)>;
 
     retry_with_delays_if(
         || {
@@ -94,6 +108,12 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
         OPEN_CLIPBOARD_RETRY_DELAYS,
         is_retryable_open_clipboard_error,
         |d| {
+            // Best-effort: try to capture the window + PID that currently has the clipboard open so
+            // we can include it in the final error for debugging. This runs only on retryable
+            // failures, not on the success path.
+            if let Some(holder) = get_open_clipboard_lock_holder() {
+                lock_holder = Some(holder);
+            }
             slept += d;
             std::thread::sleep(d);
         },
@@ -102,9 +122,12 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     .map_err(|err| {
         let last_hresult = err.code().0 as u32;
         let retriable = is_retryable_open_clipboard_error(&err);
+        let lock_holder_ctx = lock_holder
+            .map(|(hwnd, pid)| format!("open_clipboard_window=0x{:X}, open_clipboard_pid={pid}", hwnd.0 as usize))
+            .unwrap_or_else(|| "open_clipboard_window=None".to_string());
         win_err(
             &format!(
-                "OpenClipboard failed after {attempts}/{max_attempts} attempts over {}ms sleep (budget {}ms, retriable={retriable}, last_hresult=0x{last_hresult:08X})",
+                "OpenClipboard failed after {attempts}/{max_attempts} attempts over {}ms sleep (budget {}ms, retriable={retriable}, last_hresult=0x{last_hresult:08X}, {lock_holder_ctx})",
                 slept.as_millis(),
                 max_total_sleep.as_millis(),
             ),
