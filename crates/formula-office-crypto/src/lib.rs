@@ -16,8 +16,34 @@ mod util;
 use std::io::{Cursor, Read};
 
 pub use crate::error::OfficeCryptoError;
+pub use crate::crypto::HashAlgorithm;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum EncryptionScheme {
+    Agile,
+    Standard,
+}
+
+#[derive(Debug, Clone)]
+pub struct EncryptOptions {
+    pub scheme: EncryptionScheme,
+    pub key_bits: usize,
+    pub hash_algorithm: HashAlgorithm,
+    pub spin_count: u32,
+}
+
+impl Default for EncryptOptions {
+    fn default() -> Self {
+        Self {
+            scheme: EncryptionScheme::Agile,
+            key_bits: 256,
+            hash_algorithm: HashAlgorithm::Sha512,
+            spin_count: 100_000,
+        }
+    }
+}
 
 /// Returns true if the provided bytes look like an OLE/CFB container holding an Office-encrypted
 /// OOXML package (streams `EncryptionInfo` and `EncryptedPackage`).
@@ -51,6 +77,38 @@ pub fn decrypt_encrypted_package_ole(
         .read_to_end(&mut encrypted_package)?;
 
     decrypt_encrypted_package(&encryption_info, &encrypted_package, password)
+}
+
+/// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
+///
+/// The returned bytes are an OLE/CFB container containing:
+/// - `EncryptionInfo` stream (Agile XML descriptor, by default)
+/// - `EncryptedPackage` stream (8-byte decrypted size prefix + encrypted payload)
+pub fn encrypt_package_to_ole(
+    zip_bytes: &[u8],
+    password: &str,
+    opts: EncryptOptions,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    use std::io::Write as _;
+
+    let (encryption_info, encrypted_package) = match opts.scheme {
+        EncryptionScheme::Agile => agile::encrypt_agile_encrypted_package(zip_bytes, password, &opts)?,
+        EncryptionScheme::Standard => {
+            return Err(OfficeCryptoError::UnsupportedEncryption(
+                "Standard encryption writer not implemented".to_string(),
+            ))
+        }
+    };
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor)?;
+
+    ole.create_stream("EncryptionInfo")?
+        .write_all(&encryption_info)?;
+    ole.create_stream("EncryptedPackage")?
+        .write_all(&encrypted_package)?;
+
+    Ok(ole.into_inner().into_inner())
 }
 
 fn decrypt_encrypted_package(

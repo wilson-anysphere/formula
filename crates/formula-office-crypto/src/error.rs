@@ -8,9 +8,12 @@ pub enum OfficeCryptoError {
     InvalidPassword,
     #[error("unsupported encryption: {0}")]
     UnsupportedEncryption(String),
+    #[error("invalid encryption options: {0}")]
+    InvalidOptions(String),
     #[error("invalid format: {0}")]
     InvalidFormat(String),
+    #[error("integrity check failed")]
+    IntegrityCheckFailed,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
-

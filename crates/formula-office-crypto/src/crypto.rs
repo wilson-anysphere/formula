@@ -1,17 +1,14 @@
 use crate::error::OfficeCryptoError;
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
-#[cfg(test)]
 use cbc::Encryptor;
 use cipher::block_padding::NoPadding;
-use cipher::{BlockDecryptMut, KeyIvInit};
-#[cfg(test)]
-use cipher::BlockEncryptMut;
+use cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use sha2::Digest;
 use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HashAlgorithm {
+pub enum HashAlgorithm {
     Sha1,
     Sha256,
     Sha384,
@@ -19,6 +16,24 @@ pub(crate) enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
+    pub fn as_ooxml_name(&self) -> &'static str {
+        match self {
+            HashAlgorithm::Sha1 => "SHA1",
+            HashAlgorithm::Sha256 => "SHA256",
+            HashAlgorithm::Sha384 => "SHA384",
+            HashAlgorithm::Sha512 => "SHA512",
+        }
+    }
+
+    pub fn digest_len(&self) -> usize {
+        match self {
+            HashAlgorithm::Sha1 => 20,
+            HashAlgorithm::Sha256 => 32,
+            HashAlgorithm::Sha384 => 48,
+            HashAlgorithm::Sha512 => 64,
+        }
+    }
+
     pub(crate) fn from_name(name: &str) -> Result<Self, OfficeCryptoError> {
         match name {
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
@@ -178,7 +193,6 @@ pub(crate) fn aes_cbc_decrypt(
     Ok(buf)
 }
 
-#[cfg(test)]
 pub(crate) fn aes_cbc_encrypt(
     key: &[u8],
     iv: &[u8],

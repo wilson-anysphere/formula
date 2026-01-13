@@ -1,8 +1,15 @@
 use base64::Engine;
+use hmac::{Hmac, Mac};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use rand::rngs::OsRng;
+use rand::RngCore;
+use sha1::Sha1;
+use sha2::{Sha256, Sha384, Sha512};
 
-use crate::crypto::{aes_cbc_decrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm};
+use crate::crypto::{
+    aes_cbc_decrypt, aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm,
+};
 use crate::error::OfficeCryptoError;
 use crate::util::{read_u64_le, EncryptionInfoHeader};
 use zeroize::Zeroizing;
@@ -250,6 +257,213 @@ pub(crate) fn decrypt_agile_encrypted_package(
     }
     out.truncate(expected_len);
     Ok(out)
+}
+
+pub(crate) fn encrypt_agile_encrypted_package(
+    zip_bytes: &[u8],
+    password: &str,
+    opts: &crate::EncryptOptions,
+) -> Result<(Vec<u8>, Vec<u8>), OfficeCryptoError> {
+    if opts.key_bits % 8 != 0 {
+        return Err(OfficeCryptoError::InvalidOptions(
+            "key_bits must be divisible by 8".to_string(),
+        ));
+    }
+    if opts.key_bits != 128 && opts.key_bits != 256 {
+        return Err(OfficeCryptoError::InvalidOptions(format!(
+            "unsupported key_bits {} (expected 128 or 256)",
+            opts.key_bits
+        )));
+    }
+
+    let key_bytes = opts.key_bits / 8;
+    let block_size = 16usize;
+    let hash_alg = opts.hash_algorithm;
+
+    let pw_utf16 = password_to_utf16le(password);
+
+    // Random salts and keys.
+    let mut salt_key_encryptor = vec![0u8; 16];
+    let mut salt_key_data = vec![0u8; 16];
+    OsRng.fill_bytes(&mut salt_key_encryptor);
+    OsRng.fill_bytes(&mut salt_key_data);
+
+    let mut package_key_plain = vec![0u8; key_bytes];
+    OsRng.fill_bytes(&mut package_key_plain);
+    let package_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(package_key_plain);
+
+    let mut verifier_hash_input_plain = [0u8; 16];
+    OsRng.fill_bytes(&mut verifier_hash_input_plain);
+    let verifier_hash_value_plain = hash_alg.digest(&verifier_hash_input_plain);
+    let verifier_hash_value_plain = pad_zero(&verifier_hash_value_plain, block_size);
+
+    // Encrypt verifierHashInput.
+    let key_vhi = derive_agile_key(
+        hash_alg,
+        &salt_key_encryptor,
+        &pw_utf16,
+        opts.spin_count,
+        key_bytes,
+        BLOCK_KEY_VERIFIER_HASH_INPUT,
+    );
+    let iv_vhi = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_INPUT, block_size);
+    let enc_vhi = aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain)?;
+
+    // Encrypt verifierHashValue.
+    let key_vhv = derive_agile_key(
+        hash_alg,
+        &salt_key_encryptor,
+        &pw_utf16,
+        opts.spin_count,
+        key_bytes,
+        BLOCK_KEY_VERIFIER_HASH_VALUE,
+    );
+    let iv_vhv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_VALUE, block_size);
+    let enc_vhv = aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain)?;
+
+    // Encrypt package key (encryptedKeyValue).
+    let key_kv = derive_agile_key(
+        hash_alg,
+        &salt_key_encryptor,
+        &pw_utf16,
+        opts.spin_count,
+        key_bytes,
+        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+    );
+    let iv_kv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_ENCRYPTED_KEY_VALUE, block_size);
+    let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain)?;
+
+    // Encrypt package bytes.
+    let encrypted_package =
+        encrypt_encrypted_package_stream(zip_bytes, &package_key_plain, hash_alg, &salt_key_data, block_size)?;
+
+    // Integrity (HMAC over the EncryptedPackage stream).
+    let mut hmac_key_plain = vec![0u8; hash_alg.digest_len()];
+    OsRng.fill_bytes(&mut hmac_key_plain);
+    let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(hmac_key_plain);
+    let hmac_value_plain = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
+    let hmac_value_plain = pad_zero(&hmac_value_plain, block_size);
+
+    let iv_hmac_key = derive_iv(hash_alg, &salt_key_data, BLOCK_KEY_INTEGRITY_HMAC_KEY, block_size);
+    let encrypted_hmac_key = aes_cbc_encrypt(
+        &package_key_plain,
+        &iv_hmac_key,
+        &pad_zero(&hmac_key_plain, block_size),
+    )?;
+    let iv_hmac_val = derive_iv(hash_alg, &salt_key_data, BLOCK_KEY_INTEGRITY_HMAC_VALUE, block_size);
+    let encrypted_hmac_value =
+        aes_cbc_encrypt(&package_key_plain, &iv_hmac_val, &hmac_value_plain)?;
+
+    // Build EncryptionInfo XML.
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let salt_key_encryptor_b64 = b64.encode(&salt_key_encryptor);
+    let salt_key_data_b64 = b64.encode(&salt_key_data);
+    let enc_vhi_b64 = b64.encode(enc_vhi);
+    let enc_vhv_b64 = b64.encode(enc_vhv);
+    let enc_kv_b64 = b64.encode(enc_kv);
+    let enc_hmac_key_b64 = b64.encode(encrypted_hmac_key);
+    let enc_hmac_value_b64 = b64.encode(encrypted_hmac_value);
+
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+  <keyData saltSize="16" blockSize="16" keyBits="{key_bits}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+  <dataIntegrity encryptedHmacKey="{enc_hmac_key_b64}" encryptedHmacValue="{enc_hmac_value_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+        saltSize="16" blockSize="16" keyBits="{key_bits}" spinCount="{spin_count}" hashAlgorithm="{hash_alg_name}" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
+        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
+        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
+        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
+      </p:encryptedKey>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#,
+        key_bits = opts.key_bits,
+        spin_count = opts.spin_count,
+        hash_alg_name = hash_alg.as_ooxml_name(),
+        salt_key_data_b64 = salt_key_data_b64,
+        salt_key_encryptor_b64 = salt_key_encryptor_b64,
+        enc_vhi_b64 = enc_vhi_b64,
+        enc_vhv_b64 = enc_vhv_b64,
+        enc_kv_b64 = enc_kv_b64,
+        enc_hmac_key_b64 = enc_hmac_key_b64,
+        enc_hmac_value_b64 = enc_hmac_value_b64,
+    );
+
+    // Build EncryptionInfo stream: version header + xml length + xml bytes.
+    let flags: u32 = 0x0000_0040;
+    let xml_len = xml.as_bytes().len() as u32;
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&4u16.to_le_bytes());
+    encryption_info.extend_from_slice(&flags.to_le_bytes());
+    encryption_info.extend_from_slice(&xml_len.to_le_bytes());
+    encryption_info.extend_from_slice(xml.as_bytes());
+
+    Ok((encryption_info, encrypted_package))
+}
+
+fn encrypt_encrypted_package_stream(
+    zip_bytes: &[u8],
+    package_key: &[u8],
+    hash_alg: HashAlgorithm,
+    salt: &[u8],
+    block_size: usize,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    const SEGMENT_LEN: usize = 4096;
+    let original_size = zip_bytes.len() as u64;
+    let mut out = Vec::with_capacity(8 + zip_bytes.len());
+    out.extend_from_slice(&original_size.to_le_bytes());
+
+    let mut block_index = 0u32;
+    for chunk in zip_bytes.chunks(SEGMENT_LEN) {
+        let iv = derive_iv(hash_alg, salt, &block_index.to_le_bytes(), block_size);
+        let plain = pad_zero(chunk, block_size);
+        let enc = aes_cbc_encrypt(package_key, &iv, &plain)?;
+        out.extend_from_slice(&enc);
+        block_index = block_index.checked_add(1).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("segment counter overflow".to_string())
+        })?;
+    }
+
+    Ok(out)
+}
+
+fn pad_zero(data: &[u8], block_size: usize) -> Vec<u8> {
+    if data.len() % block_size == 0 {
+        return data.to_vec();
+    }
+    let mut out = data.to_vec();
+    let pad = block_size - (out.len() % block_size);
+    out.extend(std::iter::repeat(0u8).take(pad));
+    out
+}
+
+fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha256 => {
+            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha384 => {
+            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha512 => {
+            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
+    }
 }
 
 struct AgileDescriptor {
