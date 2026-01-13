@@ -78,7 +78,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Guard: pinned Tauri CLI version matches Cargo.toml
+      - name: "Guard: pinned Tauri CLI version matches Cargo.toml"
         run: node scripts/ci/check-tauri-cli-version.mjs
 
       - name: Setup Rust
