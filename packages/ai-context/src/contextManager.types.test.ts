@@ -21,6 +21,7 @@ import {
   type DlpOptions,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
+  type SheetNameResolverLike,
   type SpreadsheetApiLike,
   type WorkbookRagVectorStore,
   type WorkbookRagWorkbook,
@@ -42,6 +43,7 @@ type _WorkbookRetrievedShape = Assert<
 
 type _ContextSheetNotAny = Assert<IsAny<ContextSheet> extends false ? true : false>;
 type _DlpOptionsNotAny = Assert<IsAny<DlpOptions> extends false ? true : false>;
+type _SheetNameResolverNotAny = Assert<IsAny<SheetNameResolverLike> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;

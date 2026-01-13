@@ -104,8 +104,14 @@ export interface SpreadsheetApiLike {
    * ContextManager forwards this through to DLP enforcement when callers do not
    * provide an explicit resolver.
    */
-  sheetNameResolver?: { getSheetIdByName(name: string): string | null | undefined };
-  sheet_name_resolver?: { getSheetIdByName(name: string): string | null | undefined };
+  sheetNameResolver?: SheetNameResolverLike;
+  sheet_name_resolver?: SheetNameResolverLike;
+  [key: string]: unknown;
+}
+
+export interface SheetNameResolverLike {
+  getSheetIdByName(name: string): string | null | undefined;
+  getSheetNameById?: (id: string) => string | null | undefined;
   [key: string]: unknown;
 }
 
@@ -168,8 +174,8 @@ export interface DlpOptions {
   /**
    * Optional sheet name <-> id resolver used for structured DLP enforcement.
    */
-  sheetNameResolver?: { getSheetIdByName(name: string): string | null | undefined };
-  sheet_name_resolver?: { getSheetIdByName(name: string): string | null | undefined };
+  sheetNameResolver?: SheetNameResolverLike;
+  sheet_name_resolver?: SheetNameResolverLike;
 }
 
 export type WorkbookRagOptions = {
