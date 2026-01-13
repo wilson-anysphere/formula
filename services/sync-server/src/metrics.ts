@@ -238,6 +238,8 @@ function createFallbackMetrics(): SyncServerMetrics {
   });
   wsConnectionsRejectedTotal.inc({ reason: "rate_limit" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "url_too_long" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "token_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);
@@ -458,6 +460,8 @@ function createFallbackMetrics(): SyncServerMetrics {
 export type WsConnectionRejectionReason =
   | "rate_limit"
   | "auth_failure"
+  | "url_too_long"
+  | "token_too_long"
   | "tombstone"
   | "retention_purging"
   | "max_connections_per_doc"
@@ -561,6 +565,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   // missing series vs. a literal 0 value.
   wsConnectionsRejectedTotal.inc({ reason: "rate_limit" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "url_too_long" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "token_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);

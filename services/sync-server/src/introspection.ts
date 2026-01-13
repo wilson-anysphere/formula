@@ -88,6 +88,11 @@ export function createSyncTokenIntrospectionClient(config: {
     SyncServerMetrics,
     "introspectionOverCapacityTotal" | "introspectionRequestsTotal" | "introspectionRequestDurationMs"
   >;
+  /**
+   * Optional token length limit (in bytes, utf-8). When exceeded, the token is
+   * treated as inactive before any hashing or network requests occur.
+   */
+  maxTokenBytes?: number;
 }): SyncTokenIntrospectionClient {
   const cache = new Map<
     string,
@@ -99,6 +104,7 @@ export function createSyncTokenIntrospectionClient(config: {
   >();
 
   const cacheTtlMs = Math.max(0, Math.floor(config.cacheTtlMs));
+  const maxTokenBytes = Math.max(0, Math.floor(config.maxTokenBytes ?? 0));
   const cacheSweepIntervalMs = Math.max(cacheTtlMs, 30_000);
   const maxEntriesBeforeSweep = 10_000;
   let lastCacheSweepAtMs = Date.now();
@@ -113,6 +119,11 @@ export function createSyncTokenIntrospectionClient(config: {
     sha256Hex(`${params.token}\n${params.docId}\n${params.clientIp ?? ""}`);
 
   const introspectInner: SyncTokenIntrospectionClient["introspect"] = async (params) => {
+    if (maxTokenBytes > 0 && Buffer.byteLength(params.token, "utf8") > maxTokenBytes) {
+      // Avoid hashing or making a network request for attacker-controlled,
+      // extremely large tokens.
+      return { active: false, reason: "token_too_long" };
+    }
     const key = cacheKey(params);
     const now = Date.now();
 

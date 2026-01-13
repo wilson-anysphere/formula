@@ -438,7 +438,11 @@ export function createSyncServer(
   const shouldPersist = (docName: string) => !tombstones.has(docKeyFromDocName(docName));
 
   const syncTokenIntrospection: SyncTokenIntrospectionClient | null = config.introspection
-    ? createSyncTokenIntrospectionClient({ ...config.introspection, metrics })
+    ? createSyncTokenIntrospectionClient({
+        ...config.introspection,
+        metrics,
+        maxTokenBytes: config.limits.maxTokenBytes,
+      })
     : null;
 
   type TombstoneSweepResult = {
@@ -1723,6 +1727,13 @@ export function createSyncServer(
           return;
         }
 
+        const maxUrlBytes = config.limits.maxUrlBytes ?? 0;
+        if (maxUrlBytes > 0 && Buffer.byteLength(req.url, "utf8") > maxUrlBytes) {
+          recordUpgradeRejection("url_too_long");
+          sendUpgradeRejection(socket, 414, "URL too long");
+          return;
+        }
+
         // Match y-websocket docName extraction (no normalization/decoding).
         const pathName = rawPathnameFromUrl(req.url);
         const docName = pathName.startsWith("/") ? pathName.slice(1) : pathName;
@@ -1752,6 +1763,12 @@ export function createSyncServer(
         }
 
         const token = extractToken(req, url);
+        const maxTokenBytes = config.limits.maxTokenBytes ?? 0;
+        if (token && maxTokenBytes > 0 && Buffer.byteLength(token, "utf8") > maxTokenBytes) {
+          recordUpgradeRejection("token_too_long");
+          sendUpgradeRejection(socket, 414, "Token too long");
+          return;
+        }
         let authCtx: AuthContext;
         try {
           authCtx = await authenticateRequest(config.auth, token, docName, {
@@ -1759,6 +1776,7 @@ export function createSyncServer(
             clientIp: ip,
             userAgent,
             metrics,
+            maxTokenBytes,
           });
         } catch (err) {
           if (err instanceof AuthError) {

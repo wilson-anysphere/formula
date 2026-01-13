@@ -26,7 +26,7 @@ export type AuthContext = {
 export class AuthError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 401 | 403 | 503 = 401
+    public readonly statusCode: 401 | 403 | 414 | 503 = 401
   ) {
     super(message);
     this.name = "AuthError";
@@ -364,9 +364,19 @@ export async function authenticateRequest(
     clientIp?: string | null;
     userAgent?: string | null;
     metrics?: Pick<SyncServerMetrics, "introspectionRequestDurationMs">;
+    /**
+     * Optional token length limit (in bytes, utf-8). When exceeded, the token is
+     * rejected before any hashing/verification/introspection work occurs.
+     */
+    maxTokenBytes?: number;
   } = {}
 ): Promise<AuthContext> {
   if (!token) throw new AuthError("Missing token", 401);
+
+  const maxTokenBytes = options.maxTokenBytes ?? 0;
+  if (maxTokenBytes > 0 && Buffer.byteLength(token, "utf8") > maxTokenBytes) {
+    throw new AuthError("Token too long", 414);
+  }
 
   if (auth.mode === "opaque") {
     if (!timingSafeEqualStrings(token, auth.token)) throw new AuthError("Invalid token", 401);

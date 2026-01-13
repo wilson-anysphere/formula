@@ -143,6 +143,25 @@ export type SyncServerConfig = {
   };
 
   limits: {
+    /**
+     * Maximum websocket upgrade request URL size (in bytes, utf-8).
+     *
+     * This limit is enforced before calling `new URL(req.url, ...)` to avoid
+     * expensive parsing/logging for attacker-controlled, extremely large URLs.
+     *
+     * Set to 0 to disable.
+     */
+    maxUrlBytes: number;
+    /**
+     * Maximum authentication token size (in bytes, utf-8).
+     *
+     * This limit is enforced before hashing/verification/introspection so
+     * attacker-controlled tokens cannot trigger expensive CPU work or large
+     * allocations.
+     *
+     * Set to 0 to disable.
+     */
+    maxTokenBytes: number;
     maxConnections: number;
     maxConnectionsPerIp: number;
     maxConnectionsPerDoc: number;
@@ -487,6 +506,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
       tombstoneTtlMs,
     },
     limits: {
+      maxUrlBytes: Math.max(0, envInt(process.env.SYNC_SERVER_MAX_URL_BYTES, 8192)),
+      maxTokenBytes: Math.max(0, envInt(process.env.SYNC_SERVER_MAX_TOKEN_BYTES, 4096)),
       maxConnections: envInt(process.env.SYNC_SERVER_MAX_CONNECTIONS, 1000),
       maxConnectionsPerIp: envInt(
         process.env.SYNC_SERVER_MAX_CONNECTIONS_PER_IP,
