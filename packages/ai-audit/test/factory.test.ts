@@ -85,6 +85,26 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).maxEntries).toBe(42);
   });
 
+  it("uses top-level max_entries/max_age_ms over retention", async () => {
+    const storage = new MemoryLocalStorage();
+    Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
+    (globalThis as any).indexedDB = indexedDB;
+    (globalThis as any).IDBKeyRange = IDBKeyRange;
+
+    const store = await createDefaultAIAuditStore({
+      bounded: false,
+      max_entries: 7,
+      max_age_ms: 1234,
+      retention: { max_entries: 42, max_age_ms: 9999 }
+    });
+
+    expect(store).toBeInstanceOf(IndexedDbAIAuditStore);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).maxEntries).toBe(7);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((store as any).maxAgeMs).toBe(1234);
+  });
+
   it('prefer: "localstorage" chooses LocalStorageAIAuditStore even when indexedDB exists', async () => {
     const storage = new MemoryLocalStorage();
     Object.defineProperty(globalThis, "window", { value: { localStorage: storage }, configurable: true });
