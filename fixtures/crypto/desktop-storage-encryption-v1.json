@@ -1,0 +1,17 @@
+{
+  "algorithm": "aes-256-gcm",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "iv": "GvOMLcK5b/3YZpQJ",
+  "plaintext": {
+    "encoding": "utf8",
+    "value": "example plaintext payload"
+  },
+  "aadContext": {
+    "scope": "formula-desktop-store",
+    "schemaVersion": 1
+  },
+  "expected": {
+    "ciphertext": "xwj/oEeNg2EMTZ9hOsFvzfEmqwXB9hoXkg==",
+    "tag": "+5Xz+PWjxxL4+mo2nRKXzQ=="
+  }
+}
