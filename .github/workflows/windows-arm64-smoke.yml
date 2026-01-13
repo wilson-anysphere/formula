@@ -54,6 +54,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Check pinned Tauri CLI version matches Tauri crates
+        run: node scripts/ci/check-tauri-cli-version.mjs
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.92.0
 
