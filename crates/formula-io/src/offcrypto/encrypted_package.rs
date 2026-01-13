@@ -408,6 +408,17 @@ mod tests {
     use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 
+    fn derive_segment_iv_reference(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
+        // Spec reference: SHA1(salt || LE32(i))[:16]
+        let mut hasher = Sha1::new();
+        hasher.update(salt);
+        hasher.update(segment_index.to_le_bytes());
+        let digest = hasher.finalize();
+        let mut iv = [0u8; AES_BLOCK_LEN];
+        iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
+        iv
+    }
+
     fn fixed_key_16() -> Vec<u8> {
         (0u8..=0x0F).collect()
     }
@@ -479,6 +490,32 @@ mod tests {
         let padded = pkcs7_pad(plaintext);
         for (i, chunk) in padded.chunks(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
             let iv = derive_segment_iv(salt, i as u32);
+            let ciphertext = encrypt_segment_aes_cbc_no_padding(key, &iv, chunk);
+            out.extend_from_slice(&ciphertext);
+        }
+
+        out
+    }
+
+    fn encrypt_encrypted_package_stream_standard_cryptoapi_reference(
+        key: &[u8],
+        salt: &[u8],
+        plaintext: &[u8],
+    ) -> Vec<u8> {
+        let orig_size = plaintext.len() as u64;
+
+        let mut out = Vec::new();
+        out.extend_from_slice(&orig_size.to_le_bytes());
+
+        if plaintext.is_empty() {
+            return out;
+        }
+
+        let padded = pkcs7_pad(plaintext);
+        for (i, chunk) in padded.chunks(ENCRYPTED_PACKAGE_SEGMENT_LEN).enumerate() {
+            // Reference IV derivation (do not use the decryptor's helper) so this test fails if the
+            // decryptor ever truncates/pads the salt or uses the wrong segment index endianness.
+            let iv = derive_segment_iv_reference(salt, i as u32);
             let ciphertext = encrypt_segment_aes_cbc_no_padding(key, &iv, chunk);
             out.extend_from_slice(&ciphertext);
         }
@@ -764,5 +801,42 @@ mod tests {
             "decryptor should not panic when computing segment counts/offsets"
         );
         assert!(res.unwrap().is_err(), "expected error on huge orig_size");
+    }
+
+    #[test]
+    fn derive_iv_known_answer_uses_full_salt_and_le_u32_segment_index() {
+        // salt = 0x00..0x07 (8 bytes, intentionally not 16)
+        let salt: Vec<u8> = (0u8..8).collect();
+
+        // Expected SHA1(salt || LE32(i))[:16]
+        // i = 0: SHA1(0001020304050607 00000000) = 5eb83f233710c17da63ba93c6e11a0a928db13b5
+        // i = 1: SHA1(0001020304050607 01000000) = e53ad9c78a02910481b7ead1e296876ebb94c934
+        let expected_i0: [u8; 16] = [
+            0x5e, 0xb8, 0x3f, 0x23, 0x37, 0x10, 0xc1, 0x7d, 0xa6, 0x3b, 0xa9, 0x3c, 0x6e, 0x11,
+            0xa0, 0xa9,
+        ];
+        let expected_i1: [u8; 16] = [
+            0xe5, 0x3a, 0xd9, 0xc7, 0x8a, 0x02, 0x91, 0x04, 0x81, 0xb7, 0xea, 0xd1, 0xe2, 0x96,
+            0x87, 0x6e,
+        ];
+
+        assert_eq!(derive_segment_iv(&salt, 0), expected_i0);
+        assert_eq!(derive_segment_iv(&salt, 1), expected_i1);
+    }
+
+    #[test]
+    fn decrypt_round_trips_non_16_byte_salts_across_multiple_segments() {
+        let key = fixed_key_16();
+
+        // >4096 bytes so we exercise segmentIndex 0 and 1.
+        let plaintext = make_plaintext(5000);
+
+        for salt in [ (0u8..8).collect::<Vec<u8>>(), (0u8..32).collect::<Vec<u8>>() ] {
+            let encrypted =
+                encrypt_encrypted_package_stream_standard_cryptoapi_reference(&key, &salt, &plaintext);
+            let decrypted =
+                decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt).unwrap();
+            assert_eq!(decrypted, plaintext, "round-trip failed for salt len={}", salt.len());
+        }
     }
 }
