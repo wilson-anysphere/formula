@@ -273,16 +273,27 @@ def main() -> int:
     _append_step_summary(md)
 
     report: dict[str, Any] = {
-        "binary": {"path": _relpath(binary.path, repo_root), "size_bytes": binary.size_bytes, "size_mb": binary.size_mb},
-        "dist": {"path": _relpath(dist.path, repo_root), "size_bytes": dist.size_bytes, "size_mb": dist.size_mb},
+        "binary": {
+            "path": _relpath(binary.path, repo_root),
+            "size_bytes": binary.size_bytes,
+            "size_mb": round(binary.size_mb, 3),
+        },
+        "dist": {
+            "path": _relpath(dist.path, repo_root),
+            "size_bytes": dist.size_bytes,
+            "size_mb": round(dist.size_mb, 3),
+        },
         "dist_tar_gz": None,
         "limits_mb": {"binary": binary_limit_mb, "dist": dist_limit_mb},
     }
+    runner_os = os.environ.get("RUNNER_OS", "").strip()
+    if runner_os:
+        report["runner_os"] = runner_os
     if dist_gzip is not None:
         report["dist_tar_gz"] = {
             "path": _relpath(dist_gzip.path, repo_root),
             "size_bytes": dist_gzip.size_bytes,
-            "size_mb": dist_gzip.size_mb,
+            "size_mb": round(dist_gzip.size_mb, 3),
         }
 
     if args.json_out is not None:
