@@ -10,4 +10,10 @@ Most users should start with:
 - `python -m tools.corpus.dashboard` – generate a scorecard from triage reports (optionally `--append-trend .../trend.json`)
 - `python -m tools.corpus.minimize` – summarize which workbook parts are responsible for round-trip diffs (privacy-safe); can optionally emit a minimized workbook via `--out-xlsx`
 
+## Private corpus note
+
+For private corpora following the recommended `originals/` + `sanitized/` layout, `tools.corpus.triage` defaults to
+preferring `sanitized/` when present (to avoid double-processing originals). Override with
+`--input-scope {auto,sanitized,originals,all}` as needed.
+
 For full docs, see: `docs/compatibility-corpus.md`.
