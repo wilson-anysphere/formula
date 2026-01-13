@@ -47,6 +47,7 @@ FilterPredicate shapes:
 
 Rules:
 - Use only column names from the provided schema.
+- If the schema is empty, suggest only schema-independent operations (e.g. take, distinctRows with columns=null, removeRowsWithErrors with columns=null).
 - Keep operations minimally valid (required fields present, correct types).
 - Do not invent column names that do not exist.`;
 
@@ -107,7 +108,6 @@ function isComparisonOperator(value: unknown): value is ComparisonPredicate["ope
 function validateColumn(name: unknown, allowed: Set<string>): name is string {
   if (typeof name !== "string") return false;
   if (!name.trim()) return false;
-  if (allowed.size === 0) return true;
   return allowed.has(name);
 }
 
@@ -162,26 +162,28 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
     }
     case "distinctRows": {
       const columns = (value as { columns?: unknown }).columns;
-      if (columns !== null && !isStringArray(columns)) return null;
-      if (Array.isArray(columns) && allowedColumns.size > 0 && columns.some((c) => !allowedColumns.has(c))) return null;
+      if (columns == null) return { type: "distinctRows", columns: null };
+      if (!isStringArray(columns)) return null;
+      if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "distinctRows", columns };
     }
     case "removeRowsWithErrors": {
       const columns = (value as { columns?: unknown }).columns;
-      if (columns !== null && !isStringArray(columns)) return null;
-      if (Array.isArray(columns) && allowedColumns.size > 0 && columns.some((c) => !allowedColumns.has(c))) return null;
+      if (columns == null) return { type: "removeRowsWithErrors", columns: null };
+      if (!isStringArray(columns)) return null;
+      if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "removeRowsWithErrors", columns };
     }
     case "removeColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (allowedColumns.size > 0 && columns.some((c) => !allowedColumns.has(c))) return null;
+      if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "removeColumns", columns };
     }
     case "selectColumns": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (allowedColumns.size > 0 && columns.some((c) => !allowedColumns.has(c))) return null;
+      if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "selectColumns", columns };
     }
     case "renameColumn": {
@@ -208,7 +210,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
     case "fillDown": {
       const columns = (value as { columns?: unknown }).columns;
       if (!isStringArray(columns)) return null;
-      if (allowedColumns.size > 0 && columns.some((c) => !allowedColumns.has(c))) return null;
+      if (columns.some((c) => !allowedColumns.has(c))) return null;
       return { type: "fillDown", columns };
     }
     case "replaceValues": {
@@ -254,7 +256,7 @@ function coerceQueryOperation(value: unknown, allowedColumns: Set<string>): Quer
       const groupColumns = (value as { groupColumns?: unknown }).groupColumns;
       const aggregations = (value as { aggregations?: unknown }).aggregations;
       if (!isStringArray(groupColumns) || groupColumns.length === 0) return null;
-      if (allowedColumns.size > 0 && groupColumns.some((c) => !allowedColumns.has(c))) return null;
+      if (groupColumns.some((c) => !allowedColumns.has(c))) return null;
       if (!Array.isArray(aggregations) || aggregations.length === 0) return null;
       const outAggs: Aggregation[] = [];
       for (const agg of aggregations) {
