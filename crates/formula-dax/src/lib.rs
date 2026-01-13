@@ -40,6 +40,8 @@ mod engine;
 mod model;
 mod parser;
 mod pivot;
+#[cfg(feature = "pivot-model")]
+mod pivot_value;
 mod value;
 
 pub use crate::backend::{ColumnarTableBackend, InMemoryTableBackend, TableBackend};
@@ -52,6 +54,11 @@ pub use crate::pivot::{
     PivotCrosstabOptions, PivotMeasure, PivotResult, PivotResultGrid, ValueFieldAggregation,
     ValueFieldSpec,
 };
+
+#[cfg(feature = "pivot-model")]
+pub use crate::pivot::{PivotResultGridPivotValues, PivotResultPivotValues};
+#[cfg(feature = "pivot-model")]
+pub use crate::pivot_value::{dax_value_to_pivot_value, pivot_value_to_dax_value};
 pub use crate::value::Value;
 
 pub use crate::engine::{FilterContext, RowContext};

@@ -3,6 +3,8 @@ use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::model::{Cardinality, RelationshipPathDirection, RowSet};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
+#[cfg(feature = "pivot-model")]
+use formula_model::pivots::PivotValue;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -189,6 +191,53 @@ impl Default for PivotCrosstabOptions {
     }
 }
 
+/// A [`PivotResult`] where every scalar is represented using the canonical pivot value type.
+///
+/// This is intended for higher layers (IPC/JS rendering) that need the same scalar representation
+/// as the worksheet pivot engine.
+#[cfg(feature = "pivot-model")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PivotResultPivotValues {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<PivotValue>>,
+}
+
+#[cfg(feature = "pivot-model")]
+impl PivotResult {
+    /// Converts this DAX pivot result into the canonical pivot scalar representation.
+    pub fn into_pivot_values(self) -> PivotResultPivotValues {
+        PivotResultPivotValues {
+            columns: self.columns,
+            rows: self
+                .rows
+                .into_iter()
+                .map(|row| row.iter().map(crate::dax_value_to_pivot_value).collect())
+                .collect(),
+        }
+    }
+}
+
+/// A [`PivotResultGrid`] where every scalar is represented using the canonical pivot value type.
+#[cfg(feature = "pivot-model")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PivotResultGridPivotValues {
+    pub data: Vec<Vec<PivotValue>>,
+}
+
+#[cfg(feature = "pivot-model")]
+impl PivotResultGrid {
+    /// Converts this DAX pivot grid result into the canonical pivot scalar representation.
+    pub fn into_pivot_values(self) -> PivotResultGridPivotValues {
+        PivotResultGridPivotValues {
+            data: self
+                .data
+                .into_iter()
+                .map(|row| row.iter().map(crate::dax_value_to_pivot_value).collect())
+                .collect(),
+        }
+    }
+}
+
 fn header_value_display_string(value: &Value) -> String {
     match value {
         Value::Blank => "(blank)".to_string(),
@@ -215,7 +264,6 @@ fn key_display_string(key: &[Value], separator: &str) -> String {
         .collect::<Vec<_>>()
         .join(separator)
 }
-
 fn cmp_value(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
         (Value::Blank, Value::Blank) => Ordering::Equal,
