@@ -54,3 +54,16 @@ test("parsePartialFormula allows function-name completion after '{' (array const
   assert.equal(parsed.inFunctionCall, false);
   assert.deepEqual(parsed.functionNamePrefix, { text: "VLO", start: 2, end: 5 });
 });
+
+test("parsePartialFormula tracks quoted sheet names inside braces (sheet names may contain '(')", () => {
+  const registry = new FunctionRegistry();
+  // Sheet name is literally: My (Sheet   (no closing ')', which is valid in Excel).
+  // The '(' should not be treated as a function call paren even though we're inside `{}`.
+  const input = "={'My (Sheet'!A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  assert.equal(parsed.isFormula, true);
+  assert.equal(parsed.inFunctionCall, false);
+  assert.equal(parsed.functionName, undefined);
+  assert.equal(parsed.functionNamePrefix, undefined);
+});

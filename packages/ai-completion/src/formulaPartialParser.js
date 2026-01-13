@@ -87,7 +87,7 @@ export function parsePartialFormula(input, cursorPosition, functionRegistry) {
       braceDepth = Math.max(0, braceDepth - 1);
       continue;
     }
-    if (ch === "'" && bracketDepth === 0 && braceDepth === 0) {
+    if (ch === "'" && bracketDepth === 0) {
       inSheetQuote = true;
       continue;
     }
@@ -201,7 +201,7 @@ function getArgContext(input, openParenIndex, cursorPosition) {
       inString = true;
       continue;
     }
-    if (ch === "'" && bracketDepth === 0 && braceDepth === 0) {
+    if (ch === "'" && bracketDepth === 0) {
       inSheetQuote = true;
       continue;
     }
