@@ -8985,20 +8985,16 @@ function handleRibbonCommand(commandId: string): void {
         ribbonLayoutController?.setSplitDirection("none", 0.5);
         return;
       case "freeze-panes":
-        app.freezePanes();
-        app.focus();
+        executeBuiltinCommand("view.freezePanes");
         return;
       case "freeze-top-row":
-        app.freezeTopRow();
-        app.focus();
+        executeBuiltinCommand("view.freezeTopRow");
         return;
       case "freeze-first-column":
-        app.freezeFirstColumn();
-        app.focus();
+        executeBuiltinCommand("view.freezeFirstColumn");
         return;
       case "unfreeze-panes":
-        app.unfreezePanes();
-        app.focus();
+        executeBuiltinCommand("view.unfreezePanes");
         return;
       default:
         // If the ribbon command matches a registered command id (builtin or extension),
