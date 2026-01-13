@@ -32,6 +32,42 @@ function toAsciiUpperCase(str: string): string {
   return str.replace(/[a-z]/g, (ch) => ch.toUpperCase());
 }
 
+function isAsciiLetter(ch: string): boolean {
+  return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
+}
+
+function isAsciiDigit(ch: string): boolean {
+  return ch >= "0" && ch <= "9";
+}
+
+// Avoid Unicode-property RegExp literals (e.g. `/\p{L}/u`) so the bundle still parses
+// in JS engines that don't support them. Fall back to ASCII-only heuristics there.
+const UNICODE_LETTER_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^\\p{Alphabetic}$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+const UNICODE_ALNUM_RE: RegExp | null = (() => {
+  try {
+    return new RegExp("^[\\p{Alphabetic}\\p{Number}]$", "u");
+  } catch {
+    return null;
+  }
+})();
+
+function isUnicodeAlphabetic(ch: string): boolean {
+  if (UNICODE_LETTER_RE) return UNICODE_LETTER_RE.test(ch);
+  return isAsciiLetter(ch);
+}
+
+function isUnicodeAlphanumeric(ch: string): boolean {
+  if (UNICODE_ALNUM_RE) return UNICODE_ALNUM_RE.test(ch);
+  return isAsciiLetter(ch) || isAsciiDigit(ch);
+}
+
 function clampCursor(input: string, cursorPosition: number): number {
   const len = typeof input === "string" ? input.length : 0;
   if (!Number.isInteger(cursorPosition)) return len;
@@ -44,13 +80,13 @@ function isIdentStartChar(ch: string): boolean {
   if (!ch) return false;
   if (ch === "$" || ch === "_" || ch === "\\") return true;
   // Unicode identifiers: mirror the Rust lexer which allows non-ASCII alphabetic.
-  return /\p{L}/u.test(ch);
+  return isUnicodeAlphabetic(ch);
 }
 
 function isIdentContChar(ch: string): boolean {
   if (!ch) return false;
   if (ch === "$" || ch === "_" || ch === "\\" || ch === ".") return true;
-  return /[\p{L}\p{N}]/u.test(ch);
+  return isUnicodeAlphanumeric(ch);
 }
 
 /**
