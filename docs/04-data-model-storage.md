@@ -122,6 +122,17 @@ interface ColumnStats {
 }
 ```
 
+### Calculated Columns (Materialized)
+
+Calculated columns in the Data Model follow Power Pivot semantics: the expression is evaluated **once per row** and the results are **materialized** into the table as a new physical column. After materialization, the column behaves like any other stored column for filtering, grouping, joins, and storage accounting.
+
+Key properties:
+
+- **Row-wise evaluation, stored results:** `formula-dax` evaluates the expression in a row context; the resulting values are stored in `formula-columnar` alongside imported columns.
+- **Immutable snapshots:** `formula-columnar::ColumnarTable` is immutable. Adding a calculated column produces a new table snapshot by **appending a newly encoded column** while **reusing the existing encoded columns unchanged** (no re-encoding of prior columns).
+- **Single logical type (excluding blanks):** to support efficient encoding, a columnar calculated column must resolve to a single logical type across all *non-blank* rows: **number**, **string**, or **boolean**. Blanks are allowed and are encoded as nulls/validity bits, but mixed non-blank types are rejected.
+- **(Optional) streaming materialization:** for very large tables, the encoder can operate in a streaming/batched mode (page-sized chunks): evaluate the expression for a batch of rows, encode that batch immediately, and emit chunks incrementally to avoid holding the entire computed column in memory.
+
 ### Encoding Strategies
 
 VertiPaq uses three encoding algorithms in order of preference:
@@ -531,6 +542,11 @@ CREATE TABLE change_log (
   new_value JSON
 );
 ```
+
+For the Power Pivot-style Data Model, `formula-storage` persists columnar data separately using `data_model_*` tables. Calculated columns are persisted in two parts:
+
+- **Values:** the computed column values are stored in `data_model_columns` / `data_model_chunks` like any other column (no special-case storage format).
+- **Definitions:** the calculated column’s `(table, name, expression)` is stored in `data_model_calculated_columns` and loaded back into `formula-dax` as metadata via `add_calculated_column_definition` (so values are *not* recomputed during load).
 
 ### Auto-Save Strategy (Debounced Dirty-Page Flush)
 
