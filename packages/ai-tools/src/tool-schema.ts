@@ -180,7 +180,8 @@ const ColumnSchema = z.preprocess((value) => {
   if (typeof value !== "string") return value;
   // Accept `$A`-style absolute markers (analogous to `$A$1` in A1 notation) by
   // normalizing them away at validation time.
-  return value.trim().replace(/\$/g, "").toUpperCase();
+  // Note: strip `$` before trimming so inputs like `"$ A"` normalize correctly.
+  return value.replace(/\$/g, "").trim().toUpperCase();
 }, z.string().min(1).superRefine((value, ctx) => {
   try {
     columnLabelToIndex(value);

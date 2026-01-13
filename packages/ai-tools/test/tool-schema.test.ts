@@ -157,6 +157,20 @@ describe("column label normalization", () => {
     expect(params.sort_by[0].column).toBe("B");
   });
 
+  it("trims whitespace introduced by $ markers", () => {
+    const call = validateToolCall({
+      name: "sort_range",
+      parameters: {
+        range: "Sheet1!A1:C10",
+        sort_by: [{ column: "$ b", order: "asc" }]
+      }
+    });
+
+    expect(call.name).toBe("sort_range");
+    const params = call.parameters as any;
+    expect(params.sort_by[0].column).toBe("B");
+  });
+
   it("accepts $-prefixed columns in filter_range and normalizes to uppercase letters", () => {
     const call = validateToolCall({
       name: "filter_range",
