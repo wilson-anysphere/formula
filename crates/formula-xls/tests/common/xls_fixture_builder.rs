@@ -1620,7 +1620,9 @@ fn build_page_setup_sanitized_sheet_name_sheet_stream(xf_cell: u16) -> Vec<u8> {
     //
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
     // Our fixture helpers accept the model’s “after which break occurs” form (0-based) and encode
-    // it as `after + 1`. Breaks after row 1 and row 4, and after column 2 (i.e. between C and D).
+    // them into BIFF8’s representation by adding 1.
+    //
+    // Break after row 1 and row 4, and after column 2 (i.e. between C and D).
     push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[1, 4]));
     push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 
