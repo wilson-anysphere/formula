@@ -347,6 +347,8 @@ jobs:
     needs: preflight
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       # NOTE: `tauri-apps/tauri-action` updates shared GitHub Release assets (notably `latest.json`)
@@ -914,6 +916,7 @@ jobs:
         run: node scripts/check-tauri-permissions.mjs
 
       - name: Build and upload release assets (macOS universal)
+        id: tauri_release_macos
         if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
@@ -935,6 +938,22 @@ jobs:
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
           prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
+
+      - name: Attest build provenance (macOS release assets)
+        if: runner.os == 'macOS' && needs.preflight.outputs.upload == 'true' && steps.tauri_release_macos.outcome == 'success'
+        id: provenance_macos
+        continue-on-error: true
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: ${{ join(fromJson(steps.tauri_release_macos.outputs.artifactPaths), '\n') }}
+
+      - name: Upload provenance bundle (workflow artifact, macOS)
+        if: steps.provenance_macos.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: ${{ steps.provenance_macos.outputs.bundle-path }}
+          if-no-files-found: warn
 
       - name: Build desktop bundles (macOS universal, dry run)
         if: runner.os == 'macOS' && needs.preflight.outputs.upload != 'true'
@@ -1094,6 +1113,7 @@ jobs:
           arch: amd64_arm64
 
       - name: Build and upload release assets
+        id: tauri_release_non_macos
         if: runner.os != 'macOS' && needs.preflight.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
@@ -1115,6 +1135,22 @@ jobs:
           # Mark GitHub Releases as prereleases when the semver tag contains a
           # prerelease suffix like `-beta.1` or `-rc.0` (e.g. `v1.2.3-beta.1`).
           prerelease: ${{ contains(needs.preflight.outputs.release_tag, '-') }}
+
+      - name: Attest build provenance (release assets)
+        if: runner.os != 'macOS' && needs.preflight.outputs.upload == 'true' && steps.tauri_release_non_macos.outcome == 'success'
+        id: provenance_non_macos
+        continue-on-error: true
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1
+        with:
+          subject-path: ${{ join(fromJson(steps.tauri_release_non_macos.outputs.artifactPaths), '\n') }}
+
+      - name: Upload provenance bundle (workflow artifact)
+        if: steps.provenance_non_macos.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: provenance-${{ needs.preflight.outputs.artifact_label }}-${{ matrix.cache_target }}
+          path: ${{ steps.provenance_non_macos.outputs.bundle-path }}
+          if-no-files-found: warn
 
       - name: Build desktop bundles (dry run)
         if: runner.os != 'macOS' && needs.preflight.outputs.upload != 'true'
@@ -2418,6 +2454,46 @@ jobs:
 
           echo
           echo "Release asset verification passed."
+
+  sbom:
+    name: Generate SBOM (Rust + JS)
+    needs:
+      - build
+      - preflight
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Generate SBOM (SPDX JSON)
+        id: generate_sbom
+        continue-on-error: true
+        uses: anchore/sbom-action@0b82b0b1a22399a1c542d4d656f70cd903571b5c # v0
+        with:
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Upload SBOM (workflow artifact)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ needs.preflight.outputs.artifact_label }}
+          path: sbom.spdx.json
+          if-no-files-found: warn
+
+      - name: Upload SBOM to the draft release
+        if: needs.preflight.outputs.upload == 'true' && steps.generate_sbom.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.preflight.outputs.release_tag }}" sbom.spdx.json \
+            --repo "${{ github.repository }}" \
+            --clobber
 
   checksums:
     name: Generate SHA256SUMS.txt

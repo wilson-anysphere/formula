@@ -1109,6 +1109,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
 1. Open the GitHub Release (draft) and confirm:
     - Updater metadata: `latest.json` and `latest.json.sig`
     - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
+    - SBOM: `sbom.spdx.json` (SPDX JSON; Rust + JS dependency set; also uploaded as a workflow artifact named `sbom-<tag>`)
     - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
     - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
     - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
@@ -1134,6 +1135,10 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
+
+    Build provenance: the release workflow also generates **build provenance attestations** for the
+    uploaded desktop artifacts. You can view them in GitHub’s **Attestations** UI for the workflow
+    run, and the raw attestation bundle is uploaded as a workflow artifact (`provenance-*`).
 2. Download `latest.json` and confirm `platforms` includes entries for:
    - `darwin-x86_64` (macOS Intel; points at the `.app.tar.gz` updater payload)
    - `darwin-aarch64` (macOS Apple Silicon; points at the `.app.tar.gz` updater payload)
