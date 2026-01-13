@@ -1526,6 +1526,12 @@ impl DataModel {
                     out.insert(column.clone());
                 }
             }
+            Expr::Let { bindings, body } => {
+                for (_, value) in bindings {
+                    self.collect_same_table_column_dependencies_inner(value, current_table, out);
+                }
+                self.collect_same_table_column_dependencies_inner(body, current_table, out);
+            }
             Expr::Measure(name) => {
                 let normalized = Self::normalize_measure_name(name);
                 // In a calculated column (row context), `[Name]` can resolve to either a measure
