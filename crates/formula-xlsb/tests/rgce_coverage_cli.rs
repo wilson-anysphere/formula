@@ -5,6 +5,8 @@ use std::process::Command;
 
 use formula_xlsb::XlsbWorkbook;
 
+mod common;
+
 fn run_rgce_coverage(path: &Path, extra_args: &[&str]) -> Vec<Value> {
     let rgce_coverage_exe = env!("CARGO_BIN_EXE_rgce_coverage");
     let mut cmd = Command::new(rgce_coverage_exe);
@@ -68,7 +70,8 @@ fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
         assert_eq!(summary["decoded_failed"], 0, "fixture {rel}");
         assert_eq!(
             summary["formulas_total"],
-            summary["decoded_ok"].as_u64().unwrap_or(0) + summary["decoded_failed"].as_u64().unwrap_or(0),
+            summary["decoded_ok"].as_u64().unwrap_or(0)
+                + summary["decoded_failed"].as_u64().unwrap_or(0),
             "fixture {rel}: totals should add up"
         );
 
@@ -84,13 +87,15 @@ fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
 
         let sheet0 = run_rgce_coverage(&path, &["--sheet", "0"]);
         let sheet0_summary = summary_from_output(&sheet0);
-        assert_eq!(sheet0_summary["decoded_failed"], 0, "fixture {rel} --sheet 0");
+        assert_eq!(
+            sheet0_summary["decoded_failed"], 0,
+            "fixture {rel} --sheet 0"
+        );
 
         let by_name = run_rgce_coverage(&path, &["--sheet", &first_sheet_name]);
         let by_name_summary = summary_from_output(&by_name);
         assert_eq!(
-            by_name_summary["decoded_failed"],
-            0,
+            by_name_summary["decoded_failed"], 0,
             "fixture {rel} --sheet {first_sheet_name}"
         );
 
@@ -181,4 +186,27 @@ fn rgce_coverage_errors_when_password_missing_for_encrypted_ooxml_wrapper() {
         stderr.contains("password"),
         "expected stderr to mention password, got:\n{stderr}"
     );
+}
+
+#[test]
+fn rgce_coverage_opens_standard_encrypted_xlsb_with_password() {
+    let plaintext_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/simple.xlsb"
+    ));
+    let plaintext_bytes = std::fs::read(plaintext_path).expect("read xlsb fixture");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let password = "Password1234_";
+    let encrypted = common::standard_encrypted_ooxml::build_standard_encrypted_ooxml_ole_bytes(
+        &plaintext_bytes,
+        password,
+    );
+    let encrypted_path = tmp.path().join("encrypted_standard.xlsb");
+    std::fs::write(&encrypted_path, encrypted).expect("write encrypted fixture");
+
+    // Use max=0 so we only exercise workbook open + selector plumbing (fast).
+    let output = run_rgce_coverage(&encrypted_path, &["--password", password, "--max", "0"]);
+    let summary = summary_from_output(&output);
+    assert_eq!(summary["formulas_total"], 0);
 }
