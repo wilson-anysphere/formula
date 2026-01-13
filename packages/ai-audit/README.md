@@ -69,3 +69,4 @@ Notes:
 - Output ordering is deterministic (stable key sorting).
 - `bigint` values are exported as decimal strings.
 - Circular references are replaced with the placeholder string `"[Circular]"`.
+- Values that throw during serialization (e.g. getters) are replaced with `"[Unserializable]"`.

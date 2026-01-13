@@ -212,4 +212,31 @@ describe("serializeAuditEntries", () => {
 
     expect(parsed[0].input).toEqual({ a: 1, self: "[Circular]" });
   });
+
+  it("does not throw when serializing objects with throwing getters", () => {
+    const input: any = {};
+    Object.defineProperty(input, "secret", {
+      enumerable: true,
+      get() {
+        throw new Error("boom");
+      },
+    });
+
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input,
+        model: "unit-test-model",
+        tool_calls: [],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries, { format: "json", redactToolResults: false });
+    const parsed = JSON.parse(output) as any[];
+
+    expect(parsed[0].input.secret).toBe("[Unserializable]");
+  });
 });

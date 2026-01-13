@@ -25,6 +25,7 @@ export interface SerializeAuditEntriesOptions {
 const DEFAULT_FORMAT: AuditExportFormat = "ndjson";
 const DEFAULT_MAX_TOOL_RESULT_CHARS = 10_000;
 const DEFAULT_REDACT_TOOL_RESULTS = true;
+const UNSERIALIZABLE_PLACEHOLDER = "[Unserializable]";
 
 /**
  * Serialize audit entries deterministically for export / troubleshooting.
@@ -63,8 +64,7 @@ function redactToolCall(call: ToolCallLog, maxToolResultChars: number): ToolCall
   const output: ToolCallLog & { export_truncated?: true } = { ...rest };
 
   if (output.audit_result_summary !== undefined) {
-    const summaryStr =
-      typeof output.audit_result_summary === "string" ? output.audit_result_summary : stableStringify(output.audit_result_summary);
+    const summaryStr = stableValueToDisplayString(output.audit_result_summary);
 
     if (summaryStr.length > maxToolResultChars) {
       output.audit_result_summary = truncateTo(summaryStr, maxToolResultChars);
@@ -96,6 +96,15 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(stableJsonValue(value, new WeakSet())) ?? "null";
 }
 
+function stableValueToDisplayString(value: unknown): string {
+  if (typeof value === "string") return value;
+
+  const stable = stableJsonValue(value, new WeakSet());
+  if (typeof stable === "string") return stable;
+
+  return JSON.stringify(stable) ?? "null";
+}
+
 function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
   if (value === null) return null;
 
@@ -108,7 +117,16 @@ function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
   if (Array.isArray(value)) {
     if (ancestors.has(value)) return "[Circular]";
     ancestors.add(value);
-    const out = value.map((item) => stableJsonValue(item, ancestors));
+    const out: unknown[] = [];
+    for (let i = 0; i < value.length; i++) {
+      let item: unknown;
+      try {
+        item = value[i];
+      } catch {
+        item = UNSERIALIZABLE_PLACEHOLDER;
+      }
+      out.push(stableJsonValue(item, ancestors));
+    }
     ancestors.delete(value);
     return out;
   }
@@ -119,15 +137,33 @@ function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
 
   // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date).
   if (typeof (obj as { toJSON?: unknown }).toJSON === "function") {
-    return stableJsonValue((obj as { toJSON: () => unknown }).toJSON(), ancestors);
+    try {
+      return stableJsonValue((obj as { toJSON: () => unknown }).toJSON(), ancestors);
+    } catch {
+      return UNSERIALIZABLE_PLACEHOLDER;
+    }
   }
 
   if (ancestors.has(obj)) return "[Circular]";
   ancestors.add(obj);
 
   const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(obj).sort()) {
-    sorted[key] = stableJsonValue(obj[key], ancestors);
+  let keys: string[];
+  try {
+    keys = Object.keys(obj).sort();
+  } catch {
+    ancestors.delete(obj);
+    return UNSERIALIZABLE_PLACEHOLDER;
+  }
+
+  for (const key of keys) {
+    let child: unknown;
+    try {
+      child = obj[key];
+    } catch {
+      child = UNSERIALIZABLE_PLACEHOLDER;
+    }
+    sorted[key] = stableJsonValue(child, ancestors);
   }
   ancestors.delete(obj);
   return sorted;
