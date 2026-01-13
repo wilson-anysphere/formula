@@ -2097,7 +2097,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "data.queriesConnections.queriesConnections":
         ribbonLayoutController != null &&
         getPanelPlacement(ribbonLayoutController.layout, PanelIds.DATA_QUERIES).kind !== "closed",
-      "review.comments.showComments": app.isCommentsPanelVisible(),
+      "comments.togglePanel": app.isCommentsPanelVisible(),
       "home.clipboard.formatPainter": Boolean(formatPainterState),
     };
 
@@ -8329,10 +8329,6 @@ mountRibbon(ribbonReactRoot, {
         app.focus();
         return;
       }
-      case "review.comments.showComments":
-        if (pressed) app.openCommentsPanel();
-        else app.closeCommentsPanel();
-        return;
       case "view.show.showFormulas":
         app.setShowFormulas(pressed);
         app.focus();
@@ -8410,10 +8406,14 @@ mountRibbon(ribbonReactRoot, {
       commandId === "formulas.formulaAuditing.showFormulas" ||
       commandId === "view.show.performanceStats" ||
       commandId === "view.window.split" ||
-      commandId === "review.comments.showComments" ||
       commandId === "file.save.autoSave" ||
       commandId === "data.queriesConnections.queriesConnections"
     ) {
+      return;
+    }
+
+    if (commandId === "comments.togglePanel" || commandId === "comments.addComment") {
+      executeBuiltinCommand(commandId);
       return;
     }
 
@@ -8953,10 +8953,6 @@ mountRibbon(ribbonReactRoot, {
     }
 
     switch (commandId) {
-      case "review.comments.newComment":
-        app.openCommentsPanel();
-        return;
-
       case "file.new.new":
       case "file.new.blankWorkbook": {
         if (!tauriBackend) {

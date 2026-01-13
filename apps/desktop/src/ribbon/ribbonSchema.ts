@@ -1896,7 +1896,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "review.comments",
           label: "Comments",
           buttons: [
-            { id: "review.comments.newComment", label: "New Comment", ariaLabel: "New Comment", iconId: "comment", size: "large" },
+            { id: "comments.addComment", label: "New Comment", ariaLabel: "New Comment", iconId: "comment", size: "large" },
             {
               id: "review.comments.deleteComment",
               label: "Delete",
@@ -1911,7 +1911,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             },
             { id: "review.comments.previous", label: "Previous", ariaLabel: "Previous Comment", iconId: "arrowUp" },
             { id: "review.comments.next", label: "Next", ariaLabel: "Next Comment", iconId: "arrowDown" },
-            { id: "review.comments.showComments", label: "Show Comments", ariaLabel: "Show Comments", iconId: "eye", kind: "toggle" },
+            { id: "comments.togglePanel", label: "Show Comments", ariaLabel: "Show Comments", iconId: "eye", kind: "toggle" },
           ],
         },
         {
