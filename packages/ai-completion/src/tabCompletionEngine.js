@@ -653,6 +653,22 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (smallest >= lookup_value)", confidence: 0.63 },
     ],
   },
+  XMATCH: {
+    // match_mode
+    2: [
+      { replacement: "0", displayText: "0 (exact match)", confidence: 0.72 },
+      { replacement: "-1", displayText: "-1 (exact or next smaller)", confidence: 0.64 },
+      { replacement: "1", displayText: "1 (exact or next larger)", confidence: 0.63 },
+      { replacement: "2", displayText: "2 (wildcard match)", confidence: 0.6 },
+    ],
+    // search_mode
+    3: [
+      { replacement: "1", displayText: "1 (first-to-last)", confidence: 0.7 },
+      { replacement: "-1", displayText: "-1 (last-to-first)", confidence: 0.64 },
+      { replacement: "2", displayText: "2 (binary search ascending)", confidence: 0.61 },
+      { replacement: "-2", displayText: "-2 (binary search descending)", confidence: 0.6 },
+    ],
+  },
   XLOOKUP: {
     // match_mode
     4: [
@@ -667,6 +683,49 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "-1", displayText: "-1 (last-to-first)", confidence: 0.64 },
       { replacement: "2", displayText: "2 (binary search ascending)", confidence: 0.61 },
       { replacement: "-2", displayText: "-2 (binary search descending)", confidence: 0.6 },
+    ],
+  },
+  SORT: {
+    // sort_order
+    2: [
+      { replacement: "1", displayText: "1 (ascending)", confidence: 0.66 },
+      { replacement: "-1", displayText: "-1 (descending)", confidence: 0.65 },
+    ],
+    // by_col
+    3: [
+      { replacement: "FALSE", displayText: "FALSE (sort by rows)", confidence: 0.62 },
+      { replacement: "TRUE", displayText: "TRUE (sort by columns)", confidence: 0.61 },
+    ],
+  },
+  SORTBY: {
+    // sort_order1
+    2: [
+      { replacement: "1", displayText: "1 (ascending)", confidence: 0.66 },
+      { replacement: "-1", displayText: "-1 (descending)", confidence: 0.65 },
+    ],
+  },
+  TAKE: {
+    // rows
+    1: [
+      { replacement: "1", displayText: "1 (first row(s))", confidence: 0.62 },
+      { replacement: "-1", displayText: "-1 (last row(s))", confidence: 0.61 },
+    ],
+    // columns
+    2: [
+      { replacement: "1", displayText: "1 (first column(s))", confidence: 0.6 },
+      { replacement: "-1", displayText: "-1 (last column(s))", confidence: 0.59 },
+    ],
+  },
+  DROP: {
+    // rows
+    1: [
+      { replacement: "1", displayText: "1 (drop first row(s))", confidence: 0.62 },
+      { replacement: "-1", displayText: "-1 (drop last row(s))", confidence: 0.61 },
+    ],
+    // columns
+    2: [
+      { replacement: "1", displayText: "1 (drop first column(s))", confidence: 0.6 },
+      { replacement: "-1", displayText: "-1 (drop last column(s))", confidence: 0.59 },
     ],
   },
   VLOOKUP: {

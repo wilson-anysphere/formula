@@ -1180,6 +1180,106 @@ test("VLOOKUP range_lookup suggests TRUE/FALSE with higher confidence", async ()
   );
 });
 
+test("XMATCH match_mode suggests 0, -1, 1, 2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=XMATCH(A1, A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, 0"),
+    `Expected XMATCH to suggest match_mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, -1"),
+    `Expected XMATCH to suggest match_mode=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, 1"),
+    `Expected XMATCH to suggest match_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, 2"),
+    `Expected XMATCH to suggest match_mode=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("XMATCH search_mode suggests 1, -1, 2, -2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=XMATCH(A1, A1:A10, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, , 1"),
+    `Expected XMATCH to suggest search_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, , -1"),
+    `Expected XMATCH to suggest search_mode=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, , 2"),
+    `Expected XMATCH to suggest search_mode=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XMATCH(A1, A1:A10, , -2"),
+    `Expected XMATCH to suggest search_mode=-2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("SORT sort_order suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=SORT(A1:A10, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SORT(A1:A10, 1, 1"),
+    `Expected SORT to suggest sort_order=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=SORT(A1:A10, 1, -1"),
+    `Expected SORT to suggest sort_order=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TAKE rows suggests 1 and -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=TAKE(A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=TAKE(A1:A10, 1"),
+    `Expected TAKE to suggest rows=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=TAKE(A1:A10, -1"),
+    `Expected TAKE to suggest rows=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {
