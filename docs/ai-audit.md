@@ -277,6 +277,9 @@ Therefore:
 
 `AIAuditRecorder` builds an `AIAuditEntry` incrementally and writes it once at the end.
 
+Note: `finalize()` is intentionally **best-effort** (it does not throw) because it is often called from `finally` blocks.
+If you need to surface persistence failures, check `recorder.finalize_error` / `recorder.finalizeError` after calling `finalize()`.
+
 ```ts
 import { AIAuditRecorder, MemoryAIAuditStore } from "@formula/ai-audit";
 
@@ -346,10 +349,8 @@ Browser example:
 import { createDefaultAIAuditStore } from "@formula/ai-audit/browser";
 
 const store = await createDefaultAIAuditStore({
-  retention: {
-    max_entries: 10_000,
-    max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
-  },
+  max_entries: 10_000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
   // bounded: { max_entry_chars: 200_000 }, // optional override
 });
 ```
@@ -362,10 +363,8 @@ import { createDefaultAIAuditStore, NodeFileBinaryStorage } from "@formula/ai-au
 const store = await createDefaultAIAuditStore({
   prefer: "sqlite",
   sqlite_storage: new NodeFileBinaryStorage("./ai-audit.sqlite"),
-  retention: {
-    max_entries: 50_000,
-    max_age_ms: 90 * 24 * 60 * 60 * 1000, // 90 days
-  },
+  max_entries: 50_000,
+  max_age_ms: 90 * 24 * 60 * 60 * 1000, // 90 days
 });
 ```
 
