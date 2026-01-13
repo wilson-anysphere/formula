@@ -54,8 +54,14 @@ type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true 
 type _SpreadsheetWithCellsNotAny = Assert<IsAny<SpreadsheetApiWithNonEmptyCells> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
+type _ClearCacheOptionsNotAny = Assert<
+  IsAny<Parameters<ContextManager["clearSheetIndexCache"]>[0]> extends false ? true : false
+>;
 
 const cm = new ContextManager({
+  // Ensure the single-sheet cache knobs are part of the public surface.
+  cacheSheetIndex: true,
+  sheetIndexCacheLimit: 32,
   workbookRag: {
     vectorStore: { query: async () => [] },
     embedder: { embedTexts: async () => [new Float32Array(1)] },
@@ -125,6 +131,9 @@ await cm.buildWorkbookContextFromSpreadsheetApi({
   workbookId: "wb-1",
   query: "hi",
 });
+
+// Explicit cache clearing API should be available and typed.
+await cm.clearSheetIndexCache({ clearStore: true });
 `;
 
     await writeFile(entryFile, source, "utf8");
