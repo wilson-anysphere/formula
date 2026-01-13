@@ -393,16 +393,36 @@ export async function trimMessagesToBudget(params) {
     /** @type {any[]} */
     const filtered = [];
     let inToolGroup = false;
+    /** @type {Set<string> | null} */
+    let expectedToolCallIds = null;
     for (const msg of nonSummaryOtherMessages) {
       throwIfAborted(signal);
       if (isAssistantToolCallMessage(msg)) {
         filtered.push(msg);
         inToolGroup = true;
+        const ids = [];
+        for (const call of msg.toolCalls) {
+          const id =
+            call && typeof call === "object"
+              ? typeof call.id === "string"
+                ? call.id
+                : typeof call.toolCallId === "string"
+                  ? call.toolCallId
+                  : null
+              : null;
+          if (id) ids.push(id);
+        }
+        expectedToolCallIds = ids.length ? new Set(ids) : null;
         continue;
       }
       if (isToolMessage(msg)) {
         if (inToolGroup) {
-          filtered.push(msg);
+          const toolCallId = typeof msg.toolCallId === "string" ? msg.toolCallId : null;
+          if (!expectedToolCallIds || (toolCallId && expectedToolCallIds.has(toolCallId))) {
+            filtered.push(msg);
+          } else {
+            orphanToolMessages.push(msg);
+          }
         } else {
           // If the input already contains orphan tool messages, avoid preserving them when trimming.
           orphanToolMessages.push(msg);
@@ -411,6 +431,7 @@ export async function trimMessagesToBudget(params) {
       }
       filtered.push(msg);
       inToolGroup = false;
+      expectedToolCallIds = null;
     }
     nonSummaryOtherMessages = filtered;
   }

@@ -230,6 +230,38 @@ describe("trimMessagesToBudget", () => {
     expect(String(summary?.content)).toContain("orphan-tool-result");
   });
 
+  it("drops tool messages whose toolCallId doesn't match the preceding assistant toolCalls", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "older-" + "x".repeat(400) },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "call-1", name: "lookup", arguments: { q: "foo" } }]
+      },
+      // Mismatched tool result (should be treated as orphan).
+      { role: "tool", toolCallId: "call-2", content: "wrong-tool-result" },
+      // Correct tool result for call-1.
+      { role: "tool", toolCallId: "call-1", content: "right-tool-result" },
+      { role: "assistant", content: "after tool" },
+      { role: "user", content: "latest" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 260,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 10,
+      summaryMaxTokens: 120
+    });
+
+    expect(trimmed.some((m) => m.role === "tool" && m.toolCallId === "call-2")).toBe(false);
+    expect(trimmed.some((m) => m.role === "tool" && m.toolCallId === "call-1")).toBe(true);
+  });
+
   it("can disable tool-call coherence (preserveToolCallPairs=false)", async () => {
     const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
 
