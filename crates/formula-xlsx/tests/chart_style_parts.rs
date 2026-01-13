@@ -75,7 +75,9 @@ fn detects_and_preserves_chart_style_and_color_style_parts() {
 <cs:colorStyle xmlns:cs="http://schemas.microsoft.com/office/drawing/2012/chartStyle"
     xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" id="11">
   <a:srgbClr val="112233"/>
-  <a:srgbClr val="445566"/>
+  <a:schemeClr val="accent1"/>
+  <a:sysClr val="windowText" lastClr="445566"/>
+  <a:prstClr val="red"/>
 </cs:colorStyle>"#
         .to_vec();
 
@@ -121,7 +123,12 @@ fn detects_and_preserves_chart_style_and_color_style_parts() {
     assert_eq!(colors_model.id, Some(11));
     assert_eq!(
         colors_model.colors,
-        vec!["112233".to_string(), "445566".to_string()]
+        vec![
+            "112233".to_string(),
+            "scheme:accent1".to_string(),
+            "sys:lastClr:445566".to_string(),
+            "prst:red".to_string(),
+        ]
     );
     assert_eq!(
         colors_model.raw_xml,

@@ -21,7 +21,11 @@ pub enum ChartColorStyleParseError {
 ///
 /// This is best-effort: we preserve the raw XML, extract the root `@id`
 /// attribute when present, and collect color entries from `a:srgbClr/@val`
-/// or `a:schemeClr/@val` elements.
+/// and related DrawingML color nodes:
+/// - `a:srgbClr/@val` -> `"RRGGBB"`
+/// - `a:schemeClr/@val` -> `"scheme:<name>"`
+/// - `a:sysClr/@lastClr` -> `"sys:lastClr:<RRGGBB>"`
+/// - `a:prstClr/@val` -> `"prst:<name>"`
 pub fn parse_chart_color_style(
     colors_xml: &[u8],
     part_name: &str,
@@ -54,6 +58,18 @@ pub fn parse_chart_color_style(
             "schemeClr" => {
                 if let Some(val) = node.attribute("val") {
                     colors.push(format!("scheme:{val}"));
+                }
+            }
+            "sysClr" => {
+                if let Some(last_clr) = node.attribute("lastClr") {
+                    colors.push(format!("sys:lastClr:{last_clr}"));
+                } else if let Some(val) = node.attribute("val") {
+                    colors.push(format!("sys:{val}"));
+                }
+            }
+            "prstClr" => {
+                if let Some(val) = node.attribute("val") {
+                    colors.push(format!("prst:{val}"));
                 }
             }
             _ => {}

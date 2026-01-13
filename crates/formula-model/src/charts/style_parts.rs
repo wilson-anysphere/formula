@@ -29,6 +29,10 @@ pub struct ChartColorStylePartModel {
     ///
     /// Values are stored as raw OOXML strings such as `"FF00AA"` for `a:srgbClr`
     /// or `"scheme:accent1"` for `a:schemeClr`.
+    ///
+    /// Other best-effort encodings include:
+    /// - `"sys:lastClr:FF00AA"` from `a:sysClr/@lastClr`
+    /// - `"prst:red"` from `a:prstClr/@val`
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub colors: Vec<String>,
     /// Raw XML payload for debugging / lossless round-trip.
