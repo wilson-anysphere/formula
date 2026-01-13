@@ -39,6 +39,16 @@ on:
         required: false
         default: false
         type: boolean
+      gate_load_p90_ms:
+        description: "Optional perf gate: fail if load step p90 exceeds this threshold (ms). Empty disables."
+        required: false
+        default: ""
+        type: string
+      gate_round_trip_p90_ms:
+        description: "Optional perf gate: fail if round_trip step p90 exceeds this threshold (ms). Empty disables."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   conflict-marker-guard:
@@ -102,6 +112,9 @@ jobs:
       # Nightly schedule runs at least the Calculate (L2) check. Render smoke (L3) is opt-in.
       CORPUS_RUN_RECALC: ${{ github.event_name == 'schedule' || github.event.inputs.recalc }}
       CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke }}
+      # Optional perf gates (opt-in). Can be configured via workflow_dispatch inputs or repo-level variables.
+      CORPUS_GATE_LOAD_P90_MS: ${{ github.event.inputs.gate_load_p90_ms || vars.CORPUS_GATE_LOAD_P90_MS }}
+      CORPUS_GATE_ROUND_TRIP_P90_MS: ${{ github.event.inputs.gate_round_trip_p90_ms || vars.CORPUS_GATE_ROUND_TRIP_P90_MS }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -170,15 +183,25 @@ PY
             echo "No private triage output; skipping."
             exit 0
           fi
+          GATE_FLAGS=()
+          if [ -n "${CORPUS_GATE_LOAD_P90_MS}" ]; then
+            GATE_FLAGS+=(--gate-load-p90-ms "${CORPUS_GATE_LOAD_P90_MS}")
+          fi
+          if [ -n "${CORPUS_GATE_ROUND_TRIP_P90_MS}" ]; then
+            GATE_FLAGS+=(--gate-round-trip-p90-ms "${CORPUS_GATE_ROUND_TRIP_P90_MS}")
+          fi
           python -m tools.corpus.dashboard \
             --triage-dir tools/corpus/out/private \
-            --append-trend tools/corpus/out/private/trend.json
+            --append-trend tools/corpus/out/private/trend.json \
+            "${GATE_FLAGS[@]}"
       - name: Publish summary (private)
+        if: always()
         run: |
           if [ -f tools/corpus/out/private/summary.md ]; then
             cat tools/corpus/out/private/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Publish trend delta (private)
+        if: always()
         run: |
           if [ ! -f tools/corpus/out/private/summary.json ]; then
             # Dashboard didn't run, so we didn't append a new trend entry.
