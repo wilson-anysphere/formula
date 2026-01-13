@@ -2778,6 +2778,13 @@ export class SpreadsheetApp {
           // ignore
         }
       }
+      if (this.inlineEditController.isOpen()) {
+        try {
+          this.inlineEditController.close();
+        } catch {
+          // ignore
+        }
+      }
     }
 
     const indicator = this.status.readOnlyIndicator;
@@ -5465,6 +5472,7 @@ export class SpreadsheetApp {
 
   openInlineAiEdit(): void {
     // Match the Cmd/Ctrl+K guard behavior (see `onKeyDown`).
+    if (this.isReadOnly()) return;
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     // Inline edit should not trigger while the formula bar is actively editing.

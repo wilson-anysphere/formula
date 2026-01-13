@@ -204,10 +204,24 @@ describe("SpreadsheetApp read-only collab UX", () => {
     const session = app.getCollabSession() as any;
     expect(session).not.toBeNull();
 
+    const inlineEditOverlay = root.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]');
+    expect(inlineEditOverlay).toBeInstanceOf(HTMLElement);
+    expect(inlineEditOverlay?.hidden).toBe(true);
+
+    // Ensure that edit-only surfaces like inline AI edit are closed if permissions flip
+    // to a read-only role mid-session.
+    app.openInlineAiEdit();
+    expect(inlineEditOverlay?.hidden).toBe(false);
+
     // Flip to viewer (read-only) and verify UI updates immediately.
     session.setPermissions({ role: "viewer", rangeRestrictions: [], userId: "u1" });
     expect(readOnlyIndicator.hidden).toBe(false);
     expect(readOnlyIndicator.textContent).toBe("Read-only (viewer)");
+    expect(inlineEditOverlay?.hidden).toBe(true);
+
+    // Read-only users should not be able to open inline edit via commands/menus.
+    app.openInlineAiEdit();
+    expect(inlineEditOverlay?.hidden).toBe(true);
 
     // Attempt an in-grid edit (F2).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
