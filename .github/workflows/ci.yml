@@ -197,6 +197,9 @@ jobs:
       - name: Build desktop (Vite)
         run: pnpm build:desktop
 
+      - name: Desktop dist asset report
+        run: node scripts/desktop_dist_asset_report.mjs
+
       - name: Check desktop bundle size budgets
         run: pnpm -C apps/desktop check:bundle-size
         env:
