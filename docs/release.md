@@ -1100,12 +1100,12 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
 ```
 
 1. Open the GitHub Release (draft) and confirm:
-   - Updater metadata: `latest.json` and `latest.json.sig`
-   - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
-   - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
-   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
-   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `arm64` / `aarch64`)
+    - Updater metadata: `latest.json` and `latest.json.sig`
+    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
+    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
+    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
+    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
+    - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `amd64` vs `arm64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
