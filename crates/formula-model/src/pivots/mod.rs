@@ -396,7 +396,6 @@ impl PivotField {
         }
     }
 }
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarValue {
     Text(String),

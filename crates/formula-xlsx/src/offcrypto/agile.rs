@@ -10,6 +10,7 @@ use crate::offcrypto::{
     ParseOptions, Result, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
     VERIFIER_HASH_VALUE_BLOCK, AES_BLOCK_SIZE,
 };
+use super::encryption_info::decode_encryption_info_xml_text;
 
 const OOXML_PASSWORD_KEY_ENCRYPTOR_URI: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
@@ -161,12 +162,6 @@ fn validate_aes_cbc_params(
     Ok(())
 }
 
-fn decode_agile_xml(bytes: &[u8]) -> Result<&str> {
-    // The encryption info XML is typically UTF-8. We keep the decoding strict to avoid silently
-    // accepting malformed inputs (and to keep error reporting deterministic).
-    std::str::from_utf8(bytes).map_err(OffCryptoError::from)
-}
-
 /// Parse an Agile Encryption `EncryptionInfo` stream (MS-OFFCRYPTO version 4.4).
 ///
 /// The caller must pass the full `EncryptionInfo` stream bytes (including the version header).
@@ -194,8 +189,8 @@ pub fn parse_agile_encryption_info_stream_with_options(
     }
 
     let xml_bytes = extract_encryption_info_xml(encryption_info_stream, opts)?;
-    let xml = decode_agile_xml(xml_bytes)?;
-    let doc = roxmltree::Document::parse(xml)?;
+    let xml = decode_encryption_info_xml_text(xml_bytes)?;
+    let doc = roxmltree::Document::parse(xml.as_ref())?;
 
     let key_data_node = doc
         .descendants()
@@ -772,6 +767,101 @@ mod tests {
         encryption_info_stream.extend_from_slice(&0u32.to_le_bytes()); // flags
         encryption_info_stream.extend_from_slice(xml.as_bytes());
         encryption_info_stream
+    }
+
+    fn minimal_encryption_info_xml() -> &'static str {
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+    xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltSize="16" blockSize="16" keyBits="256" hashSize="32"
+           cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA256"
+           saltValue="AAECAwQFBgcICQoLDA0ODw=="/>
+  <dataIntegrity encryptedHmacKey="EBESEw==" encryptedHmacValue="qrvM"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey saltSize="16" blockSize="16" keyBits="256" hashSize="32"
+                      spinCount="100000" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA256"
+                      saltValue="AQIDBA=="
+                      encryptedVerifierHashInput="CQoLDA=="
+                      encryptedVerifierHashValue="DQ4PEA=="
+                      encryptedKeyValue="BQYHCA=="/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+"#
+    }
+
+    fn wrap_payload_in_encryption_info_stream(payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&4u16.to_le_bytes()); // major
+        out.extend_from_slice(&4u16.to_le_bytes()); // minor
+        out.extend_from_slice(&0u32.to_le_bytes()); // flags
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn parse_stream_payload(payload: &[u8]) -> AgileEncryptionInfo {
+        let stream = wrap_payload_in_encryption_info_stream(payload);
+        parse_agile_encryption_info_stream(&stream).expect("parse agile encryption info")
+    }
+
+    #[test]
+    fn parses_agile_encryption_info_with_utf8_bom_and_trailing_nuls() {
+        let xml = minimal_encryption_info_xml();
+        let expected = parse_stream_payload(xml.as_bytes());
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&[0xEF, 0xBB, 0xBF]); // UTF-8 BOM
+        payload.extend_from_slice(xml.as_bytes());
+        payload.extend_from_slice(&[0, 0, 0]);
+
+        let parsed = parse_stream_payload(&payload);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn parses_agile_encryption_info_with_utf16le_xml() {
+        let xml = minimal_encryption_info_xml();
+        let expected = parse_stream_payload(xml.as_bytes());
+
+        let mut payload = Vec::new();
+        // No BOM: rely on NUL-density heuristic.
+        for unit in xml.encode_utf16() {
+            payload.extend_from_slice(&unit.to_le_bytes());
+        }
+        // UTF-16 NUL terminator.
+        payload.extend_from_slice(&[0x00, 0x00]);
+
+        let parsed = parse_stream_payload(&payload);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn parses_agile_encryption_info_with_length_prefix_and_trailing_garbage() {
+        let xml = minimal_encryption_info_xml();
+        let expected = parse_stream_payload(xml.as_bytes());
+
+        let xml_bytes = xml.as_bytes();
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&(xml_bytes.len() as u32).to_le_bytes());
+        payload.extend_from_slice(xml_bytes);
+        payload.extend_from_slice(b"GARBAGE");
+
+        let parsed = parse_stream_payload(&payload);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn parses_agile_encryption_info_with_leading_bytes_before_xml() {
+        let xml = minimal_encryption_info_xml();
+        let expected = parse_stream_payload(xml.as_bytes());
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"JUNK");
+        payload.extend_from_slice(xml.as_bytes());
+
+        let parsed = parse_stream_payload(&payload);
+        assert_eq!(parsed, expected);
     }
 
     #[test]

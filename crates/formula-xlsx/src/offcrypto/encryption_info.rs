@@ -14,6 +14,7 @@
 
 use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 use base64::Engine as _;
+use std::borrow::Cow;
 
 use super::{OffCryptoError, Result};
 
@@ -75,6 +76,138 @@ pub fn extract_encryption_info_xml<'a>(
         });
     }
     Ok(xml)
+}
+
+fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {
+    while let Some((&last, rest)) = bytes.split_last() {
+        if last == 0 {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+fn trim_start_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        if bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    &bytes[idx..]
+}
+
+fn strip_utf8_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes)
+}
+
+fn is_nul_heavy(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let zeros = bytes.iter().filter(|&&b| b == 0).count();
+    zeros > bytes.len() / 8
+}
+
+fn decode_utf16le_xml(bytes: &[u8]) -> Result<String> {
+    let mut bytes = bytes;
+    // Trim trailing UTF-16LE NUL terminators / padding.
+    while bytes.len() >= 2 {
+        let n = bytes.len();
+        if bytes[n - 2] == 0 && bytes[n - 1] == 0 {
+            bytes = &bytes[..n - 2];
+        } else {
+            break;
+        }
+    }
+
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        bytes = &bytes[2..];
+    }
+
+    // UTF-16 requires an even number of bytes; ignore a trailing odd byte.
+    bytes = &bytes[..bytes.len().saturating_sub(bytes.len() % 2)];
+
+    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+
+    let mut xml = String::from_utf16(&units)?;
+    // Be tolerant of a BOM encoded as U+FEFF.
+    if let Some(stripped) = xml.strip_prefix('\u{FEFF}') {
+        xml = stripped.to_string();
+    }
+    while xml.ends_with('\0') {
+        xml.pop();
+    }
+    Ok(xml)
+}
+
+fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
+    let len_bytes: [u8; 4] = payload.get(0..4)?.try_into().ok()?;
+    let len = u32::from_le_bytes(len_bytes) as usize;
+    if len == 0 || len > payload.len().saturating_sub(4) {
+        return None;
+    }
+    let candidate = payload.get(4..4 + len)?;
+
+    // Ensure the candidate *looks* like XML to avoid false positives on arbitrary data.
+    let trimmed = strip_utf8_bom(trim_start_ascii_whitespace(candidate));
+    let looks_like_utf8 = trimmed.first() == Some(&b'<');
+    let looks_like_utf16le = trimmed.starts_with(&[0xFF, 0xFE])
+        || (trimmed.len() >= 2 && trimmed[0] == b'<' && trimmed[1] == 0);
+    if !(looks_like_utf8 || looks_like_utf16le) {
+        return None;
+    }
+
+    Some(candidate)
+}
+
+fn scan_to_encryption_tag(payload: &[u8]) -> Option<&[u8]> {
+    const NEEDLE: &[u8] = b"<encryption";
+
+    // Do not scan if the payload already looks like XML after trimming BOM + leading whitespace.
+    let trimmed = trim_start_ascii_whitespace(strip_utf8_bom(payload));
+    if trimmed.first() == Some(&b'<') {
+        return None;
+    }
+
+    let idx = payload
+        .windows(NEEDLE.len())
+        .position(|w| w.eq_ignore_ascii_case(NEEDLE))?;
+    Some(&payload[idx..])
+}
+
+/// Decode the XML payload bytes of an Agile `EncryptionInfo` stream into UTF-8 text.
+///
+/// Real-world Office producers vary in how the XML is wrapped/encoded. This helper supports:
+/// - UTF-8 with an optional BOM and/or trailing NUL padding
+/// - UTF-16LE (heuristic: NUL-heavy)
+/// - a 4-byte little-endian length prefix before the XML
+/// - leading junk before the `<encryption ...>` root tag (scan forward)
+pub(super) fn decode_encryption_info_xml_text<'a>(payload: &'a [u8]) -> Result<Cow<'a, str>> {
+    // Optional: a 4-byte little-endian length prefix before the XML.
+    let candidate = length_prefixed_slice(payload)
+        // Fallback: scan forward to the `<encryption` tag when the payload has leading bytes.
+        .or_else(|| scan_to_encryption_tag(payload))
+        .unwrap_or(payload);
+
+    // UTF-16LE fallback heuristic (NUL-heavy buffers, or explicit BOM / `<\0` prefix).
+    let looks_like_utf16le = candidate.starts_with(&[0xFF, 0xFE])
+        || (candidate.len() >= 2 && candidate[0] == b'<' && candidate[1] == 0);
+    if looks_like_utf16le || is_nul_heavy(candidate) {
+        return Ok(Cow::Owned(decode_utf16le_xml(candidate)?));
+    }
+
+    let candidate = strip_utf8_bom(trim_trailing_nul_bytes(candidate));
+    let xml = std::str::from_utf8(candidate)?;
+    let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
+    Ok(Cow::Borrowed(xml))
 }
 
 fn count_non_ascii_whitespace_bytes(s: &str) -> usize {
@@ -199,8 +332,8 @@ pub struct AgileEncryptionInfoXml {
 /// The caller is responsible for reading the `EncryptionInfo` stream header and providing only the
 /// XML bytes.
 pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfoXml> {
-    let xml = std::str::from_utf8(xml)?;
-    let doc = roxmltree::Document::parse(xml)?;
+    let xml = decode_encryption_info_xml_text(xml)?;
+    let doc = roxmltree::Document::parse(xml.as_ref())?;
 
     let root = doc.root_element();
 

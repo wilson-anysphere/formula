@@ -8,7 +8,10 @@ use super::crypto::{
     derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
 };
-use super::encryption_info::{decode_base64_field_limited, extract_encryption_info_xml, ParseOptions};
+use super::encryption_info::{
+    decode_base64_field_limited, decode_encryption_info_xml_text, extract_encryption_info_xml,
+    ParseOptions,
+};
 use super::error::{OffCryptoError, Result};
 
 const SEGMENT_SIZE: usize = 0x1000;
@@ -429,8 +432,8 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
     }
 
     let xml_bytes = extract_encryption_info_xml(encryption_info, &opts)?;
-    let xml = std::str::from_utf8(xml_bytes)?;
-    let doc = roxmltree::Document::parse(xml)?;
+    let xml = decode_encryption_info_xml_text(xml_bytes)?;
+    let doc = roxmltree::Document::parse(xml.as_ref())?;
 
     let key_data_node = doc
         .descendants()

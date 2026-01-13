@@ -136,19 +136,22 @@ pub fn pivot_table_to_engine_config(
             });
 
             // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
-            let base_item = df.base_field.zip(df.base_item).and_then(|(field_idx, item_idx)| {
-                let shared_items = cache_def
-                    .cache_fields
-                    .get(field_idx as usize)?
-                    .shared_items
-                    .as_ref()?;
-                let item = shared_items.get(item_idx as usize)?.clone();
-                Some(pivot_key_display_string(pivot_cache_value_to_engine(
-                    cache_def,
-                    field_idx as usize,
-                    item,
-                )))
-            });
+            let base_item = df
+                .base_field
+                .zip(df.base_item)
+                .and_then(|(field_idx, item_idx)| {
+                    let shared_items = cache_def
+                        .cache_fields
+                        .get(field_idx as usize)?
+                        .shared_items
+                        .as_ref()?;
+                    let item = shared_items.get(item_idx as usize)?.clone();
+                    Some(pivot_key_display_string(pivot_cache_value_to_engine(
+                        cache_def,
+                        field_idx as usize,
+                        item,
+                    )))
+                });
             Some(ValueField {
                 source_field,
                 name,
@@ -366,9 +369,15 @@ mod tests {
             ("percentOfGrandTotal", Some(ShowAsType::PercentOfGrandTotal)),
             ("PERCENTOFGRANDTOTAL", Some(ShowAsType::PercentOfGrandTotal)),
             ("percentOfRowTotal", Some(ShowAsType::PercentOfRowTotal)),
-            ("percentOfColumnTotal", Some(ShowAsType::PercentOfColumnTotal)),
+            (
+                "percentOfColumnTotal",
+                Some(ShowAsType::PercentOfColumnTotal),
+            ),
             ("percentOf", Some(ShowAsType::PercentOf)),
-            ("percentDifferenceFrom", Some(ShowAsType::PercentDifferenceFrom)),
+            (
+                "percentDifferenceFrom",
+                Some(ShowAsType::PercentDifferenceFrom),
+            ),
             ("runningTotal", Some(ShowAsType::RunningTotal)),
             ("rankAscending", Some(ShowAsType::RankAscending)),
             ("rankDescending", Some(ShowAsType::RankDescending)),
@@ -694,11 +703,13 @@ mod tests {
         assert_eq!(cfg.row_fields[0].sort_order, SortOrder::Manual);
         assert_eq!(
             cfg.row_fields[0].manual_sort.as_deref(),
-            Some(&[
-                PivotKeyPart::Text("B".to_string()),
-                PivotKeyPart::Text("A".to_string()),
-                PivotKeyPart::Text("C".to_string()),
-            ][..])
+            Some(
+                &[
+                    PivotKeyPart::Text("B".to_string()),
+                    PivotKeyPart::Text("A".to_string()),
+                    PivotKeyPart::Text("C".to_string()),
+                ][..]
+            )
         );
     }
 

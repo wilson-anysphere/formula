@@ -62,6 +62,12 @@ pub enum OffCryptoError {
         source: std::str::Utf8Error,
     },
 
+    #[error("EncryptionInfo XML is not valid UTF-16LE: {source}")]
+    EncryptionInfoXmlNotUtf16 {
+        #[source]
+        source: std::string::FromUtf16Error,
+    },
+
     #[error("failed to parse EncryptionInfo XML: {source}")]
     EncryptionInfoXmlMalformed {
         #[source]
@@ -139,6 +145,12 @@ pub enum OffCryptoError {
 impl From<std::str::Utf8Error> for OffCryptoError {
     fn from(source: std::str::Utf8Error) -> Self {
         Self::EncryptionInfoXmlNotUtf8 { source }
+    }
+}
+
+impl From<std::string::FromUtf16Error> for OffCryptoError {
+    fn from(source: std::string::FromUtf16Error) -> Self {
+        Self::EncryptionInfoXmlNotUtf16 { source }
     }
 }
 
