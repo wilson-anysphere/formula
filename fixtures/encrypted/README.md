@@ -1,7 +1,7 @@
 # Encrypted workbook fixtures
 
-This directory holds password-protected / encrypted Excel workbooks used by tests that validate
-**format detection** and **error handling**.
+This directory is the canonical location for password-protected / encrypted Excel workbook fixtures
+used by tests that validate **format detection** and **error handling**.
 
 ## Why this is separate from `fixtures/xlsx/`
 
@@ -22,3 +22,8 @@ fixtures/encrypted/
 
 Tests that need encrypted fixtures should reference these paths **explicitly** (they are not part
 of the round-trip corpus).
+
+Note: Some encryption tests build minimal encrypted containers programmatically instead of checking
+in binary files (see `crates/formula-io/tests/encrypted_ooxml.rs` and
+`crates/formula-io/tests/encrypted_xls.rs`). If/when we add real Excel-saved encrypted workbooks to
+the repo, they should live under `fixtures/encrypted/`.

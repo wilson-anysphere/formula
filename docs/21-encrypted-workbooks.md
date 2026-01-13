@@ -215,6 +215,17 @@ When implementing (or calling) encrypted-workbook support:
 
 ---
 
+## Test fixtures in this repo
+
+- Encrypted/password-protected OOXML workbook fixtures live under `fixtures/encrypted/ooxml/`.
+  These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
+  where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
+- Some encryption coverage is exercised with **synthetic** containers generated directly in tests
+  (for example `crates/formula-io/tests/encrypted_ooxml.rs` and
+  `crates/formula-io/tests/encrypted_xls.rs`).
+
+---
+
 ## References (specs)
 
 - **MS-OFFCRYPTO** — Office Document Cryptography Structure Specification  

@@ -20,6 +20,9 @@ Encrypted OOXML fixtures live under:
 
 - `fixtures/encrypted/ooxml/`
 
+For background on how Excel encryption works (and how it differs from workbook/worksheet
+protection), see `docs/21-encrypted-workbooks.md`.
+
 ## Layout
 
 ```
