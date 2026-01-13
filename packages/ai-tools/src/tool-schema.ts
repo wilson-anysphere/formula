@@ -176,7 +176,12 @@ const A1RangeSchema = z.string().min(1).superRefine((value, ctx) => {
   }
 });
 
-const ColumnSchema = z.string().min(1).superRefine((value, ctx) => {
+const ColumnSchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  // Accept `$A`-style absolute markers (analogous to `$A$1` in A1 notation) by
+  // normalizing them away at validation time.
+  return value.trim().replace(/\$/g, "").toUpperCase();
+}, z.string().min(1).superRefine((value, ctx) => {
   try {
     columnLabelToIndex(value);
   } catch (error) {
@@ -185,7 +190,7 @@ const ColumnSchema = z.string().min(1).superRefine((value, ctx) => {
       message: error instanceof Error ? error.message : `Invalid column label: ${value}`
     });
   }
-});
+}));
 
 export const ReadRangeParamsSchema = z.object({
   range: A1RangeSchema,

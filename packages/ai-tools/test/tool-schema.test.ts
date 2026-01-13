@@ -86,3 +86,48 @@ describe("tool JSON schema fidelity (matches Zod refinements)", () => {
     expect(schema.properties.criteria.minItems).toBe(1);
   });
 });
+
+describe("column label normalization", () => {
+  it("accepts $-prefixed columns in sort_range and normalizes to uppercase letters", () => {
+    const call = validateToolCall({
+      name: "sort_range",
+      parameters: {
+        range: "Sheet1!A1:C10",
+        sort_by: [{ column: "$b", order: "asc" }]
+      }
+    });
+
+    expect(call.name).toBe("sort_range");
+    const params = call.parameters as any;
+    expect(params.sort_by[0].column).toBe("B");
+  });
+
+  it("accepts $-prefixed columns in filter_range and normalizes to uppercase letters", () => {
+    const call = validateToolCall({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:C10",
+        criteria: [{ column: "$b", operator: "equals", value: "x" }]
+      }
+    });
+
+    expect(call.name).toBe("filter_range");
+    const params = call.parameters as any;
+    expect(params.criteria[0].column).toBe("B");
+  });
+
+  it("accepts $-prefixed columns in apply_formula_column and normalizes to uppercase letters", () => {
+    const call = validateToolCall({
+      name: "apply_formula_column",
+      parameters: {
+        column: "$b",
+        formula_template: "=A{row}+1",
+        start_row: 2
+      }
+    });
+
+    expect(call.name).toBe("apply_formula_column");
+    const params = call.parameters as any;
+    expect(params.column).toBe("B");
+  });
+});
