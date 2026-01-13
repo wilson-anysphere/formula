@@ -233,6 +233,34 @@ describe("PreviewEngine", () => {
     expect(workbook.listNonEmptyCells()).toEqual([]);
   });
 
+  it("formats preview diffs with display sheet names and sorts changes by sheet/row/col", async () => {
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        // Intentionally write A10 before A2 to validate numeric row sorting.
+        { name: "write_cell", parameters: { cell: "Budget!A10", value: 10 } },
+        { name: "write_cell", parameters: { cell: "Budget!A2", value: 2 } }
+      ],
+      workbook,
+      { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver }
+    );
+
+    expect(preview.summary.total_changes).toBe(2);
+    expect(preview.changes.map((c) => c.cell)).toEqual(["Budget!A2", "Budget!A10"]);
+    expect(preview.changes.every((c) => c.cell.startsWith("Budget!"))).toBe(true);
+  });
+
   it("passes stable sheet ids to createChart during preview when using sheet_name_resolver", async () => {
     const sheetNameResolver = {
       getSheetIdByName(name: string) {

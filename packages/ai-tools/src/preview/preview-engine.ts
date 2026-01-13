@@ -63,7 +63,7 @@ export class PreviewEngine {
     const executor = new ToolExecutor(simulated, { ...executorOptions, allow_external_data: false, preview_mode: true });
     const toolResults = await executor.executePlan(toolCalls);
 
-    const changes = diffSpreadsheets(before, simulated);
+    const changes = diffSpreadsheets(before, simulated, executorOptions.sheet_name_resolver);
     const summary = summarizeChanges(changes);
 
     const warnings: string[] = [];
@@ -137,21 +137,40 @@ function nowMs(): number {
   return Date.now();
 }
 
-function diffSpreadsheets(before: SpreadsheetApi, after: SpreadsheetApi): CellChangePreview[] {
-  const beforeMap = new Map<string, { cell: CellData; cellRef: string }>();
+function diffSpreadsheets(
+  before: SpreadsheetApi,
+  after: SpreadsheetApi,
+  sheetNameResolver?: ToolExecutorOptions["sheet_name_resolver"]
+): CellChangePreview[] {
+  type DiffCellEntry = {
+    cell: CellData;
+    cellRef: string;
+    sheetId: string;
+    sheetName: string;
+    row: number;
+    col: number;
+  };
+
+  const beforeMap = new Map<string, DiffCellEntry>();
   for (const entry of before.listNonEmptyCells()) {
     const key = diffKey(entry.address.sheet, entry.address.row, entry.address.col);
-    beforeMap.set(key, { cell: entry.cell, cellRef: formatA1Cell(entry.address) });
+    const sheetId = entry.address.sheet;
+    const sheetName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const cellRef = formatA1Cell(sheetName === sheetId ? entry.address : { ...entry.address, sheet: sheetName });
+    beforeMap.set(key, { cell: entry.cell, cellRef, sheetId, sheetName, row: entry.address.row, col: entry.address.col });
   }
 
-  const afterMap = new Map<string, { cell: CellData; cellRef: string }>();
+  const afterMap = new Map<string, DiffCellEntry>();
   for (const entry of after.listNonEmptyCells()) {
     const key = diffKey(entry.address.sheet, entry.address.row, entry.address.col);
-    afterMap.set(key, { cell: entry.cell, cellRef: formatA1Cell(entry.address) });
+    const sheetId = entry.address.sheet;
+    const sheetName = sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const cellRef = formatA1Cell(sheetName === sheetId ? entry.address : { ...entry.address, sheet: sheetName });
+    afterMap.set(key, { cell: entry.cell, cellRef, sheetId, sheetName, row: entry.address.row, col: entry.address.col });
   }
 
   const keys = new Set([...beforeMap.keys(), ...afterMap.keys()]);
-  const changes: CellChangePreview[] = [];
+  const changes: Array<CellChangePreview & { sheetSort: string; sheetIdSort: string; rowSort: number; colSort: number }> = [];
   for (const key of keys) {
     const beforeEntry = beforeMap.get(key);
     const afterEntry = afterMap.get(key);
@@ -164,11 +183,25 @@ function diffSpreadsheets(before: SpreadsheetApi, after: SpreadsheetApi): CellCh
     const afterEmpty = isCellEmpty(afterCell);
     const type: CellChangeType = beforeEmpty && !afterEmpty ? "create" : !beforeEmpty && afterEmpty ? "delete" : "modify";
     const cellRef = afterEntry?.cellRef ?? beforeEntry?.cellRef ?? key;
-    changes.push({ cell: cellRef, type, before: beforeCell, after: afterCell });
+
+    const sheetSort = afterEntry?.sheetName ?? beforeEntry?.sheetName ?? "";
+    const sheetIdSort = afterEntry?.sheetId ?? beforeEntry?.sheetId ?? "";
+    const rowSort = afterEntry?.row ?? beforeEntry?.row ?? 0;
+    const colSort = afterEntry?.col ?? beforeEntry?.col ?? 0;
+    changes.push({ cell: cellRef, type, before: beforeCell, after: afterCell, sheetSort, sheetIdSort, rowSort, colSort });
   }
 
-  changes.sort((a, b) => a.cell.localeCompare(b.cell));
-  return changes;
+  changes.sort((a, b) => {
+    const sheetCmp = a.sheetSort.localeCompare(b.sheetSort);
+    if (sheetCmp !== 0) return sheetCmp;
+    const sheetIdCmp = a.sheetIdSort.localeCompare(b.sheetIdSort);
+    if (sheetIdCmp !== 0) return sheetIdCmp;
+    if (a.rowSort !== b.rowSort) return a.rowSort - b.rowSort;
+    if (a.colSort !== b.colSort) return a.colSort - b.colSort;
+    return a.cell.localeCompare(b.cell);
+  });
+
+  return changes.map(({ sheetSort: _sheetSort, sheetIdSort: _sheetIdSort, rowSort: _rowSort, colSort: _colSort, ...rest }) => rest);
 }
 
 function summarizeChanges(changes: CellChangePreview[]): PreviewSummary {
