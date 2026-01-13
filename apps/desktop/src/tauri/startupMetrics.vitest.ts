@@ -101,5 +101,26 @@ describe("startupMetrics", () => {
     await markStartupFirstRender();
     expect(invoke).toHaveBeenCalledTimes(1);
   });
-});
 
+  it("boots startup metrics as early side effects (report -> install listeners -> report again)", async () => {
+    const invoke = vi.fn().mockResolvedValue(null);
+    const listen = vi.fn().mockResolvedValue(() => {});
+    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+
+    await import("./startupMetricsBootstrap");
+
+    // Allow the listener-install promise and its `.finally(...)` to run.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(listen).toHaveBeenCalled();
+
+    // The second report should happen after listeners are registered.
+    expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
+    expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
+  });
+});

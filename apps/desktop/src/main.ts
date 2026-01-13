@@ -1,3 +1,5 @@
+// IMPORTANT: keep this as the very first import so the "webview loaded" IPC is sent
+// before the rest of the startup module graph executes (reduces startup metric skew).
 import "./tauri/startupMetricsBootstrap.js";
 
 import { SpreadsheetApp } from "./app/spreadsheetApp";

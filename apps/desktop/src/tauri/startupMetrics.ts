@@ -137,9 +137,13 @@ export async function installStartupTimingsListeners(): Promise<void> {
  * No-op outside of Tauri.
  */
 export function reportStartupWebviewLoaded(): void {
-  const invoke = getTauriInvoke();
-  if (!invoke) return;
-  void invoke("report_startup_webview_loaded").catch(() => {});
+  try {
+    const invoke = getTauriInvoke();
+    if (!invoke) return;
+    void invoke("report_startup_webview_loaded").catch(() => {});
+  } catch {
+    // Best-effort: reporting must never crash startup.
+  }
 }
 
 /**
