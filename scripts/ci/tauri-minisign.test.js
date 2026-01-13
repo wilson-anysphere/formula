@@ -92,6 +92,15 @@ test("parses pubkey formats (raw Ed25519 bytes, minisign payload bytes)", () => 
   }
 });
 
+test("rejects minisign pubkey text when comment key id does not match payload", () => {
+  const keyIdLe = Buffer.from("1122334455667788", "hex");
+  const pubkeyPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, Buffer.alloc(32, 1)]);
+  const wrongKeyId = "0000000000000000";
+  const pubkeyText = `untrusted comment: minisign public key: ${wrongKeyId}\n${pubkeyPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+  assert.throws(() => parseTauriUpdaterPubkey(pubkeyBase64), /comment key id/i);
+});
+
 test("end-to-end verify works with minisign pubkey + multiple signature formats", () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
   const message = Buffer.from("formula updater manifest", "utf8");

@@ -70,6 +70,15 @@ function nonEmptyLines(text) {
 }
 
 /**
+ * @param {string} line
+ * @returns {string | null}
+ */
+function extractKeyIdFromPublicKeyComment(line) {
+  const match = line.match(/minisign public key:\s*([0-9a-fA-F]{16})\b/);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
  * Minisign encodes key ids as little-endian bytes, while the comment line prints the key id as
  * uppercase hex in big-endian order.
  *
@@ -158,8 +167,17 @@ export function parseTauriUpdaterPubkey(pubkeyBase64) {
     );
   }
 
+  const commentLine = lines[0];
   const payloadLine = lines[1];
   const { publicKeyBytes, keyId } = parseMinisignPublicKeyPayload(payloadLine);
+
+  const commentKeyId = extractKeyIdFromPublicKeyComment(commentLine);
+  if (commentKeyId && commentKeyId !== keyId) {
+    throw new Error(
+      `minisign public key comment key id (${commentKeyId}) does not match payload key id (${keyId}).`,
+    );
+  }
+
   return { publicKeyBytes, keyId, format: "minisign" };
 }
 
