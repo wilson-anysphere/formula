@@ -124,7 +124,12 @@ export class InlineEditController {
       const workbookId = this.options.workbookId ?? "local-workbook";
       const auditStore = this.options.auditStore ?? getDesktopAIAuditStore();
       const sessionId = createSessionId();
-      const dlp = maybeGetAiCloudDlpOptions({ documentId: workbookId, sheetId: params.sheetId }) ?? undefined;
+      const dlp =
+        maybeGetAiCloudDlpOptions({
+          documentId: workbookId,
+          sheetId: params.sheetId,
+          sheetNameResolver: this.options.sheetNameResolver,
+        }) ?? undefined;
 
       const selectionSheetLabel = sheetDisplayName(params.sheetId, this.options.sheetNameResolver);
       const selectionRef = `${formatSheetNameForA1(selectionSheetLabel || params.sheetId)}!${rangeToA1(params.range)}`;

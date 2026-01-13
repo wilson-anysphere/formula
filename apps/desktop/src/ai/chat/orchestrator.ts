@@ -401,7 +401,12 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     const selectedRange =
       selectionFromAttachments(attachments, activeSheetId, options.sheetNameResolver) ?? options.getSelectedRange?.() ?? undefined;
 
-    const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
+    const dlp =
+      maybeGetAiCloudDlpOptions({
+        documentId: options.workbookId,
+        sheetId: activeSheetId,
+        sheetNameResolver: options.sheetNameResolver,
+      }) ?? undefined;
 
     let workbookContext: any;
     try {

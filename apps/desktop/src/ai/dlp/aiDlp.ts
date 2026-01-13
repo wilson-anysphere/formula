@@ -2,6 +2,7 @@ import { LocalClassificationStore, createMemoryStorage } from "../../../../../pa
 import { InMemoryAuditLogger } from "../../../../../packages/security/dlp/src/audit.js";
 import { createDefaultOrgPolicy, mergePolicies } from "../../../../../packages/security/dlp/src/policy.js";
 import { LocalPolicyStore } from "../../../../../packages/security/dlp/src/policyStore.js";
+import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
 
@@ -209,6 +210,7 @@ export type AiCloudDlpOptions = {
   // ContextManager (camelCase)
   documentId: string;
   sheetId?: string;
+  sheetNameResolver?: SheetNameResolver | null;
   policy: any;
   classificationRecords: Array<{ selector: any; classification: any }>;
   classificationStore: LocalClassificationStore;
@@ -217,6 +219,7 @@ export type AiCloudDlpOptions = {
   // ToolExecutorOptions (snake_case)
   document_id: string;
   sheet_id?: string;
+  sheet_name_resolver?: SheetNameResolver | null;
   classification_records: Array<{ selector: any; classification: any }>;
   classification_store: LocalClassificationStore;
   include_restricted_content: boolean;
@@ -228,10 +231,15 @@ export type AiCloudDlpOptions = {
  * - `ContextManager.buildWorkbookContextFromSpreadsheetApi({ dlp: ... })`
  * - `SpreadsheetLLMToolExecutor({ dlp: ... })`
  *
- * IMPORTANT: This helper is the bridge that wires enterprise DLP policy + per-cell
- * classifications into desktop AI surfaces (chat/agent/inline-edit).
- */
-export function getAiCloudDlpOptions(params: { documentId: string; sheetId?: string; orgId?: string }): AiCloudDlpOptions {
+  * IMPORTANT: This helper is the bridge that wires enterprise DLP policy + per-cell
+  * classifications into desktop AI surfaces (chat/agent/inline-edit).
+  */
+export function getAiCloudDlpOptions(params: {
+  documentId: string;
+  sheetId?: string;
+  orgId?: string;
+  sheetNameResolver?: SheetNameResolver | null;
+}): AiCloudDlpOptions {
   const localStorage = getLocalStorageOrNull();
   const storage = localStorage ?? createMemoryStorage();
   const orgId = params.orgId ?? loadActiveOrgId(storage);
@@ -253,6 +261,9 @@ export function getAiCloudDlpOptions(params: { documentId: string; sheetId?: str
   return {
     documentId: params.documentId,
     sheetId: params.sheetId,
+    ...(params.sheetNameResolver !== undefined
+      ? { sheetNameResolver: params.sheetNameResolver ?? null, sheet_name_resolver: params.sheetNameResolver ?? null }
+      : {}),
     policy,
     classificationRecords,
     classificationStore,
@@ -278,6 +289,7 @@ export function maybeGetAiCloudDlpOptions(params: {
   documentId: string;
   sheetId?: string;
   orgId?: string;
+  sheetNameResolver?: SheetNameResolver | null;
 }): AiCloudDlpOptions | null {
   const localStorage = getLocalStorageOrNull();
   if (!localStorage) return null;
@@ -292,6 +304,9 @@ export function maybeGetAiCloudDlpOptions(params: {
   return {
     documentId: params.documentId,
     sheetId: params.sheetId,
+    ...(params.sheetNameResolver !== undefined
+      ? { sheetNameResolver: params.sheetNameResolver ?? null, sheet_name_resolver: params.sheetNameResolver ?? null }
+      : {}),
     policy: memoized.policy,
     classificationRecords: memoized.classificationRecords,
     classificationStore: memoized.classificationStore,

@@ -773,6 +773,80 @@ describe("ai chat orchestrator", () => {
     }
   });
 
+  it("blocks before calling the LLM when DLP policy forbids cloud AI processing on renamed sheets (uses sheetNameResolver)", async () => {
+    resetAiDlpAuditLoggerForTests();
+
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    try {
+      storage.clear();
+
+      const workbookId = "wb_dlp_block_renamed_sheet";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            // Only block when Restricted content is in scope.
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: false,
+          },
+        },
+      });
+
+      const controller = new DocumentController();
+      const internalSheetId = controller.addSheet({ name: "Budget" });
+      controller.setCellValue(internalSheetId, "A1", "TOP SECRET");
+
+      const classificationStore = new LocalClassificationStore({ storage: storage as any });
+      classificationStore.upsert(
+        workbookId,
+        { scope: "cell", documentId: workbookId, sheetId: internalSheetId, row: 0, col: 0 },
+        { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["test"] },
+      );
+
+      const sheetNameResolver = createSheetNameResolverFromIdToNameMap(new Map([[internalSheetId, "Budget"]]));
+
+      const embedder = new HashEmbedder({ dimension: 64 });
+      const vectorStore = new InMemoryVectorStore({ dimension: 64 });
+      const contextManager = new ContextManager({
+        tokenBudgetTokens: 800,
+        workbookRag: { vectorStore, embedder, topK: 3 },
+      });
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_dlp_block_renamed_sheet" });
+      const llmClient = { chat: vi.fn(async () => ({ message: { role: "assistant", content: "should not be called" } })) };
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId,
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => internalSheetId,
+        sheetNameResolver,
+        auditStore,
+        sessionId: "session_dlp_block_renamed_sheet",
+        contextManager,
+      });
+
+      await expect(orchestrator.sendMessage({ text: "What is in Budget!A1?", history: [] })).rejects.toThrow(
+        /Sending data to cloud AI is restricted/i,
+      );
+      expect(llmClient.chat).not.toHaveBeenCalled();
+    } finally {
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
+  });
+
   it("redacts tool results when DLP policy requires redaction (no restricted cells sent to the LLM)", async () => {
     resetAiDlpAuditLoggerForTests();
 

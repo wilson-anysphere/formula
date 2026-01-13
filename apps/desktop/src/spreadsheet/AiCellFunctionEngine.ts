@@ -286,7 +286,11 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     if (argError) return argError;
 
     const defaultSheetId = sheetIdFromCellAddress(cellAddress);
-    const dlp = getAiCloudDlpOptions({ documentId: this.workbookId, sheetId: defaultSheetId });
+    const dlp = getAiCloudDlpOptions({
+      documentId: this.workbookId,
+      sheetId: defaultSheetId,
+      sheetNameResolver: this.sheetNameResolver,
+    });
 
     const alignedProvenance = alignArgProvenance({
       args: params.args,

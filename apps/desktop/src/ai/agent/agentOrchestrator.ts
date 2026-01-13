@@ -296,7 +296,12 @@ export async function runAgentTask(params: RunAgentTaskParams): Promise<AgentTas
     });
     const toolPolicy = getDesktopToolPolicy({ mode: "agent" });
 
-    const dlp = maybeGetAiCloudDlpOptions({ documentId: params.workbookId, sheetId: defaultSheetId }) ?? undefined;
+    const dlp =
+      maybeGetAiCloudDlpOptions({
+        documentId: params.workbookId,
+        sheetId: defaultSheetId,
+        sheetNameResolver: params.sheetNameResolver,
+      }) ?? undefined;
     const devOnBuildStats =
       import.meta.env.MODE === "development"
         ? (stats: WorkbookContextBuildStats) => {
