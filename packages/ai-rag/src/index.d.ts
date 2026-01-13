@@ -10,6 +10,7 @@ export {
   ChunkedLocalStorageBinaryStorage,
   IndexedDBBinaryStorage,
 } from "./store/binaryStorage.js";
+export type { BinaryStorage } from "./store/binaryStorage.js";
 
 export { chunkWorkbook } from "./workbook/chunkWorkbook.js";
 export { chunkToText } from "./workbook/chunkToText.js";
