@@ -39,7 +39,7 @@ describe("CursorLLMClient config (baseUrl normalization)", () => {
     ["https://cursor.test/v1/chat/completions", "https://cursor.test/v1/chat/completions"],
     ["", "/v1/chat/completions"],
   ])("posts to %s => %s", async (baseUrl, expectedEndpoint) => {
-    const fetchMock = vi.fn(async () => okResponse());
+    const fetchMock = vi.fn(async (..._args: any[]) => okResponse());
     vi.stubGlobal("fetch", fetchMock as any);
 
     const client = new CursorLLMClient({ baseUrl, timeoutMs: 1_000 });
@@ -52,7 +52,7 @@ describe("CursorLLMClient config (baseUrl normalization)", () => {
   it("defaults to same-origin /v1/chat/completions when baseUrl is omitted", async () => {
     const restoreBaseUrl = setEnv("CURSOR_AI_BASE_URL", undefined);
     try {
-      const fetchMock = vi.fn(async () => okResponse());
+      const fetchMock = vi.fn(async (..._args: any[]) => okResponse());
       vi.stubGlobal("fetch", fetchMock as any);
 
       const client = new CursorLLMClient({ timeoutMs: 1_000 });
@@ -70,7 +70,7 @@ describe("CursorLLMClient config (Node env var overrides)", () => {
   it("uses CURSOR_AI_BASE_URL when baseUrl is not provided", async () => {
     const restoreBaseUrl = setEnv("CURSOR_AI_BASE_URL", "https://cursor.env");
     try {
-      const fetchMock = vi.fn(async () => okResponse());
+      const fetchMock = vi.fn(async (..._args: any[]) => okResponse());
       vi.stubGlobal("fetch", fetchMock as any);
 
       const client = new CursorLLMClient({ timeoutMs: 1_000 });
@@ -93,4 +93,3 @@ describe("CursorLLMClient config (Node env var overrides)", () => {
     }
   });
 });
-
