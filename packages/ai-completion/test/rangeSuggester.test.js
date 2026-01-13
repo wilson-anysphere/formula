@@ -60,6 +60,46 @@ test("suggestRanges trims non-numeric header rows when the range is mostly numer
   assert.equal(suggestions[0].range, "A2:A4");
 });
 
+test("suggestRanges falls back to scanning down when no data exists above the current cell", () => {
+  const ctx = createColumnAContext([
+    [1, 10], // A2
+    [2, 20], // A3
+    [3, 30], // A4
+    [4, 40], // A5
+    [5, 50], // A6
+    [6, 60], // A7
+    [7, 70], // A8
+    [8, 80], // A9
+    [9, 90], // A10
+    [10, 100], // A11
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 0, col: 0 }, // A1, above the data block
+    surroundingCells: ctx,
+  });
+
+  assert.ok(suggestions.some((s) => s.range === "A2:A11"));
+});
+
+test("suggestRanges trims non-numeric header rows when scanning downwards", () => {
+  const ctx = createColumnAContext([
+    [1, "Header"], // A2
+    [2, 10], // A3
+    [3, 20], // A4
+    [4, 30], // A5
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 0, col: 0 }, // A1, above the header+data block
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "A3:A5");
+});
+
 test("suggestRanges preserves absolute column/row prefixes in A1 output", () => {
   const ctx = createColumnAContext([
     [0, 10],

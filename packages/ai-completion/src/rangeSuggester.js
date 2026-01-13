@@ -59,9 +59,20 @@ export function suggestRanges(params) {
   /** @type {RangeSuggestion[]} */
   const suggestions = [];
 
-  const contiguous = explicitRow
-    ? findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows, sheetName)
-    : findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
+  /** @type {{startRow:number,endRow:number,numericRatio:number} | null} */
+  let contiguous = null;
+  let contiguousReason = "";
+  if (explicitRow !== null) {
+    contiguous = findContiguousBlockDown(surroundingCells, colIndex, explicitRow - 1, maxScanRows, sheetName);
+    contiguousReason = "contiguous_down_from_start";
+  } else {
+    contiguous = findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
+    contiguousReason = "contiguous_above_current_cell";
+    if (!contiguous) {
+      contiguous = findContiguousBlockBelow(surroundingCells, colIndex, cellRef.row + 1, maxScanRows, sheetName);
+      contiguousReason = "contiguous_below_current_cell";
+    }
+  }
 
   /** @type {RangeSuggestion | null} */
   let tableSuggestion = null;
@@ -81,7 +92,7 @@ export function suggestRanges(params) {
     suggestions.push({
       range,
       confidence: clamp01(base + lengthBoost + numericBoost),
-      reason: explicitRow ? "contiguous_down_from_start" : "contiguous_above_current_cell",
+      reason: contiguousReason,
     });
 
     // Also suggest a 2D rectangular range when the column looks like part of a table.
@@ -191,6 +202,35 @@ function findContiguousBlockDown(ctx, col, startRow, maxScanRows, sheetName) {
 
   const metrics = computeNumericStats(ctx, col, startRow, endRow, sheetName);
   return { startRow, endRow, numericRatio: metrics.numericRatio, rawStartRow: startRow, rawEndRow: endRow };
+}
+
+/**
+ * @param {CellContext} ctx
+ * @param {number} col
+ * @param {number} fromRow start scanning from this row downwards (inclusive)
+ * @param {number} maxScanRows
+ */
+function findContiguousBlockBelow(ctx, col, fromRow, maxScanRows, sheetName) {
+  if (fromRow < 0) fromRow = 0;
+
+  // Find the nearest non-empty cell below (skip blank separators).
+  let startRow = fromRow;
+  let scanned = 0;
+  while (scanned < maxScanRows && isEmptyCell(ctx.getCellValue(startRow, col, sheetName))) {
+    startRow++;
+    scanned++;
+  }
+  if (scanned >= maxScanRows) return null;
+
+  let endRow = startRow;
+  scanned = 0;
+  while (scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(endRow + 1, col, sheetName))) {
+    endRow++;
+    scanned++;
+  }
+
+  const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName);
+  return { startRow: trimmed.startRow, endRow: trimmed.endRow, numericRatio: trimmed.numericRatio };
 }
 
 function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName) {
