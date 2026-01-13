@@ -2764,8 +2764,6 @@ impl DaxEngine {
                             // preserves other filters on the same table.
                             let mut modified_filter = filter.clone();
                             modified_filter.clear_column_filter(table, column);
-                            let candidate_rows =
-                                resolve_table_rows(model, &modified_filter, table)?;
 
                             let table_ref = model
                                 .table(table)
@@ -2776,6 +2774,21 @@ impl DaxEngine {
                                     column: column.clone(),
                                 }
                             })?;
+
+                            let (candidate_rows, sets) = if modified_filter.is_empty() {
+                                ((0..table_ref.row_count()).collect(), None)
+                            } else {
+                                let sets = resolve_row_sets(model, &modified_filter)?;
+                                let Some(rows_set) = sets.get(table) else {
+                                    return Err(DaxError::UnknownTable(table.to_string()));
+                                };
+                                let rows: Vec<usize> = rows_set
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
+                                    .collect();
+                                (rows, Some(sets))
+                            };
 
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
@@ -2788,7 +2801,12 @@ impl DaxEngine {
                             }
                             if !seen.contains(&Value::Blank)
                                 && blank_row_allowed(&modified_filter, table)
-                                && virtual_blank_row_exists(model, &modified_filter, table, None)?
+                                && virtual_blank_row_exists(
+                                    model,
+                                    &modified_filter,
+                                    table,
+                                    sets.as_ref(),
+                                )?
                             {
                                 rows.push(table_ref.row_count());
                             }

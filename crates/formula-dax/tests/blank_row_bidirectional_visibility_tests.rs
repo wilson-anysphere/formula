@@ -5,6 +5,10 @@ use formula_dax::{
 use pretty_assertions::assert_eq;
 
 fn build_model_blank_row_bidirectional() -> DataModel {
+    build_model_blank_row_bidirectional_with_cardinality(Cardinality::OneToMany)
+}
+
+fn build_model_blank_row_bidirectional_with_cardinality(cardinality: Cardinality) -> DataModel {
     let mut model = DataModel::new();
 
     let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
@@ -24,7 +28,7 @@ fn build_model_blank_row_bidirectional() -> DataModel {
             from_column: "CustomerId".into(),
             to_table: "Customers".into(),
             to_column: "CustomerId".into(),
-            cardinality: Cardinality::OneToMany,
+            cardinality,
             cross_filter_direction: CrossFilterDirection::Both,
             is_active: true,
             enforce_referential_integrity: false,
@@ -150,3 +154,114 @@ fn distinctcount_virtual_blank_row_respects_bidirectional_filter_context() {
     );
 }
 
+#[test]
+fn values_virtual_blank_row_respects_bidirectional_filter_context_many_to_many() {
+    let model = build_model_blank_row_bidirectional_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Customers[Region]))",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Customers[Region]))",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SELECTEDVALUE(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("East")
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(VALUES(Customers[Region]))",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SELECTEDVALUE(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::Blank
+    );
+}
+
+#[test]
+fn distinctcount_virtual_blank_row_respects_bidirectional_filter_context_many_to_many() {
+    let model = build_model_blank_row_bidirectional_with_cardinality(Cardinality::ManyToMany);
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "DISTINCTCOUNT(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+
+    let matched_filter = FilterContext::empty().with_column_equals("Orders", "CustomerId", 1.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "DISTINCTCOUNT(Customers[Region])",
+                &matched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+
+    let unmatched_filter =
+        FilterContext::empty().with_column_equals("Orders", "CustomerId", 999.into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "DISTINCTCOUNT(Customers[Region])",
+                &unmatched_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        1.into()
+    );
+}
