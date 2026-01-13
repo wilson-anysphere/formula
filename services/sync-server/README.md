@@ -490,6 +490,12 @@ Configuration:
   - If **unset**, it defaults to:
     - **enabled** when `NODE_ENV=production`
     - **disabled** otherwise
+- `SYNC_SERVER_RESERVED_ROOT_NAMES`
+  - Optional comma-separated list of **exact** reserved root names.
+  - Defaults to: `versions,versionsMeta`
+- `SYNC_SERVER_RESERVED_ROOT_PREFIXES`
+  - Optional comma-separated list of reserved root **prefixes**.
+  - Defaults to: `branching:`
 
 Default reserved roots:
 
@@ -510,6 +516,7 @@ Implications for Formula collaboration deployments:
 
 - `@formula/collab-versioning` defaults to `YjsVersionStore` (history stored *inside* the Y.Doc under `versions`/`versionsMeta`). This requires the guard to be **disabled**, otherwise version snapshot/checkpoint writes will be rejected.
 - Formula’s Yjs-backed branching store (`YjsBranchStore`, graph stored *inside* the Y.Doc under `branching:*`) also requires the guard to be **disabled**.
+- If you customize the branching root name (non-default `rootName`), note that the guard only blocks configured prefixes; you may need to extend `SYNC_SERVER_RESERVED_ROOT_PREFIXES` accordingly.
 - If you want to keep the guard enabled in production, use non-Yjs stores instead (where applicable), for example:
   - `ApiVersionStore` (cloud DB/API): `packages/versioning/src/store/apiVersionStore.js`
   - `SQLiteVersionStore` (local desktop): `packages/versioning/src/store/sqliteVersionStore.js`
