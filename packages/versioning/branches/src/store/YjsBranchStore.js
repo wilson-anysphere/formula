@@ -487,8 +487,37 @@ export class YjsBranchStore {
     }
 
     if (typeof existingRoot === "string" && existingRoot.length > 0) {
-      const rootCommitMap = getYMap(this.#commits.get(existingRoot));
-      if (!rootCommitMap) throw new Error(`Root commit not found: ${existingRoot}`);
+      /** @type {string} */
+      let rootCommitId = existingRoot;
+      /** @type {Y.Map<any> | null} */
+      let rootCommitMap = getYMap(this.#commits.get(rootCommitId));
+      if (!rootCommitMap) throw new Error(`Root commit not found: ${rootCommitId}`);
+
+      // Resilience: interrupted gzip-chunks writes can leave partially-written
+      // commits around (commitComplete=false). Ensure document repair doesn't
+      // select those as the root commit pointer.
+      if (!this.#isCommitComplete(rootCommitMap)) {
+        const inferredRoot = this.#inferRootCommitId(docId);
+        if (
+          typeof inferredRoot === "string" &&
+          inferredRoot.length > 0 &&
+          inferredRoot !== rootCommitId
+        ) {
+          this.#ydoc.transact(() => {
+            const current = this.#meta.get("rootCommitId");
+            if (current !== rootCommitId) return;
+            this.#meta.set("rootCommitId", inferredRoot);
+          });
+          rootCommitId = inferredRoot;
+          existingRoot = inferredRoot;
+          rootCommitMap = getYMap(this.#commits.get(rootCommitId));
+          if (!rootCommitMap) throw new Error(`Root commit not found: ${rootCommitId}`);
+        } else {
+          throw new Error(
+            `YjsBranchStore: root commit not fully written yet (commitComplete=false): ${rootCommitId}`
+          );
+        }
+      }
 
       const rootDocId = rootCommitMap.get("docId");
       if (typeof rootDocId === "string" && rootDocId.length > 0 && rootDocId !== docId) {
@@ -504,11 +533,11 @@ export class YjsBranchStore {
       const snapshot = needsSnapshot
         ? this._applyPatch(
             emptyDocumentState(),
-            await this.#readCommitPatch(rootCommitMap, existingRoot),
+            await this.#readCommitPatch(rootCommitMap, rootCommitId),
           )
         : null;
 
-      const headForMissingMainBranch = this.#inferLatestCommitId(docId) ?? existingRoot;
+      const headForMissingMainBranch = this.#inferLatestCommitId(docId) ?? rootCommitId;
 
       this.#ydoc.transact(() => {
         // Backwards-compatible migration: ensure main branch exists.
@@ -565,7 +594,7 @@ export class YjsBranchStore {
           };
 
           this.#ydoc.transact(() => {
-            const commit = getYMap(this.#commits.get(existingRoot));
+            const commit = getYMap(this.#commits.get(rootCommitId));
             if (!commit) return;
             if (this.#commitHasSnapshot(commit)) return;
 
@@ -580,7 +609,7 @@ export class YjsBranchStore {
 
           while (snapshotArr && snapshotIndex < snapshotChunks.length) {
             this.#ydoc.transact(() => {
-              const commit = getYMap(this.#commits.get(existingRoot));
+              const commit = getYMap(this.#commits.get(rootCommitId));
               if (!commit) return;
               const arr = getYArray(commit.get("snapshotChunks"));
               if (!arr) return;
@@ -592,7 +621,7 @@ export class YjsBranchStore {
           }
         } else {
           this.#ydoc.transact(() => {
-            const commit = getYMap(this.#commits.get(existingRoot));
+            const commit = getYMap(this.#commits.get(rootCommitId));
             if (commit && commit.get("snapshot") === undefined) {
               commit.set("snapshot", structuredClone(snapshot));
             }
@@ -760,27 +789,40 @@ export class YjsBranchStore {
         seen.add(currentId);
         const commitMap = getYMap(this.#commits.get(currentId));
         if (!commitMap) break;
+        const commitDocId = commitMap.get("docId");
+        if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) break;
         const parent = commitMap.get("parentCommitId");
-        if (!parent) return currentId;
+        if (!parent) {
+          // Avoid selecting partially-written gzip-chunks commits as the root.
+          if (!this.#isCommitComplete(commitMap)) break;
+          const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
+          if (!hasPayload) break;
+          return currentId;
+        }
         currentId = parent;
       }
     }
 
-    /** @type {{ id: string, createdAt: number }[]} */
+    /** @type {{ id: string, createdAt: number, hasPayload: boolean }[]} */
     const candidates = [];
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
       const parent = commitMap.get("parentCommitId");
       if (parent !== null && parent !== undefined) return;
+      if (!this.#isCommitComplete(commitMap)) return;
 
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt });
+      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
     });
 
-    candidates.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+    candidates.sort((a, b) => {
+      if (a.hasPayload !== b.hasPayload) return a.hasPayload ? -1 : 1;
+      return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+    });
     return candidates[0]?.id ?? null;
   }
 
@@ -791,18 +833,23 @@ export class YjsBranchStore {
    * @returns {string | null}
    */
   #inferLatestCommitId(docId) {
-    /** @type {{ id: string, createdAt: number }[]} */
+    /** @type {{ id: string, createdAt: number, hasPayload: boolean }[]} */
     const candidates = [];
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
+      if (!this.#isCommitComplete(commitMap)) return;
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt });
+      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
     });
 
-    candidates.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
+    candidates.sort((a, b) => {
+      if (a.hasPayload !== b.hasPayload) return a.hasPayload ? -1 : 1;
+      return b.createdAt - a.createdAt || a.id.localeCompare(b.id);
+    });
     return candidates[0]?.id ?? null;
   }
 
