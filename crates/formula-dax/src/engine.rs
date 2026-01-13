@@ -232,6 +232,44 @@ impl RowContext {
     }
 }
 
+#[derive(Clone, Debug)]
+enum VarValue {
+    Scalar(Value),
+    Table(TableResult),
+}
+
+#[derive(Clone, Debug, Default)]
+struct VarEnv {
+    scopes: Vec<HashMap<String, VarValue>>,
+}
+
+impl VarEnv {
+    fn normalize_name(name: &str) -> String {
+        name.trim().to_ascii_uppercase()
+    }
+
+    fn lookup(&self, name: &str) -> Option<&VarValue> {
+        let key = Self::normalize_name(name);
+        self.scopes.iter().rev().find_map(|scope| scope.get(&key))
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn define(&mut self, name: &str, value: VarValue) {
+        if self.scopes.is_empty() {
+            self.push_scope();
+        }
+        let scope = self.scopes.last_mut().expect("just pushed if empty");
+        scope.insert(Self::normalize_name(name), value);
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DaxEngine;
 
@@ -278,7 +316,8 @@ impl DaxEngine {
         filter: &FilterContext,
         row_ctx: &RowContext,
     ) -> DaxResult<Value> {
-        self.eval_scalar(model, expr, filter, row_ctx)
+        let mut env = VarEnv::default();
+        self.eval_scalar(model, expr, filter, row_ctx, &mut env)
     }
 
     fn eval_scalar(
@@ -287,6 +326,7 @@ impl DaxEngine {
         expr: &Expr,
         filter: &FilterContext,
         row_ctx: &RowContext,
+        env: &mut VarEnv,
     ) -> DaxResult<Value> {
         match expr {
             Expr::Number(n) => Ok(Value::from(*n)),
@@ -305,11 +345,13 @@ impl DaxEngine {
                         filter.clone()
                     };
 
+                    let mut measure_env = VarEnv::default();
                     return self.eval_scalar(
                         model,
                         &measure.parsed,
                         &eval_filter,
                         &RowContext::default(),
+                        &mut measure_env,
                     );
                 }
 
@@ -335,6 +377,19 @@ impl DaxEngine {
                 })?;
                 Ok(value)
             }
+            Expr::Let { bindings, body } => {
+                env.push_scope();
+                let result = (|| -> DaxResult<Value> {
+                    for (name, binding_expr) in bindings {
+                        let value =
+                            self.eval_var_value(model, binding_expr, filter, row_ctx, env)?;
+                        env.define(name, value);
+                    }
+                    self.eval_scalar(model, body, filter, row_ctx, env)
+                })();
+                env.pop_scope();
+                result
+            }
             Expr::ColumnRef { table, column } => {
                 let row = row_ctx.row_for(table).ok_or_else(|| {
                     DaxError::Eval(format!("no row context for {table}[{column}]"))
@@ -355,7 +410,7 @@ impl DaxEngine {
                 Ok(value)
             }
             Expr::UnaryOp { op, expr } => {
-                let value = self.eval_scalar(model, expr, filter, row_ctx)?;
+                let value = self.eval_scalar(model, expr, filter, row_ctx, env)?;
                 match op {
                     UnaryOp::Negate => {
                         let n = coerce_number(&value)?;
@@ -364,14 +419,39 @@ impl DaxEngine {
                 }
             }
             Expr::BinaryOp { op, left, right } => {
-                let left = self.eval_scalar(model, left, filter, row_ctx)?;
-                let right = self.eval_scalar(model, right, filter, row_ctx)?;
+                let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
                 self.eval_binary(op, left, right)
             }
-            Expr::Call { name, args } => self.eval_call_scalar(model, name, args, filter, row_ctx),
-            Expr::TableName(name) => Err(DaxError::Type(format!(
-                "table {name} used in scalar context"
-            ))),
+            Expr::Call { name, args } => {
+                self.eval_call_scalar(model, name, args, filter, row_ctx, env)
+            }
+            Expr::TableName(name) => match env.lookup(name) {
+                Some(VarValue::Scalar(v)) => Ok(v.clone()),
+                Some(VarValue::Table(_)) => Err(DaxError::Type(format!(
+                    "table variable {name} used in scalar context"
+                ))),
+                None => Err(DaxError::Type(format!(
+                    "table {name} used in scalar context"
+                ))),
+            },
+        }
+    }
+
+    fn eval_var_value(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+        row_ctx: &RowContext,
+        env: &mut VarEnv,
+    ) -> DaxResult<VarValue> {
+        match self.eval_scalar(model, expr, filter, row_ctx, env) {
+            Ok(v) => Ok(VarValue::Scalar(v)),
+            Err(err) => match self.eval_table(model, expr, filter, row_ctx, env) {
+                Ok(t) => Ok(VarValue::Table(t)),
+                Err(_) => Err(err),
+            },
         }
     }
 
@@ -422,6 +502,7 @@ impl DaxEngine {
         args: &[Expr],
         filter: &FilterContext,
         row_ctx: &RowContext,
+        env: &mut VarEnv,
     ) -> DaxResult<Value> {
         match name.to_ascii_uppercase().as_str() {
             "TRUE" => Ok(Value::Boolean(true)),
@@ -431,19 +512,19 @@ impl DaxEngine {
                 let [arg] = args else {
                     return Err(DaxError::Eval("ISBLANK expects 1 argument".into()));
                 };
-                let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                let value = self.eval_scalar(model, arg, filter, row_ctx, env)?;
                 Ok(Value::Boolean(value.is_blank()))
             }
             "IF" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(DaxError::Eval("IF expects 2 or 3 arguments".into()));
                 }
-                let cond = self.eval_scalar(model, &args[0], filter, row_ctx)?;
+                let cond = self.eval_scalar(model, &args[0], filter, row_ctx, env)?;
                 let cond = cond.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 if cond {
-                    self.eval_scalar(model, &args[1], filter, row_ctx)
+                    self.eval_scalar(model, &args[1], filter, row_ctx, env)
                 } else if args.len() == 3 {
-                    self.eval_scalar(model, &args[2], filter, row_ctx)
+                    self.eval_scalar(model, &args[2], filter, row_ctx, env)
                 } else {
                     Ok(Value::Blank)
                 }
@@ -457,7 +538,7 @@ impl DaxEngine {
 
                 // DAX evaluates the expression once, then compares it against each value in
                 // order, returning the result for the first match.
-                let expr = self.eval_scalar(model, &args[0], filter, row_ctx)?;
+                let expr = self.eval_scalar(model, &args[0], filter, row_ctx, env)?;
 
                 // DAX syntax:
                 //   SWITCH(<expr>, <value1>, <result1>, ..., [<else>])
@@ -470,15 +551,15 @@ impl DaxEngine {
 
                 let mut idx = 1usize;
                 while idx + 1 < pair_end {
-                    let value = self.eval_scalar(model, &args[idx], filter, row_ctx)?;
+                    let value = self.eval_scalar(model, &args[idx], filter, row_ctx, env)?;
                     if compare_values(&BinaryOp::Equals, &expr, &value)? {
-                        return self.eval_scalar(model, &args[idx + 1], filter, row_ctx);
+                        return self.eval_scalar(model, &args[idx + 1], filter, row_ctx, env);
                     }
                     idx += 2;
                 }
 
                 if has_else {
-                    self.eval_scalar(model, &args[args.len() - 1], filter, row_ctx)
+                    self.eval_scalar(model, &args[args.len() - 1], filter, row_ctx, env)
                 } else {
                     Ok(Value::Blank)
                 }
@@ -487,12 +568,12 @@ impl DaxEngine {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(DaxError::Eval("DIVIDE expects 2 or 3 arguments".into()));
                 }
-                let numerator = self.eval_scalar(model, &args[0], filter, row_ctx)?;
-                let denominator = self.eval_scalar(model, &args[1], filter, row_ctx)?;
+                let numerator = self.eval_scalar(model, &args[0], filter, row_ctx, env)?;
+                let denominator = self.eval_scalar(model, &args[1], filter, row_ctx, env)?;
                 let denominator = coerce_number(&denominator)?;
                 if denominator == 0.0 {
                     if args.len() == 3 {
-                        self.eval_scalar(model, &args[2], filter, row_ctx)
+                        self.eval_scalar(model, &args[2], filter, row_ctx, env)
                     } else {
                         Ok(Value::Blank)
                     }
@@ -508,7 +589,7 @@ impl DaxEngine {
                     ));
                 }
                 for arg in args {
-                    let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                    let value = self.eval_scalar(model, arg, filter, row_ctx, env)?;
                     if !value.is_blank() {
                         return Ok(value);
                     }
@@ -519,7 +600,7 @@ impl DaxEngine {
                 let [arg] = args else {
                     return Err(DaxError::Eval("NOT expects 1 argument".into()));
                 };
-                let value = self.eval_scalar(model, arg, filter, row_ctx)?;
+                let value = self.eval_scalar(model, arg, filter, row_ctx, env)?;
                 let b = value.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 Ok(Value::Boolean(!b))
             }
@@ -527,8 +608,8 @@ impl DaxEngine {
                 let [left, right] = args else {
                     return Err(DaxError::Eval("AND expects 2 arguments".into()));
                 };
-                let left = self.eval_scalar(model, left, filter, row_ctx)?;
-                let right = self.eval_scalar(model, right, filter, row_ctx)?;
+                let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
                 let left = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 let right = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 Ok(Value::Boolean(left && right))
@@ -537,8 +618,8 @@ impl DaxEngine {
                 let [left, right] = args else {
                     return Err(DaxError::Eval("OR expects 2 arguments".into()));
                 };
-                let left = self.eval_scalar(model, left, filter, row_ctx)?;
-                let right = self.eval_scalar(model, right, filter, row_ctx)?;
+                let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
                 let left = left.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 let right = right.truthy().map_err(|e| DaxError::Type(e.to_string()))?;
                 Ok(Value::Boolean(left || right))
@@ -579,7 +660,7 @@ impl DaxEngine {
                 if values.len() == 1 {
                     Ok(values.into_iter().next().expect("len==1"))
                 } else if args.len() == 2 {
-                    self.eval_scalar(model, &args[1], filter, row_ctx)
+                    self.eval_scalar(model, &args[1], filter, row_ctx, env)
                 } else {
                     Ok(Value::Blank)
                 }
@@ -636,6 +717,7 @@ impl DaxEngine {
                     value_expr,
                     filter,
                     row_ctx,
+                    env,
                     IteratorKind::Sum,
                 )
             }
@@ -649,6 +731,7 @@ impl DaxEngine {
                     value_expr,
                     filter,
                     row_ctx,
+                    env,
                     IteratorKind::Average,
                 )
             }
@@ -662,6 +745,7 @@ impl DaxEngine {
                     value_expr,
                     filter,
                     row_ctx,
+                    env,
                     IteratorKind::Max,
                 )
             }
@@ -675,6 +759,7 @@ impl DaxEngine {
                     value_expr,
                     filter,
                     row_ctx,
+                    env,
                     IteratorKind::Min,
                 )
             }
@@ -682,7 +767,7 @@ impl DaxEngine {
                 let [table_expr] = args else {
                     return Err(DaxError::Eval("COUNTROWS expects 1 argument".into()));
                 };
-                let table_result = self.eval_table(model, table_expr, filter, row_ctx)?;
+                let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                 Ok(Value::from(table_result.rows.len() as i64))
             }
             "COUNTX" => {
@@ -695,6 +780,7 @@ impl DaxEngine {
                     value_expr,
                     filter,
                     row_ctx,
+                    env,
                     IteratorKind::Count,
                 )
             }
@@ -778,7 +864,7 @@ impl DaxEngine {
                     search_cols.push(search_idx);
 
                     let search_value =
-                        self.eval_scalar(model, search_value_expr, filter, row_ctx)?;
+                        self.eval_scalar(model, search_value_expr, filter, row_ctx, env)?;
                     search_values.push(search_value);
                 }
 
@@ -803,7 +889,7 @@ impl DaxEngine {
                 match matched_rows.len() {
                     0 => {
                         if let Some(expr) = alternate_result {
-                            self.eval_scalar(model, expr, filter, row_ctx)
+                            self.eval_scalar(model, expr, filter, row_ctx, env)
                         } else {
                             Ok(Value::Blank)
                         }
@@ -841,7 +927,7 @@ impl DaxEngine {
                         "CALCULATE expects at least 1 argument".into(),
                     ));
                 }
-                self.eval_calculate(model, args, filter, row_ctx)
+                self.eval_calculate(model, args, filter, row_ctx, env)
             }
             "RELATED" => {
                 let [arg] = args else {
@@ -1255,9 +1341,10 @@ impl DaxEngine {
         value_expr: &Expr,
         filter: &FilterContext,
         row_ctx: &RowContext,
+        env: &mut VarEnv,
         kind: IteratorKind,
     ) -> DaxResult<Value> {
-        let table_result = self.eval_table(model, table_expr, filter, row_ctx)?;
+        let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
         let mut sum = 0.0;
         let mut count = 0usize;
         let mut best: Option<f64> = None;
@@ -1265,7 +1352,7 @@ impl DaxEngine {
         for row in table_result.rows {
             let mut inner_ctx = row_ctx.clone();
             inner_ctx.push(&table_result.table, row);
-            let value = self.eval_scalar(model, value_expr, filter, &inner_ctx)?;
+            let value = self.eval_scalar(model, value_expr, filter, &inner_ctx, env)?;
             match kind {
                 IteratorKind::Sum | IteratorKind::Average => match value {
                     Value::Number(n) => {
@@ -1470,15 +1557,16 @@ impl DaxEngine {
         args: &[Expr],
         filter: &FilterContext,
         row_ctx: &RowContext,
+        env: &mut VarEnv,
     ) -> DaxResult<Value> {
         let (expr, filter_args) = args.split_first().expect("checked above");
-        let new_filter = self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
+        let new_filter = self.build_calculate_filter(model, filter, row_ctx, filter_args, env)?;
         let mut expr_filter = new_filter;
         // `CALCULATE` already performs context transition before evaluating the expression, so
         // measure references inside should not re-apply an implicit transition that would
         // undo filter modifiers like `ALL(...)`.
         expr_filter.suppress_implicit_measure_context_transition = true;
-        self.eval_scalar(model, expr, &expr_filter, row_ctx)
+        self.eval_scalar(model, expr, &expr_filter, row_ctx, env)
     }
 
     fn build_calculate_filter(
@@ -1487,11 +1575,12 @@ impl DaxEngine {
         filter: &FilterContext,
         row_ctx: &RowContext,
         filter_args: &[Expr],
+        env: &mut VarEnv,
     ) -> DaxResult<FilterContext> {
         let mut base_filter = filter.clone();
         base_filter.suppress_implicit_measure_context_transition = false;
         let mut new_filter = self.apply_context_transition(model, &base_filter, row_ctx)?;
-        self.apply_calculate_filter_args(model, &mut new_filter, row_ctx, filter_args)?;
+        self.apply_calculate_filter_args(model, &mut new_filter, row_ctx, filter_args, env)?;
         Ok(new_filter)
     }
 
@@ -1532,6 +1621,7 @@ impl DaxEngine {
         filter: &mut FilterContext,
         row_ctx: &RowContext,
         filter_args: &[Expr],
+        env: &mut VarEnv,
     ) -> DaxResult<()> {
         // `CALCULATE` filter arguments are order-independent. Evaluate all arguments in the
         // original filter context (after context transition), then apply their effects together.
@@ -1728,7 +1818,7 @@ impl DaxEngine {
                         ));
                     };
 
-                    let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx)?;
+                    let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
                     let key = (table.clone(), column.clone());
                     if !keep_filters {
                         clear_columns.insert(key.clone());
@@ -1838,7 +1928,7 @@ impl DaxEngine {
                     column_filters.push((key, values));
                 }
                 Expr::Call { .. } | Expr::TableName(_) => {
-                    let table_filter = self.eval_table(model, arg, &eval_filter, row_ctx)?;
+                    let table_filter = self.eval_table(model, arg, &eval_filter, row_ctx, env)?;
                     if !keep_filters {
                         clear_tables.insert(table_filter.table.clone());
                     }
@@ -2074,23 +2164,44 @@ impl DaxEngine {
         expr: &Expr,
         filter: &FilterContext,
         row_ctx: &RowContext,
+        env: &mut VarEnv,
     ) -> DaxResult<TableResult> {
         match expr {
-            Expr::TableName(name) => Ok(TableResult {
-                table: name.clone(),
-                rows: resolve_table_rows(model, filter, name)?,
-            }),
+            Expr::Let { bindings, body } => {
+                env.push_scope();
+                let result = (|| -> DaxResult<TableResult> {
+                    for (name, binding_expr) in bindings {
+                        let value =
+                            self.eval_var_value(model, binding_expr, filter, row_ctx, env)?;
+                        env.define(name, value);
+                    }
+                    self.eval_table(model, body, filter, row_ctx, env)
+                })();
+                env.pop_scope();
+                result
+            }
+            Expr::TableName(name) => match env.lookup(name) {
+                Some(VarValue::Table(t)) => Ok(t.clone()),
+                Some(VarValue::Scalar(_)) => Err(DaxError::Type(format!(
+                    "scalar variable {name} used in table context"
+                ))),
+                None => Ok(TableResult {
+                    table: name.clone(),
+                    rows: resolve_table_rows(model, filter, name)?,
+                }),
+            },
             Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
                 "FILTER" => {
                     let [table_expr, predicate] = args.as_slice() else {
                         return Err(DaxError::Eval("FILTER expects 2 arguments".into()));
                     };
-                    let base = self.eval_table(model, table_expr, filter, row_ctx)?;
+                    let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                     let mut rows = Vec::new();
                     for row in base.rows.iter().copied() {
                         let mut inner_ctx = row_ctx.clone();
                         inner_ctx.push(&base.table, row);
-                        let pred = self.eval_scalar(model, predicate, filter, &inner_ctx)?;
+                        let pred =
+                            self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                         if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                             rows.push(row);
                         }
@@ -2182,7 +2293,7 @@ impl DaxEngine {
                             })
                         }
                         _ => {
-                            let base = self.eval_table(model, arg, filter, row_ctx)?;
+                            let base = self.eval_table(model, arg, filter, row_ctx, env)?;
                             distinct_rows_by_all_columns(model, &base)
                         }
                     }
@@ -2203,9 +2314,10 @@ impl DaxEngine {
                             },
                             filter,
                             row_ctx,
+                            env,
                         ),
                         _ => {
-                            let base = self.eval_table(model, arg, filter, row_ctx)?;
+                            let base = self.eval_table(model, arg, filter, row_ctx, env)?;
                             distinct_rows_by_all_columns(model, &base)
                         }
                     }
@@ -2268,10 +2380,10 @@ impl DaxEngine {
                     }
                     let (table_expr, filter_args) = args.split_first().expect("checked above");
                     let new_filter =
-                        self.build_calculate_filter(model, filter, row_ctx, filter_args)?;
+                        self.build_calculate_filter(model, filter, row_ctx, filter_args, env)?;
                     let mut table_filter = new_filter;
                     table_filter.suppress_implicit_measure_context_transition = true;
-                    self.eval_table(model, table_expr, &table_filter, row_ctx)
+                    self.eval_table(model, table_expr, &table_filter, row_ctx, env)
                 }
                 "SUMMARIZE" => {
                     let (table_expr, group_exprs) = args.split_first().ok_or_else(|| {
@@ -2283,7 +2395,7 @@ impl DaxEngine {
                         ));
                     }
 
-                    let base = self.eval_table(model, table_expr, filter, row_ctx)?;
+                    let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                     let table_ref = model
                         .table(&base.table)
                         .ok_or_else(|| DaxError::UnknownTable(base.table.clone()))?;

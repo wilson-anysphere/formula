@@ -7,6 +7,10 @@ pub enum Expr {
     Boolean(bool),
     TableName(String),
     Measure(String),
+    Let {
+        bindings: Vec<(String, Expr)>,
+        body: Box<Expr>,
+    },
     ColumnRef {
         table: String,
         column: String,
@@ -54,6 +58,8 @@ enum Token {
     BracketIdentifier(String),
     Number(f64),
     String(String),
+    Var,
+    Return,
     Comma,
     LParen,
     RParen,
@@ -273,7 +279,13 @@ impl<'a> Lexer<'a> {
             }
             c if is_ident_start(c) => {
                 let ident = self.consume_while(is_ident_part);
-                Ok(Token::Identifier(ident))
+                if ident.eq_ignore_ascii_case("VAR") {
+                    Ok(Token::Var)
+                } else if ident.eq_ignore_ascii_case("RETURN") {
+                    Ok(Token::Return)
+                } else {
+                    Ok(Token::Identifier(ident))
+                }
             }
             other => Err(DaxError::Parse(format!(
                 "unexpected character {other:?} in {:?}",
@@ -355,6 +367,7 @@ impl<'a> Parser<'a> {
 
     fn parse_prefix(&mut self) -> DaxResult<Expr> {
         match &self.lookahead {
+            Token::Var => self.parse_let_expression(),
             Token::Minus => {
                 self.bump()?;
                 let expr = self.parse_expr(7)?;
@@ -389,6 +402,33 @@ impl<'a> Parser<'a> {
                 "unexpected token in expression: {other:?}"
             ))),
         }
+    }
+
+    fn parse_let_expression(&mut self) -> DaxResult<Expr> {
+        let mut bindings = Vec::new();
+        while self.lookahead == Token::Var {
+            self.bump()?; // VAR
+            let name = match self.bump()? {
+                Token::Identifier(name) => name,
+                other => {
+                    return Err(DaxError::Parse(format!(
+                        "expected identifier after VAR, found {other:?}"
+                    )))
+                }
+            };
+            self.expect(Token::Equals)?;
+            let expr = self.parse_expr(0)?;
+            bindings.push((name, expr));
+        }
+        if bindings.is_empty() {
+            return Err(DaxError::Parse("expected at least one VAR binding".into()));
+        }
+        self.expect(Token::Return)?;
+        let body = self.parse_expr(0)?;
+        Ok(Expr::Let {
+            bindings,
+            body: Box::new(body),
+        })
     }
 
     fn parse_ident_like(&mut self) -> DaxResult<Expr> {

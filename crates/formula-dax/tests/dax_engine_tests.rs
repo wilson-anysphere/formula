@@ -162,6 +162,106 @@ fn filter_context_supports_multi_value_column_filters() {
 }
 
 #[test]
+fn var_return_works_in_measures() {
+    let mut model = build_model();
+    model
+        .add_measure(
+            "Double Total Sales",
+            "VAR t = SUM(Orders[Amount]) RETURN t * 2",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Double Total Sales", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 86.0.into());
+}
+
+#[test]
+fn var_return_works_in_calculated_columns_in_row_context() {
+    let mut model = build_model();
+    model
+        .add_calculated_column(
+            "Orders",
+            "Double Amount via Var",
+            "VAR x = Orders[Amount] RETURN x * 2",
+        )
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    let values: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "Double Amount via Var").unwrap())
+        .collect();
+    assert_eq!(values, vec![20.0.into(), 40.0.into(), 10.0.into(), 16.0.into()]);
+}
+
+#[test]
+fn nested_var_scopes_shadow_outer_bindings() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR x = 1 RETURN VAR x = x + 1 RETURN x * 2",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 4.0.into());
+}
+
+#[test]
+fn var_is_visible_in_calculate_expression_and_filter_arguments() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "East Sales via Var",
+            "VAR region = \"East\" RETURN CALCULATE([Total Sales], Customers[Region] = region)",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("East Sales via Var", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 38.0.into());
+}
+
+#[test]
+fn calculate_can_reference_scalar_var_in_expression_argument() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+    model
+        .add_measure(
+            "Total Sales (constant via var)",
+            "VAR t = [Total Sales] RETURN CALCULATE(t, Customers[Region] = \"East\")",
+        )
+        .unwrap();
+
+    let value = model
+        .evaluate_measure("Total Sales (constant via var)", &FilterContext::empty())
+        .unwrap();
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn var_is_visible_in_iterator_body() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "VAR factor = 2 RETURN SUMX(Orders, Orders[Amount] * factor)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 86.0.into());
+}
+
+#[test]
 fn calculate_overrides_existing_column_filters() {
     let mut model = build_model();
     model
