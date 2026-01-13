@@ -32,6 +32,9 @@ const INDEXEDDB_SCHEMA_VERSION = 1;
 /**
  * IndexedDB-backed audit store intended for browser contexts where `localStorage`
  * quota limits and full-array rewrites are undesirable.
+ *
+ * Note: IndexedDB also has quota limits. For defense-in-depth against oversized
+ * single entries, wrap this store with `BoundedAIAuditStore`.
  */
 export class IndexedDbAIAuditStore implements AIAuditStore {
   private readonly dbName: string;

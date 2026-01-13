@@ -8,6 +8,10 @@ export interface LocalStorageAIAuditStoreOptions {
   key?: string;
   /**
    * Cap the number of stored entries (oldest dropped). Defaults to 1000.
+   *
+   * Note: this caps the *count* of entries, but does not enforce a strict per-entry
+   * size limit. For defense-in-depth against LocalStorage quota write failures,
+   * wrap this store with `BoundedAIAuditStore`.
    */
   max_entries?: number;
   /**
