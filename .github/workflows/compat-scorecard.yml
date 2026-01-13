@@ -33,7 +33,7 @@ jobs:
             const repo = context.repo.repo;
 
             async function findCompletedRunId(workflowFile) {
-              const resp = await github.rest.actions.listWorkflowRuns({
+              const resp = await github.rest.actions.listWorkflowRunsForWorkflow({
                 owner,
                 repo,
                 workflow_id: workflowFile,
