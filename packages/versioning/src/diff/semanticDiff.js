@@ -1,5 +1,5 @@
-import { isDeepStrictEqual } from "node:util";
 import { normalizeFormula } from "../formula/normalize.js";
+import { deepEqual } from "./deepEqual.js";
 
 /**
  * @typedef {{ row: number, col: number }} CellRef
@@ -113,13 +113,13 @@ function sameValueAndFormula(a, b) {
   const bEncrypted = bEnc !== null && bEnc !== undefined;
   if (aEncrypted || bEncrypted) {
     if (!aEncrypted || !bEncrypted) return false;
-    return isDeepStrictEqual(aEnc, bEnc);
+    return deepEqual(aEnc, bEnc);
   }
   const av = a?.value ?? null;
   const bv = b?.value ?? null;
   const af = normalizeFormula(a?.formula) ?? null;
   const bf = normalizeFormula(b?.formula) ?? null;
-  return isDeepStrictEqual(av, bv) && af === bf;
+  return deepEqual(av, bv) && af === bf;
 }
 
 /**
@@ -129,7 +129,7 @@ function sameValueAndFormula(a, b) {
 function sameFormat(a, b) {
   const af = a?.format ?? null;
   const bf = b?.format ?? null;
-  return isDeepStrictEqual(af, bf);
+  return deepEqual(af, bf);
 }
 
 /**

@@ -1,6 +1,5 @@
-import { isDeepStrictEqual } from "node:util";
-
 import { semanticDiff } from "../diff/semanticDiff.js";
+import { deepEqual } from "../diff/deepEqual.js";
 import { workbookStateFromYjsSnapshot } from "./workbookState.js";
 
 /**
@@ -280,7 +279,7 @@ export function diffYjsWorkbookSnapshots(opts) {
   for (const [key, afterValue] of after.metadata) {
     const beforeValue = before.metadata.get(key);
     if (beforeValue === undefined) continue;
-    if (!isDeepStrictEqual(beforeValue, afterValue)) {
+    if (!deepEqual(beforeValue, afterValue)) {
       metadata.modified.push({ key, before: beforeValue, after: afterValue });
     }
   }
@@ -303,7 +302,7 @@ export function diffYjsWorkbookSnapshots(opts) {
   for (const [key, afterValue] of after.namedRanges) {
     const beforeValue = before.namedRanges.get(key);
     if (beforeValue === undefined) continue;
-    if (!isDeepStrictEqual(beforeValue, afterValue)) {
+    if (!deepEqual(beforeValue, afterValue)) {
       namedRanges.modified.push({ key, before: beforeValue, after: afterValue });
     }
   }
