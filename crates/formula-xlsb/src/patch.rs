@@ -1560,7 +1560,6 @@ fn convert_value_record_to_formula<W: io::Write>(
     }
 
     let rgcb = edit.new_rgcb.as_deref().unwrap_or(&[]);
-    let flags = edit.new_formula_flags.unwrap_or(0);
     if rgcb.is_empty() && rgce_references_rgcb(rgce) {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
