@@ -156,7 +156,6 @@ import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import {
   WorkbookSheetStore,
-  generateDefaultSheetName,
   validateSheetName,
   type SheetVisibility,
   type TabColor,
@@ -169,6 +168,7 @@ import {
 } from "./sheets/collabWorkbookSheetStore";
 import { tryInsertCollabSheet } from "./sheets/collabSheetMutations";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
+import { createAddSheetCommand, createDeleteActiveSheetCommand } from "./sheets/sheetCommands";
 import {
   applyAllBorders,
   NUMBER_FORMATS,
@@ -2616,7 +2616,6 @@ sheetTabsRootEl.classList.remove("sheet-tabs");
 
 let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
-let addSheetInFlight = false;
 // During `DocumentController.applyState` restores, the sheet store is re-ordered to match
 // the restored sheet order. Avoid feeding those intermediate store moves back into the
 // DocumentController while the restore is still in progress.
@@ -2816,83 +2815,20 @@ function listSheetsForUi(): SheetUiInfo[] {
   return [{ id: fallback.id, name: fallback.name }];
 }
 
-async function handleAddSheet(): Promise<void> {
-  if (addSheetInFlight) return;
-  addSheetInFlight = true;
-  try {
-    const activeId = app.getCurrentSheetId();
-    const allSheets = workbookSheetStore.listAll();
-    const desiredName = generateDefaultSheetName(allSheets);
-    const doc = app.getDocument();
+const handleAddSheet = createAddSheetCommand({
+  app,
+  getWorkbookSheetStore: () => workbookSheetStore,
+  restoreFocusAfterSheetNavigation,
+  showToast,
+});
 
-    const collabSession = app.getCollabSession?.() ?? null;
-    if (collabSession) {
-      // In collab mode, the Yjs `session.sheets` array is the authoritative sheet list.
-      // Create the new sheet by updating that metadata so it propagates to other clients.
-      const existing = listSheetsFromCollabSession(collabSession);
-      const existingIds = new Set(existing.map((sheet) => sheet.id));
-
-      const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
-      const generateId = () => {
-        const uuid = typeof randomUuid === "function" ? randomUuid.call((globalThis as any).crypto) : null;
-        return uuid ? `sheet_${uuid}` : `sheet_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
-      };
-
-      let id = generateId();
-      for (let i = 0; i < 10 && existingIds.has(id); i += 1) {
-        id = generateId();
-      }
-      while (existingIds.has(id)) {
-        id = `${id}_${Math.random().toString(16).slice(2)}`;
-      }
-
-      const inserted = tryInsertCollabSheet({
-        session: collabSession,
-        sheetId: id,
-        name: desiredName,
-        visibility: "visible",
-        insertAfterSheetId: activeId,
-      });
-      if (!inserted.inserted) {
-        showToast(inserted.reason, "error");
-        return;
-      }
-
-      // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
-      doc.getCell(id, { row: 0, col: 0 });
-      app.activateSheet(id);
-      restoreFocusAfterSheetNavigation();
-      return;
-    }
-
-    // In local (non-collab) mode, the UI sheet store is the authoritative sheet list.
-    // Mutate it first so sheet-tab operations remain undoable in the DocumentController.
-    // The workbook sync bridge will persist the structural change to the native backend.
-    const existingIdCi = new Set(allSheets.map((s) => s.id.trim().toLowerCase()));
-    const baseId = desiredName;
-    let newSheetId = baseId;
-    let counter = 1;
-    while (existingIdCi.has(newSheetId.toLowerCase())) {
-      counter += 1;
-      newSheetId = `${baseId}-${counter}`;
-    }
-
-    workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
-
-    // Best-effort: ensure the sheet is materialized (DocumentController can create sheets lazily).
-    try {
-      doc.getCell(newSheetId, { row: 0, col: 0 });
-    } catch {
-      // ignore
-    }
-    app.activateSheet(newSheetId);
-    restoreFocusAfterSheetNavigation();
-  } catch (err) {
-    showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
-  } finally {
-    addSheetInFlight = false;
-  }
-}
+const handleDeleteActiveSheet = createDeleteActiveSheetCommand({
+  app,
+  getWorkbookSheetStore: () => workbookSheetStore,
+  restoreFocusAfterSheetNavigation,
+  showToast,
+  confirm: (message) => nativeDialogs.confirm(message),
+});
 
 async function renameSheetById(
   sheetId: string,
@@ -8600,6 +8536,14 @@ function handleRibbonCommand(commandId: string): void {
       case "home.number.moreFormats.custom":
       case "home.cells.format.formatCells": // legacy ribbon schema id
         executeBuiltinCommand("format.openFormatCells");
+        return;
+      case "home.cells.insert.insertSheet":
+        if (isSpreadsheetEditing() || app.isReadOnly()) return;
+        void handleAddSheet();
+        return;
+      case "home.cells.delete.deleteSheet":
+        if (isSpreadsheetEditing() || app.isReadOnly()) return;
+        void handleDeleteActiveSheet();
         return;
       case "edit.autoSum":
         executeBuiltinCommand(commandId);
