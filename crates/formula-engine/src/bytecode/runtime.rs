@@ -5174,6 +5174,17 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 if !range_in_bounds(grid, range) {
                     return Value::Error(ErrorKind::Ref);
                 }
+                grid.record_reference(
+                    grid.sheet_id(),
+                    CellCoord {
+                        row: range.row_start,
+                        col: range.col_start,
+                    },
+                    CellCoord {
+                        row: range.row_end,
+                        col: range.col_end,
+                    },
+                );
                 for row in range.row_start..=range.row_end {
                     for col in range.col_start..=range.col_end {
                         let v = grid.get_value(CellCoord { row, col });
@@ -5214,6 +5225,17 @@ fn fn_concat(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     if !range_in_bounds_on_sheet(grid, area.sheet, range) {
                         return Value::Error(ErrorKind::Ref);
                     }
+                    grid.record_reference(
+                        area.sheet,
+                        CellCoord {
+                            row: range.row_start,
+                            col: range.col_start,
+                        },
+                        CellCoord {
+                            row: range.row_end,
+                            col: range.col_end,
+                        },
+                    );
 
                     for row in range.row_start..=range.row_end {
                         for col in range.col_start..=range.col_end {
@@ -5987,6 +6009,28 @@ fn fn_sumif(
         if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, sum_range) {
             return Value::Error(ErrorKind::Ref);
         }
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: crit_range.row_start,
+                col: crit_range.col_start,
+            },
+            CellCoord {
+                row: crit_range.row_end,
+                col: crit_range.col_end,
+            },
+        );
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: sum_range.row_start,
+                col: sum_range.col_start,
+            },
+            CellCoord {
+                row: sum_range.row_end,
+                col: sum_range.col_end,
+            },
+        );
         if crit_range.rows() != sum_range.rows() || crit_range.cols() != sum_range.cols() {
             return Value::Error(ErrorKind::Value);
         }
@@ -6211,6 +6255,17 @@ fn fn_sumifs(
     if !range_in_bounds(grid, sum_range) {
         return Value::Error(ErrorKind::Ref);
     }
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: sum_range.row_start,
+            col: sum_range.col_start,
+        },
+        CellCoord {
+            row: sum_range.row_end,
+            col: sum_range.col_end,
+        },
+    );
 
     let rows = sum_range.rows();
     let cols = sum_range.cols();
@@ -6247,6 +6302,19 @@ fn fn_sumifs(
 
         crit_ranges.push(range);
         crits.push(crit);
+    }
+    for range in &crit_ranges {
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
@@ -6544,6 +6612,17 @@ fn fn_countifs(
         if !range_in_bounds(grid, range) {
             return Value::Error(ErrorKind::Ref);
         }
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
 
         let crit = match parse_countif_criteria(&pair[1], locale) {
             Ok(c) => c,
@@ -6744,6 +6823,17 @@ fn countifs_with_array_ranges(
                         }
                     }
                 }
+                grid.record_reference(
+                    grid.sheet_id(),
+                    CellCoord {
+                        row: range.row_start,
+                        col: range.col_start,
+                    },
+                    CellCoord {
+                        row: range.row_end,
+                        col: range.col_end,
+                    },
+                );
                 CriteriaRange::Range(range)
             }
             Value::Array(a) => {
@@ -6861,6 +6951,28 @@ fn fn_averageif(
         if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, avg_range) {
             return Value::Error(ErrorKind::Ref);
         }
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: crit_range.row_start,
+                col: crit_range.col_start,
+            },
+            CellCoord {
+                row: crit_range.row_end,
+                col: crit_range.col_end,
+            },
+        );
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: avg_range.row_start,
+                col: avg_range.col_start,
+            },
+            CellCoord {
+                row: avg_range.row_end,
+                col: avg_range.col_end,
+            },
+        );
         if crit_range.rows() != avg_range.rows() || crit_range.cols() != avg_range.cols() {
             return Value::Error(ErrorKind::Value);
         }
@@ -7118,6 +7230,17 @@ fn fn_averageifs(
     if !range_in_bounds(grid, avg_range) {
         return Value::Error(ErrorKind::Ref);
     }
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: avg_range.row_start,
+            col: avg_range.col_start,
+        },
+        CellCoord {
+            row: avg_range.row_end,
+            col: avg_range.col_end,
+        },
+    );
 
     let rows = avg_range.rows();
     let cols = avg_range.cols();
@@ -7154,6 +7277,19 @@ fn fn_averageifs(
 
         crit_ranges.push(range);
         crits.push(crit);
+    }
+    for range in &crit_ranges {
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
@@ -7486,6 +7622,17 @@ fn fn_minifs(
     if !range_in_bounds(grid, min_range) {
         return Value::Error(ErrorKind::Ref);
     }
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: min_range.row_start,
+            col: min_range.col_start,
+        },
+        CellCoord {
+            row: min_range.row_end,
+            col: min_range.col_end,
+        },
+    );
 
     let rows = min_range.rows();
     let cols = min_range.cols();
@@ -7522,6 +7669,19 @@ fn fn_minifs(
 
         crit_ranges.push(range);
         crits.push(crit);
+    }
+    for range in &crit_ranges {
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
@@ -7783,6 +7943,17 @@ fn fn_maxifs(
     if !range_in_bounds(grid, max_range) {
         return Value::Error(ErrorKind::Ref);
     }
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: max_range.row_start,
+            col: max_range.col_start,
+        },
+        CellCoord {
+            row: max_range.row_end,
+            col: max_range.col_end,
+        },
+    );
 
     let rows = max_range.rows();
     let cols = max_range.cols();
@@ -7819,6 +7990,19 @@ fn fn_maxifs(
 
         crit_ranges.push(range);
         crits.push(crit);
+    }
+    for range in &crit_ranges {
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
@@ -8078,6 +8262,18 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             if !range_in_bounds(grid, range) {
                 return Err(ErrorKind::Ref);
             }
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: range.row_start,
+                    col: range.col_start,
+                },
+                CellCoord {
+                    row: range.row_end,
+                    col: range.col_end,
+                },
+            );
+
             let rows_i32 = range.rows();
             let cols_i32 = range.cols();
             if rows_i32 <= 0 || cols_i32 <= 0 {
@@ -9676,6 +9872,17 @@ fn range2d_from_value<'a>(
             if !range_in_bounds(grid, range) {
                 return Err(ErrorKind::Ref);
             }
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: range.row_start,
+                    col: range.col_start,
+                },
+                CellCoord {
+                    row: range.row_end,
+                    col: range.col_end,
+                },
+            );
             Ok(Range2DArg::Range(range))
         }
         Value::Array(a) => Ok(Range2DArg::Array(a)),
@@ -11575,43 +11782,42 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
 mod tests {
     use super::*;
     use crate::bytecode::ColumnarGrid;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct TracingGrid {
+        values: HashMap<(i32, i32), Value>,
+        trace: Mutex<Vec<(usize, CellCoord, CellCoord)>>,
+    }
+
+    impl Grid for TracingGrid {
+        fn get_value(&self, coord: CellCoord) -> Value {
+            self.values
+                .get(&(coord.row, coord.col))
+                .cloned()
+                .unwrap_or(Value::Empty)
+        }
+
+        fn sheet_id(&self) -> usize {
+            0
+        }
+
+        fn record_reference(&self, sheet: usize, start: CellCoord, end: CellCoord) {
+            self.trace.lock().unwrap().push((sheet, start, end));
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            (10, 10)
+        }
+    }
 
     #[test]
     fn bytecode_dependency_trace_deref_value_dynamic_records_reference() {
-        use std::collections::HashMap;
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Default)]
-        struct TracingGrid {
-            values: HashMap<(i32, i32), Value>,
-            trace: Mutex<Vec<(usize, CellCoord, CellCoord)>>,
-        }
-
-        impl Grid for TracingGrid {
-            fn get_value(&self, coord: CellCoord) -> Value {
-                self.values
-                    .get(&(coord.row, coord.col))
-                    .cloned()
-                    .unwrap_or(Value::Empty)
-            }
-
-            fn sheet_id(&self) -> usize {
-                0
-            }
-
-            fn record_reference(&self, sheet: usize, start: CellCoord, end: CellCoord) {
-                self.trace.lock().unwrap().push((sheet, start, end));
-            }
-
-            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
-                None
-            }
-
-            fn bounds(&self) -> (i32, i32) {
-                (10, 10)
-            }
-        }
-
         let grid = TracingGrid::default();
 
         // Program: push a range reference, then return it (Vm::eval will dynamically dereference).
@@ -11641,6 +11847,84 @@ mod tests {
                 CellCoord { row: 0, col: 0 },
                 CellCoord { row: 1, col: 1 }
             )]
+        );
+    }
+
+    #[test]
+    fn bytecode_dependency_trace_concat_records_reference() {
+        let mut grid = TracingGrid::default();
+        grid.values
+            .insert((0, 0), Value::Text(Arc::from("a")));
+        grid.values
+            .insert((1, 0), Value::Text(Arc::from("b")));
+
+        let range = RangeRef::new(
+            Ref::new(0, 0, true, true), // A1
+            Ref::new(1, 0, true, true), // A2
+        );
+        let base = CellCoord::new(0, 0);
+        let out = fn_concat(&[Value::Range(range)], &grid, base);
+
+        assert_eq!(out, Value::Text(Arc::from("ab")));
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![(
+                0,
+                CellCoord { row: 0, col: 0 },
+                CellCoord { row: 1, col: 0 }
+            )]
+        );
+    }
+
+    #[test]
+    fn bytecode_dependency_trace_sumifs_records_reference() {
+        let mut grid = TracingGrid::default();
+        // Criteria range A1:A2
+        grid.values.insert((0, 0), Value::Number(1.0));
+        grid.values.insert((1, 0), Value::Number(0.0));
+        // Sum range B1:B2
+        grid.values.insert((0, 1), Value::Number(10.0));
+        grid.values.insert((1, 1), Value::Number(20.0));
+
+        let crit_range = RangeRef::new(
+            Ref::new(0, 0, true, true),
+            Ref::new(1, 0, true, true),
+        );
+        let sum_range = RangeRef::new(
+            Ref::new(0, 1, true, true),
+            Ref::new(1, 1, true, true),
+        );
+
+        let base = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+        let out = fn_sumifs(
+            &[
+                Value::Range(sum_range),
+                Value::Range(crit_range),
+                Value::Number(1.0),
+            ],
+            &grid,
+            base,
+            &locale,
+        );
+
+        assert_eq!(out, Value::Number(10.0));
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![
+                (
+                    0,
+                    CellCoord { row: 0, col: 1 },
+                    CellCoord { row: 1, col: 1 }
+                ),
+                (
+                    0,
+                    CellCoord { row: 0, col: 0 },
+                    CellCoord { row: 1, col: 0 }
+                )
+            ]
         );
     }
 
