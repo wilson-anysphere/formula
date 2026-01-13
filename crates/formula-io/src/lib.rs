@@ -17,6 +17,8 @@ mod rc4_cryptoapi;
 pub use rc4_cryptoapi::{HashAlg, Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
 mod ms_offcrypto;
 mod rc4_encrypted_package;
+mod encrypted_package;
+pub use encrypted_package::StandardAesEncryptedPackageReader;
 
 #[cfg(feature = "encrypted-workbooks")]
 mod encrypted_ooxml;
