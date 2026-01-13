@@ -163,67 +163,36 @@ function loadInCellImageFixture(): { imageId: string; imagePngBase64: string } {
 }
 
 test.describe("drawing + image rendering regressions", () => {
-  test("renders floating DrawingML image.xlsx via DrawingOverlay canvas pixels", async ({ page }) => {
+  test("renders floating DrawingML image.xlsx via the desktop drawing layer canvas", async ({ page }) => {
     const fixture = loadFloatingImageFixture();
 
     await gotoDesktop(page);
 
-    // Ensure the built-in overlay container exists (charts + future drawings).
+    // Ensure the built-in overlay container exists (charts + drawings).
     await expect(page.locator(".chart-layer")).toHaveCount(1);
+    await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
     const result = await page.evaluate(async ({ fixture }) => {
-      const { DrawingOverlay, anchorToRectPx } = await import("/src/drawings/overlay.ts");
+      const { anchorToRectPx } = await import("/src/drawings/overlay.ts");
 
       const app = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp");
 
-      const gridRoot = document.querySelector<HTMLElement>("#grid");
-      if (!gridRoot) throw new Error("Missing #grid root");
+      const overlay = (app as any).drawingOverlay;
+      if (!overlay) throw new Error("Missing SpreadsheetApp.drawingOverlay");
+      const canvas = (overlay as any).canvas as HTMLCanvasElement | undefined;
+      if (!canvas) throw new Error("Missing DrawingOverlay.canvas");
 
-      const dpr = window.devicePixelRatio || 1;
-      const { width, height } = gridRoot.getBoundingClientRect();
-
-      const existing = gridRoot.querySelector<HTMLCanvasElement>('[data-testid="e2e-drawing-overlay"]');
-      existing?.remove();
-
-      const canvas = document.createElement("canvas");
-      canvas.dataset.testid = "e2e-drawing-overlay";
-      canvas.style.position = "absolute";
-      canvas.style.inset = "0";
-      canvas.style.pointerEvents = "none";
-      // Above chart overlay (z=2) / selection overlay (z=3) for debug readability.
-      canvas.style.zIndex = "6";
-      gridRoot.appendChild(canvas);
+      const images = (app as any).drawingImages;
+      if (!images || typeof images.set !== "function") {
+        throw new Error("Missing SpreadsheetApp.drawingImages store");
+      }
 
       const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      const imageEntry = { id: fixture.imageId, bytes, mimeType: "image/png" };
-      const backing = new Map<string, typeof imageEntry>();
-      const images = {
-        get(id: string) {
-          return backing.get(id);
-        },
-        set(entry: typeof imageEntry) {
-          backing.set(entry.id, entry);
-        },
-      };
-      images.set(imageEntry);
+      images.set({ id: fixture.imageId, bytes, mimeType: "image/png" });
 
-      const geom = {
-        cellOriginPx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
-          return { x: rect.x, y: rect.y };
-        },
-        cellSizePx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
-          return { width: rect.width, height: rect.height };
-        },
-      };
-
-      const overlay = new DrawingOverlay(canvas, images, geom);
-      const viewport = { scrollX: 0, scrollY: 0, width, height, dpr };
-      overlay.resize(viewport);
+      const viewport = (app as any).syncDrawingOverlayViewport?.();
+      if (!viewport) throw new Error("Missing SpreadsheetApp.syncDrawingOverlayViewport()");
 
       const obj = {
         id: 1,
@@ -244,15 +213,17 @@ test.describe("drawing + image rendering regressions", () => {
 
       await overlay.render([obj], viewport);
 
+      const geom = (overlay as any).geom;
+      if (!geom) throw new Error("Missing DrawingOverlay.geom");
       const rect = anchorToRectPx(obj.anchor, geom);
       const sampleRect = (() => {
-        const centerX = rect.x + rect.width / 2;
-        const centerY = rect.y + rect.height / 2;
+        const centerX = rect.x + rect.width / 2 - viewport.scrollX;
+        const centerY = rect.y + rect.height / 2 - viewport.scrollY;
         const size = 20;
         const x = Math.max(0, Math.floor(centerX - size / 2));
         const y = Math.max(0, Math.floor(centerY - size / 2));
-        const w = Math.min(Math.floor(size), Math.max(1, Math.floor(width) - x));
-        const h = Math.min(Math.floor(size), Math.max(1, Math.floor(height) - y));
+        const w = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.width) - x));
+        const h = Math.min(Math.floor(size), Math.max(1, Math.floor(viewport.height) - y));
         return { x, y, width: w, height: h };
       })();
 
@@ -260,6 +231,7 @@ test.describe("drawing + image rendering regressions", () => {
       if (!ctx) throw new Error("Missing 2d context");
       // `getImageData` uses device-pixel coordinates, not the CSS pixel coordinates
       // we render at after applying the DPR transform.
+      const dpr = typeof viewport.dpr === "number" && viewport.dpr > 0 ? viewport.dpr : window.devicePixelRatio || 1;
       const samplePx = {
         x: Math.max(0, Math.floor(sampleRect.x * dpr)),
         y: Math.max(0, Math.floor(sampleRect.y * dpr)),
@@ -283,95 +255,82 @@ test.describe("drawing + image rendering regressions", () => {
     ).toBeGreaterThan(0);
   });
 
-  test("renders images-in-cells image-in-cell.xlsx via DrawingOverlay canvas pixels", async ({ page }) => {
+  test("renders images-in-cells image-in-cell.xlsx as an in-cell image (shared grid)", async ({ page }) => {
     const fixture = loadInCellImageFixture();
 
-    await gotoDesktop(page);
-    await expect(page.locator(".chart-layer")).toHaveCount(1);
+    await gotoDesktop(page, "/?grid=shared");
+    await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
-    const result = await page.evaluate(async ({ fixture }) => {
-      const { DrawingOverlay, anchorToRectPx } = await import("/src/drawings/overlay.ts");
-
+    await page.evaluate(async ({ fixture }) => {
       const app = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp");
 
-      const gridRoot = document.querySelector<HTMLElement>("#grid");
-      if (!gridRoot) throw new Error("Missing #grid root");
+      const sharedGrid = (app as any).sharedGrid;
+      if (!sharedGrid) throw new Error("Expected shared grid mode to be enabled");
+      const renderer = sharedGrid.renderer;
+      if (!renderer) throw new Error("Missing shared grid renderer");
 
-      const dpr = window.devicePixelRatio || 1;
-      const { width, height } = gridRoot.getBoundingClientRect();
-
-      const existing = gridRoot.querySelector<HTMLCanvasElement>('[data-testid="e2e-drawing-overlay"]');
-      existing?.remove();
-
-      const canvas = document.createElement("canvas");
-      canvas.dataset.testid = "e2e-drawing-overlay";
-      canvas.style.position = "absolute";
-      canvas.style.inset = "0";
-      canvas.style.pointerEvents = "none";
-      canvas.style.zIndex = "6";
-      gridRoot.appendChild(canvas);
-
+      // Install a deterministic image resolver backed by the fixture's `xl/media/image1.png`.
       const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      const imageEntry = { id: fixture.imageId, bytes, mimeType: "image/png" };
-      const backing = new Map<string, typeof imageEntry>();
-      const images = {
-        get(id: string) {
-          return backing.get(id);
-        },
-        set(entry: typeof imageEntry) {
-          backing.set(entry.id, entry);
-        },
+      (renderer as any).imageResolver = async (imageId: string) => {
+        if (imageId === fixture.imageId) return bytes;
+        return null;
       };
-      images.set(imageEntry);
+      if (typeof renderer.clearImageCache === "function") {
+        renderer.clearImageCache();
+      }
 
-      const geom = {
-        cellOriginPx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
-          return { x: rect.x, y: rect.y };
-        },
-        cellSizePx: (cell: { row: number; col: number }) => {
-          const rect = app.getCellRect(cell);
-          if (!rect) throw new Error(`Missing rect for cell r${cell.row}c${cell.col}`);
-          return { width: rect.width, height: rect.height };
-        },
-      };
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      // Use the formula-model envelope shape (`{type:"image", value:{...}}`) so the DocumentCellProvider
+      // image detection logic is exercised.
+      doc.setCellValue(sheetId, "A1", { type: "image", value: { imageId: fixture.imageId, altText: "Fixture image" } });
 
-      const overlay = new DrawingOverlay(canvas, images, geom);
-      const viewport = { scrollX: 0, scrollY: 0, width, height, dpr };
-      overlay.resize(viewport);
+      // Force an immediate render so the grid requests the image bitmap.
+      renderer.markAllDirty?.();
+      renderer.renderImmediately?.();
+    }, { fixture });
 
-      // In-cell images should render inside the cell bounds. For the fixture we use Sheet1!A1.
-      const obj = {
-        id: 1,
-        zOrder: 0,
-        kind: { type: "image", imageId: fixture.imageId },
-        anchor: {
-          type: "twoCell",
-          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
-          // See DrawingOverlay.anchorToRectPx: `to` specifies the containing cell for the bottom-right corner,
-          // so `row=1,col=1,offset=0` maps exactly to the bottom-right boundary of A1.
-          to: { cell: { row: 1, col: 1 }, offset: { xEmu: 0, yEmu: 0 } },
-        },
-      };
+    await expect
+      .poll(async () => {
+        return await page.evaluate((imageId) => {
+          const app = (window as any).__formulaApp;
+          const renderer = app?.sharedGrid?.renderer;
+          const cache: Map<string, any> | undefined = (renderer as any)?.imageBitmapCache;
+          const entry = cache?.get?.(imageId);
+          return entry?.state ?? null;
+        }, fixture.imageId);
+      })
+      .toBe("ready");
 
-      await overlay.render([obj], viewport);
+    const result = await page.evaluate((imageId) => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp");
+      const rect = app.getCellRectA1("A1");
+      if (!rect) throw new Error("Missing A1 rect");
 
-      const rect = anchorToRectPx(obj.anchor, geom);
+      const canvas = app.referenceCanvas as HTMLCanvasElement | undefined;
+      if (!canvas) throw new Error("Missing shared grid content canvas");
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Missing content canvas 2d context");
+
+      // Ensure the image has been painted in the current frame.
+      app.sharedGrid?.renderer?.renderImmediately?.();
+
+      const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
       const sampleRect = (() => {
         const centerX = rect.x + rect.width / 2;
         const centerY = rect.y + rect.height / 2;
-        const size = 16;
+        const size = Math.min(32, Math.max(12, Math.min(rect.width, rect.height) * 0.5));
         const x = Math.max(0, Math.floor(centerX - size / 2));
         const y = Math.max(0, Math.floor(centerY - size / 2));
-        const w = Math.min(Math.floor(size), Math.max(1, Math.floor(width) - x));
-        const h = Math.min(Math.floor(size), Math.max(1, Math.floor(height) - y));
+        const maxW = Math.max(1, Math.floor(canvas.getBoundingClientRect().width) - x);
+        const maxH = Math.max(1, Math.floor(canvas.getBoundingClientRect().height) - y);
+        const w = Math.min(Math.floor(size), maxW);
+        const h = Math.min(Math.floor(size), maxH);
         return { x, y, width: w, height: h };
       })();
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Missing 2d context");
       const samplePx = {
         x: Math.max(0, Math.floor(sampleRect.x * dpr)),
         y: Math.max(0, Math.floor(sampleRect.y * dpr)),
@@ -384,14 +343,16 @@ test.describe("drawing + image rendering regressions", () => {
         if (imageData.data[i] !== 0) nonTransparent += 1;
       }
 
-      return { nonTransparent, sampleRect };
-    }, { fixture });
+      const cache: Map<string, any> | undefined = (app.sharedGrid?.renderer as any)?.imageBitmapCache;
+      const state = cache?.get?.(imageId)?.state ?? null;
+      return { nonTransparent, sampleRect, state };
+    }, fixture.imageId);
+
+    expect(result.state).toBe("ready");
 
     expect(
       result.nonTransparent,
-      `expected overlay canvas to contain non-transparent pixels near rendered in-cell image (sample=${JSON.stringify(
-        result.sampleRect,
-      )})`,
+      `expected shared-grid content canvas to contain non-transparent pixels near rendered in-cell image (sample=${JSON.stringify(result.sampleRect)})`,
     ).toBeGreaterThan(0);
   });
 });
