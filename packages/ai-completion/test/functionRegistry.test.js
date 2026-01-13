@@ -138,4 +138,8 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("DSUM", 2), "Expected DSUM criteria to be a range");
   assert.ok(registry.isRangeArg("DCOUNT", 0), "Expected DCOUNT database to be a range");
   assert.ok(registry.isRangeArg("DCOUNT", 2), "Expected DCOUNT criteria to be a range");
+
+  // Size helpers
+  assert.ok(registry.isRangeArg("ROWS", 0), "Expected ROWS array to be a range");
+  assert.ok(registry.isRangeArg("COLUMNS", 0), "Expected COLUMNS array to be a range");
 });

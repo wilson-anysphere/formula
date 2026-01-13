@@ -1145,6 +1145,20 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ROWS",
+    description: "Returns the number of rows in a reference or array.",
+    args: [
+      { name: "array", type: "range" },
+    ],
+  },
+  {
+    name: "COLUMNS",
+    description: "Returns the number of columns in a reference or array.",
+    args: [
+      { name: "array", type: "range" },
+    ],
+  },
+  {
     name: "MMULT",
     description: "Returns the matrix product of two arrays.",
     args: [
