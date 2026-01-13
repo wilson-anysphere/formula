@@ -270,19 +270,18 @@ test.describe("drawing + image rendering regressions", () => {
       const renderer = sharedGrid.renderer;
       if (!renderer) throw new Error("Missing shared grid renderer");
 
-      // Store the fixture's `xl/media/image1.png` bytes in the app's image store so the
-      // normal shared-grid imageResolver path is exercised (DesktopImageStore -> Blob -> ImageBitmap).
+      // Store the fixture's `xl/media/image1.png` bytes in the DocumentController image store so the
+      // normal shared-grid imageResolver path is exercised (DocumentController -> Blob -> ImageBitmap).
       const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      const store = (app as any).imageStore;
-      if (!store || typeof store.set !== "function") {
-        throw new Error("Missing SpreadsheetApp.imageStore");
+      const doc = app.getDocument();
+      if (!doc || typeof doc.setImage !== "function") {
+        throw new Error("Missing DocumentController.setImage");
       }
-      store.set(fixture.imageId, { bytes, mimeType: "image/png" });
+      doc.setImage(fixture.imageId, { bytes, mimeType: "image/png" });
       if (typeof renderer.clearImageCache === "function") {
         renderer.clearImageCache();
       }
 
-      const doc = app.getDocument();
       const sheetId = app.getCurrentSheetId();
       // Use the formula-model envelope shape (`{type:"image", value:{...}}`) so the DocumentCellProvider
       // image detection logic is exercised.
