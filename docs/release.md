@@ -547,10 +547,6 @@ Expected `{{target}}` values for this repo’s release matrix:
 
 - **macOS (universal):** `darwin-universal` (some toolchains use `universal-apple-darwin`) pointing
   at the updater payload, typically an `.app.tar.gz`.
-- **macOS (universal, alternate):** some toolchains emit **per-arch** updater targets instead of a
-  single universal key. In that case, `latest.json` will contain **both**:
-  - `darwin-x86_64` (or `x86_64-apple-darwin`)
-  - `darwin-aarch64` (or `aarch64-apple-darwin`)
 - **Windows:** `windows-x86_64` (some toolchains use `x86_64-pc-windows-msvc`) and
   `windows-aarch64` / `windows-arm64` (some toolchains use `aarch64-pc-windows-msvc`) — one entry per
   architecture. Each entry points at the **updater-consumed** Windows installer (see
@@ -785,12 +781,14 @@ are attached:
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - macOS universal updater payload (either):
-     - `darwin-universal` (sometimes `universal-apple-darwin`), **or**
-     - both `darwin-x86_64` + `darwin-aarch64` (sometimes `x86_64-apple-darwin` + `aarch64-apple-darwin`)
+   - `darwin-universal` (macOS universal; sometimes `universal-apple-darwin`)
    - `windows-x86_64` (Windows x64; sometimes `x86_64-pc-windows-msvc`)
    - `windows-aarch64` / `windows-arm64` (Windows ARM64; sometimes `aarch64-pc-windows-msvc`)
    - `linux-x86_64` (Linux; sometimes `x86_64-unknown-linux-gnu`)
+
+   Note: our CI validator expects the macOS key to be the universal form (`darwin-universal` /
+   `universal-apple-darwin`). If you see per-arch keys like `darwin-x86_64` / `darwin-aarch64`, that
+   usually indicates a Tauri/toolchain change and the docs/validator should be updated together.
 
    Quick check (after downloading `latest.json` to your current directory):
 
