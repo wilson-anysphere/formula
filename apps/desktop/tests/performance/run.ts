@@ -4,12 +4,13 @@ import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
+import { formatMb, formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
 import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.ts';
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createSharedGridRendererBenchmarks } from './benchmarks/sharedGridRenderer.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
+import { runDesktopMemoryBenchmarks } from './desktopMemoryBench.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -19,7 +20,7 @@ type DetailedReport = {
   benchmarks: BenchmarkResult[];
 };
 
-type ActionBenchmark = { name: string; unit: 'ms'; value: number };
+type ActionBenchmark = { name: string; unit: BenchmarkResult['unit']; value: number };
 
 function parseArgs(argv: string[]): { output: string; details: string } {
   const defaults = {
@@ -43,11 +44,16 @@ function parseArgs(argv: string[]): { output: string; details: string } {
 function printSummary(results: BenchmarkResult[]): void {
   const longestName = Math.max(...results.map((r) => r.name.length));
 
+  const formatValue = (value: number, unit: BenchmarkResult['unit']): string => {
+    if (unit === 'mb') return formatMb(value);
+    return formatMs(value);
+  };
+
   for (const r of results) {
     const status = r.passed ? 'PASS' : 'FAIL';
     const name = r.name.padEnd(longestName);
-    const p95 = formatMs(r.p95).padStart(10);
-    const target = formatMs(r.targetMs).padStart(10);
+    const p95 = formatValue(r.p95, r.unit).padStart(10);
+    const target = formatValue(r.targetMs, r.unit).padStart(10);
     // eslint-disable-next-line no-console
     console.log(`${status}  ${name}  p95=${p95}  target=${target}`);
   }
@@ -141,6 +147,7 @@ async function main(): Promise<void> {
   // Optional: real desktop startup (Tauri binary) cold-start timings.
   // This is gated because it requires a built binary + a usable display environment.
   results.push(...(await runDesktopStartupBenchmarks()));
+  results.push(...(await runDesktopMemoryBenchmarks()));
 
   results.sort((a, b) => a.name.localeCompare(b.name));
 

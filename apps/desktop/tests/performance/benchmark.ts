@@ -6,12 +6,12 @@ export interface BenchmarkOptions {
   iterations?: number;
   warmup?: number;
   /**
-   * Absolute p95 threshold in milliseconds.
+   * Absolute p95 threshold in `unit` (milliseconds by default).
    *
    * Benchmarks fail if `p95 > targetMs`.
    */
   targetMs: number;
-  unit?: 'ms';
+  unit?: 'ms' | 'mb';
   /**
    * Timing source for the benchmark loop.
    *
@@ -29,7 +29,7 @@ export interface BenchmarkResult {
   name: string;
   iterations: number;
   warmup: number;
-  unit: 'ms';
+  unit: 'ms' | 'mb';
   /**
    * Timing source used for this benchmark result.
    *
@@ -76,7 +76,7 @@ export async function runBenchmark(
   const iterations = options.iterations ?? 50;
   const warmup = options.warmup ?? 10;
   const targetMs = options.targetMs;
-  const unit: 'ms' = options.unit ?? 'ms';
+  const unit: BenchmarkResult['unit'] = options.unit ?? 'ms';
   const clock = options.clock ?? 'wall';
 
   for (let i = 0; i < warmup; i++) {
@@ -124,4 +124,11 @@ export function formatMs(value: number): string {
   if (value >= 1000) return `${(value / 1000).toFixed(2)}s`;
   if (value >= 10) return `${value.toFixed(1)}ms`;
   return `${value.toFixed(3)}ms`;
+}
+
+export function formatMb(value: number): string {
+  if (value >= 1024) return `${(value / 1024).toFixed(2)}gb`;
+  if (value >= 100) return `${value.toFixed(0)}mb`;
+  if (value >= 10) return `${value.toFixed(1)}mb`;
+  return `${value.toFixed(2)}mb`;
 }
