@@ -1680,9 +1680,13 @@ fn import_xls_path_with_biff_reader(
         // worksheet substream for `SHRFMLA` (shared formula) and `ARRAY` (array formula)
         // definition records.
         //
-        // Some non-standard producers omit those definition records but still store a full
-        // `FORMULA.rgce` token stream in the base cell; as a fallback, recover follower-cell
-        // formulas by materializing from the base cell's rgce across the row/col delta.
+        // Fallback behaviors:
+        // - If definition records are missing/corrupt but the base cell still stores a full
+        //   `FORMULA.rgce` token stream, recover follower formulas by materializing from the base
+        //   cell's rgce across the row/col delta.
+        // - Some producers store the shared rgce only in `SHRFMLA` and omit the base cell's full
+        //   formula token stream (or the base cell `FORMULA` record entirely). In that case,
+        //   recover formulas by decoding `SHRFMLA` rgce relative to each cell in the shared range.
         if let (
             Some(workbook_stream),
             Some(codepage),
@@ -1698,9 +1702,11 @@ fn import_xls_path_with_biff_reader(
         ) {
             if biff_version == biff::BiffVersion::Biff8 {
                 if let Some(sheet_info) = biff_sheets.get(biff_idx) {
-                    // Build a minimal rgce decode context. We provide sheet names (BoundSheet
-                    // order) and EXTERNSHEET entries so 3D references can be rendered; SUPBOOK and
-                    // defined-name metadata are left empty for best-effort decoding.
+                    // Build an rgce decode context for BIFF8 worksheet formulas.
+                    //
+                    // Note: we parse SUPBOOK/EXTERNSHEET directly from the workbook stream rather
+                    // than relying on `biff_globals`: we drop the workbook globals cache after
+                    // constructing the XF/style mapping to save memory.
                     let sheet_names_by_biff_idx: Vec<String> =
                         biff_sheets.iter().map(|s| s.name.clone()).collect();
                     let supbooks: &[biff::supbook::SupBookInfo] = &[];
@@ -1805,17 +1811,17 @@ fn import_xls_path_with_biff_reader(
             biff_version,
             biff_idx,
         ) {
-            if biff_version == biff::BiffVersion::Biff8 && !biff_rgce_externsheet.is_empty() {
+            if biff_version == biff::BiffVersion::Biff8 {
                 if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
-                    if sheet_info.offset < workbook_stream.len() {
-                        let rgce_ctx = biff::rgce::RgceDecodeContext {
-                            codepage,
-                            sheet_names: &biff_rgce_sheet_names,
-                            externsheet: &biff_rgce_externsheet,
-                            supbooks: &biff_rgce_supbooks,
-                            defined_names: &biff_rgce_defined_names,
-                        };
+                    let rgce_ctx = biff::rgce::RgceDecodeContext {
+                        codepage,
+                        sheet_names: &biff_rgce_sheet_names,
+                        externsheet: &biff_rgce_externsheet,
+                        supbooks: &biff_rgce_supbooks,
+                        defined_names: &biff_rgce_defined_names,
+                    };
 
+                    if sheet_info.offset < workbook_stream.len() {
                         match biff::formulas::parse_biff8_sheet_formula_overrides(
                             workbook_stream,
                             sheet_info.offset,
@@ -1835,6 +1841,70 @@ fn import_xls_path_with_biff_reader(
                                 &mut warnings_suppressed,
                             ),
                         }
+                    }
+
+                    match biff::parse_biff_sheet_shared_formulas(workbook_stream, sheet_info.offset)
+                    {
+                        Ok(mut parsed) => {
+                            warnings.extend(parsed.warnings.drain(..).map(|w| {
+                                ImportWarning::new(format!(
+                                    "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {w}"
+                                ))
+                            }));
+
+                            for shared in parsed.shared_formulas.drain(..) {
+                                for row_u16 in shared.row_first..=shared.row_last {
+                                    for col_u16 in shared.col_first..=shared.col_last {
+                                        let row: u32 = row_u16 as u32;
+                                        let col: u32 = col_u16 as u32;
+                                        if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+                                            continue;
+                                        }
+
+                                        let cell_ref = CellRef::new(row, col);
+                                        let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+
+                                        if sheet
+                                            .formula(anchor)
+                                            .is_some_and(|existing| existing != ErrorValue::Unknown.as_str())
+                                        {
+                                            continue;
+                                        }
+
+                                        let base = biff::rgce::CellCoord::new(row, col);
+                                        let decoded = biff::rgce::decode_biff8_rgce_with_base(
+                                            &shared.rgce,
+                                            &rgce_ctx,
+                                            Some(base),
+                                        );
+
+                                        for warning in decoded.warnings {
+                                            warnings.push(ImportWarning::new(format!(
+                                                "failed to decode shared formula in sheet `{sheet_name}` at {}: {warning}",
+                                                cell_ref.to_a1()
+                                            )));
+                                        }
+
+                                        let Some(normalized) =
+                                            normalize_formula_text(&decoded.text)
+                                        else {
+                                            continue;
+                                        };
+                                        sheet.set_formula(anchor, Some(normalized));
+                                        if let Some(resolved) = style_id_for_cell_xf(
+                                            xf_style_ids.as_deref(),
+                                            sheet_cell_xfs,
+                                            anchor,
+                                        ) {
+                                            sheet.set_style_id(anchor, resolved);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` shared formulas for sheet `{sheet_name}`: {err}"
+                        ))),
                     }
                 }
             }

@@ -24,6 +24,7 @@ mod workbook_context;
 pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
+pub(crate) mod shared_formulas;
 pub(crate) mod sort;
 pub(crate) mod supbook;
 pub(crate) mod sst;
@@ -51,6 +52,7 @@ pub(crate) use sheet::{
     SheetRowColProperties,
 };
 pub(crate) use sort::parse_biff_sheet_sort_state;
+pub(crate) use shared_formulas::parse_biff_sheet_shared_formulas;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BiffVersion {

@@ -341,6 +341,34 @@ pub fn build_calamine_formula_error_biff_fallback_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing shared-formula groups where the base cell's `FORMULA`
+/// record is missing or degenerate (`PtgExp`).
+///
+/// Some `.xls` writers rely entirely on the `SHRFMLA` record (shared formula definition) to store
+/// the shared rgce token stream and only emit `PtgExp` in cells within the shared formula range.
+///
+/// This fixture contains two sheets:
+/// - `MissingBase`: the shared formula range is `B1:B2`, but `B1` has **no** `FORMULA` record. `B2`
+///   contains a `FORMULA` record with `PtgExp(B1)`.
+/// - `DegenerateBase`: `B1` has a `FORMULA` record but its rgce is `PtgExp(B1)` (self-reference);
+///   `B2` contains `PtgExp(B1)`.
+///
+/// In both cases, the `SHRFMLA` record defines the shared rgce for `A(row)+1`:
+/// - `B1` → `A1+1`
+/// - `B2` → `A2+1`
+pub fn build_shared_formula_shrfmla_only_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_shrfmla_only_workbook_stream();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a shared formula over `B1:B2`:
 /// - `B1`: `SUM(A1,1)`
 /// - `B2`: `SUM(A2,1)` via `PtgExp` referencing `B1`
@@ -5914,6 +5942,139 @@ fn build_shared_formula_ptgexp_missing_shrfmla_sheet_stream(xf_cell: u16) -> Vec
     );
 
     // Intentionally omit SHRFMLA/ARRAY definition records.
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SharedFormulaBaseKind {
+    MissingFormulaRecord,
+    PtgExpSelf,
+}
+
+fn build_shared_formula_shrfmla_only_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One cell XF (General).
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets: MissingBase and DegenerateBase.
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["MissingBase", "DegenerateBase"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet 0: MissingBase -----------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_formula_shrfmla_only_sheet_stream(
+        xf_cell,
+        SharedFormulaBaseKind::MissingFormulaRecord,
+    ));
+
+    // -- Sheet 1: DegenerateBase --------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_formula_shrfmla_only_sheet_stream(
+        xf_cell,
+        SharedFormulaBaseKind::PtgExpSelf,
+    ));
+
+    globals
+}
+
+fn build_shared_formula_shrfmla_only_sheet_stream(
+    xf_cell: u16,
+    base_kind: SharedFormulaBaseKind,
+) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0,2) cols [0,2) => A1:B2.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Provide value cells in column A so the shared formula has something to reference.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0)); // A1
+
+    // Shared formula rgce: `A(row)+1` for B1:B2.
+    // In BIFF8 this uses `PtgRefN` offsets relative to the cell containing the formula.
+    // - row_off = 0
+    // - col_off = -1 (left)
+    let shared_rgce: [u8; 9] = [
+        0x2C, // PtgRefN
+        0x00, 0x00, // row_off = 0 (i16 stored in u16 field)
+        0xFF, 0xFF, // col_off = -1 (14-bit two's complement + relative bits)
+        0x1E, // PtgInt
+        0x01, 0x00, // 1
+        0x03, // PtgAdd
+    ];
+
+    // Depending on the variant, emit a degenerate base FORMULA record or omit it entirely.
+    if base_kind == SharedFormulaBaseKind::PtgExpSelf {
+        let ptgexp_self: [u8; 5] = [
+            0x01, // PtgExp
+            0x00, 0x00, // rw=0 (B1)
+            0x01, 0x00, // col=1 (B)
+        ];
+        push_record(
+            &mut sheet,
+            RECORD_FORMULA,
+            &formula_cell(0, 1, xf_cell, 0.0, &ptgexp_self),
+        );
+    }
+
+    // SHRFMLA defines the shared formula range and token stream.
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 1, 1, &shared_rgce),
+    );
+
+    // A2 value cell (row 1).
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(1, 0, xf_cell, 2.0)); // A2
+
+    // B2: FORMULA record containing only `PtgExp(B1)`.
+    let ptgexp_b1: [u8; 5] = [
+        0x01, // PtgExp
+        0x00, 0x00, // rw=0 (B1)
+        0x01, 0x00, // col=1 (B)
+    ];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 1, xf_cell, 0.0, &ptgexp_b1),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
