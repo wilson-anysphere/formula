@@ -6,6 +6,8 @@
  * only need to provide `listNonEmptyCells`.
  */
 
+import { throwIfAborted } from "../utils/abort.js";
+
 /**
  * Coordinate base for `address.row/col` returned by the SpreadsheetApi.
  *
@@ -84,14 +86,4 @@ export function workbookFromSpreadsheetApi(params) {
   });
 
   return { id: workbookId, sheets };
-}
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
 }

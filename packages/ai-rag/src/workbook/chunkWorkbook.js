@@ -1,6 +1,7 @@
 import { extractCells } from "./extractCells.js";
 import { rectIntersectionArea, rectSize, rectToA1 } from "./rect.js";
 import { getSheetCellMap, getSheetMatrix, normalizeCell } from "./normalizeCell.js";
+import { throwIfAborted } from "../utils/abort.js";
 
 const DEFAULT_EXTRACT_MAX_ROWS = 50;
 const DEFAULT_EXTRACT_MAX_COLS = 50;
@@ -10,16 +11,6 @@ const DEFAULT_EXTRACT_MAX_COLS = 50;
 const DEFAULT_DETECT_REGIONS_CELL_LIMIT = 200000;
 const DEFAULT_MAX_DATA_REGIONS_PER_SHEET = 50;
 const DEFAULT_MAX_FORMULA_REGIONS_PER_SHEET = 50;
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
 
 function isNonEmptyCell(cell) {
   if (!cell) return false;

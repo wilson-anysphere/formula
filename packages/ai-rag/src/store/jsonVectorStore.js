@@ -1,17 +1,8 @@
 import { fromBase64, InMemoryBinaryStorage, toBase64 } from "./binaryStorage.js";
 import { InMemoryVectorStore } from "./inMemoryVectorStore.js";
+import { throwIfAborted } from "../utils/abort.js";
 
 const JSON_VECTOR_STORE_VERSION = 2;
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
 
 /**
  * @param {Float32Array} vector

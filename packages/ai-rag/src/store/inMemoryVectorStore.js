@@ -1,14 +1,5 @@
 import { cosineSimilarity, normalizeL2, toFloat32Array } from "./vectorMath.js";
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
+import { throwIfAborted } from "../utils/abort.js";
 
 /**
  * @typedef {Object} VectorRecord
