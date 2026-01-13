@@ -569,3 +569,53 @@
 .toast[data-type="warning"] {
   border-color: var(--warning);
 }
+
+/*
+  Formula diff rendering (version history / conflict UIs).
+*/
+
+.formula-diff-view {
+  display: inline;
+  font:
+    12px/18px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.formula-diff-view--empty {
+  color: var(--text-tertiary);
+}
+
+.formula-diff-empty-marker {
+  user-select: none;
+}
+
+.formula-diff-op {
+  display: inline;
+}
+
+.formula-diff-op--insert,
+.formula-diff-op--delete {
+  display: inline-block;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  margin: 0 1px;
+}
+
+.formula-diff-op--insert {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.formula-diff-op--delete {
+  background: var(--error-bg);
+  color: var(--error);
+  text-decoration: line-through;
+}
