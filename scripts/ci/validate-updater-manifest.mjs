@@ -5,8 +5,10 @@
  * - Ensures the manifest version matches the git tag.
  * - Ensures the manifest contains updater entries for all expected targets.
  * - Ensures each updater entry references an asset that exists on the GitHub Release.
- * - Ensures each target references the correct *updatable* artifact type (macOS .app.tar.gz, Linux
- *   .AppImage, Windows .msi/.exe).
+ * - Ensures each target references the correct *self-updatable* artifact type:
+ *   - macOS: `.app.tar.gz` updater archive
+ *   - Windows: `.msi` (Windows Installer)
+ *   - Linux: `.AppImage`
  * - Ensures all platform URLs are unique (no two targets colliding on the same asset URL).
  *
  * This catches "last writer wins" / merge regressions where one platform build overwrites latest.json
@@ -34,20 +36,6 @@ function assetNameFromUrl(url) {
   const parsed = new URL(url);
   const last = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
   return decodeURIComponent(last);
-}
-
-/**
- * @param {string} target
- * @returns {"macos" | "linux" | "windows" | null}
- */
-function platformFamilyFromTarget(target) {
-  const lower = target.toLowerCase();
-  if (lower.includes("darwin") || lower.includes("apple-darwin") || lower.includes("macos")) {
-    return "macos";
-  }
-  if (lower.includes("linux")) return "linux";
-  if (lower.includes("windows") || lower.includes("pc-windows")) return "windows";
-  return null;
 }
 
 /**
@@ -279,29 +267,49 @@ async function main() {
     fatal("Missing GITHUB_TOKEN / GH_TOKEN (required to query/download draft release assets).");
   }
 
-  // At minimum (per platform requirements). We allow a couple of aliases in case Tauri changes
-  // how it formats target identifiers in the updater JSON.
-  const macUniversalKeys = ["darwin-universal", "universal-apple-darwin"];
-  const macX64Keys = ["darwin-x86_64", "x86_64-apple-darwin"];
-  const macArm64Keys = ["darwin-aarch64", "aarch64-apple-darwin"];
-
-  const expectedTargets = [
+  // Platform key mapping is intentionally strict.
+  //
+  // Source of truth:
+  // - docs/desktop-updater-target-mapping.md
+  //
+  // Do NOT accept "alias" keys here (like Rust target triples). If Tauri/tauri-action changes
+  // the platform key naming, we want this validator to fail loudly with an expected vs actual
+  // diff so we can update the docs + verification logic together.
+  const expectedPlatforms = [
     {
-      id: "windows-x86_64",
-      label: "Windows (x86_64)",
-      keys: ["windows-x86_64", "x86_64-pc-windows-msvc"],
+      key: "darwin-universal",
+      label: "macOS (universal)",
+      expectedAsset: {
+        description: `macOS updater archive (*.app.tar.gz)`,
+        matches: (assetName) => assetName.endsWith(".app.tar.gz"),
+      },
     },
     {
-      id: "windows-arm64",
+      key: "windows-x86_64",
+      label: "Windows (x64)",
+      expectedAsset: {
+        description: `Windows updater installer (*.msi)`,
+        matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+      },
+    },
+    {
+      key: "windows-aarch64",
       label: "Windows (ARM64)",
-      keys: ["windows-aarch64", "windows-arm64", "aarch64-pc-windows-msvc"],
+      expectedAsset: {
+        description: `Windows updater installer (*.msi)`,
+        matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+      },
     },
     {
-      id: "linux-x86_64",
+      key: "linux-x86_64",
       label: "Linux (x86_64)",
-      keys: ["linux-x86_64", "x86_64-unknown-linux-gnu"],
+      expectedAsset: {
+        description: `Linux updater bundle (*.AppImage)`,
+        matches: (assetName) => assetName.endsWith(".AppImage"),
+      },
     },
   ];
+  const expectedPlatformKeys = expectedPlatforms.map((p) => p.key);
 
   const retryDelaysMs = [2000, 4000, 8000, 12000, 20000];
   /** @type {any | undefined} */
@@ -611,78 +619,32 @@ async function main() {
       );
     }
 
-    // Ensure each platform points at a self-updatable artifact type.
-    /** @type {Array<{ target: string; url: string; expected: string }>} */
-    const invalidMac = [];
-    /** @type {Array<{ target: string; url: string; expected: string }>} */
-    const invalidLinux = [];
-    /** @type {Array<{ target: string; url: string; expected: string }>} */
-    const invalidWindows = [];
-
-    for (const { target, url, assetName } of validatedTargets) {
-      const family = platformFamilyFromTarget(target);
-      if (!family) continue;
-
-      if (family === "macos") {
-        if (!(assetName.endsWith(".app.tar.gz") || assetName.endsWith(".tar.gz"))) {
-          invalidMac.push({
-            target,
-            url,
-            expected: `ends with ".app.tar.gz" (preferred) or ".tar.gz"`,
-          });
-        }
-      } else if (family === "linux") {
-        if (!assetName.endsWith(".AppImage")) {
-          invalidLinux.push({
-            target,
-            url,
-            expected: `ends with ".AppImage" (Linux auto-update requires AppImage; .deb/.rpm are typically not self-updatable)`,
-          });
-        }
-      } else if (family === "windows") {
-        const lower = assetName.toLowerCase();
-        if (!(lower.endsWith(".msi") || lower.endsWith(".exe"))) {
-          invalidWindows.push({
-            target,
-            url,
-            expected: `ends with ".msi" or ".exe"`,
-          });
-        }
-      }
-    }
-
-    if (invalidMac.length > 0) {
+    // Ensure the manifest contains the expected *platform key* names.
+    const actualPlatformKeys = Object.keys(platforms).slice().sort();
+    const expectedKeySet = new Set(expectedPlatformKeys);
+    const expectedSortedKeys = expectedPlatformKeys.slice().sort();
+    const missingKeys = expectedSortedKeys.filter(
+      (k) => !Object.prototype.hasOwnProperty.call(platforms, k),
+    );
+    const unexpectedKeys = actualPlatformKeys.filter((k) => !expectedKeySet.has(k));
+    if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
       errors.push(
         [
-          `Invalid macOS updater URLs in latest.json (expected updater archive):`,
-          ...invalidMac
-            .slice()
-            .sort((a, b) => a.target.localeCompare(b.target))
-            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
-        ].join("\n"),
-      );
-    }
-
-    if (invalidLinux.length > 0) {
-      errors.push(
-        [
-          `Invalid Linux updater URLs in latest.json (expected .AppImage):`,
-          ...invalidLinux
-            .slice()
-            .sort((a, b) => a.target.localeCompare(b.target))
-            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
-        ].join("\n"),
-      );
-    }
-
-    if (invalidWindows.length > 0) {
-      errors.push(
-        [
-          `Invalid Windows updater URLs in latest.json (expected .msi or .exe):`,
-          ...invalidWindows
-            .slice()
-            .sort((a, b) => a.target.localeCompare(b.target))
-            .map((t) => `  - ${t.target}: ${t.url} (${t.expected})`),
+          `Unexpected latest.json.platforms keys (Tauri updater target identifiers).`,
+          ``,
+          `Expected (${expectedSortedKeys.length}):`,
+          ...expectedSortedKeys.map((k) => `  - ${k}`),
+          ``,
+          `Actual (${actualPlatformKeys.length}):`,
+          ...actualPlatformKeys.map((k) => `  - ${k}`),
+          ``,
+          ...(missingKeys.length > 0
+            ? [`Missing (${missingKeys.length}):`, ...missingKeys.map((k) => `  - ${k}`), ``]
+            : []),
+          ...(unexpectedKeys.length > 0
+            ? [`Unexpected (${unexpectedKeys.length}):`, ...unexpectedKeys.map((k) => `  - ${k}`), ``]
+            : []),
+          `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/ci/validate-updater-manifest.mjs together.`,
         ].join("\n"),
       );
     }
@@ -714,102 +676,63 @@ async function main() {
 
     /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
     const summaryRows = [];
+    /** @type {Array<{ target: string; url: string; assetName: string; expected: string }>} */
+    const wrongAssetTypes = [];
 
-    // macOS: either a dedicated universal key is present, OR both per-arch keys exist.
-    const macUniversalKey = macUniversalKeys.find((k) =>
-      Object.prototype.hasOwnProperty.call(platforms, k),
-    );
-    const macUniversalValidatedKey = macUniversalKeys.find((k) => validatedByTarget.has(k));
-
-    if (macUniversalKey && !macUniversalValidatedKey) {
-      // Key exists but was invalid; the invalid entry error should be enough, but keep the
-      // missing-target message actionable about what we were expecting.
-      missingTargets.push({
-        label: "macOS (universal)",
-        expectation: `expected a valid universal entry (${macUniversalKeys.map((k) => JSON.stringify(k)).join(", ")}) or both per-arch entries (${macX64Keys[0]} + ${macArm64Keys[0]}).`,
-      });
-    } else if (macUniversalValidatedKey) {
-      const validated = validatedByTarget.get(macUniversalValidatedKey);
-      if (validated) {
-        summaryRows.push({
-          label: "macOS (universal)",
-          key: macUniversalValidatedKey,
-          url: validated.url,
-          assetName: validated.assetName,
-        });
-      }
-    } else {
-      const macX64Key = macX64Keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
-      const macArm64Key = macArm64Keys.find((k) =>
-        Object.prototype.hasOwnProperty.call(platforms, k),
-      );
-
-      const macX64ValidatedKey = macX64Keys.find((k) => validatedByTarget.has(k));
-      const macArm64ValidatedKey = macArm64Keys.find((k) => validatedByTarget.has(k));
-
-      if (!macX64Key || !macArm64Key) {
-        missingTargets.push({
-          label: "macOS (universal)",
-          expectation: `expected ${macUniversalKeys.map((k) => JSON.stringify(k)).join(" or ")} or both ${macX64Keys.map((k) => JSON.stringify(k)).join(" / ")} and ${macArm64Keys.map((k) => JSON.stringify(k)).join(" / ")}.`,
-        });
-      } else if (!macX64ValidatedKey || !macArm64ValidatedKey) {
-        // Keys exist but at least one was invalid.
-        missingTargets.push({
-          label: "macOS (universal)",
-          expectation: `expected valid per-arch entries for both macOS x86_64 and arm64 (found ${JSON.stringify(macX64Key)} and ${JSON.stringify(macArm64Key)}).`,
-        });
-      } else {
-        const validatedX64 = validatedByTarget.get(macX64ValidatedKey);
-        const validatedArm64 = validatedByTarget.get(macArm64ValidatedKey);
-        if (validatedX64) {
-          summaryRows.push({
-            label: "macOS (x86_64)",
-            key: macX64ValidatedKey,
-            url: validatedX64.url,
-            assetName: validatedX64.assetName,
-          });
-        }
-        if (validatedArm64) {
-          summaryRows.push({
-            label: "macOS (arm64)",
-            key: macArm64ValidatedKey,
-            url: validatedArm64.url,
-            assetName: validatedArm64.assetName,
-          });
-        }
-      }
-    }
-
-    for (const expected of expectedTargets) {
-      const foundKey = expected.keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
-      if (!foundKey) {
+    for (const expected of expectedPlatforms) {
+      const key = expected.key;
+      if (!Object.prototype.hasOwnProperty.call(platforms, key)) {
         missingTargets.push({
           label: expected.label,
-          expectation: `expected one of: ${expected.keys.map((k) => JSON.stringify(k)).join(", ")}`,
+          expectation: `expected platform key ${JSON.stringify(key)}`,
         });
         continue;
       }
 
-      const validated = validatedByTarget.get(foundKey);
+      const validated = validatedByTarget.get(key);
       if (!validated) {
-        // Entry exists (foundKey) but was invalid, so it will already be present in invalidTargets.
+        // Entry exists but was invalid; the invalid entry error should already be present, but keep
+        // the missing-target message tied to the human label.
+        missingTargets.push({
+          label: expected.label,
+          expectation: `platform key ${JSON.stringify(key)} exists but entry is invalid (missing url/signature?)`,
+        });
         continue;
       }
+
       summaryRows.push({
         label: expected.label,
-        key: foundKey,
+        key,
         url: validated.url,
         assetName: validated.assetName,
       });
+
+      if (!expected.expectedAsset.matches(validated.assetName)) {
+        wrongAssetTypes.push({
+          target: key,
+          url: validated.url,
+          assetName: validated.assetName,
+          expected: expected.expectedAsset.description,
+        });
+      }
     }
 
-    // Print additional targets (if any) in the success summary.
-    const expectedKeySet = new Set([
-      ...macUniversalKeys,
-      ...macX64Keys,
-      ...macArm64Keys,
-      ...expectedTargets.flatMap((t) => t.keys),
-    ]);
+    if (wrongAssetTypes.length > 0) {
+      errors.push(
+        [
+          `Updater asset type mismatch in latest.json.platforms:`,
+          ...wrongAssetTypes
+            .slice()
+            .sort((a, b) => a.target.localeCompare(b.target))
+            .map(
+              (t) =>
+                `  - ${t.target}: ${t.assetName} (from ${JSON.stringify(t.url)}; expected ${t.expected})`,
+            ),
+        ].join("\n"),
+      );
+    }
+
+    // Useful for debugging when the manifest contains extra targets.
     const otherTargets = validatedTargets
       .filter((t) => !expectedKeySet.has(t.target))
       .sort((a, b) => a.target.localeCompare(b.target));

@@ -13,6 +13,11 @@ Platform/architecture expectations for a release:
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
 updater.
 
+For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
+see:
+
+- `docs/desktop-updater-target-mapping.md`
+
 ## Testing the release pipeline (workflow_dispatch)
 
 To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
@@ -98,6 +103,9 @@ CI note: the workflow also validates that the uploaded Tauri updater manifest (`
 `latest.json.sig`) contains entries for every expected OS/architecture target. This catches a common
 parallel-build failure mode where the last finishing job overwrites `latest.json` and ships an
 incomplete updater manifest.
+
+See `docs/desktop-updater-target-mapping.md` for the exact `latest.json.platforms` key names CI
+expects.
 
 ## 2) Tauri updater keys (required for auto-update)
 
