@@ -18,14 +18,20 @@ import {
   extractWorkbookSchema,
   parseA1Range,
   RagIndex,
+  headSampleRows,
+  tailSampleRows,
+  systematicSampleRows,
+  randomSampleRows,
+  stratifiedSampleRows,
   scoreRegionForQuery,
   pickBestRegionForQuery,
   type RegionType,
   type RegionRef,
+  type SystematicSamplingOptions,
 } from "../src/index.js";
 import type { SheetSchema } from "../src/schema.js";
  
- type IsAny<T> = 0 extends (1 & T) ? true : false;
+type IsAny<T> = 0 extends (1 & T) ? true : false;
 type Assert<T extends true> = T;
  
 // --- Constants ---
@@ -62,7 +68,19 @@ type _Score_ReturnType = Assert<ReturnType<typeof scoreRegionForQuery> extends n
 type PickedRegion = ReturnType<typeof pickBestRegionForQuery>;
 type _PickBest_NotAny = Assert<IsAny<PickedRegion> extends false ? true : false>;
 type _PickBest_Shape = Assert<PickedRegion extends { type: RegionType; index: number; range: string } | null ? true : false>;
-  
+
+// --- Sampling helpers ---
+type HeadSampled = ReturnType<typeof headSampleRows<number>>;
+type _HeadSample_NotAny = Assert<IsAny<HeadSampled> extends false ? true : false>;
+type _HeadSample_Shape = Assert<HeadSampled extends number[] ? true : false>;
+type _TailSample_Shape = Assert<ReturnType<typeof tailSampleRows<number>> extends number[] ? true : false>;
+type _SystematicOpts_NotAny = Assert<IsAny<SystematicSamplingOptions> extends false ? true : false>;
+type _SystematicSample_Shape = Assert<ReturnType<typeof systematicSampleRows<number>> extends number[] ? true : false>;
+type _RandomSample_Shape = Assert<ReturnType<typeof randomSampleRows<number>> extends number[] ? true : false>;
+type _StratifiedSample_Shape = Assert<
+  ReturnType<typeof stratifiedSampleRows<{ k: string }>> extends Array<{ k: string }> ? true : false
+>;
+
 // --- Workbook schema extraction ---
 type WorkbookSchema = ReturnType<typeof extractWorkbookSchema>;
 type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true : false>;
@@ -78,6 +96,11 @@ const dlp = classifyText("test@example.com");
 void dlp;
 const index = new RagIndex();
 void index;
+void headSampleRows([1, 2, 3], 2);
+void tailSampleRows([1, 2, 3], 2);
+void systematicSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+void randomSampleRows([1, 2, 3, 4], 2, { seed: 1 });
+void stratifiedSampleRows([{ k: "a" }, { k: "b" }], 1, { getStratum: (r) => r.k, seed: 1 });
 const wbSchema = extractWorkbookSchema({
   id: "wb1",
   sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]] }],
@@ -86,9 +109,9 @@ const wbSchema = extractWorkbookSchema({
 wbSchema.tables[0]?.rangeA1;
 const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
 const ref: RegionRef = { type: "table", index: 0 };
- scoreRegionForQuery(ref, schema, "revenue");
- pickBestRegionForQuery(schema, "revenue");
- void parsed;
+scoreRegionForQuery(ref, schema, "revenue");
+pickBestRegionForQuery(schema, "revenue");
+void parsed;
 `;
 
   await writeFile(entryFile, source, "utf8");
