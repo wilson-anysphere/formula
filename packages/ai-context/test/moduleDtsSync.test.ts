@@ -4,7 +4,8 @@ import { expect, test } from "vitest";
 
 function extractStarExports(code: string): string[] {
   const exports: string[] = [];
-  const re = /^\s*export\s+\*\s+from\s+["'](.+?)["'];/gm;
+  // Allow optional semicolons so this stays robust across formatting styles.
+  const re = /^\s*export\s+\*\s+from\s+["'](.+?)["']\s*;?\s*$/gm;
   for (let match; (match = re.exec(code)); ) {
     exports.push(match[1]!);
   }
@@ -25,7 +26,13 @@ function extractJsNamedExports(code: string): string[] {
 
   // export { foo, bar as baz } [from "..."]
   for (const m of code.matchAll(/^\s*export\s*\{([^}]+)\}\s*(?:from\s+["'][^"']+["'])?\s*;?/gm)) {
-    const list = m[1] ?? "";
+    let list = m[1] ?? "";
+    // Strip comments from the export list so formats like:
+    //   export { foo, /* comment */ bar }
+    // or:
+    //   export { foo, // comment\n bar }
+    // don't confuse the parser.
+    list = list.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
     for (const part of list.split(",")) {
       const trimmed = part.trim();
       if (!trimmed) continue;

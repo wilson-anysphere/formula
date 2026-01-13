@@ -4,7 +4,9 @@ import { expect, test } from "vitest";
 
 function extractStarExports(code: string): string[] {
   const exports: string[] = [];
-  const re = /^\s*export\s+\*\s+from\s+["'](.+?)["'];/gm;
+  // Allow optional semicolons so the test keeps working if we ever switch to a
+  // semicolon-less formatting style.
+  const re = /^\s*export\s+\*\s+from\s+["'](.+?)["']\s*;?\s*$/gm;
   for (let match; (match = re.exec(code)); ) {
     exports.push(match[1]!);
   }
@@ -36,4 +38,3 @@ test("src/index.d.ts mirrors src/index.js exports and all exported modules have 
     await readFile(dtsUrl, "utf8");
   }
 });
-
