@@ -79,10 +79,10 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<ChartAnchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
 
             Some(ChartAnchor::Absolute {
-                x_emu: pos.attribute("x")?.parse().ok()?,
-                y_emu: pos.attribute("y")?.parse().ok()?,
-                cx_emu: ext.attribute("cx")?.parse().ok()?,
-                cy_emu: ext.attribute("cy")?.parse().ok()?,
+                x_emu: pos.attribute("x")?.trim().parse().ok()?,
+                y_emu: pos.attribute("y")?.trim().parse().ok()?,
+                cx_emu: ext.attribute("cx")?.trim().parse().ok()?,
+                cy_emu: ext.attribute("cy")?.trim().parse().ok()?,
             })
         }
         "oneCellAnchor" => {
@@ -94,12 +94,22 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<ChartAnchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
 
             Some(ChartAnchor::OneCell {
-                from_col: descendant_text(from, "col").and_then(|t| t.parse().ok())?,
-                from_row: descendant_text(from, "row").and_then(|t| t.parse().ok())?,
-                from_col_off_emu: descendant_text(from, "colOff").and_then(|t| t.parse().ok())?,
-                from_row_off_emu: descendant_text(from, "rowOff").and_then(|t| t.parse().ok())?,
-                cx_emu: ext.attribute("cx")?.parse().ok()?,
-                cy_emu: ext.attribute("cy")?.parse().ok()?,
+                from_col: descendant_text(from, "col")
+                    .and_then(|t| t.trim().parse().ok())?,
+                from_row: descendant_text(from, "row")
+                    .and_then(|t| t.trim().parse().ok())?,
+                from_col_off_emu: descendant_text(from, "colOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
+                from_row_off_emu: descendant_text(from, "rowOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
+                cx_emu: ext.attribute("cx")?.trim().parse().ok()?,
+                cy_emu: ext.attribute("cy")?.trim().parse().ok()?,
             })
         }
         "twoCellAnchor" => {
@@ -111,14 +121,32 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<ChartAnchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "to")?;
 
             Some(ChartAnchor::TwoCell {
-                from_col: descendant_text(from, "col").and_then(|t| t.parse().ok())?,
-                from_row: descendant_text(from, "row").and_then(|t| t.parse().ok())?,
-                from_col_off_emu: descendant_text(from, "colOff").and_then(|t| t.parse().ok())?,
-                from_row_off_emu: descendant_text(from, "rowOff").and_then(|t| t.parse().ok())?,
-                to_col: descendant_text(to, "col").and_then(|t| t.parse().ok())?,
-                to_row: descendant_text(to, "row").and_then(|t| t.parse().ok())?,
-                to_col_off_emu: descendant_text(to, "colOff").and_then(|t| t.parse().ok())?,
-                to_row_off_emu: descendant_text(to, "rowOff").and_then(|t| t.parse().ok())?,
+                from_col: descendant_text(from, "col")
+                    .and_then(|t| t.trim().parse().ok())?,
+                from_row: descendant_text(from, "row")
+                    .and_then(|t| t.trim().parse().ok())?,
+                from_col_off_emu: descendant_text(from, "colOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
+                from_row_off_emu: descendant_text(from, "rowOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
+                to_col: descendant_text(to, "col").and_then(|t| t.trim().parse().ok())?,
+                to_row: descendant_text(to, "row").and_then(|t| t.trim().parse().ok())?,
+                to_col_off_emu: descendant_text(to, "colOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
+                to_row_off_emu: descendant_text(to, "rowOff")
+                    .unwrap_or("0")
+                    .trim()
+                    .parse()
+                    .ok()?,
             })
         }
         _ => None,

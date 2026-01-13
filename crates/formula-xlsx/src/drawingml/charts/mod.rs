@@ -58,13 +58,13 @@ pub enum ChartDiagnosticSeverity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DrawingChartObjectRef {
+pub struct DrawingChartObjectRef {
     pub rel_id: String,
     pub anchor: Anchor,
     pub drawing_frame_xml: String,
 }
 
-pub(crate) fn extract_chart_object_refs(
+pub fn extract_chart_object_refs(
     drawing_xml: &[u8],
     part_name: &str,
 ) -> Result<Vec<DrawingChartObjectRef>, ChartExtractionError> {
@@ -187,12 +187,12 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
 
             Some(Anchor::Absolute {
                 pos: CellOffset::new(
-                    pos.attribute("x")?.parse().ok()?,
-                    pos.attribute("y")?.parse().ok()?,
+                    pos.attribute("x")?.trim().parse().ok()?,
+                    pos.attribute("y")?.trim().parse().ok()?,
                 ),
                 ext: EmuSize::new(
-                    ext.attribute("cx")?.parse().ok()?,
-                    ext.attribute("cy")?.parse().ok()?,
+                    ext.attribute("cx")?.trim().parse().ok()?,
+                    ext.attribute("cy")?.trim().parse().ok()?,
                 ),
             })
         }
@@ -207,8 +207,8 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
             Some(Anchor::OneCell {
                 from: parse_anchor_point(&from)?,
                 ext: EmuSize::new(
-                    ext.attribute("cx")?.parse().ok()?,
-                    ext.attribute("cy")?.parse().ok()?,
+                    ext.attribute("cx")?.trim().parse().ok()?,
+                    ext.attribute("cy")?.trim().parse().ok()?,
                 ),
             })
         }
@@ -232,8 +232,16 @@ fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
 fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Option<AnchorPoint> {
     let col: u32 = descendant_text(*node, "col")?.trim().parse().ok()?;
     let row: u32 = descendant_text(*node, "row")?.trim().parse().ok()?;
-    let col_off: i64 = descendant_text(*node, "colOff")?.trim().parse().ok()?;
-    let row_off: i64 = descendant_text(*node, "rowOff")?.trim().parse().ok()?;
+    let col_off: i64 = descendant_text(*node, "colOff")
+        .unwrap_or("0")
+        .trim()
+        .parse()
+        .ok()?;
+    let row_off: i64 = descendant_text(*node, "rowOff")
+        .unwrap_or("0")
+        .trim()
+        .parse()
+        .ok()?;
 
     Some(AnchorPoint::new(
         CellRef::new(row, col),
