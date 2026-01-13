@@ -847,13 +847,17 @@ support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support”
 After the workflow completes, open the GitHub Release (draft) and confirm the expected artifacts
 are attached:
 
+Note: the in-app updater downloads whatever URLs `latest.json` points at (per-platform). Installers
+like `.dmg` / `.msi` / `.deb` are for **manual** installation; auto-update uses the **updater
+payload** artifacts referenced by `latest.json` (see `docs/desktop-updater-target-mapping.md`).
+
 1. Open the GitHub Release (draft) and confirm:
    - Updater metadata: `latest.json` and `latest.json.sig`
    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture
+   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
@@ -898,10 +902,10 @@ are attached:
    PY
    ```
 
-    Also confirm each platform entry points at the **updater-consumed** asset type:
-    - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
-    - `windows-*` → `*.msi` (updater runs the Windows Installer; CI expects the manifest to reference the MSI)
-    - `linux-*` → `*.AppImage`
+     Also confirm each platform entry points at the **updater-consumed** asset type:
+     - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+     - `windows-*` → `*.msi` (preferred; updater runs the Windows Installer) or `*.exe` (depending on updater strategy)
+     - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
