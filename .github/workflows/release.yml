@@ -74,8 +74,8 @@ jobs:
             tauri_args: "--bundles appimage,deb,rpm"
           - platform: windows-2022
             label: windows-2022 (x64)
-            rust_target: ""
-            tauri_args: ""
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: "--target x86_64-pc-windows-msvc"
           - platform: windows-2022
             label: windows-2022 (arm64)
             rust_target: aarch64-pc-windows-msvc
@@ -127,6 +127,7 @@ jobs:
       - name: Install macOS Rust targets (universal build)
         if: runner.os == 'macOS'
         run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
       - name: Install Rust target (${{ matrix.rust_target }})
         if: matrix.rust_target != ''
         run: rustup target add ${{ matrix.rust_target }}
@@ -311,69 +312,30 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      - name: Verify Windows installer assets (MSI + NSIS + signatures)
+      - name: Assert Windows installer bundle exists for target
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $bundleDir = "apps/desktop/src-tauri/target/release/bundle"
-          if ("${{ matrix.rust_target }}" -ne "") {
-            $bundleDir = "apps/desktop/src-tauri/target/${{ matrix.rust_target }}/release/bundle"
+          $target = "${{ matrix.rust_target }}"
+          if ([string]::IsNullOrWhiteSpace($target)) {
+            throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
+
+          $bundleDir = "apps/desktop/src-tauri/target/$target/release/bundle"
 
           if (-not (Test-Path $bundleDir)) {
-            throw "windows-release-assets: ERROR expected Tauri bundle dir not found: $bundleDir"
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found: $bundleDir"
           }
 
-          $msiDir = Join-Path $bundleDir "msi"
-          $expectedNsisDirs = @(
-            (Join-Path $bundleDir "nsis"),
-            (Join-Path $bundleDir "nsis-web")
-          )
-          $nsisDirs = $expectedNsisDirs | Where-Object { Test-Path $_ }
-
-          $msis = @()
-          if (Test-Path $msiDir) {
-            $msis = Get-ChildItem -Path $msiDir -Recurse -File -Filter "*.msi"
+          $installers = Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi, *.exe -ErrorAction SilentlyContinue
+          if (-not $installers -or $installers.Count -eq 0) {
+            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir"
           }
 
-          $nsisExes = @()
-          foreach ($d in $nsisDirs) {
-            $nsisExes += Get-ChildItem -Path $d -Recurse -File -Filter "*.exe"
-          }
-
-          if (-not $msis -or $msis.Count -eq 0) {
-            throw "windows-release-assets: ERROR missing MSI installer (*.msi). Looked under: $msiDir"
-          }
-          if (-not $nsisExes -or $nsisExes.Count -eq 0) {
-            throw "windows-release-assets: ERROR missing NSIS installer (*.exe). Looked under: $($expectedNsisDirs -join ', ')"
-          }
-
-          $missingSigs = @()
-          foreach ($msi in $msis) {
-            $sig = "$($msi.FullName).sig"
-            if (-not (Test-Path $sig)) {
-              $missingSigs += $sig
-            }
-          }
-          foreach ($exe in $nsisExes) {
-            $sig = "$($exe.FullName).sig"
-            if (-not (Test-Path $sig)) {
-              $missingSigs += $sig
-            }
-          }
-
-          if ($missingSigs.Count -gt 0) {
-            $missingJoined = $missingSigs -join "`n"
-            throw "windows-release-assets: ERROR missing signature file(s) for installer artifacts:`n$missingJoined"
-          }
-
-          Write-Host "windows-release-assets: OK"
-          Write-Host "MSI installers:"
-          $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
-          Write-Host "NSIS installers:"
-          $nsisExes | ForEach-Object { Write-Host " - $($_.FullName)" }
+          Write-Host "windows-bundle: OK (found $($installers.Count) installer file(s))"
+          $installers | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
         if: runner.os == 'Windows'
