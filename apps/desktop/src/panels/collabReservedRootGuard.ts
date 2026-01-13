@@ -10,6 +10,10 @@ export const RESERVED_ROOT_GUARD_UI_MESSAGE =
   "In-doc versioning/branching stores (YjsVersionStore/YjsBranchStore) won't work, so Version History and Branch Manager actions are disabled. " +
   "To use these features, disable SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED on the sync server or configure an out-of-doc store (ApiVersionStore/SQLite).";
 
+// Preserve the detected error per provider instance so panels can show the banner
+// even if they are opened after the close event occurred (or are re-opened).
+const providerReservedRootGuardError = new WeakMap<object, string>();
+
 function coerceReason(reason: unknown): string {
   if (typeof reason === "string") return reason;
   if (reason == null) return "";
@@ -172,9 +176,20 @@ export function useReservedRootGuardError(provider: any | null): string | null {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!provider) return;
+    if (!provider) {
+      setError(null);
+      return;
+    }
+
+    if (provider && (typeof provider === "object" || typeof provider === "function")) {
+      setError(providerReservedRootGuardError.get(provider as object) ?? null);
+    }
+
     return listenForProviderCloseEvents(provider, (info) => {
       if (isReservedRootGuardDisconnect(info)) {
+        if (provider && (typeof provider === "object" || typeof provider === "function")) {
+          providerReservedRootGuardError.set(provider as object, RESERVED_ROOT_GUARD_UI_MESSAGE);
+        }
         setError(RESERVED_ROOT_GUARD_UI_MESSAGE);
       }
     });
@@ -182,4 +197,3 @@ export function useReservedRootGuardError(provider: any | null): string | null {
 
   return error;
 }
-

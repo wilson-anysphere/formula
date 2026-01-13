@@ -121,6 +121,21 @@ describe("sync-server reserved root guard disconnect UX", () => {
     await act(async () => {
       root.unmount();
     });
+
+    // Re-mounting the panel with the same provider should still surface the banner
+    // (even though we are not re-emitting a close event).
+    const container2 = document.createElement("div");
+    document.body.appendChild(container2);
+    const root2 = createRoot(container2);
+    await act(async () => {
+      root2.render(<CollabVersionHistoryPanel session={session} />);
+    });
+    await act(async () => {
+      await waitFor(() => container2.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+    await act(async () => {
+      root2.unmount();
+    });
   });
 
   it("shows a persistent error banner and disables branch manager mutations", async () => {
@@ -161,6 +176,20 @@ describe("sync-server reserved root guard disconnect UX", () => {
 
     await act(async () => {
       root.unmount();
+    });
+
+    // Banner should persist across re-mounts for the same provider instance.
+    const container2 = document.createElement("div");
+    document.body.appendChild(container2);
+    const root2 = createRoot(container2);
+    await act(async () => {
+      root2.render(<CollabBranchManagerPanel session={session} sheetNameResolver={null} />);
+    });
+    await act(async () => {
+      await waitFor(() => container2.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+    await act(async () => {
+      root2.unmount();
     });
   });
 });
