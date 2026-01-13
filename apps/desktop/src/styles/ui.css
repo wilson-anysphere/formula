@@ -749,6 +749,16 @@
   scroll-behavior: smooth;
 }
 
+html[data-reduced-motion="true"] #sheet-tabs.sheet-bar .sheet-tabs {
+  scroll-behavior: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #sheet-tabs.sheet-bar .sheet-tabs {
+    scroll-behavior: auto;
+  }
+}
+
 #sheet-tabs.sheet-bar .sheet-tab {
   height: 22px;
   padding: 0;
