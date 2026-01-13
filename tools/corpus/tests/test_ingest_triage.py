@@ -45,12 +45,14 @@ class IngestTriageInvocationTests(unittest.TestCase):
                 exe: Path,
                 workbook_bytes: bytes,
                 *,
+                workbook_name: str,
                 diff_ignore: set[str],
                 diff_limit: int,
                 recalc: bool,
                 render_smoke: bool,
             ) -> dict:
                 observed["exe"] = exe
+                observed["workbook_name"] = workbook_name
                 observed["diff_ignore"] = diff_ignore
                 observed["diff_limit"] = diff_limit
                 observed["recalc"] = recalc
@@ -70,6 +72,7 @@ class IngestTriageInvocationTests(unittest.TestCase):
         self.assertEqual(observed["diff_limit"], 25)
         self.assertEqual(observed["recalc"], False)
         self.assertEqual(observed["render_smoke"], False)
+        self.assertEqual(observed["workbook_name"], "book.xlsx")
 
         diff_ignore = observed["diff_ignore"]
         self.assertIsInstance(diff_ignore, set)
@@ -81,4 +84,3 @@ class IngestTriageInvocationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
