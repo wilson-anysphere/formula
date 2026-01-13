@@ -159,14 +159,18 @@ pub enum ComboChartEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BarChartModel {
+    pub vary_colors: Option<bool>,
     pub bar_direction: Option<String>,
     pub grouping: Option<String>,
+    pub gap_width: Option<u16>,
+    pub overlap: Option<i16>,
     pub ax_ids: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct LineChartModel {
+    pub vary_colors: Option<bool>,
     pub grouping: Option<String>,
     pub ax_ids: Vec<u32>,
 }
@@ -176,11 +180,13 @@ pub struct LineChartModel {
 pub struct PieChartModel {
     pub vary_colors: Option<bool>,
     pub first_slice_angle: Option<u32>,
+    pub hole_size: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ScatterChartModel {
+    pub vary_colors: Option<bool>,
     pub scatter_style: Option<String>,
     pub ax_ids: Vec<u32>,
 }
@@ -287,6 +293,8 @@ pub struct SeriesModel {
     pub values: Option<SeriesNumberData>,
     pub x_values: Option<SeriesData>,
     pub y_values: Option<SeriesData>,
+    pub smooth: Option<bool>,
+    pub invert_if_negative: Option<bool>,
     /// Series shape properties (`c:ser/c:spPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<ShapeStyle>,

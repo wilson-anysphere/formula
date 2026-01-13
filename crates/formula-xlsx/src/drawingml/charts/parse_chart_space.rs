@@ -272,11 +272,16 @@ fn parse_plot_area_model(
 ) -> PlotAreaModel {
     match chart_kind {
         ChartKind::Bar => PlotAreaModel::Bar(BarChartModel {
+            vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             bar_direction: child_attr(chart_node, "barDir", "val").map(str::to_string),
             grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
+            gap_width: child_attr(chart_node, "gapWidth", "val")
+                .and_then(|v| v.parse::<u16>().ok()),
+            overlap: child_attr(chart_node, "overlap", "val").and_then(|v| v.parse::<i16>().ok()),
             ax_ids: parse_ax_ids(chart_node),
         }),
         ChartKind::Line => PlotAreaModel::Line(LineChartModel {
+            vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
             ax_ids: parse_ax_ids(chart_node),
         }),
@@ -284,8 +289,10 @@ fn parse_plot_area_model(
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             first_slice_angle: child_attr(chart_node, "firstSliceAng", "val")
                 .and_then(|v| v.parse::<u32>().ok()),
+            hole_size: child_attr(chart_node, "holeSize", "val").and_then(|v| v.parse::<u8>().ok()),
         }),
         ChartKind::Scatter => PlotAreaModel::Scatter(ScatterChartModel {
+            vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             scatter_style: child_attr(chart_node, "scatterStyle", "val").map(str::to_string),
             ax_ids: parse_ax_ids(chart_node),
         }),
@@ -350,12 +357,18 @@ fn parse_series(
         .filter_map(parse_series_point_style)
         .collect();
 
+    let smooth = child_attr(series_node, "smooth", "val").map(parse_ooxml_bool);
+    let invert_if_negative =
+        child_attr(series_node, "invertIfNegative", "val").map(parse_ooxml_bool);
+
     SeriesModel {
         name,
         categories,
         values,
         x_values,
         y_values,
+        smooth,
+        invert_if_negative,
         style,
         marker,
         data_labels,

@@ -424,6 +424,8 @@ fn parse_series(
         values,
         x_values,
         y_values,
+        smooth: None,
+        invert_if_negative: None,
         style: None,
         marker: None,
         data_labels: None,

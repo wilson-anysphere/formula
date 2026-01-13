@@ -50,7 +50,8 @@
     "plotArea": {
       "kind": "pie",
       "varyColors": true,
-      "firstSliceAngle": 0
+      "firstSliceAngle": 0,
+      "holeSize": 50
     },
     "axes": [],
     "series": [
