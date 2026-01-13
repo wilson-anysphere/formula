@@ -687,9 +687,11 @@ class CapturingAuditStore implements AIAuditStore {
 }
 
 function formatUserMessage(text: string, attachments: AiChatAttachment[]): string {
-  const compacted = compactAttachmentsForPrompt(attachments);
-  if (!compacted.length) return text;
-  return `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(compacted)}`;
+  // Attachments passed to this helper are expected to be prompt-safe already
+  // (see `compactAttachmentsForPrompt` in `sendMessage`). Avoid re-compacting here
+  // so compaction remains idempotent (e.g. range/table attachments are force-truncated).
+  if (!attachments.length) return text;
+  return `${text}\n\nAttachments:\n${formatAttachmentsForPrompt(attachments)}`;
 }
 
 function formatAttachmentsForPrompt(attachments: AiChatAttachment[]) {
