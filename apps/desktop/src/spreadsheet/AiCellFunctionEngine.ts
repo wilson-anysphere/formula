@@ -1148,18 +1148,42 @@ function heuristicClassifyReferencedValue(params: {
 function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (Array.isArray(value)) return { ...DEFAULT_CLASSIFICATION };
   const scalar = isProvenanceCellValue(value) ? value.value : (value as SpreadsheetValue);
-  const text = formatScalar(scalar, { maxChars });
-  if (!text) return { ...DEFAULT_CLASSIFICATION };
+
+  // Heuristic classification is used to decide whether we should redact a value entirely.
+  // This should be conservative and resilient to prompt truncation (e.g. private key blocks
+  // can exceed `maxCellChars` but we still must not send any prefix).
+  //
+  // We scan up to `scanChars` (>= MAX_PROMPT_CHARS) of the raw scalar text rather than the
+  // prompt-formatted value, so detectors that rely on begin/end markers (PEM blocks, etc)
+  // can still fire even when the prompt would otherwise be truncated.
+  const scanChars = Math.max(maxChars, MAX_PROMPT_CHARS);
+
+  let rawText = "";
+  if (scalar === null) rawText = "";
+  else if (typeof scalar === "string") rawText = scalar;
+  else if (typeof scalar === "number") rawText = Number.isFinite(scalar) ? String(scalar) : "";
+  else if (typeof scalar === "boolean") rawText = scalar ? "TRUE" : "FALSE";
+  else rawText = String(scalar);
+
+  if (!rawText) return { ...DEFAULT_CLASSIFICATION };
+  const scanText = rawText.length > scanChars ? rawText.slice(0, scanChars) : rawText;
 
   // Conservative heuristic DLP scanner (defense-in-depth) from `@formula/ai-context`.
-  const sensitive = classifyText(text);
-  if (sensitive.level === "sensitive") {
-    // Map sensitive findings (emails, API keys, SSNs, etc.) to the most restrictive
-    // spreadsheet classification so cloud processing will be redacted/blocked by policy.
-    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["heuristic", ...(sensitive.findings ?? [])] };
+  const heuristic = classifyText(scanText);
+  if (heuristic?.level === "sensitive") {
+    const labels = (heuristic.findings || []).map((f: unknown) => `heuristic:${String(f)}`);
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
   }
 
-  const lowered = text.toLowerCase();
+  // Defense-in-depth for truncated PEM/PGP blocks: `classifyText` intentionally requires the
+  // full begin/end block to reduce false positives, but for AI prompts we should treat *any*
+  // private key header as sensitive (even if the tail of the block gets truncated).
+  const scanUpper = scanText.toUpperCase();
+  if (scanUpper.includes("-----BEGIN") && (scanUpper.includes("PRIVATE KEY-----") || scanUpper.includes("PGP PRIVATE KEY BLOCK-----"))) {
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["heuristic:private_key"] };
+  }
+
+  const lowered = scanText.toLowerCase();
   const labels = ["heuristic"];
   if (lowered.includes("password") || lowered.includes("ssn")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
   if (lowered.includes("top secret") || lowered.includes("secret")) return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
