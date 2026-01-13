@@ -75,3 +75,8 @@
     opacity: 1;
   }
 }
+
+:root[data-theme="high-contrast"] .auditing-legend__transitive,
+:root[data-theme="high-contrast"] .auditing-legend__errors {
+  opacity: 1;
+}
