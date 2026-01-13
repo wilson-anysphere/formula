@@ -26,6 +26,14 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
+ * Normalize newlines so `--check` is stable across platforms / git autocrlf settings.
+ * @param {string} value
+ */
+function normalizeNewlines(value) {
+  return value.replace(/\r\n/g, "\n");
+}
+
+/**
  * @param {string[]} argv
  * @returns {{ check: boolean; dateOverride: string | null }}
  */
@@ -205,20 +213,6 @@ async function generateTsvForLocale(locale, canonicalFunctionsSorted, date) {
     }
   }
 
-  // Detect duplicated localized spellings (case-insensitive) to avoid ambiguous parsing.
-  /** @type {Map<string, string>} */
-  const localizedUpperToCanonical = new Map();
-  for (const [canonical, localized] of translations) {
-    const upper = casefoldIdent(localized);
-    const existing = localizedUpperToCanonical.get(upper);
-    if (existing != null && existing !== canonical) {
-      throw new Error(
-        `Locale source ${path.relative(repoRoot, locale.sourcePath)} maps multiple functions to the same localized name: ${existing} and ${canonical} -> ${localized}`
-      );
-    }
-    localizedUpperToCanonical.set(upper, canonical);
-  }
-
   const header = [
     "# Canonical\tLocalized",
     `# Source: ${sourceLabel.trim()}`,
@@ -230,11 +224,19 @@ async function generateTsvForLocale(locale, canonicalFunctionsSorted, date) {
   /** @type {string[]} */
   const lines = [...header];
 
+  /** @type {Map<string, string>} */
+  const localizedToCanonical = new Map();
   for (const canonical of canonicalFunctionsSorted) {
     const translated = translations.get(canonical);
-    const localized =
-      translated == null ? canonical : casefoldIdent(translated) === canonical ? canonical : casefoldIdent(translated);
+    const localized = translated == null ? canonical : casefoldIdent(translated);
     validateTsvEntry(canonical, localized);
+    const existing = localizedToCanonical.get(localized);
+    if (existing != null && existing !== canonical) {
+      throw new Error(
+        `Locale source ${path.relative(repoRoot, locale.sourcePath)} maps multiple functions to the same localized name: ${existing} and ${canonical} -> ${localized}`
+      );
+    }
+    localizedToCanonical.set(localized, canonical);
     lines.push(`${canonical}\t${localized}`);
   }
 
@@ -304,7 +306,9 @@ for (const locale of locales) {
         throw err;
       }
     }
-    if (existing !== generated) {
+    const existingNormalized = existing == null ? null : normalizeNewlines(existing);
+    const generatedNormalized = normalizeNewlines(generated);
+    if (existingNormalized !== generatedNormalized) {
       hadMismatch = true;
       console.error(
         `Locale TSV mismatch: ${path.relative(repoRoot, locale.outputPath)} (run node scripts/generate-locale-function-tsv.js to update)`
