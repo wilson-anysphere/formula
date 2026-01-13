@@ -22,6 +22,12 @@ const SHA1_LEN: usize = 20;
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
 
+// CryptoAPI algorithm identifiers used by Standard encryption.
+const CALG_AES_128: u32 = 0x0000_660E;
+const CALG_AES_192: u32 = 0x0000_660F;
+const CALG_AES_256: u32 = 0x0000_6610;
+const CALG_SHA1: u32 = 0x0000_8004;
+
 /// Parsed `EncryptionVersionInfo` (MS-OFFCRYPTO).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EncryptionVersionInfo {
@@ -135,6 +141,8 @@ pub enum OffcryptoError {
     Truncated { context: &'static str },
     /// CSPName was not valid UTF-16LE.
     InvalidCspNameUtf16,
+    /// Standard encryption uses an algorithm not supported by the current implementation.
+    UnsupportedAlgorithm(u32),
     /// The stream contents are structurally invalid (e.g. missing required attributes).
     InvalidEncryptionInfo { context: &'static str },
     /// The `EncryptionInfo` version is not supported by the current parser.
@@ -164,6 +172,9 @@ impl fmt::Display for OffcryptoError {
                 write!(f, "truncated data while reading {context}")
             }
             OffcryptoError::InvalidCspNameUtf16 => write!(f, "invalid UTF-16LE CSPName"),
+            OffcryptoError::UnsupportedAlgorithm(id) => {
+                write!(f, "unsupported encryption algorithm id 0x{id:08X}")
+            }
             OffcryptoError::InvalidEncryptionInfo { context } => {
                 write!(f, "invalid EncryptionInfo: {context}")
             }
@@ -313,18 +324,46 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         csp_name: decode_csp_name_utf16le(hr.remaining())?,
     };
 
+    // Algorithm/parameter validation.
+    //
+    // Standard encryption produced by Excel uses AES + SHA1. Restrict the parser to this subset
+    // so downstream crypto code can rely on the parameters being consistent.
+    let expected_key_size = match header.alg_id {
+        CALG_AES_128 => 128,
+        CALG_AES_192 => 192,
+        CALG_AES_256 => 256,
+        other => return Err(OffcryptoError::UnsupportedAlgorithm(other)),
+    };
+    if header.key_size_bits != expected_key_size {
+        return Err(OffcryptoError::UnsupportedAlgorithm(header.alg_id));
+    }
+    if header.alg_id_hash != CALG_SHA1 {
+        return Err(OffcryptoError::UnsupportedAlgorithm(header.alg_id_hash));
+    }
+
     // EncryptionVerifier occupies the remaining bytes after the header.
     let salt_size = r.read_u32_le("EncryptionVerifier.saltSize")? as usize;
-    let salt = r
-        .take(salt_size, "EncryptionVerifier.salt")?
-        .to_vec();
+    if salt_size != 16 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.saltSize must be 16 for Standard encryption",
+        });
+    }
+    let salt = r.take(16, "EncryptionVerifier.salt")?.to_vec();
 
     let enc_ver = r.take(16, "EncryptionVerifier.encryptedVerifier")?;
     let mut encrypted_verifier = [0u8; 16];
     encrypted_verifier.copy_from_slice(enc_ver);
 
     let verifier_hash_size = r.read_u32_le("EncryptionVerifier.verifierHashSize")?;
-    let encrypted_verifier_hash = r.remaining().to_vec();
+    if verifier_hash_size != 20 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
+        });
+    }
+    // SHA1 hashes are 20 bytes, padded to an AES block boundary (16) => 32 bytes.
+    let encrypted_verifier_hash = r
+        .take(32, "EncryptionVerifier.encryptedVerifierHash")?
+        .to_vec();
 
     let verifier = StandardEncryptionVerifier {
         salt,
