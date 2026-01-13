@@ -74,7 +74,11 @@ export class ChunkedLocalStorageBinaryStorage {
     const namespace = opts.namespace ?? "formula.ai-rag.sqlite";
     this.key = `${namespace}:${opts.workbookId}`;
     this.metaKey = `${this.key}:meta`;
-    this.chunkSizeChars = Math.max(1, Math.floor(opts.chunkSizeChars ?? 1_000_000));
+    // Base64 is encoded in 4-character quanta. Normalize to a multiple of 4 so
+    // each stored chunk is independently decodable.
+    const rawChunkSizeChars = Math.max(1, Math.floor(opts.chunkSizeChars ?? 1_000_000));
+    const aligned = rawChunkSizeChars - (rawChunkSizeChars % 4);
+    this.chunkSizeChars = aligned >= 4 ? aligned : 4;
   }
 
   async load() {
@@ -135,8 +139,25 @@ export class ChunkedLocalStorageBinaryStorage {
       return null;
     }
 
-    /** @type {string[]} */
-    const parts = [];
+    // Decode chunk-by-chunk when possible (avoids joining a potentially huge
+    // base64 string in memory). Fall back to concatenating and decoding when
+    // existing chunk boundaries are not base64-aligned (older callers may have
+    // provided a chunkSizeChars that wasn't a multiple of 4).
+    const chunkIsDecodable = (part, index) => {
+      if (part.length % 4 !== 0) return false;
+      // Intermediate chunks should never contain padding. If they do, treat as
+      // legacy/untrusted and fall back to full join+decode.
+      if (index < chunks - 1 && part.includes("=")) return false;
+      return true;
+    };
+
+    const decodedLength = (encoded) => {
+      const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+      return (encoded.length * 3) / 4 - padding;
+    };
+
+    let canDecodeIndividually = true;
+    let totalBytes = 0;
     for (let i = 0; i < chunks; i += 1) {
       const part = storage.getItem(`${this.key}:${i}`);
       if (typeof part !== "string") {
@@ -148,20 +169,68 @@ export class ChunkedLocalStorageBinaryStorage {
         }
         return null;
       }
-      parts.push(part);
+      if (!chunkIsDecodable(part, i)) {
+        canDecodeIndividually = false;
+        break;
+      }
+      totalBytes += decodedLength(part);
     }
 
-    try {
-      return fromBase64(parts.join(""));
-    } catch {
-      // Corrupted base64 payload; clear persisted chunks.
-      try {
-        await this.remove();
-      } catch {
-        // ignore
+    if (!canDecodeIndividually) {
+      /** @type {string[]} */
+      const parts = [];
+      for (let i = 0; i < chunks; i += 1) {
+        const part = storage.getItem(`${this.key}:${i}`);
+        if (typeof part !== "string") {
+          try {
+            await this.remove();
+          } catch {
+            // ignore
+          }
+          return null;
+        }
+        parts.push(part);
       }
-      return null;
+
+      try {
+        return fromBase64(parts.join(""));
+      } catch {
+        // Corrupted base64 payload; clear persisted chunks.
+        try {
+          await this.remove();
+        } catch {
+          // ignore
+        }
+        return null;
+      }
     }
+
+    const out = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (let i = 0; i < chunks; i += 1) {
+      const part = storage.getItem(`${this.key}:${i}`);
+      if (typeof part !== "string") {
+        try {
+          await this.remove();
+        } catch {
+          // ignore
+        }
+        return null;
+      }
+      try {
+        const bytes = fromBase64(part);
+        out.set(bytes, offset);
+        offset += bytes.byteLength;
+      } catch {
+        try {
+          await this.remove();
+        } catch {
+          // ignore
+        }
+        return null;
+      }
+    }
+    return out;
   }
 
   /**
@@ -170,9 +239,6 @@ export class ChunkedLocalStorageBinaryStorage {
   async save(data) {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
-
-    const encoded = toBase64(data);
-    const chunks = encoded.length === 0 ? 0 : Math.ceil(encoded.length / this.chunkSizeChars);
 
     // Rollback protection: `setItem` can throw (quota / permissions). Since we write chunks to
     // stable keys (`${key}:0`, `${key}:1`, ...), a mid-write failure could otherwise corrupt
@@ -183,12 +249,49 @@ export class ChunkedLocalStorageBinaryStorage {
     const backups = [];
     const prevMeta = storage.getItem(this.metaKey);
 
+    /** @type {number} */
+    let chunks = 0;
+
     try {
-      for (let i = 0; i < chunks; i += 1) {
-        const chunkKey = `${this.key}:${i}`;
-        backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
-        const start = i * this.chunkSizeChars;
-        storage.setItem(chunkKey, encoded.slice(start, start + this.chunkSizeChars));
+      // Prefer Node's Buffer when available.
+      if (typeof Buffer !== "undefined") {
+        const encoded = toBase64(data);
+        chunks = encoded.length === 0 ? 0 : Math.ceil(encoded.length / this.chunkSizeChars);
+        for (let i = 0; i < chunks; i += 1) {
+          const chunkKey = `${this.key}:${i}`;
+          backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
+          const start = i * this.chunkSizeChars;
+          storage.setItem(chunkKey, encoded.slice(start, start + this.chunkSizeChars));
+        }
+      } else {
+        // Browser-safe streaming base64 encode + chunking (avoids building a full
+        // multi-MB base64 string in memory).
+        const MAX_FROM_CHAR_CODE_ARGS = 0x8000;
+        const BYTE_CHUNK_SIZE = MAX_FROM_CHAR_CODE_ARGS - (MAX_FROM_CHAR_CODE_ARGS % 3); // keep base64 alignment
+        let pending = "";
+        for (let i = 0; i < data.length; i += BYTE_CHUNK_SIZE) {
+          const chunk = data.subarray(i, i + BYTE_CHUNK_SIZE);
+          // eslint-disable-next-line prefer-spread
+          const binary = String.fromCharCode.apply(null, chunk);
+          // eslint-disable-next-line no-undef
+          pending += btoa(binary);
+
+          while (pending.length >= this.chunkSizeChars) {
+            const slice = pending.slice(0, this.chunkSizeChars);
+            pending = pending.slice(this.chunkSizeChars);
+            const chunkKey = `${this.key}:${chunks}`;
+            backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
+            storage.setItem(chunkKey, slice);
+            chunks += 1;
+          }
+        }
+
+        if (pending.length > 0) {
+          const chunkKey = `${this.key}:${chunks}`;
+          backups.push({ key: chunkKey, prev: storage.getItem(chunkKey) });
+          storage.setItem(chunkKey, pending);
+          chunks += 1;
+        }
       }
 
       storage.setItem(this.metaKey, JSON.stringify({ chunks }));
