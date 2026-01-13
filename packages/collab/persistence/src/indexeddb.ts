@@ -340,8 +340,14 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       // Optimization: if the document hasn't changed since the last compaction and the
       // underlying updates store is already compacted to a single record, avoid rewriting
       // the snapshot (which can be expensive for large docs and causes unnecessary IDB churn).
-      const localUpdateCount = this.updateCounts.get(docId) ?? 0;
-      if (localUpdateCount === 0) {
+      const localUpdateCount = this.updateCounts.get(docId);
+      // Only skip the rewrite if we've previously observed at least one post-sync update *or*
+      // successfully compacted once (we track that by setting `updateCounts`).
+      //
+      // This avoids skipping the very first compaction/flush in a new session, which could
+      // otherwise violate `flush()` durability guarantees if there are y-indexeddb writes
+      // still in flight from before we started counting updates.
+      if (localUpdateCount === 0 && this.updateCounts.has(docId)) {
         const persistedCount = await this.countUpdateRecords(db);
         if (persistedCount === 1) return;
       }
