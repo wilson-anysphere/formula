@@ -5,10 +5,32 @@ import { LocalPolicyStore } from "../../../../../packages/security/dlp/src/polic
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
 
+const AI_DLP_AUDIT_LOGGER_RETENTION_CAP = 1_000;
+
+class CappedInMemoryAuditLogger extends InMemoryAuditLogger {
+  private readonly retentionCap: number;
+
+  constructor(retentionCap: number) {
+    super();
+    this.retentionCap = retentionCap;
+  }
+
+  override log(event: any): string {
+    const id = super.log(event);
+    const excess = this.events.length - this.retentionCap;
+    if (excess > 0) this.events.splice(0, excess);
+    return id;
+  }
+}
+
+function createAiDlpAuditLogger(): InMemoryAuditLogger {
+  return new CappedInMemoryAuditLogger(AI_DLP_AUDIT_LOGGER_RETENTION_CAP);
+}
+
 let sharedAuditLogger: InMemoryAuditLogger | null = null;
 
 export function getAiDlpAuditLogger(): InMemoryAuditLogger {
-  if (!sharedAuditLogger) sharedAuditLogger = new InMemoryAuditLogger();
+  if (!sharedAuditLogger) sharedAuditLogger = createAiDlpAuditLogger();
   return sharedAuditLogger;
 }
 
@@ -19,7 +41,7 @@ export function getAiDlpAuditLogger(): InMemoryAuditLogger {
  * singleton keeps orchestration surfaces consistent and makes unit testing deterministic.
  */
 export function resetAiDlpAuditLoggerForTests(): void {
-  sharedAuditLogger = new InMemoryAuditLogger();
+  sharedAuditLogger = createAiDlpAuditLogger();
 }
 
 function safeStorage(storage: StorageLike): StorageLike {
