@@ -119,10 +119,17 @@ These indices are built eagerly when the relationship is added, and updated on `
 
 ### Cardinality
 
-Only `Cardinality::OneToMany` is currently supported.
+Supported cardinalities:
 
-Attempting to add a relationship with `OneToOne` or `ManyToMany` will return
-`DaxError::UnsupportedCardinality` (`engine.rs`).
+- `Cardinality::OneToMany`
+- `Cardinality::OneToOne`
+
+Unsupported:
+
+- `Cardinality::ManyToMany` (returns `DaxError::UnsupportedCardinality`)
+
+For `OneToOne` relationships, the engine enforces uniqueness on **both** sides when the relationship is
+added (`DaxError::NonUniqueKey`), treating `BLANK` as a real key for uniqueness checks.
 
 ### Cross-filter direction
 
@@ -247,8 +254,19 @@ into the in-memory table.
   Allowed row indices per table (usually produced by table expressions like `FILTER(...)`).
 - `active_relationship_overrides: HashSet<usize>`  
   Activated relationships (via `USERELATIONSHIP`).
+- `cross_filter_overrides: HashMap<usize, RelationshipOverride>`  
+  Per-relationship overrides (via `CROSSFILTER`) that can change `CrossFilterDirection` or disable a
+  relationship for the duration of evaluation.
 - `suppress_implicit_measure_context_transition: bool`  
   Internal flag used to keep `CALCULATE` semantics correct.
+
+Public helper APIs on `FilterContext` that are useful when calling the engine from Rust:
+
+- `FilterContext::with_column_equals(table, column, value)`
+- `FilterContext::with_column_in(table, column, values)`
+- `FilterContext::set_column_equals(table, column, value)`
+- `FilterContext::set_column_in(table, column, values)`
+- `FilterContext::clear_column_filter_public(table, column)`
 
 Filters combine with **AND** semantics:
 
@@ -300,10 +318,24 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
 1. `USERELATIONSHIP(TableA[Col], TableB[Col])`  
    Activates a relationship for this calculation.
 
-2. `ALL(Table)` and `ALL(Table[Column])`  
-   Clears filters on an entire table, or a specific column.
+2. `CROSSFILTER(TableA[Col], TableB[Col], direction)`  
+   Overrides relationship filtering for the duration of the evaluation.
 
-3. Column comparisons: `Table[Column] <op> <scalar>` where `<op>` is:
+   - `direction` is a bare identifier (parsed as `Expr::TableName`), one of:
+     - `BOTH`
+     - `ONEWAY` (or `SINGLE`)
+     - `NONE` (disables the relationship)
+
+3. `ALL(Table)` / `ALL(Table[Column])` and `REMOVEFILTERS(Table)` / `REMOVEFILTERS(Table[Column])`  
+   Clears filters on an entire table, or a specific column. (`REMOVEFILTERS` is treated as an alias for the
+   `ALL` filter-modifier semantics.)
+
+4. `KEEPFILTERS(innerFilterArg)`  
+   Wraps a normal filter argument but changes its semantics from “replace filters” to “intersect filters”.
+   Implementation note: `KEEPFILTERS` is supported only inside `CALCULATE` / `CALCULATETABLE`. It affects
+   whether the engine clears existing table/column filters before applying the new filter.
+
+5. Column comparisons: `Table[Column] <op> <scalar>` where `<op>` is:
    - `=` (direct value filter)
    - `<>`, `<`, `<=`, `>`, `>=` (implemented by scanning rows to compute the set of allowed values)
 
@@ -312,11 +344,18 @@ The engine supports the following filter argument forms (see `apply_calculate_fi
    - Non-equality comparisons currently build a *value set* by scanning rows under the current filters
      (except the column being filtered).
 
-4. Value-set filters: `VALUES(Table[Column])` or `DISTINCT(Table[Column])`  
+6. Value-set filters: `VALUES(Table[Column])` or `DISTINCT(Table[Column])`  
    Clears the column filter and replaces it with the set of distinct values visible under the current
    (post-transition) filter context.
 
-5. Table expressions (row filters): any supported table expression (including a bare `TableName`)  
+7. `TREATAS(VALUES(SourceTable[Col]), TargetTable[Col])` (or `TREATAS(DISTINCT(...), Target...)`)  
+   Applies the set of values from one column as a filter on another column.
+
+   Current limitations:
+   - The first argument must be `VALUES(column)` or `DISTINCT(column)`
+   - The second argument must be a target column reference
+
+8. Table expressions (row filters): any supported table expression (including a bare `TableName`)  
    The table expression is evaluated, and its resulting row set becomes an explicit `row_filter` for that
    table (intersected with any existing row filter).
 
@@ -331,7 +370,7 @@ Notable unsupported patterns:
 
 - Boolean filter expressions that are not a column comparison (e.g. `Fact[Amount] > 0 && ...`)
 - `IN` syntax (`Table[Col] IN {...}`) (not parsed)
-- `KEEPFILTERS`, `REMOVEFILTERS`, `TREATAS`, `CROSSFILTER`, etc. (not implemented)
+- Many other filter modifiers (`ALLSELECTED`, `FILTERS`, `ISCROSSFILTERED`, etc.)
 
 ---
 
@@ -419,6 +458,7 @@ Supported expression forms:
 - Unary minus: `-expr`
 - Binary operators:
   - arithmetic: `+ - * /`
+  - text concatenation: `&` (single ampersand)
   - comparisons: `= <> < <= > >=`
   - boolean: `&&` and `||`
 - Parentheses for grouping
@@ -428,7 +468,6 @@ Unsupported (not parsed):
 - `VAR` / `RETURN`
 - `{ ... }` table constructors
 - `IN` operator
-- `&` string concatenation operator
 - `;` argument separators (locale variants)
 
 ---
@@ -445,6 +484,7 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 
 - `TRUE()`, `FALSE()`, `BLANK()`
 - `IF(condition, then, [else])`
+- `SWITCH(expr, value1, result1, ..., [else])`
 - `DIVIDE(numerator, denominator, [alternateResult])`
 - `COALESCE(arg1, arg2, ...)`
 - `NOT(x)`
@@ -454,7 +494,11 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `AVERAGE(Table[Column])`
 - `MIN(Table[Column])`
 - `MAX(Table[Column])`
+- `COUNT(Table[Column])` (counts numeric values)
+- `COUNTA(Table[Column])` (counts non-blank values)
+- `COUNTBLANK(Table[Column])`
 - `DISTINCTCOUNT(Table[Column])`
+- `DISTINCTCOUNTNOBLANK(Table[Column])`
 - `COUNTROWS(tableExpr)`
 - `SUMX(tableExpr, valueExpr)`
 - `AVERAGEX(tableExpr, valueExpr)`
@@ -463,6 +507,8 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 - `COUNTX(tableExpr, valueExpr)`
 - `HASONEVALUE(Table[Column])`
 - `SELECTEDVALUE(Table[Column], [alternateResult])`
+- `LOOKUPVALUE(ResultTable[ResultCol], SearchTable[SearchCol1], SearchValue1, ..., [alternateResult])`  
+  (current MVP restriction: all search columns must be in the same table as the result column)
 - `CALCULATE(expr, filter1, filter2, ...)`
 - `RELATED(Table[Column])` (requires row context)
 
@@ -481,6 +527,10 @@ If a function is not listed here, it is currently unsupported and will evaluate 
 ### Filter modifiers inside `CALCULATE`
 
 - `USERELATIONSHIP(TableA[Col], TableB[Col])`
+- `CROSSFILTER(TableA[Col], TableB[Col], BOTH|ONEWAY|SINGLE|NONE)`
+- `TREATAS(VALUES(Source[Col])|DISTINCT(Source[Col]), Target[Col])` (limited)
+- `KEEPFILTERS(innerFilterArg)` (supported only as a wrapper inside `CALCULATE` / `CALCULATETABLE`)
+- `REMOVEFILTERS(Table|Table[Column])` (alias for `ALL`-style clearing inside `CALCULATE`)
 
 ---
 
@@ -549,7 +599,7 @@ assert_eq!(result.columns, vec!["Fact[Category]".to_string(), "Total".to_string(
 This is not an exhaustive list, but the most common contributor-facing constraints:
 
 - **Relationships**
-  - Only one-to-many relationships are supported.
+  - `OneToMany` and `OneToOne` are supported; `ManyToMany` is not.
   - Only single-column relationships are supported.
 - **DAX language coverage**
   - No variables (`VAR`/`RETURN`), no `IN`, no table constructors.

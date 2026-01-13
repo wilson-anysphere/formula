@@ -28,7 +28,7 @@ use std::sync::Arc;
 ///
 /// [`AggOp::DistinctCount`] counts distinct **non-null** values. For `ColumnType::Number` it
 /// canonicalizes `-0.0` to `0.0` and all NaN bit patterns to a single canonical NaN (mirroring
-/// [`canonical_f64_bits`]) before deduplication.
+/// the internal `canonical_f64_bits` normalization) before deduplication.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AggOp {
     Count,
