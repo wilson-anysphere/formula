@@ -184,6 +184,11 @@ jobs:
         # without paying the JS dependency install cost.
         run: node packages/engine/scripts/build-wasm.mjs
 
+      - name: Run formula-wasm wasm-bindgen tests (node)
+        # Ensure our wasm-bindgen exports (including optional engines like formula-dax)
+        # remain usable in JS runtimes.
+        run: wasm-pack test crates/formula-wasm --node --release
+
       - name: Smoke-check WASM assets (no pnpm install)
         run: node packages/engine/scripts/smoke-wasm.mjs
 
