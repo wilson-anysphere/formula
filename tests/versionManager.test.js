@@ -144,3 +144,59 @@ test("VersionManager.destroy unsubscribes from doc updates (unsubscribe-returnin
   doc.emitUpdate();
   assert.equal(vm.dirty, false);
 });
+
+test("VersionManager.destroy cleans up an in-flight autosnapshot save", async () => {
+  const doc = new FakeDoc();
+
+  class DeferredStore extends InMemoryVersionStore {
+    constructor() {
+      super();
+      this._deferred = null;
+      this.saveStarted = false;
+    }
+
+    defer() {
+      /** @type {{ promise: Promise<void>, resolve: () => void }} */
+      const deferred = {};
+      deferred.promise = new Promise((resolve) => {
+        deferred.resolve = () => resolve();
+      });
+      // @ts-expect-error - assigned above
+      this._deferred = deferred;
+      return deferred;
+    }
+
+    async saveVersion(version) {
+      this.saveStarted = true;
+      if (this._deferred) {
+        await this._deferred.promise;
+      }
+      return await super.saveVersion(version);
+    }
+  }
+
+  const store = new DeferredStore();
+  const deferred = store.defer();
+
+  const vm = new VersionManager({ doc, store, autoStart: false, autoSnapshotIntervalMs: 1 });
+
+  // Mark dirty and start an autosnapshot tick.
+  doc.setCell("r0c0", { value: 1 });
+  assert.equal(vm.dirty, true);
+
+  const tickPromise = vm._autoSnapshotTick();
+
+  // Wait until saveVersion has started (tick is now awaiting our deferred).
+  while (!store.saveStarted) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // Destroy while the autosnapshot is in-flight.
+  vm.destroy();
+  deferred.resolve();
+
+  await tickPromise;
+
+  const versions = await store.listVersions();
+  assert.equal(versions.length, 0);
+});

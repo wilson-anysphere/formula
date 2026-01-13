@@ -290,6 +290,16 @@ export class VersionManager extends SimpleEventEmitter {
     const version = await this._createVersion({
       kind: "snapshot",
     });
+    // If we're destroyed while an autosnapshot is in flight (e.g. interval tick
+    // awaited store writes), ensure we don't leave behind a stray snapshot.
+    if (this._destroyed) {
+      try {
+        await this.store.deleteVersion(version.id);
+      } catch {
+        // ignore (best-effort cleanup)
+      }
+      return null;
+    }
     this.dirty = false;
     return version;
   }
