@@ -5,7 +5,7 @@ import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { showInputBox } from "../../extensions/ui.js";
 
-import { FormulaDiffView } from "../version-history/FormulaDiffView.js";
+import { FormulaDiffView } from "../../versioning/ui/FormulaDiffView.js";
 
 export type Cell = { value?: unknown; formula?: string; format?: Record<string, unknown>; enc?: unknown };
 
@@ -233,7 +233,7 @@ function CellInlineView({ cell }: { cell: Cell | null }) {
   if (!cell) return <span className="branch-merge__empty">∅</span>;
   if (cellHasEnc(cell)) return <span className="branch-merge__encrypted">{encryptedCellText(cell.enc)}</span>;
   if (cellHasFormula(cell)) {
-    return <FormulaDiffView oldFormula={cell.formula ?? null} newFormula={cell.formula ?? null} />;
+    return <FormulaDiffView before={cell.formula ?? null} after={cell.formula ?? null} />;
   }
   if (cellHasValue(cell)) return <span className="branch-merge__value">{valueSummary(cell.value)}</span>;
   return <span className="branch-merge__empty">∅</span>;
@@ -279,7 +279,7 @@ function CellConflictColumn({
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">Formula</div>
           <div className="branch-merge__cell-section-body">
-            <FormulaDiffView oldFormula={formulaOld} newFormula={formulaNew} />
+            <FormulaDiffView before={formulaOld} after={formulaNew} />
           </div>
         </div>
       ) : null}

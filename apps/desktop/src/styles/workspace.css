@@ -639,26 +639,6 @@
     monospace;
 }
 
-.branch-merge__formula-diff {
-  /* Keep long formulas readable inside the three-column layout. */
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.branch-merge__diff-token {
-  padding: 0 1px;
-  border-radius: 2px;
-}
-
-.branch-merge__diff-token--insert {
-  background: var(--success-bg);
-}
-
-.branch-merge__diff-token--delete {
-  background: var(--error-bg);
-  text-decoration: line-through;
-}
-
 .branch-merge__resolution-actions button {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
