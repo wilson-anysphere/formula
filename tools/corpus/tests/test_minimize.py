@@ -259,6 +259,128 @@ class CorpusMinimizeTests(unittest.TestCase):
             ]
             self.assertNotIn("theme/theme1.xml", targets)
 
+    def test_minimize_workbook_package_greedy_removal_stops_on_changed_critical_set(self) -> None:
+        # Build a tiny (synthetic) XLSX-like zip with a removable theme part + a large binary part.
+        # We'll mock `minimize_workbook` so we can unit test the greedy removal logic without
+        # invoking Rust.
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/xl/big.bin" ContentType="application/octet-stream"/>
+</Types>
+""",
+            )
+            z.writestr(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+            )
+            z.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>
+""",
+            )
+            z.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>
+""",
+            )
+            z.writestr(
+                "xl/styles.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+""",
+            )
+            z.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>
+""",
+            )
+            z.writestr("xl/theme/theme1.xml", b"x" * 2000)
+            z.writestr("xl/theme/_rels/theme1.xml.rels", b"y" * 50)
+            z.writestr("xl/big.bin", b"z" * 1500)
+
+        data = buf.getvalue()
+        wb = WorkbookInput(display_name="book.xlsx", data=data)
+
+        baseline = {
+            "open_ok": True,
+            "round_trip_ok": False,
+            "critical_parts": ["xl/workbook.xml"],
+            "diff_counts": {"critical": 1, "warning": 0, "info": 0, "total": 1},
+        }
+
+        def fake_minimize_workbook(workbook: WorkbookInput, **_kwargs):  # type: ignore[no-untyped-def]
+            with zipfile.ZipFile(io.BytesIO(workbook.data), "r") as z:
+                names = {info.filename for info in z.infolist() if not info.is_dir()}
+            # Pretend removing `xl/big.bin` changes the critical diff signature, so the minimizer
+            # should reject that removal.
+            if "xl/big.bin" not in names:
+                return {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "critical_parts": ["xl/workbook.xml", "xl/_rels/workbook.xml.rels"],
+                    "diff_counts": {"critical": 2, "warning": 0, "info": 0, "total": 2},
+                }
+            return baseline
+
+        original = minimize_mod.minimize_workbook  # noqa: SLF001
+        try:
+            minimize_mod.minimize_workbook = fake_minimize_workbook  # type: ignore[assignment]
+            with tempfile.TemporaryDirectory() as tmpdir:
+                out_xlsx = Path(tmpdir) / "min.xlsx"
+                _summary, removed, out_bytes = minimize_mod.minimize_workbook_package(
+                    wb,
+                    rust_exe=Path("noop"),
+                    diff_ignore=set(),
+                    diff_limit=0,
+                    out_xlsx=out_xlsx,
+                    max_steps=50,
+                    baseline=baseline,
+                )
+        finally:
+            minimize_mod.minimize_workbook = original  # type: ignore[assignment]
+
+        self.assertIn("xl/theme/theme1.xml", removed)
+        self.assertIn("xl/theme/_rels/theme1.xml.rels", removed)
+        self.assertNotIn("xl/big.bin", removed)
+
+        with zipfile.ZipFile(io.BytesIO(out_bytes), "r") as z:
+            names = {info.filename for info in z.infolist() if not info.is_dir()}
+            self.assertNotIn("xl/theme/theme1.xml", names)
+            self.assertNotIn("xl/theme/_rels/theme1.xml.rels", names)
+            self.assertIn("xl/big.bin", names)
+
+            rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            targets = [
+                el.attrib.get("Target", "")
+                for el in rels
+                if el.tag.split("}")[-1] == "Relationship"
+            ]
+            self.assertNotIn("theme/theme1.xml", targets)
+
 
 if __name__ == "__main__":
     unittest.main()

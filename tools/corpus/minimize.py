@@ -409,8 +409,8 @@ def minimize_workbook_package(
     This is a best-effort "Phase 2" minimizer. It is intentionally conservative:
     - never removes required core parts needed for loadability
     - only removes parts *not* in the initial critical part set
-    - after each removal, reruns triage and only accepts the change if the original critical
-      parts are still present in the new critical set.
+    - after each removal, reruns triage and only accepts the change if the critical diff
+      signature is unchanged (same set of critical parts + same overall critical count).
     """
 
     baseline_summary = baseline or minimize_workbook(
@@ -422,12 +422,11 @@ def minimize_workbook_package(
     baseline_critical = set(baseline_summary.get("critical_parts") or [])
     if not baseline_critical:
         raise RuntimeError("workbook has no critical diffs; nothing to minimize")
+    baseline_critical_count = int((baseline_summary.get("diff_counts") or {}).get("critical") or 0)
 
     parts = _read_zip_parts(workbook.data)
     required = _required_core_parts(parts)
-    # Keep all `.rels` parts by default to avoid introducing new CRITICAL extra_part diffs.
-    rels_parts = {p for p in parts if p.endswith(".rels")}
-    always_keep = required | baseline_critical | rels_parts
+    always_keep = required | baseline_critical
 
     candidates = [
         p
@@ -452,7 +451,7 @@ def minimize_workbook_package(
         keep.remove(part)
 
         # Always keep baseline critical parts and required core parts.
-        keep |= baseline_critical | required | rels_parts
+        keep |= baseline_critical | required
 
         trial_bytes = prune_xlsx_parts(
             current_bytes,
@@ -469,7 +468,13 @@ def minimize_workbook_package(
 
         trial_open_ok = trial_summary.get("open_ok") is True
         trial_critical = set(trial_summary.get("critical_parts") or [])
-        if trial_open_ok and baseline_critical.issubset(trial_critical):
+        trial_critical_count = int((trial_summary.get("diff_counts") or {}).get("critical") or 0)
+        if (
+            trial_open_ok
+            and trial_summary.get("round_trip_ok") == baseline_summary.get("round_trip_ok")
+            and trial_critical == baseline_critical
+            and trial_critical_count == baseline_critical_count
+        ):
             removed.append(part)
             current_bytes = trial_bytes
             current_summary = trial_summary
