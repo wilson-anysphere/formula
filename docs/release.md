@@ -320,7 +320,8 @@ Expected `{{target}}` values for this repo’s release matrix:
 - **macOS (universal):** `darwin-aarch64` and `darwin-x86_64` (both should be present; they may point
   at the same universal updater payload, typically an `.app.tar.gz`).
 - **Windows:** `windows-x86_64` and `windows-aarch64` (one entry per architecture; points at the
-  Windows installer used by the updater, typically `.msi` or `.exe`).
+  Windows installer used by the updater. The release workflow builds **both** `.msi` (WiX) and
+  `.exe` (NSIS) installers, but `latest.json` will typically reference just one per architecture.)
 - **Linux:** `linux-x86_64` (points at the updater payload, typically the `.AppImage`).
 
 For reference, this is how the release workflow’s Tauri build targets map to updater targets:
@@ -328,8 +329,8 @@ For reference, this is how the release workflow’s Tauri build targets map to u
 | Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
 | --- | --- | --- | --- |
 | macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-aarch64`, `darwin-x86_64` |
-| Windows x64 | _(default)_ | `x86_64-pc-windows-msvc` | `windows-x86_64` |
-| Windows ARM64 | `--target aarch64-pc-windows-msvc` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
+| Windows x64 | `--target x86_64-pc-windows-msvc --bundles msi,nsis` | `x86_64-pc-windows-msvc` | `windows-x86_64` |
+| Windows ARM64 | `--target aarch64-pc-windows-msvc --bundles msi,nsis` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
 | Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
 
 Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
@@ -467,15 +468,20 @@ are attached:
 1. Open the GitHub Release (draft) and confirm:
    - Updater metadata: `latest.json` and `latest.json.sig`
    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
-   - Windows **x64**: installer (NSIS `.exe` and/or `.msi`, usually includes `x64` in the filename)
-   - Windows **ARM64**: installer (NSIS `.exe` and/or `.msi`, usually includes `arm64` in the filename)
+   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `x64` in the filename)
+   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `arm64` in the filename)
    - Linux: `.AppImage` + `.deb` + `.rpm`
 
    If the release was built with updater signing secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`),
    expect a corresponding `.sig` signature file uploaded alongside the updater-consumed artifacts:
    - macOS: `.app.tar.gz.sig`
-   - Windows: installer `.sig` (`.msi.sig` and/or `.exe.sig`)
+   - Windows: installer `.sig` (`.msi.sig` and `.exe.sig`)
    - Linux: `.AppImage.sig`
+
+   Note: the release workflow enforces that each Windows target produces **both** a `.msi` and a
+   `.exe` installer under `apps/desktop/src-tauri/target/<triple>/release/bundle/**`. If the MSI
+   bundler regresses (e.g. missing WiX toolset support for ARM64), the workflow fails so we don’t
+   ship a Windows release that violates the distribution requirement.
 
    Note: this repo also uploads `.sig` files for the Linux `.deb` and `.rpm` bundles (used for
    manual install/downgrade), even though the Tauri updater typically uses the `.AppImage` on Linux.

@@ -95,12 +95,12 @@ jobs:
             label: windows-2022 (x64)
             cache_target: x86_64-pc-windows-msvc
             rust_target: x86_64-pc-windows-msvc
-            tauri_args: "--target x86_64-pc-windows-msvc"
+            tauri_args: "--target x86_64-pc-windows-msvc --bundles msi,nsis"
           - platform: windows-2022
             label: windows-2022 (arm64)
             cache_target: aarch64-pc-windows-msvc
             rust_target: aarch64-pc-windows-msvc
-            tauri_args: "--target aarch64-pc-windows-msvc"
+            tauri_args: "--target aarch64-pc-windows-msvc --bundles msi,nsis"
 
     runs-on: ${{ matrix.platform }}
 
@@ -215,6 +215,29 @@ jobs:
           }
           if (-not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
             throw "WiX Toolset installation failed: light.exe not found on PATH."
+          }
+
+      - name: Install NSIS (required for EXE builds)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # Tauri's NSIS bundler requires makensis.exe. If it's missing, Tauri may
+          # skip EXE generation without failing the overall build. Install NSIS
+          # deterministically so Windows releases always include both `.exe` and `.msi`.
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            choco install nsis --yes --no-progress
+
+            # Ensure the newly-installed tools are visible in the current step.
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            throw "NSIS installation failed: makensis.exe not found on PATH."
           }
 
       - name: Cache cargo registry + git
@@ -377,13 +400,22 @@ jobs:
             throw "windows-bundle: ERROR expected Tauri bundle dir not found: $bundleDir"
           }
 
-          $installers = Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi, *.exe -ErrorAction SilentlyContinue
-          if (-not $installers -or $installers.Count -eq 0) {
-            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir"
+          # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
+          $msis = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.msi -ErrorAction SilentlyContinue)
+          $exes = @(Get-ChildItem -Path $bundleDir -Recurse -File -Include *.exe -ErrorAction SilentlyContinue)
+
+          if ($msis.Count -eq 0) {
+            throw "windows-bundle: ERROR missing required Windows MSI installer under: $bundleDir"
+          }
+          if ($exes.Count -eq 0) {
+            throw "windows-bundle: ERROR missing required Windows EXE (NSIS) installer under: $bundleDir"
           }
 
-          Write-Host "windows-bundle: OK (found $($installers.Count) installer file(s))"
-          $installers | ForEach-Object { Write-Host " - $($_.FullName)" }
+          Write-Host "windows-bundle: OK (found $($msis.Count) MSI + $($exes.Count) EXE installer file(s))"
+          Write-Host "MSI installers:"
+          $msis | ForEach-Object { Write-Host " - $($_.FullName)" }
+          Write-Host "EXE installers:"
+          $exes | ForEach-Object { Write-Host " - $($_.FullName)" }
 
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
         if: runner.os == 'Windows'
