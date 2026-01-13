@@ -82,6 +82,22 @@ function canonicalizeFunctionNameForLocale(name: string, localeId: string): stri
   return hasPrefix ? `${PREFIX}${mapped}` : mapped;
 }
 
+function canonicalizeInCallContext(
+  ctx: PartialFormulaContext,
+  localeId: string,
+  functionRegistry: RangeArgRegistry,
+): PartialFormulaContext {
+  if (!ctx?.isFormula || !ctx.inFunctionCall || typeof ctx.functionName !== "string") return ctx;
+  const argIndex = Number.isInteger(ctx.argIndex) ? (ctx.argIndex as number) : 0;
+  const canonicalFnName = canonicalizeFunctionNameForLocale(ctx.functionName, localeId);
+  if (!canonicalFnName || canonicalFnName === ctx.functionName) return ctx;
+  return {
+    ...ctx,
+    functionName: canonicalFnName,
+    expectingRange: Boolean(functionRegistry?.isRangeArg?.(canonicalFnName, argIndex)),
+  };
+}
+
 function isAsciiLetter(ch: string): boolean {
   return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
 }
@@ -396,14 +412,21 @@ export function createLocaleAwarePartialFormulaParser(options: {
       return { isFormula: false, inFunctionCall: false };
     }
 
+    const localeId = getLocale();
     const engine = getEngineClient();
     if (!engine) {
-      return parsePartialFormulaFallback(input, cursor, functionRegistry);
+      return canonicalizeInCallContext(
+        parsePartialFormulaFallback(input, cursor, functionRegistry),
+        localeId,
+        functionRegistry
+      );
     }
-
-    const localeId = getLocale();
     if (unsupportedLocaleIds.has(localeId)) {
-      return parsePartialFormulaFallback(input, cursor, functionRegistry);
+      return canonicalizeInCallContext(
+        parsePartialFormulaFallback(input, cursor, functionRegistry),
+        localeId,
+        functionRegistry
+      );
     }
 
     try {
@@ -427,6 +450,10 @@ export function createLocaleAwarePartialFormulaParser(options: {
       }
     }
 
-    return parsePartialFormulaFallback(input, cursor, functionRegistry);
+    return canonicalizeInCallContext(
+      parsePartialFormulaFallback(input, cursor, functionRegistry),
+      localeId,
+      functionRegistry
+    );
   };
 }
