@@ -167,12 +167,14 @@ export function MergeBranchPanel({
   branchService,
   sourceBranch,
   sheetNameResolver = null,
+  mutationsDisabled = false,
   onClose
 }: {
   actor: Actor;
   branchService: BranchService;
   sourceBranch: string;
   sheetNameResolver?: SheetNameResolver | null;
+  mutationsDisabled?: boolean;
   onClose: () => void;
 }) {
   const [preview, setPreview] = useState<MergePreview | null>(null);
@@ -180,6 +182,7 @@ export function MergeBranchPanel({
   const [resolutions, setResolutions] = useState<Map<number, ConflictResolution>>(new Map());
 
   useEffect(() => {
+    if (mutationsDisabled) return;
     void (async () => {
       try {
         setError(null);
@@ -188,7 +191,7 @@ export function MergeBranchPanel({
         setError((e as Error).message);
       }
     })();
-  }, [actor, branchService, sourceBranch]);
+  }, [actor, branchService, sourceBranch, mutationsDisabled]);
 
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
 
@@ -257,6 +260,7 @@ export function MergeBranchPanel({
 
               <div className="branch-merge__resolution-actions">
                 <button
+                  disabled={mutationsDisabled}
                   onClick={() => {
                     setResolutions(new Map(resolutions).set(idx, { conflictIndex: idx, choice: "ours" }));
                   }}
@@ -264,6 +268,7 @@ export function MergeBranchPanel({
                   {t("branchMerge.chooseOurs")}
                 </button>
                 <button
+                  disabled={mutationsDisabled}
                   onClick={() => {
                     setResolutions(new Map(resolutions).set(idx, { conflictIndex: idx, choice: "theirs" }));
                   }}
@@ -271,6 +276,7 @@ export function MergeBranchPanel({
                   {t("branchMerge.chooseTheirs")}
                 </button>
                 <button
+                  disabled={mutationsDisabled}
                   onClick={async () => {
                     try {
                       const manual =
@@ -341,7 +347,7 @@ export function MergeBranchPanel({
           <div className="branch-merge__footer-actions">
             <button onClick={onClose}>{t("branchMerge.cancel")}</button>
             <button
-              disabled={preview.conflicts.length !== resolutions.size}
+              disabled={mutationsDisabled || preview.conflicts.length !== resolutions.size}
               onClick={async () => {
                 try {
                   setError(null);

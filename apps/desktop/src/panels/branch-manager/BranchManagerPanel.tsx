@@ -39,11 +39,13 @@ export type BranchService = {
 export function BranchManagerPanel({
   actor,
   branchService,
-  onStartMerge
+  onStartMerge,
+  mutationsDisabled = false,
 }: {
   actor: Actor;
   branchService: BranchService;
   onStartMerge: (sourceBranch: string) => void;
+  mutationsDisabled?: boolean;
 }) {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [currentBranchName, setCurrentBranchName] = useState<string | null>(null);
@@ -89,10 +91,10 @@ export function BranchManagerPanel({
           value={newBranchName}
           onChange={(e) => setNewBranchName(e.target.value)}
           placeholder={t("branchManager.newBranch.placeholder")}
-          disabled={!canManage}
+          disabled={!canManage || mutationsDisabled}
         />
         <button
-          disabled={!canManage || !newBranchName.trim()}
+          disabled={!canManage || mutationsDisabled || !newBranchName.trim()}
           onClick={async () => {
             try {
               await branchService.createBranch(actor, { name: newBranchName.trim() });
@@ -124,7 +126,7 @@ export function BranchManagerPanel({
             </div>
             <div className="branch-manager__item-actions">
               <button
-                disabled={!canManage}
+                disabled={!canManage || mutationsDisabled}
                 onClick={async () => {
                   const newName = await showInputBox({ prompt: t("branchManager.prompt.rename"), value: b.name });
                   const trimmed = newName?.trim();
@@ -140,7 +142,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.rename")}
               </button>
               <button
-                disabled={!canManage || isCurrent}
+                disabled={!canManage || mutationsDisabled || isCurrent}
                 onClick={async () => {
                   try {
                     await branchService.checkoutBranch(actor, { name: b.name });
@@ -153,7 +155,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.switch")}
               </button>
               <button
-                disabled={!canManage || b.name === "main" || isCurrent}
+                disabled={!canManage || mutationsDisabled || b.name === "main" || isCurrent}
                 onClick={async () => {
                   const ok = await nativeDialogs.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }));
                   if (!ok) return;
@@ -168,7 +170,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.delete")}
               </button>
               <button
-                disabled={!canManage}
+                disabled={!canManage || mutationsDisabled}
                 onClick={() => onStartMerge(b.name)}
               >
                 {t("branchManager.actions.merge")}
