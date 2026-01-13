@@ -532,6 +532,102 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  const setZoomPercent = (percent: number): void => {
+    if (!app.supportsZoom()) return;
+    const value = typeof percent === "number" ? percent : Number(percent);
+    if (!Number.isFinite(value) || value <= 0) return;
+    app.setZoom(value / 100);
+  };
+
+  const registerZoomPreset = (percent: number): void => {
+    const value = Math.round(percent);
+    const id = `view.zoom.zoom${value}`;
+    commandRegistry.registerBuiltinCommand(
+      id,
+      t(`command.${id}`),
+      () => {
+        setZoomPercent(value);
+        if (!app.supportsZoom()) return;
+        app.focus();
+      },
+      {
+        category: t("commandCategory.view"),
+        icon: null,
+        description: t(`commandDescription.${id}`),
+        keywords: ["zoom", `${value}%`, "view", "scale"],
+      },
+    );
+  };
+
+  for (const percent of [25, 50, 75, 100, 150, 200, 400]) {
+    registerZoomPreset(percent);
+  }
+
+  commandRegistry.registerBuiltinCommand(
+    "view.zoom.set",
+    t("command.view.zoom.set"),
+    async (...args: any[]) => {
+      if (!app.supportsZoom()) return;
+      if (args.length === 0) {
+        await commandRegistry.executeCommand("view.zoom.openPicker");
+        return;
+      }
+      const percent = Number(args[0]);
+      if (!Number.isFinite(percent) || percent <= 0) return;
+      setZoomPercent(percent);
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.zoom.set"),
+      keywords: ["zoom", "view", "scale", "percent"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.zoom.zoomToSelection",
+    t("command.view.zoom.zoomToSelection"),
+    () => {
+      if (!app.supportsZoom()) return;
+      app.zoomToSelection();
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.zoom.zoomToSelection"),
+      keywords: ["zoom", "selection", "fit", "view"],
+    },
+  );
+
+  const zoomPickerTitle = t("command.view.zoom.openPicker");
+  commandRegistry.registerBuiltinCommand(
+    "view.zoom.openPicker",
+    zoomPickerTitle,
+    async () => {
+      if (!app.supportsZoom()) return;
+      // Keep the custom zoom picker aligned with the shared-grid zoom clamp
+      // (currently 25%–400%, Excel-style).
+      const baseOptions = [25, 50, 75, 100, 125, 150, 200, 400];
+      const current = Math.round(app.getZoom() * 100);
+      const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
+      const picked = await showQuickPick(
+        options.map((value) => ({ label: `${value}%`, value })),
+        { placeHolder: zoomPickerTitle },
+      );
+      if (picked == null) return;
+      setZoomPercent(picked);
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.zoom.openPicker"),
+      keywords: ["zoom", "custom zoom", "view", "scale"],
+    },
+  );
+
   commandRegistry.registerBuiltinCommand(
     "audit.tracePrecedents",
     t("command.audit.tracePrecedents"),

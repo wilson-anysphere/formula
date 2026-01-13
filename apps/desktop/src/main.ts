@@ -8633,42 +8633,6 @@ mountRibbon(ribbonReactRoot, {
       }));
     };
 
-    const openCustomZoomQuickPick = async (): Promise<void> => {
-      if (!app.supportsZoom()) return;
-      // Keep the custom zoom picker aligned with the shared-grid zoom clamp
-      // (currently 25%–400%, Excel-style).
-      const baseOptions = [25, 50, 75, 100, 125, 150, 200, 400];
-      const current = Math.round(app.getZoom() * 100);
-      const options = baseOptions.includes(current) ? baseOptions : [current, ...baseOptions];
-      const picked = await showQuickPick(
-        options.map((value) => ({ label: `${value}%`, value })),
-        { placeHolder: "Zoom" },
-      );
-      if (picked == null) return;
-      app.setZoom(picked / 100);
-      syncZoomControl();
-      app.focus();
-    };
-
-    const zoomMenuItemPrefix = "view.zoom.zoom.";
-    if (commandId.startsWith(zoomMenuItemPrefix)) {
-      const suffix = commandId.slice(zoomMenuItemPrefix.length);
-      if (suffix === "custom") {
-        void openCustomZoomQuickPick();
-        return;
-      }
-
-      const percent = Number(suffix);
-      if (Number.isFinite(percent) && Number.isInteger(percent) && percent > 0) {
-        if (!app.supportsZoom()) return;
-
-        app.setZoom(percent / 100);
-        syncZoomControl();
-        app.focus();
-        return;
-      }
-    }
-
     const fontNamePrefix = "home.font.fontName.";
     if (commandId.startsWith(fontNamePrefix)) {
       const preset = commandId.slice(fontNamePrefix.length);
@@ -9668,19 +9632,6 @@ mountRibbon(ribbonReactRoot, {
       case "unfreeze-panes":
         app.unfreezePanes();
         app.focus();
-        return;
-      case "view.zoom.zoom100":
-        app.setZoom(1);
-        syncZoomControl();
-        app.focus();
-        return;
-      case "view.zoom.zoomToSelection":
-        app.zoomToSelection();
-        syncZoomControl();
-        app.focus();
-        return;
-      case "view.zoom.zoom":
-        void openCustomZoomQuickPick();
         return;
       default:
         // If the ribbon command matches a registered command id (builtin or extension),

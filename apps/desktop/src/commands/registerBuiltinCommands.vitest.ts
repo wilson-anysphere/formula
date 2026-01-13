@@ -507,6 +507,56 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.cutToClipboard).not.toHaveBeenCalled();
     expect(app.pasteFromClipboard).not.toHaveBeenCalled();
   });
+
+  it("executes view.zoom.zoom100 by setting zoom=1 (100%)", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      supportsZoom: vi.fn(() => true),
+      setZoom: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+    await commandRegistry.executeCommand("view.zoom.zoom100");
+
+    expect(app.setZoom).toHaveBeenCalledWith(1);
+    expect(app.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("executes view.zoom.zoomToSelection by invoking SpreadsheetApp.zoomToSelection", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      supportsZoom: vi.fn(() => true),
+      zoomToSelection: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+    await commandRegistry.executeCommand("view.zoom.zoomToSelection");
+
+    expect(app.zoomToSelection).toHaveBeenCalledTimes(1);
+    expect(app.focus).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("registerBuiltinCommands: theme preference commands", () => {

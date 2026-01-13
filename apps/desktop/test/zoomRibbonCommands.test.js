@@ -21,14 +21,14 @@ test("Ribbon schema includes View → Zoom command ids", () => {
     "view.zoom.zoomToSelection",
 
     // Zoom dropdown menu items.
-    "view.zoom.zoom.400",
-    "view.zoom.zoom.200",
-    "view.zoom.zoom.150",
-    "view.zoom.zoom.100",
-    "view.zoom.zoom.75",
-    "view.zoom.zoom.50",
-    "view.zoom.zoom.25",
-    "view.zoom.zoom.custom",
+    "view.zoom.zoom400",
+    "view.zoom.zoom200",
+    "view.zoom.zoom150",
+    "view.zoom.zoom100",
+    "view.zoom.zoom75",
+    "view.zoom.zoom50",
+    "view.zoom.zoom25",
+    "view.zoom.openPicker",
   ];
 
   for (const id of ids) {
@@ -39,29 +39,17 @@ test("Ribbon schema includes View → Zoom command ids", () => {
   assert.match(schema, /\bid:\s*["']view\.zoom\.zoom["'][\s\S]*?\bkind:\s*["']dropdown["']/);
 });
 
-test("Desktop main.ts wires View → Zoom ribbon commands to SpreadsheetApp zoom", () => {
+test("Desktop main.ts delegates View → Zoom ribbon commands to CommandRegistry", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  // Fixed action buttons should be explicit `case` handlers.
-  const buttonCases = [
-    { id: "view.zoom.zoom100", pattern: /\bapp\.setZoom\(\s*1\s*\)/ },
-    { id: "view.zoom.zoomToSelection", pattern: /\bapp\.zoomToSelection\(\)/ },
-    { id: "view.zoom.zoom", pattern: /\bopenCustomZoomQuickPick\b/ },
-  ];
+  // Zoom commands should not be wired through the ribbon's onCommand switch (they are
+  // registered as built-in commands and executed through CommandRegistry instead).
+  assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoom100["']:/);
+  assert.doesNotMatch(main, /\bcase\s+["']view\.zoom\.zoomToSelection["']:/);
+  assert.doesNotMatch(main, /\bconst\s+zoomMenuItemPrefix\s*=\s*["']view\.zoom\.zoom\./);
 
-  for (const { id, pattern } of buttonCases) {
-    assert.match(main, new RegExp(`\\bcase\\s+["']${escapeRegExp(id)}["']:`), `Expected main.ts to handle ${id}`);
-    assert.match(main, pattern, `Expected main.ts to invoke ${String(pattern)} for ${id}`);
-  }
-
-  // The dropdown menu items (e.g. view.zoom.zoom.200) are handled via prefix parsing.
-  assert.match(main, /\bconst\s+zoomMenuItemPrefix\s*=\s*["']view\.zoom\.zoom\.\s*["'];/);
-  assert.match(main, /\bcommandId\.startsWith\(zoomMenuItemPrefix\)/);
-  assert.match(main, /\bsuffix\s*===\s*["']custom["']/);
-  assert.match(main, /\bconst\s+percent\s*=\s*Number\(suffix\)/);
-  assert.match(main, /\bapp\.setZoom\(\s*percent\s*\/\s*100\s*\)/);
-  assert.match(main, /\bsyncZoomControl\(\)/);
-  assert.match(main, /\bapp\.focus\(\)/);
+  // Ensure ribbon onCommand delegates registered ids through CommandRegistry.
+  assert.match(main, /\bcommandRegistry\.getCommand\(commandId\)/);
+  assert.match(main, /\bexecuteBuiltinCommand\(\s*commandId/);
 });
-

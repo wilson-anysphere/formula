@@ -21,7 +21,7 @@ test.describe("ribbon zoom", () => {
 
     // Menu item zoom presets.
     await zoomDropdown.click();
-    const zoom200 = ribbon.locator('button[data-command-id="view.zoom.zoom.200"]');
+    const zoom200 = ribbon.locator('button[data-command-id="view.zoom.zoom200"]');
     await expect(zoom200).toBeVisible();
     await zoom200.click();
 
@@ -30,7 +30,7 @@ test.describe("ribbon zoom", () => {
 
     // Menu item "Custom…" should route to the existing QuickPick zoom flow.
     await zoomDropdown.click();
-    const customZoom = ribbon.locator('button[data-command-id="view.zoom.zoom.custom"]');
+    const customZoom = ribbon.locator('button[data-command-id="view.zoom.openPicker"]');
     await expect(customZoom).toBeVisible();
     await customZoom.click();
 
