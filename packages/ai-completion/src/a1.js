@@ -83,7 +83,8 @@ export function toA1(ref) {
  */
 export function parseA1(a1) {
   if (typeof a1 !== "string") return null;
-  const match = /^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/.exec(a1.trim());
+  const cellPart = stripSheetPrefix(a1);
+  const match = /^(\$?)([A-Za-z]{1,3})(\$?)(\d+)$/.exec(cellPart.trim());
   if (!match) return null;
   const colLetters = match[2];
   const rowStr = match[4];
@@ -91,6 +92,51 @@ export function parseA1(a1) {
   const row = Number(rowStr) - 1;
   if (!Number.isInteger(row) || row < 0) return null;
   return { row, col };
+}
+
+/**
+ * Strip an optional sheet prefix from a sheet-qualified A1 reference.
+ *
+ * Examples:
+ * - Sheet1!A1 -> A1
+ * - 'My Sheet'!$B$2 -> $B$2
+ * - 'Bob''s Sheet'!C3 -> C3
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripSheetPrefix(text) {
+  const trimmed = text.trim();
+  if (!trimmed.includes("!")) return trimmed;
+
+  // Handle quoted sheet names: 'My Sheet'!A1
+  if (trimmed.startsWith("'")) {
+    let i = 1;
+    while (i < trimmed.length) {
+      const ch = trimmed[i];
+      if (ch === "'") {
+        // Escaped apostrophe inside sheet name: '' -> '
+        if (trimmed[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        // Closing quote must be followed by '!' to be a valid sheet prefix.
+        if (trimmed[i + 1] === "!") {
+          return trimmed.slice(i + 2);
+        }
+        // Malformed quoting; fall back to returning the original string so parsing fails.
+        return trimmed;
+      }
+      i += 1;
+    }
+    // Unterminated quote; fall back to returning the original string so parsing fails.
+    return trimmed;
+  }
+
+  // Unquoted sheet names: Sheet1!A1
+  const bang = trimmed.indexOf("!");
+  if (bang <= 0) return trimmed;
+  return trimmed.slice(bang + 1);
 }
 
 /**
