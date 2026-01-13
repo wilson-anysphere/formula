@@ -933,6 +933,33 @@ By default, `createCollabVersioning` uses `YjsVersionStore`, which stores all ve
 - `versions` (records)
 - `versionsMeta` (ordering + metadata)
 
+#### Snapshot size + sync-server message limits
+
+Large workbooks can produce snapshot blobs that exceed the sync-server websocket message limit (`SYNC_SERVER_MAX_MESSAGE_BYTES`, default **2MB**). If a single Yjs update exceeds this limit, the server will close the websocket with code **1009** ("Message too big").
+
+To avoid these catastrophic failures, the default `createCollabVersioning` store configuration writes snapshots in **streaming mode** (multiple Yjs transactions/updates):
+
+- `writeMode: "stream"`
+- `chunkSize: 64KiB`
+- `maxChunksPerTransaction`: bounded so each update stays comfortably below typical message limits (at the default chunk size this is 8 chunks, ~512KiB of snapshot payload/update).
+
+Tradeoff: streaming writes create more Yjs transactions (more websocket messages), but keeps each message small and robust for large documents.
+
+If you need to tune this (for example, when running with a very small `SYNC_SERVER_MAX_MESSAGE_BYTES`), you can override the default store settings without constructing a store manually:
+
+```ts
+import { createCollabVersioning } from "@formula/collab-versioning";
+
+const versioning = createCollabVersioning({
+  session,
+  yjsStoreOptions: {
+    // Example: keep each streamed update under ~128KiB.
+    chunkSize: 32 * 1024,
+    maxChunksPerTransaction: 2,
+  },
+});
+```
+
 ### Snapshot/restore isolation (excluded roots)
 
 `CollabVersioning` snapshots/restores are intended to affect **user workbook state**, not internal collaboration metadata stored in the same `Y.Doc`.
