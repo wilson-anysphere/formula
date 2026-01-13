@@ -297,10 +297,16 @@ def _detect_webview2_marker(installer: Path) -> str | None:
     found = _binary_contains_any(installer, patterns)
     if found is None:
         return None
-    try:
-        return found.decode("utf-8", errors="replace")
-    except Exception:
-        return "webview2-marker"
+
+    # Prefer returning the canonical marker string when we can identify it.
+    for marker in WEBVIEW2_MARKER_STRINGS:
+        if found == marker.encode("utf-8") or found == marker.encode("utf-16le"):
+            return marker
+
+    # Fallback: decode best-effort for debugging output.
+    if b"\x00" in found:
+        return found.decode("utf-16le", errors="replace")
+    return found.decode("utf-8", errors="replace")
 
 
 def main() -> int:
