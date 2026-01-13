@@ -96,14 +96,17 @@ auto-update.
 ### (Optional) Generate / rotate a keypair
 
 Only do this if you need to rotate keys (e.g. compromised secret). Run this from the repo root
-(requires the Tauri CLI, `cargo-tauri`, installed from the `tauri-cli` crate). In agent environments,
+(requires the Tauri CLI, `cargo tauri`, installed from the `tauri-cli` crate). In agent environments,
 use the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
 
 ```bash
 # (Agents) Initialize safe defaults (memory limits, isolated CARGO_HOME, etc.)
 source scripts/agent-init.sh
 
-bash scripts/cargo_agent.sh install tauri-cli --locked
+TAURI_CLI_VERSION=2.9.5
+
+# NOTE: Keep this version in sync with `.github/workflows/release.yml` (env.TAURI_CLI_VERSION).
+bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --locked --force
 (cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)
 ```
 
@@ -620,12 +623,13 @@ variables in **Settings → Secrets and variables → Actions → Variables**:
 
 1. Build the desktop bundles for your platform:
 
-   ```bash
-   source scripts/agent-init.sh
+    ```bash
+    source scripts/agent-init.sh
 
-   bash scripts/cargo_agent.sh install cargo-tauri --locked
-   (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
-   ```
+    TAURI_CLI_VERSION=2.9.5
+    bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --locked --force
+    (cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
+    ```
 
 2. From the repo root, print a bundle size table:
 

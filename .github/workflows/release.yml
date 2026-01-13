@@ -30,6 +30,13 @@ env:
   # Pin wasm-pack for reproducible tagged releases (avoid `cargo install wasm-pack`
   # pulling newer incompatible versions). Keep this in sync with ci.yml/perf.yml.
   WASM_PACK_VERSION: 0.13.1
+  # Pin the Tauri CLI (`cargo tauri`) version used by release builds so the toolchain
+  # can't drift independently from the repo's pinned Tauri crates.
+  #
+  # Keep this in sync with:
+  # - apps/desktop/src-tauri/Cargo.toml (tauri = "2.9")
+  # - docs/release.md (local release prep instructions)
+  TAURI_CLI_VERSION: "2.9.5"
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -53,6 +60,9 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Check pinned Tauri CLI version matches Tauri crates
+        run: node scripts/ci/check-tauri-cli-version.mjs
 
       - name: Check desktop version matches release tag
         run: node scripts/check-desktop-version.mjs "${{ github.ref_name }}"
@@ -356,6 +366,12 @@ jobs:
         if: runner.os == 'Linux' || vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0'
         run: pnpm -C apps/desktop check:coi
 
+      - name: Install pinned Tauri CLI (cargo tauri)
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
+
+      - name: Print Tauri CLI version
+        run: cargo tauri --version
+
       - name: Build and upload release assets (macOS universal)
         if: runner.os == 'macOS'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
@@ -369,6 +385,9 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          # Use the Cargo-installed Tauri CLI (`cargo tauri`) instead of letting the
+          # action install a floating `@tauri-apps/cli@v2` toolchain.
+          tauriScript: cargo tauri
           args: --target universal-apple-darwin
           tagName: ${{ github.ref_name }}
           releaseName: Formula ${{ github.ref_name }}
@@ -408,6 +427,9 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          # Use the Cargo-installed Tauri CLI (`cargo tauri`) instead of letting the
+          # action install a floating `@tauri-apps/cli@v2` toolchain.
+          tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
           tagName: ${{ github.ref_name }}
           releaseName: Formula ${{ github.ref_name }}
