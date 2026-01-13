@@ -63,7 +63,13 @@ function stableStringify(value) {
   if (value === null) return "null";
   const t = typeof value;
   if (t === "string") return JSON.stringify(value);
-  if (t === "number" || t === "boolean") return JSON.stringify(value);
+  if (t === "number") {
+    if (Number.isNaN(value)) return "NaN";
+    if (Object.is(value, -0)) return "-0";
+    if (!Number.isFinite(value)) return String(value);
+    return JSON.stringify(value);
+  }
+  if (t === "boolean") return JSON.stringify(value);
   if (t === "undefined") return "undefined";
   if (t === "bigint") return JSON.stringify(String(value));
   if (t === "function") return "\"[Function]\"";

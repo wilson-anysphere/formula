@@ -185,3 +185,33 @@ test("semanticDiff: encrypted cells do not leak value/formula fields even if pro
   assert.equal(diff.modified[0].oldFormula, null);
   assert.equal(diff.modified[0].newFormula, null);
 });
+
+test("semanticDiff: NaN is treated as equal (no diff)", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { value: Number.NaN },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 0)]: { value: Number.NaN },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+  assert.equal(diff.moved.length, 0);
+  assert.equal(diff.formatOnly.length, 0);
+});
+
+test("semanticDiff: NaN does not collide with null for move signatures", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { value: Number.NaN },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 1)]: { value: null },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.moved.length, 0);
+  assert.equal(diff.removed.length, 1);
+  assert.equal(diff.added.length, 1);
+  assert.equal(Number.isNaN(diff.removed[0].oldValue), true);
+  assert.equal(diff.added[0].newValue, null);
+});
