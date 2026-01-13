@@ -4,7 +4,8 @@ import { ContextManager } from "../../../../../packages/ai-context/src/contextMa
 import { stableJsonStringify, type TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import {
   HashEmbedder,
-  LocalStorageBinaryStorage,
+  ChunkedLocalStorageBinaryStorage,
+  IndexedDBBinaryStorage,
   workbookFromSpreadsheetApi,
 } from "../../../../../packages/ai-rag/src/index.js";
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
@@ -163,7 +164,8 @@ function resolveEmbedder(
 
 /**
  * Desktop RAG service:
- * - Uses sqlite-backed vector store persisted in LocalStorage.
+ * - Uses sqlite-backed vector store persisted in browser storage (IndexedDB when
+ *   available; chunked localStorage fallback).
  * - Tracks DocumentController mutations and only re-indexes when content changes.
  * - Keeps buildWorkbookContextFromSpreadsheetApi cheap (no workbook scan when index is up to date).
  * - Uses deterministic hash embeddings by design (offline; no user API keys or local model setup).
@@ -237,11 +239,132 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   async function getRag(): Promise<DesktopRag> {
     if (disposed) throw new Error("DesktopRagService is disposed");
     if (!ragPromise) {
+      const idb = (globalThis as any)?.indexedDB as IDBFactory | undefined;
+      const hasIndexedDB = idb && typeof idb.open === "function";
+
+      const buildStorage = () => {
+        if (!hasIndexedDB) {
+          // Restricted environments that disable IndexedDB (or older WebViews).
+          // Use chunked localStorage to avoid per-key limits.
+          return new ChunkedLocalStorageBinaryStorage({ namespace: storageNamespace, workbookId: options.workbookId });
+        }
+
+        const primary = new IndexedDBBinaryStorage({ namespace: storageNamespace, workbookId: options.workbookId, dbName: "formula.desktop.rag.sqlite" });
+        // Backwards compatibility:
+        // - Older desktop builds used LocalStorageBinaryStorage (single-key base64).
+        // - Newer builds can use ChunkedLocalStorageBinaryStorage (multi-key base64).
+        // ChunkedLocalStorageBinaryStorage also knows how to load legacy single-key
+        // values and migrate them into chunks.
+        const fallback = new ChunkedLocalStorageBinaryStorage({ namespace: storageNamespace, workbookId: options.workbookId });
+
+        const bytesEqual = (a: Uint8Array, b: Uint8Array) => {
+          if (a.byteLength !== b.byteLength) return false;
+          for (let i = 0; i < a.byteLength; i += 1) {
+            if (a[i] !== b[i]) return false;
+          }
+          return true;
+        };
+
+        const isStorage = (value: unknown): value is Storage =>
+          Boolean(
+            value &&
+              typeof (value as any).getItem === "function" &&
+              typeof (value as any).setItem === "function" &&
+              typeof (value as any).removeItem === "function",
+          );
+
+        const localStorageHasKey = (key: string) => {
+          try {
+            const storage = (globalThis as any)?.localStorage as Storage | undefined;
+            if (!isStorage(storage)) return false;
+            return storage.getItem(key) != null;
+          } catch {
+            return false;
+          }
+        };
+
+        let fallbackCleared = false;
+        let primaryBroken = false;
+
+        const clearFallbackOnce = async () => {
+          if (fallbackCleared) return;
+          fallbackCleared = true;
+          try {
+            await fallback.remove?.();
+          } catch {
+            // ignore
+          }
+        };
+
+        const saveToPrimaryAndVerify = async (data: Uint8Array) => {
+          try {
+            await primary.save(data);
+            const check = await primary.load();
+            return check != null && bytesEqual(check, data);
+          } catch {
+            return false;
+          }
+        };
+
+        return {
+          async load() {
+            // If localStorage contains any bytes, prefer them. This avoids a scenario
+            // where IndexedDB writes previously failed (so localStorage has the latest
+            // DB), but IndexedDB still contains an older copy.
+            const key = `${storageNamespace}:${options.workbookId}`;
+            const hasLocal = localStorageHasKey(`${key}:meta`) || localStorageHasKey(key);
+
+            const idbBytes = await primary.load();
+            if (!hasLocal) return idbBytes;
+
+            const localBytes = await fallback.load();
+            if (!localBytes) return idbBytes;
+
+            // If both storages exist and differ, treat localStorage as authoritative
+            // (it's only written when IndexedDB persistence is not working).
+            if (idbBytes && bytesEqual(idbBytes, localBytes)) {
+              // Local bytes are redundant; clean them up.
+              await clearFallbackOnce();
+              return idbBytes;
+            }
+
+            // Best-effort migration into IndexedDB for future sessions.
+            if (!primaryBroken) {
+              const ok = await saveToPrimaryAndVerify(localBytes);
+              if (ok) {
+                await clearFallbackOnce();
+              } else {
+                primaryBroken = true;
+              }
+            }
+
+            return localBytes;
+          },
+          async save(data: Uint8Array) {
+            if (!primaryBroken) {
+              const ok = await saveToPrimaryAndVerify(data);
+              if (ok) {
+                await clearFallbackOnce();
+                return;
+              }
+              primaryBroken = true;
+            }
+
+            // Fallback persistence when IndexedDB is unavailable/blocked.
+            await fallback.save(data);
+          },
+          async remove() {
+            await primary.remove?.();
+            await fallback.remove?.();
+          },
+        };
+      };
+
       ragPromise = ragFactory({
         workbookId: options.workbookId,
         dimension,
         embedder,
-        storage: new LocalStorageBinaryStorage({ namespace: storageNamespace, workbookId: options.workbookId }),
+        storage: buildStorage(),
         tokenBudgetTokens: options.tokenBudgetTokens,
         tokenEstimator: options.tokenEstimator,
         topK: options.topK,

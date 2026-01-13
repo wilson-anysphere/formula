@@ -1,8 +1,8 @@
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
 import {
   HashEmbedder,
-  IndexedDBBinaryStorage,
   ChunkedLocalStorageBinaryStorage,
+  IndexedDBBinaryStorage,
   SqliteVectorStore,
   indexWorkbook,
 } from "../../../../../packages/ai-rag/src/index.js";
