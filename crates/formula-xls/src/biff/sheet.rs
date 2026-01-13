@@ -906,6 +906,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
     let mut saw_autofilter_info = false;
 
     let mut saw_eof = false;
+    let mut warned_colinfo_first_oob = false;
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
     while let Some(next) = iter.next() {
         let record = match next {
@@ -1045,7 +1046,35 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         );
                         continue;
                     }
-                    for col in first_col..=last_col {
+
+                    // Clamp COLINFO column ranges to the model's Excel bounds to avoid excessive
+                    // work/memory usage for corrupt files with huge ranges.
+                    if first_col >= EXCEL_MAX_COLS {
+                        if !warned_colinfo_first_oob {
+                            push_warning_bounded(
+                                &mut props.warnings,
+                                format!(
+                                    "ignoring COLINFO record with out-of-bounds first_col ({first_col}) at offset {}",
+                                    record.offset
+                                ),
+                            );
+                            warned_colinfo_first_oob = true;
+                        }
+                        continue;
+                    }
+
+                    let max_col = EXCEL_MAX_COLS.saturating_sub(1);
+                    let clamped_last_col = last_col.min(max_col);
+                    if clamped_last_col != last_col {
+                        push_warning_bounded(
+                            &mut props.warnings,
+                            format!(
+                                "COLINFO column range {first_col}..={last_col} truncated to {first_col}..={clamped_last_col}"
+                            ),
+                        );
+                    }
+
+                    for col in first_col..=clamped_last_col {
                         let entry = props.cols.entry(col).or_default();
                         if let Some(width) = width {
                             entry.width = Some(width);
@@ -2009,6 +2038,49 @@ mod tests {
                 .count(),
             1,
             "suppression warning should only be emitted once; warnings={:?}",
+            props.warnings
+        );
+    }
+
+    #[test]
+    fn clamps_colinfo_column_ranges_to_excel_bounds() {
+        let sheet_bof = record(records::RECORD_BOF_BIFF8, &[0u8; 16]);
+
+        // COLINFO with a range that extends past the model's max column.
+        let first_col = EXCEL_MAX_COLS - 2;
+        let last_col = EXCEL_MAX_COLS + 2;
+
+        let mut colinfo_payload = Vec::new();
+        colinfo_payload.extend_from_slice(&(first_col as u16).to_le_bytes());
+        colinfo_payload.extend_from_slice(&(last_col as u16).to_le_bytes());
+        colinfo_payload.extend_from_slice(&256u16.to_le_bytes()); // width = 1.0
+        colinfo_payload.extend_from_slice(&0u16.to_le_bytes()); // ixfe
+        colinfo_payload.extend_from_slice(&0u16.to_le_bytes()); // options
+        colinfo_payload.extend_from_slice(&0u16.to_le_bytes()); // reserved
+
+        let stream = [
+            sheet_bof,
+            record(RECORD_COLINFO, &colinfo_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+
+        assert_eq!(
+            props.cols.keys().copied().collect::<Vec<_>>(),
+            vec![EXCEL_MAX_COLS - 2, EXCEL_MAX_COLS - 1]
+        );
+        assert!(!props.cols.contains_key(&EXCEL_MAX_COLS));
+        assert!(!props.cols.contains_key(&(EXCEL_MAX_COLS + 1)));
+        assert!(!props.cols.contains_key(&(EXCEL_MAX_COLS + 2)));
+
+        assert!(
+            props
+                .warnings
+                .iter()
+                .any(|w| w.contains("COLINFO") && w.contains("truncated")),
+            "expected truncation warning, got {:?}",
             props.warnings
         );
     }
