@@ -102,6 +102,29 @@ class TriageSchemaTests(unittest.TestCase):
         self.assertIn("Top failing workbooks by cellXfs", md)
         self.assertIn("bad.xlsx", md)
 
+    def test_dashboard_markdown_includes_top_diff_fingerprints_section(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "counts": {"total": 1, "open_ok": 1, "calculate_ok": 1, "render_ok": 1, "round_trip_ok": 0},
+            "rates": {"open": 1.0, "calculate": 1.0, "render": 1.0, "round_trip": 0.0},
+            "top_diff_fingerprints_in_failures": [
+                {
+                    "fingerprint": "37a012601a0da63445b4fbe412c6c753406e776b652013e0ca21a56a36fb634e",
+                    "count": 3,
+                    "part": "xl/workbook.xml.rels",
+                    "kind": "attribute_changed",
+                    "path": "/Relationships/Relationship[1]/@Id",
+                }
+            ],
+        }
+        md = _markdown_summary(summary, reports=[])
+        self.assertIn("Top diff fingerprints in failing workbooks", md)
+        # Only the prefix should be rendered in markdown.
+        self.assertIn("37a012601a0da634", md)
+        self.assertNotIn(
+            "37a012601a0da63445b4fbe412c6c753406e776b652013e0ca21a56a36fb634e", md
+        )
+        self.assertIn("xl/workbook.xml.rels", md)
 
 if __name__ == "__main__":
     unittest.main()

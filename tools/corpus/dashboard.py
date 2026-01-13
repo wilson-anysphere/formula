@@ -277,6 +277,30 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
             lines.append(f"| {row['feature']} | {row['count']} |")
         lines.append("")
 
+    top_diff_fingerprints = summary.get("top_diff_fingerprints_in_failures", [])
+    if top_diff_fingerprints:
+        lines.append("## Top diff fingerprints in failing workbooks")
+        lines.append("")
+        lines.append("| Fingerprint | Count | Part | Kind | Path |")
+        lines.append("|---|---:|---|---|---|")
+        for row in top_diff_fingerprints[:20]:
+            fp = row.get("fingerprint") or ""
+            fp_prefix = fp[:16] if isinstance(fp, str) else ""
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        fp_prefix,
+                        str(row.get("count", 0)),
+                        row.get("part", "") or "",
+                        row.get("kind", "") or "",
+                        row.get("path", "") or "",
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+
     style = summary.get("style") or {}
     cellxfs = (style.get("cellXfs") or {}) if isinstance(style, dict) else {}
     if cellxfs:
@@ -354,6 +378,8 @@ def main() -> int:
     failures_by_category: Counter[str] = Counter()
     failing_function_counts: Counter[str] = Counter()
     failing_feature_counts: Counter[str] = Counter()
+    failing_diff_fingerprint_counts: Counter[str] = Counter()
+    failing_diff_fingerprint_samples: dict[str, dict[str, str]] = {}
     diff_totals: Counter[str] = Counter()
     diff_part_critical: Counter[str] = Counter()
     diff_part_total: Counter[str] = Counter()
@@ -379,6 +405,25 @@ def main() -> int:
             if cellxfs is not None:
                 failing_cellxfs.append(cellxfs)
                 failing_cellxfs_by_workbook.append((cellxfs, r.get("display_name", "?")))
+
+            diff_step = (r.get("steps") or {}).get("diff") or {}
+            diff_details = diff_step.get("details") if isinstance(diff_step, dict) else None
+            if isinstance(diff_details, dict):
+                top_diffs = diff_details.get("top_differences")
+                if isinstance(top_diffs, list):
+                    for entry in top_diffs:
+                        if not isinstance(entry, dict):
+                            continue
+                        fp = entry.get("fingerprint")
+                        if not isinstance(fp, str) or not fp:
+                            continue
+                        failing_diff_fingerprint_counts[fp] += 1
+                        if fp not in failing_diff_fingerprint_samples:
+                            failing_diff_fingerprint_samples[fp] = {
+                                "part": entry.get("part") or "",
+                                "path": entry.get("path") or "",
+                                "kind": entry.get("kind") or "",
+                            }
         else:
             if cellxfs is not None:
                 passing_cellxfs.append(cellxfs)
@@ -486,6 +531,16 @@ def main() -> int:
         "top_features_in_failures": [
             {"feature": feat, "count": cnt}
             for feat, cnt in failing_feature_counts.most_common(50)
+        ],
+        "top_diff_fingerprints_in_failures": [
+            {
+                "fingerprint": fp,
+                "count": cnt,
+                "part": (failing_diff_fingerprint_samples.get(fp) or {}).get("part", ""),
+                "path": (failing_diff_fingerprint_samples.get(fp) or {}).get("path", ""),
+                "kind": (failing_diff_fingerprint_samples.get(fp) or {}).get("kind", ""),
+            }
+            for fp, cnt in failing_diff_fingerprint_counts.most_common(20)
         ],
     }
     if style_summary:

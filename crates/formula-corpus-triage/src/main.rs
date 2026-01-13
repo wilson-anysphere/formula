@@ -121,6 +121,7 @@ struct DiffCounts {
 
 #[derive(Debug, Serialize)]
 struct DiffEntry {
+    fingerprint: String,
     severity: String,
     part: String,
     path: String,
@@ -418,11 +419,19 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let mut entries: Vec<DiffEntry> = report
         .differences
         .into_iter()
-        .map(|d| DiffEntry {
-            severity: d.severity.as_str().to_string(),
-            part: d.part,
-            path: d.path,
-            kind: d.kind,
+        .map(|d| {
+            let severity = d.severity.as_str().to_string();
+            let part = d.part;
+            let path = d.path;
+            let kind = d.kind;
+            let fingerprint = diff_entry_fingerprint(&severity, &part, &path, &kind);
+            DiffEntry {
+                fingerprint,
+                severity,
+                part,
+                path,
+                kind,
+            }
         })
         .collect();
 
@@ -813,6 +822,12 @@ fn sha256_text(text: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn diff_entry_fingerprint(severity: &str, part: &str, path: &str, kind: &str) -> String {
+    // Privacy-safe stable fingerprint: aggregate diffs across workbooks without including any
+    // expected/actual values (which may contain workbook data).
+    sha256_text(&format!("{severity}|{part}|{path}|{kind}"))
+}
+
 fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
     let sheet = doc
         .workbook
@@ -898,6 +913,9 @@ fn render_smoke(doc: &formula_xlsx::XlsxDocument) -> Result<RenderDetails> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use zip::write::FileOptions;
+    use zip::{CompressionMethod, ZipWriter};
 
     #[test]
     fn preserves_extended_errors_in_normalization_and_engine_seeding() {
@@ -1059,5 +1077,65 @@ mod tests {
             part_groups.get("docProps/app.xml").map(String::as_str),
             Some("doc_props")
         );
+    }
+
+    #[test]
+    fn diff_entry_fingerprint_is_stable() {
+        let fp = diff_entry_fingerprint(
+            "CRITICAL",
+            "xl/workbook.xml.rels",
+            "/Relationships/Relationship[1]/@Id",
+            "attribute_changed",
+        );
+        assert_eq!(
+            fp,
+            "37a012601a0da63445b4fbe412c6c753406e776b652013e0ca21a56a36fb634e"
+        );
+    }
+
+    #[test]
+    fn diff_workbooks_emits_fingerprints_for_entries() {
+        fn zip_with_part(name: &str, bytes: &[u8]) -> Vec<u8> {
+            let cursor = std::io::Cursor::new(Vec::new());
+            let mut zip = ZipWriter::new(cursor);
+            let options = FileOptions::<()>::default().compression_method(CompressionMethod::Stored);
+            zip.start_file(name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+            let cursor = zip.finish().unwrap();
+            cursor.into_inner()
+        }
+
+        let expected_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="t" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+        let actual_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="t" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let expected = zip_with_part("xl/_rels/workbook.xml.rels", expected_xml);
+        let actual = zip_with_part("xl/_rels/workbook.xml.rels", actual_xml);
+
+        let args = Args {
+            input: PathBuf::new(),
+            ignore_parts: Vec::new(),
+            diff_limit: 10,
+            recalc: false,
+            render_smoke: false,
+        };
+
+        let details = diff_workbooks(&expected, &actual, &args).unwrap();
+        assert!(
+            !details.top_differences.is_empty(),
+            "expected at least one diff entry"
+        );
+
+        let entry = &details.top_differences[0];
+        assert_eq!(
+            entry.fingerprint,
+            diff_entry_fingerprint(&entry.severity, &entry.part, &entry.path, &entry.kind)
+        );
+        assert_eq!(entry.fingerprint.len(), 64);
     }
 }
