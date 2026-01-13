@@ -16,6 +16,11 @@
       "browser": "./src/sqlite.ts",
       "node": "./src/sqlite.node.ts",
       "default": "./src/sqlite.ts"
+    },
+    "./export": {
+      "browser": "./src/export.ts",
+      "node": "./src/export.ts",
+      "default": "./src/export.ts"
     }
   },
   "dependencies": {

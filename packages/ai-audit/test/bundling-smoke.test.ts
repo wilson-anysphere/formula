@@ -51,6 +51,39 @@ describe("ai-audit browser bundling", () => {
     expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
   });
 
+  it("bundles the export entrypoint without pulling in sql.js or Node-only modules", async () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkgRoot = path.resolve(here, "..");
+
+    const outdir = await fs.mkdtemp(path.join(os.tmpdir(), "ai-audit-export-esbuild-"));
+
+    const result = await build({
+      absWorkingDir: pkgRoot,
+      bundle: true,
+      format: "esm",
+      metafile: true,
+      outdir,
+      platform: "browser",
+      write: false,
+      stdin: {
+        sourcefile: "entry.js",
+        resolveDir: pkgRoot,
+        contents: `
+          import { serializeAuditEntries } from "@formula/ai-audit/export";
+          console.log(serializeAuditEntries);
+        `
+      }
+    });
+
+    const inputFiles = Object.keys(result.metafile?.inputs ?? {});
+    expect(inputFiles.some((file) => file.includes("sql.js"))).toBe(false);
+    expect(inputFiles.some((file) => file.includes("sqlite-store"))).toBe(false);
+    expect(inputFiles.some((file) => file.includes("storage.node"))).toBe(false);
+
+    const outputImports = collectOutputImports(result);
+    expect(outputImports.some((imp) => imp.path.startsWith("node:"))).toBe(false);
+  });
+
   it("bundles the sqlite entrypoint for browser builds without Node builtins", async () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const pkgRoot = path.resolve(here, "..");
