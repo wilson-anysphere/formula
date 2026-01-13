@@ -113,17 +113,20 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     retry_with_delays_if(
         || {
             attempts += 1;
-            unsafe { OpenClipboard(None) }
+            let res = unsafe { OpenClipboard(None) };
+            if res.is_err() {
+                // Best-effort: capture the window + PID/TID that currently has the clipboard open
+                // so we can include it in the final error for debugging. This runs only on failure,
+                // not on the success path.
+                if let Some(holder) = get_open_clipboard_lock_holder() {
+                    lock_holder = Some(holder);
+                }
+            }
+            res
         },
         OPEN_CLIPBOARD_RETRY_DELAYS,
         is_retryable_open_clipboard_error,
         |d| {
-            // Best-effort: try to capture the window + PID that currently has the clipboard open so
-            // we can include it in the final error for debugging. This runs only on retryable
-            // failures, not on the success path.
-            if let Some(holder) = get_open_clipboard_lock_holder() {
-                lock_holder = Some(holder);
-            }
             slept += d;
             std::thread::sleep(d);
         },
