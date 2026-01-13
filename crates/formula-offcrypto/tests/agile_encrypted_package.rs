@@ -22,6 +22,13 @@ fn segment_iv(hash: HashAlgorithm, salt: &[u8], segment_index: u32) -> [u8; 16] 
     let mut iv = [0u8; 16];
 
     match hash {
+        HashAlgorithm::Md5 => {
+            let mut hasher = md5::Md5::new();
+            hasher.update(salt);
+            hasher.update(index_bytes);
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..16]);
+        }
         HashAlgorithm::Sha1 => {
             let mut hasher = Sha1::new();
             hasher.update(salt);

@@ -429,6 +429,7 @@ fn derive_iv_16(
 
 fn hash_alg_digest_len(hash_alg: HashAlgorithm) -> usize {
     match hash_alg {
+        HashAlgorithm::Md5 => 16,
         HashAlgorithm::Sha1 => 20,
         HashAlgorithm::Sha256 => 32,
         HashAlgorithm::Sha384 => 48,
@@ -438,6 +439,7 @@ fn hash_alg_digest_len(hash_alg: HashAlgorithm) -> usize {
 
 fn hash_alg_digest(hash_alg: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     match hash_alg {
+        HashAlgorithm::Md5 => md5::Md5::digest(data).to_vec(),
         HashAlgorithm::Sha1 => sha1::Sha1::digest(data).to_vec(),
         HashAlgorithm::Sha256 => sha2::Sha256::digest(data).to_vec(),
         HashAlgorithm::Sha384 => sha2::Sha384::digest(data).to_vec(),
@@ -499,6 +501,15 @@ fn compute_hmac(
     data: &[u8],
 ) -> Result<Vec<u8>, OffcryptoError> {
     let out = match hash_alg {
+        HashAlgorithm::Md5 => {
+            let mut mac = <Hmac<md5::Md5> as hmac::Mac>::new_from_slice(key).map_err(|_| {
+                OffcryptoError::InvalidEncryptionInfo {
+                    context: "invalid HMAC key",
+                }
+            })?;
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
         HashAlgorithm::Sha1 => {
             let mut mac = <Hmac<sha1::Sha1> as hmac::Mac>::new_from_slice(key).map_err(|_| {
                 OffcryptoError::InvalidEncryptionInfo {

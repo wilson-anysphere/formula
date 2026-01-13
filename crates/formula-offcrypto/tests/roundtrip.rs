@@ -49,7 +49,6 @@ fn read_ole_stream(ole_bytes: &[u8], name: &str) -> Vec<u8> {
         .expect("read stream");
     out
 }
-
 #[test]
 fn roundtrip_standard_encryption() {
     let password = "Password";

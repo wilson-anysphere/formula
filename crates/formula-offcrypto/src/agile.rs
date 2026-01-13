@@ -117,6 +117,14 @@ pub fn agile_iterated_hash(
     hash_alg.digest_two_into(salt, password_utf16le, &mut h_buf[..digest_len]);
 
     match hash_alg {
+        HashAlgorithm::Md5 => {
+            for i in 0..spin_count {
+                let mut hasher = md5::Md5::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..16]);
+                h_buf[..16].copy_from_slice(&hasher.finalize());
+            }
+        }
         HashAlgorithm::Sha1 => {
             for i in 0..spin_count {
                 let mut hasher = sha1::Sha1::new();

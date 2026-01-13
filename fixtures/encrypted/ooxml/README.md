@@ -9,7 +9,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
 ## Passwords
 
-- `agile.xlsx` / `standard.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
+- `agile.xlsx` / `standard.xlsx` / `standard-rc4.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
@@ -22,9 +22,12 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `password`
 - `standard.xlsx` – Standard encrypted OOXML.
-   - `EncryptionInfo` header version **Major 3 / Minor 2**
-   - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
-   - Decrypts to `plaintext.xlsx` with password `password`
+  - `EncryptionInfo` header version **Major 3 / Minor 2**
+  - ECMA-376/MS-OFFCRYPTO Standard: 50,000 password-hash iterations + AES-ECB
+  - Decrypts to `plaintext.xlsx` with password `password`
+- `standard-rc4.xlsx` – Standard encrypted OOXML (RC4 CryptoAPI).
+  - `EncryptionInfo` header version **Major 3 / Minor 2**
+  - Decrypts to `plaintext.xlsx` with password `password`
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `""`

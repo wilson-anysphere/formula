@@ -11,9 +11,12 @@
 //! Verifier digests are compared in constant time to reduce timing side channels.
 
 mod util;
+mod rc4;
 
 pub mod agile;
+pub mod cryptoapi;
 pub mod standard;
+pub mod standard_rc4;
 
 use core::fmt;
 use std::io::{Cursor, Read, Seek};
@@ -98,6 +101,8 @@ const PASSWORD_KEY_ENCRYPTOR_NS: &str =
 const CALG_AES_128: u32 = 0x0000_660E;
 const CALG_AES_192: u32 = 0x0000_660F;
 const CALG_AES_256: u32 = 0x0000_6610;
+const CALG_RC4: u32 = 0x0000_6801;
+const CALG_MD5: u32 = 0x0000_8003;
 const CALG_SHA1: u32 = 0x0000_8004;
 
 /// Parsed `EncryptionVersionInfo` (MS-OFFCRYPTO).
@@ -274,6 +279,7 @@ fn validate_standard_encryption_info(info: &StandardEncryptionInfo) -> Result<()
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
+    Md5,
     Sha1,
     Sha256,
     Sha384,
@@ -284,6 +290,7 @@ impl HashAlgorithm {
     /// Canonical OOXML/MS-OFFCRYPTO algorithm name (e.g. `SHA512`).
     pub fn as_ooxml_name(&self) -> &'static str {
         match self {
+            HashAlgorithm::Md5 => "MD5",
             HashAlgorithm::Sha1 => "SHA1",
             HashAlgorithm::Sha256 => "SHA256",
             HashAlgorithm::Sha384 => "SHA384",
@@ -293,6 +300,7 @@ impl HashAlgorithm {
 
     fn parse_offcrypto_name(name: &str) -> Result<Self, OffcryptoError> {
         match name.trim().to_ascii_uppercase().as_str() {
+            "MD5" => Ok(HashAlgorithm::Md5),
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
             "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
             "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
@@ -305,6 +313,7 @@ impl HashAlgorithm {
 
     pub(crate) fn digest_len(self) -> usize {
         match self {
+            HashAlgorithm::Md5 => 16,
             HashAlgorithm::Sha1 => 20,
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
@@ -315,6 +324,11 @@ impl HashAlgorithm {
     pub(crate) fn digest_into(self, data: &[u8], out: &mut [u8]) {
         debug_assert!(out.len() >= self.digest_len());
         match self {
+            HashAlgorithm::Md5 => {
+                let mut hasher = md5::Md5::new();
+                hasher.update(data);
+                out[..16].copy_from_slice(&hasher.finalize());
+            }
             HashAlgorithm::Sha1 => {
                 let mut hasher = Sha1::new();
                 hasher.update(data);
@@ -341,6 +355,12 @@ impl HashAlgorithm {
     pub(crate) fn digest_two_into(self, a: &[u8], b: &[u8], out: &mut [u8]) {
         debug_assert!(out.len() >= self.digest_len());
         match self {
+            HashAlgorithm::Md5 => {
+                let mut hasher = md5::Md5::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..16].copy_from_slice(&hasher.finalize());
+            }
             HashAlgorithm::Sha1 => {
                 let mut hasher = Sha1::new();
                 hasher.update(a);
@@ -740,29 +760,56 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
 
     // Algorithm/parameter validation.
     //
-    // Standard encryption produced by Excel uses AES + SHA1. Restrict the parser to this subset
-    // so downstream crypto code can rely on the parameters being consistent.
-    let expected_key_size = match header.alg_id {
-        CALG_AES_128 => 128,
-        CALG_AES_192 => 192,
-        CALG_AES_256 => 256,
+    // Standard encryption supports both AES and RC4 CryptoAPI variants. We accept both, but
+    // validate a small set of invariants so downstream crypto code can rely on the parsed
+    // parameters being self-consistent.
+    #[derive(Clone, Copy)]
+    enum CipherKind {
+        Aes { key_bits: u32 },
+        Rc4,
+    }
+
+    let cipher = match header.alg_id {
+        CALG_AES_128 => CipherKind::Aes { key_bits: 128 },
+        CALG_AES_192 => CipherKind::Aes { key_bits: 192 },
+        CALG_AES_256 => CipherKind::Aes { key_bits: 256 },
+        CALG_RC4 => CipherKind::Rc4,
         other => {
             return Err(OffcryptoError::UnsupportedAlgorithm(format!(
                 "algId=0x{other:08x}"
             )))
         }
     };
-    if header.key_size_bits != expected_key_size {
-        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
-            "keySize={} mismatch for algId=0x{:08x}",
-            header.key_size_bits, header.alg_id
-        )));
-    }
-    if header.alg_id_hash != CALG_SHA1 {
-        return Err(OffcryptoError::UnsupportedAlgorithm(format!(
-            "algIdHash=0x{:08x}",
-            header.alg_id_hash
-        )));
+
+    match cipher {
+        CipherKind::Aes { key_bits } => {
+            if header.key_size_bits != key_bits {
+                return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                    "keySize={} mismatch for algId=0x{:08x}",
+                    header.key_size_bits, header.alg_id
+                )));
+            }
+            if header.alg_id_hash != CALG_SHA1 {
+                return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                    "algIdHash=0x{:08x}",
+                    header.alg_id_hash
+                )));
+            }
+        }
+        CipherKind::Rc4 => {
+            if !matches!(header.key_size_bits, 40 | 56 | 128) {
+                return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                    "keySize={} unsupported for algId=0x{:08x}",
+                    header.key_size_bits, header.alg_id
+                )));
+            }
+            if !matches!(header.alg_id_hash, CALG_SHA1 | CALG_MD5) {
+                return Err(OffcryptoError::UnsupportedAlgorithm(format!(
+                    "algIdHash=0x{:08x}",
+                    header.alg_id_hash
+                )));
+            }
+        }
     }
 
     // EncryptionVerifier occupies the remaining bytes after the header.
@@ -779,16 +826,31 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     encrypted_verifier.copy_from_slice(enc_ver);
 
     let verifier_hash_size = r.read_u32_le("EncryptionVerifier.verifierHashSize")?;
-    if verifier_hash_size != 20 {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context:
-                "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
-        });
-    }
-    // SHA1 hashes are 20 bytes, padded to an AES block boundary (16) => 32 bytes.
-    let encrypted_verifier_hash = r
-        .take(32, "EncryptionVerifier.encryptedVerifierHash")?
-        .to_vec();
+    let encrypted_verifier_hash = match cipher {
+        CipherKind::Aes { .. } => {
+            if verifier_hash_size != 20 {
+                return Err(OffcryptoError::InvalidEncryptionInfo {
+                    context:
+                        "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
+                });
+            }
+            // SHA1 hashes are 20 bytes, padded to an AES block boundary (16) => 32 bytes.
+            r.take(32, "EncryptionVerifier.encryptedVerifierHash")?.to_vec()
+        }
+        CipherKind::Rc4 => {
+            let expected = if header.alg_id_hash == CALG_MD5 { 16 } else { 20 };
+            if verifier_hash_size != expected {
+                return Err(OffcryptoError::InvalidEncryptionInfo {
+                    context: "EncryptionVerifier.verifierHashSize does not match algIdHash",
+                });
+            }
+            r.take(
+                verifier_hash_size as usize,
+                "EncryptionVerifier.encryptedVerifierHash",
+            )?
+            .to_vec()
+        }
+    };
 
     let verifier = StandardEncryptionVerifier {
         salt,
@@ -2506,6 +2568,17 @@ fn derive_iterated_hash_from_password(
     );
 
     match hash_algorithm {
+        HashAlgorithm::Md5 => {
+            for i in 0..spin_count {
+                if let Some(cb) = on_iteration.as_mut() {
+                    cb(i);
+                }
+                let mut hasher = md5::Md5::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..16]);
+                h_buf[..16].copy_from_slice(&hasher.finalize());
+            }
+        }
         HashAlgorithm::Sha1 => {
             for i in 0..spin_count {
                 if let Some(cb) = on_iteration.as_mut() {
@@ -2714,6 +2787,7 @@ pub fn agile_verify_password_with_options(
     )?;
 
     let hash_len = match info.password_hash_algorithm {
+        HashAlgorithm::Md5 => 16,
         HashAlgorithm::Sha1 => 20,
         HashAlgorithm::Sha256 => 32,
         HashAlgorithm::Sha384 => 48,
@@ -2821,6 +2895,7 @@ pub fn agile_secret_key_with_options(
         )?;
 
         let hash_len = match info.password_hash_algorithm {
+            HashAlgorithm::Md5 => 16,
             HashAlgorithm::Sha1 => 20,
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
