@@ -1526,6 +1526,8 @@ export class SpreadsheetApp {
     };
 
     this.chartSelectionCanvas = document.createElement("canvas");
+    // Chart selection handles are rendered on a separate overlay canvas. Keep the base
+    // class list minimal and use semantic classes so CSS can control stacking.
     this.chartSelectionCanvas.className = "grid-canvas chart-selection-canvas";
     this.chartSelectionCanvas.setAttribute("aria-hidden", "true");
     if (this.gridMode === "shared") {

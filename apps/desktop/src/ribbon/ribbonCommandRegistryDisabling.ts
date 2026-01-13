@@ -156,7 +156,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "open-python-panel",
   "open-marketplace-panel",
   "open-extensions-panel",
-  "open-vba-migrate-panel",
   "open-comments-panel",
   "audit-precedents",
   "audit-dependents",

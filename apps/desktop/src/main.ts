@@ -8716,9 +8716,6 @@ function handleRibbonCommand(commandId: string): void {
       case "view.unfreezePanes":
         executeBuiltinCommand(commandId);
         return;
-      case "open-vba-migrate-panel":
-        toggleDockPanel(PanelIds.VBA_MIGRATE);
-        return;
       default:
         // If the ribbon command matches a registered command id (builtin or extension),
         // dispatch it through the shared CommandRegistry. This keeps ribbon buttons
