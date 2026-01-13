@@ -96,7 +96,10 @@ export class PresenceManager {
 
   getRemotePresences(options?: { activeSheet?: string; includeOtherSheets?: boolean; staleAfterMs?: number }): RemotePresenceState[];
 
-  subscribe(listener: (presences: RemotePresenceState[]) => void): () => void;
+  subscribe(
+    listener: (presences: RemotePresenceState[]) => void,
+    opts?: { includeOtherSheets?: boolean },
+  ): () => void;
 }
 
 export class InMemoryAwarenessHub {

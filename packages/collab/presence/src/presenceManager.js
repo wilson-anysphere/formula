@@ -89,7 +89,8 @@ export class PresenceManager {
     this._setTimeout = setTimeoutFn ?? globalThis.setTimeout;
     this._clearTimeout = clearTimeoutFn ?? globalThis.clearTimeout;
     this._staleEvictionTimeoutId = null;
-    this._listeners = new Set();
+    /** @type {Map<Function, { includeOtherSheets: boolean }>} */
+    this._listeners = new Map();
     this._awarenessChangeHandler = (change) => {
       const localClientId = this.awareness.clientID;
       const added = Array.isArray(change?.added) ? change.added : [];
@@ -171,12 +172,17 @@ export class PresenceManager {
   _notify() {
     if (this._listeners.size === 0) return;
     const { allPresences, presences } = this._getRemotePresenceSnapshot();
-    for (const listener of this._listeners) listener(presences);
     // Schedule stale eviction across *all* remote presences (not just the current active
-    // sheet) so consumers can call `getRemotePresences({ includeOtherSheets: true })`
-    // inside a subscription callback and still have stale clients removed even when
-    // there are no active-sheet users.
+    // sheet). This ensures:
+    // - `subscribe(..., { includeOtherSheets: true })` evicts stale users on non-active sheets
+    // - legacy consumers calling `getRemotePresences({ includeOtherSheets: true })` inside a
+    //   default subscription callback still see stale users removed, even when there are no
+    //   active-sheet users.
+    //
+    // Schedule before calling listeners so a listener cannot affect eviction timing by
+    // mutating the presences array.
     this._scheduleStaleEviction(allPresences);
+    for (const [listener, opts] of this._listeners) listener(opts?.includeOtherSheets ? allPresences : presences);
   }
 
   /**
@@ -187,10 +193,12 @@ export class PresenceManager {
    * ignored to avoid causing unnecessary re-renders during pointer movement.
    *
    * @param {(presences: any[]) => void} listener
+   * @param {{ includeOtherSheets?: boolean }=} opts
    * @returns {() => void}
    */
-  subscribe(listener) {
-    this._listeners.add(listener);
+  subscribe(listener, opts) {
+    const includeOtherSheets = opts?.includeOtherSheets === true;
+    this._listeners.set(listener, { includeOtherSheets });
 
     if (!this._awarenessListenerAttached && typeof this.awareness.on === "function") {
       this.awareness.on("change", this._awarenessChangeHandler);
@@ -198,8 +206,8 @@ export class PresenceManager {
     }
 
     const { allPresences, presences } = this._getRemotePresenceSnapshot();
-    listener(presences);
     this._scheduleStaleEviction(allPresences);
+    listener(includeOtherSheets ? allPresences : presences);
 
     return () => {
       this._listeners.delete(listener);
