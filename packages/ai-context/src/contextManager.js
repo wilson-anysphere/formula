@@ -426,16 +426,32 @@ export class ContextManager {
     });
     const chain = prev.then(() => current);
     this._sheetIndexLocks.set(key, chain);
+    let acquired = false;
 
     try {
       // Allow callers to abort while waiting for a previous indexing pass.
       await awaitWithAbort(prev, signal);
+      acquired = true;
       throwIfAborted(signal);
       return await fn();
     } finally {
       release();
-      if (this._sheetIndexLocks.get(key) === chain) {
-        this._sheetIndexLocks.delete(key);
+      if (acquired) {
+        if (this._sheetIndexLocks.get(key) === chain) {
+          this._sheetIndexLocks.delete(key);
+        }
+      } else {
+        // If this call aborted while *waiting* for the lock, do not eagerly delete the
+        // lock chain: doing so would allow subsequent calls to bypass the in-flight
+        // operation they were waiting on.
+        //
+        // Instead, schedule cleanup after the chain settles (after the previous holder
+        // completes). Only delete if we are still the tail.
+        chain.finally(() => {
+          if (this._sheetIndexLocks.get(key) === chain) {
+            this._sheetIndexLocks.delete(key);
+          }
+        });
       }
     }
   }

@@ -101,8 +101,12 @@ test("buildContext: aborts while waiting for an in-flight sheet index", async ()
   abortController.abort();
 
   await assert.rejects(p2, { name: "AbortError" });
+  // A third call started while p1 is still in-flight should not bypass the existing
+  // in-flight lock, even though p2 aborted while waiting.
+  const p3 = cm.buildContext({ sheet, query: "south" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   releaseGate();
-  await p1;
+  await Promise.all([p1, p3]);
 });
 
 test("buildContext: cacheSheetIndex=false re-indexes even when the sheet is unchanged", async () => {
