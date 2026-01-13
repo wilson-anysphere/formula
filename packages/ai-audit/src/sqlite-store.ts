@@ -37,6 +37,15 @@ export interface SqliteAIAuditStoreOptions {
   auto_persist_interval_ms?: number;
 }
 
+/**
+ * SQL.js-backed audit store (SQLite in WASM).
+ *
+ * Note: this store supports retention via row count / max age, but does not
+ * enforce a strict per-entry size cap. When persisting via LocalStorage (e.g.
+ * `LocalStorageBinaryStorage`), large single entries can still cause quota
+ * failures. For defense-in-depth against oversized entries, wrap the store with
+ * `BoundedAIAuditStore`.
+ */
 export class SqliteAIAuditStore implements AIAuditStore {
   private readonly db: SqlJsDatabase;
   private readonly storage: SqliteBinaryStorage;
