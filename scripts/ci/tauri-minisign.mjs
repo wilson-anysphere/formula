@@ -187,6 +187,11 @@ export function parseTauriUpdaterPubkey(pubkeyBase64) {
 
   const lines = nonEmptyLines(text);
   if (lines.length === 1) {
+    if (lines[0].toLowerCase().startsWith("untrusted comment:")) {
+      throw new Error(
+        `updater pubkey minisign text is missing the base64 payload line (found only the comment line).`,
+      );
+    }
     // Some setups may store only the minisign payload line (without the comment).
     const { publicKeyBytes, keyId } = parseMinisignPublicKeyPayload(lines[0]);
     return { publicKeyBytes, keyId, format: "minisign" };
@@ -241,6 +246,11 @@ export function parseTauriUpdaterSignature(signatureText, label = "signature") {
     commentKeyId = extractKeyIdFromSignatureComment(lines[0]);
     base64Line = lines[1];
   } else if (lines.length === 1) {
+    if (lines[0].toLowerCase().startsWith("untrusted comment:")) {
+      throw new Error(
+        `${label} minisign signature text is missing the base64 payload line (found only the comment line).`,
+      );
+    }
     base64Line = lines[0];
   } else {
     // If this doesn't look like minisign (missing comment line), attempt to find a base64-like line.
@@ -264,7 +274,7 @@ export function parseTauriUpdaterSignature(signatureText, label = "signature") {
   const bytes = decodeBase64(label, base64Line);
 
   if (bytes.length === 64) {
-    return { signatureBytes: bytes, keyId: null, format: "raw" };
+    return { signatureBytes: bytes, keyId: commentKeyId, format: "raw" };
   }
 
   if (bytes.length === 74) {
@@ -283,7 +293,7 @@ export function parseTauriUpdaterSignature(signatureText, label = "signature") {
     }
     if (commentKeyId && commentKeyId !== keyId) {
       throw new Error(
-        `${label} minisign comment key id (${commentKeyId}) does not match payload key id (${keyId}).`,
+        `${label} minisign signature comment key id (${commentKeyId}) does not match payload key id (${keyId}).`,
       );
     }
     return { signatureBytes: Buffer.from(signature), keyId, format: "minisign" };

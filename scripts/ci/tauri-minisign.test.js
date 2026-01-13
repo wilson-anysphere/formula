@@ -62,6 +62,31 @@ test("parses supported signature formats (raw, minisign payload, minisign text)"
     assert.deepEqual(parsed.signatureBytes, sig);
     assert.equal(parsed.keyId, "0807060504030201");
   }
+
+  // Minisign signature file comment contains an explicit key id (validate + return).
+  {
+    const text = `untrusted comment: minisign signature: 0807060504030201\n${minisignB64}\n`;
+    const parsed = parseTauriUpdaterSignature(text);
+    assert.equal(parsed.format, "minisign");
+    assert.deepEqual(parsed.signatureBytes, sig);
+    assert.equal(parsed.keyId, "0807060504030201");
+  }
+
+  // Minisign signature file comment key id mismatch should be rejected.
+  {
+    const text = `untrusted comment: minisign signature: 0000000000000000\n${minisignB64}\n`;
+    assert.throws(() => parseTauriUpdaterSignature(text), /comment key id/i);
+  }
+
+  // Raw signature bytes with a minisign-style comment that includes a key id.
+  {
+    const rawB64 = sig.toString("base64");
+    const text = `untrusted comment: minisign signature: 0807060504030201\n${rawB64}\n`;
+    const parsed = parseTauriUpdaterSignature(text);
+    assert.equal(parsed.format, "raw");
+    assert.deepEqual(parsed.signatureBytes, sig);
+    assert.equal(parsed.keyId, "0807060504030201");
+  }
 });
 
 test("parses pubkey formats (raw Ed25519 bytes, minisign payload bytes)", () => {
