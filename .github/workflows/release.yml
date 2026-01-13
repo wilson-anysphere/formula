@@ -131,7 +131,9 @@ jobs:
 
       - name: Build and upload release assets (macOS universal)
         if: matrix.platform == 'macos-latest'
-        uses: tauri-apps/tauri-action@v0
+        # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
+        # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
+        uses: tauri-apps/tauri-action@v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -162,7 +164,9 @@ jobs:
 
       - name: Build and upload release assets
         if: matrix.platform != 'macos-latest'
-        uses: tauri-apps/tauri-action@v0
+        # Pinned for reproducible releases: avoid upstream `@v0` moving and breaking builds.
+        # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
+        uses: tauri-apps/tauri-action@v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

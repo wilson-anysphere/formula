@@ -50,6 +50,10 @@ APIs so the updater plugin can complete any pending work during shutdown.
 The workflow in `.github/workflows/release.yml` will run and create/update a **draft** release with
 all platform artifacts attached.
 
+Note: the workflow intentionally pins `tauri-apps/tauri-action` to a specific `v0.x.y` tag to avoid
+implicit breakage when the floating `@v0` tag advances. To upgrade, bump the pinned version in
+`.github/workflows/release.yml` (and verify a tagged build in CI).
+
 ## 2) Tauri updater keys (required for auto-update)
 
 Tauri's updater verifies update artifacts using an Ed25519 signature.
@@ -195,7 +199,7 @@ Secrets:
 The desktop app is configured to use **GitHub Releases** as the updater source.
 
 `apps/desktop/src-tauri/tauri.conf.json` points at the `latest.json` manifest generated and uploaded
-by `tauri-apps/tauri-action@v0`:
+by `tauri-apps/tauri-action@v0.6.1`:
 
 ```
 https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json
