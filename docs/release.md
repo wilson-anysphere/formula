@@ -685,6 +685,7 @@ On the target distro, confirm a WebKitGTK 4.1 runtime package is available via t
 
 - Debian/Ubuntu: `apt-cache policy libwebkit2gtk-4.1-0` (or `apt search libwebkit2gtk-4.1`)
 - Fedora: `dnf info webkit2gtk4.1`
+- openSUSE: `zypper info libwebkit2gtk-4_1-0`
 - RHEL 9-family: `dnf info webkit2gtk3` (WebKitGTK 4.0; expect to use the `.AppImage` if 4.1 is unavailable)
 
 If the distro cannot install a WebKitGTK 4.1 package, recommend the `.AppImage` instead of the
