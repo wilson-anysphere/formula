@@ -6,6 +6,11 @@ on:
     # Daily (UTC). Adjust as needed; goal is continuous cross-platform visibility.
     - cron: "0 7 * * *"
 
+env:
+  # Keep these in sync with ci.yml/release.yml to reduce cross-workflow drift.
+  NODE_VERSION: 22
+  WASM_PACK_VERSION: 0.13.1
+
 jobs:
   desktop-startup-perf:
     name: Desktop startup perf (${{ matrix.os }})
@@ -19,6 +24,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+        shell: bash
+        run: bash scripts/ci/check-rust-toolchain-pins.sh
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -27,12 +36,12 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Setup Rust toolchain (stable + wasm32)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.92.0
         with:
           targets: wasm32-unknown-unknown
 
@@ -67,7 +76,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
-        run: cargo install wasm-pack --locked
+        run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Build desktop frontend (Vite + WASM)
         run: pnpm build:desktop
