@@ -3,8 +3,14 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("theme selector", () => {
+  // Validate the UX spec: new users should start in Light theme even when the OS prefers dark.
+  test.use({ colorScheme: "dark" });
+
   test("switches to Dark theme via ribbon and persists across reload", async ({ page }) => {
     await gotoDesktop(page);
+
+    // Default should be light (not System).
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
 
     await page.getByRole("tab", { name: "View", exact: true }).click();
 
