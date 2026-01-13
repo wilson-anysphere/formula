@@ -1,6 +1,6 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
-use crate::model::{Cardinality, RelationshipPathDirection, RowSet};
+use crate::model::{normalize_ident, Cardinality, RelationshipPathDirection, RowSet};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
 #[cfg(feature = "pivot-model")]
@@ -396,6 +396,7 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
 struct RelatedHop<'a> {
     relationship_idx: usize,
     from_idx: usize,
+    to_table_key: &'a str,
     to_index: &'a std::collections::HashMap<Value, RowSet>,
     to_table: &'a crate::model::Table,
 }
@@ -417,6 +418,7 @@ fn build_group_key_accessors<'a>(
     let base_table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    let base_table_key = normalize_ident(base_table);
 
     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
     for &idx in filter.relationship_overrides() {
@@ -437,14 +439,14 @@ fn build_group_key_accessors<'a>(
 
     let mut accessors = Vec::with_capacity(group_by.len());
     for col in group_by {
-        if col.table == base_table {
-            let idx =
-                base_table_ref
-                    .column_idx(&col.column)
-                    .ok_or_else(|| DaxError::UnknownColumn {
-                        table: base_table.to_string(),
-                        column: col.column.clone(),
-                    })?;
+        let col_table_key = normalize_ident(&col.table);
+        if col_table_key == base_table_key {
+            let idx = base_table_ref
+                .column_idx(&col.column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: base_table.to_string(),
+                    column: col.column.clone(),
+                })?;
             accessors.push(GroupKeyAccessor::Base { idx });
             continue;
         }
@@ -476,12 +478,13 @@ fn build_group_key_accessors<'a>(
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
 
              hops.push(RelatedHop {
-                 relationship_idx: rel_idx,
-                 from_idx,
-                 to_index: &rel_info.to_index,
-                 to_table: to_table_ref,
-             });
-        }
+                  relationship_idx: rel_idx,
+                  from_idx,
+                  to_table_key: rel_info.to_table_key.as_str(),
+                  to_index: &rel_info.to_index,
+                  to_table: to_table_ref,
+              });
+         }
 
         let to_table_ref = model
             .table(&col.table)
@@ -852,9 +855,10 @@ fn plan_pivot_expr(
         Expr::Boolean(b) => Ok(Some(PlannedExpr::Const(Value::from(*b)))),
         Expr::Measure(name) => {
             let normalized = DataModel::normalize_measure_name(name);
+            let key = normalize_ident(normalized);
             let measure = model
                 .measures()
-                .get(normalized)
+                .get(&key)
                 .ok_or_else(|| DaxError::UnknownMeasure(name.clone()))?;
             plan_pivot_expr(
                 model,
@@ -1194,7 +1198,7 @@ fn plan_pivot_expr(
                 let Expr::ColumnRef { table, column } = arg else {
                     return Ok(None);
                 };
-                if table != base_table_name {
+                if normalize_ident(table) != normalize_ident(base_table_name) {
                     return Ok(None);
                 }
                 let idx = base_table.column_idx(column).ok_or_else(|| DaxError::UnknownColumn {
@@ -1217,7 +1221,7 @@ fn plan_pivot_expr(
                 let Expr::TableName(table) = arg else {
                     return Ok(None);
                 };
-                if table != base_table_name {
+                if normalize_ident(table) != normalize_ident(base_table_name) {
                     return Ok(None);
                 }
                 let agg_idx = ensure_agg(AggregationKind::CountRows, None, agg_specs, agg_map);
@@ -1236,7 +1240,11 @@ fn pivot_columnar_group_by(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<Option<PivotResult>> {
-    if group_by.iter().any(|c| c.table != base_table) {
+    let base_table_key = normalize_ident(base_table);
+    if group_by
+        .iter()
+        .any(|c| normalize_ident(&c.table) != base_table_key)
+    {
         return Ok(None);
     }
 
@@ -1320,7 +1328,12 @@ fn pivot_columnar_groups_with_measure_eval(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<Option<PivotResult>> {
-    if group_by.is_empty() || group_by.iter().any(|c| c.table != base_table) {
+    let base_table_key = normalize_ident(base_table);
+    if group_by.is_empty()
+        || group_by
+            .iter()
+            .any(|c| normalize_ident(&c.table) != base_table_key)
+    {
         return Ok(None);
     }
 
@@ -2057,6 +2070,7 @@ fn pivot_row_scan_many_to_many(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+    let base_table_key = normalize_ident(base_table);
 
     let row_sets = (!filter.is_empty())
         .then(|| crate::engine::resolve_row_sets(model, filter))
@@ -2145,7 +2159,7 @@ fn pivot_row_scan_many_to_many(
                     for hop in hops {
                         let allowed = row_sets
                             .as_ref()
-                            .and_then(|sets| sets.get(hop.to_table.name()));
+                            .and_then(|sets| sets.get(hop.to_table_key));
                         let mut next_rows: HashSet<usize> = HashSet::new();
                         for &current_row in &current_rows {
                             let key = current_table
@@ -2212,7 +2226,7 @@ fn pivot_row_scan_many_to_many(
 
     if let Some(sets) = row_sets.as_ref() {
         let allowed = sets
-            .get(base_table)
+            .get(base_table_key.as_str())
             .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
         for row in allowed.iter_ones() {
             process_row(row)?;

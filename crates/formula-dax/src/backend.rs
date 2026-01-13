@@ -1,4 +1,5 @@
 use crate::engine::{DaxError, DaxResult};
+use crate::model::normalize_ident;
 use crate::value::Value;
 use std::collections::HashMap;
 use std::fmt;
@@ -148,7 +149,7 @@ impl InMemoryTableBackend {
         let column_index = columns
             .iter()
             .enumerate()
-            .map(|(idx, c)| (c.clone(), idx))
+            .map(|(idx, c)| (normalize_ident(c), idx))
             .collect();
 
         Self {
@@ -171,7 +172,8 @@ impl InMemoryTableBackend {
     }
 
     pub fn add_column(&mut self, table: &str, name: String, values: Vec<Value>) -> DaxResult<()> {
-        if self.column_index.contains_key(&name) {
+        let key = normalize_ident(&name);
+        if self.column_index.contains_key(&key) {
             return Err(DaxError::DuplicateColumn {
                 table: table.to_string(),
                 column: name,
@@ -188,7 +190,7 @@ impl InMemoryTableBackend {
 
         let idx = self.columns.len();
         self.columns.push(name.clone());
-        self.column_index.insert(name, idx);
+        self.column_index.insert(key, idx);
         for (row, value) in self.rows.iter_mut().zip(values) {
             row.push(value);
         }
@@ -218,7 +220,7 @@ impl TableBackend for InMemoryTableBackend {
     }
 
     fn column_index(&self, column: &str) -> Option<usize> {
-        self.column_index.get(column).copied()
+        self.column_index.get(&normalize_ident(column)).copied()
     }
 
     fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {
@@ -245,11 +247,10 @@ impl fmt::Debug for ColumnarTableBackend {
 impl ColumnarTableBackend {
     pub fn new(table: formula_columnar::ColumnarTable) -> Self {
         let columns: Vec<String> = table.schema().iter().map(|c| c.name.clone()).collect();
-        let column_index = columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| (c.clone(), idx))
-            .collect();
+        let mut column_index = HashMap::new();
+        for (idx, c) in columns.iter().enumerate() {
+            column_index.entry(normalize_ident(c)).or_insert(idx);
+        }
 
         Self {
             columns,
@@ -260,11 +261,10 @@ impl ColumnarTableBackend {
 
     pub fn from_arc(table: Arc<formula_columnar::ColumnarTable>) -> Self {
         let columns: Vec<String> = table.schema().iter().map(|c| c.name.clone()).collect();
-        let column_index = columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| (c.clone(), idx))
-            .collect();
+        let mut column_index = HashMap::new();
+        for (idx, c) in columns.iter().enumerate() {
+            column_index.entry(normalize_ident(c)).or_insert(idx);
+        }
 
         Self {
             columns,
@@ -893,7 +893,7 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn column_index(&self, column: &str) -> Option<usize> {
-        self.column_index.get(column).copied()
+        self.column_index.get(&normalize_ident(column)).copied()
     }
 
     fn value_by_idx(&self, row: usize, idx: usize) -> Option<Value> {

@@ -10,6 +10,10 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+pub(crate) fn normalize_ident(s: &str) -> String {
+    s.trim().to_ascii_lowercase()
+}
+
 /// Relationship cardinality between two tables.
 ///
 /// `formula-dax` models relationships in the same oriented way as Tabular/Power Pivot: every
@@ -197,7 +201,8 @@ impl Table {
         match &mut self.storage {
             TableStorage::InMemory(backend) => backend.add_column(&self.name, name, values),
             TableStorage::Columnar(backend) => {
-                if backend.column_index.contains_key(&name) {
+                let key = normalize_ident(&name);
+                if backend.column_index.contains_key(&key) {
                     return Err(DaxError::DuplicateColumn {
                         table: self.name.clone(),
                         column: name,
@@ -283,7 +288,7 @@ impl Table {
                     .columns
                     .iter()
                     .enumerate()
-                    .map(|(idx, c)| (c.clone(), idx))
+                    .map(|(idx, c)| (normalize_ident(c), idx))
                     .collect();
                 Ok(())
             }
@@ -319,7 +324,7 @@ impl Table {
                     Some(name) => name,
                     None => return Ok(None),
                 };
-                backend.column_index.remove(&name);
+                backend.column_index.remove(&normalize_ident(&name));
                 for row in &mut backend.rows {
                     row.pop();
                 }
@@ -764,6 +769,10 @@ impl UnmatchedFactRowsBuilder {
 #[derive(Clone, Debug)]
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
+    pub(crate) from_table_key: String,
+    pub(crate) from_column_key: String,
+    pub(crate) to_table_key: String,
+    pub(crate) to_column_key: String,
     /// Column index of `rel.from_column` in the `from_table`.
     pub(crate) from_idx: usize,
     /// Column index of `rel.to_column` in the `to_table`.
@@ -814,7 +823,8 @@ impl DataModel {
     }
 
     pub fn table(&self, name: &str) -> Option<&Table> {
-        self.tables.get(name)
+        let key = normalize_ident(name);
+        self.tables.get(&key)
     }
 
     pub fn tables(&self) -> impl Iterator<Item = &Table> {
@@ -835,23 +845,25 @@ impl DataModel {
 
     pub fn add_table(&mut self, table: Table) -> DaxResult<()> {
         let name = table.name.clone();
-        if self.tables.contains_key(&name) {
+        let key = normalize_ident(&name);
+        if self.tables.contains_key(&key) {
             return Err(DaxError::DuplicateTable { table: name });
         }
-        self.tables.insert(name, table);
+        self.tables.insert(key, table);
         Ok(())
     }
 
     pub fn insert_row(&mut self, table: &str, row: Vec<Value>) -> DaxResult<()> {
+        let table_key = normalize_ident(table);
         let table_ref = self
             .tables
-            .get(table)
+            .get(&table_key)
             .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
 
         let calc_count = self
             .calculated_columns
             .iter()
-            .filter(|c| c.table == table)
+            .filter(|c| normalize_ident(&c.table) == table_key)
             .count();
 
         let total_columns = table_ref.columns().len();
@@ -863,16 +875,16 @@ impl DataModel {
                 // Insert values for non-calculated columns in schema order and leave calculated
                 // column slots blank. This ensures `insert_row` works even when calculated columns
                 // are not physically stored at the end of the table (e.g. in persisted models).
-                let calc_names: HashSet<&str> = self
+                let calc_names: HashSet<String> = self
                     .calculated_columns
                     .iter()
-                    .filter(|c| c.table == table)
-                    .map(|c| c.name.as_str())
+                    .filter(|c| normalize_ident(&c.table) == table_key)
+                    .map(|c| normalize_ident(&c.name))
                     .collect();
                 let mut iter = row.into_iter();
                 let mut expanded = Vec::with_capacity(total_columns);
                 for col in table_ref.columns() {
-                    if calc_names.contains(col.as_str()) {
+                    if calc_names.contains(&normalize_ident(col)) {
                         expanded.push(Value::Blank);
                     } else {
                         expanded.push(iter.next().unwrap_or(Value::Blank));
@@ -892,7 +904,7 @@ impl DataModel {
         let row_index = {
             let table_mut = self
                 .tables
-                .get_mut(table)
+                .get_mut(&table_key)
                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
             table_mut.push_row(full_row.clone())?;
             table_mut.row_count().saturating_sub(1)
@@ -901,15 +913,15 @@ impl DataModel {
         if calc_count > 0 {
             let calc_result: DaxResult<Vec<Value>> = (|| {
                 let mut row_ctx = RowContext::default();
-                row_ctx.push(table, row_index);
+                row_ctx.push(&table_key, row_index);
                 let engine = crate::engine::DaxEngine::new();
 
-                let topo_order = match self.calculated_column_order.get(table) {
+                let topo_order = match self.calculated_column_order.get(&table_key) {
                     Some(order) if order.len() == calc_count => order.clone(),
                     _ => {
-                        let order = self.build_calculated_column_order(table)?;
+                        let order = self.build_calculated_column_order(&table_key)?;
                         self.calculated_column_order
-                            .insert(table.to_string(), order.clone());
+                            .insert(table_key.clone(), order.clone());
                         order
                     }
                 };
@@ -929,7 +941,7 @@ impl DataModel {
                     let col_idx = {
                         let table_ref = self
                             .tables
-                            .get(table)
+                            .get(&table_key)
                             .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
                         table_ref
                             .column_idx(&calc.name)
@@ -941,14 +953,14 @@ impl DataModel {
 
                     let table_mut = self
                         .tables
-                        .get_mut(table)
+                        .get_mut(&table_key)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
                     table_mut.set_value_by_idx(row_index, col_idx, value)?;
                 }
 
                 Ok(self
                     .tables
-                    .get(table)
+                    .get(&table_key)
                     .map(|t| {
                         (0..t.columns().len())
                             .map(|idx| t.value_by_idx(row_index, idx).unwrap_or(Value::Blank))
@@ -962,7 +974,7 @@ impl DataModel {
                 Err(err) => {
                     // Keep insert_row atomic: if computing a calculated column fails, remove the
                     // appended row before returning the error.
-                    if let Some(table_mut) = self.tables.get_mut(table) {
+                    if let Some(table_mut) = self.tables.get_mut(&table_key) {
                         table_mut.pop_row();
                     }
                     return Err(err);
@@ -980,7 +992,7 @@ impl DataModel {
         let mut to_index_updates: Vec<(usize, Value, bool)> = Vec::new();
         for (rel_idx, rel_info) in self.relationships.iter().enumerate() {
             let rel = &rel_info.rel;
-            if rel.to_table == table {
+            if rel_info.to_table_key == table_key {
                 let key = full_row
                     .get(rel_info.to_idx)
                     .cloned()
@@ -989,7 +1001,7 @@ impl DataModel {
                 // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
                 if rel.cardinality != Cardinality::ManyToMany && key_existed {
                     self.tables
-                        .get_mut(table)
+                        .get_mut(&table_key)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
                         .pop_row();
                     return Err(DaxError::NonUniqueKey {
@@ -1001,7 +1013,7 @@ impl DataModel {
                 to_index_updates.push((rel_idx, key, key_existed));
             }
 
-            if rel.from_table == table {
+            if rel_info.from_table_key == table_key {
                 let key = full_row
                     .get(rel_info.from_idx)
                     .cloned()
@@ -1013,7 +1025,7 @@ impl DataModel {
                     if let Some(from_index) = rel_info.from_index.as_ref() {
                         if from_index.contains_key(&key) {
                             self.tables
-                                .get_mut(table)
+                                .get_mut(&table_key)
                                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
                                 .pop_row();
                             return Err(DaxError::NonUniqueKey {
@@ -1033,7 +1045,7 @@ impl DataModel {
                 }
                 if !rel_info.to_index.contains_key(&key) {
                     self.tables
-                        .get_mut(table)
+                        .get_mut(&table_key)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
                         .pop_row();
                     return Err(DaxError::ReferentialIntegrityViolation {
@@ -1085,12 +1097,12 @@ impl DataModel {
                 continue;
             };
 
-            let from_table_name = rel_info.rel.from_table.clone();
+            let from_table_key = rel_info.from_table_key.clone();
             let from_idx = rel_info.from_idx;
             let from_table_ref = self
                 .tables
-                .get(&from_table_name)
-                .ok_or_else(|| DaxError::UnknownTable(from_table_name.clone()))?;
+                .get(&from_table_key)
+                .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
             match unmatched {
                 UnmatchedFactRows::Sparse(_) => {
                     // When the unmatched set is sparse, scanning it is cheaper than finding all
@@ -1136,13 +1148,11 @@ impl DataModel {
         }
 
         for rel_info in &mut self.relationships {
-            let rel = &rel_info.rel;
-            if rel.from_table == table {
+            if rel_info.from_table_key == table_key {
                 let key = full_row
                     .get(rel_info.from_idx)
                     .cloned()
                     .unwrap_or(Value::Blank);
-
                 if let Some(from_index) = rel_info.from_index.as_mut() {
                     from_index.entry(key.clone()).or_default().push(row_index);
                 }
@@ -1188,13 +1198,16 @@ impl DataModel {
     ///   column and compare the [`Value`] variant. If either side is all BLANKs in the scan
     ///   window, validation is skipped.
     pub fn add_relationship(&mut self, relationship: Relationship) -> DaxResult<()> {
+        let mut relationship = relationship;
+        let from_table_lookup_key = normalize_ident(&relationship.from_table);
+        let to_table_lookup_key = normalize_ident(&relationship.to_table);
         let from_table = self
             .tables
-            .get(&relationship.from_table)
+            .get(&from_table_lookup_key)
             .ok_or_else(|| DaxError::UnknownTable(relationship.from_table.clone()))?;
         let to_table = self
             .tables
-            .get(&relationship.to_table)
+            .get(&to_table_lookup_key)
             .ok_or_else(|| DaxError::UnknownTable(relationship.to_table.clone()))?;
 
         let from_col = relationship.from_column.clone();
@@ -1203,15 +1216,28 @@ impl DataModel {
         let from_idx = from_table
             .column_idx(&from_col)
             .ok_or_else(|| DaxError::UnknownColumn {
-                table: relationship.from_table.clone(),
+                table: from_table.name.clone(),
                 column: from_col.clone(),
             })?;
         let to_idx = to_table
             .column_idx(&to_col)
             .ok_or_else(|| DaxError::UnknownColumn {
-                table: relationship.to_table.clone(),
+                table: to_table.name.clone(),
                 column: to_col.clone(),
             })?;
+
+        relationship.from_table = from_table.name.clone();
+        relationship.to_table = to_table.name.clone();
+        relationship.from_column = from_table
+            .columns()
+            .get(from_idx)
+            .cloned()
+            .unwrap_or(from_col.clone());
+        relationship.to_column = to_table
+            .columns()
+            .get(to_idx)
+            .cloned()
+            .unwrap_or(to_col.clone());
 
         Self::validate_relationship_join_column_types(
             &relationship,
@@ -1221,6 +1247,11 @@ impl DataModel {
             to_idx,
         )?;
 
+        let from_table_key = normalize_ident(&relationship.from_table);
+        let to_table_key = normalize_ident(&relationship.to_table);
+        let from_column_key = normalize_ident(&relationship.from_column);
+        let to_column_key = normalize_ident(&relationship.to_column);
+
         let mut to_index = HashMap::<Value, RowSet>::new();
         for row in 0..to_table.row_count() {
             let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
@@ -1229,7 +1260,7 @@ impl DataModel {
                     if to_index.insert(value.clone(), RowSet::One(row)).is_some() {
                         return Err(DaxError::NonUniqueKey {
                             table: relationship.to_table.clone(),
-                            column: to_col.clone(),
+                            column: relationship.to_column.clone(),
                             value: value.clone(),
                         });
                     }
@@ -1333,6 +1364,10 @@ impl DataModel {
 
         self.relationships.push(RelationshipInfo {
             rel: relationship,
+            from_table_key,
+            from_column_key,
+            to_table_key,
+            to_column_key,
             from_idx,
             to_idx,
             to_index,
@@ -1456,15 +1491,19 @@ impl DataModel {
         expression: impl Into<String>,
     ) -> DaxResult<()> {
         let name = name.into();
-        if self.measures.contains_key(&name) {
-            return Err(DaxError::DuplicateMeasure { measure: name });
+        let display_name = Self::normalize_measure_name(&name).to_string();
+        let key = normalize_ident(&display_name);
+        if self.measures.contains_key(&key) {
+            return Err(DaxError::DuplicateMeasure {
+                measure: display_name,
+            });
         }
         let expression = expression.into();
         let parsed = crate::parser::parse(&expression)?;
         self.measures.insert(
-            name.clone(),
+            key,
             Measure {
-                name,
+                name: display_name,
                 expression,
                 parsed,
             },
@@ -1479,16 +1518,11 @@ impl DataModel {
         expression: impl Into<String>,
     ) -> DaxResult<()> {
         let table = table.into();
+        let table_key = normalize_ident(&table);
         let name = name.into();
         let expression = expression.into();
 
         let parsed = crate::parser::parse(&expression)?;
-        let calc = CalculatedColumn {
-            table: table.clone(),
-            name: name.clone(),
-            expression,
-            parsed: parsed.clone(),
-        };
 
         enum NewColumn {
             InMemory(Vec<Value>),
@@ -1496,7 +1530,7 @@ impl DataModel {
         }
 
         let new_column = {
-            let Some(table_ref) = self.tables.get(&table) else {
+            let Some(table_ref) = self.tables.get(&table_key) else {
                 return Err(DaxError::UnknownTable(table.clone()));
             };
 
@@ -1658,9 +1692,20 @@ impl DataModel {
             }
         };
 
+        let calc = CalculatedColumn {
+            table: self
+                .tables
+                .get(&table_key)
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| table.clone()),
+            name: name.clone(),
+            expression,
+            parsed: parsed.clone(),
+        };
+
         let table_mut = self
             .tables
-            .get_mut(&table)
+            .get_mut(&table_key)
             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
 
         match (&mut table_mut.storage, new_column) {
@@ -1704,7 +1749,7 @@ impl DataModel {
                     .columns
                     .iter()
                     .enumerate()
-                    .map(|(idx, c)| (c.clone(), idx))
+                    .map(|(idx, c)| (normalize_ident(c), idx))
                     .collect();
             }
             (TableStorage::InMemory(_), NewColumn::Columnar(_))
@@ -1717,13 +1762,12 @@ impl DataModel {
         // Recompute the evaluation order for calculated columns in this table so `insert_row`
         // can honor intra-table dependencies (Power Pivot allows calculated columns to reference
         // other calculated columns in the same table).
-        let table_name = table.clone();
-        if let Err(err) = self.refresh_calculated_column_order(&table_name) {
+        if let Err(err) = self.refresh_calculated_column_order(&table_key) {
             // Roll back the definition. The physical column was already added; for in-memory
             // tables we can also remove the last column, but columnar tables do not currently
             // support removing columns.
             self.calculated_columns.pop();
-            if let Some(table_mut) = self.tables.get_mut(&table_name) {
+            if let Some(table_mut) = self.tables.get_mut(&table_key) {
                 let _ = table_mut.pop_last_column();
             }
             return Err(err);
@@ -1744,11 +1788,13 @@ impl DataModel {
         expression: impl Into<String>,
     ) -> DaxResult<()> {
         let table = table.into();
+        let table_key = normalize_ident(&table);
         let name = name.into();
+        let name_key = normalize_ident(&name);
         if self
             .calculated_columns
             .iter()
-            .any(|c| c.table == table && c.name == name)
+            .any(|c| normalize_ident(&c.table) == table_key && normalize_ident(&c.name) == name_key)
         {
             return Err(DaxError::DuplicateColumn {
                 table,
@@ -1758,29 +1804,24 @@ impl DataModel {
 
         let table_ref = self
             .tables
-            .get(&table)
+            .get(&table_key)
             .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
-        if table_ref.column_idx(&name).is_none() {
+        let Some(col_idx) = table_ref.column_idx(&name) else {
             return Err(DaxError::UnknownColumn {
                 table,
                 column: name,
             });
-        }
+        };
 
         let expression = expression.into();
         let parsed = crate::parser::parse(&expression)?;
         self.calculated_columns.push(CalculatedColumn {
-            table,
-            name,
+            table: table_ref.name.clone(),
+            name: table_ref.columns().get(col_idx).cloned().unwrap_or(name),
             expression,
             parsed,
         });
-        let table_name = self
-            .calculated_columns
-            .last()
-            .map(|c| c.table.clone())
-            .unwrap_or_default();
-        if let Err(err) = self.refresh_calculated_column_order(&table_name) {
+        if let Err(err) = self.refresh_calculated_column_order(&table_key) {
             self.calculated_columns.pop();
             return Err(err);
         }
@@ -1788,9 +1829,10 @@ impl DataModel {
     }
 
     pub fn evaluate_measure(&self, name: &str, filter: &FilterContext) -> DaxResult<Value> {
+        let key = normalize_ident(Self::normalize_measure_name(name));
         let measure = self
             .measures
-            .get(Self::normalize_measure_name(name))
+            .get(&key)
             .ok_or_else(|| DaxError::UnknownMeasure(name.to_string()))?;
         crate::engine::DaxEngine::new().evaluate_expr(
             self,
@@ -1818,25 +1860,28 @@ impl DataModel {
     where
         F: Fn(usize, &RelationshipInfo) -> bool,
     {
+        let from_key = normalize_ident(from_table);
+        let to_key = normalize_ident(to_table);
+
         // We intentionally do not treat `from_table == to_table` as a valid path here.
         // Callers like `RELATED`/`RELATEDTABLE` are defined in terms of relationships, and
         // previously errored when the target table was the current table.
-        if from_table == to_table {
+        if from_key == to_key {
             return Ok(None);
         }
 
-        fn dfs<'a, F>(
-            model: &'a DataModel,
-            start_table: &'a str,
-            current_table: &'a str,
-            target_table: &'a str,
+        fn dfs<F>(
+            model: &DataModel,
+            start_table: &str,
+            current_table: &str,
+            target_table: &str,
             direction: RelationshipPathDirection,
             is_relationship_active: &F,
-            visited: &mut HashSet<&'a str>,
+            visited: &mut HashSet<String>,
             path: &mut Vec<usize>,
-            table_path: &mut Vec<&'a str>,
+            table_path: &mut Vec<String>,
             found_path: &mut Option<Vec<usize>>,
-            found_table_path: &mut Option<Vec<&'a str>>,
+            found_table_path: &mut Option<Vec<String>>,
         ) -> DaxResult<()>
         where
             F: Fn(usize, &RelationshipInfo) -> bool,
@@ -1864,16 +1909,16 @@ impl DataModel {
 
                 let next_table = match direction {
                     RelationshipPathDirection::ManyToOne => {
-                        if rel.rel.from_table != current_table {
+                        if rel.from_table_key != current_table {
                             continue;
                         }
-                        rel.rel.to_table.as_str()
+                        rel.to_table_key.as_str()
                     }
                     RelationshipPathDirection::OneToMany => {
-                        if rel.rel.to_table != current_table {
+                        if rel.to_table_key != current_table {
                             continue;
                         }
-                        rel.rel.from_table.as_str()
+                        rel.from_table_key.as_str()
                     }
                 };
 
@@ -1881,9 +1926,9 @@ impl DataModel {
                     continue;
                 }
 
-                visited.insert(next_table);
+                visited.insert(next_table.to_string());
                 path.push(idx);
-                table_path.push(next_table);
+                table_path.push(next_table.to_string());
 
                 dfs(
                     model,
@@ -1908,17 +1953,17 @@ impl DataModel {
         }
 
         let mut visited = HashSet::new();
-        visited.insert(from_table);
+        visited.insert(from_key.clone());
         let mut path = Vec::new();
-        let mut table_path = vec![from_table];
+        let mut table_path = vec![from_key.clone()];
         let mut found_path = None;
         let mut found_table_path = None;
 
         dfs(
             self,
-            from_table,
-            from_table,
-            to_table,
+            &from_key,
+            &from_key,
+            &to_key,
             direction,
             &is_relationship_active,
             &mut visited,
@@ -1938,19 +1983,22 @@ impl DataModel {
         table_b: &str,
         column_b: &str,
     ) -> Option<usize> {
+        let table_a = normalize_ident(table_a);
+        let column_a = normalize_ident(column_a);
+        let table_b = normalize_ident(table_b);
+        let column_b = normalize_ident(column_b);
         self.relationships
             .iter()
             .enumerate()
             .find_map(|(idx, info)| {
-                let rel = &info.rel;
-                let forward = rel.from_table == table_a
-                    && rel.from_column == column_a
-                    && rel.to_table == table_b
-                    && rel.to_column == column_b;
-                let reverse = rel.from_table == table_b
-                    && rel.from_column == column_b
-                    && rel.to_table == table_a
-                    && rel.to_column == column_a;
+                let forward = info.from_table_key == table_a
+                    && info.from_column_key == column_a
+                    && info.to_table_key == table_b
+                    && info.to_column_key == column_b;
+                let reverse = info.from_table_key == table_b
+                    && info.from_column_key == column_b
+                    && info.to_table_key == table_a
+                    && info.to_column_key == column_a;
                 (forward || reverse).then_some(idx)
             })
     }
@@ -1970,11 +2018,17 @@ impl DataModel {
     }
 
     fn build_calculated_column_order(&self, table: &str) -> DaxResult<Vec<usize>> {
+        let table_key = normalize_ident(table);
+        let table_display = self
+            .tables
+            .get(&table_key)
+            .map(|t| t.name().to_string())
+            .unwrap_or_else(|| table.trim().to_string());
         let calc_indices: Vec<usize> = self
             .calculated_columns
             .iter()
             .enumerate()
-            .filter_map(|(idx, c)| (c.table == table).then_some(idx))
+            .filter_map(|(idx, c)| (normalize_ident(&c.table) == table_key).then_some(idx))
             .collect();
 
         if calc_indices.is_empty() {
@@ -1985,7 +2039,7 @@ impl DataModel {
         let mut name_to_idx: HashMap<String, usize> = HashMap::new();
         for &idx in &calc_indices {
             if let Some(calc) = self.calculated_columns.get(idx) {
-                name_to_idx.insert(calc.name.clone(), idx);
+                name_to_idx.insert(normalize_ident(&calc.name), idx);
             }
         }
 
@@ -1995,7 +2049,7 @@ impl DataModel {
             let Some(calc) = self.calculated_columns.get(idx) else {
                 continue;
             };
-            let deps = self.collect_same_table_column_dependencies(&calc.parsed, table);
+            let deps = self.collect_same_table_column_dependencies(&calc.parsed, &table_key);
             let mut calc_deps: Vec<usize> = deps
                 .into_iter()
                 .filter_map(|dep_name| name_to_idx.get(&dep_name).copied())
@@ -2071,7 +2125,15 @@ impl DataModel {
                 Ok(())
             }
 
-            dfs(start, state, stack, out, deps_by_calc, table, this)
+            dfs(
+                start,
+                state,
+                stack,
+                out,
+                deps_by_calc,
+                table_display.as_str(),
+                this,
+            )
         };
 
         // Use definition order as a stable traversal order.
@@ -2114,8 +2176,8 @@ impl DataModel {
                 self.collect_same_table_column_dependencies_inner(body, current_table, out);
             }
             Expr::ColumnRef { table, column } => {
-                if table == current_table {
-                    out.insert(column.clone());
+                if normalize_ident(table) == current_table {
+                    out.insert(normalize_ident(column));
                 }
             }
             Expr::Measure(name) => {
@@ -2123,10 +2185,11 @@ impl DataModel {
                 // In a calculated column (row context), `[Name]` can resolve to either a measure
                 // or a same-table column. Only treat it as a column dependency when no measure
                 // exists and the table contains a column with that name.
-                if !self.measures.contains_key(normalized) {
+                let measure_key = normalize_ident(normalized);
+                if !self.measures.contains_key(&measure_key) {
                     if let Some(table_ref) = self.tables.get(current_table) {
                         if table_ref.column_idx(normalized).is_some() {
-                            out.insert(normalized.to_string());
+                            out.insert(normalize_ident(normalized));
                         }
                     }
                 }

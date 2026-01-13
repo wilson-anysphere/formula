@@ -4,12 +4,12 @@ use formula_dax::{DataModel, DaxError, Table, Value};
 fn insert_row_computes_dependent_calculated_columns() {
     let mut model = DataModel::new();
 
-    let mut t = Table::new("T", vec!["a"]);
+    let mut t = Table::new("T", vec!["a0"]);
     t.push_row(vec![1.into()]).unwrap();
     model.add_table(t).unwrap();
 
     model
-        .add_calculated_column("T", "A", "[a] + 1")
+        .add_calculated_column("T", "A", "[a0] + 1")
         .unwrap();
     model
         .add_calculated_column("T", "B", "[A] + 1")
@@ -30,18 +30,18 @@ fn insert_row_computes_calculated_columns_in_dependency_order() {
     // Simulate a persisted model where calculated column values are already stored in the table,
     // but definitions can be registered in any order.
     //
-    // Base column: a
+    // Base column: a0
     // Calculated columns:
-    //   A = [a] + 1
+    //   A = [a0] + 1
     //   B = [A] + 1
-    let mut t = Table::new("T", vec!["a", "A", "B"]);
+    let mut t = Table::new("T", vec!["a0", "A", "B"]);
     t.push_row(vec![1.into(), 2.into(), 3.into()]).unwrap();
     model.add_table(t).unwrap();
 
     // Register definitions out-of-order on purpose: B before A.
     model.add_calculated_column_definition("T", "B", "[A] + 1")
         .unwrap();
-    model.add_calculated_column_definition("T", "A", "[a] + 1")
+    model.add_calculated_column_definition("T", "A", "[a0] + 1")
         .unwrap();
 
     model.insert_row("T", vec![10.into()]).unwrap();
@@ -56,7 +56,7 @@ fn insert_row_computes_calculated_columns_in_dependency_order() {
 fn calculated_column_dependency_cycle_errors() {
     let mut model = DataModel::new();
 
-    let mut t = Table::new("T", vec!["a", "A", "B"]);
+    let mut t = Table::new("T", vec!["a0", "A", "B"]);
     t.push_row(vec![1.into(), Value::Blank, Value::Blank]).unwrap();
     model.add_table(t).unwrap();
 
@@ -78,24 +78,24 @@ fn insert_row_maps_values_around_calculated_columns() {
     let mut model = DataModel::new();
 
     // Simulate a persisted table where calculated columns are not physically last.
-    // Schema order: a, A (calc), b, B (calc)
-    let mut t = Table::new("T", vec!["a", "A", "b", "B"]);
+    // Schema order: a0, A (calc), b0, B (calc)
+    let mut t = Table::new("T", vec!["a0", "A", "b0", "B"]);
     t.push_row(vec![1.into(), 2.into(), 20.into(), 22.into()]).unwrap();
     model.add_table(t).unwrap();
 
     // Register definitions out-of-order to also exercise topo ordering.
-    model.add_calculated_column_definition("T", "B", "[A] + [b]")
+    model.add_calculated_column_definition("T", "B", "[A] + [b0]")
         .unwrap();
-    model.add_calculated_column_definition("T", "A", "[a] + 1")
+    model.add_calculated_column_definition("T", "A", "[a0] + 1")
         .unwrap();
 
-    // Provide only non-calculated column values in schema order (a, b).
+    // Provide only non-calculated column values in schema order (a0, b0).
     model.insert_row("T", vec![10.into(), 20.into()]).unwrap();
 
     let t = model.table("T").unwrap();
     assert_eq!(t.row_count(), 2);
-    assert_eq!(t.value(1, "a").unwrap(), Value::from(10.0));
-    assert_eq!(t.value(1, "b").unwrap(), Value::from(20.0));
+    assert_eq!(t.value(1, "a0").unwrap(), Value::from(10.0));
+    assert_eq!(t.value(1, "b0").unwrap(), Value::from(20.0));
     assert_eq!(t.value(1, "A").unwrap(), Value::from(11.0));
     assert_eq!(t.value(1, "B").unwrap(), Value::from(31.0));
 }
@@ -127,7 +127,7 @@ fn calculated_column_dependencies_traverse_var_bindings_and_body() {
 
     // Persisted model: calculated column storage already exists, but definitions can be registered
     // in any order.
-    let mut t = Table::new("T", vec!["a", "A", "B", "C"]);
+    let mut t = Table::new("T", vec!["a0", "A", "B", "C"]);
     t.push_row(vec![1.into(), Value::Blank, Value::Blank, Value::Blank])
         .unwrap();
     model.add_table(t).unwrap();
@@ -137,10 +137,10 @@ fn calculated_column_dependencies_traverse_var_bindings_and_body() {
         .add_calculated_column_definition("T", "C", "VAR x = [A] RETURN x + [B]")
         .unwrap();
     model
-        .add_calculated_column_definition("T", "A", "[a] + 1")
+        .add_calculated_column_definition("T", "A", "[a0] + 1")
         .unwrap();
     model
-        .add_calculated_column_definition("T", "B", "[a] + 2")
+        .add_calculated_column_definition("T", "B", "[a0] + 2")
         .unwrap();
 
     model.insert_row("T", vec![10.into()]).unwrap();
