@@ -1,7 +1,5 @@
 import type { FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
-export type { FormulaToken, FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
-
 export type HighlightKind =
   FormulaTokenType;
 
