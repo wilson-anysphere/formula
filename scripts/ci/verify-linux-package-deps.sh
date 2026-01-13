@@ -51,6 +51,27 @@ if [[ "${#target_dirs[@]}" -eq 0 ]]; then
   fail "no Cargo target directories found (expected CARGO_TARGET_DIR, apps/desktop/src-tauri/target, apps/desktop/target, or target)"
 fi
 
+# Normalize to absolute real paths (and de-dupe). This avoids scanning the same directory twice
+# (e.g. when CARGO_TARGET_DIR=target and we also add "target" as a default candidate).
+declare -A seen_target_dirs=()
+normalized_target_dirs=()
+for dir in "${target_dirs[@]}"; do
+  abs="${dir}"
+  if [[ "${abs}" != /* ]]; then
+    abs="${repo_root}/${abs}"
+  fi
+  if [[ ! -d "${abs}" ]]; then
+    continue
+  fi
+  abs="$(cd "${abs}" && pwd -P)"
+  if [[ -n "${seen_target_dirs[${abs}]:-}" ]]; then
+    continue
+  fi
+  seen_target_dirs["${abs}"]=1
+  normalized_target_dirs+=("${abs}")
+done
+target_dirs=("${normalized_target_dirs[@]}")
+
 # Prefer predictable paths rather than traversing the entire Cargo build tree (which can be large).
 bundle_dirs=()
 shopt -s nullglob
