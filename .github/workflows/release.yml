@@ -1395,7 +1395,9 @@ jobs:
 
           api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
           retry_delays=(2 4 8 12 20)
-          win_x64_re='(x64|x86_64|amd64)'
+          # Tauri output naming varies slightly between bundlers (e.g. "x64", "x86_64", "amd64", "win64").
+          # Treat these as equivalent x64 markers for collision detection.
+          win_x64_re='(x64|x86_64|amd64|win64)'
           win_arm64_re='(arm64|aarch64)'
 
           fetch_release() {
@@ -1583,7 +1585,7 @@ jobs:
             elif [[ "$base" == *.msi || "$base" == *.exe ]]; then
               if [[ "$base" =~ (arm64|aarch64) ]]; then
                 echo "windows-arm64"
-              elif [[ "$base" =~ (x64|x86_64|amd64) ]]; then
+              elif [[ "$base" =~ (x64|x86_64|amd64|win64) ]]; then
                 echo "windows-x64"
               else
                 echo "windows-unknown"
