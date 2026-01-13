@@ -150,7 +150,9 @@ jobs:
     env:
       # Nightly schedule runs at least the Calculate (L2) check. Render smoke (L3) is opt-in.
       CORPUS_RUN_RECALC: ${{ github.event_name == 'schedule' || github.event.inputs.recalc }}
-      CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke }}
+      # Render smoke can be enabled for workflow_dispatch runs, or (for scheduled runs) via a repo
+      # variable `CORPUS_RUN_RENDER_SMOKE=true`.
+      CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke || vars.CORPUS_RUN_RENDER_SMOKE }}
       # Optional perf gates (opt-in). Can be configured via workflow_dispatch inputs or repo-level variables.
       CORPUS_GATE_LOAD_P90_MS: ${{ github.event.inputs.gate_load_p90_ms || vars.CORPUS_GATE_LOAD_P90_MS }}
       CORPUS_GATE_ROUND_TRIP_P90_MS: ${{ github.event.inputs.gate_round_trip_p90_ms || vars.CORPUS_GATE_ROUND_TRIP_P90_MS }}

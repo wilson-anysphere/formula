@@ -454,6 +454,9 @@ run triage against inputs that still contain cached values (commonly the encrypt
 These inputs apply to both the public and private corpus jobs; the private job will still skip if the
 required secrets/corpus archive are not configured.
 
+For scheduled runs, you can also opt into nightly render smoke by setting the repo variable
+`CORPUS_RUN_RENDER_SMOKE=true` (see `.github/workflows/corpus.yml`).
+
 ### Compatibility gate thresholds
 
 After generating `tools/corpus/out/**/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
