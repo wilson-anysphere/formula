@@ -117,6 +117,69 @@ class TriageInputScopeTests(unittest.TestCase):
             triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
             triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
 
+    def test_expectations_are_skipped_when_input_is_scoped(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_build_rust_helper = triage_mod._build_rust_helper
+        original_triage_paths = triage_mod._triage_paths
+        original_compare_expectations = triage_mod._compare_expectations
+        try:
+            triage_mod._build_rust_helper = lambda: Path("noop")  # type: ignore[assignment]
+
+            def _fake_triage_paths(paths, **_kwargs):  # type: ignore[no-untyped-def]
+                return [
+                    {
+                        "display_name": p.name,
+                        "sha256": "0" * 64,
+                        "result": {"open_ok": True, "round_trip_ok": True},
+                    }
+                    for p in paths
+                ]
+
+            triage_mod._triage_paths = _fake_triage_paths  # type: ignore[assignment]
+
+            def _boom(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                raise AssertionError("_compare_expectations should not run for scoped inputs")
+
+            triage_mod._compare_expectations = _boom  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmp:
+                corpus_dir = Path(tmp) / "corpus"
+                sanitized = corpus_dir / "sanitized"
+                originals = corpus_dir / "originals"
+                sanitized.mkdir(parents=True)
+                originals.mkdir(parents=True)
+                (sanitized / "a.xlsx").write_bytes(b"dummy-xlsx")
+                (originals / "b.xlsx.enc").write_bytes(b"dummy-enc")
+
+                expectations_path = Path(tmp) / "expectations.json"
+                expectations_path.write_text(json.dumps({"a.xlsx": {"open_ok": True}}), encoding="utf-8")
+
+                out_dir = Path(tmp) / "out"
+
+                argv = sys.argv
+                try:
+                    sys.argv = [
+                        "tools.corpus.triage",
+                        "--corpus-dir",
+                        str(corpus_dir),
+                        "--out-dir",
+                        str(out_dir),
+                        "--expectations",
+                        str(expectations_path),
+                    ]
+                    with mock.patch("sys.stdout", new=io.StringIO()):
+                        rc = triage_mod.main()
+                finally:
+                    sys.argv = argv
+
+                self.assertEqual(rc, 0)
+                self.assertFalse((out_dir / "expectations-result.json").exists())
+        finally:
+            triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
+            triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
+            triage_mod._compare_expectations = original_compare_expectations  # type: ignore[assignment]
+
     def test_main_all_includes_both_sanitized_and_originals(self) -> None:
         import tools.corpus.triage as triage_mod
 
