@@ -15,6 +15,9 @@ const releaseWorkflowPath = path.join(repoRoot, releaseWorkflowRelativePath);
 const docsReleaseRelativePath = "docs/release.md";
 const docsReleasePath = path.join(repoRoot, docsReleaseRelativePath);
 
+const cargoLockRelativePath = "Cargo.lock";
+const cargoLockPath = path.join(repoRoot, cargoLockRelativePath);
+
 const workflowsDirRelativePath = ".github/workflows";
 const workflowsDirPath = path.join(repoRoot, workflowsDirRelativePath);
 
@@ -82,6 +85,19 @@ function extractPinnedCliVersionsFromDocs(markdownText) {
     versions.push(match[1]);
   }
   return versions;
+}
+
+function extractTauriVersionFromCargoLock(lockText) {
+  // Cargo.lock format:
+  // [[package]]
+  // name = "tauri"
+  // version = "2.9.5"
+  //
+  // We only need the resolved version string; parsing with a regex keeps this script dependency-free.
+  const match = lockText.match(
+    /\[\[package\]\]\s*\r?\nname\s*=\s*"tauri"\s*\r?\nversion\s*=\s*"([^"]+)"/m,
+  );
+  return match ? match[1].trim() : null;
 }
 
 let cargoTomlText = "";
@@ -184,6 +200,32 @@ try {
   parsePinnedCliVersion(pinnedCliVersion);
 } catch (err) {
   console.error(String(err instanceof Error ? err.message : err));
+  process.exit(1);
+}
+
+// Keep the pinned CLI patch version aligned with the resolved Tauri crate version in Cargo.lock.
+// This prevents "tauri crates upgraded but CLI not upgraded" drift.
+try {
+  const lockText = await readFile(cargoLockPath, "utf8");
+  const tauriLockVersion = extractTauriVersionFromCargoLock(lockText);
+  if (!tauriLockVersion) {
+    console.error(`Failed to locate tauri version in ${cargoLockRelativePath}.`);
+    process.exit(1);
+  }
+  const normalizedPinned = String(pinnedCliVersion).trim().replace(/^v/, "");
+  if (normalizedPinned !== tauriLockVersion) {
+    console.error("Pinned TAURI_CLI_VERSION does not match the resolved tauri crate version in Cargo.lock.");
+    console.error(`- ${cargoLockRelativePath}: tauri version "${tauriLockVersion}"`);
+    console.error(`- ${releaseWorkflowRelativePath}: TAURI_CLI_VERSION="${normalizedPinned}"`);
+    console.error("");
+    console.error("Fix:");
+    console.error(`- Update TAURI_CLI_VERSION in ${releaseWorkflowRelativePath} to "${tauriLockVersion}".`);
+    console.error(`- Update TAURI_CLI_VERSION in any other workflow/docs snippets to match.`);
+    process.exit(1);
+  }
+} catch (err) {
+  console.error(`Failed to read/parse ${cargoLockRelativePath}.`);
+  console.error(err);
   process.exit(1);
 }
 
