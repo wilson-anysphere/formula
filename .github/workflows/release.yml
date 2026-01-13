@@ -187,21 +187,25 @@ jobs:
             label: macos-14
             # The macOS job builds a universal bundle (x86_64 + arm64).
             cache_target: universal-apple-darwin
+            cache_features: desktop
             rust_target: ""
             tauri_args: ""
           - platform: ubuntu-24.04
             label: ubuntu-24.04
             cache_target: x86_64-unknown-linux-gnu
+            cache_features: desktop
             rust_target: ""
             tauri_args: "--bundles appimage,deb,rpm"
           - platform: windows-2022
             label: windows-2022 (x64)
             cache_target: x86_64-pc-windows-msvc
+            cache_features: desktop
             rust_target: x86_64-pc-windows-msvc
             tauri_args: "--target x86_64-pc-windows-msvc --bundles msi,nsis"
           - platform: windows-2022
             label: windows-2022 (arm64)
             cache_target: aarch64-pc-windows-msvc
+            cache_features: desktop
             rust_target: aarch64-pc-windows-msvc
             tauri_args: "--target aarch64-pc-windows-msvc --bundles msi,nsis"
 
@@ -398,9 +402,9 @@ jobs:
           # Keep these caches isolated per Rust target triple + runner arch so cross-compile jobs
           # (e.g. Windows aarch64) don't thrash/overwrite caches or restore host build-script
           # binaries from an incompatible runner architecture.
-          key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ hashFiles('Cargo.lock') }}
+          key: cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-
+            cargo-target-desktop-release-${{ runner.os }}-${{ runner.arch }}-${{ matrix.cache_target }}-${{ matrix.cache_features }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
