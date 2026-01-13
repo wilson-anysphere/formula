@@ -17,6 +17,143 @@
 pnpm --filter @formula/sync-server dev
 ```
 
+## Deployment
+
+This server is designed to run in production behind a reverse proxy / load balancer and to persist
+documents to local disk.
+
+Code references:
+
+- Env var parsing + defaults: [`src/config.ts`](./src/config.ts)
+- HTTP/WebSocket handling and health endpoints: [`src/server.ts`](./src/server.ts)
+- Formula collaboration semantics (reserved roots + message size limits):
+  - [`docs/06-collaboration.md`](../../docs/06-collaboration.md)
+  - [`instructions/collaboration.md`](../../instructions/collaboration.md)
+
+### Horizontal scaling (y-websocket rooms)
+
+`y-websocket` does **not** provide cross-instance fanout by default. That means:
+
+- All websocket clients for a given document (`docId` / room name) must connect to the **same**
+  sync-server instance.
+- If clients for the same `docId` land on different instances, they will not see each other's
+  updates (each instance maintains its own in-memory room state and persistence).
+
+If you run multiple replicas, you must configure **sticky routing by `docId`** (i.e. the websocket
+URL path `/<docId>`). Cookie-based or client-IP stickiness is **not** sufficient; the affinity must
+be per-document.
+
+If you need to freely load balance connections for the same `docId`, you must add an external
+pubsub/broker layer (e.g. Redis) and modify the server to publish/subscribe document updates across
+instances.
+
+### Persistence + storage
+
+The built-in persistence backends (`SYNC_SERVER_PERSISTENCE_BACKEND=file|leveldb`) write to
+`SYNC_SERVER_DATA_DIR` on the **local filesystem**.
+
+Implications:
+
+- The data directory is **not shared** across pods/instances. If you scale horizontally without
+  docId-sticky routing, different replicas will load and persist different versions of the same
+  document.
+- Do **not** mount the same `SYNC_SERVER_DATA_DIR` into multiple replicas at once (LevelDB is not a
+  multi-writer database; sync-server also uses a lock file — see “Data directory locking” below).
+- In Kubernetes, use a per-pod PersistentVolume (often a StatefulSet with `ReadWriteOnce`) if you
+  need durability across pod restarts.
+
+### Reverse proxy / ingress (WebSocket)
+
+Your proxy must support WebSockets and long-lived connections:
+
+- Forward websocket upgrade headers (`Upgrade` + `Connection: upgrade`) and use HTTP/1.1.
+- Increase idle/read timeouts (many load balancers default to ~60s).
+- If the proxy terminates TLS, run sync-server over HTTP/WS internally and expose WSS externally
+  (or use the built-in TLS options described below).
+
+Example nginx snippet:
+
+```nginx
+location / {
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+
+  # WebSockets are long-lived; bump timeouts above the defaults.
+  proxy_read_timeout 3600s;
+  proxy_send_timeout 3600s;
+
+  proxy_pass http://sync_server_upstream;
+}
+```
+
+### `SYNC_SERVER_TRUST_PROXY`
+
+When running behind a **trusted** reverse proxy, set `SYNC_SERVER_TRUST_PROXY=1` so rate limiting
+and per-IP connection limits use the first `X-Forwarded-For` address (instead of the proxy’s IP).
+
+Only enable this when your proxy/ingress:
+
+- overwrites or strips any client-supplied `X-Forwarded-*` headers, and
+- is the only network path to the sync-server
+
+Otherwise clients can spoof `X-Forwarded-For` to bypass per-IP limits. See the implementation in
+[`src/server.ts`](./src/server.ts) (`pickIp`) and defaults in [`src/config.ts`](./src/config.ts).
+
+### Security knobs
+
+- **Public metrics:** `GET /metrics` is public by default. Disable it with
+  `SYNC_SERVER_DISABLE_PUBLIC_METRICS=1` and scrape metrics via:
+  - `GET /internal/metrics` protected by `SYNC_SERVER_INTERNAL_ADMIN_TOKEN`, or
+  - proxy/network-layer allowlisting.
+- **Internal admin endpoints:** set `SYNC_SERVER_INTERNAL_ADMIN_TOKEN` to enable `/internal/*`.
+  Treat this as a production secret; avoid exposing these endpoints to the public internet.
+- **Origin allowlist:** the sync-server does not currently enforce an `Origin` allowlist for WebSocket
+  upgrades. If you need to restrict cross-site WebSocket connections, enforce an allowlist at your
+  reverse proxy/ingress.
+
+### Kubernetes probes (`/healthz`, `/readyz`)
+
+The server exposes:
+
+- `GET /healthz` – process liveness + a small operational snapshot (always `200` when the process is
+  healthy).
+- `GET /readyz` – readiness gate (returns `200` only after persistence/tombstones are initialized
+  and the data-dir lock is held; otherwise `503`).
+
+Suggested probes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 1234
+  periodSeconds: 10
+  timeoutSeconds: 2
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 1234
+  periodSeconds: 10
+  timeoutSeconds: 2
+```
+
+For large datasets, consider adding a `startupProbe` so Kubernetes doesn't restart the pod during
+initial persistence initialization.
+
+### Formula deployment gotchas (reserved roots + message size)
+
+These are the two most common collaboration misconfigurations:
+
+- **Reserved roots:** The reserved-root mutation guard defaults to **enabled** when
+  `NODE_ENV=production` and rejects writes to `versions`, `versionsMeta`, and `branching:*` (close
+  code `1008`). If you use Yjs-based versioning/branching stores, disable it or use out-of-doc
+  stores instead. See “Reserved root mutation guard” below and the deployment notes in
+  [`docs/06-collaboration.md`](../../docs/06-collaboration.md).
+- **Message size:** `SYNC_SERVER_MAX_MESSAGE_BYTES` defaults to **2 MiB**; large branching commits
+  can exceed this and cause close code `1009`. See “Limits & hardening” below and
+  [`docs/06-collaboration.md`](../../docs/06-collaboration.md) for chunking guidance.
+
 ## Stress testing
 
 `services/sync-server` includes a **manual** stress/load harness that starts a local sync-server
