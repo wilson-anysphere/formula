@@ -1921,6 +1921,48 @@ test("QUARTILE.INC quart suggests 1, 2, 3, 0, 4", async () => {
   }
 });
 
+test("NORM.DIST cumulative suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=NORM.DIST(0, 0, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORM.DIST(0, 0, 1, TRUE"),
+    `Expected NORM.DIST to suggest TRUE (cumulative), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORM.DIST(0, 0, 1, FALSE"),
+    `Expected NORM.DIST to suggest FALSE (probability), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("NORM.S.DIST cumulative suggests TRUE/FALSE", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=NORM.S.DIST(0, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORM.S.DIST(0, TRUE"),
+    `Expected NORM.S.DIST to suggest TRUE (cumulative), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=NORM.S.DIST(0, FALSE"),
+    `Expected NORM.S.DIST to suggest FALSE (probability), got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {

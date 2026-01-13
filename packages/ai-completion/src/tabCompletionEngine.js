@@ -668,7 +668,8 @@ export class TabCompletionEngine {
     };
 
     if (argType === "boolean") {
-      const enumEntries = getFunctionSpecificArgEnum(fnName, argIndex);
+      const enumEntries =
+        getFunctionSpecificArgEnum(fnName, argIndex) ?? getCumulativeDistributionBooleanEnum(fnName, argIndex);
       if (enumEntries?.length) {
         for (const entry of enumEntries) addReplacement(entry);
         return dedupeSuggestions(suggestions);
@@ -1033,6 +1034,35 @@ function getFunctionSpecificArgEnum(fnName, argIndex) {
   const upper = fnName.toUpperCase();
   const base = upper.startsWith("_XLFN.") ? upper.slice("_XLFN.".length) : upper;
   return FUNCTION_SPECIFIC_ARG_ENUMS[base]?.[argIndex] ?? null;
+}
+
+/**
+ * Heuristic for the common `cumulative` boolean argument in distribution functions.
+ *
+ * Many Excel functions named `*.DIST`/`*DIST` accept a final boolean arg that toggles
+ * cumulative vs PDF/PMF mode. The core catalog only exposes "boolean" so we provide
+ * a more informative hint without needing per-function curation.
+ *
+ * @param {string | undefined} fnName
+ * @param {number} argIndex
+ */
+function getCumulativeDistributionBooleanEnum(fnName, argIndex) {
+  if (typeof fnName !== "string" || !Number.isInteger(argIndex)) return null;
+  const upper = fnName.toUpperCase();
+  const base = upper.startsWith("_XLFN.") ? upper.slice("_XLFN.".length) : upper;
+
+  // Match distribution function families:
+  // - Modern: NORM.DIST, NORM.S.DIST, LOGNORM.DIST, F.DIST, T.DIST, ...
+  // - Legacy: NORMDIST, NORMSDIST, BINOMDIST, ...
+  const looksLikeDist = base.includes(".DIST") || base.endsWith("DIST");
+  if (!looksLikeDist) return null;
+
+  // Most distributions use the boolean arg as `cumulative`. This is a best-effort
+  // hint and should stay conservative (only 2 suggestions).
+  return [
+    { replacement: "TRUE", displayText: "TRUE (cumulative)", confidence: 0.66 },
+    { replacement: "FALSE", displayText: "FALSE (probability)", confidence: 0.64 },
+  ];
 }
 
 /**
