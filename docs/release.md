@@ -301,6 +301,14 @@ Secrets:
 - `WINDOWS_CERTIFICATE` – base64-encoded `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`
 
+Verification (signed artifacts):
+
+- After a Windows release build, verify the generated installer(s) are Authenticode-signed and timestamped:
+  ```powershell
+  signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
+  signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
+  ```
+
 Timestamping:
 
 - The Authenticode timestamp server is configured in `apps/desktop/src-tauri/tauri.conf.json` under
