@@ -27,7 +27,7 @@ Authentication is supplied by the embedding environment (desktop app, web app, e
 ### `createLLMClient()`
 
 ```ts
-import { createLLMClient } from "./createLLMClient.js";
+import { createLLMClient } from "./index.js";
 
 // Uses the Cursor backend. Auth is expected to be handled by the embedding
 // environment (for example, session cookies in a browser runtime).
@@ -42,10 +42,22 @@ console.log(res.message.content);
 ### `new CursorLLMClient(...)`
 
 ```ts
-import { CursorLLMClient } from "./cursor.js";
+import { CursorLLMClient } from "./index.js";
 
 const client = new CursorLLMClient({
   baseUrl: "https://api.cursor.sh/v1",
   authToken: "cursor-managed-token",
+});
+```
+
+### Tool result serialization (bounded)
+
+```ts
+import { serializeToolResultForModel } from "./index.js";
+
+const toolResultForModel = serializeToolResultForModel({
+  toolCall: { id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:Z1000" } },
+  result: someToolResult,
+  maxChars: 20_000,
 });
 ```
