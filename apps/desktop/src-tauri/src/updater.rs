@@ -43,7 +43,26 @@ pub enum UpdateCheckSource {
     Manual,
 }
 
+fn env_flag_truthy(name: &str) -> bool {
+    match std::env::var(name) {
+        Ok(raw) => {
+            let v = raw.trim().to_ascii_lowercase();
+            !(v.is_empty() || v == "0" || v == "false")
+        }
+        Err(_) => false,
+    }
+}
+
 pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
+    // Benchmarks (startup + idle memory) need to be stable/independent of updater/network behavior.
+    // The primary gate lives in `main.rs` (skipping the startup listener entirely), but keep this
+    // as defense-in-depth so any future `UpdateCheckSource::Startup` callsites respect it too.
+    if matches!(source, UpdateCheckSource::Startup)
+        && env_flag_truthy("FORMULA_DISABLE_STARTUP_UPDATE_CHECK")
+    {
+        return;
+    }
+
     if UPDATE_CHECK_IN_FLIGHT.swap(true, Ordering::SeqCst) {
         // Startup checks should not interrupt the user; manual checks should provide feedback so
         // the frontend can display "Already checking..." without triggering a second network call.
