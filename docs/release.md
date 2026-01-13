@@ -453,9 +453,10 @@ are attached:
 
 1. Open the GitHub Release (draft) and confirm:
    - Updater metadata: `latest.json` and `latest.json.sig`
-   - macOS (**universal**): `.dmg` (and/or `.app.tar.gz`)
-   - Windows (**x64 + ARM64**): installers (`.msi` and/or `.exe`) for each architecture
-   - Linux: `.AppImage`, `.deb`, `.rpm`
+   - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
+   - Windows **x64**: installer (NSIS `.exe` and/or `.msi`, usually includes `x64` in the filename)
+   - Windows **ARM64**: installer (NSIS `.exe` and/or `.msi`, usually includes `arm64` in the filename)
+   - Linux: `.AppImage` + `.deb` + `.rpm`
 
    If the release was built with updater signing secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`),
    expect a corresponding `.sig` signature file uploaded alongside the updater-consumed artifacts:
@@ -474,6 +475,18 @@ are attached:
    - `windows-x86_64` (Windows x64)
    - `windows-aarch64` (Windows ARM64)
    - `linux-x86_64` (Linux)
+
+   Quick check (after downloading `latest.json` to your current directory):
+
+   ```bash
+   python - <<'PY'
+   import json
+   data = json.load(open("latest.json", encoding="utf-8"))
+   keys = sorted((data.get("platforms") or {}).keys())
+   print("\n".join(keys) if keys else "(no platforms found)")
+   PY
+   ```
+
 3. Download the artifacts and do quick sanity checks:
 
    ### macOS: confirm the app is universal
