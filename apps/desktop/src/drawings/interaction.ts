@@ -102,7 +102,7 @@ export class DrawingInteractionController {
       }
     }
 
-    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY, this.geom);
+    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY, this.geom, paneLayout);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) {
@@ -250,7 +250,7 @@ export class DrawingInteractionController {
       }
     }
 
-    const hit = hitTestDrawingsObject(index, viewport, x, y, this.geom);
+    const hit = hitTestDrawingsObject(index, viewport, x, y, this.geom, paneLayout);
     if (hit) {
       this.canvas.style.cursor = "move";
       return;

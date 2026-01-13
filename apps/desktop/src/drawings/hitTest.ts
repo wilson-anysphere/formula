@@ -55,6 +55,15 @@ export interface HitTestIndex {
   byId: Map<number, number>;
 }
 
+export interface HitTestViewportLayout {
+  frozenRows: number;
+  frozenCols: number;
+  headerOffsetX: number;
+  headerOffsetY: number;
+  frozenBoundaryX: number;
+  frozenBoundaryY: number;
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   if (value < min) return min;
   if (value > max) return max;
@@ -198,19 +207,36 @@ export function hitTestDrawings(
   x: number,
   y: number,
   geom: GridGeometry = index.geom,
+  layout?: HitTestViewportLayout,
 ): HitTestResult | null {
-  const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-  const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+  const headerOffsetX = layout
+    ? layout.headerOffsetX
+    : Number.isFinite(viewport.headerOffsetX)
+      ? Math.max(0, viewport.headerOffsetX!)
+      : 0;
+  const headerOffsetY = layout
+    ? layout.headerOffsetY
+    : Number.isFinite(viewport.headerOffsetY)
+      ? Math.max(0, viewport.headerOffsetY!)
+      : 0;
 
   // Ignore pointer events over the header area; drawings are rendered under headers.
   if (x < headerOffsetX || y < headerOffsetY) return null;
 
-  const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
-  const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
-  let frozenBoundaryX = headerOffsetX;
-  let frozenBoundaryY = headerOffsetY;
+  const frozenRows = layout
+    ? layout.frozenRows
+    : Number.isFinite(viewport.frozenRows)
+      ? Math.max(0, Math.trunc(viewport.frozenRows!))
+      : 0;
+  const frozenCols = layout
+    ? layout.frozenCols
+    : Number.isFinite(viewport.frozenCols)
+      ? Math.max(0, Math.trunc(viewport.frozenCols!))
+      : 0;
+  let frozenBoundaryX = layout ? layout.frozenBoundaryX : headerOffsetX;
+  let frozenBoundaryY = layout ? layout.frozenBoundaryY : headerOffsetY;
 
-  if (frozenCols > 0) {
+  if (!layout && frozenCols > 0) {
     let raw = viewport.frozenWidthPx;
     if (!Number.isFinite(raw)) {
       let derived = 0;
@@ -226,7 +252,7 @@ export function hitTestDrawings(
     frozenBoundaryX = clampNumber(raw as number, headerOffsetX, viewport.width);
   }
 
-  if (frozenRows > 0) {
+  if (!layout && frozenRows > 0) {
     let raw = viewport.frozenHeightPx;
     if (!Number.isFinite(raw)) {
       let derived = 0;
@@ -271,19 +297,36 @@ export function hitTestDrawingsObject(
   x: number,
   y: number,
   geom: GridGeometry = index.geom,
+  layout?: HitTestViewportLayout,
 ): DrawingObject | null {
-  const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
-  const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+  const headerOffsetX = layout
+    ? layout.headerOffsetX
+    : Number.isFinite(viewport.headerOffsetX)
+      ? Math.max(0, viewport.headerOffsetX!)
+      : 0;
+  const headerOffsetY = layout
+    ? layout.headerOffsetY
+    : Number.isFinite(viewport.headerOffsetY)
+      ? Math.max(0, viewport.headerOffsetY!)
+      : 0;
 
   if (x < headerOffsetX || y < headerOffsetY) return null;
 
-  const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
-  const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+  const frozenRows = layout
+    ? layout.frozenRows
+    : Number.isFinite(viewport.frozenRows)
+      ? Math.max(0, Math.trunc(viewport.frozenRows!))
+      : 0;
+  const frozenCols = layout
+    ? layout.frozenCols
+    : Number.isFinite(viewport.frozenCols)
+      ? Math.max(0, Math.trunc(viewport.frozenCols!))
+      : 0;
 
-  let frozenBoundaryX = headerOffsetX;
-  let frozenBoundaryY = headerOffsetY;
+  let frozenBoundaryX = layout ? layout.frozenBoundaryX : headerOffsetX;
+  let frozenBoundaryY = layout ? layout.frozenBoundaryY : headerOffsetY;
 
-  if (frozenCols > 0) {
+  if (!layout && frozenCols > 0) {
     let raw = viewport.frozenWidthPx;
     if (!Number.isFinite(raw)) {
       let derived = 0;
@@ -299,7 +342,7 @@ export function hitTestDrawingsObject(
     frozenBoundaryX = clampNumber(raw as number, headerOffsetX, viewport.width);
   }
 
-  if (frozenRows > 0) {
+  if (!layout && frozenRows > 0) {
     let raw = viewport.frozenHeightPx;
     if (!Number.isFinite(raw)) {
       let derived = 0;
