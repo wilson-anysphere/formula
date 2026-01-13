@@ -393,6 +393,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Guard: Windows Authenticode timestamp URL uses HTTPS
+        run: node scripts/ci/check-windows-timestamp-url.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -403,7 +406,7 @@ jobs:
           FORMULA_SKIP_WASM_BUILD: "1"
         # NOTE: Do not include an extra `--` after the script name. Vitest treats it as
         # an argument separator and will fall back to running the full test suite.
-        run: pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpc.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts
+        run: pnpm test:vitest apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpc.vitest.ts apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts
 
   sync-server-docker:
     name: Sync server Docker build
