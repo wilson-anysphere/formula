@@ -830,6 +830,59 @@ describe("ToolExecutor include_formula_values", () => {
     expect(audit_logger.log).toHaveBeenCalled();
   });
 
+  it("read_range redacts formula cells (values and formulas) when the formula cell itself is restricted", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              row: 0,
+              col: 0,
+            },
+            classification: { level: "Restricted", labels: [] },
+          },
+        ],
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1", include_formulas: true },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([["[REDACTED]"]]);
+    expect(result.data?.formulas).toEqual([["[REDACTED]"]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("redact");
+    expect(event.redactedCellCount).toBe(1);
+  });
+
   it("does not use formula values for filter_range comparisons under DLP REDACT decisions", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
