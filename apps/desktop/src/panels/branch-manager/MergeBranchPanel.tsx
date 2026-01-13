@@ -546,7 +546,11 @@ export function MergeBranchPanel({
                     const showEnc = cellHasEnc(c.base) || cellHasEnc(c.ours) || cellHasEnc(c.theirs);
                     const showFormula = cellHasFormula(c.base) || cellHasFormula(c.ours) || cellHasFormula(c.theirs);
                     const showValue = cellHasValue(c.base) || cellHasValue(c.ours) || cellHasValue(c.theirs);
-                    const showFormat = c.reason === "format";
+                    const showFormat =
+                      c.reason === "format" ||
+                      c.base?.format !== undefined ||
+                      c.ours?.format !== undefined ||
+                      c.theirs?.format !== undefined;
                     const baseFormula = c.base?.formula ?? null;
 
                     return (
