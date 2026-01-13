@@ -18,6 +18,7 @@ const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/sr
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
+const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
 
 function resolveJsToTs() {
   return {
@@ -60,6 +61,10 @@ export default defineConfig({
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+      // `@formula/spreadsheet-frontend/formula/tokenizeFormula` is a subpath export used by the
+      // desktop formula bar highlight code. Alias it directly so Vitest stays resilient in
+      // cached/stale `node_modules` environments that may not include the latest package exports.
+      { find: "@formula/spreadsheet-frontend/formula/tokenizeFormula", replacement: spreadsheetFrontendTokenizerEntry },
       // `@formula/marketplace-shared` lives under the repo `shared/` directory. Like the collab
       // workspace aliases above, we keep an explicit mapping here so Vitest stays resilient in
       // cached/stale `node_modules` environments that may be missing the pnpm workspace link.
