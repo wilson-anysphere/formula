@@ -63,6 +63,11 @@ workbook.xlsx (ZIP archive)
 │   ├── charts/                # Chart definitions
 │   ├── tables/                # Table definitions
 │   ├── pivotTables/           # Pivot tables
+│   ├── pivotCache/            # Pivot caches (definition + records)
+│   ├── slicers/               # Slicers (optional; pivot UX)
+│   ├── slicerCaches/          # Slicer caches
+│   ├── timelines/             # Timelines (optional; pivot UX)
+│   ├── timelineCaches/        # Timeline caches
 │   └── vbaProject.bin         # VBA macros (binary)
 └── xl/_rels/                  # Relationships
 ```
