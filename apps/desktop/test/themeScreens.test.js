@@ -111,3 +111,7 @@ test("app shell snapshot (light)", () => {
 test("app shell snapshot (dark)", () => {
   expectSnapshot("app-shell.dark.html", renderAppShell("dark"));
 });
+
+test("app shell snapshot (high contrast)", () => {
+  expectSnapshot("app-shell.high-contrast.html", renderAppShell("high-contrast"));
+});
