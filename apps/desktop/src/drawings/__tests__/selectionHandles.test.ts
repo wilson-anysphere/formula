@@ -170,4 +170,142 @@ describe("drawings selection handles", () => {
 
     pointerUp!({ offsetX: 87, offsetY: 187, pointerId: 1 });
   });
+
+  it("supports hover cursors with header offsets (shared-grid headers)", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = {
+      style: { cursor: "" },
+      addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
+      removeEventListener: (type: string) => listeners.delete(type),
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+    };
+
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const viewport: Viewport = {
+      scrollX: 0,
+      scrollY: 0,
+      width: 500,
+      height: 500,
+      dpr: 1,
+      headerOffsetX: 10,
+      headerOffsetY: 20,
+    };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(200) },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown")!;
+    const pointerUp = listeners.get("pointerup")!;
+    const pointerMove = listeners.get("pointermove")!;
+
+    // Select.
+    pointerDown({ offsetX: 140 + viewport.headerOffsetX!, offsetY: 220 + viewport.headerOffsetY!, pointerId: 1 });
+    pointerUp({ offsetX: 140 + viewport.headerOffsetX!, offsetY: 220 + viewport.headerOffsetY!, pointerId: 1 });
+
+    const bounds = {
+      x: 100 + viewport.headerOffsetX!,
+      y: 200 + viewport.headerOffsetY!,
+      width: 80,
+      height: 40,
+    };
+    for (const c of getResizeHandleCenters(bounds)) {
+      pointerMove({ offsetX: c.x, offsetY: c.y, pointerId: 1 });
+      expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle));
+    }
+  });
+
+  it("supports hover cursors in frozen panes when the sheet is scrolled", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = {
+      style: { cursor: "" },
+      addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
+      removeEventListener: (type: string) => listeners.delete(type),
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+    };
+
+    // Use a large frozen pane boundary so the entire object (and all 8 handles) are
+    // contained within the frozen quadrant, even while the sheet is scrolled.
+    const CELL = 200;
+    const geom: GridGeometry = {
+      cellOriginPx: (cell) => ({ x: cell.col * CELL, y: cell.row * CELL }),
+      cellSizePx: () => ({ width: CELL, height: CELL }),
+    };
+
+    const viewport: Viewport = {
+      scrollX: 50,
+      scrollY: 100,
+      width: 500,
+      height: 500,
+      dpr: 1,
+      frozenRows: 1,
+      frozenCols: 1,
+      frozenWidthPx: CELL,
+      frozenHeightPx: CELL,
+    };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown")!;
+    const pointerUp = listeners.get("pointerup")!;
+    const pointerMove = listeners.get("pointermove")!;
+
+    // Select (object is in the frozen top-left pane, so it's at (0,0) on screen).
+    pointerDown({ offsetX: 40, offsetY: 20, pointerId: 1 });
+    pointerUp({ offsetX: 40, offsetY: 20, pointerId: 1 });
+
+    const bounds = { x: 0, y: 0, width: 80, height: 40 };
+    for (const c of getResizeHandleCenters(bounds)) {
+      pointerMove({ offsetX: c.x, offsetY: c.y, pointerId: 1 });
+      expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle));
+    }
+  });
 });
