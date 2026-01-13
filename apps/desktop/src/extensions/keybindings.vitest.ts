@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCommandKeybindingAriaIndex,
   buildCommandKeybindingDisplayIndex,
+  formatKeybindingForAria,
   formatKeybindingForDisplay,
+  getPrimaryCommandKeybindingAria,
   getPrimaryCommandKeybindingDisplay,
   matchesKeybinding,
   parseKeybinding,
@@ -241,6 +244,23 @@ describe("keybindings", () => {
     expect(formatKeybindingForDisplay(escape, "other")).toMatchInlineSnapshot('"Meta+Esc"');
   });
 
+  it("formatKeybindingForAria renders aria-keyshortcuts strings", () => {
+    const binding = parseKeybinding("cmd.test", "ctrl+option+shift+cmd+arrowup")!;
+    expect(formatKeybindingForAria(binding)).toBe("Control+Alt+Shift+Meta+ArrowUp");
+
+    const escape = parseKeybinding("cmd.test", "cmd+escape")!;
+    expect(formatKeybindingForAria(escape)).toBe("Meta+Escape");
+
+    const pageUp = parseKeybinding("cmd.test", "ctrl+pgup")!;
+    expect(formatKeybindingForAria(pageUp)).toBe("Control+PageUp");
+
+    const f2 = parseKeybinding("cmd.test", "shift+f2")!;
+    expect(formatKeybindingForAria(f2)).toBe("Shift+F2");
+
+    const copy = parseKeybinding("cmd.test", "ctrl+c")!;
+    expect(formatKeybindingForAria(copy)).toBe("Control+C");
+  });
+
   it("formatKeybindingForDisplay preserves punctuation tokens", () => {
     const semicolon = parseKeybinding("cmd.test", "ctrl+shift+;")!;
     expect(formatKeybindingForDisplay(semicolon, "other")).toBe("Ctrl+Shift+;");
@@ -275,5 +295,19 @@ describe("keybindings", () => {
 
     expect(index.get("cmd.one")).toEqual(["Ctrl+B", "Ctrl+K"]);
     expect(getPrimaryCommandKeybindingDisplay("cmd.one", index)).toBe("Ctrl+B");
+  });
+
+  it("buildCommandKeybindingAriaIndex returns primary binding for a command", () => {
+    const index = buildCommandKeybindingAriaIndex({
+      platform: "other",
+      builtin: [{ command: "cmd.one", key: "ctrl+b" }],
+      contributed: [
+        { command: "cmd.one", key: "ctrl+k" },
+        { command: "cmd.one", key: "ctrl+k" }, // duplicate should not add a second time
+      ],
+    });
+
+    expect(index.get("cmd.one")).toEqual(["Control+B", "Control+K"]);
+    expect(getPrimaryCommandKeybindingAria("cmd.one", index)).toBe("Control+B");
   });
 });
