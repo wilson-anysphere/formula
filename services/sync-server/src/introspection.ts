@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import type { SyncRole } from "./auth.js";
+import type { SyncServerMetrics } from "./metrics.js";
 
 export type SyncTokenIntrospectionResult = {
   active: boolean;
@@ -71,10 +72,22 @@ export type SyncTokenIntrospectionClient = {
   }) => Promise<SyncTokenIntrospectionResult>;
 };
 
+export class SyncTokenIntrospectionOverCapacityError extends Error {
+  constructor(message: string = "Introspection over capacity") {
+    super(message);
+    this.name = "SyncTokenIntrospectionOverCapacityError";
+  }
+}
+
 export function createSyncTokenIntrospectionClient(config: {
   url: string;
   token: string;
   cacheTtlMs: number;
+  maxConcurrent?: number;
+  metrics?: Pick<
+    SyncServerMetrics,
+    "introspectionOverCapacityTotal" | "introspectionRequestsTotal"
+  >;
 }): SyncTokenIntrospectionClient {
   const cache = new Map<
     string,
@@ -89,6 +102,10 @@ export function createSyncTokenIntrospectionClient(config: {
   const cacheSweepIntervalMs = Math.max(cacheTtlMs, 30_000);
   const maxEntriesBeforeSweep = 10_000;
   let lastCacheSweepAtMs = Date.now();
+
+  const maxConcurrent = Math.max(0, Math.floor(config.maxConcurrent ?? 50));
+  const metrics = config.metrics;
+  let activeRequests = 0;
 
   const cacheKey = (params: { token: string; docId: string; clientIp?: string }) =>
     // Hash the key so we don't retain raw JWTs/opaque tokens (which could be large
@@ -125,44 +142,75 @@ export function createSyncTokenIntrospectionClient(config: {
     }
 
     const task = (async () => {
-      const res = await fetch(config.url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          // API internal endpoints use the same header name as other internal ops.
-          "x-internal-admin-token": config.token
-        },
-        body: JSON.stringify({
-          token: params.token,
-          docId: params.docId,
-          clientIp: params.clientIp,
-          userAgent: params.userAgent
-        }),
-        signal: AbortSignal.timeout(5_000)
-      });
+      let acquired = false;
+      let recorded = false;
+      const record = (result: "ok" | "inactive" | "error") => {
+        if (recorded) return;
+        recorded = true;
+        metrics?.introspectionRequestsTotal.inc({ result });
+      };
 
-      const json = (await res.json().catch(() => null)) as unknown;
-
-      if (res.status === 401 || res.status === 403) {
-        // Token is inactive/invalid (or the introspection endpoint rejected our request).
-        // Never treat a 401/403 response as an active token, even if the body is malformed or claims otherwise.
-        const reason =
-          json && typeof json === "object"
-            ? typeof (json as any).reason === "string" && (json as any).reason.length > 0
-              ? ((json as any).reason as string)
-              : typeof (json as any).error === "string" && (json as any).error.length > 0
-                ? ((json as any).error as string)
-                : "forbidden"
-            : "forbidden";
-
-        return { active: false, reason };
+      if (maxConcurrent > 0) {
+        if (activeRequests >= maxConcurrent) {
+          metrics?.introspectionOverCapacityTotal.inc();
+          record("error");
+          throw new SyncTokenIntrospectionOverCapacityError();
+        }
+        activeRequests += 1;
+        acquired = true;
       }
 
-      if (!res.ok) {
-        throw new Error(`Introspection request failed (${res.status})`);
-      }
+      try {
+        const res = await fetch(config.url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            // API internal endpoints use the same header name as other internal ops.
+            "x-internal-admin-token": config.token,
+          },
+          body: JSON.stringify({
+            token: params.token,
+            docId: params.docId,
+            clientIp: params.clientIp,
+            userAgent: params.userAgent,
+          }),
+          signal: AbortSignal.timeout(5_000),
+        });
 
-      return parseIntrospectionResult(json);
+        const json = (await res.json().catch(() => null)) as unknown;
+
+        if (res.status === 401 || res.status === 403) {
+          // Token is inactive/invalid (or the introspection endpoint rejected our request).
+          // Never treat a 401/403 response as an active token, even if the body is malformed or claims otherwise.
+          const reason =
+            json && typeof json === "object"
+              ? typeof (json as any).reason === "string" && (json as any).reason.length > 0
+                ? ((json as any).reason as string)
+                : typeof (json as any).error === "string" && (json as any).error.length > 0
+                  ? ((json as any).error as string)
+                  : "forbidden"
+              : "forbidden";
+
+          record("inactive");
+          return { active: false, reason };
+        }
+
+        if (!res.ok) {
+          record("error");
+          throw new Error(`Introspection request failed (${res.status})`);
+        }
+
+        const parsed = parseIntrospectionResult(json);
+        record(parsed.active ? "ok" : "inactive");
+        return parsed;
+      } catch (err) {
+        record("error");
+        throw err;
+      } finally {
+        if (acquired) {
+          activeRequests = Math.max(0, activeRequests - 1);
+        }
+      }
     })();
 
     if (cacheTtlMs > 0) {

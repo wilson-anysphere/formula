@@ -53,6 +53,7 @@ import { installYwsSecurity } from "./ywsSecurity.js";
 import { createSyncServerMetrics, type WsConnectionRejectionReason } from "./metrics.js";
 import {
   createSyncTokenIntrospectionClient,
+  SyncTokenIntrospectionOverCapacityError,
   type SyncTokenIntrospectionClient,
 } from "./introspection.js";
 import { statusCodeForIntrospectionReason } from "./introspection-reasons.js";
@@ -417,7 +418,7 @@ export function createSyncServer(
   const shouldPersist = (docName: string) => !tombstones.has(docKeyFromDocName(docName));
 
   const syncTokenIntrospection: SyncTokenIntrospectionClient | null = config.introspection
-    ? createSyncTokenIntrospectionClient(config.introspection)
+    ? createSyncTokenIntrospectionClient({ ...config.introspection, metrics })
     : null;
 
   type TombstoneSweepResult = {
@@ -1668,8 +1669,13 @@ export function createSyncServer(
             }
           } catch (err) {
             recordUpgradeRejection("auth_failure");
-            logger.error({ err, ip, docName }, "ws_introspection_failed");
-            sendUpgradeRejection(socket, 503, "Introspection failed");
+            if (err instanceof SyncTokenIntrospectionOverCapacityError) {
+              logger.warn({ err, ip, docName }, "ws_introspection_over_capacity");
+              sendUpgradeRejection(socket, 503, "Introspection over capacity");
+            } else {
+              logger.error({ err, ip, docName }, "ws_introspection_failed");
+              sendUpgradeRejection(socket, 503, "Introspection failed");
+            }
             return;
           }
         }

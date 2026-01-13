@@ -98,6 +98,11 @@ export type SyncServerConfig = {
     url: string;
     token: string;
     cacheTtlMs: number;
+    /**
+     * Maximum number of concurrent in-flight HTTP calls to the introspection
+     * endpoint. `0` disables the limit.
+     */
+    maxConcurrent: number;
   } | null;
 
   /**
@@ -364,6 +369,10 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const introspectionUrlRaw = process.env.SYNC_SERVER_INTROSPECTION_URL?.trim();
   const introspectionTokenRaw = process.env.SYNC_SERVER_INTROSPECTION_TOKEN?.trim();
   const introspectionCacheTtlMs = envInt(process.env.SYNC_SERVER_INTROSPECTION_CACHE_TTL_MS, 15_000);
+  const introspectionMaxConcurrent = Math.max(
+    0,
+    envInt(process.env.SYNC_SERVER_INTROSPECTION_MAX_CONCURRENT, 50)
+  );
 
   let introspection: SyncServerConfig["introspection"] = null;
   if (introspectionUrlRaw) {
@@ -382,7 +391,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
     introspection = {
       url,
       token: introspectionTokenRaw,
-      cacheTtlMs: introspectionCacheTtlMs
+      cacheTtlMs: introspectionCacheTtlMs,
+      maxConcurrent: introspectionMaxConcurrent,
     };
   }
 

@@ -281,6 +281,21 @@ function createFallbackMetrics(): SyncServerMetrics {
   wsReservedRootInspectionFailClosedTotal.inc({ reason: "gc" }, 0);
   wsReservedRootInspectionFailClosedTotal.inc({ reason: "unknown" }, 0);
 
+  const introspectionOverCapacityTotal = createCounter({
+    name: "sync_server_introspection_over_capacity_total",
+    help:
+      "Total sync token introspection attempts rejected due to the maximum concurrent in-flight limit.",
+  });
+
+  const introspectionRequestsTotal = createCounter<"result">({
+    name: "sync_server_introspection_requests_total",
+    help: "Total sync token introspection requests by result.",
+    labelNames: ["result"],
+  });
+  introspectionRequestsTotal.inc({ result: "ok" }, 0);
+  introspectionRequestsTotal.inc({ result: "inactive" }, 0);
+  introspectionRequestsTotal.inc({ result: "error" }, 0);
+
   const retentionSweepsTotal = createCounter<"sweep">({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -360,6 +375,8 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsReservedRootQuotaViolationsTotal,
     wsReservedRootMutationsTotal,
     wsReservedRootInspectionFailClosedTotal,
+    introspectionOverCapacityTotal,
+    introspectionRequestsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
@@ -402,6 +419,9 @@ export type SyncServerMetrics = {
   wsReservedRootQuotaViolationsTotal: Counter<"kind">;
   wsReservedRootMutationsTotal: Counter<string>;
   wsReservedRootInspectionFailClosedTotal: Counter<"reason">;
+
+  introspectionOverCapacityTotal: Counter<string>;
+  introspectionRequestsTotal: Counter<"result">;
 
   retentionSweepsTotal: Counter<"sweep">;
   retentionDocsPurgedTotal: Counter<"sweep">;
@@ -522,6 +542,23 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsReservedRootInspectionFailClosedTotal.inc({ reason: "gc" }, 0);
   wsReservedRootInspectionFailClosedTotal.inc({ reason: "unknown" }, 0);
 
+  const introspectionOverCapacityTotal = new promClient.Counter({
+    name: "sync_server_introspection_over_capacity_total",
+    help:
+      "Total sync token introspection attempts rejected due to the maximum concurrent in-flight limit.",
+    registers: [registry],
+  });
+
+  const introspectionRequestsTotal = new promClient.Counter({
+    name: "sync_server_introspection_requests_total",
+    help: "Total sync token introspection requests by result.",
+    labelNames: ["result"],
+    registers: [registry],
+  });
+  introspectionRequestsTotal.inc({ result: "ok" }, 0);
+  introspectionRequestsTotal.inc({ result: "inactive" }, 0);
+  introspectionRequestsTotal.inc({ result: "error" }, 0);
+
   const retentionSweepsTotal = new promClient.Counter({
     name: "sync_server_retention_sweeps_total",
     help: "Total retention sweeps executed.",
@@ -612,6 +649,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsReservedRootQuotaViolationsTotal,
     wsReservedRootMutationsTotal,
     wsReservedRootInspectionFailClosedTotal,
+    introspectionOverCapacityTotal,
+    introspectionRequestsTotal,
     retentionSweepsTotal,
     retentionDocsPurgedTotal,
     retentionSweepErrorsTotal,
