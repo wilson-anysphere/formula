@@ -8,3 +8,4 @@ export * from "./insertImage";
 export * from "./modelAdapters";
 export * from "./duplicate";
 export * from "./transform";
+export * from "./commands";

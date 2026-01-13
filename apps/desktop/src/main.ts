@@ -4420,6 +4420,7 @@ if (
   window.addEventListener("unload", () => disposeKeyboardContextKeys());
   type GridArea = "cell" | "rowHeader" | "colHeader" | "corner";
   let currentGridArea: GridArea = "cell";
+  let currentContextMenuTarget: "grid" | "drawing" = "grid";
 
   let lastSelection: SelectionState | null = null;
 
@@ -5416,6 +5417,7 @@ if (
       // Reset the "where was the context menu opened" context keys when the menu closes so
       // keybindings / when-clauses don't keep matching header-specific items.
       currentGridArea = "cell";
+      currentContextMenuTarget = "grid";
       updateContextKeys();
 
       // Best-effort: restore focus to the appropriate editing surface after closing.
@@ -5861,16 +5863,67 @@ if (
     return menuItems;
   };
 
+  const buildDrawingContextMenuItems = (): ContextMenuItem[] => {
+    const allowEditCommands = !app.isEditing();
+    const hasSelection = app.getSelectedDrawingId() != null;
+    if (!hasSelection) return [];
+
+    return [
+      {
+        type: "item",
+        label: "Duplicate",
+        enabled: allowEditCommands,
+        shortcut: primaryShortcut("D"),
+        onSelect: () => {
+          app.duplicateSelectedDrawing();
+          app.focus();
+        },
+      },
+      {
+        type: "item",
+        label: "Delete",
+        enabled: allowEditCommands,
+        shortcut: "Del",
+        onSelect: () => {
+          app.deleteSelectedDrawing();
+          app.focus();
+        },
+      },
+      { type: "separator" },
+      {
+        type: "item",
+        label: "Bring to Front",
+        enabled: allowEditCommands,
+        shortcut: primaryShiftShortcut("]"),
+        onSelect: () => {
+          app.bringSelectedDrawingToFront();
+          app.focus();
+        },
+      },
+      {
+        type: "item",
+        label: "Send to Back",
+        enabled: allowEditCommands,
+        shortcut: primaryShiftShortcut("["),
+        onSelect: () => {
+          app.sendSelectedDrawingToBack();
+          app.focus();
+        },
+      },
+    ];
+  };
+
   // While the context menu is open, keep its enabled/disabled state in sync with
   // `ContextKeyService` so `when`-clauses can react to selection changes.
   contextKeys.onDidChange(() => {
     if (!contextMenu.isOpen()) return;
-    contextMenu.update(buildGridContextMenuItems());
+    contextMenu.update(currentContextMenuTarget === "drawing" ? buildDrawingContextMenuItems() : buildGridContextMenuItems());
   });
 
   let contextMenuSession = 0;
 
   const openGridContextMenuAtPoint = (x: number, y: number) => {
+    currentContextMenuTarget = "grid";
     const session = (contextMenuSession += 1);
     contextMenu.open({ x, y, items: buildGridContextMenuItems() });
 
@@ -5894,12 +5947,29 @@ if (
     }
   };
 
+  const openDrawingContextMenuAtPoint = (x: number, y: number) => {
+    // Invalidate any pending extension-driven updates from a previously-open grid context menu.
+    // (Those updates should never overwrite a drawing-specific menu.)
+    contextMenuSession += 1;
+    currentContextMenuTarget = "drawing";
+    contextMenu.open({ x, y, items: buildDrawingContextMenuItems() });
+  };
+
   gridRoot.addEventListener("contextmenu", (e) => {
     // Always prevent the native context menu; we render our own.
     e.preventDefault();
 
     const anchorX = e.clientX;
     const anchorY = e.clientY;
+
+    const drawingHit = app.pickDrawingAtClientPoint?.(anchorX, anchorY) ?? null;
+    if (drawingHit != null) {
+      // Excel-like: right-clicking a drawing should open the drawing context menu without
+      // affecting underlying cell selection.
+      app.selectDrawing?.(drawingHit);
+      openDrawingContextMenuAtPoint(anchorX, anchorY);
+      return;
+    }
 
     const hit = hitTestGridAreaAtClientPoint(anchorX, anchorY);
     currentGridArea = hit.area;

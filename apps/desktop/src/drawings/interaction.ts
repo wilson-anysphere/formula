@@ -25,6 +25,11 @@ export interface DrawingInteractionCallbacks {
   getObjects(): DrawingObject[];
   setObjects(next: DrawingObject[]): void;
   onSelectionChange?(selectedId: number | null): void;
+  /**
+   * Optional focus request hook for integrations that want drawing selection to
+   * keep keyboard focus on the grid root (so Delete/Ctrl+D shortcuts work).
+   */
+  requestFocus?(): void;
 }
 
 export interface DrawingInteractionControllerOptions {
@@ -83,6 +88,14 @@ export class DrawingInteractionController {
       }
     | null = null;
   private selectedId: number | null = null;
+  private readonly isMacPlatform: boolean = (() => {
+    try {
+      const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+      return /Mac|iPhone|iPad|iPod/.test(platform);
+    } catch {
+      return false;
+    }
+  })();
 
   constructor(
     private readonly element: HTMLElement,
@@ -135,6 +148,12 @@ export class DrawingInteractionController {
   }
 
   private readonly onPointerDown = (e: PointerEvent) => {
+    const pointerType = e.pointerType ?? "";
+    const button = typeof e.button === "number" ? e.button : 0;
+    const isContextClick =
+      pointerType === "mouse" &&
+      (button === 2 || (this.isMacPlatform && button === 0 && e.ctrlKey && !e.metaKey));
+
     const rect = this.element.getBoundingClientRect();
     const { x, y } = this.getLocalPoint(e, rect);
 
@@ -157,7 +176,7 @@ export class DrawingInteractionController {
     // the outline and extend half their size beyond the rect).
     const selectedIndex = this.selectedId != null ? index.byId.get(this.selectedId) : undefined;
     const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
-    if (selectedObject && !inHeader) {
+    if (selectedObject && !inHeader && !isContextClick) {
       const anchor = selectedObject.anchor;
       const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
       const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
@@ -175,6 +194,7 @@ export class DrawingInteractionController {
           const startAngleRad = Math.atan2(y - centerY, x - centerX);
           const startRotationDeg = selectedObject.transform?.rotationDeg ?? 0;
           this.stopPointerEvent(e);
+          this.callbacks.requestFocus?.();
           this.activeRect = rect;
           this.element.setPointerCapture(e.pointerId);
           this.rotating = {
@@ -227,14 +247,20 @@ export class DrawingInteractionController {
       return;
     }
 
-    // Secondary mouse buttons should not initiate drag/resize or capture the
-    // pointer; we only update selection above and let the event bubble (so the
-    // app can show a context menu).
-    if (isNonPrimaryMouseButton) {
+    if (isContextClick) {
+      // Allow the downstream `contextmenu` handler to open without initiating a
+      // drag/resize. Still stop propagation so grid selection doesn't change.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      this.callbacks.requestFocus?.();
       return;
     }
 
+    // Secondary mouse buttons should not initiate drag/resize or capture the pointer.
+    if (isNonPrimaryMouseButton) return;
+
     this.stopPointerEvent(e);
+    this.callbacks.requestFocus?.();
     this.activeRect = rect;
     try {
       this.element.setPointerCapture(e.pointerId);

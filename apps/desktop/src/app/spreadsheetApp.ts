@@ -34,11 +34,18 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
-import { insertImageFromFile } from "../drawings/insertImage";
+import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes, insertImageFromFile } from "../drawings/insertImage";
+import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
 import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
-import { decodeBase64ToBytes as decodeClipboardImageBase64ToBytes } from "../drawings/insertImage";
-import { IndexedDbImageStore } from "../drawings/persistence/indexedDbImageStore";
+import {
+  bringForward,
+  bringToFront,
+  deleteSelected as deleteDrawingSelected,
+  duplicateSelected as duplicateDrawingSelected,
+  sendBackward,
+  sendToBack,
+} from "../drawings/commands";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -827,6 +834,19 @@ function resolveCollabOptionsFromStoredConnection(workbookId: string | undefined
   };
 }
 
+function resolveDrawingsDemoEnabledFromUrl(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URL(window.location.href).searchParams;
+    const raw = params.get("drawings") ?? params.get("drawing") ?? params.get("overlayDrawings");
+    if (!raw) return false;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+  } catch {
+    return false;
+  }
+}
+
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
@@ -893,6 +913,7 @@ export class SpreadsheetApp {
   private drawingCanvas: HTMLCanvasElement;
   private readonly drawingGeom: DrawingGridGeometry;
   private drawingOverlay: DrawingOverlay;
+  private readonly drawingsDemoEnabled: boolean = resolveDrawingsDemoEnabledFromUrl();
   private drawingInteractionController: DrawingInteractionController | null = null;
   private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
   private readonly drawingImages: ImageStore;
@@ -969,7 +990,6 @@ export class SpreadsheetApp {
   // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
   private scrollX = 0;
   private scrollY = 0;
-
   private readonly cellWidth = 100;
   private readonly cellHeight = 24;
   private readonly rowHeaderWidth = 48;
@@ -2139,14 +2159,15 @@ export class SpreadsheetApp {
       this.drawingGeom,
       new ChartRendererAdapter(this.formulaChartModelStore),
     );
+    this.drawingOverlay.setSelectedId(null);
 
-    if (opts.enableDrawingInteractions) {
+    const enableDrawingInteractions = opts.enableDrawingInteractions ?? this.drawingsDemoEnabled;
+    if (enableDrawingInteractions) {
       const callbacks: DrawingInteractionCallbacks = {
         getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
         getObjects: () => this.listDrawingObjectsForSheet(),
         setObjects: (next) => {
-          const doc: any = this.document as any;
-          this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: doc.getSheetDrawings };
+          this.setDrawingObjectsForSheet(next);
           this.renderDrawings();
         },
         onSelectionChange: (selectedId) => {
@@ -2159,6 +2180,7 @@ export class SpreadsheetApp {
           this.drawingOverlay.setSelectedId(selectedId);
           this.renderDrawings();
         },
+        requestFocus: () => this.focus(),
       };
       this.drawingInteractionCallbacks = callbacks;
       this.drawingInteractionController = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
@@ -5421,8 +5443,8 @@ export class SpreadsheetApp {
    *
    * This is used by the split-view secondary pane so drawings render in both panes.
    */
-  getDrawingObjects(sheetId: string): DrawingObject[] {
-    const id = String(sheetId ?? "");
+  getDrawingObjects(sheetId: string = this.sheetId): DrawingObject[] {
+    const id = String(sheetId ?? this.sheetId);
     if (!id) return [];
     return this.listDrawingObjectsForSheet(id);
   }
@@ -5942,6 +5964,83 @@ export class SpreadsheetApp {
     if (picked) return { area: "cell", row: picked.row, col: picked.col };
 
     return { area: "cell", row: null, col: null };
+  }
+
+  /**
+   * Drawing overlay state helpers (selection, commands).
+   *
+   * These are public primarily so external integration points (context menus, keyboard shortcuts,
+   * e2e harnesses) can interact with drawing objects without needing direct state access.
+   */
+  pickDrawingAtClientPoint(clientX: number, clientY: number): number | null {
+    const geom = this.drawingGeom;
+    const objects = this.listDrawingObjectsForSheet();
+    if (objects.length === 0) return null;
+
+    // Shared-grid mode uses its own internal coordinate space anchored on the
+    // selection canvas.
+    const canvasRect = this.selectionCanvas.getBoundingClientRect();
+    const x = clientX - canvasRect.left;
+    const y = clientY - canvasRect.top;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (x < 0 || y < 0 || x > canvasRect.width || y > canvasRect.height) return null;
+
+    const viewport = this.getDrawingInteractionViewport();
+    const index = buildHitTestIndex(objects, geom);
+    const hit = hitTestDrawings(index, viewport, x, y);
+    return hit?.object.id ?? null;
+  }
+
+  selectDrawing(id: number | null): void {
+    this.selectedDrawingId = id;
+    this.drawingInteractionController?.setSelectedId(id);
+    this.drawingOverlay.setSelectedId(id);
+    this.renderDrawings();
+  }
+
+  deleteSelectedDrawing(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    const objects = this.listDrawingObjectsForSheet();
+    this.setDrawingObjectsForSheet(deleteDrawingSelected(objects, selected));
+    this.selectDrawing(null);
+  }
+
+  duplicateSelectedDrawing(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    const result = duplicateDrawingSelected(this.listDrawingObjectsForSheet(), selected);
+    if (!result) return;
+    this.setDrawingObjectsForSheet(result.objects);
+    this.selectDrawing(result.duplicatedId);
+  }
+
+  bringSelectedDrawingForward(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    this.setDrawingObjectsForSheet(bringForward(this.listDrawingObjectsForSheet(), selected));
+    this.renderDrawings();
+  }
+
+  sendSelectedDrawingBackward(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    this.setDrawingObjectsForSheet(sendBackward(this.listDrawingObjectsForSheet(), selected));
+    this.renderDrawings();
+  }
+
+  bringSelectedDrawingToFront(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    this.setDrawingObjectsForSheet(bringToFront(this.listDrawingObjectsForSheet(), selected));
+    this.renderDrawings();
+  }
+
+  sendSelectedDrawingToBack(): void {
+    const selected = this.selectedDrawingId;
+    if (selected == null) return;
+    this.setDrawingObjectsForSheet(sendToBack(this.listDrawingObjectsForSheet(), selected));
+    this.renderDrawings();
   }
 
   fillDown(): void {
@@ -9978,7 +10077,32 @@ export class SpreadsheetApp {
       docObjects = objects;
     }
 
-    return docObjects;
+    const finalObjects: DrawingObject[] =
+      docObjects.length > 0 || !this.drawingsDemoEnabled
+        ? docObjects
+        : ([
+            {
+              id: 1,
+              kind: { type: "shape", label: "Demo Drawing" },
+              anchor: {
+                type: "oneCell",
+                from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(8), yEmu: pxToEmu(8) } },
+                size: { cx: pxToEmu(240), cy: pxToEmu(120) },
+              },
+              zOrder: 0,
+            },
+          ] as DrawingObject[]);
+
+    if (finalObjects !== docObjects) {
+      this.drawingObjectsCache = { sheetId, objects: finalObjects, source: drawingsGetter };
+    }
+    return finalObjects;
+  }
+
+  private setDrawingObjectsForSheet(objects: DrawingObject[]): void {
+    const doc = this.document as any;
+    const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
+    this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
@@ -10399,6 +10523,61 @@ export class SpreadsheetApp {
 
   private syncEngineNow(): void {
     (this.engine as unknown as { syncNow?: () => void }).syncNow?.();
+  }
+
+  private handleDrawingKeyDown(e: KeyboardEvent): boolean {
+    if (this.selectedDrawingId == null) return false;
+    // Never hijack keys while editing text (cell editor, formula bar, inline edit).
+    if (this.isEditing()) return false;
+
+    const primary = e.ctrlKey || e.metaKey;
+    const key = e.key;
+
+    if (key === "Delete" || key === "Backspace") {
+      e.preventDefault();
+      this.deleteSelectedDrawing();
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && !e.shiftKey && (key === "d" || key === "D")) {
+      e.preventDefault();
+      this.duplicateSelectedDrawing();
+      this.focus();
+      return true;
+    }
+
+    // Excel-like z-order shortcuts.
+    if (primary && !e.altKey && !e.shiftKey && e.code === "BracketRight") {
+      e.preventDefault();
+      this.bringSelectedDrawingForward();
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && !e.shiftKey && e.code === "BracketLeft") {
+      e.preventDefault();
+      this.sendSelectedDrawingBackward();
+      this.focus();
+      return true;
+    }
+
+    // Optional: Ctrl/Cmd+Shift+]/[ for to-front/to-back.
+    if (primary && !e.altKey && e.shiftKey && e.code === "BracketRight") {
+      e.preventDefault();
+      this.bringSelectedDrawingToFront();
+      this.focus();
+      return true;
+    }
+
+    if (primary && !e.altKey && e.shiftKey && e.code === "BracketLeft") {
+      e.preventDefault();
+      this.sendSelectedDrawingToBack();
+      this.focus();
+      return true;
+    }
+
+    return false;
   }
 
   private handleShowFormulasShortcut(e: KeyboardEvent): boolean {
@@ -12796,12 +12975,6 @@ export class SpreadsheetApp {
   }
 
   private onKeyDown(e: KeyboardEvent): void {
-    // Other desktop UI surfaces (menus, global shortcuts, etc) may handle keyboard events
-    // at the window level. If an earlier handler already called `preventDefault()`, treat
-    // the event as consumed and don't apply spreadsheet keyboard behavior on top.
-    if (e.defaultPrevented) {
-      return;
-    }
     if (this.inlineEditController.isOpen()) {
       return;
     }
@@ -12812,6 +12985,20 @@ export class SpreadsheetApp {
 
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+      return;
+    }
+
+    // Drawings take precedence over grid keyboard shortcuts when an object is selected.
+    // This includes overriding `Ctrl/Cmd+D` (Fill Down) and `Ctrl/Cmd+[` / `Ctrl/Cmd+]` (Auditing)
+    // so drawing manipulation remains usable in shared-grid mode.
+    if (this.handleDrawingKeyDown(e)) {
+      return;
+    }
+
+    // Other desktop UI surfaces (menus, global shortcuts, etc) may handle keyboard events
+    // at the window level. If an earlier handler already called `preventDefault()`, treat
+    // the event as consumed and don't apply spreadsheet keyboard behavior on top.
+    if (e.defaultPrevented) {
       return;
     }
 
