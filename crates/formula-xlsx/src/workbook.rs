@@ -619,7 +619,8 @@ fn is_chart_user_shapes_relationship(rel_type: &str, rel_target: &str) -> bool {
         return true;
     }
     // Fallback to filename heuristic for producers that omit the relationship type.
-    rel_target.ends_with(".xml") && rel_target.contains("drawing")
+    rel_target.ends_with(".xml")
+        && (rel_target.contains("usershapes") || rel_target.contains("drawing"))
 }
 
 fn format_chart_space_error(err: &ChartSpaceParseError) -> String {
