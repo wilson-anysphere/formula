@@ -2965,6 +2965,7 @@ export class SpreadsheetApp {
     this.disposed = true;
     // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
     this.drawingOverlay?.destroy?.();
+    this.chartSelectionOverlay?.destroy?.();
     this.activeSheetBackgroundAbort?.abort();
     this.activeSheetBackgroundAbort = null;
     this.workbookImageBitmaps.clear();
@@ -3035,6 +3036,7 @@ export class SpreadsheetApp {
     }
     this.outlineButtons.clear();
     this.chartModels.clear();
+    this.dirtyChartIds.clear();
     this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
