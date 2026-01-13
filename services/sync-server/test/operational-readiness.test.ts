@@ -8,7 +8,20 @@ import { fileURLToPath } from "node:url";
 
 import WebSocket from "ws";
 
-import { startSyncServer } from "./test-helpers.ts";
+import { startSyncServer, waitForCondition } from "./test-helpers.ts";
+
+function getMetricValue(body: string, name: string): number | null {
+  // Allow default labels (e.g. `{service="sync-server"}`) while keeping the matcher simple.
+  const match = body.match(
+    new RegExp(
+      `^${name}(?:\\{[^}]*\\})?\\s+(-?\\\\d+(?:\\\\.\\\\d+)?(?:e[+-]?\\\\d+)?)$`,
+      "m"
+    )
+  );
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
 
 async function httpsRequestText(url: string, opts?: { headers?: Record<string, string> }) {
   const parsed = new URL(url);
@@ -114,6 +127,66 @@ test("exposes Prometheus metrics in text format", async (t) => {
   assert.equal(internalOk.headers.get("cache-control"), "no-store");
   const internalBody = await internalOk.text();
   assert.match(internalBody, /sync_server_ws_connections_total/);
+});
+
+test("updates active doc + unique IP gauges as websocket connections come and go", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-metrics-gauges-"));
+
+  const server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+    },
+  });
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const ws1 = new WebSocket(`${server.wsUrl}/doc-a?token=test-token`);
+  const ws2 = new WebSocket(`${server.wsUrl}/doc-b?token=test-token`);
+
+  await Promise.all(
+    [ws1, ws2].map(
+      (ws) =>
+        new Promise<void>((resolve, reject) => {
+          ws.once("open", () => resolve());
+          ws.once("error", reject);
+        })
+    )
+  );
+
+  await waitForCondition(async () => {
+    const res = await fetch(`${server.httpUrl}/metrics`);
+    if (res.status !== 200) return false;
+    const body = await res.text();
+    const activeDocs = getMetricValue(body, "sync_server_ws_active_docs_current");
+    const uniqueIps = getMetricValue(body, "sync_server_ws_unique_ips_current");
+    return activeDocs === 2 && uniqueIps !== null && uniqueIps >= 1;
+  }, 5_000);
+
+  const closePromises = [ws1, ws2].map(
+    (ws) =>
+      new Promise<void>((resolve) => {
+        ws.once("close", () => resolve());
+        ws.once("error", () => resolve());
+      })
+  );
+  ws1.terminate();
+  ws2.terminate();
+  await Promise.all(closePromises);
+
+  await waitForCondition(async () => {
+    const res = await fetch(`${server.httpUrl}/metrics`);
+    if (res.status !== 200) return false;
+    const body = await res.text();
+    const activeDocs = getMetricValue(body, "sync_server_ws_active_docs_current");
+    const uniqueIps = getMetricValue(body, "sync_server_ws_unique_ips_current");
+    return activeDocs === 0 && uniqueIps === 0;
+  }, 5_000);
 });
 
 test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_PATH are set", async (t) => {

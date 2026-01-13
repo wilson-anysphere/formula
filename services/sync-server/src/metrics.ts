@@ -211,6 +211,18 @@ function createFallbackMetrics(): SyncServerMetrics {
   });
   wsConnectionsCurrent.set(0);
 
+  const wsActiveDocsCurrent = createGauge({
+    name: "sync_server_ws_active_docs_current",
+    help: "Current document rooms with at least one active WebSocket connection.",
+  });
+  wsActiveDocsCurrent.set(0);
+
+  const wsUniqueIpsCurrent = createGauge({
+    name: "sync_server_ws_unique_ips_current",
+    help: "Current unique client IPs with at least one active WebSocket connection.",
+  });
+  wsUniqueIpsCurrent.set(0);
+
   const wsConnectionsRejectedTotal = createCounter<"reason">({
     name: "sync_server_ws_connections_rejected_total",
     help: "Total rejected WebSocket upgrade attempts.",
@@ -366,6 +378,8 @@ function createFallbackMetrics(): SyncServerMetrics {
     registry,
     wsConnectionsTotal,
     wsConnectionsCurrent,
+    wsActiveDocsCurrent,
+    wsUniqueIpsCurrent,
     wsConnectionsRejectedTotal,
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
@@ -408,6 +422,8 @@ export type SyncServerMetrics = {
 
   wsConnectionsTotal: Counter<string>;
   wsConnectionsCurrent: Gauge<string>;
+  wsActiveDocsCurrent: Gauge<string>;
+  wsUniqueIpsCurrent: Gauge<string>;
   wsConnectionsRejectedTotal: Counter<"reason">;
 
   wsClosesTotal: Counter<"code">;
@@ -460,6 +476,20 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     registers: [registry],
   });
   wsConnectionsCurrent.set(0);
+
+  const wsActiveDocsCurrent = new promClient.Gauge({
+    name: "sync_server_ws_active_docs_current",
+    help: "Current document rooms with at least one active WebSocket connection.",
+    registers: [registry],
+  });
+  wsActiveDocsCurrent.set(0);
+
+  const wsUniqueIpsCurrent = new promClient.Gauge({
+    name: "sync_server_ws_unique_ips_current",
+    help: "Current unique client IPs with at least one active WebSocket connection.",
+    registers: [registry],
+  });
+  wsUniqueIpsCurrent.set(0);
 
   const wsConnectionsRejectedTotal = new promClient.Counter({
     name: "sync_server_ws_connections_rejected_total",
@@ -640,6 +670,8 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     registry,
     wsConnectionsTotal,
     wsConnectionsCurrent,
+    wsActiveDocsCurrent,
+    wsUniqueIpsCurrent,
     wsConnectionsRejectedTotal,
     wsClosesTotal,
     wsMessagesRateLimitedTotal,

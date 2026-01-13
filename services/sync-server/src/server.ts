@@ -1370,6 +1370,8 @@ export function createSyncServer(
 
     metrics.wsConnectionsTotal.inc();
     metrics.wsConnectionsCurrent.set(wss.clients.size);
+    metrics.wsActiveDocsCurrent.set(activeSocketsByDoc.size);
+    metrics.wsUniqueIpsCurrent.set(connectionTracker.snapshot().uniqueIps);
 
     let messagesInWindow = 0;
     let messageWindowStartedAtMs = Date.now();
@@ -1470,6 +1472,8 @@ export function createSyncServer(
         }
       }
       metrics.wsConnectionsCurrent.set(wss.clients.size);
+      metrics.wsActiveDocsCurrent.set(activeSocketsByDoc.size);
+      metrics.wsUniqueIpsCurrent.set(connectionTracker.snapshot().uniqueIps);
       logger.info({ ip, docName, userId: authCtx?.userId }, "ws_connection_closed");
     });
 
