@@ -168,4 +168,44 @@ describe("defaultRibbonSchema", () => {
       }
     }
   });
+
+  it("aligns Home → Editing AutoSum/Fill ids with builtin command ids", () => {
+    const homeTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "home");
+    expect(homeTab, "Expected Home tab to exist").toBeTruthy();
+    if (!homeTab) return;
+
+    const editingGroup = homeTab.groups.find((group) => group.id === "home.editing");
+    expect(editingGroup, "Expected Home → Editing group to exist").toBeTruthy();
+    if (!editingGroup) return;
+
+    const autoSum = editingGroup.buttons.find((button) => button.ariaLabel === "AutoSum");
+    expect(autoSum?.id).toBe("edit.autoSum");
+    expect(
+      autoSum?.menuItems?.some((item) => item.id === "edit.autoSum"),
+      "Expected AutoSum dropdown to include edit.autoSum",
+    ).toBe(true);
+    expect(
+      autoSum?.menuItems?.some((item) => item.id === "home.editing.autoSum.sum"),
+      "Expected AutoSum dropdown not to include legacy home.editing.autoSum.sum",
+    ).toBe(false);
+
+    const fill = editingGroup.buttons.find((button) => button.id === "home.editing.fill");
+    expect(fill, "Expected Fill dropdown to exist").toBeTruthy();
+    expect(
+      fill?.menuItems?.some((item) => item.id === "edit.fillDown"),
+      "Expected Fill dropdown to include edit.fillDown",
+    ).toBe(true);
+    expect(
+      fill?.menuItems?.some((item) => item.id === "edit.fillRight"),
+      "Expected Fill dropdown to include edit.fillRight",
+    ).toBe(true);
+    expect(
+      fill?.menuItems?.some((item) => item.id === "home.editing.fill.down"),
+      "Expected Fill dropdown not to include legacy home.editing.fill.down",
+    ).toBe(false);
+    expect(
+      fill?.menuItems?.some((item) => item.id === "home.editing.fill.right"),
+      "Expected Fill dropdown not to include legacy home.editing.fill.right",
+    ).toBe(false);
+  });
 });
