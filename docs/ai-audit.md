@@ -339,6 +339,9 @@ await recorder.finalize();
 
 It also wraps the chosen store in `BoundedAIAuditStore` by default (pass `bounded: false` to disable).
 
+Retention options can be provided either via the legacy `retention: { max_entries, max_age_ms }` object
+or via top-level `max_entries` / `max_age_ms` (preferred).
+
 Note: the browser entrypoint intentionally does **not** support `prefer: "sqlite"` (to avoid pulling `sql.js` into default web bundles).
 If you want sqlite-backed persistence in browser/webview contexts, import `SqliteAIAuditStore` from `@formula/ai-audit/sqlite` and
 construct it directly.
