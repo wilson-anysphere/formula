@@ -19,7 +19,7 @@ Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_A
 
 ## JS bundle size budgets (CI guard)
 
-CI runs a lightweight bundle size check after the desktop Vite build to prevent accidental
+CI runs a lightweight JS bundle size check after the desktop Vite build to prevent accidental
 dependency additions that bloat the desktop initial load.
 
 Locally:

@@ -30,7 +30,7 @@ function toPosixPath(p) {
 function usage() {
   console.log(
     [
-      "Check Vite desktop bundle sizes (apps/desktop/dist).",
+      "Check desktop renderer JS bundle sizes (Vite; apps/desktop/dist).",
       "",
       "Usage:",
       "  node apps/desktop/scripts/bundle-size-check.mjs [--dist <path>]",
@@ -302,7 +302,7 @@ async function main() {
   const distTotalStatus = budgetStatus(totalBytes, distTotalBudgetKiB);
 
   const lines = [];
-  lines.push("### Desktop bundle size (Vite)");
+  lines.push("### Desktop JS bundle size (Vite)");
   lines.push("");
   lines.push(`Measured JS bundles in \`${toPosixPath(path.relative(process.cwd(), distDir))}\`.`);
   lines.push("");
@@ -422,7 +422,7 @@ async function main() {
 
   if (violations.length > 0) {
     const errorLines = [];
-    errorLines.push("Bundle size budgets exceeded:");
+    errorLines.push("JS bundle size budgets exceeded:");
     for (const v of violations) errorLines.push(`- ${v}`);
     errorLines.push("");
     errorLines.push("Offending files (entry scripts):");

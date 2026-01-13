@@ -54,7 +54,7 @@ test("reports sizes and exits 0 with no budgets", () => {
   fs.rmSync(root, { recursive: true, force: true });
 
   assert.equal(proc.status, 0, proc.stderr);
-  assert.match(proc.stdout, /Desktop bundle size/i);
+  assert.match(proc.stdout, /Desktop JS bundle size/i);
   assert.match(proc.stdout, /Total JS \(dist\/assets\/\*\*\/\*\.js\)/);
   assert.match(proc.stdout, /Total JS \(dist\/\*\*\/\*\.js\)/);
   assert.match(proc.stdout, /Entry JS \(script tags\)/);
@@ -93,7 +93,7 @@ test("fails when budgets are exceeded", () => {
   fs.rmSync(root, { recursive: true, force: true });
 
   assert.notEqual(proc.status, 0);
-  assert.match(proc.stderr, /Bundle size budgets exceeded/i);
+  assert.match(proc.stderr, /JS bundle size budgets exceeded/i);
   assert.match(proc.stderr, /FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB/);
   assert.match(proc.stderr, /FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB/);
 });
@@ -116,7 +116,7 @@ test("warn-only prints violations but exits 0", () => {
   fs.rmSync(root, { recursive: true, force: true });
 
   assert.equal(proc.status, 0);
-  assert.match(proc.stderr, /Bundle size budgets exceeded/i);
+  assert.match(proc.stderr, /JS bundle size budgets exceeded/i);
 });
 
 test("optional dist total budget (dist/**/*.js) can be enforced separately", () => {

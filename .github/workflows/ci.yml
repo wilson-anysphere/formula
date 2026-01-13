@@ -264,7 +264,7 @@ jobs:
           FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION: ${{ vars.FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION }}
         run: node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist
 
-      - name: Check desktop bundle size budgets
+      - name: Check desktop JS bundle size budgets
         run: pnpm -C apps/desktop check:bundle-size
         env:
           # Budgets are interpreted as KiB (1024 bytes). Adjust intentionally when
