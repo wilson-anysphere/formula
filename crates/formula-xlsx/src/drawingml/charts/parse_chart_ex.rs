@@ -76,7 +76,9 @@ pub fn parse_chart_ex(
         .unwrap_or_default();
 
     Ok(ChartModel {
-        chart_kind: ChartKind::Unknown { name: chart_name.clone() },
+        chart_kind: ChartKind::Unknown {
+            name: chart_name.clone(),
+        },
         title,
         legend,
         plot_area: PlotAreaModel::Unknown { name: chart_name },
@@ -97,7 +99,10 @@ pub fn parse_chart_ex(
     })
 }
 
-fn parse_title(chart_node: Node<'_, '_>, _diagnostics: &mut Vec<ChartDiagnostic>) -> Option<TextModel> {
+fn parse_title(
+    chart_node: Node<'_, '_>,
+    _diagnostics: &mut Vec<ChartDiagnostic>,
+) -> Option<TextModel> {
     // ChartEx sometimes stores a plain-text title directly as `<cx:title>My title</cx:title>`.
     // It can also store a structured title as `<cx:title><cx:tx>...</cx:tx></cx:title>`.
     let auto_deleted = chart_node
@@ -141,7 +146,10 @@ fn parse_title(chart_node: Node<'_, '_>, _diagnostics: &mut Vec<ChartDiagnostic>
     }
 }
 
-fn parse_legend(chart_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic>) -> Option<LegendModel> {
+fn parse_legend(
+    chart_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) -> Option<LegendModel> {
     let legend_node = chart_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "legend")?;
@@ -164,6 +172,7 @@ fn parse_legend(chart_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic>
         position,
         overlay,
         text_style: None,
+        style: None,
     })
 }
 
@@ -550,6 +559,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             rich_text: RichText::new(text),
             formula: None,
             style: None,
+            box_style: None,
         });
     }
 
