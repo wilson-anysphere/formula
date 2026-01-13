@@ -25,6 +25,9 @@ export function indexWorkbook(params: {
   onProgress?: (info: { phase: "chunk" | "hash" | "embed" | "upsert" | "delete"; processed: number; total?: number }) => void;
   transform?: (
     record: { id: string; text: string; metadata: any }
-  ) => { text?: string; metadata?: any } | null | Promise<{ text?: string; metadata?: any } | null>;
+  ) =>
+    | { text?: string | null; metadata?: any }
+    | null
+    | Promise<{ text?: string | null; metadata?: any } | null>;
   signal?: AbortSignal;
 }): Promise<{ totalChunks: number; upserted: number; skipped: number; deleted: number }>;

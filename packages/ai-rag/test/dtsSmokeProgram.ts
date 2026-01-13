@@ -1,0 +1,99 @@
+import {
+  HashEmbedder,
+  InMemoryBinaryStorage,
+  InMemoryVectorStore,
+  JsonVectorStore,
+  LocalStorageBinaryStorage,
+  SqliteVectorStore,
+  approximateTokenCount,
+  chunkToText,
+  chunkWorkbook,
+  indexWorkbook,
+  rectToA1,
+  workbookFromSpreadsheetApi,
+} from "../src/index.js";
+
+// This file is intentionally not executed. It's a compilation target for the
+// d.ts smoke test to ensure our hand-written declaration files match the
+// runtime JS API surface (exports, method names, option shapes, etc).
+
+async function smoke() {
+  const abortController = new AbortController();
+
+  const embedder = new HashEmbedder({ dimension: 8 });
+  await embedder.embedTexts(["hello"], { signal: abortController.signal });
+
+  const store = new InMemoryVectorStore({ dimension: embedder.dimension });
+  await store.upsert([
+    { id: "a", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb" } },
+  ]);
+
+  await store.list({
+    workbookId: "wb",
+    includeVector: false,
+    signal: abortController.signal,
+    filter: (_metadata, id) => id === "a",
+  });
+
+  await store.query(new Float32Array(embedder.dimension), 3, {
+    workbookId: "wb",
+    signal: abortController.signal,
+    filter: (_metadata, id) => id.startsWith("a"),
+  });
+
+  const jsonStore = new JsonVectorStore({
+    dimension: embedder.dimension,
+    storage: new InMemoryBinaryStorage(),
+    autoSave: false,
+  });
+  await jsonStore.load();
+  await jsonStore.close();
+
+  const sqliteStore = await SqliteVectorStore.create({
+    dimension: embedder.dimension,
+    storage: new InMemoryBinaryStorage(),
+    autoSave: false,
+    locateFile: (file, prefix) => `${prefix ?? ""}${file}`,
+  });
+  await sqliteStore.list({ includeVector: true, signal: abortController.signal });
+  await sqliteStore.query(new Float32Array(embedder.dimension), 3, { signal: abortController.signal });
+  await sqliteStore.close();
+
+  const localStorage = new LocalStorageBinaryStorage({ workbookId: "wb", namespace: "ns" });
+  const key: string = localStorage.key;
+  void key;
+
+  const workbook = { id: "wb", sheets: [{ name: "Sheet1", cells: [[{ v: "hello" }]] }] };
+  const chunks = chunkWorkbook(workbook, { signal: abortController.signal });
+  const text = chunkToText(chunks[0], { sampleRows: 1 });
+  const tokenCount: number = approximateTokenCount(text);
+  void tokenCount;
+
+  await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    sampleRows: 2,
+    signal: abortController.signal,
+    transform: async (record) => {
+      if (record.id === "skip") return null;
+      // The implementation accepts `text: null` and coerces to "".
+      return { text: null, metadata: { ...record.metadata, transformed: true } };
+    },
+  });
+
+  rectToA1({ r0: 0, c0: 0, r1: 0, c1: 0 });
+
+  workbookFromSpreadsheetApi({
+    workbookId: "wb",
+    spreadsheet: {
+      listSheets: () => ["Sheet1"],
+      listNonEmptyCells: () => [],
+    },
+    coordinateBase: "auto",
+    signal: abortController.signal,
+  });
+}
+
+void smoke;
+

@@ -1,4 +1,4 @@
-import type { InMemoryVectorStore, VectorRecord, VectorSearchResult } from "./inMemoryVectorStore.js";
+import { InMemoryVectorStore, type VectorRecord, type VectorSearchResult } from "./inMemoryVectorStore.js";
 
 export class JsonVectorStore extends InMemoryVectorStore {
   constructor(opts: { storage?: any; dimension: number; autoSave?: boolean; resetOnCorrupt?: boolean });
