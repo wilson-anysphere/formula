@@ -830,6 +830,9 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     push_record(&mut sheet, RECORD_TOPMARGIN, &1.3f64.to_le_bytes());
     push_record(&mut sheet, RECORD_BOTTOMMARGIN, &1.4f64.to_le_bytes());
 
+    // Enable fit-to-page scaling so `SETUP.iFitWidth/iFitHeight` apply.
+    push_record(&mut sheet, RECORD_WSBOOL, &WSBOOL_OPTION_FIT_TO_PAGE.to_le_bytes());
+
     // Page setup: Landscape + A4 + Fit to 2 pages wide by 3 tall + non-default header/footer
     // margins.
     push_record(
@@ -878,7 +881,8 @@ fn setup_record(
     out.extend_from_slice(&fit_width.to_le_bytes()); // iFitWidth
     out.extend_from_slice(&fit_height.to_le_bytes()); // iFitHeight
     let mut grbit = 0u16;
-    if landscape {
+    // BIFF8 SETUP.grbit bit1 is `fPortrait`: 0=landscape, 1=portrait.
+    if !landscape {
         grbit |= 0x0002;
     }
     out.extend_from_slice(&grbit.to_le_bytes()); // grbit
@@ -6319,12 +6323,16 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
     push_record(
         &mut sheet,
         RECORD_HPAGEBREAKS,
-        &hpagebreaks_record(&[cfg.row_break_after]),
+        // BIFF8 stores the 0-based index of the first row below the break; the model stores the
+        // 0-based row index after which the break occurs (so import subtracts 1).
+        &hpagebreaks_record(&[cfg.row_break_after.saturating_add(1)]),
     );
     push_record(
         &mut sheet,
         RECORD_VPAGEBREAKS,
-        &vpagebreaks_record(&[cfg.col_break_after]),
+        // BIFF8 stores the 0-based index of the first column to the right of the break; import
+        // subtracts 1 to produce the model's "breaks after" indices.
+        &vpagebreaks_record(&[cfg.col_break_after.saturating_add(1)]),
     );
 
     // A1: a single cell so calamine returns a non-empty range.
