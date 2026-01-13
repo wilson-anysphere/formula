@@ -3132,7 +3132,10 @@ struct FieldIndices {
 }
 
 impl FieldIndices {
-    fn new<S: PivotRecordSource + ?Sized>(source: &S, cfg: &PivotConfig) -> Result<Self, PivotError> {
+    fn new<S: PivotRecordSource + ?Sized>(
+        source: &S,
+        cfg: &PivotConfig,
+    ) -> Result<Self, PivotError> {
         let mut row_indices = Vec::new();
         for f in &cfg.row_fields {
             let Some(source_field) = f.source_field.as_cache_field_name() else {

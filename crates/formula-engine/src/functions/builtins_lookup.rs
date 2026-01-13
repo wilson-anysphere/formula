@@ -1549,20 +1549,25 @@ fn getpivotdata_from_registry(
 
     let mut acc = PivotAccumulator::new();
 
+    let mut pivot_filter_indices = Vec::new();
+    for filter in &pivot.config.filter_fields {
+        let Some(allowed) = &filter.allowed else {
+            continue;
+        };
+        let Some(source_field) = filter.source_field.as_cache_field_name() else {
+            continue;
+        };
+        let key = crate::value::casefold(source_field);
+        let Some(idx) = entry.field_indices.get(&key).copied() else {
+            continue;
+        };
+        pivot_filter_indices.push((idx, allowed));
+    }
+
     'records: for record in &pivot.cache.records {
         // Apply pivot-config filter fields (report filters / slicers).
-        for filter in &pivot.config.filter_fields {
-            let Some(allowed) = &filter.allowed else {
-                continue;
-            };
-            let Some(source_field) = filter.source_field.as_cache_field_name() else {
-                continue;
-            };
-            let key = crate::value::casefold(source_field);
-            let Some(idx) = entry.field_indices.get(&key).copied() else {
-                continue;
-            };
-            let pv = record.get(idx).unwrap_or(&PivotEngineValue::Blank);
+        for (idx, allowed) in &pivot_filter_indices {
+            let pv = record.get(*idx).unwrap_or(&PivotEngineValue::Blank);
             if !allowed.contains(&pivot_engine_value_to_key_part(pv)) {
                 continue 'records;
             }
