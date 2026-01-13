@@ -102,6 +102,8 @@ export const deDE = {
   "command.comments.addComment": "Kommentar hinzufügen",
   "command.edit.selectCurrentRegion": "Aktuellen Bereich auswählen",
   "command.format.toggleFormatPainter": "Format übertragen",
+  "command.format.openFormatCells": "Zellen formatieren…",
+  "command.format.applyNumberFormatPresetQuickPick": "Zahlenformat-Vorgaben…",
   "commandDescription.view.togglePanel.aiChat": "Das KI-Chat-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.aiAudit": "Das KI-Audit-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.extensions": "Das Erweiterungen-Panel ein-/ausblenden",

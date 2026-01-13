@@ -102,6 +102,8 @@ export const ar = {
   "command.comments.addComment": "إضافة تعليق",
   "command.edit.selectCurrentRegion": "تحديد المنطقة الحالية",
   "command.format.toggleFormatPainter": "نسخ التنسيق",
+  "command.format.openFormatCells": "تنسيق الخلايا…",
+  "command.format.applyNumberFormatPresetQuickPick": "إعدادات تنسيق الأرقام…",
   "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.extensions": "إظهار/إخفاء لوحة الإضافات",
