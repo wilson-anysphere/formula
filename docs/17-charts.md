@@ -147,7 +147,7 @@ The chart regression corpus lives under `fixtures/charts/` (see also
 4. Generate model JSON files:
 
    ```bash
-   cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/<stem>.xlsx
+   cargo run -p formula-xlsx --bin dump_chart_models -- fixtures/charts/xlsx/<stem>.xlsx --emit-both-models
    ```
 
    This writes `fixtures/charts/models/<stem>/chart<N>.json` (one JSON per extracted chart).
@@ -168,8 +168,9 @@ The Rust test suite treats this corpus as **source-of-truth** for chart parsing 
   - Loads each fixture with `XlsxPackage::extract_chart_objects()`.
   - Requires an exact 1:1 match between extracted chart count and the number of `chart<N>.json`
     files under `fixtures/charts/models/<stem>/`.
-  - Asserts the parsed `ChartModel` matches the committed JSON (today this uses
-    `parse_chart_space(chart1.xml)` as the baseline model).
+  - Asserts the parsed `ChartModel`s match the committed JSON:
+    - `modelChartSpace`: `parse_chart_space(chart1.xml)`
+    - `modelChartEx`: optional `parse_chart_ex(chartEx1.xml)` when present.
 
 ## Chart Types to Support
 
