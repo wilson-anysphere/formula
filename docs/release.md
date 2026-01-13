@@ -52,11 +52,23 @@ releasable state.
 Run them locally from the repo root:
 
 ```bash
+# Ensures the pinned TAURI_CLI_VERSION in .github/workflows/release.yml matches the Tauri crate major/minor.
+node scripts/ci/check-tauri-cli-version.mjs
+
 # Ensures the tag version matches apps/desktop/src-tauri/tauri.conf.json "version".
 node scripts/check-desktop-version.mjs vX.Y.Z
 
 # Ensures plugins.updater.pubkey/endpoints are not placeholders when the updater is active.
 node scripts/check-updater-config.mjs
+
+# Ensures Windows installers will install WebView2 if it is missing.
+node scripts/ci/check-webview2-install-mode.mjs
+
+# Ensures Windows Authenticode timestamping uses HTTPS.
+node scripts/ci/check-windows-timestamp-url.mjs
+
+# Ensures Windows installers support manual rollback (downgrades) from the Releases page.
+node scripts/ci/check-windows-allow-downgrades.mjs
 
 # Ensures the Tauri updater signing secrets are present for tagged releases.
 # (CI reads these from GitHub Actions secrets; locally requires env vars to be set.)
