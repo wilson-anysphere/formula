@@ -508,32 +508,49 @@ export class TabCompletionEngine {
 
     const spanStart = parsed.currentArg?.start ?? cursor;
     const spanEnd = parsed.currentArg?.end ?? cursor;
+    const typedPrefix = (parsed.currentArg?.text ?? "").trim();
 
     /** @type {Suggestion[]} */
     const suggestions = [];
 
+    /**
+     * @param {{ replacement: string, displayText?: string, confidence: number }} entry
+     */
+    const addReplacement = (entry) => {
+      const replacement = entry.replacement;
+      const displayText = entry.displayText ?? replacement;
+      suggestions.push({
+        text: replaceSpan(input, spanStart, spanEnd, replacement),
+        displayText,
+        type: "function_arg",
+        confidence: clamp01(entry.confidence + prefixMatchBoost(typedPrefix, replacement)),
+      });
+    };
+
     if (argType === "boolean") {
-      for (const boolLiteral of ["TRUE", "FALSE"]) {
-        suggestions.push({
-          text: replaceSpan(input, spanStart, spanEnd, boolLiteral),
-          displayText: boolLiteral,
-          type: "function_arg",
-          confidence: 0.5,
-        });
+      const enumEntries = getFunctionSpecificArgEnum(fnName, argIndex);
+      if (enumEntries?.length) {
+        for (const entry of enumEntries) addReplacement(entry);
+        return dedupeSuggestions(suggestions);
       }
-      return suggestions;
+
+      for (const boolLiteral of ["TRUE", "FALSE"]) {
+        addReplacement({ replacement: boolLiteral, confidence: 0.5 });
+      }
+      return dedupeSuggestions(suggestions);
     }
 
     if (argType === "number") {
-      for (const n of ["1", "0"]) {
-        suggestions.push({
-          text: replaceSpan(input, spanStart, spanEnd, n),
-          displayText: n,
-          type: "function_arg",
-          confidence: 0.4,
-        });
+      const enumEntries = getFunctionSpecificArgEnum(fnName, argIndex);
+      if (enumEntries?.length) {
+        for (const entry of enumEntries) addReplacement(entry);
+        return dedupeSuggestions(suggestions);
       }
-      return suggestions;
+
+      for (const n of ["1", "0"]) {
+        addReplacement({ replacement: n, confidence: 0.4 });
+      }
+      return dedupeSuggestions(suggestions);
     }
 
     if (argType === "value") {
@@ -552,6 +569,98 @@ export class TabCompletionEngine {
 
     return [];
   }
+}
+
+/**
+ * Function-specific enumerations for commonly misunderstood "flag" arguments.
+ * These are curated because the function catalog only carries coarse arg types.
+ *
+ * @type {Record<string, Record<number, {replacement: string, displayText?: string, confidence: number}[]>>}
+ */
+const FUNCTION_SPECIFIC_ARG_ENUMS = {
+  MATCH: {
+    // match_type
+    2: [
+      { replacement: "0", displayText: "0 (exact match)", confidence: 0.72 },
+      { replacement: "1", displayText: "1 (largest <= lookup_value)", confidence: 0.64 },
+      { replacement: "-1", displayText: "-1 (smallest >= lookup_value)", confidence: 0.63 },
+    ],
+  },
+  XLOOKUP: {
+    // match_mode
+    4: [
+      { replacement: "0", displayText: "0 (exact match)", confidence: 0.72 },
+      { replacement: "-1", displayText: "-1 (exact or next smaller)", confidence: 0.64 },
+      { replacement: "1", displayText: "1 (exact or next larger)", confidence: 0.63 },
+      { replacement: "2", displayText: "2 (wildcard match)", confidence: 0.6 },
+    ],
+    // search_mode
+    5: [
+      { replacement: "1", displayText: "1 (first-to-last)", confidence: 0.7 },
+      { replacement: "-1", displayText: "-1 (last-to-first)", confidence: 0.64 },
+      { replacement: "2", displayText: "2 (binary search ascending)", confidence: 0.61 },
+      { replacement: "-2", displayText: "-2 (binary search descending)", confidence: 0.6 },
+    ],
+  },
+  VLOOKUP: {
+    // range_lookup (TRUE = approx match, FALSE = exact)
+    3: [
+      { replacement: "FALSE", displayText: "FALSE (exact match)", confidence: 0.7 },
+      { replacement: "TRUE", displayText: "TRUE (approximate match)", confidence: 0.69 },
+    ],
+  },
+  HLOOKUP: {
+    // range_lookup
+    3: [
+      { replacement: "FALSE", displayText: "FALSE (exact match)", confidence: 0.7 },
+      { replacement: "TRUE", displayText: "TRUE (approximate match)", confidence: 0.69 },
+    ],
+  },
+};
+
+/**
+ * @param {string | undefined} fnName
+ * @param {number} argIndex
+ */
+function getFunctionSpecificArgEnum(fnName, argIndex) {
+  if (typeof fnName !== "string" || !Number.isInteger(argIndex)) return null;
+  const upper = fnName.toUpperCase();
+  const base = upper.startsWith("_XLFN.") ? upper.slice("_XLFN.".length) : upper;
+  return FUNCTION_SPECIFIC_ARG_ENUMS[base]?.[argIndex] ?? null;
+}
+
+/**
+ * Prefer the value that matches the typed prefix without changing overall ordering too much.
+ * @param {string} typedPrefix
+ * @param {string} replacement
+ */
+function prefixMatchBoost(typedPrefix, replacement) {
+  if (!typedPrefix) return 0;
+  if (!replacement) return 0;
+  const typed = typedPrefix.trim();
+  if (!typed) return 0;
+  return startsWithIgnoreCase(replacement, typed) ? 0.05 : 0;
+}
+
+/**
+ * Dedupe while preserving the first (highest-priority) entry.
+ * The overall suggestion list is still globally ranked/deduped later, but keeping
+ * this bounded avoids pushing generic suggestions out of the `maxSuggestions` cap.
+ *
+ * @param {Suggestion[]} suggestions
+ */
+function dedupeSuggestions(suggestions) {
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {Suggestion[]} */
+  const out = [];
+  for (const s of suggestions) {
+    const key = s?.text;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 function normalizeBackendCompletion(input, cursorPosition, completion) {

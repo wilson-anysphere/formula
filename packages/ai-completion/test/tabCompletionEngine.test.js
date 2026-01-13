@@ -922,6 +922,115 @@ test("Argument value suggestions use catalog arg_types (RANDBETWEEN suggests num
   );
 });
 
+test("MATCH match_type suggests 0, 1, -1", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=MATCH(A1, A1:A10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1, A1:A10, 0"),
+    `Expected MATCH to suggest match_type=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1, A1:A10, 1"),
+    `Expected MATCH to suggest match_type=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=MATCH(A1, A1:A10, -1"),
+    `Expected MATCH to suggest match_type=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("XLOOKUP match_mode suggests 0, -1, 1, 2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=XLOOKUP(A1, A1:A10, B1:B10, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , 0"),
+    `Expected XLOOKUP to suggest match_mode=0, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , -1"),
+    `Expected XLOOKUP to suggest match_mode=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , 1"),
+    `Expected XLOOKUP to suggest match_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , 2"),
+    `Expected XLOOKUP to suggest match_mode=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("XLOOKUP search_mode suggests 1, -1, 2, -2", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=XLOOKUP(A1, A1:A10, B1:B10, , , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , , 1"),
+    `Expected XLOOKUP to suggest search_mode=1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , , -1"),
+    `Expected XLOOKUP to suggest search_mode=-1, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , , 2"),
+    `Expected XLOOKUP to suggest search_mode=2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=XLOOKUP(A1, A1:A10, B1:B10, , , -2"),
+    `Expected XLOOKUP to suggest search_mode=-2, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("VLOOKUP range_lookup suggests TRUE/FALSE with higher confidence", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=VLOOKUP(A1, A1:B10, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  const exact = suggestions.find((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, FALSE");
+  assert.ok(exact, `Expected VLOOKUP to suggest FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok(
+    (exact?.confidence ?? 0) > 0.5,
+    `Expected VLOOKUP/FALSE to have elevated confidence, got: ${exact?.confidence}`
+  );
+
+  const approx = suggestions.find((s) => s.text === "=VLOOKUP(A1, A1:B10, 2, TRUE");
+  assert.ok(approx, `Expected VLOOKUP to suggest TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok(
+    (approx?.confidence ?? 0) > 0.5,
+    `Expected VLOOKUP/TRUE to have elevated confidence, got: ${approx?.confidence}`
+  );
+});
+
 test("TabCompletionEngine caches suggestions by context key", async () => {
   let callCount = 0;
   const completionClient = {

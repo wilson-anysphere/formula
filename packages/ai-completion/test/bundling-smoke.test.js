@@ -18,7 +18,6 @@ try {
 } catch {
   build = null;
 }
-
 function collectOutputImports(result) {
   const outputs = result.metafile?.outputs ?? {};
   return Object.values(outputs).flatMap((output) => output.imports ?? []);

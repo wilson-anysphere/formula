@@ -67,7 +67,14 @@ export class CursorTabCompletionClient {
 
       // Use lowercase so tests (and any header-inspecting consumers) can treat this as a plain
       // record without worrying about case. Fetch treats header keys as case-insensitive.
-      const headers = { ...(authHeaders ?? {}), "content-type": "application/json" };
+      /** @type {Record<string, string>} */
+      const headers = {};
+      for (const [key, value] of Object.entries(authHeaders ?? {})) {
+        if (!key) continue;
+        if (value === undefined || value === null) continue;
+        headers[key.toLowerCase()] = String(value);
+      }
+      headers["content-type"] = "application/json";
       if (controller.signal.aborted) return "";
 
       const res = await this.fetchImpl(this.endpointUrl, {
