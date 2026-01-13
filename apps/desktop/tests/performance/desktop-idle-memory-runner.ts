@@ -339,7 +339,11 @@ async function findPidForExecutableLinux(
 }
 
 function getProcessTreeRssBytesDarwin(rootPid: number): number {
-  const proc = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8" });
+  const proc = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], {
+    encoding: "utf8",
+    // `ps -axo` can print many lines; bump the buffer so we don't fail on busy CI hosts.
+    maxBuffer: 5 * 1024 * 1024,
+  });
   if (proc.error || proc.status !== 0) return 0;
 
   const childrenByPpid = new Map<number, number[]>();
@@ -383,59 +387,44 @@ function getProcessTreeRssBytesDarwin(rootPid: number): number {
 }
 
 function getProcessTreeWorkingSetBytesWindows(rootPid: number): number {
+  // Do the process tree aggregation in PowerShell so we don't have to stream/parse a huge
+  // `ConvertTo-Json` payload (which can exceed Node's default spawnSync stdio buffer).
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
+    `$rootPid = ${rootPid}`,
     "$procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, WorkingSetSize",
-    "$procs | ConvertTo-Json -Compress",
-  ].join("; ");
-  const proc = spawnSync("powershell", ["-NoProfile", "-Command", script], { encoding: "utf8" });
+    "$children = @{}",
+    "$ws = @{}",
+    "foreach ($p in $procs) {",
+    "  $pid = [int]$p.ProcessId",
+    "  $ppid = [int]$p.ParentProcessId",
+    "  if (-not $children.ContainsKey($ppid)) { $children[$ppid] = @() }",
+    "  $children[$ppid] += $pid",
+    "  $ws[$pid] = [int64]$p.WorkingSetSize",
+    "}",
+    "$stack = New-Object System.Collections.Generic.Stack[int]",
+    "$seen = New-Object System.Collections.Generic.HashSet[int]",
+    "$stack.Push($rootPid)",
+    "$total = [int64]0",
+    "while ($stack.Count -gt 0) {",
+    "  $pid = $stack.Pop()",
+    "  if (-not $seen.Add($pid)) { continue }",
+    "  if ($ws.ContainsKey($pid)) { $total += $ws[$pid] }",
+    "  if ($children.ContainsKey($pid)) { foreach ($c in $children[$pid]) { $stack.Push([int]$c) } }",
+    "}",
+    "Write-Output $total",
+  ].join("\n");
+
+  const proc = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
   if (proc.error || proc.status !== 0) return 0;
   const stdout = (proc.stdout ?? "").trim();
   if (!stdout) return 0;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return 0;
-  }
-
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  const childrenByPpid = new Map<number, number[]>();
-  const wsByPid = new Map<number, number>();
-
-  for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
-    const pid = Number((row as any).ProcessId);
-    const ppid = Number((row as any).ParentProcessId);
-    const ws = Number((row as any).WorkingSetSize);
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    if (!Number.isInteger(ppid) || ppid < 0) continue;
-    if (!Number.isFinite(ws) || ws < 0) continue;
-
-    wsByPid.set(pid, ws);
-    const children = childrenByPpid.get(ppid);
-    if (children) children.push(pid);
-    else childrenByPpid.set(ppid, [pid]);
-  }
-
-  const seen = new Set<number>();
-  const stack: number[] = [rootPid];
-  while (stack.length > 0) {
-    const pid = stack.pop()!;
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    const children = childrenByPpid.get(pid) ?? [];
-    for (const child of children) {
-      if (!seen.has(child)) stack.push(child);
-    }
-  }
-
-  let total = 0;
-  for (const pid of seen) {
-    total += wsByPid.get(pid) ?? 0;
-  }
-  return total;
+  const bytes = Number(stdout);
+  if (!Number.isFinite(bytes) || bytes < 0) return 0;
+  return bytes;
 }
 
 async function getProcessTreeRssBytes(rootPid: number): Promise<number> {
