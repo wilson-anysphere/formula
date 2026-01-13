@@ -631,25 +631,51 @@ jobs:
           # - target/release/bundle/dmg/*.dmg
           # - target/release/bundle/macos/*.app
           # - target/<triple>/release/bundle/... (when building for non-host targets)
+          #
+          # Avoid scanning the entire Cargo target directory (can be huge); only look in the expected
+          # `release/bundle` directories.
+          bundle_dirs=()
+          if [[ -d target/release/bundle ]]; then
+            bundle_dirs+=("target/release/bundle")
+          fi
+          for dir in target/*/release/bundle; do
+            [[ -d "$dir" ]] || continue
+            bundle_dirs+=("$dir")
+          done
+
+          if [[ ${#bundle_dirs[@]} -eq 0 ]]; then
+            echo "::error::No Tauri bundle directories found under apps/desktop/src-tauri/target."
+            echo "Expected at least one of:"
+            echo "  - apps/desktop/src-tauri/target/release/bundle"
+            echo "  - apps/desktop/src-tauri/target/<triple>/release/bundle"
+            exit 1
+          fi
+
+          echo "Bundle directories:"
+          printf '  - %s\n' "${bundle_dirs[@]}"
+
           # Avoid bash `mapfile` (not available on macOS's system bash 3.x).
           dmgs=()
-          while IFS= read -r -d '' dmg; do
-            dmgs+=("$dmg")
-          done < <(find target -type f -path "*/release/bundle/*/*.dmg" -print0)
-
-          # Prune at the first matching .app so we don't accidentally validate nested helper apps.
           apps=()
-          while IFS= read -r -d '' app; do
-            apps+=("$app")
-          done < <(find target -type d -path "*/release/bundle/*/*.app" -prune -print0)
-
-          # Tauri's macOS updater artifact is typically a tarball (e.g. `Formula.app.tar.gz`).
-          # Validate the `.app` inside the archive as well to ensure the updater payload is
-          # stapled/notarized, not just the standalone bundle output.
           tarballs=()
-          while IFS= read -r -d '' archive; do
-            tarballs+=("$archive")
-          done < <(find target -type f \( -name "*.tar.gz" -o -name "*.tgz" \) -path "*/release/bundle/macos/*" -print0)
+
+          for bundle_dir in "${bundle_dirs[@]}"; do
+            while IFS= read -r -d '' dmg; do
+              dmgs+=("$dmg")
+            done < <(find "$bundle_dir" -maxdepth 3 -type f -name "*.dmg" -print0)
+
+            # Prune at the first matching .app so we don't accidentally validate nested helper apps.
+            while IFS= read -r -d '' app; do
+              apps+=("$app")
+            done < <(find "$bundle_dir" -maxdepth 2 -type d -name "*.app" -prune -print0)
+
+            # Tauri's macOS updater artifact is typically a tarball (e.g. `Formula.app.tar.gz`).
+            # Validate the `.app` inside the archive as well to ensure the updater payload is
+            # stapled/notarized, not just the standalone bundle output.
+            while IFS= read -r -d '' archive; do
+              tarballs+=("$archive")
+            done < <(find "$bundle_dir" -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.tgz" \) -path "*/macos/*" -print0)
+          done
 
           if [[ ${#dmgs[@]} -eq 0 && ${#apps[@]} -eq 0 ]]; then
             echo "::error::No macOS bundle artifacts (.dmg or .app) were found under target/**/release/bundle/**."
