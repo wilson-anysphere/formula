@@ -8,11 +8,12 @@ use crate::eval::CompiledExpr;
 use crate::functions::{FunctionContext, Reference};
 use crate::locale::ValueLocaleConfig;
 use formula_model::{CellRef, ErrorValue as ModelErrorValue};
-use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
+mod formatting;
 mod number_parse;
 
 use crate::date::ExcelDateSystem;
+pub(crate) use formatting::format_number_general_with_options;
 pub(crate) use number_parse::parse_number;
 pub use number_parse::NumberLocale;
 
@@ -656,18 +657,11 @@ impl Value {
                 }
                 Ok(v.display.clone())
             }
-            Value::Number(n) => {
-                let options = FormatOptions {
-                    locale: ctx.value_locale().separators,
-                    date_system: match ctx.date_system() {
-                        // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
-                        // for the 1900 date system (Excel compatibility).
-                        ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
-                        ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
-                    },
-                };
-                Ok(formula_format::format_value(FmtValue::Number(*n), None, &options).text)
-            }
+            Value::Number(n) => Ok(format_number_general_with_options(
+                *n,
+                ctx.value_locale().separators,
+                ctx.date_system(),
+            )),
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
             Value::Error(e) => Err(*e),

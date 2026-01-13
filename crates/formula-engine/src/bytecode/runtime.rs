@@ -13,10 +13,10 @@ use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
 use crate::simd::{self, CmpOp, NumericCriteria};
 use crate::value::{
-    cmp_case_insensitive, parse_number, ErrorKind as EngineErrorKind, Value as EngineValue,
+    cmp_case_insensitive, format_number_general_with_options, parse_number, ErrorKind as EngineErrorKind,
+    Value as EngineValue,
 };
 use chrono::{DateTime, Datelike, Timelike, Utc};
-use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 use smallvec::SmallVec;
 use std::borrow::Cow;
@@ -5021,34 +5021,16 @@ fn xor_range_on_sheet(
     None
 }
 
-fn format_number_general(n: f64) -> String {
-    // Match the engine's number-to-text coercion semantics used by the AST evaluator.
-    //
-    // The AST path uses `Value::coerce_to_string_with_ctx`, which relies on `formula-format` for
-    // locale-aware "General" formatting. Using the same logic here avoids backend divergence from
-    // subtle rounding differences (e.g. in `&` / CONCAT) and from locale-specific formatting (e.g.
-    // `=CONCAT(1.5)` under `de-DE`, which should yield `1,5`).
-    if !n.is_finite() {
-        return n.to_string();
-    }
-    let options = FormatOptions {
-        locale: thread_value_locale().separators,
-        date_system: match thread_date_system() {
-            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior for the 1900
-            // date system (Excel compatibility).
-            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
-            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
-        },
-    };
-    formula_format::format_value(FmtValue::Number(n), None, &options).text
-}
-
 fn coerce_to_cow_str(v: &Value) -> Result<Cow<'_, str>, ErrorKind> {
     match v {
         Value::Text(s) => Ok(Cow::Borrowed(s.as_ref())),
         Value::Entity(v) => Ok(Cow::Borrowed(v.display.as_str())),
         Value::Record(v) => Ok(Cow::Borrowed(v.display.as_str())),
-        Value::Number(n) => Ok(Cow::Owned(format_number_general(*n))),
+        Value::Number(n) => Ok(Cow::Owned(format_number_general_with_options(
+            *n,
+            thread_value_locale().separators,
+            thread_date_system(),
+        ))),
         Value::Bool(b) => Ok(Cow::Borrowed(if *b { "TRUE" } else { "FALSE" })),
         Value::Empty | Value::Missing => Ok(Cow::Borrowed("")),
         Value::Error(e) => Err(*e),
