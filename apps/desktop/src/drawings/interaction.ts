@@ -183,13 +183,16 @@ export class DrawingInteractionController {
     const currentObj = objects.find((o) => o.id === active.id);
 
     if (startObj && currentObj) {
-      const startRect = anchorToRectPx(startObj.anchor, this.geom);
-      const endRect = anchorToRectPx(currentObj.anchor, this.geom);
+      // Compute deltas/sizes in EMU directly so we preserve exact DrawingML units
+      // (avoids float drift from px<->emu round-trips).
+      const startPos = anchorTopLeftEmu(startObj.anchor, this.geom);
+      const endPos = anchorTopLeftEmu(currentObj.anchor, this.geom);
+      const endSize = anchorSizeEmu(currentObj.anchor, this.geom);
 
-      const dxEmu = pxToEmu(endRect.x - startRect.x);
-      const dyEmu = pxToEmu(endRect.y - startRect.y);
-      const cxEmu = pxToEmu(endRect.width);
-      const cyEmu = pxToEmu(endRect.height);
+      const dxEmu = endPos.xEmu - startPos.xEmu;
+      const dyEmu = endPos.yEmu - startPos.yEmu;
+      const cxEmu = endSize.cxEmu;
+      const cyEmu = endSize.cyEmu;
 
       let patched = currentObj;
       if (resizing) {
@@ -262,6 +265,50 @@ export class DrawingInteractionController {
     this.hitTestIndex = built;
     this.hitTestIndexObjects = objects;
     return built;
+  }
+}
+
+function anchorTopLeftEmu(
+  anchor: DrawingObject["anchor"],
+  geom: GridGeometry,
+): { xEmu: number; yEmu: number } {
+  switch (anchor.type) {
+    case "absolute":
+      return { xEmu: anchor.pos.xEmu, yEmu: anchor.pos.yEmu };
+    case "oneCell": {
+      const origin = geom.cellOriginPx(anchor.from.cell);
+      return {
+        xEmu: pxToEmu(origin.x) + anchor.from.offset.xEmu,
+        yEmu: pxToEmu(origin.y) + anchor.from.offset.yEmu,
+      };
+    }
+    case "twoCell": {
+      const fromOrigin = geom.cellOriginPx(anchor.from.cell);
+      const toOrigin = geom.cellOriginPx(anchor.to.cell);
+      const x1 = pxToEmu(fromOrigin.x) + anchor.from.offset.xEmu;
+      const y1 = pxToEmu(fromOrigin.y) + anchor.from.offset.yEmu;
+      const x2 = pxToEmu(toOrigin.x) + anchor.to.offset.xEmu;
+      const y2 = pxToEmu(toOrigin.y) + anchor.to.offset.yEmu;
+      return { xEmu: Math.min(x1, x2), yEmu: Math.min(y1, y2) };
+    }
+  }
+}
+
+function anchorSizeEmu(anchor: DrawingObject["anchor"], geom: GridGeometry): { cxEmu: number; cyEmu: number } {
+  switch (anchor.type) {
+    case "absolute":
+      return { cxEmu: anchor.size.cx, cyEmu: anchor.size.cy };
+    case "oneCell":
+      return { cxEmu: anchor.size.cx, cyEmu: anchor.size.cy };
+    case "twoCell": {
+      const fromOrigin = geom.cellOriginPx(anchor.from.cell);
+      const toOrigin = geom.cellOriginPx(anchor.to.cell);
+      const x1 = pxToEmu(fromOrigin.x) + anchor.from.offset.xEmu;
+      const y1 = pxToEmu(fromOrigin.y) + anchor.from.offset.yEmu;
+      const x2 = pxToEmu(toOrigin.x) + anchor.to.offset.xEmu;
+      const y2 = pxToEmu(toOrigin.y) + anchor.to.offset.yEmu;
+      return { cxEmu: Math.abs(x2 - x1), cyEmu: Math.abs(y2 - y1) };
+    }
   }
 }
 
