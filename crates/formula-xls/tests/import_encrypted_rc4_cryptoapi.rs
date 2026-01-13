@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
-use formula_model::CellValue;
+use formula_model::{CellRef, CellValue, VerticalAlignment};
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -103,6 +103,34 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
 
     let sheet = result.workbook.sheet_by_name("Sheet1").expect("Sheet1");
     assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(42.0));
+
+    // Ensure workbook-global style metadata *after* FILEPASS was imported.
+    //
+    // In an encrypted workbook, XF/font/format records are located after FILEPASS and their
+    // payload bytes are encrypted. After decryption we still retain the FILEPASS record header,
+    // so we must mask it to allow BIFF parsing to continue and import the XF table.
+    let cell = sheet
+        .cell(CellRef::from_a1("A1").unwrap())
+        .expect("A1 cell exists");
+    assert_ne!(cell.style_id, 0, "expected BIFF-derived style id");
+
+    let style = result
+        .workbook
+        .styles
+        .get(cell.style_id)
+        .expect("style exists for A1");
+    assert!(
+        style.alignment.is_some(),
+        "expected at least one XF-derived alignment property to be imported"
+    );
+    assert_eq!(
+        style
+            .alignment
+            .as_ref()
+            .and_then(|alignment| alignment.vertical),
+        Some(VerticalAlignment::Top),
+        "expected A1 style to preserve vertical alignment from the decrypted XF record"
+    );
 }
 
 #[test]
@@ -135,4 +163,3 @@ fn rc4_cryptoapi_unsupported_algorithm_errors() {
         formula_xls::ImportError::Decrypt(formula_xls::DecryptError::UnsupportedEncryption)
     ));
 }
-
