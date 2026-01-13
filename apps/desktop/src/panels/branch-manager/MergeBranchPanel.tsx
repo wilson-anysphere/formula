@@ -133,14 +133,6 @@ function formatSummary(format: unknown): string {
   }
 }
 
-function cellSummary(cell: Cell | null) {
-  if (!cell) return "∅";
-  if (cell.enc !== null && cell.enc !== undefined) return encryptedCellText(cell.enc);
-  if (cell.formula) return cell.formula;
-  if (cell.value !== undefined) return JSON.stringify(cell.value);
-  return "∅";
-}
-
 function jsonSummary(value: unknown) {
   if (value === null || value === undefined) return "∅";
   if (typeof value === "string") return value;
@@ -487,6 +479,13 @@ export function MergeBranchPanel({
   const [error, setError] = useState<string | null>(null);
   const [resolutions, setResolutions] = useState<Map<number, ConflictResolution>>(new Map());
   const [manualCellDrafts, setManualCellDrafts] = useState<Map<number, ManualCellDraft>>(new Map());
+
+  // Reset any in-progress resolutions when switching merge targets so conflict indices
+  // don't get applied to a different preview.
+  useEffect(() => {
+    setResolutions(new Map());
+    setManualCellDrafts(new Map());
+  }, [sourceBranch]);
 
   useEffect(() => {
     if (mutationsDisabled) return;
