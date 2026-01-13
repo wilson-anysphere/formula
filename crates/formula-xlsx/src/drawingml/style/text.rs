@@ -12,9 +12,10 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     // model a single "effective" run style by merging a best-effort cascade:
     //
     //   1) list-style defaults (`a:lstStyle/*/a:defRPr`)
-    //   2) first paragraph defaults (`a:p/a:pPr/a:defRPr`)
-    //   3) first run overrides (`a:p/a:r/a:rPr`)
-    //   4) paragraph-end run props (`a:p/a:endParaRPr`)
+    //   2) direct defaults (`defRPr` directly under `txPr`)
+    //   3) first paragraph defaults (`a:p/a:pPr/a:defRPr`)
+    //   4) first run overrides (`a:p/a:r/a:rPr`)
+    //   5) paragraph-end run props (`a:p/a:endParaRPr`)
     //
     // This matches how Excel often structures chart text, while remaining resilient to
     // missing/empty elements.
@@ -29,6 +30,15 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
             lst.descendants()
                 .find(|n| n.is_element() && n.tag_name().name() == "defRPr")
         });
+
+    // Some producers (and some chart sub-elements) use a simplified `<c:txPr>` encoding that places
+    // `<defRPr>` directly under `<txPr>` instead of nesting it under `<a:p>/<a:pPr>`.
+    //
+    // This form still carries the same run properties (`sz`, `b`, `<latin typeface=...>`, etc), so
+    // treat it as an additional default run-property source.
+    let direct_def_rpr = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "defRPr");
 
     let paragraph_def_rpr = first_paragraph.and_then(|p| {
         p.children()
@@ -52,6 +62,7 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
 
     for rpr in [
         list_style_def_rpr,
+        direct_def_rpr,
         paragraph_def_rpr,
         run_rpr,
         end_para_rpr,
