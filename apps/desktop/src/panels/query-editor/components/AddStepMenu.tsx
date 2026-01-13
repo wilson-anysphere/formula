@@ -159,7 +159,11 @@ export function AddStepMenu(props: {
         <div>
           <input
             value={intent}
-            onChange={(e) => setIntent(e.target.value)}
+            onChange={(e) => {
+              setIntent(e.target.value);
+              if (aiError) setAiError(null);
+              if (suggestions) setSuggestions(null);
+            }}
             placeholder={t("queryEditor.addStep.aiPlaceholder")}
             className="query-editor-add-step__ai-input"
           />
@@ -196,7 +200,10 @@ export function AddStepMenu(props: {
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => props.onAddStep(op)}
+                    onClick={() => {
+                      props.onAddStep(op);
+                      setSuggestions(null);
+                    }}
                     className="query-editor-add-step__suggestion"
                     title={JSON.stringify(op, null, 2)}
                   >
