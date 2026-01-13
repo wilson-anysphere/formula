@@ -178,6 +178,15 @@ console.log(ctx.promptContext);
 
 In most integrations, only `promptContext` should ever reach a cloud model.
 
+#### Quick safety checklist (what can be sent to cloud models?)
+
+| Value | Safe to send to a cloud model by default? | Notes |
+|---|---:|---|
+| `promptContext` | ✅ Yes | Designed to be prompt-facing and budgeted; still subject to your org’s DLP policy. |
+| `schema` | ❌ No | May include sample values/snippets; treat as sensitive unless redacted + policy-allowed. |
+| `sampledRows` | ❌ No | Contains raw cell values by design. |
+| `retrieved` | ❌ No | Easy footgun: callers may serialize it directly; prefer the already-packed `promptContext`. |
+
 ---
 
 ## Example: build workbook context with `ContextManager.buildWorkbookContextFromSpreadsheetApi`
