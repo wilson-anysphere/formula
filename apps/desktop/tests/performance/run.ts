@@ -284,7 +284,8 @@ async function main(): Promise<void> {
   // Rust engine microbenchmarks (parse/eval/recalc).
   results.push(...runRustBenchmarks());
 
-  // Optional: real desktop startup (Tauri binary) cold-start timings.
+  // Optional: real desktop startup (Tauri binary) timings.
+  // Supports cold vs warm profiles via `FORMULA_DESKTOP_STARTUP_MODE=cold|warm`.
   // This is gated because it requires a built binary + a usable display environment.
   results.push(...(await runDesktopStartupBenchmarks()));
   results.push(...(await runDesktopMemoryBenchmarks()));
