@@ -44,13 +44,14 @@ function blobToFloat32(blob) {
   if (!(blob instanceof Uint8Array)) {
     throw new Error("Expected SQLite BLOB to be Uint8Array");
   }
-  if (blob.byteOffset % 4 !== 0) {
-    throw new Error(`Invalid vector blob alignment: byteOffset ${blob.byteOffset}`);
-  }
   if (blob.byteLength % 4 !== 0) {
     throw new Error(`Invalid vector blob length: ${blob.byteLength}`);
   }
-  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+  // Typed array views in JS require byteOffset alignment for the element size.
+  // If we receive an unaligned Uint8Array (possible when crossing WASM/JS boundaries),
+  // copy into a fresh buffer so we can safely reinterpret as Float32Array.
+  const bytes = blob.byteOffset % 4 === 0 ? blob : new Uint8Array(blob);
+  return new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4);
 }
 
 /**
