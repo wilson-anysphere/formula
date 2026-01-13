@@ -16,4 +16,6 @@ For private corpora following the recommended `originals/` + `sanitized/` layout
 preferring `sanitized/` when present (to avoid double-processing originals). Override with
 `--input-scope {auto,sanitized,originals,all}` as needed.
 
+For large corpora, pass `--jobs N` (default `1`) to run per-workbook triage in parallel.
+
 For full docs, see: `docs/compatibility-corpus.md`.
