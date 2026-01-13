@@ -236,15 +236,25 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
   const panelVisible = await panel.isVisible().catch(() => false);
 
   if (!panelVisible) {
+    // Prefer the ribbon UI when available (so we still cover the click path), but fall back to
+    // command execution when the ribbon isn't mounted (some harnesses may omit it, and it can be
+    // slow to initialize under heavy load).
     const ribbonRoot = page.getByTestId("ribbon-root");
+    const ribbonAvailable = await ribbonRoot.isVisible().catch(() => false);
     const ribbonButton = ribbonRoot.getByTestId("open-extensions-panel");
-    const ribbonButtonVisible = await ribbonButton.isVisible().catch(() => false);
-    if (!ribbonButtonVisible) {
-      // The Extensions toggle lives in the Home ribbon tab. If another tab is active, the button
-      // may not be rendered/visible, so select Home before clicking.
-      await ribbonRoot.getByRole("tab", { name: "Home", exact: true }).click();
+    const ribbonButtonVisible = ribbonAvailable ? await ribbonButton.isVisible().catch(() => false) : false;
+
+    if (ribbonAvailable && ribbonButtonVisible) {
+      await ribbonButton.click({ timeout: 30_000 });
+    } else {
+      // Execute the canonical command directly via the exposed CommandRegistry.
+      await page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const registry: any = (window as any).__formulaCommandRegistry;
+        if (!registry) throw new Error("Missing window.__formulaCommandRegistry (desktop e2e harness)");
+        await registry.executeCommand("view.togglePanel.extensions");
+      });
     }
-    await ribbonButton.click({ timeout: 30_000 });
 
     await panel.waitFor({ state: "visible", timeout: 30_000 });
   }

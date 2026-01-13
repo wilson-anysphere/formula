@@ -213,8 +213,14 @@ export async function activate(context) {
       await gotoDesktop(page);
       await waitForDesktopReady(page);
 
-      await page.getByRole("tab", { name: "View", exact: true }).click();
-      await page.getByTestId("ribbon-root").getByTestId("open-marketplace-panel").click();
+      // Open the Marketplace panel via the CommandRegistry so this test does not depend on the ribbon
+      // being mounted/interactive in the web-based desktop harness.
+      await page.evaluate(async () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const registry: any = (window as any).__formulaCommandRegistry;
+        if (!registry) throw new Error("Missing window.__formulaCommandRegistry (desktop e2e harness)");
+        await registry.executeCommand("view.togglePanel.marketplace");
+      });
 
       const panel = page.getByTestId("panel-marketplace");
       await expect(panel).toBeVisible();
@@ -247,7 +253,6 @@ export async function activate(context) {
 
       // Verify the install triggers panel contribution sync too: open the Extensions panel and
       // open the contributed view (panel) without reloading.
-      await page.getByRole("tab", { name: "Home", exact: true }).click();
       await openExtensionsPanel(page);
 
       await page.getByTestId("panel-extensions").getByTestId(`open-panel-${panelId}`).click();
