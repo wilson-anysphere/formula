@@ -1,3 +1,6 @@
+mod common;
+
+use common::build_model;
 use formula_dax::{
     pivot_crosstab, DataModel, FilterContext, GroupByColumn, PivotMeasure, Table, Value,
 };
@@ -187,6 +190,36 @@ fn pivot_crosstab_multiple_column_fields_join_with_slash() {
             ],
             vec![Value::from("East"), 10.0.into(), 20.0.into()],
             vec![Value::from("West"), 7.0.into(), Value::Blank],
+        ]
+    );
+}
+
+#[test]
+fn pivot_crosstab_supports_related_dimension_row_and_column_fields() {
+    let mut model = build_model();
+    model.add_measure("Total", "SUM(Orders[Amount])").unwrap();
+
+    let result = pivot_crosstab(
+        &model,
+        "Orders",
+        &[GroupByColumn::new("Customers", "Region")],
+        &[GroupByColumn::new("Customers", "Name")],
+        &[PivotMeasure::new("Total", "[Total]").unwrap()],
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.data,
+        vec![
+            vec![
+                Value::from("Customers[Region]"),
+                Value::from("Alice"),
+                Value::from("Bob"),
+                Value::from("Carol"),
+            ],
+            vec![Value::from("East"), 30.0.into(), Value::Blank, 8.0.into()],
+            vec![Value::from("West"), Value::Blank, 5.0.into(), Value::Blank],
         ]
     );
 }
