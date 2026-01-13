@@ -95,10 +95,22 @@ export class HashEmbedder {
     throwIfAborted(signal);
     const vec = Array.from({ length: this.dimension }, () => 0);
     const tokens = tokenize(text);
+
+    /** @type {Map<string, number>} */
+    const termFreq = new Map();
     for (const token of tokens) {
       throwIfAborted(signal);
+      termFreq.set(token, (termFreq.get(token) ?? 0) + 1);
+    }
+
+    for (const [token, tf] of termFreq) {
+      throwIfAborted(signal);
       const h = hashString(token);
-      vec[h % this.dimension] += 1;
+      const idx = h % this.dimension;
+      const sign = (h & 0x80000000) === 0 ? 1 : -1;
+      // Light TF damping: repeated tokens matter, but sublinearly.
+      const w = Math.sqrt(tf);
+      vec[idx] += sign * w;
     }
     // L2 normalize.
     let norm = 0;
