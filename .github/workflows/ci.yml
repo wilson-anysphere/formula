@@ -245,6 +245,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
+      - name: Setup Node (for Tauri permission validation script)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
@@ -260,6 +264,14 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf
+      - name: Install cargo-tauri (CLI)
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-tauri >/dev/null 2>&1; then
+            bash scripts/cargo_agent.sh install cargo-tauri --locked
+          fi
+      - name: Validate Tauri capability permission identifiers
+        run: node scripts/check-tauri-permissions.mjs
       - name: Check desktop shell builds with full desktop feature set
         run: |
           # The desktop shell crate was historically named `desktop`. It is now
