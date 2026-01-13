@@ -4,6 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packages/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - "rust-toolchain.toml"
+      - ".github/workflows/perf.yml"
 
 env:
   # Keep in sync with release.yml/ci.yml so performance runs don't break when
