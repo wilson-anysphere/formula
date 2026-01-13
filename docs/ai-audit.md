@@ -175,7 +175,7 @@ persistence.
 - Persistence: `indexedDB` (one entry per record)
   - Database name default: `formula_ai_audit`
   - Object store default: `ai_audit_log`
-- Filtering: designed for efficient filtering/indexing by `timestamp_ms`, `session_id`, `workbook_id`, and `mode`.
+- Filtering: supports `timestamp_ms` (before/after/cursor pagination), `session_id`, `workbook_id`, and `mode`.
 - Retention knobs:
   - `max_entries?: number` (newest retained)
   - `max_age_ms?: number` (entries older than `now - max_age_ms` deleted)
