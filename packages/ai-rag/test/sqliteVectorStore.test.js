@@ -124,6 +124,52 @@ test(
   }
 );
 
+test(
+  "SqliteVectorStore throws on invalid dimension metadata when resetOnCorrupt=false (file storage)",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const tmpRoot = path.join(__dirname, ".tmp");
+    await mkdir(tmpRoot, { recursive: true });
+    const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-invalid-dim-meta-"));
+    const filePath = path.join(tmpDir, "vectors.sqlite");
+
+    try {
+      const store1 = await createSqliteFileVectorStore({
+        filePath,
+        dimension: 3,
+        autoSave: true,
+      });
+      await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+
+      // Corrupt the persisted dimension metadata.
+      store1._db.run("UPDATE vector_store_meta SET value = 'not-a-number' WHERE key = 'dimension';");
+      store1._dirty = true;
+      await store1.close();
+
+      await assert.rejects(
+        createSqliteFileVectorStore({
+          filePath,
+          dimension: 4,
+          autoSave: false,
+          resetOnCorrupt: false,
+          resetOnDimensionMismatch: false,
+        }),
+        (err) => {
+          assert.equal(err?.name, "SqliteVectorStoreInvalidMetadataError");
+          assert.equal(err?.rawDimension, "not-a-number");
+          return true;
+        }
+      );
+
+      // Ensure the file was not deleted by the failed open.
+      const st = await stat(filePath);
+      assert.ok(st.isFile());
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
 test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB (even with autoSave:false)", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
