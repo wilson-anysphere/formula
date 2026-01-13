@@ -16,6 +16,10 @@ The dashboard emits both human- and machine-readable outputs:
 - `summary.md` (includes a **Timings** section with per-step `duration_ms` stats like p50/p90)
 - `summary.json` (includes the same data under `timings`)
 
+For round-trip failures (`failure_category=round_trip_diff`), triage reports also include a more
+actionable `round_trip_failure_kind` (based on diff part groups like rels/content-types/styles/worksheets),
+and the dashboard summarizes these under `failures_by_round_trip_failure_kind`.
+
 The dashboard also supports opt-in perf regression gates:
 
 - `--gate-load-p90-ms <ms>`

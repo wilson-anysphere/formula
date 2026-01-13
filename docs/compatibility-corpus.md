@@ -133,6 +133,26 @@ Triage output layout (`--out-dir`):
   `"<sha256[:16]>-<path_hash>.json"` where `path_hash` is a stable hash of the workbook's path
   relative to `--corpus-dir`. This ensures `--jobs 1` and `--jobs N` produce the same report file set.
 
+#### Round-trip diff categorization (`round_trip_failure_kind`)
+
+Triage reports always include a coarse `failure_category` (e.g. `open_error`, `calc_mismatch`,
+`render_error`, `round_trip_diff`).
+
+For `failure_category=round_trip_diff`, triage also emits a higher-signal `round_trip_failure_kind`
+derived from the Rust helper’s **diff part groups** (privacy-safe: no XML values are emitted; only
+OPC part paths + group labels).
+
+Examples:
+
+- `round_trip_rels` – diffs only in `*.rels`
+- `round_trip_content_types` – diffs include `[Content_Types].xml`
+- `round_trip_styles` – diffs include `xl/styles.xml`
+- `round_trip_worksheets` – diffs include `xl/worksheets/*`
+- `round_trip_shared_strings` – diffs include `xl/sharedStrings.xml`
+- `round_trip_media` – diffs include `xl/media/*`
+- `round_trip_doc_props` – diffs include `docProps/*`
+- `round_trip_other` – anything else
+
 For large private corpora, you can speed up triage by running workbooks in parallel:
 
 ```bash
