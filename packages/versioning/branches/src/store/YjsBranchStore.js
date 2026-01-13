@@ -921,8 +921,11 @@ export class YjsBranchStore {
         const parent = commitMap.get("parentCommitId");
         if (!parent) {
           // Avoid selecting partially-written gzip-chunks commits as the root.
-          if (!this.#isCommitComplete(commitMap)) break;
+          // However, some repairs (e.g. root snapshot migration) temporarily set
+          // `commitComplete=false` even though the commit still has an inline
+          // patch/snapshot payload that makes it safe to use.
           const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
+          if (!this.#isCommitComplete(commitMap) && !hasPayload) break;
           if (!hasPayload) break;
           return currentId;
         }
@@ -937,11 +940,11 @@ export class YjsBranchStore {
       if (!commitMap) return;
       const parent = commitMap.get("parentCommitId");
       if (parent !== null && parent !== undefined) return;
-      if (!this.#isCommitComplete(commitMap)) return;
 
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
+      if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
       if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
     });
@@ -965,10 +968,10 @@ export class YjsBranchStore {
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
       if (!commitMap) return;
-      if (!this.#isCommitComplete(commitMap)) return;
       const commitDocId = commitMap.get("docId");
       if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
+      if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
       if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
     });

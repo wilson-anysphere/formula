@@ -167,6 +167,55 @@ test("YjsBranchStore.ensureDocument can recover when root commit is mid snapshot
   assert.equal(repaired.get("commitComplete"), true);
  });
 
+test("YjsBranchStore.ensureDocument can infer rootCommitId even if root is mid snapshot migration (commitComplete=false but patch is inline)", async () => {
+  const ydoc = new Y.Doc();
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  // Seed history using JSON payloads so the root commit contains an inline patch.
+  const seedStore = new YjsBranchStore({ ydoc, payloadEncoding: "json" });
+  await seedStore.ensureDocument(docId, actor, { sheets: {} });
+
+  const meta = ydoc.getMap("branching:meta");
+  const commits = ydoc.getMap("branching:commits");
+  const rootId = meta.get("rootCommitId");
+  assert.ok(typeof rootId === "string" && rootId.length > 0);
+
+  const rootCommit = commits.get(rootId);
+  assert.ok(rootCommit instanceof Y.Map);
+
+  const commitsBefore = commits.size;
+
+  ydoc.transact(() => {
+    // Simulate an interrupted migration that tried to write a gzip-chunks snapshot
+    // for the root commit but crashed mid-write.
+    rootCommit.delete("snapshot");
+    rootCommit.set("commitComplete", false);
+    rootCommit.set("snapshotEncoding", "gzip-chunks");
+    const chunks = new Y.Array();
+    chunks.push([new Uint8Array([1, 2, 3])]);
+    rootCommit.set("snapshotChunks", chunks);
+
+    // Also corrupt the rootCommitId metadata to force inference.
+    meta.delete("rootCommitId");
+  });
+
+  const repairStore = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+  });
+
+  await repairStore.ensureDocument(docId, actor, { sheets: {} });
+
+  assert.equal(meta.get("rootCommitId"), rootId);
+  assert.equal(commits.size, commitsBefore);
+
+  const repaired = commits.get(rootId);
+  assert.ok(repaired instanceof Y.Map);
+  assert.equal(repaired.get("commitComplete"), true);
+});
+
 test("YjsBranchStore.ensureDocument deletes stale unreachable incomplete gzip-chunks commits", async () => {
   const ydoc = new Y.Doc();
   const store = new YjsBranchStore({
