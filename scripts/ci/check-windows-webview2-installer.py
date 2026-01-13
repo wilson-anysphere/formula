@@ -164,7 +164,34 @@ def _binary_contains_any(path: Path, markers: list[bytes]) -> bytes | None:
 
 
 def _find_7z() -> str | None:
-    return shutil.which("7z") or shutil.which("7z.exe")
+    exe = shutil.which("7z") or shutil.which("7z.exe")
+    if exe:
+        return exe
+
+    # GitHub's Windows runners typically have 7-Zip installed, but it may not always be on PATH.
+    # Look in common install locations so the verifier remains robust.
+    if os.name != "nt":
+        return None
+
+    candidate_paths: list[Path] = []
+    for env_var in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+        root = os.environ.get(env_var)
+        if root:
+            candidate_paths.append(Path(root) / "7-Zip" / "7z.exe")
+
+    # Hardcoded fallbacks in case the env vars aren't set.
+    candidate_paths.extend(
+        [
+            Path("C:/Program Files/7-Zip/7z.exe"),
+            Path("C:/Program Files (x86)/7-Zip/7z.exe"),
+        ]
+    )
+
+    for candidate in candidate_paths:
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
 
 
 def _7z_list(archive: Path) -> str | None:
@@ -178,7 +205,7 @@ def _7z_list(archive: Path) -> str | None:
 
     # -sccUTF-8 forces UTF-8 console encoding (important on Windows).
     cmd = [seven_zip, "l", "-sccUTF-8", "-ba", "-bd", str(archive)]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
     if proc.returncode != 0:
         return None
     return proc.stdout.decode("utf-8", errors="replace")
@@ -195,7 +222,7 @@ def _7z_extract_and_find_marker(archive: Path, markers: list[str]) -> str | None
 
     with tempfile.TemporaryDirectory(prefix="webview2-check-") as tmpdir:
         cmd = [seven_zip, "x", "-y", "-sccUTF-8", f"-o{tmpdir}", str(archive)]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300)
         if proc.returncode != 0:
             return None
 
@@ -264,6 +291,14 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+
+    seven_zip = _find_7z()
+    if seven_zip:
+        print(f"webview2-check: using 7z={seven_zip}")
+    else:
+        print(
+            "webview2-check: 7z not found; falling back to binary marker scanning (less reliable)."
+        )
 
     target_dirs = _candidate_target_dirs(repo_root)
     if not target_dirs:
