@@ -88,7 +88,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -197,6 +196,38 @@ jobs:
           if (-not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
             throw "WiX Toolset installation failed: light.exe not found on PATH."
           }
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CARGO_HOME }}/registry
+            ${{ env.CARGO_HOME }}/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Cache cargo target (release build artifacts)
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/**/release/deps
+            target/**/release/build
+            target/**/release/.fingerprint
+            target/**/release/incremental
+            target/**/release/wbuild
+            target/.rustc_info.json
+            target/**/.rustc_info.json
+            apps/desktop/src-tauri/target/**/release/deps
+            apps/desktop/src-tauri/target/**/release/build
+            apps/desktop/src-tauri/target/**/release/.fingerprint
+            apps/desktop/src-tauri/target/**/release/incremental
+            apps/desktop/src-tauri/target/**/release/wbuild
+            apps/desktop/src-tauri/target/.rustc_info.json
+            apps/desktop/src-tauri/target/**/.rustc_info.json
+          key: cargo-target-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-target-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
