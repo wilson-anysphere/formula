@@ -352,9 +352,26 @@ function extractA1ReferencesFromToolCalls(
   if (!Array.isArray(toolCalls)) return [];
   const out: string[] = [];
   for (const call of toolCalls) {
-    const params = call?.parameters ?? call?.arguments;
-    if (!params || typeof params !== "object" || Array.isArray(params)) continue;
-    const obj = params as Record<string, unknown>;
+    const rawParams = call?.parameters ?? call?.arguments;
+
+    // Tool call payloads can show up in different shapes depending on where they're sourced from:
+    // - `packages/ai-tools` audit logs store a JSON-safe object in `parameters`.
+    // - `packages/llm` ToolCall uses `arguments`, which may be an object OR a JSON string
+    //   (e.g. if streaming aggregation fails to parse).
+    // Handle all of these deterministically so reference inference stays effective.
+    let obj: Record<string, unknown> | null = null;
+    if (typeof rawParams === "string") {
+      obj = tryParseJsonObject(rawParams);
+      if (!obj) {
+        const refs = extractA1ReferencesFromText(rawParams);
+        if (refs.length) out.push(refs[0]!);
+        continue;
+      }
+    } else if (rawParams && typeof rawParams === "object" && !Array.isArray(rawParams)) {
+      obj = rawParams as Record<string, unknown>;
+    } else {
+      continue;
+    }
 
     if (typeof obj.range === "string") {
       // read_range / compute_statistics / filter_range / detect_anomalies, etc.
@@ -422,6 +439,18 @@ function extractA1ReferencesFromToolCalls(
     }
   }
   return out;
+}
+
+function tryParseJsonObject(input: string): Record<string, unknown> | null {
+  const raw = String(input ?? "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function extractA1ReferencesFromText(text: string): string[] {
