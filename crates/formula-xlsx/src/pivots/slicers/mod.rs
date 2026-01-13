@@ -4,12 +4,13 @@ use crate::openxml::{
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
 use crate::DateSystem;
-use chrono::NaiveDate;
-use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
+use chrono::{Datelike, NaiveDate};
+use formula_engine::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
 use formula_model::pivots::ScalarValue;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::Reader;
+use quick_xml::Writer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 
@@ -206,6 +207,497 @@ impl XlsxPackage {
     pub fn pivot_slicer_parts(&self) -> Result<PivotSlicerParts, XlsxError> {
         parse_pivot_slicer_parts(self)
     }
+
+    /// Update the persisted selection state for a timeline cache (and any connected timeline
+    /// definition parts).
+    ///
+    /// Excel persists timeline selections in a few different ways depending on workbook
+    /// version and producer. This helper patches the provided part (typically a
+    /// `xl/timelineCaches/timelineCacheDefinition*.xml`) and also attempts to update any
+    /// `xl/timelines/timeline*.xml` parts that reference the same cache so the workbook reopens
+    /// with the requested selection.
+    pub fn set_timeline_selection(
+        &mut self,
+        timeline_cache_part: &str,
+        selection: &TimelineSelectionState,
+    ) -> Result<(), XlsxError> {
+        let canonical = timeline_cache_part
+            .trim()
+            .trim_start_matches('/')
+            .to_string();
+        let date_system = self
+            .part("xl/workbook.xml")
+            .and_then(|bytes| parse_workbook_date_system(bytes).ok())
+            .unwrap_or_default();
+
+        let mut targets: BTreeSet<String> = BTreeSet::new();
+        if !canonical.is_empty() {
+            targets.insert(canonical.clone());
+        }
+
+        if canonical.starts_with("xl/timelineCaches/") {
+            // Patch any timeline definition parts that reference this cache.
+            for timeline_part in self
+                .part_names()
+                .filter(|name| name.starts_with("xl/timelines/") && name.ends_with(".xml"))
+            {
+                let Some(xml) = self.part(timeline_part) else {
+                    continue;
+                };
+                let parsed = parse_timeline_xml(xml).ok();
+                let Some(rid) = parsed.and_then(|p| p.cache_rid) else {
+                    continue;
+                };
+                let resolved = resolve_relationship_target(self, timeline_part, &rid)?;
+                if resolved
+                    .as_deref()
+                    .is_some_and(|target| target.trim_start_matches('/') == canonical)
+                {
+                    targets.insert(timeline_part.to_string());
+                }
+            }
+        } else if canonical.starts_with("xl/timelines/") {
+            // Patch the referenced cache definition as well (if any).
+            if let Some(xml) = self.part(&canonical) {
+                if let Ok(parsed) = parse_timeline_xml(xml) {
+                    if let Some(rid) = parsed.cache_rid.as_deref() {
+                        if let Some(cache_part) =
+                            resolve_relationship_target(self, &canonical, rid)?
+                        {
+                            targets.insert(cache_part);
+                        }
+                    }
+                }
+            }
+        }
+
+        for target in targets {
+            let bytes = self
+                .part(&target)
+                .ok_or_else(|| XlsxError::MissingPart(target.clone()))?
+                .to_vec();
+            let updated = patch_timeline_selection_xml(&bytes, selection, date_system)?;
+            self.set_part(target, updated);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TimelineDateRepr {
+    Iso,
+    CompactYmd,
+    Serial,
+}
+
+#[derive(Clone, Debug)]
+struct DesiredTimelineDate {
+    iso: String,
+    date: Option<NaiveDate>,
+}
+
+impl DesiredTimelineDate {
+    fn parse(value: &str, date_system: DateSystem) -> Option<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let date = parse_timeline_date_input(trimmed, date_system);
+        let iso = if let Some(date) = date {
+            format!("{:04}-{:02}-{:02}", date.year(), date.month(), date.day())
+        } else if let Some(prefix) = iso_prefix(trimmed) {
+            prefix.to_string()
+        } else {
+            trimmed.to_string()
+        };
+
+        Some(Self { iso, date })
+    }
+}
+
+fn iso_prefix(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.len() < 10 {
+        return None;
+    }
+    let prefix = trimmed.get(..10)?;
+    let bytes = prefix.as_bytes();
+    if bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[..4].iter().all(|b| b.is_ascii_digit())
+        && bytes[5..7].iter().all(|b| b.is_ascii_digit())
+        && bytes[8..10].iter().all(|b| b.is_ascii_digit())
+    {
+        Some(prefix)
+    } else {
+        None
+    }
+}
+
+fn parse_timeline_date_input(value: &str, date_system: DateSystem) -> Option<NaiveDate> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // ISO `YYYY-MM-DD` (or a datetime string that starts with it).
+    if let Some(prefix) = iso_prefix(trimmed) {
+        return NaiveDate::parse_from_str(prefix, "%Y-%m-%d").ok();
+    }
+
+    // Compact `YYYYMMDD`.
+    if trimmed.len() == 8 && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        let iso = format!("{}-{}-{}", &trimmed[..4], &trimmed[4..6], &trimmed[6..8]);
+        return NaiveDate::parse_from_str(&iso, "%Y-%m-%d").ok();
+    }
+
+    // Excel serial.
+    let Ok(serial) = trimmed.parse::<i32>() else {
+        return None;
+    };
+    let Ok(date) = serial_to_ymd(serial, date_system.to_engine_date_system()) else {
+        return None;
+    };
+    NaiveDate::from_ymd_opt(date.year, u32::from(date.month), u32::from(date.day))
+}
+
+fn detect_timeline_date_repr(existing: &str) -> TimelineDateRepr {
+    let trimmed = existing.trim();
+    if iso_prefix(trimmed).is_some() {
+        return TimelineDateRepr::Iso;
+    }
+    if trimmed.len() == 8 && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        return TimelineDateRepr::CompactYmd;
+    }
+    if !trimmed.is_empty() && trimmed.as_bytes().iter().all(|b| b.is_ascii_digit()) {
+        return TimelineDateRepr::Serial;
+    }
+    TimelineDateRepr::Iso
+}
+
+fn apply_desired_date_to_existing(
+    existing: &str,
+    desired: &DesiredTimelineDate,
+    date_system: DateSystem,
+) -> String {
+    let trimmed = existing.trim();
+    match detect_timeline_date_repr(trimmed) {
+        TimelineDateRepr::Iso => {
+            if trimmed.len() > 10 && iso_prefix(trimmed).is_some() {
+                format!("{}{}", desired.iso, &trimmed[10..])
+            } else {
+                desired.iso.clone()
+            }
+        }
+        TimelineDateRepr::CompactYmd => {
+            if desired.iso.len() == 10 {
+                desired.iso.replace('-', "")
+            } else {
+                desired.iso.clone()
+            }
+        }
+        TimelineDateRepr::Serial => match desired.date {
+            Some(date) => {
+                let excel_date = ExcelDate::new(date.year(), date.month() as u8, date.day() as u8);
+                match ymd_to_serial(excel_date, date_system.to_engine_date_system()) {
+                    Ok(serial) => serial.to_string(),
+                    Err(_) => desired.iso.clone(),
+                }
+            }
+            None => desired.iso.clone(),
+        },
+    }
+}
+
+fn patch_timeline_selection_xml(
+    xml: &[u8],
+    selection: &TimelineSelectionState,
+    date_system: DateSystem,
+) -> Result<Vec<u8>, XlsxError> {
+    if selection.start.is_none() && selection.end.is_none() {
+        return Ok(xml.to_vec());
+    }
+
+    let desired_start = selection
+        .start
+        .as_deref()
+        .and_then(|s| DesiredTimelineDate::parse(s, date_system));
+    let desired_end = selection
+        .end
+        .as_deref()
+        .and_then(|s| DesiredTimelineDate::parse(s, date_system));
+
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(xml.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut depth = 0usize;
+    let mut root_name: Option<String> = None;
+    let mut root_prefix: Option<String> = None;
+    let mut wrote_start = false;
+    let mut wrote_end = false;
+    let mut inserted = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) => {
+                if depth == 0 {
+                    let name = e.name();
+                    let name = name.as_ref();
+                    root_prefix = name
+                        .iter()
+                        .position(|b| *b == b':')
+                        .map(|idx| String::from_utf8_lossy(&name[..idx]).into_owned());
+                    root_name = Some(String::from_utf8_lossy(name).into_owned());
+                }
+
+                let (patched, did_touch, event_start, event_end) =
+                    patch_timeline_selection_start(e, &desired_start, &desired_end, date_system)?;
+                wrote_start |= event_start;
+                wrote_end |= event_end;
+                if did_touch {
+                    writer.write_event(Event::Start(patched))?;
+                } else {
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                }
+                depth += 1;
+            }
+            Event::Empty(ref e) => {
+                if depth == 0 {
+                    let name = e.name();
+                    let name = name.as_ref();
+                    root_prefix = name
+                        .iter()
+                        .position(|b| *b == b':')
+                        .map(|idx| String::from_utf8_lossy(&name[..idx]).into_owned());
+                    let root_name_str = String::from_utf8_lossy(name).into_owned();
+                    root_name = Some(root_name_str.clone());
+
+                    let (patched, did_touch, event_start, event_end) =
+                        patch_timeline_selection_start(
+                            e,
+                            &desired_start,
+                            &desired_end,
+                            date_system,
+                        )?;
+                    wrote_start |= event_start;
+                    wrote_end |= event_end;
+                    let needs_insert =
+                        should_insert_timeline_selection(&desired_start, &desired_end)
+                            && ((desired_start.is_some() && !wrote_start)
+                                || (desired_end.is_some() && !wrote_end));
+
+                    if needs_insert {
+                        inserted = true;
+                        wrote_start |= desired_start.is_some();
+                        wrote_end |= desired_end.is_some();
+                        // Expand the self-closing root so we can insert the selection element.
+                        writer.write_event(Event::Start(patched.into_owned()))?;
+                        insert_timeline_selection_element(
+                            &mut writer,
+                            root_prefix.as_deref(),
+                            &desired_start,
+                            &desired_end,
+                        )?;
+                        writer.write_event(Event::End(BytesEnd::new(root_name_str.as_str())))?;
+                    } else if did_touch {
+                        writer.write_event(Event::Empty(patched))?;
+                    } else {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                } else {
+                    let (patched, did_touch, event_start, event_end) =
+                        patch_timeline_selection_start(
+                            e,
+                            &desired_start,
+                            &desired_end,
+                            date_system,
+                        )?;
+                    wrote_start |= event_start;
+                    wrote_end |= event_end;
+                    if did_touch {
+                        writer.write_event(Event::Empty(patched))?;
+                    } else {
+                        writer.write_event(Event::Empty(e.to_owned()))?;
+                    }
+                }
+            }
+            Event::End(ref e) => {
+                if depth == 1
+                    && !inserted
+                    && should_insert_timeline_selection(&desired_start, &desired_end)
+                    && ((desired_start.is_some() && !wrote_start)
+                        || (desired_end.is_some() && !wrote_end))
+                {
+                    inserted = true;
+                    insert_timeline_selection_element(
+                        &mut writer,
+                        root_prefix.as_deref(),
+                        &desired_start,
+                        &desired_end,
+                    )?;
+                    wrote_start |= desired_start.is_some();
+                    wrote_end |= desired_end.is_some();
+                }
+
+                writer.write_event(Event::End(e.to_owned()))?;
+                depth = depth.saturating_sub(1);
+            }
+            Event::Eof => break,
+            other => writer.write_event(other.into_owned())?,
+        }
+
+        buf.clear();
+    }
+
+    // If we never observed any root element (malformed XML), fall back to returning the original.
+    if root_name.is_none() {
+        return Ok(xml.to_vec());
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn should_insert_timeline_selection(
+    desired_start: &Option<DesiredTimelineDate>,
+    desired_end: &Option<DesiredTimelineDate>,
+) -> bool {
+    desired_start.is_some() || desired_end.is_some()
+}
+
+fn insert_timeline_selection_element<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    prefix: Option<&str>,
+    desired_start: &Option<DesiredTimelineDate>,
+    desired_end: &Option<DesiredTimelineDate>,
+) -> Result<(), XlsxError> {
+    let tag_name = match prefix {
+        Some(prefix) => format!("{prefix}:selection"),
+        None => "selection".to_string(),
+    };
+    let mut el = BytesStart::new(tag_name.as_str());
+    if let Some(start) = desired_start.as_ref() {
+        el.push_attribute(("startDate", start.iso.as_str()));
+    }
+    if let Some(end) = desired_end.as_ref() {
+        el.push_attribute(("endDate", end.iso.as_str()));
+    }
+    writer.write_event(Event::Empty(el))?;
+    Ok(())
+}
+
+fn patch_timeline_selection_start(
+    e: &BytesStart<'_>,
+    desired_start: &Option<DesiredTimelineDate>,
+    desired_end: &Option<DesiredTimelineDate>,
+    date_system: DateSystem,
+) -> Result<(BytesStart<'static>, bool, bool, bool), XlsxError> {
+    let name = e.name();
+    let name = name.as_ref();
+    let tag_local = local_name(name);
+    let is_selection = tag_local.eq_ignore_ascii_case(b"selection");
+    let is_start_el =
+        tag_local.eq_ignore_ascii_case(b"start") || tag_local.eq_ignore_ascii_case(b"startDate");
+    let is_end_el =
+        tag_local.eq_ignore_ascii_case(b"end") || tag_local.eq_ignore_ascii_case(b"endDate");
+
+    let mut touched = false;
+    let mut saw_start = false;
+    let mut saw_end = false;
+    let mut wrote_start = false;
+    let mut wrote_end = false;
+
+    let tag_name = std::str::from_utf8(name).unwrap_or("selection");
+    let mut patched = BytesStart::new(tag_name);
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key_local = local_name(attr.key.as_ref());
+        let value = attr.unescape_value()?.into_owned();
+        let mut out_value: Option<String> = None;
+
+        if let Some(desired) = desired_start.as_ref() {
+            if is_start_attr_key(key_local) {
+                saw_start = true;
+                touched = true;
+                wrote_start = true;
+                out_value = Some(apply_desired_date_to_existing(&value, desired, date_system));
+            } else if is_start_el
+                && (key_local.eq_ignore_ascii_case(b"val")
+                    || key_local.eq_ignore_ascii_case(b"value"))
+            {
+                saw_start = true;
+                touched = true;
+                wrote_start = true;
+                out_value = Some(apply_desired_date_to_existing(&value, desired, date_system));
+            }
+        }
+
+        if let Some(desired) = desired_end.as_ref() {
+            if is_end_attr_key(key_local) {
+                saw_end = true;
+                touched = true;
+                wrote_end = true;
+                out_value = Some(apply_desired_date_to_existing(&value, desired, date_system));
+            } else if is_end_el
+                && (key_local.eq_ignore_ascii_case(b"val")
+                    || key_local.eq_ignore_ascii_case(b"value"))
+            {
+                saw_end = true;
+                touched = true;
+                wrote_end = true;
+                out_value = Some(apply_desired_date_to_existing(&value, desired, date_system));
+            }
+        }
+
+        if is_start_attr_key(key_local) || is_end_attr_key(key_local) {
+            touched = true;
+        }
+
+        if let Some(out_value) = out_value {
+            patched.push_attribute((attr.key.as_ref(), out_value.as_bytes()));
+        } else {
+            patched.push_attribute((attr.key.as_ref(), value.as_bytes()));
+        }
+    }
+
+    if is_selection {
+        if let Some(desired) = desired_start.as_ref() {
+            if !saw_start {
+                patched.push_attribute(("startDate", desired.iso.as_str()));
+                touched = true;
+                wrote_start = true;
+            }
+        }
+        if let Some(desired) = desired_end.as_ref() {
+            if !saw_end {
+                patched.push_attribute(("endDate", desired.iso.as_str()));
+                touched = true;
+                wrote_end = true;
+            }
+        }
+    }
+
+    Ok((patched.into_owned(), touched, wrote_start, wrote_end))
+}
+
+fn is_start_attr_key(key: &[u8]) -> bool {
+    key.eq_ignore_ascii_case(b"start")
+        || key.eq_ignore_ascii_case(b"startDate")
+        || key.eq_ignore_ascii_case(b"selectionStart")
+        || key.eq_ignore_ascii_case(b"selectionStartDate")
+}
+
+fn is_end_attr_key(key: &[u8]) -> bool {
+    key.eq_ignore_ascii_case(b"end")
+        || key.eq_ignore_ascii_case(b"endDate")
+        || key.eq_ignore_ascii_case(b"selectionEnd")
+        || key.eq_ignore_ascii_case(b"selectionEndDate")
 }
 
 fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, XlsxError> {
@@ -1469,5 +1961,122 @@ mod engine_filter_field_tests {
         );
         assert_eq!(slicer.cache_name.as_deref(), Some("Cache1"));
         assert_eq!(slicer.source_name.as_deref(), Some("Field1"));
+    }
+}
+
+#[cfg(test)]
+mod timeline_selection_write_tests {
+    use super::*;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn timeline_selection_updates_existing_selection_element() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main">
+  <selection startDate="2024-01-01" endDate="2024-01-31"/>
+</timelineCacheDefinition>"#;
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-02-01".to_string()),
+            end: Some("2024-02-29".to_string()),
+        };
+
+        let updated =
+            patch_timeline_selection_xml(xml, &selection, DateSystem::V1900).expect("patch xml");
+        let parsed = parse_timeline_selection(&updated, DateSystem::V1900.to_engine_date_system())
+            .expect("parse selection");
+        assert_eq!(parsed.start.as_deref(), Some("2024-02-01"));
+        assert_eq!(parsed.end.as_deref(), Some("2024-02-29"));
+
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(updated_str.contains("startDate=\"2024-02-01\""));
+        assert!(updated_str.contains("endDate=\"2024-02-29\""));
+    }
+
+    #[test]
+    fn timeline_selection_inserts_when_missing() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"/>"#;
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-03-01".to_string()),
+            end: Some("2024-03-31".to_string()),
+        };
+
+        let updated =
+            patch_timeline_selection_xml(xml, &selection, DateSystem::V1900).expect("patch xml");
+        let parsed = parse_timeline_selection(&updated, DateSystem::V1900.to_engine_date_system())
+            .expect("parse selection");
+        assert_eq!(parsed.start.as_deref(), Some("2024-03-01"));
+        assert_eq!(parsed.end.as_deref(), Some("2024-03-31"));
+
+        let updated_str = std::str::from_utf8(&updated).expect("utf8");
+        assert!(updated_str.contains("selection"));
+        assert!(updated_str.contains("startDate=\"2024-03-01\""));
+        assert!(updated_str.contains("endDate=\"2024-03-31\""));
+    }
+
+    #[test]
+    fn set_timeline_selection_round_trips_via_pivot_slicer_parts() {
+        let timeline_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timeline xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+          name="Timeline1" uid="{00000000-0000-0000-0000-000000000001}">
+  <timelineCache r:id="rId1"/>
+</timeline>"#;
+
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.microsoft.com/office/2007/relationships/timelineCacheDefinition"
+                Target="../timelineCaches/timelineCacheDefinition1.xml"/>
+</Relationships>"#;
+
+        let cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<timelineCacheDefinition xmlns="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+                         name="TimelineCache1" sourceName="Date"/>"#;
+
+        let mut pkg = build_package(&[
+            ("xl/timelines/timeline1.xml", timeline_xml),
+            ("xl/timelines/_rels/timeline1.xml.rels", rels_xml),
+            ("xl/timelineCaches/timelineCacheDefinition1.xml", cache_xml),
+        ]);
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-04-01".to_string()),
+            end: Some("2024-04-30".to_string()),
+        };
+        pkg.set_timeline_selection("xl/timelineCaches/timelineCacheDefinition1.xml", &selection)
+            .expect("set selection");
+
+        let parts = pkg.pivot_slicer_parts().expect("parse slicer parts");
+        assert_eq!(parts.timelines.len(), 1);
+        assert_eq!(
+            parts.timelines[0].selection.start.as_deref(),
+            Some("2024-04-01")
+        );
+        assert_eq!(
+            parts.timelines[0].selection.end.as_deref(),
+            Some("2024-04-30")
+        );
     }
 }
