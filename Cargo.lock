@@ -2254,6 +2254,7 @@ dependencies = [
  "formula-format",
  "formula-model",
  "log",
+ "proptest",
  "tempfile",
  "thiserror 2.0.17",
 ]

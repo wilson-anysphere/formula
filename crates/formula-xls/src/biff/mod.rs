@@ -105,6 +105,9 @@ pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
 }
 
 #[cfg(test)]
+mod fuzz_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

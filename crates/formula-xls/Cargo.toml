@@ -15,4 +15,5 @@ thiserror = "2.0"
 
 [dev-dependencies]
 formula-engine = { path = "../formula-engine", default-features = false }
+proptest = "1.4"
 tempfile = "3.10"
