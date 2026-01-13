@@ -63,6 +63,7 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
 
   // Chart selection handles are rendered on a separate overlay canvas.
   assert.match(css, /\.chart-selection-canvas\s*\{/);
+  assert.match(css, /\.chart-selection-canvas\s*\{[^}]*pointer-events:\s*none\s*;/);
 
   // Drawings (shapes/images) are rendered to a canvas clipped under headers.
   assert.match(css, /\.drawing-layer\s*\{/);

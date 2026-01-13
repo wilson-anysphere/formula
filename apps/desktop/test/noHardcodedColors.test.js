@@ -202,9 +202,6 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     // intentionally include hex colors.
     if (rel === "charts/scene/color.ts") return false;
     if (rel === "charts/scene/demo.ts") return false;
-    // Formatting presets for sheet/table styling intentionally include Excel/OOXML ARGB hex colors.
-    if (rel === "formatting/cellStyles.ts") return false;
-    if (rel === "formatting/formatAsTablePresets.ts") return false;
     if (rel.includes("/demo/")) return false;
     if (rel.includes("/__tests__/")) return false;
     // Vitest entrypoints live under `src/` with a `.vitest.*` suffix; treat them like other tests.
