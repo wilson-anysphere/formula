@@ -296,7 +296,8 @@ impl DaxEngine {
             parsed_args.push(crate::parser::parse(arg)?);
         }
         let row_ctx = RowContext::default();
-        self.build_calculate_filter(model, filter, &row_ctx, &parsed_args)
+        let mut env = VarEnv::default();
+        self.build_calculate_filter(model, filter, &row_ctx, &parsed_args, &mut env)
     }
 
     pub fn evaluate(
@@ -950,7 +951,7 @@ impl DaxEngine {
                 };
 
                 let level_from_inner: usize = if args.len() == 2 {
-                    let value = self.eval_scalar(model, &args[1], filter, row_ctx)?;
+                    let value = self.eval_scalar(model, &args[1], filter, row_ctx, env)?;
                     let n = coerce_number(&value)?;
                     if !n.is_finite() {
                         return Err(DaxError::Eval(
@@ -1701,6 +1702,7 @@ impl DaxEngine {
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
             keep_filters: bool,
+            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -1742,7 +1744,7 @@ impl DaxEngine {
             for row in candidate_rows {
                 let mut inner_ctx = row_ctx.clone();
                 inner_ctx.push(&table, row);
-                let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx)?;
+                let pred = engine.eval_scalar(model, expr, &base_filter, &inner_ctx, env)?;
                 if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                     allowed_rows.insert(row);
                 }
@@ -1821,6 +1823,7 @@ impl DaxEngine {
                     &eval_filter,
                     row_ctx,
                     keep_filters,
+                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -1832,6 +1835,7 @@ impl DaxEngine {
                         &eval_filter,
                         row_ctx,
                         keep_filters,
+                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?
