@@ -50,9 +50,14 @@
 //! (wrong password vs unsupported algorithms vs file corruption) without leaking sensitive inputs
 //! such as passwords or derived keys.
 
+mod aes_cbc;
 mod crypto;
 mod error;
 
+pub use aes_cbc::{
+    decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError,
+    AES_BLOCK_SIZE,
+};
 pub use crypto::{
     derive_iv, derive_key, hash_password, CryptoError, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,

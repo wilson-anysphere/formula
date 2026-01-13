@@ -2314,9 +2314,12 @@ dependencies = [
 name = "formula-xlsx"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "base64 0.22.1",
+ "cbc",
  "cfb 0.10.0",
  "chrono",
+ "cipher",
  "digest",
  "formula-columnar",
  "formula-engine",

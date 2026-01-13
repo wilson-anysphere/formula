@@ -658,7 +658,7 @@ fn parse_slicer_cache_item(
 }
 
 #[cfg(test)]
-mod tests {
+mod engine_filter_tests {
     use super::*;
 
     use std::collections::HashSet;
