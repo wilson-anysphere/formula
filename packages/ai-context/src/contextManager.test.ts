@@ -40,6 +40,32 @@ describe("ContextManager promptContext", () => {
     expect(out1.promptContext.length).toBeLessThan(pretty.length);
     expect(pretty.length - out1.promptContext.length).toBeGreaterThan(100);
   });
+
+  it("does not leak schema column sampleValues into the prompt schema JSON", async () => {
+    const cm = new ContextManager({
+      tokenBudgetTokens: 1_000_000,
+      redactor: (text: string) => text,
+    });
+
+    const values: any[][] = [["ID", "Secret"]];
+    // Keep the secret value outside the first few rows so the retrieved TSV preview
+    // (bounded by maxChunkRows) does not contain it. `extractSheetSchema` will still
+    // capture it in `TableSchema.columns[*].sampleValues`.
+    for (let i = 0; i < 50; i++) {
+      values.push([i + 1, i === 49 ? "TOP_SECRET" : 0]);
+    }
+
+    const sheet = { name: "Sheet1", values };
+    const out = await cm.buildContext({
+      sheet,
+      query: "id",
+      sampleRows: 0,
+      limits: { maxChunkRows: 5 },
+    });
+
+    expect(out.schema.tables[0]?.columns?.[1]?.sampleValues).toContain("TOP_SECRET");
+    expect(out.promptContext).not.toContain("TOP_SECRET");
+  });
 });
 
 describe("ContextManager samplingStrategy", () => {
