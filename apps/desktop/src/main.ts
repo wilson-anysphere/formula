@@ -4160,6 +4160,7 @@ if (
       secondaryGridView = new SecondaryGridView({
         container: gridSecondaryEl,
         provider: app.getSharedGridProvider() ?? undefined,
+        imageResolver: app.getSharedGridImageResolver() ?? undefined,
         document: app.getDocument(),
         getSheetId: getSecondarySheetId,
         rowCount,

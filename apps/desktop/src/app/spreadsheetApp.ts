@@ -78,7 +78,13 @@ import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWork
 import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
-import type { CellRange as GridCellRange, GridAxisSizeChange, GridPresence, GridViewportState } from "@formula/grid";
+import type {
+  CanvasGridImageResolver,
+  CellRange as GridCellRange,
+  GridAxisSizeChange,
+  GridPresence,
+  GridViewportState
+} from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
@@ -548,6 +554,7 @@ export class SpreadsheetApp {
   );
   private readonly document = new DocumentController({ engine: this.engine });
   private readonly imageStore = new DesktopImageStore();
+  private readonly sharedGridImageResolver: CanvasGridImageResolver = async (imageId) => this.imageStore.getImageBlob(imageId);
   /**
    * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
    * (see `@formula/collab-undo`) so we never overwrite newer remote edits.
@@ -1355,7 +1362,7 @@ export class SpreadsheetApp {
         frozenCols: headerCols,
         defaultRowHeight: this.cellHeight,
         defaultColWidth: this.cellWidth,
-        imageResolver: async (imageId) => this.imageStore.getImageBlob(imageId),
+        imageResolver: this.sharedGridImageResolver,
         enableResize: true,
         enableKeyboard: false,
         canvases: { grid: this.gridCanvas, content: this.referenceCanvas, selection: this.selectionCanvas },
@@ -3643,6 +3650,17 @@ export class SpreadsheetApp {
    */
   getSharedGridProvider(): DocumentCellProvider | null {
     return this.sharedProvider;
+  }
+
+  /**
+   * Returns the shared-grid image resolver when running in shared-grid mode.
+   *
+   * This is primarily used by the split-view secondary pane so it can render the
+   * same in-cell images as the primary grid.
+   */
+  getSharedGridImageResolver(): CanvasGridImageResolver | null {
+    if (this.gridMode !== "shared") return null;
+    return this.sharedGridImageResolver;
   }
 
   getGridLimits(): GridLimits {

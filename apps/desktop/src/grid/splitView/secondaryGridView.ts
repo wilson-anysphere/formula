@@ -1,4 +1,11 @@
-import type { CellRange, CellRange as GridCellRange, CellRichText, FillCommitEvent, GridAxisSizeChange } from "@formula/grid";
+import type {
+  CanvasGridImageResolver,
+  CellRange,
+  CellRange as GridCellRange,
+  CellRichText,
+  FillCommitEvent,
+  GridAxisSizeChange
+} from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import { showToast } from "../../extensions/ui.js";
@@ -81,6 +88,13 @@ export class SecondaryGridView {
      * ignored for provider creation, but still accepted for convenience.
      */
     provider?: DocumentCellProvider;
+    /**
+     * Optional image resolver to reuse (e.g. the primary shared-grid image resolver).
+     *
+     * When supplied, in-cell image values (`CellData.image`) can render in the secondary pane
+     * without requiring the pane to manage its own image store.
+     */
+    imageResolver?: CanvasGridImageResolver | null;
     document: DocumentController;
     getSheetId: () => string;
     rowCount: number;
@@ -229,6 +243,7 @@ export class SecondaryGridView {
       frozenCols: this.headerCols,
       defaultRowHeight: 24,
       defaultColWidth: 100,
+      imageResolver: options.imageResolver ?? null,
       enableResize: true,
       enableKeyboard: true,
       canvases: { grid: gridCanvas, content: contentCanvas, selection: selectionCanvas },
