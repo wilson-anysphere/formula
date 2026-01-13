@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -283,11 +283,39 @@ const canonicalFunctionsSorted = sortedUnique(
 const localeSourceDir = path.join(repoRoot, "crates", "formula-engine", "src", "locale", "data", "sources");
 const localeOutputDir = path.join(repoRoot, "crates", "formula-engine", "src", "locale", "data");
 
-const locales = ["de-DE", "fr-FR", "es-ES"].map((localeId) => ({
-  localeId,
-  sourcePath: path.join(localeSourceDir, `${localeId}.json`),
-  outputPath: path.join(localeOutputDir, `${localeId}.tsv`),
-}));
+const locales = await (async () => {
+  /** @type {Array<{ localeId: string; sourcePath: string; outputPath: string }>} */
+  const out = [];
+  let entries;
+  try {
+    entries = await readdir(localeSourceDir, { withFileTypes: true });
+  } catch (err) {
+    throw new Error(
+      `Failed to read locale sources directory ${path.relative(repoRoot, localeSourceDir)}: ${err}`,
+    );
+  }
+
+  const localeIds = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => entry.name.replace(/\.json$/u, ""))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  if (localeIds.length === 0) {
+    throw new Error(
+      `No locale source JSON files found under ${path.relative(repoRoot, localeSourceDir)} (expected e.g. de-DE.json)`,
+    );
+  }
+
+  for (const localeId of localeIds) {
+    out.push({
+      localeId,
+      sourcePath: path.join(localeSourceDir, `${localeId}.json`),
+      outputPath: path.join(localeOutputDir, `${localeId}.tsv`),
+    });
+  }
+
+  return out;
+})();
 
 let hadMismatch = false;
 for (const locale of locales) {
