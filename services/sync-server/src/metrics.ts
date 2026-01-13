@@ -258,6 +258,14 @@ function createFallbackMetrics(): SyncServerMetrics {
     help: "Total WebSocket messages rejected due to message size limits.",
   });
 
+  const wsMessageHandlerErrorsTotal = createCounter<"stage">({
+    name: "sync_server_ws_message_handler_errors_total",
+    help: "Total WebSocket message handler errors by stage (guard vs handler).",
+    labelNames: ["stage"],
+  });
+  wsMessageHandlerErrorsTotal.inc({ stage: "guard" }, 0);
+  wsMessageHandlerErrorsTotal.inc({ stage: "handler" }, 0);
+
   const wsAwarenessSpoofAttemptsTotal = createCounter({
     name: "sync_server_ws_awareness_spoof_attempts_total",
     help: "Total awareness update spoof attempts filtered by the server.",
@@ -384,6 +392,7 @@ function createFallbackMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsMessageHandlerErrorsTotal,
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,
@@ -430,6 +439,7 @@ export type SyncServerMetrics = {
 
   wsMessagesRateLimitedTotal: Counter<string>;
   wsMessagesTooLargeTotal: Counter<string>;
+  wsMessageHandlerErrorsTotal: Counter<"stage">;
   wsAwarenessSpoofAttemptsTotal: Counter<string>;
   wsAwarenessClientIdCollisionsTotal: Counter<string>;
   wsReservedRootQuotaViolationsTotal: Counter<"kind">;
@@ -531,6 +541,15 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     help: "Total WebSocket messages rejected due to message size limits.",
     registers: [registry],
   });
+
+  const wsMessageHandlerErrorsTotal = new promClient.Counter({
+    name: "sync_server_ws_message_handler_errors_total",
+    help: "Total WebSocket message handler errors by stage (guard vs handler).",
+    labelNames: ["stage"],
+    registers: [registry],
+  });
+  wsMessageHandlerErrorsTotal.inc({ stage: "guard" }, 0);
+  wsMessageHandlerErrorsTotal.inc({ stage: "handler" }, 0);
 
   const wsAwarenessSpoofAttemptsTotal = new promClient.Counter({
     name: "sync_server_ws_awareness_spoof_attempts_total",
@@ -676,6 +695,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     wsClosesTotal,
     wsMessagesRateLimitedTotal,
     wsMessagesTooLargeTotal,
+    wsMessageHandlerErrorsTotal,
     wsAwarenessSpoofAttemptsTotal,
     wsAwarenessClientIdCollisionsTotal,
     wsReservedRootQuotaViolationsTotal,

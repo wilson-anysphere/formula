@@ -375,7 +375,17 @@ function sanitizeAwarenessStateJson(stateJSON: string, userId: string): string |
   return JSON.stringify(obj);
 }
 
-function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void {
+type WsMessageHandlerErrorStage = "guard" | "handler";
+
+function patchWebSocketMessageHandlers(
+  ws: WebSocket,
+  params: {
+    guard: MessageGuard;
+    logger: Logger;
+    metrics?: Pick<SyncServerMetrics, "wsMessageHandlerErrorsTotal">;
+  }
+): void {
+  const { guard, logger, metrics } = params;
   const wrappedListeners = new WeakMap<MessageListener, MessageListener>();
 
   const originalOn = ws.on.bind(ws);
@@ -386,14 +396,43 @@ function patchWebSocketMessageHandlers(ws: WebSocket, guard: MessageGuard): void
   const originalOff = ws.off ? ws.off.bind(ws) : ws.removeListener.bind(ws);
   const originalRemoveListener = ws.removeListener.bind(ws);
 
+  const handleError = (stage: WsMessageHandlerErrorStage): void => {
+    try {
+      metrics?.wsMessageHandlerErrorsTotal.inc({ stage });
+    } catch {
+      // ignore
+    }
+    try {
+      // Avoid logging attacker-controlled content (frame bytes / exception strings).
+      logger.warn({ stage }, "ws_message_handler_error");
+    } catch {
+      // ignore
+    }
+    try {
+      ws.close(1011, "Internal error");
+    } catch {
+      // ignore
+    }
+  };
+
   const wrap = (listener: MessageListener): MessageListener => {
     const existing = wrappedListeners.get(listener);
     if (existing) return existing;
 
     const wrapped: MessageListener = (data, isBinary) => {
-      const result = guard(data, isBinary);
+      let result: MessageGuardResult;
+      try {
+        result = guard(data, isBinary);
+      } catch {
+        handleError("guard");
+        return;
+      }
       if ("drop" in result) return;
-      listener(result.data, result.isBinary);
+      try {
+        listener(result.data, result.isBinary);
+      } catch {
+        handleError("handler");
+      }
     };
     wrappedListeners.set(listener, wrapped);
     return wrapped;
@@ -472,6 +511,7 @@ export function installYwsSecurity(
       | "wsReservedRootInspectionFailClosedTotal"
       | "wsAwarenessSpoofAttemptsTotal"
       | "wsAwarenessClientIdCollisionsTotal"
+      | "wsMessageHandlerErrorsTotal"
     >;
     limits: {
       maxMessageBytes: number;
@@ -482,6 +522,9 @@ export function installYwsSecurity(
     };
     enforceRangeRestrictions?: boolean;
     reservedRootGuard?: ReservedRootGuardConfig;
+    __testHooks?: {
+      inspectUpdateForReservedRootGuard?: typeof inspectUpdateForReservedRootGuard;
+    };
   }
 ): void {
   const {
@@ -493,7 +536,10 @@ export function installYwsSecurity(
     limits,
     enforceRangeRestrictions: enforceRangeRestrictionsConfig,
     reservedRootGuard: reservedRootGuardConfig,
+    __testHooks,
   } = params;
+  const inspectUpdateForReservedRootGuardFn =
+    __testHooks?.inspectUpdateForReservedRootGuard ?? inspectUpdateForReservedRootGuard;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
@@ -721,7 +767,7 @@ export function installYwsSecurity(
           return { drop: true };
         }
 
-        const inspection = inspectUpdateForReservedRootGuard({
+        const inspection = inspectUpdateForReservedRootGuardFn({
           ydoc,
           update: updateBytes,
           reservedRootNames,
@@ -789,7 +835,7 @@ export function installYwsSecurity(
       }
 
       if (reservedRootGuardEnabled && isSyncUpdate && updateBytes) {
-        const inspection = inspectUpdateForReservedRootGuard({
+        const inspection = inspectUpdateForReservedRootGuardFn({
           ydoc,
           update: updateBytes,
           reservedRootNames,
@@ -1183,5 +1229,5 @@ export function installYwsSecurity(
     return { data: Buffer.from(sanitizedMessage), isBinary };
   };
 
-  patchWebSocketMessageHandlers(ws, guard);
+  patchWebSocketMessageHandlers(ws, { guard, logger, metrics });
 }
