@@ -267,6 +267,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Check pinned Tauri CLI version matches Tauri crates
+        run: node scripts/ci/check-tauri-cli-version.mjs
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
       # CARGO_HOME so cargo installs/builds share the same cache.
