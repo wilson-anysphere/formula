@@ -8490,9 +8490,19 @@ function handleRibbonCommand(commandId: string): void {
         }
         return;
 
-      case "insert.tables.pivotTable":
-        ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
-        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+      case "formulas.formulaAuditing.tracePrecedents":
+        app.clearAuditing();
+        app.toggleAuditingPrecedents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.traceDependents":
+        app.clearAuditing();
+        app.toggleAuditingDependents();
+        app.focus();
+        return;
+      case "formulas.formulaAuditing.removeArrows":
+        app.clearAuditing();
+        app.focus();
         return;
 
       case "home.font.borders":

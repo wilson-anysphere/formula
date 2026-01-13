@@ -9,7 +9,7 @@ export const insertTab: RibbonTabDefinition = {
       label: "Tables",
       buttons: [
         {
-          id: "insert.tables.pivotTable",
+          id: "view.insertPivotTable",
           label: "PivotTable",
           ariaLabel: "PivotTable",
           iconId: "chart",
@@ -17,7 +17,7 @@ export const insertTab: RibbonTabDefinition = {
           size: "large",
           testId: "ribbon-insert-pivot-table",
           menuItems: [
-            { id: "insert.tables.pivotTable", label: "PivotTable…", ariaLabel: "PivotTable", iconId: "chart" },
+            { id: "view.insertPivotTable", label: "PivotTable…", ariaLabel: "PivotTable", iconId: "chart" },
             { id: "insert.tables.pivotTable.fromTableRange", label: "From Table/Range…", ariaLabel: "PivotTable from Table or Range", iconId: "formatAsTable" },
             { id: "insert.tables.pivotTable.fromExternal", label: "From External Data…", ariaLabel: "PivotTable from External Data", iconId: "globe" },
             { id: "insert.tables.pivotTable.fromDataModel", label: "From Data Model…", ariaLabel: "PivotTable from Data Model", iconId: "puzzle" },
