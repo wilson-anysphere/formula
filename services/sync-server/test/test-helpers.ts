@@ -240,6 +240,8 @@ export async function startSyncServer(opts: {
       SYNC_SERVER_DISABLE_PUBLIC_METRICS: "",
       // Prevent per-document websocket connection limits from leaking into tests.
       SYNC_SERVER_MAX_CONNECTIONS_PER_DOC: "",
+      // Prevent websocket origin allowlist settings from leaking into tests.
+      SYNC_SERVER_ALLOWED_ORIGINS: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },

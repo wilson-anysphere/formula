@@ -38,6 +38,16 @@ export type SyncServerConfig = {
   port: number;
   trustProxy: boolean;
   gc: boolean;
+  /**
+   * Optional allowlist of accepted WebSocket `Origin` header values.
+   *
+   * When set, browser-originated websocket upgrades (requests that include an
+   * `Origin` header) must match one of these values. Requests without an Origin
+   * header are always allowed to support non-browser clients.
+   *
+   * When unset/empty, all origins are allowed (current behavior).
+   */
+  allowedOrigins: string[] | null;
   tls:
     | {
         certPath: string;
@@ -196,6 +206,18 @@ export function loadConfigFromEnv(): SyncServerConfig {
   const gc = envBool(process.env.SYNC_SERVER_GC, true);
 
   const disablePublicMetrics = envBool(process.env.SYNC_SERVER_DISABLE_PUBLIC_METRICS, false);
+
+  const allowedOriginsEnv = process.env.SYNC_SERVER_ALLOWED_ORIGINS;
+  const allowedOrigins = (() => {
+    const raw = allowedOriginsEnv?.trim() ?? "";
+    if (raw.length === 0) return null;
+    const parts = raw
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (parts.length === 0) return null;
+    return [...new Set(parts)];
+  })();
 
   const enforceRangeRestrictionsDefault = nodeEnv === "production";
   const enforceRangeRestrictions = envBool(
@@ -386,6 +408,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     port,
     trustProxy,
     gc,
+    allowedOrigins,
     tls,
     metrics: {
       public: !disablePublicMetrics,

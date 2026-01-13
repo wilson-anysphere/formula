@@ -50,7 +50,7 @@ import { requireLevelForYLeveldb } from "./leveldbLevel.js";
 import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
 import { Y } from "./yjs.js";
 import { installYwsSecurity } from "./ywsSecurity.js";
-import { createSyncServerMetrics } from "./metrics.js";
+import { createSyncServerMetrics, type WsConnectionRejectionReason } from "./metrics.js";
 import {
   createSyncTokenIntrospectionClient,
   type SyncTokenIntrospectionClient,
@@ -257,6 +257,12 @@ export function createSyncServer(
     reservedRootPrefixes: ["branching:"],
   };
 
+  const allowedOrigins = (() => {
+    const list = config.allowedOrigins;
+    if (!list || list.length === 0) return null;
+    return new Set(list);
+  })();
+
   const connectionTracker = new ConnectionTracker(
     config.limits.maxConnections,
     config.limits.maxConnectionsPerIp
@@ -301,12 +307,7 @@ export function createSyncServer(
   };
 
   const recordUpgradeRejection = (
-    reason:
-      | "rate_limit"
-      | "auth_failure"
-      | "tombstone"
-      | "retention_purging"
-      | "max_connections_per_doc"
+    reason: WsConnectionRejectionReason
   ) => {
     metrics.wsConnectionsRejectedTotal.inc({ reason });
   };
@@ -1470,6 +1471,21 @@ export function createSyncServer(
         if (req.method !== "GET") {
           sendUpgradeRejection(socket, 405, "Method Not Allowed");
           return;
+        }
+
+        if (allowedOrigins) {
+          const originHeader = req.headers["origin"];
+          const origin =
+            typeof originHeader === "string"
+              ? originHeader
+              : Array.isArray(originHeader)
+                ? originHeader[0]
+                : undefined;
+          if (origin !== undefined && !allowedOrigins.has(origin.trim())) {
+            recordUpgradeRejection("origin_not_allowed");
+            sendUpgradeRejection(socket, 403, "Origin not allowed");
+            return;
+          }
         }
 
         if (!req.url) {
