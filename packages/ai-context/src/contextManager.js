@@ -1829,7 +1829,12 @@ function heuristicToPolicyClassification(heuristic) {
 }
 
 /**
- * Apply a redactor to every string cell in a sheet values matrix.
+ * Apply a redactor to sheet cell values and ensure heuristic-sensitive values do not leak
+ * under DLP redaction.
+ *
+ * Note: We treat numbers/bigints as potential carriers of sensitive patterns (e.g. credit
+ * card numbers) because prompt formatting stringifies them.
+ *
  * @param {unknown[][]} values
  * @param {(text: string) => string} redactor
  * @param {{ signal?: AbortSignal }} [options]
@@ -1851,17 +1856,28 @@ function redactValuesForDlp(values, redactor, options = {}) {
     const nextRow = [];
     for (const cell of row) {
       throwIfAborted(signal);
-      if (typeof cell !== "string") {
+      const isTextLike = typeof cell === "string" || typeof cell === "number" || typeof cell === "bigint";
+      if (!isTextLike) {
         nextRow.push(cell);
         continue;
       }
-      const redacted = redactor(cell);
+
+      const raw = String(cell);
+      const redacted = redactor(raw);
       // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
       // ensure heuristic sensitive patterns never slip through under DLP redaction.
       if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
         nextRow.push("[REDACTED]");
         continue;
       }
+
+      // Preserve non-string primitives when redaction is a no-op (keeps API behavior stable),
+      // but allow redactors to return strings when they transform the content.
+      if (typeof cell !== "string" && redacted === raw) {
+        nextRow.push(cell);
+        continue;
+      }
+
       nextRow.push(redacted);
     }
     out.push(nextRow);
@@ -1894,6 +1910,17 @@ function redactStructuredValue(value, redactor, options = {}) {
       return /** @type {T} */ ("[REDACTED]");
     }
     return /** @type {T} */ (redacted);
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    const raw = String(value);
+    const redacted = redactor(raw);
+    if (!restrictedAllowed && classifyText(redacted).level === "sensitive") {
+      return /** @type {T} */ ("[REDACTED]");
+    }
+    if (redacted !== raw) {
+      return /** @type {T} */ (redacted);
+    }
+    return value;
   }
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;

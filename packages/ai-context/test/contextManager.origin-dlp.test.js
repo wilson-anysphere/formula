@@ -156,3 +156,31 @@ test("buildContext: DLP REDACT also prevents attachment_data range previews from
   assert.doesNotMatch(out.promptContext, /alice@example\.com/);
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
+
+test("buildContext: heuristic DLP redaction also redacts numeric values that match sensitive patterns", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const cardNumber = 4111111111111111;
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Card"], [cardNumber]],
+    },
+    query: "anything",
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /4111111111111111/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+  assert.doesNotMatch(JSON.stringify(out.sampledRows), /4111111111111111/);
+  assert.doesNotMatch(JSON.stringify(out.retrieved), /4111111111111111/);
+});
