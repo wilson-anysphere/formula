@@ -126,7 +126,11 @@ function parsePermissionIdentifiers(permissionLsOutput) {
   // The CLI output format has changed across Tauri versions (bullets, tables, etc).
   // We parse conservatively by extracting tokens that *look like* permission identifiers:
   // - core/plugin permissions: `<segment>:<segment>[:<segment>]...`
-  // - application permissions: `allow-invoke` (hyphenated, no `:`)
+  //
+  // Note: we intentionally do *not* parse application permissions (like `allow-invoke`) from
+  // this output because some CLI output formats include hyphenated words (or hierarchical lists)
+  // that can lead to false positives. Application permissions are instead read from
+  // `apps/desktop/src-tauri/permissions/*.json`.
   const identifiers = new Set();
 
   // Parse colon-delimited identifiers as whole tokens.
@@ -136,13 +140,8 @@ function parsePermissionIdentifiers(permissionLsOutput) {
   // - the identifier is preceded by start-of-string or a non-identifier character
   // - the identifier is not immediately followed by another ':' (so we don't match prefixes)
   const colonIdentifier = /(^|[^a-z0-9_:-])([a-z0-9][a-z0-9_-]*(?::[a-z0-9_-]+)+)(?![a-z0-9_:-])/gim;
-  const hyphenIdentifier =
-    /(^|[^a-z0-9_:-])([a-z0-9][a-z0-9_-]*-[a-z0-9_-]+(?:-[a-z0-9_-]+)*)(?![a-z0-9_:-])/gim;
 
   for (const match of permissionLsOutput.matchAll(colonIdentifier)) {
-    identifiers.add(match[2]);
-  }
-  for (const match of permissionLsOutput.matchAll(hyphenIdentifier)) {
     identifiers.add(match[2]);
   }
 
