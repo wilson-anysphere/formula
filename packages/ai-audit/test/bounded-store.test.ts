@@ -269,4 +269,34 @@ describe("BoundedAIAuditStore", () => {
     expect(storedInput?.audit_truncated).toBe(true);
     expect(typeof storedInput?.audit_json).toBe("string");
   });
+
+  it("drops excess tool calls when needed to fit the entry budget", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const maxEntryChars = 1_500;
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: maxEntryChars });
+
+    const tool_calls = Array.from({ length: 50 }, (_, i) => ({ name: `tool_${i}`, parameters: { i } }));
+
+    const entry: AIAuditEntry = {
+      id: "entry-many-tools-1",
+      timestamp_ms: Date.now(),
+      session_id: "session-many-tools-1",
+      mode: "chat",
+      input: { prompt: "hello" },
+      model: "unit-test-model",
+      tool_calls,
+    };
+
+    expect(JSON.stringify(entry).length).toBeGreaterThan(maxEntryChars);
+
+    await store.logEntry(entry);
+
+    const stored = await underlying.listEntries({ session_id: "session-many-tools-1" });
+    expect(stored).toHaveLength(1);
+
+    const storedEntry = stored[0]!;
+    expect(JSON.stringify(storedEntry).length).toBeLessThanOrEqual(maxEntryChars);
+    expect(storedEntry.tool_calls.length).toBeLessThan(tool_calls.length);
+    expect(storedEntry.tool_calls.some((c) => c.name === "audit_truncated_tool_calls")).toBe(true);
+  });
 });
