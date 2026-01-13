@@ -141,7 +141,9 @@ CI behavior note:
   disables the relevant Tauri signing config for that job and only enables notarization when all
   required credentials are available.
 - To **enforce** code signing on tagged releases (fail fast if secrets are missing), set the GitHub
-  Actions variable `FORMULA_REQUIRE_CODESIGN=1`.
+  Actions variable `FORMULA_REQUIRE_CODESIGN=1` (Settings → Secrets and variables → Actions →
+  Variables). In enforcement mode, CI fails with a “Code signing is required (…) but secrets are
+  missing” error and lists the missing secrets.
 
 ### macOS (Developer ID + notarization)
 
