@@ -317,6 +317,62 @@
   flex-wrap: wrap;
 }
 
+.collab-version-history__create {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.collab-version-history__create-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.collab-version-history__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.collab-version-history__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.collab-version-history__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.collab-version-history__input,
+.collab-version-history__textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.collab-version-history__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.collab-version-history__create-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.collab-version-history__hint {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
 .collab-version-history__empty {
   color: var(--text-secondary);
 }
@@ -347,11 +403,48 @@
 
 .collab-version-history__item-title {
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.collab-version-history__badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
 .collab-version-history__item-meta {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.collab-version-history__details {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.collab-version-history__details-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.collab-version-history__details-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.collab-version-history__details-annotations {
+  white-space: pre-wrap;
+  color: var(--text-primary);
 }
 
 .branch-manager {
