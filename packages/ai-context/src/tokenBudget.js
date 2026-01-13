@@ -66,8 +66,42 @@ function stabilizeJson(value) {
   if (typeof value === "symbol") return value.toString();
   if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`;
   if (value instanceof Date) return value.toISOString();
-  if (value instanceof Map) return Array.from(value.entries()).map(([k, v]) => [stabilizeJson(k), stabilizeJson(v)]);
-  if (value instanceof Set) return Array.from(value.values()).map((v) => stabilizeJson(v));
+  if (value instanceof Map) {
+    const entries = Array.from(value.entries()).map(([k, v], index) => {
+      const stableKey = stabilizeJson(k);
+      const stableValue = stabilizeJson(v);
+      // Use a stable string form for sorting that is independent of insertion order.
+      const keySort = JSON.stringify(stableKey) ?? "";
+      const valueSort = JSON.stringify(stableValue) ?? "";
+      return { stableKey, stableValue, keySort, valueSort, index };
+    });
+
+    entries.sort((a, b) => {
+      if (a.keySort < b.keySort) return -1;
+      if (a.keySort > b.keySort) return 1;
+      if (a.valueSort < b.valueSort) return -1;
+      if (a.valueSort > b.valueSort) return 1;
+      return a.index - b.index;
+    });
+
+    return entries.map((e) => [e.stableKey, e.stableValue]);
+  }
+
+  if (value instanceof Set) {
+    const values = Array.from(value.values()).map((v, index) => {
+      const stableValue = stabilizeJson(v);
+      const valueSort = JSON.stringify(stableValue) ?? "";
+      return { stableValue, valueSort, index };
+    });
+
+    values.sort((a, b) => {
+      if (a.valueSort < b.valueSort) return -1;
+      if (a.valueSort > b.valueSort) return 1;
+      return a.index - b.index;
+    });
+
+    return values.map((v) => v.stableValue);
+  }
 
   if (Array.isArray(value)) return value.map((v) => stabilizeJson(v));
 
@@ -232,8 +266,8 @@ export function trimToTokenBudget(text, maxTokens, estimator = DEFAULT_TOKEN_EST
 export function packSectionsToTokenBudget(sections, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR, options = {}) {
   const signal = options.signal;
   throwIfAborted(signal);
-  const ordered = sections.slice().sort((a, b) => b.priority - a.priority);
-  let remaining = maxTokens;
+  const ordered = orderSectionsDeterministically(sections);
+  let remaining = Math.max(0, maxTokens);
   /** @type {{ key: string, text: string }[]} */
   const packed = [];
 
@@ -248,4 +282,102 @@ export function packSectionsToTokenBudget(sections, maxTokens, estimator = DEFAU
 
   throwIfAborted(signal);
   return packed;
+}
+
+/**
+ * Pack sections while returning a detailed report about token usage.
+ *
+ * This is useful for debugging prompt/context construction without depending on
+ * model-specific tokenizers.
+ *
+ * @param {{ key: string, text: string, priority: number }[]} sections
+ * @param {number} maxTokens
+ * @param {TokenEstimator} [estimator]
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {{
+ *   packed: { key: string, text: string }[],
+ *   report: {
+ *     maxTokens: number,
+ *     remainingTokens: number,
+ *     sections: Array<{
+ *       key: string,
+ *       priority: number,
+ *       tokensPreTrim: number,
+ *       tokensPostTrim: number,
+ *       trimmed: boolean,
+ *       dropped: boolean
+ *     }>
+ *   }
+ * }}
+ */
+export function packSectionsToTokenBudgetWithReport(sections, maxTokens, estimator = DEFAULT_TOKEN_ESTIMATOR, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+
+  const ordered = orderSectionsDeterministically(sections);
+  let remaining = Math.max(0, maxTokens);
+
+  /** @type {{ key: string, text: string }[]} */
+  const packed = [];
+  /** @type {Array<{ key: string, priority: number, tokensPreTrim: number, tokensPostTrim: number, trimmed: boolean, dropped: boolean }>} */
+  const reportSections = [];
+
+  for (const section of ordered) {
+    throwIfAborted(signal);
+
+    const tokensPreTrim = estimateTokens(section.text, estimator);
+
+    if (remaining <= 0) {
+      reportSections.push({
+        key: section.key,
+        priority: section.priority,
+        tokensPreTrim,
+        tokensPostTrim: 0,
+        trimmed: false,
+        dropped: true
+      });
+      continue;
+    }
+
+    const trimmedText = trimToTokenBudget(section.text, remaining, estimator, { signal });
+    const tokensPostTrim = estimateTokens(trimmedText, estimator);
+    remaining -= tokensPostTrim;
+
+    packed.push({ key: section.key, text: trimmedText });
+    reportSections.push({
+      key: section.key,
+      priority: section.priority,
+      tokensPreTrim,
+      tokensPostTrim,
+      trimmed: trimmedText !== section.text,
+      dropped: false
+    });
+  }
+
+  throwIfAborted(signal);
+  return {
+    packed,
+    report: {
+      maxTokens,
+      remainingTokens: remaining,
+      sections: reportSections
+    }
+  };
+}
+
+/**
+ * @param {{ key: string, text: string, priority: number }[]} sections
+ */
+function orderSectionsDeterministically(sections) {
+  return sections
+    .map((section, originalIndex) => ({ section, originalIndex }))
+    .sort((a, b) => {
+      const aPriority = Number.isFinite(a.section.priority) ? a.section.priority : 0;
+      const bPriority = Number.isFinite(b.section.priority) ? b.section.priority : 0;
+      const priorityDiff = bPriority - aPriority;
+      if (priorityDiff !== 0) return priorityDiff;
+      // Deterministic tie-breaker: preserve original input order.
+      return a.originalIndex - b.originalIndex;
+    })
+    .map(({ section }) => section);
 }

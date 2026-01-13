@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { packSectionsToTokenBudget } from "./tokenBudget.js";
+import { packSectionsToTokenBudget, packSectionsToTokenBudgetWithReport, stableJsonStringify } from "./tokenBudget.js";
 
 describe("tokenBudget", () => {
   it("packSectionsToTokenBudget respects a custom TokenEstimator", () => {
@@ -51,5 +51,94 @@ describe("tokenBudget", () => {
     }
 
     expect(error).toMatchObject({ name: "AbortError" });
+  });
+
+  it("packSectionsToTokenBudget is deterministic when priorities tie", () => {
+    const sections = [
+      { key: "b", priority: 1, text: "B" },
+      { key: "z", priority: 2, text: "Z" },
+      { key: "a", priority: 1, text: "A" },
+      { key: "y", priority: 2, text: "Y" }
+    ];
+
+    const packed = packSectionsToTokenBudget(sections, 1_000);
+    expect(packed.map((s) => s.key)).toEqual(["z", "y", "b", "a"]);
+  });
+
+  it("stableJsonStringify is stable for Map insertion order", () => {
+    const map1 = new Map<string, number>();
+    map1.set("b", 1);
+    map1.set("a", 2);
+
+    const map2 = new Map<string, number>();
+    map2.set("a", 2);
+    map2.set("b", 1);
+
+    expect(stableJsonStringify(map1)).toBe(stableJsonStringify(map2));
+    expect(stableJsonStringify(map1)).toBe('[["a",2],["b",1]]');
+  });
+
+  it("stableJsonStringify is stable for Set insertion order", () => {
+    const set1 = new Set<string>();
+    set1.add("b");
+    set1.add("a");
+
+    const set2 = new Set<string>();
+    set2.add("a");
+    set2.add("b");
+
+    expect(stableJsonStringify(set1)).toBe(stableJsonStringify(set2));
+    expect(stableJsonStringify(set1)).toBe('["a","b"]');
+  });
+
+  it("packSectionsToTokenBudgetWithReport reports token usage, trims, and drops", () => {
+    const charEstimator = {
+      estimateTextTokens: (text: string) => String(text ?? "").length,
+      estimateMessageTokens: (message: any) => JSON.stringify(message ?? "").length,
+      estimateMessagesTokens: (messages: any[]) => JSON.stringify(messages ?? []).length
+    };
+
+    const suffix = "\n…(trimmed to fit token budget)…";
+    const maxTokens = 40;
+
+    const { packed, report } = packSectionsToTokenBudgetWithReport(
+      [
+        { key: "b", priority: 1, text: "y".repeat(10) },
+        { key: "first", priority: 2, text: "x".repeat(100) },
+        { key: "a", priority: 1, text: "z".repeat(10) }
+      ],
+      maxTokens,
+      charEstimator as any
+    );
+
+    expect(packed).toEqual([{ key: "first", text: "x".repeat(8) + suffix }]);
+    expect(report.maxTokens).toBe(maxTokens);
+    expect(report.remainingTokens).toBe(0);
+    expect(report.sections).toEqual([
+      {
+        key: "first",
+        priority: 2,
+        tokensPreTrim: 100,
+        tokensPostTrim: 40,
+        trimmed: true,
+        dropped: false
+      },
+      {
+        key: "b",
+        priority: 1,
+        tokensPreTrim: 10,
+        tokensPostTrim: 0,
+        trimmed: false,
+        dropped: true
+      },
+      {
+        key: "a",
+        priority: 1,
+        tokensPreTrim: 10,
+        tokensPostTrim: 0,
+        trimmed: false,
+        dropped: true
+      }
+    ]);
   });
 });

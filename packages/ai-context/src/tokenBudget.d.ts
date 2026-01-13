@@ -32,3 +32,25 @@ export function packSectionsToTokenBudget(
   estimator?: TokenEstimator,
   options?: { signal?: AbortSignal },
 ): Array<{ key: string; text: string }>;
+
+export interface TokenBudgetSectionReport {
+  key: string;
+  priority: number;
+  tokensPreTrim: number;
+  tokensPostTrim: number;
+  trimmed: boolean;
+  dropped: boolean;
+}
+
+export interface TokenBudgetReport {
+  maxTokens: number;
+  remainingTokens: number;
+  sections: TokenBudgetSectionReport[];
+}
+
+export function packSectionsToTokenBudgetWithReport(
+  sections: Array<{ key: string; text: string; priority: number }>,
+  maxTokens: number,
+  estimator?: TokenEstimator,
+  options?: { signal?: AbortSignal },
+): { packed: Array<{ key: string; text: string }>; report: TokenBudgetReport };
