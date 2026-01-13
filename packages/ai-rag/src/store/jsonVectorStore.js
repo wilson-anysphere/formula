@@ -132,6 +132,18 @@ export class JsonVectorStore extends InMemoryVectorStore {
     if (this._autoSave) await this._enqueuePersist();
   }
 
+  /**
+   * Update stored metadata without touching vectors.
+   *
+   * @param {{ id: string, metadata: any }[]} records
+   */
+  async updateMetadata(records) {
+    await this.load();
+    await super.updateMetadata(records);
+    this._dirty = true;
+    if (this._autoSave) await this._persist();
+  }
+
   async delete(ids) {
     await this.load();
     await super.delete(ids);

@@ -50,6 +50,19 @@ export class InMemoryVectorStore {
   }
 
   /**
+   * Update stored metadata without touching vectors.
+   *
+   * @param {{ id: string, metadata: any }[]} records
+   */
+  async updateMetadata(records) {
+    for (const r of records) {
+      const existing = this._records.get(r.id);
+      if (!existing) continue;
+      this._records.set(r.id, { vector: existing.vector, metadata: r.metadata });
+    }
+  }
+
+  /**
    * @param {string[]} ids
    */
   async delete(ids) {

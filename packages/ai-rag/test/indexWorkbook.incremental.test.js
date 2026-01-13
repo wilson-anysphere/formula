@@ -90,6 +90,46 @@ test("indexWorkbook re-embeds all chunks when embedder identity changes", async 
   assert.equal(second.deleted, 0);
 });
 
+test("indexWorkbook persists metadata-only changes without re-embedding", async () => {
+  const workbook = makeWorkbook();
+  const baseEmbedder = new HashEmbedder({ dimension: 128 });
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  let embedCalls = 0;
+  const embedder = {
+    name: baseEmbedder.name,
+    async embedTexts(texts, options) {
+      embedCalls += 1;
+      return baseEmbedder.embedTexts(texts, options);
+    },
+  };
+
+  const first = await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v1" } }),
+  });
+  assert.ok(first.totalChunks > 0);
+  assert.equal(first.upserted, first.totalChunks);
+
+  const second = await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    transform: (record) => ({ metadata: { ...record.metadata, tag: "v2" } }),
+  });
+  assert.equal(second.upserted, 0);
+  assert.equal(second.deleted, 0);
+  assert.equal(embedCalls, 1);
+
+  const records = await store.list({ workbookId: workbook.id, includeVector: false });
+  assert.ok(records.length > 0);
+  for (const r of records) {
+    assert.equal(r.metadata.tag, "v2");
+  }
+});
+
 test("indexWorkbook only upserts changed chunks", async () => {
   const workbook = makeWorkbookTwoTables();
   const embedder = new HashEmbedder({ dimension: 128 });

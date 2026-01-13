@@ -19,6 +19,7 @@ export class SqliteVectorStore {
   batch<T>(fn: () => Promise<T> | T): Promise<T>;
 
   upsert(records: Array<{ id: string; vector: ArrayLike<number>; metadata: any }>): Promise<void>;
+  updateMetadata(records: Array<{ id: string; metadata: any }>): Promise<void>;
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;
   clear(): Promise<void>;

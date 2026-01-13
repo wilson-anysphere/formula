@@ -7,6 +7,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
   batch<T>(fn: () => Promise<T> | T): Promise<T>;
 
   upsert(records: VectorRecord[]): Promise<void>;
+  updateMetadata(records: Array<{ id: string; metadata: any }>): Promise<void>;
   delete(ids: string[]): Promise<void>;
   deleteWorkbook(workbookId: string): Promise<number>;
   clear(): Promise<void>;

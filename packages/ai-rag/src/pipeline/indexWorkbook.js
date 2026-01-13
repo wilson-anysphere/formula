@@ -1,7 +1,29 @@
 import { contentHash } from "../utils/hash.js";
+import { stableJsonStringify } from "../utils/stableJsonStringify.js";
 import { awaitWithAbort, throwIfAborted } from "../utils/abort.js";
 import { chunkWorkbook } from "../workbook/chunkWorkbook.js";
 import { chunkToText } from "../workbook/chunkToText.js";
+
+/**
+ * Build a stable hash for record metadata.
+ *
+ * This intentionally excludes fields derived from the chunk text to avoid needless churn
+ * and large hash payloads.
+ *
+ * @param {any} metadata
+ */
+async function computeMetadataHash(metadata) {
+  const meta = metadata && typeof metadata === "object" ? metadata : {};
+  /** @type {Record<string, any>} */
+  const filtered = {};
+  for (const [key, value] of Object.entries(meta)) {
+    if (key === "contentHash" || key === "tokenCount" || key === "metadataHash" || key === "text") {
+      continue;
+    }
+    filtered[key] = value;
+  }
+  return contentHash(stableJsonStringify(filtered));
+}
 
 /**
  * @param {string} text
@@ -59,6 +81,8 @@ export async function indexWorkbook(params) {
   throwIfAborted(signal);
   onProgress?.({ phase: "chunk", processed: 0, total: chunks.length });
 
+  const supportsUpdateMetadata = typeof vectorStore.updateMetadata === "function";
+
   const existingForWorkbook = await awaitWithAbort(
     vectorStore.list({
       workbookId: workbook.id,
@@ -68,13 +92,18 @@ export async function indexWorkbook(params) {
     signal
   );
   throwIfAborted(signal);
-  const existingHashes = new Map(
-    existingForWorkbook.map((r) => [r.id, r.metadata?.contentHash])
+  const existingState = new Map(
+    existingForWorkbook.map((r) => [
+      r.id,
+      { contentHash: r.metadata?.contentHash, metadataHash: r.metadata?.metadataHash },
+    ])
   );
 
   const currentIds = new Set();
   /** @type {{ id: string, text: string, metadata: any }[]} */
   const toUpsert = [];
+  /** @type {{ id: string, metadata: any }[]} */
+  const toUpdateMetadata = [];
 
   let processedChunks = 0;
   for (const chunk of chunks) {
@@ -127,12 +156,38 @@ export async function indexWorkbook(params) {
     throwIfAborted(signal);
     const chunkHash = await awaitWithAbort(contentHash(`${embedderName}\n${record.text}`), signal);
     throwIfAborted(signal);
+    const metadataHash = await awaitWithAbort(computeMetadataHash(record.metadata), signal);
+    throwIfAborted(signal);
+
     processedChunks += 1;
     onProgress?.({ phase: "hash", processed: processedChunks, total: chunks.length });
     onProgress?.({ phase: "chunk", processed: processedChunks, total: chunks.length });
     currentIds.add(record.id);
 
-    if (existingHashes.get(record.id) === chunkHash) continue;
+    const existing = existingState.get(record.id);
+    if (existing?.contentHash === chunkHash) {
+      if (existing?.metadataHash === metadataHash) continue;
+
+      if (supportsUpdateMetadata) {
+        toUpdateMetadata.push({
+          id: record.id,
+          metadata: {
+            ...(record.metadata ?? {}),
+            // Re-apply so every record stores the embedder identity unless a transform
+            // explicitly overrides it.
+            ...(Object.prototype.hasOwnProperty.call(record.metadata ?? {}, "embedder")
+              ? null
+              : { embedder: embedderName }),
+            contentHash: chunkHash,
+            metadataHash,
+            tokenCount: tokenCount(record.text),
+          },
+        });
+        continue;
+      }
+      // Backward compatible fallback: store doesn't support `updateMetadata`, so
+      // re-upsert (and re-embed) the record.
+    }
 
     toUpsert.push({
       id: record.id,
@@ -145,6 +200,7 @@ export async function indexWorkbook(params) {
           ? null
           : { embedder: embedderName }),
         contentHash: chunkHash,
+        metadataHash,
         tokenCount: tokenCount(record.text),
       },
     });
@@ -233,7 +289,8 @@ export async function indexWorkbook(params) {
     metadata: r.metadata,
   }));
 
-  const hasMutations = upsertRecords.length > 0 || staleIds.length > 0;
+  const hasMutations =
+    upsertRecords.length > 0 || (supportsUpdateMetadata && toUpdateMetadata.length > 0) || staleIds.length > 0;
   if (hasMutations && typeof vectorStore.batch === "function") {
     // Avoid aborting while awaiting persistence. Batches are stateful; if we were to
     // reject early here, callers could start a new indexing run while the underlying
@@ -249,8 +306,12 @@ export async function indexWorkbook(params) {
         onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
       }
       // Preserve the existing behavior: if an abort happens during the upsert, skip
-      // deletions, but do not throw inside the batch (throwing would skip the final
-      // persistence snapshot).
+      // subsequent mutations, but do not throw inside the batch (throwing would skip
+      // the final persistence snapshot).
+      if (signal?.aborted) return;
+      if (supportsUpdateMetadata && toUpdateMetadata.length) {
+        await vectorStore.updateMetadata(toUpdateMetadata);
+      }
       if (signal?.aborted) return;
       if (staleIds.length) {
         onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
@@ -271,6 +332,15 @@ export async function indexWorkbook(params) {
       throwIfAborted(signal);
       await vectorStore.upsert(upsertRecords);
       onProgress?.({ phase: "upsert", processed: upsertRecords.length, total: upsertRecords.length });
+    }
+    throwIfAborted(signal);
+
+    if (supportsUpdateMetadata && toUpdateMetadata.length) {
+      // Avoid aborting while awaiting persistence. Metadata updates are stateful; if we
+      // were to reject early here, callers could start a new indexing run while the
+      // underlying store is still writing.
+      throwIfAborted(signal);
+      await vectorStore.updateMetadata(toUpdateMetadata);
     }
     throwIfAborted(signal);
 

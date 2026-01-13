@@ -663,6 +663,39 @@ export class SqliteVectorStore {
   }
 
   /**
+   * Update stored metadata without touching vectors.
+   *
+   * @param {{ id: string, metadata: any }[]} records
+   */
+  async updateMetadata(records) {
+    if (!records.length) return;
+
+    const stmt = this._db.prepare(`
+      UPDATE vectors
+      SET workbook_id = ?, metadata_json = ?
+      WHERE id = ?;
+    `);
+
+    this._db.run("BEGIN;");
+    try {
+      for (const r of records) {
+        const meta = r.metadata ?? {};
+        // Keep workbook_id aligned with metadata_json for efficient workbook filtering.
+        const workbookId = meta.workbookId ?? null;
+        stmt.run([workbookId, JSON.stringify(meta), r.id]);
+      }
+      this._db.run("COMMIT;");
+    } catch (err) {
+      this._db.run("ROLLBACK;");
+      throw err;
+    } finally {
+      stmt.free();
+    }
+
+    if (this._autoSave) await this._persist();
+  }
+
+  /**
    * @param {string[]} ids
    */
   async delete(ids) {
