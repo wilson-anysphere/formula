@@ -4,6 +4,8 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
+import { registerFormatPainterCommand } from "../../commands/formatPainterCommand.js";
+import { registerFormatFontDropdownCommands } from "../../commands/registerFormatFontDropdownCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -167,6 +169,26 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
+    });
+
+    registerFormatPainterCommand({
+      commandRegistry,
+      isArmed: () => false,
+      arm: () => {},
+      disarm: () => {},
+    });
+
+    // Home → Font dropdowns use canonical `format.*` ids for borders + color presets.
+    // These are registered separately from `registerDesktopCommands` because they require DOM
+    // color-picker wiring in the full desktop shell.
+    registerFormatFontDropdownCommands({
+      commandRegistry,
+      category: "Format",
+      applyFormattingToSelection: () => {},
+      openColorPicker: () => {},
+      getDocument: () => ({} as any),
+      fontColorPicker: {} as any,
+      fillColorPicker: {} as any,
     });
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
