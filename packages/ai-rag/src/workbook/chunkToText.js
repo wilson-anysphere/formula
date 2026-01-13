@@ -125,12 +125,19 @@ function inferHeaderRow(cells) {
     // Special-case "title rows": a single long-ish multi-word string in the first
     // row of an otherwise multi-column range often indicates a caption above the
     // actual header row (e.g. "Revenue Summary").
+    //
+    // Be conservative: it's easy for a real header to have a single multi-word
+    // label in the first column with the remaining headers blank (e.g.
+    // "Customer Name"). Prefer false negatives (treat as a header) over false
+    // positives (treating data as headers).
+    const titleKeywordsRe = /\b(summary|report|overview|dashboard|analysis|results|totals)\b/i;
     const titleLike =
       row0.nonEmpty === 1 &&
       maxColCount > 1 &&
       typeof row0.firstString === "string" &&
       row0.firstString.length >= 12 &&
-      /\s/.test(row0.firstString);
+      /\s/.test(row0.firstString) &&
+      (titleKeywordsRe.test(row0.firstString) || row0.firstString.length >= 24 || /[:–—]/.test(row0.firstString));
     if (!titleLike) return 0;
   }
 

@@ -60,6 +60,24 @@ test("chunkToText treats a sparse header row with blank columns as a header (not
   assert.match(text, /Column2=Seattle/);
 });
 
+test("chunkToText does not misclassify multi-word headers as title rows", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Customer Name" }, { v: "" }],
+      [{ v: "Alice" }, { v: "Seattle" }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Customer Name=Alice/);
+  assert.match(text, /Column2=Seattle/);
+  assert.doesNotMatch(text, /PRE-HEADER ROWS:/);
+});
+
 test("chunkToText includes column truncation indicator in PRE-HEADER ROWS when table is wide", () => {
   const colCount = 25;
   const titleRow = [{ v: "Revenue Summary" }, ...Array.from({ length: colCount - 1 }, () => ({}))];
