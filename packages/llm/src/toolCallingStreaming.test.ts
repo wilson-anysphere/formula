@@ -95,6 +95,7 @@ describe("runChatWithToolsStreaming", () => {
 
   it("summarizes large tool results before appending them to the next streamed request", async () => {
     const bigValues = Array.from({ length: 100 }, (_, r) => Array.from({ length: 100 }, (_, c) => r * 100 + c));
+    const maxToolResultChars = 1_000;
 
     const toolExecutor: ToolExecutor = {
       tools: [
@@ -132,7 +133,7 @@ describe("runChatWithToolsStreaming", () => {
         expect(last.role).toBe("tool");
         expect(last.toolCallId).toBe("call-1");
         expect(typeof last.content).toBe("string");
-        expect(last.content.length).toBeLessThanOrEqual(20_000);
+        expect(last.content.length).toBeLessThanOrEqual(maxToolResultChars);
 
         const payload = JSON.parse(last.content);
         expect(payload.tool).toBe("read_range");
@@ -149,9 +150,114 @@ describe("runChatWithToolsStreaming", () => {
       client: client as any,
       toolExecutor,
       messages: [{ role: "user", content: "Read a big range" }],
+      maxToolResultChars,
     });
 
     expect(result.final).toBe("done");
+    expect(toolExecutor.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces unknown tool calls as tool results and continues the loop (streaming)", async () => {
+    const toolExecutor: ToolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: "read",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      execute: vi.fn(async () => {
+        throw new Error("should not execute unknown tool");
+      }),
+    };
+
+    let streamCalls = 0;
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be called when streamChat is available");
+      },
+      async *streamChat(request: any) {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "tool_call_start", id: "call-1", name: "nonexistent_tool" } satisfies ChatStreamEvent;
+          yield { type: "tool_call_delta", id: "call-1", delta: "{}" } satisfies ChatStreamEvent;
+          yield { type: "done" } satisfies ChatStreamEvent;
+          return;
+        }
+
+        const last = request.messages.at(-1);
+        expect(last.role).toBe("tool");
+        expect(last.toolCallId).toBe("call-1");
+        const payload = JSON.parse(last.content);
+        expect(payload.ok).toBe(false);
+        expect(payload.error?.code).toBe("unknown_tool");
+
+        yield { type: "text", delta: "Recovered." } satisfies ChatStreamEvent;
+        yield { type: "done" } satisfies ChatStreamEvent;
+      },
+    };
+
+    const result = await runChatWithToolsStreaming({
+      client: client as any,
+      toolExecutor,
+      messages: [{ role: "user", content: "call an unknown tool" }],
+    });
+
+    expect(result.final).toBe("Recovered.");
+    expect(streamCalls).toBe(2);
+    expect(toolExecutor.execute).not.toHaveBeenCalled();
+  });
+
+  it("wraps tool execution errors when continueOnToolError=true (streaming)", async () => {
+    const toolExecutor: ToolExecutor = {
+      tools: [
+        {
+          name: "read_range",
+          description: "read",
+          parameters: { type: "object", properties: {} },
+        },
+      ],
+      execute: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    };
+
+    let streamCalls = 0;
+    const client = {
+      async chat() {
+        throw new Error("chat() should not be called when streamChat is available");
+      },
+      async *streamChat(request: any) {
+        streamCalls += 1;
+        if (streamCalls === 1) {
+          yield { type: "tool_call_start", id: "call-1", name: "read_range" } satisfies ChatStreamEvent;
+          yield { type: "tool_call_delta", id: "call-1", delta: '{"range":"Sheet1!A1:A1"}' } satisfies ChatStreamEvent;
+          yield { type: "done" } satisfies ChatStreamEvent;
+          return;
+        }
+
+        const last = request.messages.at(-1);
+        expect(last.role).toBe("tool");
+        expect(last.toolCallId).toBe("call-1");
+        const payload = JSON.parse(last.content);
+        expect(payload.ok).toBe(false);
+        expect(payload.error?.code).toBe("tool_execution_error");
+        expect(String(payload.error?.message ?? "")).toMatch(/boom/);
+
+        yield { type: "text", delta: "Recovered." } satisfies ChatStreamEvent;
+        yield { type: "done" } satisfies ChatStreamEvent;
+      },
+    };
+
+    const result = await runChatWithToolsStreaming({
+      client: client as any,
+      toolExecutor,
+      messages: [{ role: "user", content: "trigger tool error" }],
+      continueOnToolError: true,
+    });
+
+    expect(result.final).toBe("Recovered.");
+    expect(streamCalls).toBe(2);
     expect(toolExecutor.execute).toHaveBeenCalledTimes(1);
   });
 

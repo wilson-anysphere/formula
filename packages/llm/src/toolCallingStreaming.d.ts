@@ -10,6 +10,19 @@ export function runChatWithToolsStreaming(params: {
   onToolResult?: (call: ToolCall, result: unknown) => void;
   requireApproval?: (call: ToolCall) => Promise<boolean>;
   continueOnApprovalDenied?: boolean;
+  /**
+   * When true, tool execution failures are returned to the model as tool results
+   * (`ok:false`) and the loop continues, allowing the model to re-plan.
+   *
+   * Default is false (rethrow tool execution errors).
+   */
+  continueOnToolError?: boolean;
+  /**
+   * Max size of a serialized tool result appended to the model context (in characters).
+   *
+   * Default is 20_000.
+   */
+  maxToolResultChars?: number;
   model?: string;
   temperature?: number;
   maxTokens?: number;

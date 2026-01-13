@@ -172,6 +172,13 @@ async function collectAssistantMessageFromStream(stream, onStreamEvent, signal) 
  *   onToolResult?: (call: ToolCall, result: unknown) => void,
  *   requireApproval?: (call: ToolCall) => Promise<boolean>,
  *   continueOnApprovalDenied?: boolean,
+ *   // When true, tool execution failures are surfaced to the model as tool results
+ *   // (`ok:false`) and the loop continues, allowing the model to re-plan.
+ *   // Default is false (rethrow tool execution errors).
+ *   continueOnToolError?: boolean,
+ *   // Max size of a serialized tool result appended to the model context (in characters).
+ *   // Default is 20_000.
+ *   maxToolResultChars?: number,
  *   model?: string,
  *   temperature?: number,
  *   maxTokens?: number,
@@ -186,8 +193,13 @@ export async function runChatWithToolsStreaming(params) {
   const maxIterations = params.maxIterations ?? 8;
   const requireApproval = params.requireApproval ?? (async () => true);
   const continueOnApprovalDenied = params.continueOnApprovalDenied ?? false;
+  const continueOnToolError = params.continueOnToolError ?? false;
   const toolDefs = params.toolExecutor.tools ?? [];
-  const maxToolResultChars = 20_000;
+  const maxToolResultChars =
+    typeof params.maxToolResultChars === "number" && Number.isFinite(params.maxToolResultChars) && params.maxToolResultChars > 0
+      ? Math.floor(params.maxToolResultChars)
+      : 20_000;
+  const toolNameSet = new Set(toolDefs.map((t) => t.name));
 
   /** @type {LLMMessage[]} */
   const messages = params.messages.slice();
@@ -240,6 +252,35 @@ export async function runChatWithToolsStreaming(params) {
         continue;
       }
 
+      if (!toolNameSet.has(call.name)) {
+        const availableTools = toolDefs.map((t) => t.name);
+        const baseResult = {
+          tool: call.name,
+          ok: false,
+          error: {
+            code: "unknown_tool",
+            message: `Unknown tool: ${call.name}`,
+          },
+        };
+        /** @type {any} */
+        let unknownToolResult = baseResult;
+        try {
+          const candidate = { ...baseResult, available_tools: availableTools };
+          if (JSON.stringify(candidate).length <= maxToolResultChars) {
+            unknownToolResult = candidate;
+          }
+        } catch {
+          // fall back to minimal envelope
+        }
+        params.onToolResult?.(call, unknownToolResult);
+        messages.push({
+          role: "tool",
+          toolCallId: call.id,
+          content: serializeToolResultForModel({ toolCall: call, result: unknownToolResult, maxChars: maxToolResultChars }),
+        });
+        continue;
+      }
+
       if (requiresApproval) {
         throwIfAborted(params.signal);
         const approved = await withAbort(params.signal, requireApproval(call));
@@ -269,7 +310,45 @@ export async function runChatWithToolsStreaming(params) {
       }
 
       throwIfAborted(params.signal);
-      const result = await withAbort(params.signal, params.toolExecutor.execute(call));
+      /** @type {unknown} */
+      let result;
+      try {
+        result = await withAbort(params.signal, params.toolExecutor.execute(call));
+      } catch (error) {
+        if (error && typeof error === "object" && /** @type {any} */ (error).name === "AbortError") {
+          throw error;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : (() => {
+                  try {
+                    return JSON.stringify(error);
+                  } catch {
+                    return String(error);
+                  }
+                })();
+        const errorResult = {
+          tool: call.name,
+          ok: false,
+          error: {
+            code: "tool_execution_error",
+            message,
+          },
+        };
+        params.onToolResult?.(call, errorResult);
+        messages.push({
+          role: "tool",
+          toolCallId: call.id,
+          content: serializeToolResultForModel({ toolCall: call, result: errorResult, maxChars: maxToolResultChars }),
+        });
+        if (!continueOnToolError) {
+          throw error;
+        }
+        continue;
+      }
       params.onToolResult?.(call, result);
 
       messages.push({
