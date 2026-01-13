@@ -123,6 +123,22 @@ test("suggestRanges trims non-numeric header rows when scanning downwards", () =
   assert.equal(suggestions[0].range, "A3:A5");
 });
 
+test("suggestRanges does not return an invalid contiguous-above range when the scan cap is hit", () => {
+  // Data exists, but is too far above the active row to be detected under a small maxScanRows cap.
+  const ctx = createColumnAContext([[0, 1]]); // A1
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 10, col: 0 }, // A11, far below the data
+    surroundingCells: ctx,
+    maxScanRows: 3,
+  });
+
+  // Should fall back to the safe "entire column" suggestion only.
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].range, "A:A");
+});
+
 test("suggestRanges preserves absolute column/row prefixes in A1 output", () => {
   const ctx = createColumnAContext([
     [0, 10],

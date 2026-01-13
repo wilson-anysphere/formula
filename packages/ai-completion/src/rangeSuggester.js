@@ -183,6 +183,8 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows, sheetName) {
     scanned++;
   }
   if (endRow < 0) return null;
+  // If we hit the scan cap without ever finding a non-empty cell, treat it as "no signal".
+  if (isEmptyCell(ctx.getCellValue(endRow, col, sheetName))) return null;
 
   let startRow = endRow;
   scanned = 0;
