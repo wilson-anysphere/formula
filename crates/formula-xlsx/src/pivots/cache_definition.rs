@@ -301,7 +301,7 @@ impl XlsxDocument {
     }
 }
 
-fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, XlsxError> {
+pub(crate) fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
 

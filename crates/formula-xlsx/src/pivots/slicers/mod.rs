@@ -3,7 +3,7 @@ use crate::openxml::{
 };
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
-use crate::DateSystem;
+use crate::{DateSystem, XlsxDocument};
 use super::{PivotCacheDefinition, PivotCacheValue};
 use formula_engine::pivot::{FilterField, PivotFieldRef, PivotKeyPart};
 use chrono::{Datelike, NaiveDate};
@@ -358,7 +358,11 @@ impl XlsxPackage {
     /// This parser is intentionally conservative: it extracts the minimum metadata needed to
     /// wire up the UX layer, while leaving the XML untouched for round-trip fidelity.
     pub fn pivot_slicer_parts(&self) -> Result<PivotSlicerParts, XlsxError> {
-        parse_pivot_slicer_parts(self)
+        parse_pivot_slicer_parts_with(
+            self.part_names(),
+            |name| self.part(name),
+            |base, rid| crate::openxml::resolve_relationship_target(self, base, rid),
+        )
     }
 
     /// Update the persisted selection state for a timeline cache (and any connected timeline
@@ -914,22 +918,60 @@ fn canonicalize_part_name_for_discovery(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, XlsxError> {
-    let date_system = package
-        .part("xl/workbook.xml")
+impl XlsxDocument {
+    /// Parse slicers and timelines out of the preserved parts in an [`XlsxDocument`].
+    pub fn pivot_slicer_parts(&self) -> Result<PivotSlicerParts, XlsxError> {
+        parse_pivot_slicer_parts_with(
+            self.parts().keys(),
+            |name| {
+                let name = name.strip_prefix('/').unwrap_or(name);
+                self.parts().get(name).map(|bytes| bytes.as_slice())
+            },
+            |base, rid| {
+                crate::openxml::resolve_relationship_target_from_parts(
+                    |name| {
+                        let name = name.strip_prefix('/').unwrap_or(name);
+                        self.parts().get(name).map(|bytes| bytes.as_slice())
+                    },
+                    base,
+                    rid,
+                )
+            },
+        )
+    }
+}
+
+fn parse_pivot_slicer_parts_with<'a, PN, Part, Resolve>(
+    part_names: PN,
+    part: Part,
+    resolve_relationship_target: Resolve,
+) -> Result<PivotSlicerParts, XlsxError>
+where
+    PN: IntoIterator,
+    PN::Item: AsRef<str>,
+    Part: Fn(&str) -> Option<&'a [u8]>,
+    Resolve: Fn(&str, &str) -> Result<Option<String>, XlsxError>,
+{
+    let date_system = part("xl/workbook.xml")
         .and_then(|bytes| parse_workbook_date_system(bytes).ok())
         .unwrap_or_default();
     let excel_date_system = date_system.to_engine_date_system();
     // Pivot cache resolution is best-effort; slicer/timeline parsing should not fail just because
     // the pivot relationship graph can't be resolved.
-    let pivot_graph = package.pivot_graph().ok();
+    let part_names: Vec<String> = part_names
+        .into_iter()
+        .map(|name| name.as_ref().strip_prefix('/').unwrap_or(name.as_ref()).to_string())
+        .collect();
+    let pivot_graph =
+        crate::pivots::graph::pivot_graph_with(part_names.iter(), |name| part(name)).ok();
 
     let mut slicer_parts = Vec::new();
     let mut timeline_parts = Vec::new();
     let mut drawing_rels = Vec::new();
     let mut worksheet_rels = Vec::new();
     let mut chartsheet_rels = Vec::new();
-    for name in package.part_names() {
+
+    for name in &part_names {
         let canonical = canonicalize_part_name_for_discovery(name);
         if canonical.starts_with("xl/slicers/") && canonical.ends_with(".xml") {
             slicer_parts.push(canonical);
@@ -963,7 +1005,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
     for rels_name in drawing_rels {
         // Real-world workbooks can contain malformed relationship XML. Pivot slicer discovery is
         // best-effort, so treat any missing/malformed `.rels` part as empty.
-        let Some(rels_bytes) = package.part(&rels_name) else {
+        let Some(rels_bytes) = part(&rels_name) else {
             continue;
         };
         let relationships = match parse_relationships(rels_bytes) {
@@ -989,7 +1031,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
 
     let mut drawing_to_sheets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for rels_name in worksheet_rels.into_iter().chain(chartsheet_rels) {
-        let Some(rels_bytes) = package.part(&rels_name) else {
+        let Some(rels_bytes) = part(&rels_name) else {
             continue;
         };
         // Best-effort: malformed `.rels` parts are ignored instead of failing slicer parsing.
@@ -1025,26 +1067,22 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         }
     }
 
-    let sheet_name_by_part = sheet_name_by_part(package);
+    let sheet_name_by_part = sheet_name_by_part_with(&part, &resolve_relationship_target);
 
     let mut slicers = Vec::with_capacity(slicer_parts.len());
     for part_name in slicer_parts {
-        let xml = package
-            .part(&part_name)
-            .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
+        let xml = part(&part_name).ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_slicer_xml(xml)?;
 
         // Best-effort: malformed `.rels` parts should not prevent slicer discovery.
         let cache_part = match parsed.cache_rid.as_deref() {
-            Some(rid) => resolve_relationship_target(package, &part_name, rid)
-                .ok()
-                .flatten(),
+            Some(rid) => resolve_relationship_target(&part_name, rid).ok().flatten(),
             None => None,
         };
 
         let (cache_name, source_name, connected_pivot_tables, connected_tables) =
             if let Some(cache_part) = cache_part.as_deref() {
-                match resolve_slicer_cache_definition(package, cache_part) {
+                match resolve_slicer_cache_definition(&part, cache_part) {
                     Ok(resolved) => (
                         resolved.cache_name,
                         resolved.source_name,
@@ -1055,7 +1093,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
                         // Best-effort: if the slicer cache XML is malformed, still surface the
                         // cache part and any connected Excel Tables referenced via relationships.
                         let (_, connected_tables) =
-                            parse_slicer_cache_rels_best_effort(package, cache_part);
+                            parse_slicer_cache_rels_best_effort(&part, cache_part);
                         (None, None, Vec::new(), connected_tables)
                     }
                 }
@@ -1073,12 +1111,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
 
         let selection = cache_part
             .as_deref()
-            .and_then(|cache_part| package.part(cache_part))
+            .and_then(|cache_part| part(cache_part))
             .and_then(|bytes| parse_slicer_cache_selection(bytes).ok())
             .unwrap_or_default();
 
         let field_name = resolve_slicer_field_name(
-            package,
+            &part,
             pivot_graph.as_ref(),
             cache_part.as_deref(),
             &connected_pivot_tables,
@@ -1104,22 +1142,18 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
 
     let mut timelines = Vec::with_capacity(timeline_parts.len());
     for part_name in timeline_parts {
-        let xml = package
-            .part(&part_name)
-            .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
+        let xml = part(&part_name).ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
         let parsed = parse_timeline_xml(xml)?;
 
         // Best-effort: malformed `.rels` parts should not prevent timeline discovery.
         let cache_part = match parsed.cache_rid.as_deref() {
-            Some(rid) => resolve_relationship_target(package, &part_name, rid)
-                .ok()
-                .flatten(),
+            Some(rid) => resolve_relationship_target(&part_name, rid).ok().flatten(),
             None => None,
         };
 
         let (cache_name, source_name, base_field, level, connected_pivot_tables) =
             if let Some(cache_part) = cache_part.as_deref() {
-                match resolve_timeline_cache_definition(package, cache_part) {
+                match resolve_timeline_cache_definition(&part, &resolve_relationship_target, cache_part) {
                     Ok(resolved) => (
                         resolved.cache_name,
                         resolved.source_name,
@@ -1144,7 +1178,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         let mut selection = parse_timeline_selection(xml, excel_date_system).unwrap_or_default();
         if (selection.start.is_none() || selection.end.is_none()) && cache_part.is_some() {
             if let Some(cache_part) = cache_part.as_deref() {
-                if let Some(bytes) = package.part(cache_part) {
+                if let Some(bytes) = part(cache_part) {
                     if let Ok(cache_selection) = parse_timeline_selection(bytes, excel_date_system)
                     {
                         if selection.start.is_none() {
@@ -1159,7 +1193,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         }
 
         let field_name = resolve_timeline_field_name(
-            package,
+            &part,
             pivot_graph.as_ref(),
             base_field,
             &connected_pivot_tables,
@@ -1210,9 +1244,12 @@ fn is_drawing_relationship_type(type_uri: &str) -> bool {
     type_uri.trim_end().ends_with("/drawing")
 }
 
-fn sheet_name_by_part(package: &XlsxPackage) -> BTreeMap<String, String> {
+fn sheet_name_by_part_with<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
+    resolve_relationship_target: &impl Fn(&str, &str) -> Result<Option<String>, XlsxError>,
+) -> BTreeMap<String, String> {
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = match package.part(workbook_part) {
+    let workbook_xml = match part(workbook_part) {
         Some(bytes) => bytes,
         None => return BTreeMap::new(),
     };
@@ -1227,16 +1264,16 @@ fn sheet_name_by_part(package: &XlsxPackage) -> BTreeMap<String, String> {
 
     let mut out = BTreeMap::new();
     for sheet in sheets {
-        let resolved = resolve_relationship_target(package, workbook_part, &sheet.rel_id)
+        let resolved = resolve_relationship_target(workbook_part, &sheet.rel_id)
             .ok()
             .flatten()
             .or_else(|| {
                 let guess_ws = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
-                if package.part(&guess_ws).is_some() {
+                if part(&guess_ws).is_some() {
                     return Some(guess_ws);
                 }
                 let guess_cs = format!("xl/chartsheets/sheet{}.xml", sheet.sheet_id);
-                package.part(&guess_cs).map(|_| guess_cs)
+                part(&guess_cs).map(|_| guess_cs)
             });
         if let Some(part) = resolved {
             out.insert(part, sheet.name);
@@ -1971,13 +2008,11 @@ struct ResolvedSlicerCacheDefinition {
     connected_tables: Vec<String>,
 }
 
-fn resolve_slicer_cache_definition(
-    package: &XlsxPackage,
+fn resolve_slicer_cache_definition<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     cache_part: &str,
 ) -> Result<ResolvedSlicerCacheDefinition, XlsxError> {
-    let cache_bytes = package
-        .part(cache_part)
-        .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
+    let cache_bytes = part(cache_part).ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
     let parsed = parse_slicer_cache_xml(cache_bytes)?;
 
     // Slicer caches can connect to both pivot tables and Excel Tables (ListObjects). Pivot table
@@ -1987,7 +2022,7 @@ fn resolve_slicer_cache_definition(
     // Excel generally emits `xl/slicerCaches/_rels/slicerCache*.xml.rels`, but the part can be
     // missing or malformed in real-world files. This code is best-effort: if relationships cannot
     // be parsed we fall back to empty connection lists rather than failing slicer discovery.
-    let (rel_by_id, connected_tables) = parse_slicer_cache_rels_best_effort(package, cache_part);
+    let (rel_by_id, connected_tables) = parse_slicer_cache_rels_best_effort(part, cache_part);
 
     let mut connected_pivot_tables = BTreeSet::new();
     for rid in parsed.pivot_table_rids {
@@ -2016,15 +2051,15 @@ fn resolve_slicer_cache_definition(
     })
 }
 
-fn parse_slicer_cache_rels_best_effort(
-    package: &XlsxPackage,
+fn parse_slicer_cache_rels_best_effort<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     cache_part: &str,
 ) -> (HashMap<String, crate::openxml::Relationship>, Vec<String>) {
     const TABLE_REL_TYPE: &str =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 
     let rels_name = rels_part_name(cache_part);
-    let relationships = match package.part(&rels_name) {
+    let relationships = match part(&rels_name) {
         Some(bytes) => parse_relationships(bytes).unwrap_or_else(|_| Vec::new()),
         None => Vec::new(),
     };
@@ -2065,16 +2100,15 @@ struct ResolvedTimelineCacheDefinition {
     connected_pivot_tables: Vec<String>,
 }
 
-fn resolve_timeline_cache_definition(
-    package: &XlsxPackage,
+fn resolve_timeline_cache_definition<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
+    resolve_relationship_target: &impl Fn(&str, &str) -> Result<Option<String>, XlsxError>,
     cache_part: &str,
 ) -> Result<ResolvedTimelineCacheDefinition, XlsxError> {
-    let cache_bytes = package
-        .part(cache_part)
-        .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
+    let cache_bytes = part(cache_part).ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
     let parsed = parse_timeline_cache_xml(cache_bytes)?;
     let connected_pivot_tables =
-        resolve_relationship_targets(package, cache_part, parsed.pivot_table_rids)?;
+        resolve_relationship_targets(resolve_relationship_target, cache_part, parsed.pivot_table_rids)?;
 
     Ok(ResolvedTimelineCacheDefinition {
         cache_name: parsed.cache_name,
@@ -2086,7 +2120,7 @@ fn resolve_timeline_cache_definition(
 }
 
 fn resolve_relationship_targets(
-    package: &XlsxPackage,
+    resolve_relationship_target: &impl Fn(&str, &str) -> Result<Option<String>, XlsxError>,
     base_part: &str,
     relationship_ids: Vec<String>,
 ) -> Result<Vec<String>, XlsxError> {
@@ -2094,7 +2128,7 @@ fn resolve_relationship_targets(
     for rid in relationship_ids {
         // These relationships are optional (they connect caches to pivot tables). Be tolerant of
         // malformed `.rels` payloads and continue when we can't resolve a target.
-        match resolve_relationship_target(package, base_part, &rid) {
+        match resolve_relationship_target(base_part, &rid) {
             Ok(Some(target)) => {
                 targets.insert(target);
             }
@@ -2259,8 +2293,8 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
     })
 }
 
-fn resolve_timeline_field_name(
-    package: &XlsxPackage,
+fn resolve_timeline_field_name<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     base_field: Option<u32>,
     connected_pivot_tables: &[String],
@@ -2268,15 +2302,15 @@ fn resolve_timeline_field_name(
     let base_field = base_field?;
     let pivot_table_part = connected_pivot_tables.first()?;
     resolve_pivot_cache_field_name(
-        package,
+        part,
         pivot_graph,
         pivot_table_part,
         base_field,
     )
 }
 
-fn resolve_slicer_field_name(
-    package: &XlsxPackage,
+fn resolve_slicer_field_name<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     cache_part: Option<&str>,
     connected_pivot_tables: &[String],
@@ -2284,12 +2318,12 @@ fn resolve_slicer_field_name(
 ) -> Option<String> {
     // First, see if the slicer cache definition includes an explicit field index.
     if let Some(cache_part) = cache_part {
-        if let Ok(resolved) = resolve_slicer_cache_definition(package, cache_part) {
+        if let Ok(resolved) = resolve_slicer_cache_definition(part, cache_part) {
             if let (Some(field_index), Some(pivot_table_part)) =
                 (resolved.field_index, connected_pivot_tables.first())
             {
                 if let Some(name) = resolve_pivot_cache_field_name(
-                    package,
+                    part,
                     pivot_graph,
                     pivot_table_part,
                     field_index,
@@ -2300,14 +2334,15 @@ fn resolve_slicer_field_name(
         }
     }
 
-    infer_slicer_field_name(package, pivot_graph, connected_pivot_tables, selection)
+    infer_slicer_field_name(part, pivot_graph, connected_pivot_tables, selection)
 }
 
-fn resolve_pivot_cache_parts(
-    package: &XlsxPackage,
+fn resolve_pivot_cache_parts<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     pivot_table_part: &str,
 ) -> Option<(String, Option<String>)> {
+    let pivot_table_part = pivot_table_part.trim_start_matches('/');
     if let Some(graph) = pivot_graph {
         if let Some(instance) = graph
             .pivot_tables
@@ -2321,14 +2356,14 @@ fn resolve_pivot_cache_parts(
     }
 
     // Fallback: parse `cacheId` from the pivot table and use the canonical naming convention.
-    let bytes = package.part(pivot_table_part)?;
+    let bytes = part(pivot_table_part)?;
     let cache_id = parse_pivot_table_cache_id(bytes)?;
     let def_guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
-    if package.part(&def_guess).is_none() {
+    if part(&def_guess).is_none() {
         return None;
     }
     let records_guess = format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml");
-    let records_part = package.part(&records_guess).map(|_| records_guess);
+    let records_part = part(&records_guess).map(|_| records_guess);
     Some((def_guess, records_part))
 }
 
@@ -2359,24 +2394,22 @@ fn parse_pivot_table_cache_id(xml: &[u8]) -> Option<u32> {
     None
 }
 
-fn resolve_pivot_cache_field_name(
-    package: &XlsxPackage,
+fn resolve_pivot_cache_field_name<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     pivot_table_part: &str,
     field_index: u32,
 ) -> Option<String> {
-    let (def_part, _) = resolve_pivot_cache_parts(package, pivot_graph, pivot_table_part)?;
-    let def = package
-        .pivot_cache_definition(&def_part)
-        .ok()
-        .flatten()?;
+    let (def_part, _) = resolve_pivot_cache_parts(part, pivot_graph, pivot_table_part)?;
+    let def_bytes = part(&def_part)?;
+    let def = crate::pivots::cache_definition::parse_pivot_cache_definition(def_bytes).ok()?;
     def.cache_fields
         .get(field_index as usize)
         .map(|f| f.name.clone())
 }
 
-fn infer_slicer_field_name(
-    package: &XlsxPackage,
+fn infer_slicer_field_name<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     connected_pivot_tables: &[String],
     selection: &SlicerSelectionState,
@@ -2401,7 +2434,7 @@ fn infer_slicer_field_name(
     let mut match_sets = Vec::new();
     for pivot_table_part in connected_pivot_tables {
         let Some(matches) = matching_fields_for_pivot_table(
-            package,
+            part,
             pivot_graph,
             pivot_table_part,
             &candidate_items,
@@ -2439,22 +2472,20 @@ fn infer_slicer_field_name(
     None
 }
 
-fn matching_fields_for_pivot_table(
-    package: &XlsxPackage,
+fn matching_fields_for_pivot_table<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_graph: Option<&crate::pivots::graph::XlsxPivotGraph>,
     pivot_table_part: &str,
     candidate_items: &HashSet<String>,
 ) -> Option<HashSet<String>> {
-    let (def_part, records_part) = resolve_pivot_cache_parts(package, pivot_graph, pivot_table_part)?;
-    let def = package.pivot_cache_definition(&def_part).ok().flatten()?;
+    let (def_part, records_part) = resolve_pivot_cache_parts(part, pivot_graph, pivot_table_part)?;
+    let def_bytes = part(&def_part)?;
+    let def = crate::pivots::cache_definition::parse_pivot_cache_definition(def_bytes).ok()?;
     if def.cache_fields.is_empty() {
         return None;
     }
 
-    let shared_items = package
-        .part(&def_part)
-        .and_then(|bytes| parse_pivot_cache_shared_items(bytes).ok())
-        .unwrap_or_default();
+    let shared_items = parse_pivot_cache_shared_items(def_bytes).ok().unwrap_or_default();
 
     let field_count = def.cache_fields.len();
     let mut matches = HashSet::new();
@@ -2491,7 +2522,7 @@ fn matching_fields_for_pivot_table(
         return Some(matches);
     };
 
-    let Some(records_bytes) = package.part(&records_part) else {
+    let Some(records_bytes) = part(&records_part) else {
         return Some(matches);
     };
 

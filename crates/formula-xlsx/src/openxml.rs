@@ -77,6 +77,74 @@ pub fn resolve_relationship_target(
     Ok(None)
 }
 
+/// Resolve an OPC relationship target using an arbitrary part getter.
+///
+/// This is the generic counterpart of [`resolve_relationship_target`]. It's used by higher-level
+/// representations like [`crate::XlsxDocument`] that store raw parts but aren't backed by an
+/// [`XlsxPackage`].
+pub fn resolve_relationship_target_from_parts<'a, F>(
+    get_part: F,
+    part_name: &str,
+    relationship_id: &str,
+) -> Result<Option<String>, XlsxError>
+where
+    F: Fn(&str) -> Option<&'a [u8]>,
+{
+    // Most callers use canonical OPC names (`xl/...`), but tolerate non-standard inputs that still
+    // show up in the wild.
+    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
+
+    let rels_name = rels_part_name(part_name);
+    let rels_bytes = match get_part(&rels_name) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    let relationships = parse_relationships(rels_bytes)?;
+    for rel in relationships {
+        if rel.id == relationship_id {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                return Ok(None);
+            }
+            // Resolve the target using the same URI normalization as other code paths (including
+            // fragment stripping). Note that a target of just `#fragment` refers to the source part.
+            //
+            // Some producers percent-encode relationship targets (e.g. `sheet%201.xml`) while
+            // writing the actual ZIP entry name unescaped (or vice versa). Try the raw normalized
+            // target first, then fall back to a best-effort percent-decoded candidate if the raw
+            // part is missing.
+            let candidates = crate::path::resolve_target_candidates(part_name, &rel.target);
+            let resolved = candidates.iter().find(|candidate| {
+                let candidate = candidate.as_str();
+                if get_part(candidate).is_some() {
+                    return true;
+                }
+                if let Some(stripped) = candidate.strip_prefix('/') {
+                    return get_part(stripped).is_some();
+                }
+                let mut with_slash = String::with_capacity(candidate.len() + 1);
+                with_slash.push('/');
+                with_slash.push_str(candidate);
+                get_part(with_slash.as_str()).is_some()
+            });
+            let resolved = resolved.cloned().unwrap_or_else(|| {
+                candidates
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| resolve_target(part_name, &rel.target))
+            });
+            if resolved.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(resolved));
+        }
+    }
+    Ok(None)
+}
+
 pub fn resolve_target(base_part: &str, target: &str) -> String {
     // Keep relationship target resolution centralized in `path::resolve_target` so behavior stays
     // consistent across the codebase (including fragment/query stripping and Windows-path

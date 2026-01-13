@@ -6,6 +6,7 @@ use quick_xml::Reader;
 
 use crate::openxml::{parse_relationships, resolve_relationship_target, resolve_target};
 use crate::package::{XlsxError, XlsxPackage};
+use crate::XlsxDocument;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PivotChartPart {
@@ -45,16 +46,59 @@ impl XlsxPackage {
 }
 
 fn parse_pivot_chart_parts(package: &XlsxPackage) -> Result<Vec<PivotChartPart>, XlsxError> {
-    let chart_parts = package
-        .part_names()
-        .filter(|name| name.starts_with("xl/charts/") && name.ends_with(".xml"))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    parse_pivot_chart_parts_with(
+        package.part_names(),
+        |name| package.part(name),
+        |base, rid| resolve_relationship_target(package, base, rid),
+    )
+}
+
+impl XlsxDocument {
+    /// Locate chart parts that declare a `<c:pivotSource>` element and resolve their pivot targets.
+    pub fn pivot_chart_parts(&self) -> Result<Vec<PivotChartPart>, XlsxError> {
+        parse_pivot_chart_parts_with(
+            self.parts().keys(),
+            |name| {
+                let name = name.strip_prefix('/').unwrap_or(name);
+                self.parts().get(name).map(|bytes| bytes.as_slice())
+            },
+            |base, rid| {
+                crate::openxml::resolve_relationship_target_from_parts(
+                    |name| {
+                        let name = name.strip_prefix('/').unwrap_or(name);
+                        self.parts().get(name).map(|bytes| bytes.as_slice())
+                    },
+                    base,
+                    rid,
+                )
+            },
+        )
+    }
+}
+
+fn parse_pivot_chart_parts_with<'a, PN, Part, Resolve>(
+    part_names: PN,
+    part: Part,
+    resolve_relationship_target: Resolve,
+) -> Result<Vec<PivotChartPart>, XlsxError>
+where
+    PN: IntoIterator,
+    PN::Item: AsRef<str>,
+    Part: Fn(&str) -> Option<&'a [u8]>,
+    Resolve: Fn(&str, &str) -> Result<Option<String>, XlsxError>,
+{
+    let mut chart_parts = Vec::new();
+    for name in part_names {
+        let name = name.as_ref();
+        let name = name.strip_prefix('/').unwrap_or(name);
+        if name.starts_with("xl/charts/") && name.ends_with(".xml") {
+            chart_parts.push(name.to_string());
+        }
+    }
 
     let mut parts = Vec::with_capacity(chart_parts.len());
     for part_name in chart_parts {
-        let xml = package
-            .part(&part_name)
+        let xml = part(&part_name)
             .ok_or_else(|| XlsxError::MissingPart(part_name.clone()))?;
 
         let parsed = match parse_chart_xml(xml) {
@@ -62,11 +106,11 @@ fn parse_pivot_chart_parts(package: &XlsxPackage) -> Result<Vec<PivotChartPart>,
             Err(_) => None,
         };
 
-        let pivot_source_part = match parsed.as_ref().and_then(|parsed| parsed.pivot_source_rid.as_deref()) {
-            Some(rid) => match resolve_relationship_target(package, &part_name, rid) {
-                Ok(target) => target,
-                Err(_) => None,
-            },
+        let pivot_source_part = match parsed
+            .as_ref()
+            .and_then(|parsed| parsed.pivot_source_rid.as_deref())
+        {
+            Some(rid) => resolve_relationship_target(&part_name, rid).ok().flatten(),
             None => None,
         };
 

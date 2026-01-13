@@ -5,7 +5,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::openxml::{local_name, parse_relationships};
-use crate::package::{XlsxError, XlsxPackage};
+use crate::{XlsxDocument, XlsxError, XlsxPackage};
 use crate::path::{rels_for_part, resolve_target};
 use crate::sheet_metadata::parse_workbook_sheets;
 
@@ -47,81 +47,7 @@ impl XlsxPackage {
     /// This helper is intentionally tolerant of missing parts and relationships: pivot tables
     /// are returned even when their sheet or cache relationships cannot be resolved.
     pub fn pivot_graph(&self) -> Result<XlsxPivotGraph, XlsxError> {
-        let sheet_name_by_part = sheet_name_by_part(self)?;
-        let cache_parts_by_id = cache_parts_by_id(self)?;
-
-        let mut sheet_parts: BTreeSet<String> = BTreeSet::new();
-        sheet_parts.extend(sheet_name_by_part.keys().cloned());
-        sheet_parts.extend(
-            self.part_names()
-                .filter(|name| name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
-                .map(str::to_string),
-        );
-
-        let mut pivot_tables = Vec::new();
-        let mut seen_pivot_parts: BTreeSet<String> = BTreeSet::new();
-
-        for sheet_part in sheet_parts {
-            let sheet_name = sheet_name_by_part.get(&sheet_part).cloned();
-            let mut pivot_parts = BTreeSet::new();
-
-            let rels_part = rels_for_part(&sheet_part);
-            let relationships = match self.part(&rels_part) {
-                Some(xml) => parse_relationships(xml).unwrap_or_default(),
-                None => Vec::new(),
-            };
-            let rel_map: HashMap<_, _> = relationships
-                .iter()
-                .map(|rel| (rel.id.as_str(), rel))
-                .collect();
-
-            for rel in &relationships {
-                if rel.type_uri == REL_TYPE_PIVOT_TABLE {
-                    pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
-                }
-            }
-
-            if let Some(sheet_xml) = self.part(&sheet_part) {
-                if let Ok(rids) = parse_sheet_pivot_table_relationship_ids(sheet_xml) {
-                    for rid in rids {
-                        if let Some(rel) = rel_map.get(rid.as_str()) {
-                            pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
-                        }
-                    }
-                }
-            }
-
-            for pivot_part in pivot_parts {
-                seen_pivot_parts.insert(pivot_part.clone());
-                pivot_tables.push(build_pivot_table_instance(
-                    self,
-                    pivot_part,
-                    Some(sheet_part.clone()),
-                    sheet_name.clone(),
-                    &cache_parts_by_id,
-                )?);
-            }
-        }
-
-        // Fallback: include any pivot table parts that exist in the package but weren't
-        // reachable from worksheet relationships.
-        for pivot_part in self
-            .part_names()
-            .filter(|name| name.starts_with("xl/pivotTables/") && name.ends_with(".xml"))
-        {
-            if seen_pivot_parts.contains(pivot_part) {
-                continue;
-            }
-            pivot_tables.push(build_pivot_table_instance(
-                self,
-                pivot_part.to_string(),
-                None,
-                None,
-                &cache_parts_by_id,
-            )?);
-        }
-
-        Ok(XlsxPivotGraph { pivot_tables })
+        pivot_graph_with(self.part_names(), |name| self.part(name))
     }
 
     /// Resolve the pivot cache parts backing a given pivot table part.
@@ -143,7 +69,9 @@ impl XlsxPackage {
             return Ok(None);
         };
 
-        let cache_parts_by_id = cache_parts_by_id(self)?;
+        let part_names: Vec<String> = self.part_names().map(str::to_string).collect();
+        let part = |name: &str| self.part(name);
+        let cache_parts_by_id = cache_parts_by_id(&part, &part_names)?;
         let Some(parts) = cache_parts_by_id.get(&cache_id) else {
             return Ok(None);
         };
@@ -166,14 +94,119 @@ impl XlsxPackage {
     }
 }
 
-fn build_pivot_table_instance(
-    package: &XlsxPackage,
+impl XlsxDocument {
+    /// Resolve the relationship graph between worksheets, pivot tables, and pivot caches from the
+    /// preserved parts in an [`XlsxDocument`].
+    pub fn pivot_graph(&self) -> Result<XlsxPivotGraph, XlsxError> {
+        pivot_graph_with(self.parts().keys(), |name| {
+            let name = name.strip_prefix('/').unwrap_or(name);
+            self.parts().get(name).map(|bytes| bytes.as_slice())
+        })
+    }
+}
+
+pub(crate) fn pivot_graph_with<'a, PN, Part>(
+    part_names: PN,
+    part: Part,
+) -> Result<XlsxPivotGraph, XlsxError>
+where
+    PN: IntoIterator,
+    PN::Item: AsRef<str>,
+    Part: Fn(&str) -> Option<&'a [u8]>,
+{
+    let part_names: Vec<String> = part_names
+        .into_iter()
+        .map(|name| name.as_ref().to_string())
+        .collect();
+
+    let sheet_name_by_part = sheet_name_by_part(&part)?;
+    let cache_parts_by_id = cache_parts_by_id(&part, &part_names)?;
+
+    let mut sheet_parts: BTreeSet<String> = BTreeSet::new();
+    sheet_parts.extend(sheet_name_by_part.keys().cloned());
+    sheet_parts.extend(
+        part_names
+            .iter()
+            .filter(|name| name.starts_with("xl/worksheets/") && name.ends_with(".xml"))
+            .cloned(),
+    );
+
+    let mut pivot_tables = Vec::new();
+    let mut seen_pivot_parts: BTreeSet<String> = BTreeSet::new();
+
+    for sheet_part in sheet_parts {
+        let sheet_name = sheet_name_by_part.get(&sheet_part).cloned();
+        let mut pivot_parts = BTreeSet::new();
+
+        let rels_part = rels_for_part(&sheet_part);
+        let relationships = match part(&rels_part) {
+            Some(xml) => parse_relationships(xml).unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let rel_map: HashMap<_, _> = relationships
+            .iter()
+            .map(|rel| (rel.id.as_str(), rel))
+            .collect();
+
+        for rel in &relationships {
+            if rel.type_uri == REL_TYPE_PIVOT_TABLE {
+                pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
+            }
+        }
+
+        if let Some(sheet_xml) = part(&sheet_part) {
+            // Best-effort: tolerate malformed worksheet XML by falling back to the `.rels` scan
+            // above.
+            if let Ok(rids) = parse_sheet_pivot_table_relationship_ids(sheet_xml) {
+                for rid in rids {
+                    if let Some(rel) = rel_map.get(rid.as_str()) {
+                        pivot_parts.insert(resolve_target(&sheet_part, &rel.target));
+                    }
+                }
+            }
+        }
+
+        for pivot_part in pivot_parts {
+            seen_pivot_parts.insert(pivot_part.clone());
+            pivot_tables.push(build_pivot_table_instance(
+                &part,
+                pivot_part,
+                Some(sheet_part.clone()),
+                sheet_name.clone(),
+                &cache_parts_by_id,
+            )?);
+        }
+    }
+
+    // Fallback: include any pivot table parts that exist in the package but weren't reachable from
+    // worksheet relationships.
+    for pivot_part in part_names
+        .iter()
+        .filter(|name| name.starts_with("xl/pivotTables/") && name.ends_with(".xml"))
+    {
+        if seen_pivot_parts.contains(pivot_part.as_str()) {
+            continue;
+        }
+        pivot_tables.push(build_pivot_table_instance(
+            &part,
+            pivot_part.to_string(),
+            None,
+            None,
+            &cache_parts_by_id,
+        )?);
+    }
+
+    Ok(XlsxPivotGraph { pivot_tables })
+}
+
+fn build_pivot_table_instance<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     pivot_part: String,
     sheet_part: Option<String>,
     sheet_name: Option<String>,
     cache_parts_by_id: &HashMap<u32, CacheParts>,
 ) -> Result<PivotTableInstance, XlsxError> {
-    let cache_id = match package.part(&pivot_part) {
+    let cache_id = match part(&pivot_part) {
         Some(xml) => parse_pivot_table_cache_id(xml)?,
         None => None,
     };
@@ -193,9 +226,11 @@ fn build_pivot_table_instance(
     })
 }
 
-fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, XlsxError> {
+fn sheet_name_by_part<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
+) -> Result<HashMap<String, String>, XlsxError> {
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = match package.part(workbook_part) {
+    let workbook_xml = match part(workbook_part) {
         Some(bytes) => bytes,
         None => return Ok(HashMap::new()),
     };
@@ -209,7 +244,7 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, 
     };
 
     let rels_part = rels_for_part(workbook_part);
-    let workbook_rels = match package.part(&rels_part) {
+    let workbook_rels = match part(&rels_part) {
         Some(bytes) => parse_relationships(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
@@ -230,15 +265,18 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, 
     Ok(out)
 }
 
-fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, XlsxError> {
+fn cache_parts_by_id<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
+    part_names: &[String],
+) -> Result<HashMap<u32, CacheParts>, XlsxError> {
     let workbook_part = "xl/workbook.xml";
-    let cache_refs = match package.part(workbook_part) {
+    let cache_refs = match part(workbook_part) {
         Some(bytes) => parse_workbook_pivot_caches(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
 
     let rels_part = rels_for_part(workbook_part);
-    let workbook_rels = match package.part(&rels_part) {
+    let workbook_rels = match part(&rels_part) {
         Some(bytes) => parse_relationships(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
@@ -256,7 +294,7 @@ fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, 
             .map(|rel| resolve_target(workbook_part, &rel.target));
 
         let records_part = match definition_part.as_deref() {
-            Some(def_part) => cache_records_part(package, def_part)?,
+            Some(def_part) => cache_records_part(part, def_part)?,
             None => None,
         };
 
@@ -272,8 +310,9 @@ fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, 
     // Fallback for malformed workbooks: if `workbook.xml` omits `<pivotCaches>` (or the workbook
     // `.rels` is incomplete), attempt to resolve cache parts using the common `...DefinitionN.xml`
     // / `...RecordsN.xml` naming convention where `N` matches `cacheId`.
-    for part_name in package
-        .part_names()
+    for part_name in part_names
+        .iter()
+        .map(String::as_str)
         .filter(|name| name.starts_with("xl/pivotCache/") && name.ends_with(".xml"))
     {
         let Some(cache_id) = cache_id_from_pivot_cache_definition_part(part_name) else {
@@ -281,23 +320,28 @@ fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, 
         };
         caches.entry(cache_id).or_insert_with(|| CacheParts {
             definition_part: Some(part_name.to_string()),
-            records_part: package
-                .part(&format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml"))
-                .map(|_| format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml")),
+            records_part: {
+                let guess = format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml");
+                if part(&guess).is_some() {
+                    Some(guess)
+                } else {
+                    None
+                }
+            },
         });
     }
 
     for (cache_id, parts) in caches.iter_mut() {
         if parts.definition_part.is_none() {
             let guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
-            if package.part(&guess).is_some() {
+            if part(&guess).is_some() {
                 parts.definition_part = Some(guess);
             }
         }
 
         if parts.records_part.is_none() {
             let guess = format!("xl/pivotCache/pivotCacheRecords{cache_id}.xml");
-            if package.part(&guess).is_some() {
+            if part(&guess).is_some() {
                 parts.records_part = Some(guess);
             }
         }
@@ -314,12 +358,12 @@ fn cache_id_from_pivot_cache_definition_part(part_name: &str) -> Option<u32> {
     digits.parse::<u32>().ok()
 }
 
-fn cache_records_part(
-    package: &XlsxPackage,
+fn cache_records_part<'a>(
+    part: &impl Fn(&str) -> Option<&'a [u8]>,
     cache_definition_part: &str,
 ) -> Result<Option<String>, XlsxError> {
     let rels_part = rels_for_part(cache_definition_part);
-    let rels_xml = match package.part(&rels_part) {
+    let rels_xml = match part(&rels_part) {
         Some(bytes) => bytes,
         None => return Ok(None),
     };
