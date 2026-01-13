@@ -62,3 +62,45 @@ maybeTest("SqliteVectorStore persists and reloads via IndexedDBBinaryStorage", a
   await store2.close();
 });
 
+maybeTest("SqliteVectorStore can reset persisted DB on dimension mismatch (IndexedDBBinaryStorage)", async () => {
+  const dbName = uniqueDbName("ai-rag-sqlite-idb-dim-mismatch");
+  const storage1 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch",
+  });
+
+  const store1 = await SqliteVectorStore.create({ storage: storage1, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  // Simulate restart with mismatched dimension. Reset should wipe the DB.
+  const storage2 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch",
+  });
+  const store2 = await SqliteVectorStore.create({
+    storage: storage2,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: true,
+  });
+  expect(await store2.list()).toEqual([]);
+  await store2.close();
+
+  // Ensure the reset wrote a compatible DB so future opens don't repeatedly reset.
+  const storage3 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch",
+  });
+  const store3 = await SqliteVectorStore.create({
+    storage: storage3,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+  });
+  expect(await store3.list()).toEqual([]);
+  await store3.close();
+});
