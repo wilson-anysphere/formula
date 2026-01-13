@@ -4,6 +4,7 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod cache;
 mod parse_chart_color_style;
 mod parse_chart_ex;
 mod parse_chart_space;

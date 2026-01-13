@@ -6,6 +6,8 @@ use formula_model::RichText;
 use roxmltree::{Document, Node};
 use std::collections::HashMap;
 
+use super::cache::{parse_num_cache, parse_str_cache};
+
 #[derive(Debug, thiserror::Error)]
 pub enum ChartExParseError {
     #[error("part is not valid UTF-8: {part_name}: {source}")]
@@ -112,7 +114,7 @@ pub fn parse_chart_ex(
 
 fn parse_title(
     chart_node: Node<'_, '_>,
-    _diagnostics: &mut Vec<ChartDiagnostic>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> Option<TextModel> {
     // ChartEx sometimes stores a plain-text title directly as `<cx:title>My title</cx:title>`.
     // It can also store a structured title as `<cx:title><cx:tx>...</cx:tx></cx:title>`.
@@ -133,7 +135,7 @@ fn parse_title(
     let mut parsed = title_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
-        .and_then(parse_text_from_tx);
+        .and_then(|tx| parse_text_from_tx(tx, diagnostics, "title.tx"));
 
     if parsed.is_none() {
         parsed = title_node
@@ -182,6 +184,7 @@ fn parse_legend(
     Some(LegendModel {
         position,
         overlay,
+        layout: None,
         text_style: None,
         style: None,
         layout: None,
@@ -462,27 +465,27 @@ fn parse_series(
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
-        .and_then(|tx| parse_text_from_tx(tx));
+        .and_then(|tx| parse_text_from_tx(tx, diagnostics, "series.tx"));
 
     let mut categories = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "cat")
-        .and_then(|cat| parse_series_text_data(cat, diagnostics));
+        .and_then(|cat| parse_series_text_data(cat, diagnostics, "series.cat"));
 
     let mut values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "val")
-        .and_then(|val| parse_series_number_data(val, diagnostics));
+        .and_then(|val| parse_series_number_data(val, diagnostics, "series.val"));
 
     let mut x_values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "xVal")
-        .and_then(|x| parse_series_data(x, diagnostics));
+        .and_then(|x| parse_series_data(x, diagnostics, "series.xVal"));
 
     let mut y_values = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "yVal")
-        .and_then(|y| parse_series_data(y, diagnostics));
+        .and_then(|y| parse_series_data(y, diagnostics, "series.yVal"));
 
     if !chart_data.is_empty() {
         if let Some(data_id) = parse_series_data_id(series_node) {
@@ -560,7 +563,11 @@ fn fill_series_data_formula(dst: &mut Option<SeriesData>, src: &Option<SeriesDat
     }
 }
 
-fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
+fn parse_text_from_tx(
+    tx_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> Option<TextModel> {
     // Similar to classic charts: `tx/strRef/f` + `tx/strRef/strCache`, `tx/rich`, or a direct `v`.
     if let Some(rich_node) = tx_node
         .children()
@@ -575,7 +582,6 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             layout: None,
         });
     }
-
     if let Some(str_ref) = tx_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strRef")
@@ -584,7 +590,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
         let cache = str_ref
             .children()
             .find(|n| n.is_element() && n.tag_name().name() == "strCache")
-            .and_then(parse_str_cache);
+            .and_then(|cache| parse_str_cache(cache, diagnostics, context));
         let cached_value = cache.as_ref().and_then(|v| v.first()).cloned();
         return Some(TextModel {
             rich_text: RichText::new(cached_value.unwrap_or_default()),
@@ -611,19 +617,20 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
 fn parse_series_text_data(
     data_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
 ) -> Option<SeriesTextData> {
     if let Some(str_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strRef")
     {
-        return Some(parse_str_ref(str_ref));
+        return Some(parse_str_ref(str_ref, diagnostics, context));
     }
 
     if let Some(num_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numRef")
     {
-        let num = parse_num_ref(num_ref, diagnostics);
+        let num = parse_num_ref(num_ref, diagnostics, context);
         let cache = num
             .cache
             .as_ref()
@@ -640,7 +647,7 @@ fn parse_series_text_data(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strLit")
     {
-        let values = parse_str_cache(str_lit);
+        let values = parse_str_cache(str_lit, diagnostics, context);
         return Some(SeriesTextData {
             formula: None,
             cache: values.clone(),
@@ -653,7 +660,7 @@ fn parse_series_text_data(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numLit")
     {
-        let (values, _format_code) = parse_num_cache(num_lit, diagnostics);
+        let (values, _format_code) = parse_num_cache(num_lit, diagnostics, context);
         let cache = values.map(|vals| vals.into_iter().map(|v| v.to_string()).collect());
         return Some(SeriesTextData {
             formula: None,
@@ -669,19 +676,20 @@ fn parse_series_text_data(
 fn parse_series_number_data(
     data_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
 ) -> Option<SeriesNumberData> {
     if let Some(num_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numRef")
     {
-        return Some(parse_num_ref(num_ref, diagnostics));
+        return Some(parse_num_ref(num_ref, diagnostics, context));
     }
 
     if let Some(num_lit) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numLit")
     {
-        let (cache, format_code) = parse_num_cache(num_lit, diagnostics);
+        let (cache, format_code) = parse_num_cache(num_lit, diagnostics, context);
         return Some(SeriesNumberData {
             formula: None,
             cache: cache.clone(),
@@ -696,26 +704,35 @@ fn parse_series_number_data(
 fn parse_series_data(
     data_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
 ) -> Option<SeriesData> {
     if let Some(str_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strRef")
     {
-        return Some(SeriesData::Text(parse_str_ref(str_ref)));
+        return Some(SeriesData::Text(parse_str_ref(
+            str_ref,
+            diagnostics,
+            context,
+        )));
     }
 
     if let Some(num_ref) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numRef")
     {
-        return Some(SeriesData::Number(parse_num_ref(num_ref, diagnostics)));
+        return Some(SeriesData::Number(parse_num_ref(
+            num_ref,
+            diagnostics,
+            context,
+        )));
     }
 
     if let Some(str_lit) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strLit")
     {
-        let values = parse_str_cache(str_lit);
+        let values = parse_str_cache(str_lit, diagnostics, context);
         return Some(SeriesData::Text(SeriesTextData {
             formula: None,
             cache: values.clone(),
@@ -728,7 +745,7 @@ fn parse_series_data(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numLit")
     {
-        let (cache, format_code) = parse_num_cache(num_lit, diagnostics);
+        let (cache, format_code) = parse_num_cache(num_lit, diagnostics, context);
         return Some(SeriesData::Number(SeriesNumberData {
             formula: None,
             cache: cache.clone(),
@@ -740,12 +757,16 @@ fn parse_series_data(
     None
 }
 
-fn parse_str_ref(str_ref_node: Node<'_, '_>) -> SeriesTextData {
+fn parse_str_ref(
+    str_ref_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> SeriesTextData {
     let formula = descendant_text(str_ref_node, "f").map(str::to_string);
     let cache = str_ref_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strCache")
-        .and_then(parse_str_cache);
+        .and_then(|cache| parse_str_cache(cache, diagnostics, context));
 
     SeriesTextData {
         formula,
@@ -758,12 +779,13 @@ fn parse_str_ref(str_ref_node: Node<'_, '_>) -> SeriesTextData {
 fn parse_num_ref(
     num_ref_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
 ) -> SeriesNumberData {
     let formula = descendant_text(num_ref_node, "f").map(str::to_string);
     let (cache, format_code) = num_ref_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numCache")
-        .map(|cache| parse_num_cache(cache, diagnostics))
+        .map(|cache| parse_num_cache(cache, diagnostics, context))
         .unwrap_or((None, None));
 
     SeriesNumberData {
@@ -772,107 +794,6 @@ fn parse_num_ref(
         format_code,
         literal: None,
     }
-}
-
-fn parse_str_cache(cache_node: Node<'_, '_>) -> Option<Vec<String>> {
-    let pt_count = cache_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "ptCount")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<usize>().ok());
-
-    let mut points = Vec::new();
-    let mut max_idx = None::<usize>;
-    for pt in cache_node
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "pt")
-    {
-        let idx = pt.attribute("idx").and_then(|v| v.parse::<usize>().ok());
-        let Some(idx) = idx else {
-            continue;
-        };
-        let value = pt
-            .children()
-            .find(|n| n.is_element() && n.tag_name().name() == "v")
-            .and_then(|n| n.text())
-            .unwrap_or("")
-            .to_string();
-        max_idx = Some(max_idx.map_or(idx, |m| m.max(idx)));
-        points.push((idx, value));
-    }
-
-    if points.is_empty() {
-        return None;
-    }
-
-    let inferred_len = max_idx.map(|v| v + 1).unwrap_or(0);
-    let len = pt_count.unwrap_or(inferred_len);
-    let mut values = vec![String::new(); len];
-    for (idx, value) in points {
-        if idx < len {
-            values[idx] = value;
-        }
-    }
-    Some(values)
-}
-
-fn parse_num_cache(
-    cache_node: Node<'_, '_>,
-    diagnostics: &mut Vec<ChartDiagnostic>,
-) -> (Option<Vec<f64>>, Option<String>) {
-    let format_code = cache_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "formatCode")
-        .and_then(|n| n.text())
-        .map(str::to_string);
-
-    let pt_count = cache_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "ptCount")
-        .and_then(|n| n.attribute("val"))
-        .and_then(|v| v.parse::<usize>().ok());
-
-    let mut points = Vec::new();
-    let mut max_idx = None::<usize>;
-    for pt in cache_node
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "pt")
-    {
-        let idx = pt.attribute("idx").and_then(|v| v.parse::<usize>().ok());
-        let Some(idx) = idx else { continue };
-        let raw = pt
-            .children()
-            .find(|n| n.is_element() && n.tag_name().name() == "v")
-            .and_then(|n| n.text())
-            .unwrap_or("")
-            .trim();
-        let value = match raw.parse::<f64>() {
-            Ok(v) => v,
-            Err(_) => {
-                diagnostics.push(ChartDiagnostic {
-                    level: ChartDiagnosticLevel::Warning,
-                    message: format!("invalid numeric cache value {raw:?}"),
-                });
-                f64::NAN
-            }
-        };
-        max_idx = Some(max_idx.map_or(idx, |m| m.max(idx)));
-        points.push((idx, value));
-    }
-
-    if points.is_empty() {
-        return (None, format_code);
-    }
-
-    let inferred_len = max_idx.map(|v| v + 1).unwrap_or(0);
-    let len = pt_count.unwrap_or(inferred_len);
-    let mut values = vec![f64::NAN; len];
-    for (idx, value) in points {
-        if idx < len {
-            values[idx] = value;
-        }
-    }
-    (Some(values), format_code)
 }
 
 fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
