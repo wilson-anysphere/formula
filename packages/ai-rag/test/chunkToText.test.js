@@ -376,6 +376,23 @@ test("chunkToText reports when sample rows are truncated relative to the full ra
   assert.match(text, /… \(\+9 more rows\)/);
 });
 
+test("chunkToText tolerates sparse cell arrays with missing rows", () => {
+  const cells = new Array(2);
+  cells[0] = [{ v: "Header" }];
+  // Leave cells[1] unset (sparse array / missing row).
+
+  const chunk = {
+    kind: "dataRegion",
+    title: "Sparse",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells,
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /SAMPLE ROWS:/);
+});
+
 test("chunkToText includes A1-like cell addresses for formulaRegion samples", () => {
   const chunk = {
     kind: "formulaRegion",

@@ -208,6 +208,7 @@ function inferHeaderRow(cells) {
 function countFormulas(cells) {
   let count = 0;
   for (const row of cells) {
+    if (!Array.isArray(row)) continue;
     for (const cell of row) {
       if (cell && cell.f != null && String(cell.f).trim() !== "") count += 1;
     }
@@ -334,7 +335,7 @@ export function chunkToText(chunk, opts) {
     for (let r = startRow; r < Math.min(sampledRowCount, startRow + sampleRows); r += 1) {
       const row = [];
       for (let c = 0; c < rowColCount; c += 1) {
-        const cell = cells[r][c] || {};
+        const cell = cells[r]?.[c] || {};
         if (headerNames) {
           const header = headerNames[c] || `Column${c + 1}`;
           if (cell.f) {
