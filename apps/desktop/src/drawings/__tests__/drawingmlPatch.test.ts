@@ -17,6 +17,13 @@ describe("DrawingML patch helpers", () => {
     expect(out).toContain(`r:embed="rId1"`);
   });
 
+  it("patchNvPrId patches cNvPr id inside graphicFrame payloads", () => {
+    const input = `<xdr:graphicFrame><xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Chart 1"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr></xdr:graphicFrame>`;
+    const out = patchNvPrId(input, 99);
+    expect(out).toContain(`cNvPr id="99"`);
+    expect(out).toContain(`name="Chart 1"`);
+  });
+
   it("patchXfrmExt updates ext under xfrm (and leaves other ext nodes alone)", () => {
     const input =
       `<xdr:spPr><xdr:ext cx="1" cy="2"/>` +
@@ -24,6 +31,12 @@ describe("DrawingML patch helpers", () => {
     const out = patchXfrmExt(input, 300, 400);
     expect(out).toContain(`<xdr:ext cx="1" cy="2"/>`);
     expect(out).toContain(`<a:ext cx="300" cy="400"/>`);
+  });
+
+  it("patchXfrmExt patches ext inside graphicFrame xfrm", () => {
+    const input = `<xdr:graphicFrame><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm></xdr:graphicFrame>`;
+    const out = patchXfrmExt(input, 123, 456);
+    expect(out).toContain(`<a:ext cx="123" cy="456"/>`);
   });
 
   it("patchXfrmOff updates off under xfrm", () => {
