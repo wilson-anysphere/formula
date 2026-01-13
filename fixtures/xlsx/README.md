@@ -106,6 +106,7 @@ tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
   - `pivot-fixture.xlsx` - minimal pivot table parts (cache definition/records + pivotTable).
 - `charts/`:
   - `basic-chart.xlsx` - minimal chart parts (drawing + chart referencing sheet data).
+  - `rotated-chart.xlsx` - **synthetic** rotated chart frame (`xdr:graphicFrame` with `xdr:xfrm rot="..."`; used for manual verification of chart transform support).
   - `bar.xlsx`, `line.xlsx`, `pie.xlsx`, `scatter.xlsx` - small fixtures for common chart types.
 - `charts-ex/`:
   - Parser-focused **ChartEx** fixtures (Excel 2016+ “modern” charts) that include real

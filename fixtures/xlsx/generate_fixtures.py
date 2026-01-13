@@ -984,6 +984,49 @@ def drawing1_xml() -> str:
 """
 
 
+def drawing_rotated_chart_xml() -> str:
+    # Variant of `drawing1_xml()` with a rotated chart frame (`xdr:graphicFrame`).
+    #
+    # Rotation is expressed in DrawingML's 60000ths-of-a-degree units.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:twoCellAnchor>
+    <xdr:from>
+      <xdr:col>2</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>1</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:to>
+      <xdr:col>8</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>15</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:to>
+    <xdr:graphicFrame macro="">
+      <xdr:nvGraphicFramePr>
+        <xdr:cNvPr id="2" name="Rotated Chart 1"/>
+        <xdr:cNvGraphicFramePr/>
+      </xdr:nvGraphicFramePr>
+      <xdr:xfrm rot="2700000">
+        <a:off x="0" y="0"/>
+        <a:ext cx="0" cy="0"/>
+      </xdr:xfrm>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+                   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                   r:id="rId1"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>
+"""
+
+
 def drawing1_rels_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -1161,6 +1204,31 @@ def write_chart_xlsx(path: pathlib.Path) -> None:
         _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_chart_data_xml())
         _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_drawing_rels_xml())
         _zip_write(zf, "xl/drawings/drawing1.xml", drawing1_xml())
+        _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing1_rels_xml())
+        _zip_write(zf, "xl/charts/chart1.xml", chart1_xml())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
+def write_rotated_chart_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_chart_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_chart_data_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_drawing_rels_xml())
+        _zip_write(zf, "xl/drawings/drawing1.xml", drawing_rotated_chart_xml())
         _zip_write(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing1_rels_xml())
         _zip_write(zf, "xl/charts/chart1.xml", chart1_xml())
         _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
@@ -2010,6 +2078,7 @@ def main() -> None:
         styles_varied_xml(),
     )
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
+    write_rotated_chart_xlsx(ROOT / "charts" / "rotated-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
     write_rotated_image_xlsx(ROOT / "basic" / "rotated-image.xlsx")
     write_xlsx(
