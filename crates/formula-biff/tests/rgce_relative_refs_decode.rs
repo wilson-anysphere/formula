@@ -93,7 +93,7 @@ fn decode_rgce_errors_on_ptgrefn_and_does_not_misparse_following_tokens() {
 
     // The base-unaware decoder should fail fast on the RefN token.
     match decode_rgce(&rgce) {
-        Err(DecodeRgceError::UnsupportedToken { ptg }) => assert_eq!(ptg, 0x2C),
+        Err(DecodeRgceError::UnsupportedToken { offset: 0, ptg }) => assert_eq!(ptg, 0x2C),
         other => panic!("expected UnsupportedToken(0x2C), got {other:?}"),
     }
 
@@ -103,4 +103,3 @@ fn decode_rgce_errors_on_ptgrefn_and_does_not_misparse_following_tokens() {
         "A1+1"
     );
 }
-

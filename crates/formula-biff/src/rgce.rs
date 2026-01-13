@@ -1082,10 +1082,10 @@ fn decode_rgce_impl(
                     });
                 };
 
-                let row_off =
-                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let row_off = i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]])
+                    as i64;
                 let col_off = i16::from_le_bytes([rgce[i + 4], rgce[i + 5]]) as i64;
-                i += 6;
+                i += needed;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
@@ -1119,13 +1119,13 @@ fn decode_rgce_impl(
                     });
                 };
 
-                let row1_off =
-                    i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
+                let row1_off = i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]])
+                    as i64;
                 let row2_off =
                     i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) as i64;
                 let col1_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
                 let col2_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
-                i += 12;
+                i += needed;
 
                 const MAX_ROW0: i64 = 1_048_575;
                 const MAX_COL0: i64 = 0x3FFF;
