@@ -65,6 +65,7 @@ pub use agile::{
     decrypt_agile_keys, parse_agile_encryption_info_stream,
     parse_agile_encryption_info_stream_with_options, AgileDataIntegrity, AgileDecryptedKeys,
     AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
+    AgileEncryptionInfoWarning,
 };
 
 #[allow(unused_imports)]

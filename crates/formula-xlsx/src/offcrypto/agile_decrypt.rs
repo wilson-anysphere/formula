@@ -12,6 +12,10 @@ use super::encryption_info::{decode_base64_field_limited, extract_encryption_inf
 use super::error::{OffCryptoError, Result};
 
 const SEGMENT_SIZE: usize = 0x1000;
+const KEY_ENCRYPTOR_URI_PASSWORD: &str =
+    "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
+const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
+    "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
 
 #[derive(Debug, Clone)]
 struct KeyData {
@@ -373,17 +377,70 @@ fn parse_agile_encryption_info(encryption_info: &[u8]) -> Result<AgileEncryption
             element: "dataIntegrity".to_string(),
         })?;
 
-    let key_encryptor_node = doc
+    let key_encryptors_node = doc
         .descendants()
-        .find(|n| {
-            n.is_element()
-                && n.tag_name().name() == "keyEncryptor"
-                && n.attribute("uri")
-                    .is_some_and(|u| u.to_ascii_lowercase().contains("password"))
-        })
+        .find(|n| n.is_element() && n.tag_name().name() == "keyEncryptors")
         .ok_or_else(|| OffCryptoError::MissingRequiredElement {
-            element: "keyEncryptor (password)".to_string(),
+            element: "keyEncryptors".to_string(),
         })?;
+
+    // Office can emit multiple key encryptors (e.g. password + certificate). We only support
+    // password-based encryption; select the first password encryptor deterministically.
+    let mut available_uris: Vec<String> = Vec::new();
+    let mut selected_password_encryptor: Option<roxmltree::Node<'_, '_>> = None;
+    let mut password_encryptor_count = 0usize;
+    for key_encryptor in key_encryptors_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "keyEncryptor")
+    {
+        let uri = key_encryptor.attribute("uri").ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+            element: "keyEncryptor".to_string(),
+            attr: "uri".to_string(),
+        })?;
+
+        if !available_uris.iter().any(|u| u == uri) {
+            available_uris.push(uri.to_string());
+        }
+
+        if uri == KEY_ENCRYPTOR_URI_PASSWORD {
+            password_encryptor_count += 1;
+            if selected_password_encryptor.is_none() {
+                selected_password_encryptor = Some(key_encryptor);
+            }
+        }
+    }
+
+    let Some(key_encryptor_node) = selected_password_encryptor else {
+        let mut msg = String::new();
+        msg.push_str("unsupported key encryptor in Agile EncryptionInfo: ");
+        msg.push_str("Formula currently supports only password-based encryption. ");
+
+        if available_uris.is_empty() {
+            msg.push_str("No `<keyEncryptor>` entries were found.");
+        } else {
+            msg.push_str("Found keyEncryptor URIs: ");
+            msg.push_str(&available_uris.join(", "));
+            msg.push('.');
+        }
+
+        if available_uris
+            .iter()
+            .any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE)
+        {
+            msg.push_str(" This file appears to be certificate-encrypted (public/private key) rather than password-encrypted. Re-save the workbook in Excel using “Encrypt with Password”.");
+        } else {
+            msg.push_str(" Re-save the workbook in Excel using “Encrypt with Password” (not certificate-based protection).");
+        }
+
+        return Err(OffCryptoError::UnsupportedKeyEncryptor {
+            available_uris,
+            message: msg,
+        });
+    };
+
+    // `password_encryptor_count > 1` is unusual but legal; decryption remains deterministic by
+    // selecting the first password entry. We currently don't surface warnings from this helper.
+    let _ = password_encryptor_count;
     let encrypted_key_node = key_encryptor_node
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "encryptedKey")
@@ -681,4 +738,76 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
         diff |= x ^ y;
     }
     diff == 0
+}
+
+#[cfg(test)]
+mod key_encryptor_tests {
+    use super::*;
+
+    fn build_encryption_info_stream(xml: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&4u16.to_le_bytes()); // major
+        out.extend_from_slice(&4u16.to_le_bytes()); // minor
+        out.extend_from_slice(&0u32.to_le_bytes()); // flags (ignored by parser)
+        out.extend_from_slice(xml.as_bytes());
+        out
+    }
+
+    #[test]
+    fn parses_password_key_encryptor_when_multiple_key_encryptors_present() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+                xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+              <keyData saltValue="" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" hashSize="20"/>
+              <dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>
+              <keyEncryptors>
+                <keyEncryptor uri="{KEY_ENCRYPTOR_URI_CERTIFICATE}">
+                  <c:encryptedKey/>
+                </keyEncryptor>
+                <keyEncryptor uri="{KEY_ENCRYPTOR_URI_PASSWORD}">
+                  <p:encryptedKey saltValue="" hashAlgorithm="SHA1" spinCount="1" cipherAlgorithm="AES"
+                                  cipherChaining="ChainingModeCBC" keyBits="128" blockSize="16" hashSize="20"
+                                  encryptedVerifierHashInput="" encryptedVerifierHashValue="" encryptedKeyValue=""/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let info = parse_agile_encryption_info(&stream).expect("parse should succeed");
+        assert_eq!(info.password_key.spin_count, 1);
+    }
+
+    #[test]
+    fn errors_when_password_key_encryptor_is_missing() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+              <keyData saltValue="" hashAlgorithm="SHA1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                       keyBits="128" blockSize="16" hashSize="20"/>
+              <dataIntegrity encryptedHmacKey="" encryptedHmacValue=""/>
+              <keyEncryptors>
+                <keyEncryptor uri="{KEY_ENCRYPTOR_URI_CERTIFICATE}">
+                  <c:encryptedKey/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let err = parse_agile_encryption_info(&stream).expect_err("expected error");
+        match err {
+            OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
+                assert!(
+                    available_uris
+                        .iter()
+                        .any(|u| u == KEY_ENCRYPTOR_URI_CERTIFICATE),
+                    "expected certificate URI to be listed, got {available_uris:?}"
+                );
+            }
+            other => panic!("expected UnsupportedKeyEncryptor, got {other:?}"),
+        }
+    }
 }

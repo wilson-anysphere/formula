@@ -76,7 +76,7 @@ fn get_cell_value_at(engine: &Engine, sheet_id: SheetId, addr: CellAddr) -> Valu
     if let Some(provider) = &engine.external_value_provider {
         // Use the workbook's canonical display name to keep provider lookups stable even when
         // callers pass a different sheet-name casing.
-        if let Some(sheet_name) = engine.workbook.sheet_names.get(sheet_id) {
+        if let Some(sheet_name) = engine.workbook.sheet_name(sheet_id) {
             if let Some(v) = provider.get(sheet_name, addr) {
                 return v;
             }

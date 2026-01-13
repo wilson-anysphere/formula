@@ -13,6 +13,17 @@ use crate::offcrypto::{
 
 const OOXML_PASSWORD_KEY_ENCRYPTOR_URI: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
+const OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI: &str =
+    "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
+
+/// Non-fatal warnings surfaced while parsing an Agile `EncryptionInfo` XML descriptor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgileEncryptionInfoWarning {
+    /// Multiple password `<keyEncryptor>` entries were present.
+    ///
+    /// Resolution is deterministic: the first password key encryptor wins.
+    MultiplePasswordKeyEncryptors { count: usize },
+}
 
 /// Parsed `<keyData>` parameters from an Agile Encryption descriptor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +66,7 @@ pub struct AgileEncryptionInfo {
     pub key_data: AgileKeyData,
     pub data_integrity: Option<AgileDataIntegrity>,
     pub password_key_encryptor: AgilePasswordKeyEncryptor,
+    pub warnings: Vec<AgileEncryptionInfoWarning>,
 }
 
 /// Decrypted key material from the Agile password key encryptor.
@@ -232,18 +244,67 @@ pub fn parse_agile_encryption_info_stream_with_options(
         })
         .transpose()?;
 
-    // Locate the password key encryptor (`<keyEncryptor uri="...password">`).
-    let key_encryptor_node = doc
+    let key_encryptors_node = doc
         .descendants()
-        .find(|n| {
-            n.is_element()
-                && n.tag_name().name() == "keyEncryptor"
-                && n.attribute("uri")
-                    .is_some_and(|u| u.trim() == OOXML_PASSWORD_KEY_ENCRYPTOR_URI)
-        })
+        .find(|n| n.is_element() && n.tag_name().name() == "keyEncryptors")
         .ok_or_else(|| OffCryptoError::MissingRequiredElement {
-            element: "keyEncryptor(password)".to_string(),
+            element: "keyEncryptors".to_string(),
         })?;
+
+    // Office can emit multiple key encryptors (e.g. password + certificate). We currently support
+    // only the password key encryptor, so select it deterministically while capturing which URIs
+    // were present for actionable errors.
+    let mut available_uris: Vec<String> = Vec::new();
+    let mut selected_password_encryptor: Option<roxmltree::Node<'_, '_>> = None;
+    let mut password_encryptor_count = 0usize;
+    for key_encryptor in key_encryptors_node
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name() == "keyEncryptor")
+    {
+        let uri = key_encryptor.attribute("uri").ok_or_else(|| OffCryptoError::MissingRequiredAttribute {
+            element: "keyEncryptor".to_string(),
+            attr: "uri".to_string(),
+        })?;
+
+        if !available_uris.iter().any(|u| u == uri) {
+            available_uris.push(uri.to_string());
+        }
+
+        if uri.trim() == OOXML_PASSWORD_KEY_ENCRYPTOR_URI {
+            password_encryptor_count += 1;
+            if selected_password_encryptor.is_none() {
+                selected_password_encryptor = Some(key_encryptor);
+            }
+        }
+    }
+
+    let Some(key_encryptor_node) = selected_password_encryptor else {
+        let mut msg = String::new();
+        msg.push_str("unsupported key encryptor in Agile EncryptionInfo: ");
+        msg.push_str("Formula currently supports only password-based encryption. ");
+
+        if available_uris.is_empty() {
+            msg.push_str("No `<keyEncryptor>` entries were found.");
+        } else {
+            msg.push_str("Found keyEncryptor URIs: ");
+            msg.push_str(&available_uris.join(", "));
+            msg.push('.');
+        }
+
+        if available_uris
+            .iter()
+            .any(|u| u == OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI)
+        {
+            msg.push_str(" This file appears to be certificate-encrypted (public/private key) rather than password-encrypted. Re-save the workbook in Excel using “Encrypt with Password”.");
+        } else {
+            msg.push_str(" Re-save the workbook in Excel using “Encrypt with Password” (not certificate-based protection).");
+        }
+
+        return Err(OffCryptoError::UnsupportedKeyEncryptor {
+            available_uris,
+            message: msg,
+        });
+    };
 
     let encrypted_key_node = key_encryptor_node
         .descendants()
@@ -290,10 +351,18 @@ pub fn parse_agile_encryption_info_stream_with_options(
         encrypted_key_value: decode_b64_attr("encryptedKey", encrypted_key_node, "encryptedKeyValue", opts)?,
     };
 
+    let mut warnings = Vec::new();
+    if password_encryptor_count > 1 {
+        warnings.push(AgileEncryptionInfoWarning::MultiplePasswordKeyEncryptors {
+            count: password_encryptor_count,
+        });
+    }
+
     Ok(AgileEncryptionInfo {
         key_data,
         data_integrity,
         password_key_encryptor,
+        warnings,
     })
 }
 
@@ -907,6 +976,112 @@ mod tests {
         assert!(
             matches!(err, OffCryptoError::WrongPassword),
             "expected WrongPassword, got {err:?}"
+        );
+    }
+
+    fn build_encryption_info_stream(xml: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&4u16.to_le_bytes()); // major
+        out.extend_from_slice(&4u16.to_le_bytes()); // minor
+        out.extend_from_slice(&0u32.to_le_bytes()); // flags
+        out.extend_from_slice(xml.as_bytes());
+        out
+    }
+
+    #[test]
+    fn selects_password_key_encryptor_when_multiple_present() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+                xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+              <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                       saltValue=""/>
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
+                  <c:encryptedKey/>
+                </keyEncryptor>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                                  spinCount="99" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  hashAlgorithm="SHA1" saltValue=""
+                                  encryptedVerifierHashInput="" encryptedVerifierHashValue=""
+                                  encryptedKeyValue=""/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let info = parse_agile_encryption_info_stream(&stream).expect("parse should succeed");
+        assert_eq!(info.password_key_encryptor.spin_count, 99);
+        assert!(info.warnings.is_empty());
+    }
+
+    #[test]
+    fn errors_when_password_key_encryptor_missing() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:c="http://schemas.microsoft.com/office/2006/keyEncryptor/certificate">
+              <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                       saltValue=""/>
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI}">
+                  <c:encryptedKey/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let err = parse_agile_encryption_info_stream(&stream).expect_err("expected error");
+        match err {
+            OffCryptoError::UnsupportedKeyEncryptor { available_uris, .. } => {
+                assert!(
+                    available_uris
+                        .iter()
+                        .any(|u| u == OOXML_CERTIFICATE_KEY_ENCRYPTOR_URI),
+                    "expected certificate URI to be listed, got {available_uris:?}"
+                );
+            }
+            other => panic!("expected UnsupportedKeyEncryptor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn warns_on_multiple_password_key_encryptors() {
+        let xml = format!(
+            r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+                xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+              <keyData saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                       cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" hashAlgorithm="SHA1"
+                       saltValue=""/>
+              <keyEncryptors>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                                  spinCount="1" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  hashAlgorithm="SHA1" saltValue=""
+                                  encryptedVerifierHashInput="" encryptedVerifierHashValue=""
+                                  encryptedKeyValue=""/>
+                </keyEncryptor>
+                <keyEncryptor uri="{OOXML_PASSWORD_KEY_ENCRYPTOR_URI}">
+                  <p:encryptedKey saltSize="16" blockSize="16" keyBits="128" hashSize="20"
+                                  spinCount="2" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC"
+                                  hashAlgorithm="SHA1" saltValue=""
+                                  encryptedVerifierHashInput="" encryptedVerifierHashValue=""
+                                  encryptedKeyValue=""/>
+                </keyEncryptor>
+              </keyEncryptors>
+            </encryption>"#
+        );
+
+        let stream = build_encryption_info_stream(&xml);
+        let info = parse_agile_encryption_info_stream(&stream).expect("parse should succeed");
+        assert_eq!(info.password_key_encryptor.spin_count, 1);
+        assert_eq!(
+            info.warnings,
+            vec![AgileEncryptionInfoWarning::MultiplePasswordKeyEncryptors { count: 2 }]
         );
     }
 }
