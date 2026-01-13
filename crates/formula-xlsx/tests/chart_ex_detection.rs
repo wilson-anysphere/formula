@@ -40,6 +40,21 @@ fn detects_chart_ex_parts_and_parses_kind() {
             pkg.part(chart_rels_path),
             "chart rels bytes should be embedded on the extracted OpcPart for {name}.xlsx"
         );
+        let chart_rels_xml = std::str::from_utf8(
+            chart_part
+                .rels_bytes
+                .as_deref()
+                .expect("chart rels bytes should be present"),
+        )
+        .expect("chart rels should be valid utf-8");
+        assert!(
+            chart_rels_xml.contains("schemas.microsoft.com/office/2014/relationships/chartEx"),
+            "expected chart1.xml.rels to reference a ChartEx relationship for {name}.xlsx"
+        );
+        assert!(
+            chart_rels_xml.contains("Target=\"chartEx1.xml\""),
+            "expected chart1.xml.rels to target chartEx1.xml for {name}.xlsx"
+        );
 
         let chart_ex = chart
             .parts
