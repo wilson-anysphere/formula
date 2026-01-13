@@ -13,6 +13,7 @@ import type {
 type WasmWorkbookInstance = {
   getCell(address: string, sheet?: string): unknown;
   getCellRich?: (address: string, sheet?: string) => unknown;
+  goalSeek?: (request: unknown) => unknown;
   setCell(address: string, value: CellScalar, sheet?: string): void;
   setCellRich?: (address: string, value: unknown, sheet?: string) => void;
   setCells?: (updates: Array<{ address: string; value: CellScalar; sheet?: string }>) => void;
@@ -418,6 +419,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               } else {
                 throw new Error("applyOperation: WasmWorkbook.applyOperation is not available in this WASM build");
               }
+              break;
+            case "goalSeek":
+              if (typeof (wb as any).goalSeek !== "function") {
+                throw new Error("goalSeek: WasmWorkbook.goalSeek is not available in this WASM build");
+              }
+              result = cloneToPlainData((wb as any).goalSeek(params));
               break;
             default:
               throw new Error(`unknown method: ${req.method}`);

@@ -3258,6 +3258,7 @@ impl WasmWorkbook {
 
         let out = Object::new();
         object_set(&out, "success", &JsValue::from_bool(result.success()))?;
+        object_set(&out, "status", &JsValue::from_str(&format!("{:?}", result.status)))?;
         object_set(&out, "solution", &JsValue::from_f64(result.solution))?;
         object_set(
             &out,

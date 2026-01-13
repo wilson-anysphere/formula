@@ -6,6 +6,8 @@ import type {
   CellValueRich,
   EditOp,
   EditResult,
+  GoalSeekRequest,
+  GoalSeekResponse,
   FormulaPartialLexResult,
   FormulaPartialParseResult,
   FormulaParseOptions,
@@ -86,6 +88,13 @@ export interface EngineClient {
    * cross-sheet caches coherent.
    */
   recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]>;
+
+  /**
+   * Run Goal Seek (what-if analysis) over the current workbook.
+   *
+   * This is an additive API; older WASM builds may not export `goalSeek`.
+   */
+  goalSeek?(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse>;
   /**
    * Configure the logical worksheet dimensions (row/column count) for a sheet.
    *
@@ -257,6 +266,7 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.setRange(range, values, sheet, rpcOptions)),
     setLocale: async (localeId, rpcOptions) => await withEngine((connected) => connected.setLocale(localeId, rpcOptions)),
     recalculate: async (sheet, rpcOptions) => await withEngine((connected) => connected.recalculate(sheet, rpcOptions)),
+    goalSeek: async (request, rpcOptions) => await withEngine((connected) => connected.goalSeek(request, rpcOptions)),
     setSheetDimensions: async (sheet, rows, cols, rpcOptions) =>
       await withEngine((connected) => connected.setSheetDimensions(sheet, rows, cols, rpcOptions)),
     getSheetDimensions: async (sheet, rpcOptions) =>

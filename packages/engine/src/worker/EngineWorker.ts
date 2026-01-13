@@ -6,6 +6,8 @@ import type {
   CellValueRich,
   EditOp,
   EditResult,
+  GoalSeekRequest,
+  GoalSeekResponse,
   FormulaPartialLexResult,
   FormulaPartialParseResult,
   FormulaParseOptions,
@@ -292,6 +294,11 @@ export class EngineWorker {
   async recalculate(sheet?: string, options?: RpcOptions): Promise<CellChange[]> {
     await this.flush();
     return (await this.invoke("recalculate", { sheet }, options)) as CellChange[];
+  }
+
+  async goalSeek(request: GoalSeekRequest, options?: RpcOptions): Promise<GoalSeekResponse> {
+    await this.flush();
+    return (await this.invoke("goalSeek", request, options)) as GoalSeekResponse;
   }
 
   async applyOperation(op: EditOp, options?: RpcOptions): Promise<EditResult> {

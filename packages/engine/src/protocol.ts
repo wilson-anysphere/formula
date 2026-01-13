@@ -115,6 +115,31 @@ export interface CellChange {
   value: CellScalar;
 }
 
+// What-If / Goal Seek
+export type GoalSeekRecalcMode = "singleThreaded" | "multiThreaded";
+
+export interface GoalSeekRequest {
+  /** A1 address within `sheet` (no `Sheet!` prefix). */
+  targetCell: string;
+  targetValue: number;
+  /** A1 address within `sheet` (no `Sheet!` prefix). */
+  changingCell: string;
+  sheet?: string;
+  tolerance?: number;
+  maxIterations?: number;
+  recalcMode?: GoalSeekRecalcMode;
+}
+
+export interface GoalSeekResponse {
+  success: boolean;
+  /** Best-effort status string (e.g. "Converged", "MaxIterationsReached"). */
+  status?: string;
+  solution: number;
+  iterations: number;
+  finalError: number;
+  finalOutput?: number;
+}
+
 /**
  * Structural edit operation applied with Excel-like semantics.
  *
