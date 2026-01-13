@@ -45,22 +45,22 @@
 
   /* Base text */
   --text-primary: #1a1a1a;
-  --text-secondary: #666666;
+  --text-secondary: #5c5c5c;
   --text-tertiary: #8a8a8a;
   --text-muted: var(--text-secondary);
 
   /* Lines / separators */
-  --border: #d4d4d4;
+  --border: #e0e0e0;
   --border-strong: #c8c8c8;
 
   /* Brand / interactive */
-  --accent: #0066cc;
+  --accent: #0969da;
   /* Hover/active states for solid accent surfaces (primary buttons, File tab, etc). */
-  --accent-hover: #006bd6;
-  --accent-active: #005cb8;
-  --accent-light: #e6f0ff;
+  --accent-hover: #096ee4;
+  --accent-active: #095fc6;
+  --accent-light: #ddf4ff;
   --accent-bg: var(--accent-light);
-  --accent-border: var(--accent);
+  --accent-border: #54aeff;
   /* Hyperlinks */
   --link: #0969da;
 
@@ -81,11 +81,11 @@
   --text-on-accent: #ffffff;
 
   /* Selection / focus */
-  --selection-bg: var(--accent-bg);
-  --selection-border: var(--accent-border);
+  --selection-bg: rgba(9, 105, 218, 0.08);
+  --selection-border: var(--accent);
   --selection-text: var(--text-primary);
   /* Selection fill used for canvas overlays (must be translucent so cell text remains readable). */
-  --selection-fill: rgba(0, 102, 204, 0.12);
+  --selection-fill: rgba(9, 105, 218, 0.12);
 
   /* Grid chrome */
   --grid-header-bg: var(--bg-secondary);
@@ -215,6 +215,7 @@
   --accent-hover: #51aeff;
   --accent-active: #499ef2;
   --accent-light: #1a3a5c;
+  --accent-border: var(--accent);
   --link: #4da6ff;
 
   --error: #f44336;
@@ -227,6 +228,7 @@
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
 
+  --selection-bg: rgba(77, 166, 255, 0.18);
   --selection-fill: rgba(77, 166, 255, 0.18);
 
   --formula-ref-color: #c4b5fd;
@@ -282,6 +284,8 @@
   --titlebar-window-maximize: CanvasText;
 
   --text-on-accent: HighlightText;
+  --selection-bg: Highlight;
+  --selection-border: Highlight;
   --selection-text: HighlightText;
   --selection-fill: transparent;
 
@@ -387,6 +391,8 @@
     --titlebar-window-maximize: CanvasText;
 
     --text-on-accent: HighlightText;
+    --selection-bg: Highlight;
+    --selection-border: Highlight;
     --selection-text: HighlightText;
     --selection-fill: transparent;
 

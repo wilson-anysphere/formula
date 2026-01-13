@@ -609,10 +609,10 @@ Theme preference is persisted (desktop: `localStorage` key `formula.settings.app
   --bg-secondary: #f5f5f5;
   --bg-tertiary: #e8e8e8;
   --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --border: #d4d4d4;
-  --accent: #0066cc;
-  --accent-light: #e6f0ff;
+  --text-secondary: #5c5c5c;
+  --border: #e0e0e0;
+  --accent: #0969da;
+  --accent-light: #ddf4ff;
   --link: #0969da;
   --error: #d32f2f;
   --warning: #ed6c02;

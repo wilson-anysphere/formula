@@ -118,20 +118,26 @@ FUNCTIONALITY (# of Excel buttons/features)
 
 ```css
 /* Backgrounds */
---bg-app: #f8f8f8;
---bg-surface: #ffffff;
---bg-hover: #f0f0f0;
+--bg-app: #f5f5f5;
+--bg-surface: #fafafa;
+--bg-hover: #eeeeee;
 
 /* Text */
---text-primary: #1f1f1f;
---text-secondary: #6e6e6e;
+--text-primary: #1a1a1a;
+--text-secondary: #5c5c5c;
 
 /* Borders */
---border: #e5e5e5;
---border-strong: #d0d0d0;
+--border: #e0e0e0;
+--border-strong: #c8c8c8;
 
 /* Accent */
---accent: #0066cc;
+--accent: #0969da;
+--accent-bg: #ddf4ff;
+--accent-border: #54aeff;
+
+/* Selection */
+--selection-bg: rgba(9, 105, 218, 0.08);
+--selection-border: #0969da;
 --link: #0969da;
 
 /* Grid */
