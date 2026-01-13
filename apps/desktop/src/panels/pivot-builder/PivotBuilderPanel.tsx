@@ -201,6 +201,7 @@ export function PivotBuilderPanel({
                     <div className="pivot-builder__meta-label">{t("pivotBuilder.value.aggregationLabel")}</div>
                     <select
                       data-testid={`pivot-value-aggregation-${idx}`}
+                      className="pivot-builder__control pivot-builder__select"
                       value={vf.aggregation}
                       onChange={(e) => updateValueField(idx, { aggregation: e.target.value as AggregationType })}
                     >
@@ -252,7 +253,12 @@ export function PivotBuilderPanel({
         </div>
 
         <div className="pivot-builder__actions-row">
-          <button onClick={() => applyConfig(DEFAULT_CONFIG)} type="button" data-testid="pivot-reset">
+          <button
+            onClick={() => applyConfig(DEFAULT_CONFIG)}
+            type="button"
+            data-testid="pivot-reset"
+            className="pivot-builder__button"
+          >
             {t("pivotBuilder.actions.reset")}
           </button>
           <button
@@ -260,6 +266,7 @@ export function PivotBuilderPanel({
             type="button"
             disabled={Boolean(createDisabled) || config.valueFields.length === 0}
             data-testid="pivot-create"
+            className="pivot-builder__button pivot-builder__button--primary"
           >
             {createLabel ?? t("pivotBuilder.actions.create")}
           </button>

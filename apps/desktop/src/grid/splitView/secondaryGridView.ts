@@ -759,10 +759,9 @@ export class SecondaryGridView {
     }
 
     this.grid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
-    // Row/col overrides change the grid geometry while `drawingsOverlay` keeps a stable
-    // `GridGeometry` reference. Invalidate cached bounds so the next render recomputes
-    // anchors against the updated axis sizes even if the object list reference is unchanged
-    // (e.g. drawings stored in DocumentController).
+    // Axis size overrides mutate the underlying GridGeometry while the `DrawingOverlay` spatial
+    // index is keyed by the stable `geom` object reference. Invalidate the cached bounds so the
+    // overlay recomputes drawing positions under the new row/col sizes.
     this.drawingsOverlay.invalidateSpatialIndex();
     this.grid.syncScrollbars();
     const scroll = this.grid.getScroll();

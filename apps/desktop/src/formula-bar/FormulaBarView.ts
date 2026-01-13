@@ -2571,6 +2571,10 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     try {
       this.#callbacks.onCancel?.();
+    } catch (err) {
+      // Embedding callback errors should not break editing UX (or surface as unhandled
+      // window errors in tests). Log for visibility and keep the view consistent.
+      console.error("FormulaBarView.onCancel threw", err);
     } finally {
       // Even if the embedding callback throws, ensure we still clear hover/range overlays.
       this.#emitOverlays();
@@ -2591,6 +2595,10 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     try {
       this.#callbacks.onCommit(committed, commit);
+    } catch (err) {
+      // Embedding callback errors should not break editing UX (or surface as unhandled
+      // window errors in tests). Log for visibility and keep the view consistent.
+      console.error("FormulaBarView.onCommit threw", err);
     } finally {
       // Even if the embedding callback throws, ensure we still clear hover/range overlays.
       this.#emitOverlays();

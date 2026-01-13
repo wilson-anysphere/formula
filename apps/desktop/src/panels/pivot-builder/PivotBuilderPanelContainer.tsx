@@ -719,6 +719,7 @@ export function PivotBuilderPanelContainer(props: Props) {
               <span className="pivot-builder__label-text">{t("pivotBuilder.source.sheetLabel")}</span>
               <select
                 data-testid="pivot-source-sheet"
+                className="pivot-builder__control pivot-builder__select"
                 value={sourceSheetId}
                 onChange={(e) => setSourceSheetId(e.target.value)}
               >
@@ -733,7 +734,7 @@ export function PivotBuilderPanelContainer(props: Props) {
             <label className="pivot-builder__label">
               <span className="pivot-builder__label-text">{t("pivotBuilder.source.rangeLabel")}</span>
               <input
-                className="pivot-builder__input--range"
+                className="pivot-builder__control pivot-builder__input--range"
                 data-testid="pivot-source-range"
                 value={sourceRangeText}
                 onChange={(e) => setSourceRangeText(e.target.value)}
@@ -741,7 +742,12 @@ export function PivotBuilderPanelContainer(props: Props) {
               />
             </label>
 
-            <button type="button" data-testid="pivot-use-selection" onClick={useCurrentSelection}>
+            <button
+              type="button"
+              data-testid="pivot-use-selection"
+              onClick={useCurrentSelection}
+              className="pivot-builder__button"
+            >
               {t("pivotBuilder.source.useSelection")}
             </button>
           </div>
@@ -779,7 +785,7 @@ export function PivotBuilderPanelContainer(props: Props) {
               <label className="pivot-builder__label">
                 <span className="pivot-builder__label-text">{t("pivotBuilder.destination.sheetName")}</span>
                 <input
-                  className="pivot-builder__input--sheet-name"
+                  className="pivot-builder__control pivot-builder__input--sheet-name"
                   data-testid="pivot-destination-new-sheet-name"
                   value={newSheetName}
                   onChange={(e) => setNewSheetName(e.target.value)}
@@ -790,6 +796,7 @@ export function PivotBuilderPanelContainer(props: Props) {
                 <span className="pivot-builder__label-text">{t("pivotBuilder.destination.sheetLabel")}</span>
                 <select
                   data-testid="pivot-destination-sheet"
+                  className="pivot-builder__control pivot-builder__select"
                   value={destSheetId}
                   onChange={(e) => setDestSheetId(e.target.value)}
                 >
@@ -809,7 +816,7 @@ export function PivotBuilderPanelContainer(props: Props) {
             <label className="pivot-builder__label">
               <span className="pivot-builder__label-text">{t("pivotBuilder.destination.startCell")}</span>
               <input
-                className="pivot-builder__input--cell"
+                className="pivot-builder__control pivot-builder__input--cell"
                 data-testid="pivot-destination-cell"
                 value={destCellA1}
                 onChange={(e) => setDestCellA1(e.target.value)}
@@ -821,7 +828,7 @@ export function PivotBuilderPanelContainer(props: Props) {
         <div className="pivot-builder__section">
           <div className="pivot-builder__section-title">{t("pivotBuilder.name.title")}</div>
           <input
-            className="pivot-builder__input--pivot-name"
+            className="pivot-builder__control pivot-builder__input--pivot-name"
             data-testid="pivot-name"
             value={pivotName}
             onChange={(e) => setPivotName(e.target.value)}
@@ -875,6 +882,7 @@ export function PivotBuilderPanelContainer(props: Props) {
                   data-testid={`pivot-refresh-${p.id}`}
                   onClick={() => void refreshPivot(p.id)}
                   disabled={busy != null || mutationsDisabled}
+                  className="pivot-builder__button"
                 >
                   {t("pivotBuilder.pivots.refresh")}
                 </button>

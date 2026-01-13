@@ -59,14 +59,14 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
     expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
 
-    // JSDOM may log uncaught errors to the virtual console even if we prevent the window error event.
-    // Silence console noise for this resilience regression test.
+    // FormulaBarView defensively guards callbacks so the view isn't left in a broken state
+    // (or surface as unhandled window errors in tests). Silence console noise for this
+    // resilience regression test.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     // In browsers, exceptions thrown inside event listeners are reported as window "error"
-    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so Vitest
-    // doesn't treat it as an unhandled exception, while still asserting the view updated its
-    // internal state before calling the callback.
+    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so
+    // Vitest doesn't treat it as an unhandled exception.
     const onWindowError = vi.fn((event: ErrorEvent) => {
       event.preventDefault();
     });
@@ -76,11 +76,8 @@ describe("FormulaBarView commit/cancel UX", () => {
     consoleError.mockRestore();
 
     expect(onCommit).toHaveBeenCalledTimes(1);
-    // Different JSDOM versions may report the error event more than once (e.g. via multiple
-    // listeners/virtualConsole plumbing). Assert we observed the expected error at least once.
-    expect(onWindowError.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const commitErrors = onWindowError.mock.calls.map(([event]) => (event as ErrorEvent).error).filter(Boolean);
-    expect(commitErrors.some((err) => err instanceof Error && err.message === "commit failure")).toBe(true);
+    expect(onWindowError).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenCalledWith("=A1", { reason: "enter", shift: false });
 
     expect(view.model.isEditing).toBe(false);
     expect(view.model.activeCell.input).toBe("=A1");
@@ -120,14 +117,14 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(cancel.hidden).toBe(false);
     expect(commit.hidden).toBe(false);
 
-    // JSDOM may log uncaught errors to the virtual console even if we prevent the window error event.
-    // Silence console noise for this resilience regression test.
+    // FormulaBarView defensively guards callbacks so the view isn't left in a broken state
+    // (or surface as unhandled window errors in tests). Silence console noise for this
+    // resilience regression test.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     // In browsers, exceptions thrown inside event listeners are reported as window "error"
-    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so Vitest
-    // doesn't treat it as an unhandled exception, while still asserting the view updated its
-    // internal state before calling the callback.
+    // events rather than being rethrown from `dispatchEvent`. Capture + suppress it so
+    // Vitest doesn't treat it as an unhandled exception.
     const onWindowError = vi.fn((event: ErrorEvent) => {
       event.preventDefault();
     });
@@ -137,11 +134,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     consoleError.mockRestore();
 
     expect(onCancel).toHaveBeenCalledTimes(1);
-    // Different JSDOM versions may report the error event more than once (e.g. via multiple
-    // listeners/virtualConsole plumbing). Assert we observed the expected error at least once.
-    expect(onWindowError.mock.calls.length).toBeGreaterThanOrEqual(1);
-    const cancelErrors = onWindowError.mock.calls.map(([event]) => (event as ErrorEvent).error).filter(Boolean);
-    expect(cancelErrors.some((err) => err instanceof Error && err.message === "cancel failure")).toBe(true);
+    expect(onWindowError).not.toHaveBeenCalled();
 
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("=A1");

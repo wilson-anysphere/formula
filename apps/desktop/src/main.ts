@@ -2862,13 +2862,17 @@ app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate())
 app.onEditStateChange(() => {
   emitSpreadsheetEditingChanged();
   scheduleRibbonSelectionFormatStateUpdate();
-  // `renderSheetTabs` references state initialized later in this module. `SpreadsheetApp` can
-  // synchronously fire edit-state callbacks during startup (before the sheet tabs section runs),
-  // which would otherwise hit a TDZ `ReferenceError` and prevent tabs from mounting.
-  //
-  // Defer to a microtask so the module finishes initializing first.
+  // `SpreadsheetApp.onEditStateChange` invokes listeners immediately with the current edit state.
+  // During startup, sheet-tab rendering is wired later in this module; defer to avoid referencing
+  // sheet-tab state before initialization (which can crash the app in e2e).
   const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
-  schedule(() => renderSheetTabs());
+  schedule(() => {
+    try {
+      renderSheetTabs();
+    } catch {
+      // Best-effort during startup; sheet tabs will render once initialization completes.
+    }
+  });
 });
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:read-only-changed", () => {
@@ -2876,7 +2880,13 @@ window.addEventListener("formula:read-only-changed", () => {
   // See `app.onEditStateChange` above: avoid calling `renderSheetTabs` before the sheet-tab
   // module state is initialized.
   const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
-  schedule(() => renderSheetTabs());
+  schedule(() => {
+    try {
+      renderSheetTabs();
+    } catch {
+      // Best-effort during startup.
+    }
+  });
 });
 scheduleRibbonSelectionFormatStateUpdate();
 
