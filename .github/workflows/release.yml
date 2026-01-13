@@ -2029,6 +2029,23 @@ jobs:
               missing=1
             fi
 
+            require_sigs_for_ext() {
+              local label="$1"
+              local ext_re="$2"
+              local missing_sig_bases
+              missing_sig_bases="$(echo "$json" | jq -r --arg ext "$ext_re" '
+                ([.[].name] | unique) as $names |
+                [ $names[]
+                  | select(test($ext; "i"))
+                  | select(($names | index(. + ".sig")) == null)
+                ] | .[]')"
+              if [[ -n "${missing_sig_bases}" ]]; then
+                echo "missing: ${label} signature files (<asset>.sig) for:" >&2
+                echo "${missing_sig_bases}" | sed 's/^/  - /' >&2
+                missing=1
+              fi
+            }
+
             require_sigs_for_arch() {
               local label="$1"
               local arch_re="$2"
@@ -2054,6 +2071,15 @@ jobs:
             # sign of partial uploads or asset clobbering in multi-arch runs.
             require_sigs_for_arch "Windows x64 installer" "$win_x64_re" "$win_arm64_re"
             require_sigs_for_arch "Windows arm64 installer" "$win_arm64_re" "$win_x64_re"
+
+            # Require signatures for each macOS/Linux installer/bundle artifact, not just at least
+            # one signature file. This catches partial uploads where the bundle exists but its `.sig`
+            # was not attached to the GitHub Release.
+            require_sigs_for_ext "macOS DMG" '\\.dmg$'
+            require_sigs_for_ext "macOS app archive" '\\.app\\.tar\\.gz$'
+            require_sigs_for_ext "Linux AppImage" '\\.AppImage$'
+            require_sigs_for_ext "Linux DEB" '\\.deb$'
+            require_sigs_for_ext "Linux RPM" '\\.rpm$'
 
             [[ "$missing" -eq 0 ]]
           }
