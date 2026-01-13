@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { FunctionRegistry, parsePartialFormula as parsePartialFormulaFallback } from "@formula/ai-completion";
 
@@ -6,6 +6,10 @@ import { setLocale } from "../../i18n/index.js";
 import { createLocaleAwarePartialFormulaParser } from "./parsePartialFormula.js";
 
 describe("createLocaleAwarePartialFormulaParser", () => {
+  afterEach(() => {
+    setLocale("en-US");
+  });
+
   it("uses the engine parser for semicolon locales (argIndex + expectingRange)", async () => {
     setLocale("de-DE");
 
