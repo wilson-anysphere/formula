@@ -140,6 +140,28 @@ jobs:
             --release \
             --locked
 
+      - name: Cache cargo-bloat binary
+        if: steps.desktop_bench.outputs.run == 'true'
+        id: cargo-bloat-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-bloat
+          key: cargo-bloat-${{ runner.os }}-${{ runner.arch }}-locked
+          restore-keys: |
+            cargo-bloat-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install cargo-bloat
+        if: steps.desktop_bench.outputs.run == 'true' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: cargo install cargo-bloat --locked
+
+      - name: Report desktop binary size breakdown (cargo-bloat)
+        if: steps.desktop_bench.outputs.run == 'true'
+        # Informational only (for now). The report script writes markdown to both stdout and the
+        # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
+        continue-on-error: true
+        run: python3 scripts/desktop_binary_size_report.py --no-build
+
       - name: Run benchmark suite
         id: perf
         env:
@@ -213,45 +235,3 @@ jobs:
       - name: Fail on absolute target regression
         if: steps.perf.outcome == 'failure'
         run: exit 1
-
-  desktop-binary-size:
-    name: Desktop binary size breakdown (informational)
-    needs: conflict-marker-guard
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
-      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
-      # CARGO_HOME so the shared cache action works as intended.
-      - name: Use shared Cargo home for CI caching
-        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-
-      - name: Install Linux dependencies (Tauri/WebView)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            patchelf
-
-      - name: Install cargo-bloat
-        # cargo-bloat is installed into `$CARGO_HOME/bin`, which is included in PATH on GHA runners.
-        # Keep this step non-blocking so the report script can fall back to llvm-size if needed.
-        continue-on-error: true
-        run: |
-          if ! cargo bloat --version; then
-            cargo install cargo-bloat --locked
-          fi
-
-      - name: Generate size breakdown report
-        # Informational only (for now). The report script writes markdown to both stdout and the
-        # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
-        continue-on-error: true
-        run: python3 scripts/desktop_binary_size_report.py
