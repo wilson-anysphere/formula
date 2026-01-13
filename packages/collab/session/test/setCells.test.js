@@ -148,3 +148,48 @@ test("CollabSession setCells encrypts protected cells and never writes plaintext
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession setCells encryptFormat migrates plaintext `format` into the encrypted payload and removes plaintext", async () => {
+  const docId = "collab-session-setCells-encryption-test-doc-encryptFormat";
+  const doc = new Y.Doc({ guid: docId });
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForProtected = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const session = createCollabSession({ doc, encryption: { keyForCell: keyForProtected, encryptFormat: true } });
+  const sessionNoKey = createCollabSession({ doc, encryption: { keyForCell: () => null, encryptFormat: true } });
+
+  const style = { font: { bold: true } };
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "plaintext");
+    cell.set("format", style);
+    session.cells.set("Sheet1:0:0", cell);
+  });
+
+  await session.setCells([{ cellKey: "Sheet1:0:0", value: "top-secret" }]);
+
+  const encCell = session.cells.get("Sheet1:0:0");
+  assert.ok(encCell, "expected encrypted cell map to exist");
+  assert.equal(encCell.get("value"), undefined);
+  assert.equal(encCell.get("formula"), undefined);
+  assert.equal(encCell.get("format"), undefined);
+  assert.ok(encCell.get("enc"), "expected encrypted payload under `enc`");
+
+  const decrypted = await session.getCell("Sheet1:0:0");
+  assert.deepEqual(decrypted?.format, style);
+
+  const masked = await sessionNoKey.getCell("Sheet1:0:0");
+  assert.equal(masked?.value, "###");
+  assert.equal(masked?.encrypted, true);
+  assert.deepEqual(masked?.format, null);
+
+  session.destroy();
+  sessionNoKey.destroy();
+  doc.destroy();
+});
