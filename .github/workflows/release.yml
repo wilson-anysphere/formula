@@ -33,7 +33,10 @@ permissions:
 # manual re-runs or tag updates can overlap and clobber/partially overwrite the
 # release asset set.
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  # For `workflow_dispatch`, `github.ref` is the branch the workflow is run from, but the release
+  # tag may come from inputs. Key concurrency off the *effective* release tag when provided so
+  # dispatch runs for a given tag can't overlap with the corresponding tag push run.
+  group: desktop-release-${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.tag != '' && (startsWith(github.event.inputs.tag, 'v') && github.event.inputs.tag || format('v{0}', github.event.inputs.tag)) || github.event.inputs.version != '' && (startsWith(github.event.inputs.version, 'v') && github.event.inputs.version || format('v{0}', github.event.inputs.version)) || github.ref_name) || github.ref_name }}
   # Queue (don't cancel) subsequent runs so each tag's release assets are written
   # atomically by a single workflow run.
   cancel-in-progress: false
@@ -236,11 +239,9 @@ jobs:
     needs: validate-version
     strategy:
       fail-fast: false
-      # NOTE: tauri-action updates shared GitHub Release assets (notably `latest.json`)
-      # for the updater. If multiple matrix jobs run in parallel they can race and
-      # overwrite each other, leading to missing platform entries. Serializing the
-      # matrix prevents these release asset / manifest update races.
-      max-parallel: 1
+      # NOTE: `tauri-apps/tauri-action` updates shared GitHub Release assets (notably `latest.json`)
+      # for the updater. Matrix jobs remain parallel for fast releases; we publish a single combined
+      # updater manifest in a dedicated job after all platform builds complete.
       matrix:
         # Pinned runner images keep release workflows deterministic and avoid breakages
         # when GitHub updates the default `*-latest` hosted runner images.
@@ -748,6 +749,18 @@ jobs:
           path: |
             apps/desktop/src-tauri/target/**/release/bundle/**
             target/**/release/bundle/**
+
+      - name: Export updater manifest for merge (latest.json)
+        if: needs.validate-version.outputs.upload == 'true'
+        run: node scripts/ci/export-updater-manifest.mjs "updater-manifest/latest-${{ matrix.cache_target }}.json"
+
+      - name: Upload updater manifest artifact (per-platform)
+        if: needs.validate-version.outputs.upload == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: updater-manifest-${{ matrix.cache_target }}
+          path: updater-manifest/latest-${{ matrix.cache_target }}.json
+          if-no-files-found: error
 
       - name: Assert Windows installer bundle exists for target
         if: runner.os == 'Windows'
@@ -1450,9 +1463,41 @@ jobs:
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py
 
+  publish-updater-manifest:
+    name: Publish combined updater manifest (latest.json)
+    needs: [build, validate-version]
+    # Publishing `latest.json` requires updater signatures (`latest.json.sig`) which are only
+    # produced when TAURI_PRIVATE_KEY is configured. We only publish in the upstream repo or when
+    # forks have configured their own updater key secrets.
+    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download per-platform updater manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: updater-manifest-*
+          path: updater-manifest
+          merge-multiple: true
+
+      - name: Publish combined updater manifest (latest.json + latest.json.sig)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        run: node scripts/ci/publish-updater-manifest.mjs "${{ needs.validate-version.outputs.release_tag }}" updater-manifest
+
   validate-updater-manifest:
     name: Validate combined updater manifest (latest.json)
-    needs: [build, validate-version]
+    needs: [publish-updater-manifest, validate-version]
     # Validating the updater manifest requires updater signatures (`latest.json.sig`), which are
     # only produced when the TAURI_PRIVATE_KEY secret is configured. We always validate in the
     # upstream repo (to avoid accidentally shipping an unsigned updater manifest) and validate in
