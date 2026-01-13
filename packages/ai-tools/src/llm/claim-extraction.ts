@@ -357,41 +357,62 @@ function extractA1ReferencesFromToolCalls(toolCalls: Array<{ name: string; param
 
     if (typeof obj.range === "string") {
       // read_range / compute_statistics / filter_range / detect_anomalies, etc.
-      out.push(...extractA1ReferencesFromText(obj.range));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.range);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
 
     if (typeof obj.source_range === "string") {
       // create_pivot_table
-      out.push(...extractA1ReferencesFromText(obj.source_range));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.source_range);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
     if (typeof obj.sourceRange === "string") {
       // create_pivot_table (camelCase alias; common in some tool-call payloads)
-      out.push(...extractA1ReferencesFromText(obj.sourceRange));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.sourceRange);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
 
     if (typeof obj.data_range === "string") {
       // create_chart
-      out.push(...extractA1ReferencesFromText(obj.data_range));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.data_range);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
     if (typeof obj.dataRange === "string") {
       // create_chart (camelCase alias; common in some tool-call payloads)
-      out.push(...extractA1ReferencesFromText(obj.dataRange));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.dataRange);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
 
     if (typeof obj.cell === "string") {
       // write_cell, etc.
-      out.push(...extractA1ReferencesFromText(obj.cell));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.cell);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
 
     if (typeof obj.destination === "string") {
-      out.push(...extractA1ReferencesFromText(obj.destination));
-      continue;
+      const refs = extractA1ReferencesFromText(obj.destination);
+      if (refs.length) {
+        out.push(...refs);
+        continue;
+      }
     }
 
     if (typeof obj.position === "string") {
