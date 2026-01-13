@@ -6,6 +6,7 @@ import * as Y from "yjs";
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 import { encryptCellPlaintext } from "../packages/collab/encryption/src/index.node.js";
+import { EncryptedRangeManager, createEncryptionPolicyFromDoc } from "../packages/collab/encrypted-ranges/src/index.ts";
 
 const REMOTE_ORIGIN = Symbol("remote");
 
@@ -278,4 +279,75 @@ test("Yjs↔DocumentController binder prefers encrypted payloads over plaintext 
 
   assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
   assert.equal(controllerB.getCell("Sheet1", "A1").formula, null);
+});
+
+test("Yjs↔DocumentController binder blocks plaintext writes when shouldEncryptCell requires encryption but key is missing (encryptedRanges policy)", async (t) => {
+  const docId = "collab-binder-encryption-test-doc-encryptedRanges-policy";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(5);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  // Define the protected/encrypted range in the shared workbook metadata.
+  const ranges = new EncryptedRangeManager({ doc: docA });
+  ranges.add({ sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 0, keyId: "k-range-1" });
+
+  const policy = createEncryptionPolicyFromDoc(docB);
+  assert.equal(policy.shouldEncryptCell({ sheetId: "Sheet1", row: 0, col: 0 }), true);
+
+  const controllerA = new DocumentController();
+  const controllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({
+    ydoc: docA,
+    documentController: controllerA,
+    defaultSheetId: "Sheet1",
+    userId: "u-a",
+    encryption: { keyForCell: keyForA1 },
+  });
+
+  const binderB = bindYjsToDocumentController({
+    ydoc: docB,
+    documentController: controllerB,
+    defaultSheetId: "Sheet1",
+    userId: "u-b",
+    // No key material on B, but B still knows the encryption policy (ranges + key ids).
+    encryption: { keyForCell: () => null, shouldEncryptCell: policy.shouldEncryptCell },
+  });
+
+  t.after(() => {
+    binderA.destroy();
+    binderB.destroy();
+    disconnect();
+    docA.destroy();
+    docB.destroy();
+  });
+
+  // Before any encrypted payload exists in Yjs, a client without keys should still refuse
+  // to write plaintext into a cell that must be encrypted.
+  controllerB.setCellValue("Sheet1", "A1", "hacked");
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value !== "hacked", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, null);
+
+  // Ensure no plaintext leaked into the shared Yjs doc.
+  assert.equal(docA.getMap("cells").has("Sheet1:0:0"), false);
+
+  // Now write from an authorized client. It should encrypt the cell.
+  controllerA.setCellValue("Sheet1", "A1", "top-secret");
+  await waitForCondition(() => controllerB.getCell("Sheet1", "A1").value === "###", 10_000);
+  assert.equal(controllerB.getCell("Sheet1", "A1").value, "###");
+
+  const cellMap = docA.getMap("cells").get("Sheet1:0:0");
+  assert.ok(cellMap, "expected Yjs cell map to exist");
+  assert.equal(cellMap.get("value"), undefined);
+  assert.equal(cellMap.get("formula"), undefined);
+  assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
+  assert.equal(JSON.stringify(cellMap.toJSON()).includes("top-secret"), false);
 });
