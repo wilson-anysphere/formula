@@ -374,7 +374,14 @@ npx playwright install-deps
 # Tauri can build without display, but needs libraries
 sudo apt-get install -y \
   libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
-  librsvg2-dev patchelf
+  librsvg2-dev libssl-dev patchelf
+
+# If you need to build the Linux release bundles locally (.AppImage + .deb + .rpm),
+# install the additional bundler prerequisites:
+sudo apt-get install -y squashfs-tools fakeroot rpm
+
+# `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
+sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
 
 # Note: some distros still use `libwebkit2gtk-4.0-dev` and/or `libappindicator3-dev`.
 
