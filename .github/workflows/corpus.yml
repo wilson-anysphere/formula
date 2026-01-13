@@ -325,6 +325,7 @@ jobs:
           print("\n".join(lines))
           PY
       - name: Compatibility gate (private)
+        if: always()
         run: |
           if [ ! -f tools/corpus/out/private/summary.json ]; then
             echo "No private summary.json; skipping compatibility gate."
