@@ -13,7 +13,7 @@ export {
 
 export { chunkWorkbook } from "./workbook/chunkWorkbook.js";
 export { chunkToText } from "./workbook/chunkToText.js";
-export { rectToA1 } from "./workbook/rect.js";
+export { cellToA1, rectToA1 } from "./workbook/rect.js";
 export { workbookFromSpreadsheetApi } from "./workbook/fromSpreadsheetApi.js";
 
 export { indexWorkbook, approximateTokenCount } from "./pipeline/indexWorkbook.js";
