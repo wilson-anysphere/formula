@@ -599,6 +599,12 @@
     /* Keep the preview visible when the sidebar content grows. */
     max-block-size: clamp(180px, 35vh, 320px);
   }
+
+  .query-editor__schema {
+    /* Prevent large schemas/status blocks from pushing the preview off-screen. */
+    max-block-size: clamp(120px, 25vh, 220px);
+    overflow: auto;
+  }
 }
 
 @container (max-width: 520px) {
@@ -654,6 +660,11 @@
       border-inline-end: none;
       border-bottom: 1px solid var(--panel-border);
       max-height: clamp(180px, 35vh, 320px);
+    }
+
+    .query-editor__schema {
+      max-height: clamp(120px, 25vh, 220px);
+      overflow: auto;
     }
   }
 
