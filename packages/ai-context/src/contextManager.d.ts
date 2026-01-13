@@ -214,6 +214,8 @@ export class ContextManager {
     dlp?: DlpOptions;
   }): Promise<BuildContextResult>;
 
+  clearSheetIndexCache(options?: { clearStore?: boolean; signal?: AbortSignal }): Promise<void>;
+
   buildWorkbookContext(params: {
     workbook: WorkbookRagWorkbook;
     query: string;

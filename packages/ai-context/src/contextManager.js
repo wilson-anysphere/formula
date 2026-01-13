@@ -355,6 +355,44 @@ export class ContextManager {
   }
 
   /**
+   * Clear the single-sheet RAG indexing cache.
+   *
+   * Note: This only affects the in-memory, sheet-level RagIndex used by `buildContext()`.
+   * It does not impact workbook-level RAG (`buildWorkbookContext()`), which uses a caller-
+   * supplied persistent vector store.
+   *
+   * @param {{ clearStore?: boolean, signal?: AbortSignal }} [options]
+   */
+  async clearSheetIndexCache(options = {}) {
+    const signal = options.signal;
+    const clearStore = options.clearStore === true;
+    throwIfAborted(signal);
+
+    this._sheetIndexCache.clear();
+    this._sheetNameToActiveCacheKey.clear();
+
+    if (!clearStore) return;
+    const store = this.ragIndex?.store;
+    if (!store) return;
+
+    // Prefer the store's deleteByPrefix API so callers can abort long clears.
+    // Passing an empty prefix clears all ids (every string starts with "").
+    if (typeof store.deleteByPrefix === "function") {
+      await store.deleteByPrefix("", { signal });
+      return;
+    }
+
+    // Fall back to common in-memory store shapes.
+    if (typeof store.clear === "function") {
+      await store.clear();
+      return;
+    }
+    if (store.items && typeof store.items.clear === "function") {
+      store.items.clear();
+    }
+  }
+
+  /**
    * Index a sheet into the in-memory RAG store, with incremental caching by sheet signature.
    *
    * Returns the extracted schema (reused from chunking/indexing when possible).

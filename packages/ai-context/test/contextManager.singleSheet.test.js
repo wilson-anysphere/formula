@@ -198,6 +198,25 @@ test("buildContext: LRU cache eviction removes old sheet chunks from the in-memo
   assert.equal(cm.ragIndex.store.size, 2);
 });
 
+test("clearSheetIndexCache: clears cached entries and can clear the in-memory store", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(cm.ragIndex.store.size, 1);
+
+  await cm.clearSheetIndexCache({ clearStore: true });
+  assert.equal(cm.ragIndex.store.size, 0);
+
+  // Subsequent calls should still work and re-index as needed.
+  await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(cm.ragIndex.store.size, 1);
+});
+
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;
