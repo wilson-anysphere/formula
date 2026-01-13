@@ -194,6 +194,18 @@ test("IndexedDBBinaryStorage clears corrupted records on load", async () => {
   expect(await listKeys(dbName, "binary")).not.toContain(storage.key);
 });
 
+test("IndexedDBBinaryStorage remove is safe when key is missing", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-remove-missing");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-missing",
+  });
+
+  await expect(storage.remove()).resolves.toBeUndefined();
+  expect(await storage.load()).toBeNull();
+});
+
 test("IndexedDBBinaryStorage retries opening after a transient open failure", async () => {
   const dbName = uniqueDbName("ai-rag-idb-retry");
   const storage = new IndexedDBBinaryStorage({
@@ -220,4 +232,29 @@ test("IndexedDBBinaryStorage retries opening after a transient open failure", as
 
   await storage.save(new Uint8Array([1, 2, 3]));
   expect(Array.from((await storage.load()) ?? [])).toEqual([1, 2, 3]);
+});
+
+test("IndexedDBBinaryStorage can load Blob values (legacy storage shape)", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-blob");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-blob",
+  });
+
+  // Seed the DB so the object store exists, then overwrite the stored value with a Blob.
+  await storage.save(new Uint8Array([0]));
+
+  const blob = new Blob([new Uint8Array([1, 2, 3, 4])]);
+  const req = fakeIndexedDB.open(dbName, 1);
+  const db = await requestToPromise(req);
+  try {
+    const tx = db.transaction("binary", "readwrite");
+    tx.objectStore("binary").put(blob, storage.key);
+    await transactionToPromise(tx);
+  } finally {
+    db.close();
+  }
+
+  expect(Array.from((await storage.load()) ?? [])).toEqual([1, 2, 3, 4]);
 });
