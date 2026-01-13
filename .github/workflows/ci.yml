@@ -291,7 +291,36 @@ jobs:
             patchelf
 
       - name: Build desktop binary (Rust, release)
+        id: build_desktop_binary
         run: cargo build -p formula-desktop-tauri --features desktop --release --locked
+
+      - name: Cache cargo-bloat binary
+        if: always() && steps.build_desktop_binary.outcome == 'success'
+        id: cargo-bloat-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-bloat
+          # Include the pinned Rust toolchain hash so Rust upgrades force a fresh install
+          # (ensuring CI validates the new toolchain can still build required cargo-installed tools).
+          key: cargo-bloat-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-bloat-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}-
+            cargo-bloat-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install cargo-bloat
+        if: always() && steps.build_desktop_binary.outcome == 'success' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: cargo install cargo-bloat --locked
+
+      - name: Desktop Rust binary size breakdown (cargo-bloat)
+        if: always() && steps.build_desktop_binary.outcome == 'success'
+        # Informational only (for now). The report script writes markdown to both stdout and the
+        # job summary (`GITHUB_STEP_SUMMARY`) so it shows up directly in the PR UI.
+        continue-on-error: true
+        env:
+          FORMULA_ENFORCE_DESKTOP_BINARY_SIZE: ${{ vars.FORMULA_ENFORCE_DESKTOP_BINARY_SIZE }}
+          FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB }}
+        run: python3 scripts/desktop_binary_size_report.py --no-build
 
       - name: Desktop size report (binary + dist)
         env:
