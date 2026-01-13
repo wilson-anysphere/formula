@@ -29,6 +29,9 @@ You can tweak parameters:
 
 ```bash
 node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --runs 200 --warmup 50 --budget-ms 100
+
+# Or via pnpm (note the extra `--` to forward args):
+pnpm bench:tab-completion -- --runs 200 --warmup 50 --budget-ms 100
 ```
 
 You can also write JSON output (useful for CI/perf tooling):

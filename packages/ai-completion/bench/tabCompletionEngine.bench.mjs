@@ -6,7 +6,11 @@
  *
  * Run:
  *   node packages/ai-completion/bench/tabCompletionEngine.bench.mjs
+ *   pnpm bench:tab-completion
  *   pnpm -C packages/ai-completion bench:tab-completion
+ *
+ * Passing options through pnpm:
+ *   pnpm bench:tab-completion -- --runs 200 --warmup 50
  *
  * CI:
  *   The script automatically enforces the latency budget when `CI=1` or when
