@@ -65,6 +65,8 @@ releasable state.
 Run them locally from the repo root:
 
 ```bash
+# Note: CI/release workflows run these scripts under Node 22 (see release.yml).
+# Using the same major locally reduces "works locally, breaks in release" drift.
 # Ensures the pinned TAURI_CLI_VERSION in .github/workflows/release.yml matches the Tauri crate major/minor.
 node scripts/ci/check-tauri-cli-version.mjs
 
