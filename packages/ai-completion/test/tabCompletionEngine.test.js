@@ -2957,6 +2957,52 @@ test("Sheet-qualified whole-column ranges still allow auto-closing parens (=SUM(
   );
 });
 
+test("Sheet-qualified complete ranges still allow auto-closing parens (=SUM(Sheet2!A1:A10 → ...))", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2", "My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A1:A10";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A1:A10)"),
+    `Expected an auto-closed paren suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Quoted sheet-qualified complete ranges still allow auto-closing parens (=SUM('My Sheet'!A1:A10 → ...))", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2", "My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('My Sheet'!A1:A10";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('My Sheet'!A1:A10)"),
+    `Expected an auto-closed paren suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges work when the quoted sheet name contains a comma", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Jan,2024!A${r}`] = r;

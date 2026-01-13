@@ -555,6 +555,19 @@ export class TabCompletionEngine {
               surroundingCells: context?.surroundingCells,
               sheetName,
             });
+            // If the user already typed a complete range like Sheet2!A1:A10, rangeSuggester
+            // intentionally returns no candidates (it focuses on *expanding* prefixes).
+            // Still offer a useful completion by auto-closing parens when the function could
+            // be complete.
+            if (
+              rangeCandidates.length === 0 &&
+              cursor === input.length &&
+              functionCouldBeComplete &&
+              looksLikeCompleteA1RangeArg(sheetArg.rangePrefix) &&
+              closeUnbalancedParens(input) !== input
+            ) {
+              addReplacement(rawPrefix, { confidence: 0.25 });
+            }
             for (const candidate of rangeCandidates) {
               // Only emit suggestions that can be represented as a pure insertion at the
               // caret (i.e. candidate.range must start with the user-typed range prefix).
