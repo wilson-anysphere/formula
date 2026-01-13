@@ -2155,17 +2155,18 @@ function initAggState(): AggState {
 function updateAggState(state: AggState, value: CellScalar) {
   if (value == null) return;
   state.count += 1;
-  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  const numeric = parseSpreadsheetNumber(value);
+  if (numeric === null) return;
   const nextCount = state.countNumbers + 1;
   state.countNumbers = nextCount;
-  state.sum += value;
-  state.product *= value;
-  state.min = Math.min(state.min, value);
-  state.max = Math.max(state.max, value);
+  state.sum += numeric;
+  state.product *= numeric;
+  state.min = Math.min(state.min, numeric);
+  state.max = Math.max(state.max, numeric);
 
-  const delta = value - state.mean;
+  const delta = numeric - state.mean;
   state.mean += delta / nextCount;
-  const delta2 = value - state.mean;
+  const delta2 = numeric - state.mean;
   state.m2 += delta * delta2;
 }
 

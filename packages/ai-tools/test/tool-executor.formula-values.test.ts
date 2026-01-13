@@ -244,10 +244,11 @@ describe("ToolExecutor include_formula_values", () => {
     workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "Value" });
     workbook.setCell(parseA1Cell("Sheet1!C1"), { value: "Unused" });
     workbook.setCell(parseA1Cell("Sheet1!A2"), { value: "A" });
-    workbook.setCell(parseA1Cell("Sheet1!B2"), { formula: "=1+9", value: 10 });
+    // Simulate a backend that stores computed values as formatted strings.
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { formula: "=1+9", value: "10" });
     workbook.setCell(parseA1Cell("Sheet1!C2"), { value: 0 });
     workbook.setCell(parseA1Cell("Sheet1!A3"), { value: "A" });
-    workbook.setCell(parseA1Cell("Sheet1!B3"), { value: 20 });
+    workbook.setCell(parseA1Cell("Sheet1!B3"), { value: "20" });
     workbook.setCell(parseA1Cell("Sheet1!C3"), { value: 0 });
 
     const executor = new ToolExecutor(workbook, { include_formula_values: true });
