@@ -1812,6 +1812,117 @@ fn rich_values_support_bracketed_field_access_formulas() {
 }
 
 #[wasm_bindgen_test]
+fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    #[serde(rename_all = "camelCase")]
+    struct PivotCalculationResult {
+        writes: Vec<CellChange>,
+    }
+
+    let mut wb = WasmWorkbook::new();
+
+    // Source data (headers + records).
+    wb.set_cell("A1".to_string(), JsValue::from_str("Category"), None)
+        .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("Amount"), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("A"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_f64(10.0), None)
+        .unwrap();
+    wb.set_cell("A3".to_string(), JsValue::from_str("A"), None)
+        .unwrap();
+    wb.set_cell("B3".to_string(), JsValue::from_f64(5.0), None)
+        .unwrap();
+    wb.set_cell("A4".to_string(), JsValue::from_str("B"), None)
+        .unwrap();
+    wb.set_cell("B4".to_string(), JsValue::from_f64(7.0), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let config = formula_model::pivots::PivotConfig {
+        row_fields: vec![formula_model::pivots::PivotField::new("Category")],
+        column_fields: vec![],
+        value_fields: vec![formula_model::pivots::ValueField {
+            source_field: "Amount".to_string(),
+            name: "Sum of Amount".to_string(),
+            aggregation: formula_model::pivots::AggregationType::Sum,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }],
+        filter_fields: vec![],
+        calculated_fields: vec![],
+        calculated_items: vec![],
+        layout: formula_model::pivots::Layout::Tabular,
+        subtotals: formula_model::pivots::SubtotalPosition::None,
+        grand_totals: formula_model::pivots::GrandTotals {
+            rows: true,
+            columns: false,
+        },
+    };
+    let config_js = serde_wasm_bindgen::to_value(&config).unwrap();
+
+    let result_js = wb
+        .calculate_pivot(
+            DEFAULT_SHEET.to_string(),
+            "A1:B4".to_string(),
+            "D1".to_string(),
+            config_js,
+        )
+        .unwrap();
+    let result: PivotCalculationResult = serde_wasm_bindgen::from_value(result_js).unwrap();
+
+    assert_eq!(
+        result.writes,
+        vec![
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "D1".to_string(),
+                value: json!("Category"),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "E1".to_string(),
+                value: json!("Sum of Amount"),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "D2".to_string(),
+                value: json!("A"),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "E2".to_string(),
+                value: json!(15.0),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "D3".to_string(),
+                value: json!("B"),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "E3".to_string(),
+                value: json!(7.0),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "D4".to_string(),
+                value: json!("Grand Total"),
+            },
+            CellChange {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "E4".to_string(),
+                value: json!(22.0),
+            },
+        ]
+    );
+}
+
+#[wasm_bindgen_test]
 fn rich_values_support_nested_field_access_formulas() {
     let mut wb = WasmWorkbook::new();
 
