@@ -2545,7 +2545,61 @@ function estimateReadRangeChars(values: CellScalar[][], formulas?: Array<Array<s
 
 function estimateJsonScalarChars(value: unknown): number {
   if (value === null || value === undefined) return 4; // "null"
-  if (typeof value === "string") return value.length + 2; // quotes
+  if (typeof value === "string") {
+    // Estimate `JSON.stringify(value).length` without allocating.
+    //
+    // `value.length + 2` underestimates when the string contains characters that must be
+    // escaped during JSON serialization (e.g. quotes/backslashes/control chars). This
+    // estimate is used for `max_read_range_chars` enforcement and must account for the
+    // JSON-escaped size to prevent limit bypasses.
+    let chars = 2; // surrounding quotes
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+
+      // Fast-path common escapes.
+      if (code === 0x22 /* " */ || code === 0x5c /* \\ */) {
+        chars += 2;
+        continue;
+      }
+
+      // Control characters must be escaped.
+      if (code < 0x20) {
+        // JSON.stringify uses short escape sequences for a subset of control chars.
+        if (code === 0x08 /* \b */ || code === 0x09 /* \t */ || code === 0x0a /* \n */ || code === 0x0c /* \f */ || code === 0x0d /* \r */) {
+          chars += 2;
+        } else {
+          chars += 6; // \u00XX
+        }
+        continue;
+      }
+
+      // JSON.stringify escapes U+2028/U+2029 for JS compatibility.
+      if (code === 0x2028 || code === 0x2029) {
+        chars += 6; // \u2028 / \u2029
+        continue;
+      }
+
+      // Handle lone surrogate halves (JS strings can contain them, but JSON output must not).
+      if (code >= 0xd800 && code <= 0xdfff) {
+        const isHigh = code <= 0xdbff;
+        if (isHigh && i + 1 < value.length) {
+          const next = value.charCodeAt(i + 1);
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            // Valid surrogate pair: JSON.stringify preserves both code units.
+            chars += 2;
+            i += 1;
+            continue;
+          }
+        }
+        // Unpaired surrogate: JSON.stringify escapes it as \uXXXX.
+        chars += 6;
+        continue;
+      }
+
+      chars += 1;
+    }
+    return chars;
+  }
   if (typeof value === "number") return String(value).length;
   if (typeof value === "boolean") return value ? 4 : 5;
   // Defensive (CellScalar should not include objects).

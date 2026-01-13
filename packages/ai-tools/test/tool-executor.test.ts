@@ -656,6 +656,33 @@ describe("ToolExecutor", () => {
     expect(result.error?.message).toMatch(/max_read_range_chars/i);
   });
 
+  it("read_range enforces max_read_range_chars using JSON-escaped string length (quotes/backslashes)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    // Keep the limit small so we can exercise escaping overhead.
+    const executor = new ToolExecutor(workbook, { max_read_range_chars: 30 });
+
+    // Raw length = 20, but JSON-escaped length = 42 (each quote/backslash becomes 2 chars, plus outer quotes).
+    // This used to bypass the limit when we estimated `value.length + 2`.
+    const escapey = '"\\'.repeat(10);
+    const set = await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: "Sheet1!A1:A1",
+        values: [[escapey]],
+      },
+    });
+    expect(set.ok).toBe(true);
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toMatch(/max_read_range_chars/i);
+  });
+
   it("apply_formatting returns runtime_error when SpreadsheetApi.applyFormatting throws", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]) as any;
     workbook.applyFormatting = () => {
