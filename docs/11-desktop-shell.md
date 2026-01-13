@@ -376,7 +376,7 @@ Notable keys:
     - Guardrail: `node scripts/check-macos-entitlements.mjs` (also run in CI).
   - `bundle.windows.timestampUrl` should be an **HTTPS** timestamp server (avoid plaintext HTTP Authenticode timestamping). Release CI guardrails enforce this (see `scripts/ci/check-windows-timestamp-url.mjs` and `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 - `bundle.windows.webviewInstallMode` controls how Windows installers ensure the Microsoft Edge **WebView2** runtime is present.
-  - This repo uses the Evergreen bootstrapper mode so installs work on machines without WebView2 (see `docs/release.md` for details and offline alternatives).
+  - This repo pins the Evergreen bootstrapper mode (`downloadBootstrapper`, `silent: true`) so installs work on machines without WebView2 (requires internet if the runtime is missing). See `docs/release.md` for details and offline alternatives.
 
 ### Distribution (GitHub Releases)
 
