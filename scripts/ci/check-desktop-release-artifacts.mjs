@@ -430,9 +430,37 @@ function requirementsForOs(os) {
     ];
   }
   if (os === "windows") {
+    const isWindowsBundleMsi = (p) => {
+      // Only count Tauri-produced installers, not any random `.msi` that might appear under
+      // `bundle/**` (or future helper tooling output).
+      const normalized = p.split(path.sep).join("/").toLowerCase();
+      return normalized.endsWith(".msi") && normalized.includes("/release/bundle/msi/");
+    };
+
+    const isWindowsBundleExe = (p) => {
+      // Only count Tauri-produced NSIS installers under:
+      // - bundle/nsis/*.exe
+      // - bundle/nsis-web/*.exe
+      //
+      // Exclude embedded helper installers (notably WebView2 bootstrapper/runtime installers),
+      // which may be present as standalone files in the bundle dir but are not the Formula
+      // installer we ship on GitHub Releases.
+      const normalized = p.split(path.sep).join("/").toLowerCase();
+      if (!normalized.endsWith(".exe")) return false;
+      if (
+        !normalized.includes("/release/bundle/nsis/") &&
+        !normalized.includes("/release/bundle/nsis-web/")
+      ) {
+        return false;
+      }
+      const base = path.basename(p).toLowerCase();
+      if (base.startsWith("microsoftedgewebview2")) return false;
+      return true;
+    };
+
     return [
-      { label: "Windows installer (.msi)", matchBase: (p) => p.endsWith(".msi") },
-      { label: "Windows installer (.exe)", matchBase: (p) => p.endsWith(".exe") },
+      { label: "Windows installer (.msi)", matchBase: isWindowsBundleMsi },
+      { label: "Windows installer (.exe)", matchBase: isWindowsBundleExe },
     ];
   }
   if (os === "linux") {
