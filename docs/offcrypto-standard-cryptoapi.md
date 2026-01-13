@@ -271,22 +271,24 @@ function CryptDeriveKey(Hash, H_block, keyLen):
 This is sufficient for Standard encryption because Office only requests up to 32 bytes of key material
 (AES-256), and `SHA1(inner||outer)` yields 40 bytes.
 
-### 5.3) IV derivation (AES-CBC)
+### 5.3) IV derivation (AES-CBC `EncryptedPackage` segments)
 
 RC4 is a stream cipher and has no IV.
 
-For AES-based Standard encryption, data is commonly encrypted in **independent AES-CBC segments**.
-Each segment `block` uses an IV derived from the verifier `Salt`:
+For **AES** Standard encryption, the `EncryptedPackage` stream is decrypted in independent
+**AES-CBC segments**, each using an IV derived from the `EncryptionVerifier.Salt` and the segment
+index:
 
 ```text
-IV_full = Hash( Salt || LE32(block) )
+IV_full = Hash( Salt || LE32(segmentIndex) )
 IV = IV_full[0:16]   // AES block size
 ```
 
-This IV formula is used both for:
+Important:
 
-* the verifier (`block = 0`), and
-* `EncryptedPackage` segments (`block = 0, 1, 2, ...`) when using per-segment IVs.
+* This IV derivation is for **`EncryptedPackage`** decryption (see §7.2.1).
+* The **password verifier** fields (`EncryptedVerifier` / `EncryptedVerifierHash`) are decrypted with
+  AES in a mode that does **not** use an IV (AES-ECB; see §6.2).
 
 ---
 
@@ -301,13 +303,12 @@ Inputs from `EncryptionVerifier`:
 * `VerifierHashSize` (16 or 20)
 * `EncryptedVerifierHash` (remaining bytes; AES ciphertext may include padding)
 
-### 6.1) Derive block-0 key (+ IV for AES)
+### 6.1) Derive block-0 key
 
 ```text
 H_final  = hash_password(password, Salt, spinCount=50000)         // §4
 H_block0 = Hash( H_final || LE32(0) )                             // §5.1
 key      = CryptDeriveKey(Hash, H_block0, keyLen=KeySize/8)       // §5.2
-iv       = Hash(Salt || LE32(0))[0:16]    // AES only              // §5.3
 ```
 
 ### 6.2) Decrypt verifier + verifier-hash as a *single* stream
@@ -315,6 +316,10 @@ iv       = Hash(Salt || LE32(0))[0:16]    // AES only              // §5.3
 This is the most common implementation bug:
 
 > **Decrypt `EncryptedVerifier` and `EncryptedVerifierHash` together as one ciphertext stream.**
+
+This matters most for **RC4**, where decrypting the two buffers separately would reset the keystream.
+For **AES-ECB**, decrypting separately happens to be equivalent (ECB has no chaining), but treating it
+as one stream keeps the implementation uniform across algorithms.
 
 Steps:
 
@@ -326,9 +331,8 @@ Steps:
 
 2. Decrypt `C` with the cipher indicated by `EncryptionHeader.AlgID` using the derived `key`:
 
-   * **AES**: AES-CBC with `iv` from §6.1 (and `NoPadding` at the crypto layer; padding/truncation
-     is handled by sizes in the container).
-   * **RC4**: RC4 stream cipher with the derived key.
+   * **AES (`CALG_AES_*`)**: AES-ECB over 16-byte blocks (no IV, no padding at the crypto layer).
+   * **RC4 (`CALG_RC4`)**: RC4 stream cipher with the derived key.
 
    This produces plaintext `P`.
 
@@ -397,7 +401,7 @@ segmentSize = 0x1000   // 4096
 For segment index `i = 0, 1, 2, ...`:
 
 1. Use the **same derived key** (`block = 0`) from §6.1 for all segments.
-2. Derive `iv_i = Hash(Salt || LE32(i))[0:16]` (same derivation as §5.3 / §6.1, but with `block=i`).
+2. Derive `iv_i = Hash(Salt || LE32(i))[0:16]` (see §5.3).
 3. Decrypt the segment ciphertext with AES-CBC(key, iv_i).
 4. Append the decrypted bytes and continue until you have at least `OriginalPackageSize` bytes.
 
@@ -457,9 +461,45 @@ key (32 bytes, CryptDeriveKey expansion) =
   de5451b9dc3fcb383792cbeec80b6bc3
   0795c2705e075039407199f7d299b6e4
 
-iv0 (AES-CBC, 16 bytes; block=0) =
+iv0 (AES-CBC `EncryptedPackage` IV for segmentIndex=0) =
   719ea750a65a93d80e1e0ba33a2ba0e7
 ```
+
+### 8.1) Verifier check example (AES-ECB)
+
+The following values are a *synthetic* verifier example that is consistent with the derivation above
+(AES-256 + SHA-1). It is useful as an end-to-end unit test for the verifier logic.
+
+Inputs:
+
+```text
+VerifierPlain (16 bytes) =
+  00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff
+
+SHA1(VerifierPlain) =
+  73 9e 0e 84 90 ea cb cb 2e a1 1d 4a 5d be fb ae 88 8b 09 2e
+
+VerifierHashPlainPadded (32 bytes) =
+  73 9e 0e 84 90 ea cb cb 2e a1 1d 4a 5d be fb ae 88 8b 09 2e
+  00 00 00 00 00 00 00 00 00 00 00 00
+```
+
+Ciphertext (AES-ECB encrypted with `key` from the main example):
+
+```text
+EncryptedVerifier (16 bytes) =
+  25 89 ae bb 86 0b 8a 41 fa 69 0e 76 ed 56 b0 be
+
+EncryptedVerifierHash (32 bytes) =
+  de dd b6 b2 9f 9c d3 82 a0 a2 04 a5 1b 7f df 7e
+  b1 23 3f 14 fe 5c 99 d9 6f 5d e4 db 08 3d 92 5e
+```
+
+Verification procedure:
+
+1. Decrypt `EncryptedVerifier || EncryptedVerifierHash` with AES-ECB using `key`.
+2. Split plaintext into `VerifierPlain` (first 16 bytes) and `VerifierHashPlain` (next 20 bytes).
+3. Compute `SHA1(VerifierPlain)` and compare to `VerifierHashPlain`.
 
 If your implementation produces different bytes for this example, the most likely causes are:
 
