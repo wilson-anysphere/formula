@@ -12,6 +12,8 @@ import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEn
 import { CLASSIFICATION_LEVEL, classificationRank } from "../../../security/dlp/src/classification.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../security/dlp/src/selectors.js";
 
+import { parseSpreadsheetNumber } from "./number-parsing.ts";
+
 const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
 const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
@@ -2269,7 +2271,9 @@ function compareScalars(left: CellScalar | string, right: CellScalar | string): 
   if (left === null) return -1;
   if (right === null) return 1;
 
-  if (typeof left === "number" && typeof right === "number") return left - right;
+  const leftNum = parseSpreadsheetNumber(left);
+  const rightNum = parseSpreadsheetNumber(right);
+  if (leftNum !== null && rightNum !== null) return leftNum - rightNum;
   return String(left).localeCompare(String(right));
 }
 
@@ -2281,21 +2285,21 @@ function matchesCriterion(cell: CellData, criterion: { operator: string; value: 
     case "contains":
       return String(comparable ?? "").includes(String(criterion.value));
     case "greater": {
-      const a = Number(comparable);
-      const b = Number(criterion.value);
-      return Number.isFinite(a) && Number.isFinite(b) && a > b;
+      const a = parseSpreadsheetNumber(comparable);
+      const b = parseSpreadsheetNumber(criterion.value);
+      return a !== null && b !== null && a > b;
     }
     case "less": {
-      const a = Number(comparable);
-      const b = Number(criterion.value);
-      return Number.isFinite(a) && Number.isFinite(b) && a < b;
+      const a = parseSpreadsheetNumber(comparable);
+      const b = parseSpreadsheetNumber(criterion.value);
+      return a !== null && b !== null && a < b;
     }
     case "between": {
       if (criterion.value2 === undefined) return false;
-      const a = Number(comparable);
-      const low = Number(criterion.value);
-      const high = Number(criterion.value2);
-      return Number.isFinite(a) && Number.isFinite(low) && Number.isFinite(high) && a >= low && a <= high;
+      const a = parseSpreadsheetNumber(comparable);
+      const low = parseSpreadsheetNumber(criterion.value);
+      const high = parseSpreadsheetNumber(criterion.value2);
+      return a !== null && low !== null && high !== null && a >= low && a <= high;
     }
     default:
       return false;
@@ -2303,13 +2307,7 @@ function matchesCriterion(cell: CellData, criterion: { operator: string; value: 
 }
 
 function toNumber(cell: CellData): number | null {
-  if (cell.formula) return null;
-  if (typeof cell.value === "number") return cell.value;
-  if (typeof cell.value === "string") {
-    const num = Number(cell.value);
-    return Number.isFinite(num) ? num : null;
-  }
-  return null;
+  return parseSpreadsheetNumber(cell.value);
 }
 
 function median(values: number[]): number {
