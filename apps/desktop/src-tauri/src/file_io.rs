@@ -5529,6 +5529,7 @@ mod tests {
         let options = DiffOptions {
             ignore_parts,
             ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
         };
         let report =
             diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");
@@ -5577,6 +5578,7 @@ mod tests {
         let options = DiffOptions {
             ignore_parts,
             ignore_globs: Vec::new(),
+            ignore_paths: Vec::new(),
         };
         let report =
             diff_workbooks_with_options(fixture_path, &out_path, &options).expect("diff workbooks");

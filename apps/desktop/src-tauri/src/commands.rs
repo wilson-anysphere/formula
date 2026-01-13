@@ -3114,6 +3114,7 @@ pub fn set_macro_ui_context(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn run_macro(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     macro_id: String,
     permissions: Option<Vec<MacroPermission>>,
@@ -3121,6 +3122,10 @@ pub async fn run_macro(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MacroRunResult, String> {
+    ipc_origin::ensure_main_window(window.label(), "macro execution", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "macro execution", ipc_origin::Verb::Is)?;
+
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
@@ -3152,6 +3157,7 @@ pub async fn run_macro(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn run_python_script(
+    window: tauri::WebviewWindow,
     workbook_id: Option<String>,
     code: String,
     permissions: Option<PythonPermissions>,
@@ -3161,6 +3167,14 @@ pub async fn run_python_script(
     state: State<'_, SharedAppState>,
 ) -> Result<PythonRunResult, String> {
     let _ = workbook_id;
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "python script execution",
+        ipc_origin::Verb::Is,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "python script execution", ipc_origin::Verb::Is)?;
+
     crate::ipc_limits::enforce_script_code_size(&code)?;
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
