@@ -1022,6 +1022,11 @@ impl AppState {
                         preserved.sheet_pivot_tables.insert(new_name.clone(), value);
                     }
                 }
+                for preserved_sheet in &mut preserved.workbook_sheets {
+                    if sheet_name_eq_case_insensitive(&preserved_sheet.name, &old_name) {
+                        preserved_sheet.name = new_name.clone();
+                    }
+                }
             }
 
             if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {
@@ -1156,6 +1161,9 @@ impl AppState {
                 for key in keys {
                     preserved.sheet_pivot_tables.remove(&key);
                 }
+                preserved
+                    .workbook_sheets
+                    .retain(|s| !sheet_name_eq_case_insensitive(&s.name, &deleted_name));
             }
 
             if let Some(preserved) = workbook.preserved_drawing_parts.as_mut() {

@@ -16,6 +16,8 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
+#[cfg(any(feature = "desktop", test))]
+use url::Url;
 
 use crate::macro_trust::MacroTrustDecision;
 use crate::resource_limits::{MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES};
@@ -6839,6 +6841,43 @@ pub async fn write_clipboard(
 // behavior consistent across WebViews), the WebView prefers routing outbound HTTP(S) through these
 // Tauri commands so the Rust backend performs the network request.
 
+#[cfg(any(feature = "desktop", test))]
+fn is_local_http_allowed(url: &Url) -> bool {
+    if url.scheme() != "http" {
+        return false;
+    }
+
+    match url.host() {
+        Some(url::Host::Domain(domain)) => {
+            let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+            domain == "localhost" || domain.ends_with(".localhost")
+        }
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn ensure_ipc_network_url_allowed(url: &Url, context: &str, debug_assertions: bool) -> Result<(), String> {
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            if debug_assertions || is_local_http_allowed(url) {
+                Ok(())
+            } else {
+                let host = url.host_str().unwrap_or("<unknown>");
+                Err(format!(
+                    "{context}: http URLs are only allowed for localhost in release builds (got host '{host}'). Use https:// for remote hosts, or http://localhost for local development."
+                ))
+            }
+        }
+        other => Err(format!(
+            "Unsupported url scheme for {context}: {other} (only http/https allowed)"
+        )),
+    }
+}
+
 #[cfg(feature = "desktop")]
 pub use crate::network_fetch::NetworkFetchResult;
 
@@ -6854,6 +6893,9 @@ pub async fn network_fetch(
         "network access",
         ipc_origin::Verb::Is,
     )?;
+
+    let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
+    ensure_ipc_network_url_allowed(&parsed_url, "network_fetch", cfg!(debug_assertions))?;
 
     let init = init.unwrap_or(JsonValue::Null);
     crate::network_fetch::network_fetch_impl(&url, &init).await
@@ -6880,12 +6922,8 @@ fn parse_marketplace_base_url(base_url: &str) -> Result<reqwest::Url, String> {
     let url = reqwest::Url::parse(base_url).map_err(|_| {
         "Marketplace baseUrl must be an absolute http(s) URL when running under Tauri".to_string()
     })?;
-    match url.scheme() {
-        "http" | "https" => Ok(url),
-        other => Err(format!(
-            "Marketplace baseUrl must be http or https (got '{other}')"
-        )),
-    }
+    ensure_ipc_network_url_allowed(&url, "Marketplace baseUrl", cfg!(debug_assertions))?;
+    Ok(url)
 }
 
 #[cfg(feature = "desktop")]
@@ -7309,6 +7347,56 @@ mod tests {
         assert_eq!(decoded, expected);
 
         server.await.expect("server task");
+    }
+
+    #[test]
+    fn ipc_network_scheme_policy_allows_https_everywhere() {
+        let url = Url::parse("https://example.com/").expect("parse url");
+        ensure_ipc_network_url_allowed(&url, "test", false).expect("https should be allowed");
+    }
+
+    #[test]
+    fn ipc_network_scheme_policy_allows_http_localhost_in_release_mode() {
+        let url = Url::parse("http://localhost:3000/").expect("parse url");
+        ensure_ipc_network_url_allowed(&url, "test", false)
+            .expect("http localhost should be allowed in release mode");
+    }
+
+    #[test]
+    fn ipc_network_scheme_policy_denies_http_remote_in_release_mode() {
+        let url = Url::parse("http://example.com/").expect("parse url");
+        let err = ensure_ipc_network_url_allowed(&url, "test", false)
+            .expect_err("http remote should be denied in release mode");
+        assert!(
+            err.contains("http URLs are only allowed for localhost in release builds"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ipc_network_scheme_policy_allows_http_remote_in_debug_mode() {
+        let url = Url::parse("http://example.com/").expect("parse url");
+        ensure_ipc_network_url_allowed(&url, "test", true)
+            .expect("http remote should be allowed in debug mode");
+    }
+
+    #[test]
+    fn local_http_allowlist_matches_expected_hosts() {
+        for candidate in [
+            "http://localhost/",
+            "http://foo.localhost/",
+            "http://127.0.0.1/",
+            "http://[::1]/",
+        ] {
+            let url = Url::parse(candidate).expect("parse url");
+            assert!(is_local_http_allowed(&url), "expected {candidate} to be allowed");
+        }
+
+        let url = Url::parse("http://example.com/").expect("parse url");
+        assert!(
+            !is_local_http_allowed(&url),
+            "expected remote http host to be rejected"
+        );
     }
 
     #[test]

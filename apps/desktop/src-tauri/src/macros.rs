@@ -910,10 +910,11 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
                 truncated.push_str(MESSAGE_TRUNCATED_SUFFIX);
             }
             message = truncated;
-        } else if message.capacity() > max_line_bytes {
-            // Even if the string is short enough, a malicious macro can still force a huge
-            // allocation and pass it through to us. Ensure we don't retain that capacity in the
-            // output buffer.
+        }
+        if message.capacity() > max_line_bytes {
+            // Even if the string is short enough (or was truncated), a malicious macro can still
+            // force a huge allocation and pass it through to us. Ensure we don't retain that
+            // capacity in the output buffer.
             message = message.as_str().to_string();
         }
 
