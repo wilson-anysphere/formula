@@ -4,10 +4,12 @@ use formula_model::Comment;
 
 use crate::XlsxPackage;
 
-mod legacy;
+// These modules are crate-visible so the higher-fidelity `XlsxDocument` read/write pipeline can
+// reuse the existing comment XML parsers/writers without exposing them as part of the public API.
+pub(crate) mod legacy;
 pub(crate) mod import;
-mod persons;
-mod threaded;
+pub(crate) mod persons;
+pub(crate) mod threaded;
 
 pub use legacy::parse_vml_drawing_cells;
 

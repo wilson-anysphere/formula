@@ -152,7 +152,7 @@ pub use writer::{
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, Workbook, WorksheetId};
+use formula_model::{CellRef, CellValue, Comment, Workbook, WorksheetId};
 
 /// Excel date system used to interpret serialized dates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -249,6 +249,27 @@ pub struct XlsxMeta {
     /// Mapping from worksheet cells to rich value record indices (e.g. images-in-cell backed by
     /// `xl/richData/richValue.xml`).
     pub rich_value_cells: HashMap<(WorksheetId, CellRef), u32>,
+    /// Per-worksheet mapping of existing comment-related XML part names discovered on load.
+    ///
+    /// This is populated only for workbooks loaded via [`load_from_bytes`]. It is used by the
+    /// `XlsxDocument` writer to update existing comment parts in-place while preserving unknown
+    /// comment-related parts and worksheet relationship IDs.
+    pub comment_part_names: HashMap<WorksheetId, WorksheetCommentPartNames>,
+    /// Snapshot of worksheet comments as loaded from the original workbook, normalized to a stable
+    /// ordering.
+    ///
+    /// This is used to detect when comments have been edited in-memory so we can rewrite only the
+    /// affected comment XML parts on save.
+    pub comment_snapshot: HashMap<WorksheetId, Vec<Comment>>,
+}
+
+/// OPC part names for comment XML parts referenced from a worksheet's `.rels`.
+#[derive(Debug, Clone, Default)]
+pub struct WorksheetCommentPartNames {
+    /// Legacy note comments (e.g. `xl/comments1.xml`).
+    pub legacy_comments: Option<String>,
+    /// Modern threaded comments (e.g. `xl/threadedComments/threadedComments1.xml`).
+    pub threaded_comments: Option<String>,
 }
 
 /// A workbook paired with the original OPC package parts needed for high-fidelity round-trip.

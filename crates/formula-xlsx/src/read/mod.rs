@@ -9,9 +9,9 @@ use std::path::Path;
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::RichText;
 use formula_model::{
-    normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
-    SheetProtection, SheetVisibility, Workbook, WorkbookProtection, WorkbookWindow,
-    WorkbookWindowState,
+    normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DefinedNameScope,
+    ErrorValue, Range, SheetProtection, SheetVisibility, Workbook, WorkbookProtection,
+    WorkbookWindow, WorkbookWindowState,
 };
 use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
@@ -36,6 +36,7 @@ use crate::{parse_worksheet_hyperlinks, XlsxError};
 use crate::{
     CalcPr, CellMeta, CellValueKind, DateSystem, FormulaMeta, SheetMeta, XlsxDocument, XlsxMeta,
 };
+use crate::WorksheetCommentPartNames;
 use crate::WorkbookKind;
 
 mod rich_values;
@@ -52,6 +53,12 @@ const REL_TYPE_DRAWING: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
 const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
+
+// Worksheet-level comment relationship types.
+const REL_TYPE_COMMENTS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments";
+const REL_TYPE_THREADED_COMMENTS: &str =
+    "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment";
 
 #[derive(Debug, Error)]
 pub enum ReadError {
@@ -651,6 +658,11 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     let mut sheet_meta: Vec<SheetMeta> = Vec::with_capacity(sheets.len());
     let mut cell_meta = std::collections::HashMap::new();
     let mut rich_value_cells = std::collections::HashMap::new();
+    let persons = parse_persons_from_parts(&parts);
+    let mut comment_part_names: std::collections::HashMap<formula_model::WorksheetId, WorksheetCommentPartNames> =
+        std::collections::HashMap::new();
+    let mut comment_snapshot: std::collections::HashMap<formula_model::WorksheetId, Vec<Comment>> =
+        std::collections::HashMap::new();
 
     // Best-effort threaded comment personId -> displayName mapping. Missing/invalid parts should
     // not fail workbook load.
@@ -681,6 +693,16 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let rels_xml_bytes = part_bytes_tolerant(&parts, &rels_part);
         let rels_xml = rels_xml_bytes.map(std::str::from_utf8).transpose()?;
 
+        // Comment part mapping discovered via the worksheet's `.rels`.
+        // We only support *editing* existing comment infrastructure for now.
+        let comment_parts_for_sheet =
+            discover_worksheet_comment_part_names(&sheet.path, rels_xml_bytes);
+        let has_comment_parts = comment_parts_for_sheet.legacy_comments.is_some()
+            || comment_parts_for_sheet.threaded_comments.is_some();
+        if has_comment_parts {
+            comment_part_names.insert(ws_id, comment_parts_for_sheet.clone());
+        }
+
         {
             let ws = workbook
                 .sheet_mut(ws_id)
@@ -706,8 +728,9 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
                     .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
                 ws.conditional_formatting_dxfs = dxfs.clone();
             }
-            // Merged cells (must be parsed before cell content so we don't treat interior
-            // cells as value-bearing).
+            // Merged cells must be parsed before cell content so we don't treat interior cells as
+            // value-bearing, and before comments so comment anchors can normalize to the merged
+            // region's top-left cell.
             let merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str)
                 .map_err(|err| match err {
                     crate::merge_cells::MergeCellsError::Xml(e) => ReadError::Xml(e),
@@ -761,6 +784,11 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             )?;
 
             expand_shared_formulas(ws, ws_id, &cell_meta);
+
+            // Capture a normalized comment snapshot after load so the writer can detect edits.
+            if has_comment_parts {
+                comment_snapshot.insert(ws_id, normalize_worksheet_comments(ws));
+            }
         }
 
         let drawing_objects = load_sheet_drawings_from_parts(
@@ -838,10 +866,95 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             sheets: sheet_meta,
             cell_meta,
             rich_value_cells,
+            comment_part_names,
+            comment_snapshot,
         },
         calc_affecting_edits: false,
         workbook_kind,
     })
+}
+
+fn parse_persons_from_parts(parts: &BTreeMap<String, Vec<u8>>) -> BTreeMap<String, String> {
+    let mut persons = BTreeMap::<String, String>::new();
+    for (path, bytes) in parts {
+        if !path.starts_with("xl/persons/") || !path.ends_with(".xml") {
+            continue;
+        }
+        if let Ok(parsed) = crate::comments::persons::parse_persons_xml(bytes) {
+            persons.extend(parsed);
+        }
+    }
+    persons
+}
+
+fn discover_worksheet_comment_part_names(
+    worksheet_part: &str,
+    worksheet_rels: Option<&[u8]>,
+) -> WorksheetCommentPartNames {
+    let mut out = WorksheetCommentPartNames::default();
+    let Some(rels_bytes) = worksheet_rels else {
+        return out;
+    };
+
+    let rels = match crate::openxml::parse_relationships(rels_bytes) {
+        Ok(r) => r,
+        Err(_) => return out,
+    };
+
+    for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        match rel.type_uri.as_str() {
+            REL_TYPE_COMMENTS => {
+                if out.legacy_comments.is_none() {
+                    let target = resolve_target(worksheet_part, &rel.target);
+                    if !target.is_empty() {
+                        out.legacy_comments = Some(target);
+                    }
+                }
+            }
+            REL_TYPE_THREADED_COMMENTS => {
+                if out.threaded_comments.is_none() {
+                    let target = resolve_target(worksheet_part, &rel.target);
+                    if !target.is_empty() {
+                        out.threaded_comments = Some(target);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
+fn normalize_worksheet_comments(worksheet: &formula_model::Worksheet) -> Vec<Comment> {
+    let mut out: Vec<Comment> = worksheet
+        .iter_comments()
+        .map(|(_, comment)| comment.clone())
+        .collect();
+    out.sort_by(|a, b| {
+        (a.cell_ref.row, a.cell_ref.col, comment_kind_rank(a.kind), &a.id).cmp(&(
+            b.cell_ref.row,
+            b.cell_ref.col,
+            comment_kind_rank(b.kind),
+            &b.id,
+        ))
+    });
+    out
+}
+
+fn comment_kind_rank(kind: CommentKind) -> u8 {
+    match kind {
+        CommentKind::Note => 0,
+        CommentKind::Threaded => 1,
+    }
 }
 
 fn load_rich_value_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut Workbook) {

@@ -5,9 +5,9 @@ use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
-    CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
-    SheetProtection, SheetVisibility, WorkbookProtection, WorkbookWindowState, Worksheet,
-    WorksheetId,
+    CellRef, CellValue, Comment, CommentKind, ErrorValue, Hyperlink, HyperlinkTarget, Outline,
+    OutlineEntry, Range, SheetProtection, SheetVisibility, WorkbookProtection, WorkbookWindowState,
+    Worksheet, WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -903,6 +903,8 @@ fn build_parts(
         parts.insert(sheet_meta.path.clone(), sheet_xml.into_bytes());
     }
 
+    write_back_modified_comment_parts(doc, &sheet_plan.sheets, &sheet_plan.cell_meta_sheet_ids, &mut parts);
+
     Ok(parts)
 }
 
@@ -916,6 +918,101 @@ fn normalize_hyperlinks(links: &[Hyperlink]) -> Vec<Hyperlink> {
     let mut out = links.to_vec();
     out.sort_by(cmp_hyperlink);
     out
+}
+
+fn write_back_modified_comment_parts(
+    doc: &XlsxDocument,
+    sheets: &[SheetMeta],
+    cell_meta_sheet_ids: &HashMap<WorksheetId, WorksheetId>,
+    parts: &mut BTreeMap<String, Vec<u8>>,
+) {
+    for sheet_meta in sheets {
+        let Some(sheet) = doc.workbook.sheet(sheet_meta.worksheet_id) else {
+            continue;
+        };
+
+        // WorksheetId values can differ between the in-memory workbook and the preserved metadata
+        // (e.g. when the model is reconstructed from persisted state). Use the same workbook ->
+        // meta sheet mapping as `cell_meta` and other round-trip metadata.
+        let meta_sheet_id = cell_meta_sheet_ids
+            .get(&sheet_meta.worksheet_id)
+            .copied()
+            .unwrap_or(sheet_meta.worksheet_id);
+
+        let Some(part_names) = doc.meta.comment_part_names.get(&meta_sheet_id) else {
+            continue;
+        };
+        let Some(snapshot) = doc.meta.comment_snapshot.get(&meta_sheet_id) else {
+            continue;
+        };
+
+        let current = normalize_worksheet_comments(sheet);
+        if &current == snapshot {
+            continue;
+        }
+
+        // Rewrite only the comment XML parts that exist in the original workbook.
+        let current_notes = filter_comments_by_kind(&current, CommentKind::Note);
+        let snapshot_notes = filter_comments_by_kind(snapshot, CommentKind::Note);
+        if current_notes != snapshot_notes {
+            if let Some(path) = &part_names.legacy_comments {
+                if parts.contains_key(path) {
+                    parts.insert(
+                        path.clone(),
+                        crate::comments::legacy::write_comments_xml(&current_notes),
+                    );
+                }
+            }
+        }
+
+        let current_threaded = filter_comments_by_kind(&current, CommentKind::Threaded);
+        let snapshot_threaded = filter_comments_by_kind(snapshot, CommentKind::Threaded);
+        if current_threaded != snapshot_threaded {
+            if let Some(path) = &part_names.threaded_comments {
+                if parts.contains_key(path) {
+                    parts.insert(
+                        path.clone(),
+                        crate::comments::threaded::write_threaded_comments_xml(&current_threaded),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn normalize_worksheet_comments(worksheet: &Worksheet) -> Vec<Comment> {
+    let mut out: Vec<Comment> = worksheet
+        .iter_comments()
+        .map(|(_, comment)| comment.clone())
+        .collect();
+    out.sort_by(|a, b| {
+        (a.cell_ref.row, a.cell_ref.col, comment_kind_rank(a.kind), &a.id).cmp(&(
+            b.cell_ref.row,
+            b.cell_ref.col,
+            comment_kind_rank(b.kind),
+            &b.id,
+        ))
+    });
+    out
+}
+
+fn filter_comments_by_kind(comments: &[Comment], kind: CommentKind) -> Vec<Comment> {
+    let mut out: Vec<Comment> = comments
+        .iter()
+        .filter(|comment| comment.kind == kind)
+        .cloned()
+        .collect();
+    out.sort_by(|a, b| {
+        (a.cell_ref.row, a.cell_ref.col, &a.id).cmp(&(b.cell_ref.row, b.cell_ref.col, &b.id))
+    });
+    out
+}
+
+fn comment_kind_rank(kind: CommentKind) -> u8 {
+    match kind {
+        CommentKind::Note => 0,
+        CommentKind::Threaded => 1,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
