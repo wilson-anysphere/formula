@@ -111,6 +111,9 @@ test("chunkWorkbook still produces standalone formulaRegion chunks", () => {
 
 test("chunkWorkbook respects AbortSignal", () => {
   const workbook = makeWorkbook();
+  // Use a large rect to ensure we exercise abort handling even when extraction would
+  // otherwise be expensive.
+  workbook.tables[0].rect = { r0: 0, c0: 0, r1: 999, c1: 999 };
   const abortController = new AbortController();
   abortController.abort();
 

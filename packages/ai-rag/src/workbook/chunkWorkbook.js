@@ -508,6 +508,7 @@ function chunkWorkbook(workbook, options = {}) {
       cells: extractCells(sheet, table.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
+        signal,
       }),
       meta: { tableName: table.name },
     });
@@ -529,6 +530,7 @@ function chunkWorkbook(workbook, options = {}) {
       cells: extractCells(sheet, nr.rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
+        signal,
       }),
       meta: { namedRange: nr.name },
     });
@@ -568,6 +570,7 @@ function chunkWorkbook(workbook, options = {}) {
       const cells = extractCells(sheet, rect, {
         maxRows: extractMaxRows,
         maxCols: extractMaxCols,
+        signal,
       });
 
       // If this region is entirely formulas, prefer a formulaRegion chunk instead of
@@ -638,6 +641,7 @@ function chunkWorkbook(workbook, options = {}) {
         cells: extractCells(sheet, rect, {
           maxRows: extractMaxRows,
           maxCols: extractMaxCols,
+          signal,
         }),
         meta: region.isTruncationFallback
           ? {
