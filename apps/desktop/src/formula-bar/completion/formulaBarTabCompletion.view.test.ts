@@ -2,13 +2,53 @@
  * @vitest-environment jsdom
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
 import { FormulaBarView } from "../FormulaBarView.js";
 import { FormulaBarTabCompletionController } from "../../ai/completion/formulaBarTabCompletion.js";
 
 describe("FormulaBarView tab completion (integration)", () => {
+  it("caps preview evaluation cell reads (MAX_CELL_READS) for large formulas", async () => {
+    const doc = new DocumentController();
+    const getCellSpy = vi.spyOn(doc, "getCell");
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      completionClient: {
+        completeTabCompletion: async () => "=SUM(A1:A6000)",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=";
+    view.textarea.setSelectionRange(1, 1);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM(A1:A6000)");
+    expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
+
+    // The preview evaluator should stop reading after hitting the hard cap.
+    expect(getCellSpy).toHaveBeenCalledTimes(5_000);
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight?.querySelector(".formula-bar-preview")?.textContent).toContain("(preview unavailable)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("uses Cursor backend completion for formula-body suggestions", async () => {
     const doc = new DocumentController();
 
