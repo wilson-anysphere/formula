@@ -11,7 +11,14 @@ export function indexWorkbook(params: {
    * (no API keys / no local model setup). A future Cursor-managed
    * embedding service can replace this to improve retrieval quality.
    */
-  embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> };
+  embedder: {
+    /**
+     * Optional identity string (used for cache keys / persisted metadata).
+     * When absent, `indexWorkbook` falls back to `"unknown-embedder"`.
+     */
+    name?: string;
+    embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]>;
+  };
   sampleRows?: number;
   maxColumnsForSchema?: number;
   maxColumnsForRows?: number;
