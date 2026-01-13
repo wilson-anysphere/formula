@@ -9,6 +9,21 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Git tag to use for the release (optional). Example: v0.2.3"
+        required: false
+        type: string
+      version:
+        description: "Version label for artifacts (optional). Example: 0.2.3"
+        required: false
+        type: string
+      upload:
+        description: "If true, create/update a draft GitHub Release and attach assets. If false, upload bundles as workflow artifacts."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -52,9 +67,79 @@ jobs:
     name: Validate desktop version matches tag
     needs: conflict-marker-guard
     runs-on: ubuntu-24.04
+    outputs:
+      upload: ${{ steps.params.outputs.upload }}
+      release_tag: ${{ steps.params.outputs.release_tag }}
+      artifact_label: ${{ steps.params.outputs.artifact_label }}
+      should_validate_version: ${{ steps.params.outputs.should_validate_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Compute release parameters
+        id: params
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_UPLOAD: ${{ github.event.inputs.upload }}
+        run: |
+          set -euo pipefail
+
+          # Defaults:
+          upload="false"
+          release_tag=""
+
+          # Derive the release tag / artifact label.
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            upload="true"
+            release_tag="${REF_NAME}"
+            artifact_label="${REF_NAME}"
+          else
+            # workflow_dispatch
+            if [[ "${INPUT_UPLOAD:-}" == "true" ]]; then
+              upload="true"
+            fi
+
+            tag="${INPUT_TAG:-}"
+            version="${INPUT_VERSION:-}"
+
+            if [[ -n "${tag}" ]]; then
+              if [[ "${tag}" == v* ]]; then
+                release_tag="${tag}"
+              else
+                release_tag="v${tag}"
+              fi
+              artifact_label="${release_tag}"
+            elif [[ -n "${version}" ]]; then
+              if [[ "${version}" == v* ]]; then
+                release_tag="${version}"
+              else
+                release_tag="v${version}"
+              fi
+              artifact_label="${release_tag}"
+            else
+              short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+              artifact_label="manual-${short_sha}"
+            fi
+
+            if [[ "${upload}" == "true" && -z "${release_tag}" ]]; then
+              echo "error: upload=true requires either the 'tag' or 'version' workflow input." >&2
+              exit 1
+            fi
+          fi
+
+          should_validate_version="false"
+          if [[ "${EVENT_NAME}" == "push" || "${upload}" == "true" ]]; then
+            should_validate_version="true"
+          fi
+
+          echo "upload=${upload}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "artifact_label=${artifact_label}" >> "${GITHUB_OUTPUT}"
+          echo "should_validate_version=${should_validate_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -65,20 +150,20 @@ jobs:
         run: node scripts/ci/check-tauri-cli-version.mjs
 
       - name: Check desktop version matches release tag
-        run: node scripts/check-desktop-version.mjs "${{ github.ref_name }}"
+        if: steps.params.outputs.should_validate_version == 'true'
+        run: node scripts/check-desktop-version.mjs "${{ steps.params.outputs.release_tag }}"
 
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
       - name: Validate Tauri updater signing secrets
-        # This workflow currently only runs on tags, but keep the guard so future
-        # workflow_dispatch runs on branches don't require release secrets.
-        #
         # Forks/dry-runs often do not configure release secrets. We always validate updater
         # signing secrets in the upstream repo (so official releases can't ship without
         # auto-update signatures), and validate in forks only when the user has configured their
         # own updater keys.
-        if: startsWith(github.ref, 'refs/tags/') && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
+        #
+        # Only enforce when we're publishing to a GitHub Release (tag push or workflow_dispatch upload=true).
+        if: steps.params.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
         run: node scripts/ci/check-tauri-updater-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -373,7 +458,7 @@ jobs:
         run: cargo tauri --version
 
       - name: Build and upload release assets (macOS universal)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.validate-version.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -389,13 +474,26 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: --target universal-apple-darwin
-          tagName: ${{ github.ref_name }}
-          releaseName: Formula ${{ github.ref_name }}
+          tagName: ${{ needs.validate-version.outputs.release_tag }}
+          releaseName: Formula ${{ needs.validate-version.outputs.release_tag }}
           releaseBody: |
-            Automated build for ${{ github.ref_name }}.
+            Automated build for ${{ needs.validate-version.outputs.release_tag }}.
             See the assets below for the installers/bundles.
           releaseDraft: true
           prerelease: false
+
+      - name: Build desktop bundles (macOS universal, dry run)
+        if: runner.os == 'macOS' && needs.validate-version.outputs.upload != 'true'
+        uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Tauri updater signing (required for auto-update; see docs/release.md)
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          args: --target universal-apple-darwin
 
       - name: Verify macOS signed app includes WKWebView JIT entitlements
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
@@ -415,7 +513,7 @@ jobs:
           codesign -d --entitlements :- "$app" 2>&1 | grep -q "com.apple.security.cs.allow-unsigned-executable-memory"
 
       - name: Build and upload release assets
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' && needs.validate-version.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
         # To upgrade, bump to a newer `v0.x.y` tag in a PR after verifying the release workflow.
         uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
@@ -431,13 +529,36 @@ jobs:
           # action install a floating `@tauri-apps/cli@v2` toolchain.
           tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
-          tagName: ${{ github.ref_name }}
-          releaseName: Formula ${{ github.ref_name }}
+          tagName: ${{ needs.validate-version.outputs.release_tag }}
+          releaseName: Formula ${{ needs.validate-version.outputs.release_tag }}
           releaseBody: |
-            Automated build for ${{ github.ref_name }}.
+            Automated build for ${{ needs.validate-version.outputs.release_tag }}.
             See the assets below for the installers/bundles.
           releaseDraft: true
           prerelease: false
+
+      - name: Build desktop bundles (dry run)
+        if: runner.os != 'macOS' && needs.validate-version.outputs.upload != 'true'
+        uses: tauri-apps/tauri-action@73fb865345c54760d875b94642314f8c0c894afa # v0.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # Tauri updater signing (required for auto-update; see docs/release.md)
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          args: ${{ matrix.tauri_args }}
+
+      - name: Upload desktop bundles (dry run)
+        if: needs.validate-version.outputs.upload != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-bundles-${{ needs.validate-version.outputs.artifact_label }}-${{ matrix.platform }}${{ matrix.rust_target != '' && format('-{0}', matrix.rust_target) || '' }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/**/release/bundle/**
+            target/**/release/bundle/**
 
       - name: Assert Windows installer bundle exists for target
         if: runner.os == 'Windows'
@@ -1056,12 +1177,12 @@ jobs:
 
   validate-updater-manifest:
     name: Validate combined updater manifest (latest.json)
-    needs: build
+    needs: [build, validate-version]
     # Validating the updater manifest requires updater signatures (`latest.json.sig`), which are
     # only produced when the TAURI_PRIVATE_KEY secret is configured. We always validate in the
     # upstream repo (to avoid accidentally shipping an unsigned updater manifest) and validate in
     # forks only when the user has configured their own updater key secrets.
-    if: github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != ''
+    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1080,16 +1201,20 @@ jobs:
           # Set both token env vars so it works whether it looks for GH_TOKEN or GITHUB_TOKEN.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/ci/validate-updater-manifest.mjs "${{ github.ref_name }}"
+        run: node scripts/ci/validate-updater-manifest.mjs "${{ needs.validate-version.outputs.release_tag }}"
+
   verify-release-assets:
     name: Verify GitHub Release assets (multi-arch safe)
-    needs: build
+    needs: [build, validate-version]
+    if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Validate release assets are present and uniquely named per target
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ needs.validate-version.outputs.release_tag }}
         shell: bash
         run: |
           set -euo pipefail

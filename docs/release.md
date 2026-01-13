@@ -13,6 +13,22 @@ Platform/architecture expectations for a release:
 The workflow also uploads updater metadata (`latest.json` + `latest.json.sig`) used by the Tauri
 updater.
 
+## Testing the release pipeline (workflow_dispatch)
+
+To test packaging/signing changes without creating a git tag, run the **Desktop Release** workflow
+manually from GitHub Actions:
+
+1. Go to **Actions → Desktop Release → Run workflow**.
+2. Select the branch/commit you want to test.
+3. Leave **upload** unchecked (default). This is **dry-run** mode:
+   - bundles are built for all OS/targets
+   - outputs are uploaded as **workflow artifacts** (no GitHub Release is created/modified)
+4. (Recommended) Set **version** to label the artifacts (example: `0.2.3-test`). You can also set
+   **tag** (example: `v0.2.3-test`); if provided, it takes precedence.
+
+If you set **upload=true**, the workflow will create/update a **draft** GitHub Release and attach
+assets (matching the tag-driven behavior). This requires providing either `tag` or `version`.
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
