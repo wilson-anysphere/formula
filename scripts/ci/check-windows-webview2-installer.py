@@ -110,6 +110,7 @@ def _find_windows_installers(target_dir: Path) -> list[Path]:
 
     Paths look like:
       - target/release/bundle/nsis/*.exe
+      - target/release/bundle/nsis-web/*.exe
       - target/release/bundle/msi/*.msi
       - target/<triple>/release/bundle/nsis/*.exe
     """
@@ -117,6 +118,7 @@ def _find_windows_installers(target_dir: Path) -> list[Path]:
     installers: list[Path] = []
     patterns = [
         "**/release/bundle/nsis/*.exe",
+        "**/release/bundle/nsis-web/*.exe",
         "**/release/bundle/msi/*.msi",
     ]
     for pattern in patterns:
