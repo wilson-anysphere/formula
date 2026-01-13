@@ -71,7 +71,8 @@ function stableStringify(value) {
   }
   if (t === "boolean") return JSON.stringify(value);
   if (t === "undefined") return "undefined";
-  if (t === "bigint") return JSON.stringify(String(value));
+  // BigInt is not JSON-serializable; preserve type to avoid collisions with strings.
+  if (t === "bigint") return `BigInt(${String(value)})`;
   if (t === "function") return "\"[Function]\"";
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
   if (t === "object") {

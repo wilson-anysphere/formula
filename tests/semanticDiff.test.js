@@ -215,3 +215,18 @@ test("semanticDiff: NaN does not collide with null for move signatures", () => {
   assert.equal(Number.isNaN(diff.removed[0].oldValue), true);
   assert.equal(diff.added[0].newValue, null);
 });
+
+test("semanticDiff: BigInt does not collide with string for move signatures", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { value: 10n },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 1)]: { value: "10" },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.moved.length, 0);
+  assert.equal(diff.removed.length, 1);
+  assert.equal(diff.added.length, 1);
+  assert.equal(diff.removed[0].oldValue, 10n);
+  assert.equal(diff.added[0].newValue, "10");
+});
