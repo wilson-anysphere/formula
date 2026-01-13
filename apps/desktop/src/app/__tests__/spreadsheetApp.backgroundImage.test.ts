@@ -162,10 +162,17 @@ function parseSheetBackgroundImageFromXlsx(bytes: Buffer): ImageEntry {
 }
 
 describe("SpreadsheetApp worksheet background images", () => {
-  const patternToken = { kind: "pattern" };
-
   let createPatternSpy: ReturnType<typeof vi.fn>;
-  let patternFillRects: Array<{ canvasClassName: string; x: number; y: number; width: number; height: number }>;
+  type PatternToken = { kind: "pattern"; source: unknown; setTransform?: unknown };
+  let createdPatterns: PatternToken[];
+  let patternFillRects: Array<{
+    canvasClassName: string;
+    pattern: PatternToken;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
 
   function createMockCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     const noop = () => {};
@@ -186,8 +193,9 @@ describe("SpreadsheetApp worksheet background images", () => {
       createLinearGradient: () => gradient,
       createPattern: createPatternSpy,
       fillRect: (x: number, y: number, width: number, height: number) => {
-        if (state.fillStyle === patternToken) {
-          patternFillRects.push({ canvasClassName: canvas.className, x, y, width, height });
+        const fill = state.fillStyle as PatternToken | null;
+        if (fill && typeof fill === "object" && (fill as any).kind === "pattern") {
+          patternFillRects.push({ canvasClassName: canvas.className, pattern: fill, x, y, width, height });
         }
       },
       getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
@@ -223,6 +231,7 @@ describe("SpreadsheetApp worksheet background images", () => {
       },
     });
     Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 1 });
 
     // createImageBitmap is used to decode image bytes; jsdom doesn't implement it.
     Object.defineProperty(globalThis, "createImageBitmap", {
@@ -235,7 +244,21 @@ describe("SpreadsheetApp worksheet background images", () => {
       }),
     });
 
-    createPatternSpy = vi.fn(() => patternToken as any);
+    // CanvasGridRenderer uses CanvasPattern.setTransform when available to keep background patterns crisp
+    // under HiDPI scaling. jsdom doesn't implement CanvasPattern, so stub it for unit tests.
+    vi.stubGlobal(
+      "CanvasPattern",
+      class {
+        setTransform() {}
+      } as any,
+    );
+
+    createdPatterns = [];
+    createPatternSpy = vi.fn((source: unknown) => {
+      const token: PatternToken = { kind: "pattern", source, setTransform: vi.fn() };
+      createdPatterns.push(token);
+      return token as any;
+    });
     patternFillRects = [];
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
@@ -273,6 +296,7 @@ describe("SpreadsheetApp worksheet background images", () => {
 
       const app = new SpreadsheetApp(root, status);
       createPatternSpy.mockClear();
+      createdPatterns = [];
       patternFillRects = [];
 
       app.setWorkbookImages([imageEntry]);
@@ -294,6 +318,7 @@ describe("SpreadsheetApp worksheet background images", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
+      Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
       const fixtureUrl = new URL("../../../../../fixtures/xlsx/basic/background-image.xlsx", import.meta.url);
       const fixtureBytes = readFileSync(fixtureUrl);
       const imageEntry = parseSheetBackgroundImageFromXlsx(fixtureBytes);
@@ -307,6 +332,7 @@ describe("SpreadsheetApp worksheet background images", () => {
 
       const app = new SpreadsheetApp(root, status);
       createPatternSpy.mockClear();
+      createdPatterns = [];
       patternFillRects = [];
 
       app.setWorkbookImages([imageEntry]);
@@ -314,7 +340,15 @@ describe("SpreadsheetApp worksheet background images", () => {
       await app.whenIdle();
 
       expect(createPatternSpy).toHaveBeenCalled();
-      expect(patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base")).length).toBeGreaterThan(0);
+      const basePatternRects = patternFillRects.filter((rect) => rect.canvasClassName.includes("grid-canvas--base"));
+      expect(basePatternRects.length).toBeGreaterThan(0);
+      // With DPR=2 and CanvasPattern.setTransform available, the shared-grid renderer should bake the
+      // DPR into the offscreen tile resolution (but keep the CSS tile size consistent via pattern transforms).
+      // Our test double exposes the tile canvas via `pattern.source`.
+      expect(basePatternRects.some((rect) => (rect.pattern.source as any)?.width === 16)).toBe(true);
+      const hiDpiPattern = createdPatterns.find((p) => (p.source as any)?.width === 16);
+      expect((hiDpiPattern as any)?.setTransform).toBeDefined();
+      expect(((hiDpiPattern as any).setTransform as any).mock?.calls?.length ?? 0).toBeGreaterThan(0);
 
       app.destroy();
       root.remove();

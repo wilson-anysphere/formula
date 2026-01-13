@@ -553,7 +553,7 @@ export class CanvasGridRenderer {
   // - the background image is workbook data, not a styling token
   private backgroundPatternImage: CanvasImageSource | null = null;
   private backgroundPatternTile: HTMLCanvasElement | null = null;
-  private backgroundPatternTileKey: { image: CanvasImageSource; zoom: number } | null = null;
+  private backgroundPatternTileKey: { image: CanvasImageSource; zoom: number; devicePixelRatio: number } | null = null;
 
   private readonly perfStats: GridPerfStats = {
     enabled: false,
@@ -787,16 +787,26 @@ export class CanvasGridRenderer {
     if (!image) return null;
 
     const zoom = this.zoom;
+    const rawDpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+    const patternTransformSupported =
+      typeof (globalThis as any).CanvasPattern !== "undefined" &&
+      typeof (globalThis as any).CanvasPattern.prototype?.setTransform === "function";
+    // Only bake DPR into the tile size when we can also scale the pattern back down in CSS space
+    // (via `CanvasPattern.setTransform`). Otherwise the pattern would repeat at the wrong size.
+    const devicePixelRatio = patternTransformSupported ? rawDpr : 1;
     const key = this.backgroundPatternTileKey;
-    if (key && key.image === image && key.zoom === zoom && this.backgroundPatternTile) {
+    if (key && key.image === image && key.zoom === zoom && key.devicePixelRatio === devicePixelRatio && this.backgroundPatternTile) {
       return this.backgroundPatternTile;
     }
 
     const dims = getCanvasImageSourceDimensions(image);
     if (!dims) return null;
 
-    const width = Math.max(1, Math.round(dims.width * zoom));
-    const height = Math.max(1, Math.round(dims.height * zoom));
+    // Scale the offscreen tile by both zoom and DPR so the pattern does not get
+    // upscaled by the renderer's HiDPI transform (which would otherwise look
+    // pixelated because the grid layer uses `imageSmoothingEnabled=false`).
+    const width = Math.max(1, Math.round(dims.width * zoom * devicePixelRatio));
+    const height = Math.max(1, Math.round(dims.height * zoom * devicePixelRatio));
 
     const tile = document.createElement("canvas");
     tile.width = width;
@@ -814,7 +824,7 @@ export class CanvasGridRenderer {
     }
 
     this.backgroundPatternTile = tile;
-    this.backgroundPatternTileKey = { image, zoom };
+    this.backgroundPatternTileKey = { image, zoom, devicePixelRatio };
     return tile;
   }
 
@@ -2890,7 +2900,27 @@ export class CanvasGridRenderer {
     const dataOriginYSheet = headerRows > 0 ? this.scroll.rows.positionOf(headerRows) : 0;
 
     const backgroundTile = this.getBackgroundPatternTile();
-    const backgroundPattern = backgroundTile ? gridCtx.createPattern(backgroundTile, "repeat") : null;
+    const backgroundPattern = (() => {
+      if (!backgroundTile) return null;
+      const pattern = gridCtx.createPattern(backgroundTile, "repeat");
+      if (!pattern) return null;
+
+      // If the tile was generated at HiDPI resolution, scale it back down into CSS-pixel space
+      // so the pattern repeats at the expected logical size.
+      //
+      // (When supported, CanvasPattern.setTransform applies in addition to the context's current
+      // transform, so scaling by 1/DPR cancels the HiDPI upscaling that `setupHiDpiCanvas` applies.)
+      const setTransform = (pattern as any).setTransform as ((transform?: DOMMatrix2DInit) => void) | undefined;
+      const dpr = Number.isFinite(this.devicePixelRatio) && this.devicePixelRatio > 0 ? this.devicePixelRatio : 1;
+      if (typeof setTransform === "function" && dpr !== 1) {
+        try {
+          setTransform.call(pattern, { a: 1 / dpr, b: 0, c: 0, d: 1 / dpr, e: 0, f: 0 });
+        } catch {
+          // Ignore pattern transform failures (best-effort; pattern will still render, just lower quality).
+        }
+      }
+      return pattern;
+    })();
 
     for (const quadrant of quadrants) {
       if (quadrant.rect.width <= 0 || quadrant.rect.height <= 0) continue;
