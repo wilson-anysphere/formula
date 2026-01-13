@@ -560,6 +560,81 @@ pub fn detect_workbook_encryption(
     Ok(None)
 }
 
+/// Inspect a workbook on disk and, when it is an OLE-encrypted OOXML container, return a
+/// best-effort MS-OFFCRYPTO `EncryptionInfo` summary.
+///
+/// This does **not** require a password and does not attempt to decrypt the workbook.
+///
+/// Returns:
+/// - `Ok(None)` when the file is not an OLE encrypted OOXML container.
+/// - `Ok(Some(summary))` when it is.
+pub fn inspect_ooxml_encryption(
+    path: impl AsRef<Path>,
+) -> Result<Option<formula_offcrypto::EncryptionInfoSummary>, Error> {
+    use std::io::Read as _;
+
+    let path = path.as_ref();
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    // Fast-path: check the OLE magic header before attempting to parse the compound file structure.
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let header = &header[..n];
+    if header.len() < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.rewind().map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; we can't reliably sniff streams.
+        return Ok(None);
+    };
+
+    if !(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")) {
+        return Ok(None);
+    }
+
+    let encryption_info = read_ole_stream_best_effort(&mut ole, "EncryptionInfo").map_err(|source| {
+        Error::DetectIo {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+    let Some(encryption_info) = encryption_info else {
+        return Ok(None);
+    };
+
+    let summary = match formula_offcrypto::inspect_encryption_info(&encryption_info) {
+        Ok(summary) => summary,
+        Err(formula_offcrypto::OffcryptoError::UnsupportedVersion { major, minor }) => {
+            return Err(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: major,
+                version_minor: minor,
+            });
+        }
+        Err(err) => {
+            return Err(Error::DetectIo {
+                path: path.to_path_buf(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+            });
+        }
+    };
+
+    Ok(Some(summary))
+}
+
 fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<WorkbookFormat, Error> {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
@@ -1083,7 +1158,81 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
         return true;
     }
     let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
+    if ole.open_stream(&with_leading_slash).is_ok() {
+        return true;
+    }
+
+    // Best-effort: some producers (or intermediate tools) can vary stream casing. Walk the
+    // directory tree and compare paths case-insensitively.
+    let target = name.trim_start_matches('/');
+    ole.walk().any(|entry| {
+        if !entry.is_stream() {
+            return false;
+        }
+        let path = entry.path().to_string_lossy();
+        let normalized = path.strip_prefix('/').unwrap_or(&path);
+        normalized.eq_ignore_ascii_case(target)
+    })
+}
+
+fn read_ole_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, std::io::Error> {
+    use std::io::Read as _;
+
+    fn read_candidate<R: std::io::Read + std::io::Write + std::io::Seek>(
+        ole: &mut cfb::CompoundFile<R>,
+        path: &str,
+    ) -> Result<Option<Vec<u8>>, std::io::Error> {
+        let mut stream = match ole.open_stream(path) {
+            Ok(s) => s,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf)?;
+        Ok(Some(buf))
+    }
+
+    if let Some(buf) = read_candidate(ole, name)? {
+        return Ok(Some(buf));
+    }
+    let with_leading_slash = format!("/{name}");
+    if let Some(buf) = read_candidate(ole, &with_leading_slash)? {
+        return Ok(Some(buf));
+    }
+
+    let candidate = {
+        let target = name.trim_start_matches('/');
+        ole.walk().find_map(|entry| {
+            if !entry.is_stream() {
+                return None;
+            }
+            let path = entry.path().to_string_lossy().into_owned();
+            let normalized = path.strip_prefix('/').unwrap_or(&path);
+            if normalized.eq_ignore_ascii_case(target) {
+                Some(path)
+            } else {
+                None
+            }
+        })
+    };
+
+    if let Some(path) = candidate {
+        if let Some(buf) = read_candidate(ole, &path)? {
+            return Ok(Some(buf));
+        }
+        // Some callers use paths without a leading slash; try again stripped.
+        let stripped = path.strip_prefix('/').unwrap_or(&path);
+        if stripped != path {
+            if let Some(buf) = read_candidate(ole, stripped)? {
+                return Ok(Some(buf));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 /// Returns an OOXML-encryption related error when the given OLE compound file is an encrypted
@@ -1096,8 +1245,6 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
     path: &Path,
     password: Option<&str>,
 ) -> Option<Error> {
-    use std::io::Read as _;
-
     if !(stream_exists(ole, "EncryptionInfo") && stream_exists(ole, "EncryptedPackage")) {
         return None;
     }
@@ -1108,22 +1255,18 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
     //
     // See MS-OFFCRYPTO / ECMA-376. Excel commonly uses Agile encryption (4.4).
     let (version_major, version_minor) = {
-        let mut header = [0u8; 4];
-        let mut stream = match ole
-            .open_stream("EncryptionInfo")
-            .or_else(|_| ole.open_stream("/EncryptionInfo"))
-        {
-            Ok(s) => s,
-            Err(_) => {
-                // Streams exist but can't be opened; treat as unsupported.
-                return Some(Error::UnsupportedOoxmlEncryption {
-                    path: path.to_path_buf(),
-                    version_major: 0,
-                    version_minor: 0,
-                });
-            }
+        let Some(encryption_info) = read_ole_stream_best_effort(ole, "EncryptionInfo")
+            .ok()
+            .flatten()
+        else {
+            // Streams exist but can't be opened; treat as unsupported.
+            return Some(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            });
         };
-        if stream.read_exact(&mut header).is_err() {
+        if encryption_info.len() < 4 {
             return Some(Error::UnsupportedOoxmlEncryption {
                 path: path.to_path_buf(),
                 version_major: 0,
@@ -1131,8 +1274,8 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
             });
         }
         (
-            u16::from_le_bytes([header[0], header[1]]),
-            u16::from_le_bytes([header[2], header[3]]),
+            u16::from_le_bytes([encryption_info[0], encryption_info[1]]),
+            u16::from_le_bytes([encryption_info[2], encryption_info[3]]),
         )
     };
 

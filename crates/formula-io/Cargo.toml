@@ -21,6 +21,7 @@ encrypted-workbooks = []
 cfb = "0.10"
 encoding_rs = "0.8"
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
+formula-offcrypto = { path = "../formula-offcrypto" }
 formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }

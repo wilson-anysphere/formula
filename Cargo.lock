@@ -2198,6 +2198,7 @@ dependencies = [
  "formula-format",
  "formula-fs",
  "formula-model",
+ "formula-offcrypto",
  "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
