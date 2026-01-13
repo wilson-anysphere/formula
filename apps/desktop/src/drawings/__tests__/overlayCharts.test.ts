@@ -115,8 +115,9 @@ describe("DrawingOverlay charts", () => {
         "--chart-series-base": "rgb(1, 2, 3)",
         "--text-primary": "var(--text-primary-base)",
         "--text-primary-base": "rgb(10, 11, 12)",
-        "--selection-border": "var(--selection-border-base)",
-        "--selection-border-base": "rgb(4, 5, 6)",
+        // Exercise `var(--missing, fallback)` handling: the referenced token is undefined,
+        // so the resolver should return the fallback value (and not the caller fallback).
+        "--selection-border": "var(--selection-border-missing, rgb(4, 5, 6))",
         "--bg-primary": "var(--bg-primary-base)",
         "--bg-primary-base": "rgb(7, 8, 9)",
       };
