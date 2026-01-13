@@ -116,6 +116,8 @@ The web target renders the shared Canvas grid (`@formula/grid`) with a mock data
 
 This repo includes a production-ready **Yjs sync server** (WebSocket, `y-websocket` protocol) with **LevelDB persistence**, auth, basic rate limiting, and health checks.
 
+For deployment details (auth modes, limits & hardening, metrics, etc.), see [`services/sync-server/README.md`](./services/sync-server/README.md).
+
 Run locally:
 
 ```bash
