@@ -39,6 +39,14 @@ import { parseA1Range } from "./a1.js";
  *    * Include region summaries (default true).
  *    *\/
  *   includeRegions?: boolean,
+ *   /**
+ *    * Maximum number of named ranges to include in the summary.
+ *    *\/
+ *   maxNamedRanges?: number,
+ *   /**
+ *    * Include named range summaries (default true).
+ *    *\/
+ *   includeNamedRanges?: boolean,
  * }} SummarizeSheetOptions
  */
 
@@ -60,6 +68,7 @@ function normalizeLimit(value) {
 function normalizeOptions(options) {
   const maxTables = normalizeLimit(options?.maxTables);
   const maxRegions = normalizeLimit(options?.maxRegions);
+  const maxNamedRanges = normalizeLimit(options?.maxNamedRanges);
 
   const maxHeadersPerTable = normalizeLimit(options?.maxHeadersPerTable);
   const maxTypesPerTable = normalizeLimit(options?.maxTypesPerTable);
@@ -69,12 +78,14 @@ function normalizeOptions(options) {
   return {
     maxTables: maxTables ?? 20,
     maxRegions: maxRegions ?? 20,
+    maxNamedRanges: maxNamedRanges ?? 20,
     maxHeadersPerTable: maxHeadersPerTable ?? 8,
     maxTypesPerTable: maxTypesPerTable ?? (maxHeadersPerTable ?? 8),
     maxHeadersPerRegion: maxHeadersPerRegion ?? 8,
     maxTypesPerRegion: maxTypesPerRegion ?? (maxHeadersPerRegion ?? 8),
     includeTables: options?.includeTables ?? true,
     includeRegions: options?.includeRegions ?? true,
+    includeNamedRanges: options?.includeNamedRanges ?? true,
   };
 }
 
@@ -221,6 +232,15 @@ function summarizeDataRegion(region, opts) {
 }
 
 /**
+ * @param {{ name: string, range: string }} namedRange
+ */
+function summarizeNamedRange(namedRange) {
+  const name = typeof namedRange?.name === "string" ? namedRange.name : "";
+  const range = typeof namedRange?.range === "string" ? namedRange.range : "";
+  return `${bracket(name)} r=${bracket(range)}`;
+}
+
+/**
  * Summarize either a `TableSchema` or `DataRegionSchema`.
  *
  * @param {TableSchema | DataRegionSchema} schemaRegionOrTable
@@ -254,6 +274,7 @@ export function summarizeSheetSchema(schema, options = {}) {
   const sheetName = typeof schema?.name === "string" ? schema.name : "";
   const tables = Array.isArray(schema?.tables) ? schema.tables : [];
   const regions = Array.isArray(schema?.dataRegions) ? schema.dataRegions : [];
+  const namedRanges = Array.isArray(schema?.namedRanges) ? schema.namedRanges : [];
 
   /** @type {Map<string, DataRegionSchema>} */
   const regionByRange = new Map();
@@ -263,7 +284,7 @@ export function summarizeSheetSchema(schema, options = {}) {
     if (!regionByRange.has(region.range)) regionByRange.set(region.range, region);
   }
 
-  const lines = [`sheet=${bracket(sheetName)} tables=${tables.length} regions=${regions.length}`];
+  const lines = [`sheet=${bracket(sheetName)} tables=${tables.length} regions=${regions.length} named=${namedRanges.length}`];
 
   if (opts.includeTables) {
     const ordered = tables
@@ -289,6 +310,21 @@ export function summarizeSheetSchema(schema, options = {}) {
     if (omitted > 0) lines.push(`R…+${omitted}`);
   }
 
+  if (opts.includeNamedRanges) {
+    const ordered = namedRanges
+      .slice()
+      .sort(
+        (a, b) =>
+          compareA1Ranges(String(a?.range ?? ""), String(b?.range ?? "")) ||
+          String(a?.name ?? "").localeCompare(String(b?.name ?? "")),
+      );
+    const shown = ordered.slice(0, opts.maxNamedRanges);
+    for (let i = 0; i < shown.length; i++) {
+      lines.push(`N${i + 1} ${summarizeNamedRange(shown[i])}`);
+    }
+    const omitted = Math.max(ordered.length - shown.length, 0);
+    if (omitted > 0) lines.push(`N…+${omitted}`);
+  }
+
   return lines.join("\n");
 }
-

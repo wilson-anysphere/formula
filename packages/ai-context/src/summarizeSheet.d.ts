@@ -35,6 +35,14 @@ export interface SummarizeSheetOptions {
    * Include region summaries (default true).
    */
   includeRegions?: boolean;
+  /**
+   * Maximum number of named ranges to include in the summary.
+   */
+  maxNamedRanges?: number;
+  /**
+   * Include named range summaries (default true).
+   */
+  includeNamedRanges?: boolean;
 }
 
 /**
@@ -51,4 +59,3 @@ export function summarizeRegion(
   schemaRegionOrTable: TableSchema | DataRegionSchema,
   options?: SummarizeSheetOptions,
 ): string;
-

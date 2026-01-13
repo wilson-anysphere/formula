@@ -816,6 +816,7 @@ export class ContextManager {
           `Sheet schema summary:\n${summarizeSheetSchema(schemaOut, {
             maxTables: 10,
             maxRegions: 10,
+            maxNamedRanges: 10,
             maxHeadersPerTable: 8,
             maxHeadersPerRegion: 8,
           })}`,

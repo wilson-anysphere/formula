@@ -28,7 +28,7 @@ describe("summarizeSheetSchema", () => {
 
     expect(summary).toBe(
       [
-        "sheet=[Sheet1] tables=2 regions=2",
+        "sheet=[Sheet1] tables=2 regions=2 named=0",
         "T1 [SalesTable] r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
         "T2 [Matrix] r=[Sheet1!A5:B6] rows=2 cols=2 hdr=0 h=[Column1|Column2] t=[number|number]",
         "R1 r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
@@ -96,12 +96,12 @@ describe("summarizeSheetSchema", () => {
   it("can exclude tables or regions from the sheet summary", () => {
     const schema = buildSchema();
     const noTables = summarizeSheetSchema(schema, { includeTables: false, maxRegions: 1 });
-    expect(noTables).toContain("sheet=[Sheet1] tables=2 regions=2");
+    expect(noTables).toContain("sheet=[Sheet1] tables=2 regions=2 named=0");
     expect(noTables).not.toContain("\nT1 ");
     expect(noTables).toContain("\nR1 ");
 
     const noRegions = summarizeSheetSchema(schema, { includeRegions: false, maxTables: 1 });
-    expect(noRegions).toContain("sheet=[Sheet1] tables=2 regions=2");
+    expect(noRegions).toContain("sheet=[Sheet1] tables=2 regions=2 named=0");
     expect(noRegions).toContain("\nT1 ");
     expect(noRegions).not.toContain("\nR1 ");
   });
@@ -145,5 +145,22 @@ describe("summarizeSheetSchema", () => {
     expect(summary).toContain("regions=2");
     expect(summary).not.toContain("\nR1 ");
     expect(summary).toContain("R…+2");
+  });
+
+  it("includes named ranges (and respects maxNamedRanges)", () => {
+    const schema = extractSheetSchema({
+      name: "Sheet1",
+      values: [["A", "B"]],
+      namedRanges: [
+        { name: "NR1", range: "Sheet1!A1" },
+        { name: "NR2", range: "Sheet1!B1" },
+      ],
+    });
+
+    const summary = summarizeSheetSchema(schema, { maxTables: 0, maxRegions: 0, maxNamedRanges: 1 });
+    expect(summary).toContain("named=2");
+    expect(summary).toContain("N1 [NR1] r=[Sheet1!A1]");
+    expect(summary).not.toContain("N2 [NR2]");
+    expect(summary).toContain("N…+1");
   });
 });
