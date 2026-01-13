@@ -332,6 +332,30 @@ test("suggestRanges suggests a 2D table range when an explicit start cell is pro
   );
 });
 
+test("suggestRanges preserves end-column $ prefix in 2D table suggestions (A:$A -> A1:$D10)", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Header row (row 1 in A1 notation).
+  for (let c = 0; c < 4; c++) cells.push([0, c, `H${c + 1}`]);
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    for (let c = 0; c < 4; c++) {
+      cells.push([r, c, r * 100 + c]);
+    }
+  }
+
+  const suggestions = suggestRanges({
+    currentArgText: "A:$A",
+    cellRef: { row: 10, col: 0 }, // row 11, below the table
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "A1:$D10"),
+    `Expected suggestions to contain A1:$D10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
 test("suggestRanges suggests a 2D table range across the Z->AA column boundary (Y1:AB10)", () => {
   /** @type {Array<[number, number, any]>} */
   const cells = [];
