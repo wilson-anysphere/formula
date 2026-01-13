@@ -1012,9 +1012,10 @@ fn build_page_setup_fixture_sheet_stream(xf_cell: u16, mode: PageSetupScalingMod
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
-    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[5]));
-    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[3]));
+    // Our fixture helpers accept the model’s “after which break occurs” form (0-based), so break
+    // after row 4 and after column 2.
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[4]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 0.0));
@@ -1151,11 +1152,10 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
-    //
-    // This fixture encodes breaks-after rows {2,4} as rw={3,5} and break-after col {1} as col={2}.
-    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[3, 5]));
-    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[2]));
+    // Our fixture helpers accept the model’s “after which break occurs” form (0-based).
+    // Breaks after row 2 and row 4, and after column 1 (i.e. between B and C).
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[2, 4]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[1]));
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
@@ -1239,9 +1239,14 @@ fn setup_record(
 fn hpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
     // HORIZONTALPAGEBREAKS payload:
     // [cbrk:u16][(rw:u16, colStart:u16, colEnd:u16) * cbrk]
+    //
+    // BIFF8 stores `rw` as the 0-based index of the *first* row below the break.
+    // Our fixtures express breaks as the 0-based row index *after which* the break occurs, so we
+    // encode them as `rw = after + 1`.
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&(breaks.len() as u16).to_le_bytes());
-    for &rw in breaks {
+    for &after in breaks {
+        let rw = after.saturating_add(1);
         out.extend_from_slice(&rw.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes()); // colStart
         out.extend_from_slice(&255u16.to_le_bytes()); // colEnd (BIFF8 max col for Excel 97-2003)
@@ -1252,9 +1257,14 @@ fn hpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
 fn vpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
     // VERTICALPAGEBREAKS payload:
     // [cbrk:u16][(col:u16, rwStart:u16, rwEnd:u16) * cbrk]
+    //
+    // BIFF8 stores `col` as the 0-based index of the *first* column to the right of the break.
+    // Our fixtures express breaks as the 0-based column index *after which* the break occurs, so
+    // we encode them as `col = after + 1`.
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&(breaks.len() as u16).to_le_bytes());
-    for &col in breaks {
+    for &after in breaks {
+        let col = after.saturating_add(1);
         out.extend_from_slice(&col.to_le_bytes());
         out.extend_from_slice(&0u16.to_le_bytes()); // rwStart
         out.extend_from_slice(&65535u16.to_le_bytes()); // rwEnd (BIFF8 max row for Excel 97-2003)
@@ -6810,20 +6820,22 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // The importer converts these to the model’s “after which break occurs” form by subtracting 1.
-    let row_break_row = cfg.row_break_after.saturating_add(1);
-    let col_break_col = cfg.col_break_after.saturating_add(1);
+    // Our fixture helpers accept the model’s “after which break occurs” form (0-based).
     push_record(
         &mut sheet,
         RECORD_HPAGEBREAKS,
-        // BIFF8 stores the 0-based index of the first row *after* the break.
-        &hpagebreaks_record(&[row_break_row]),
+        // BIFF8 stores the 0-based index of the first row below the break.
+        // Our fixtures express breaks as the 0-based row index after which the break occurs, so
+        // `hpagebreaks_record` encodes as `rw = after + 1`.
+        &hpagebreaks_record(&[cfg.row_break_after]),
     );
     push_record(
         &mut sheet,
         RECORD_VPAGEBREAKS,
-        // BIFF8 stores the 0-based index of the first column *after* the break.
-        &vpagebreaks_record(&[col_break_col]),
+        // BIFF8 stores the 0-based index of the first column to the right of the break.
+        // Our fixtures express breaks as the 0-based column index after which the break occurs, so
+        // `vpagebreaks_record` encodes as `col = after + 1`.
+        &vpagebreaks_record(&[cfg.col_break_after]),
     );
 
     // A1: a single cell so calamine returns a non-empty range.

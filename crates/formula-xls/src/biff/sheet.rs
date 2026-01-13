@@ -14,6 +14,7 @@ use formula_model::{Orientation, PageSetup, Scaling};
 use super::records;
 use super::rgce;
 use super::strings;
+use super::worksheet_formulas;
 
 /// Hard cap on the number of per-cell XF indices tracked per worksheet.
 ///
@@ -342,6 +343,7 @@ pub(crate) struct BiffSheetProtection {
 
 #[cfg(test)]
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub(crate) struct BiffSheetPrintSettings {
     pub(crate) page_setup: PageSetup,
     pub(crate) warnings: Vec<String>,
@@ -2143,23 +2145,19 @@ pub(crate) fn parse_biff8_sheet_formulas(
 
         match record.record_id {
             RECORD_FORMULA => {
-                // FORMULA record payload [MS-XLS 2.4.127] (BIFF8):
-                //   [rw:u16][col:u16][ixfe:u16]
-                //   [value:8 bytes cached result]
-                //   [grbit:u16][chn:u32]
-                //   [cce:u16][rgce: cce bytes][... optional extra bytes ...]
-                let data = record.data.as_ref();
-                if data.len() < 22 {
-                    out.warnings.push(format!(
-                        "truncated FORMULA record at offset {} (len={})",
-                        record.offset,
-                        data.len()
-                    ));
-                    continue;
-                }
+                let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
+                    Ok(parsed) => parsed,
+                    Err(err) => {
+                        out.warnings.push(format!(
+                            "failed to parse FORMULA record at offset {}: {err}",
+                            record.offset
+                        ));
+                        continue;
+                    }
+                };
 
-                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
-                let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                let row = parsed.row as u32;
+                let col = parsed.col as u32;
                 if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
                     out.warnings.push(format!(
                         "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
@@ -2168,20 +2166,9 @@ pub(crate) fn parse_biff8_sheet_formulas(
                     continue;
                 }
 
-                let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
-                let end = 22usize.saturating_add(cce);
-                let Some(rgce_bytes) = data.get(22..end) else {
-                    out.warnings.push(format!(
-                        "truncated FORMULA rgce payload at offset {} (cce={cce}, len={})",
-                        record.offset,
-                        data.len()
-                    ));
-                    continue;
-                };
-
                 let cell_ref = CellRef::new(row, col);
                 let decoded = rgce::decode_biff8_rgce_with_base(
-                    rgce_bytes,
+                    &parsed.rgce,
                     ctx,
                     Some(rgce::CellCoord::new(row, col)),
                 );

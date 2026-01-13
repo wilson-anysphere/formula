@@ -1141,6 +1141,61 @@ mod tests {
     }
 
     #[test]
+    fn parses_formula_rgce_with_unicode_ptgstr_split_across_continue() {
+        // Ensure we also handle the non-zero continued-segment option flags (fHighByte=1) used when
+        // an uncompressed UTF-16LE ShortXLUnicodeString is continued into a CONTINUE record.
+        let literal = "ABCDE";
+        let utf16: Vec<u16> = literal.encode_utf16().collect();
+
+        let mut rgce_expected = Vec::new();
+        rgce_expected.push(0x17); // PtgStr
+        rgce_expected.push(utf16.len() as u8); // cch
+        rgce_expected.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
+        for unit in &utf16 {
+            rgce_expected.extend_from_slice(&unit.to_le_bytes());
+        }
+
+        // Split after the first two UTF-16LE code units ("AB") => 4 bytes of character payload.
+        let first_rgce_len = 3 + 4;
+        let first_rgce = &rgce_expected[..first_rgce_len];
+        let remaining_bytes = &rgce_expected[first_rgce_len..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(STR_FLAG_HIGH_BYTE); // continued segment option flags (unicode)
+        continue_payload.extend_from_slice(remaining_bytes);
+
+        let row = 0u16;
+        let col = 0u16;
+        let xf = 0u16;
+        let cached_result = 0f64;
+        let cce = rgce_expected.len() as u16;
+
+        let mut formula_payload_part1 = Vec::new();
+        formula_payload_part1.extend_from_slice(&row.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&col.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&xf.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&cached_result.to_le_bytes());
+        formula_payload_part1.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload_part1.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload_part1.extend_from_slice(&cce.to_le_bytes());
+        formula_payload_part1.extend_from_slice(first_rgce);
+
+        let stream = [
+            record(RECORD_FORMULA, &formula_payload_part1),
+            record(records::RECORD_CONTINUE, &continue_payload),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_FORMULA;
+        let mut iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter.next().expect("record").expect("logical record");
+        assert!(record.is_continued());
+
+        let parsed = parse_biff8_formula_record(&record).expect("parse formula");
+        assert_eq!(parsed.rgce, rgce_expected);
+    }
+
+    #[test]
     fn parses_shrfmla_rgce_with_continued_ptgstr_token() {
         // Synthetic SHRFMLA record split across CONTINUE within a PtgStr payload.
         let literal = "ABCDE";
