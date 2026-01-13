@@ -193,6 +193,30 @@ import {
 } from "./workbook/mergeFormattingIntoSnapshot.js";
 import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 
+// Startup performance instrumentation (no-op for web builds).
+//
+// Call `reportStartupWebviewLoaded()` immediately so the host-side `webview_loaded_ms`
+// measurement does not include the IPC overhead of installing listeners. Once the
+// listeners are installed, call it again (idempotent) to re-emit the timing events
+// for the now-ready listeners.
+void (async () => {
+  try {
+    reportStartupWebviewLoaded();
+  } catch {
+    // Best-effort; instrumentation should never block startup.
+  }
+  try {
+    await installStartupTimingsListeners();
+  } catch {
+    // Best-effort; instrumentation should never block startup.
+  }
+  try {
+    reportStartupWebviewLoaded();
+  } catch {
+    // Best-effort; instrumentation should never block startup.
+  }
+})();
+
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
 try {
@@ -212,16 +236,6 @@ window.addEventListener("unload", () => {
     // Best-effort cleanup; ignore failures during teardown.
   }
 });
-
-// Startup performance instrumentation (no-op for web builds).
-void (async () => {
-  try {
-    await installStartupTimingsListeners();
-  } catch {
-    // Best-effort; instrumentation should never block startup.
-  }
-  reportStartupWebviewLoaded();
-})();
 
 /**
  * SharedArrayBuffer requires cross-origin isolation (COOP/COEP). When we ship a

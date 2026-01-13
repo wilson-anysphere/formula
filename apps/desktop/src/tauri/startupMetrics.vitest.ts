@@ -1,21 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getStartupTimings, markStartupTimeToInteractive, reportStartupWebviewLoaded } from "./startupMetrics";
+import {
+  getStartupTimings,
+  installStartupTimingsListeners,
+  markStartupTimeToInteractive,
+  reportStartupWebviewLoaded,
+} from "./startupMetrics";
 
 describe("startupMetrics", () => {
   const originalTauri = (globalThis as any).__TAURI__;
   const originalTimings = (globalThis as any).__FORMULA_STARTUP_TIMINGS__;
+  const originalListenersInstalled = (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__;
 
   beforeEach(() => {
     const invoke = vi.fn().mockResolvedValue(null);
     const listen = vi.fn().mockResolvedValue(() => {});
     (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
   });
 
   afterEach(() => {
     (globalThis as any).__TAURI__ = originalTauri;
     (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = originalTimings;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = originalListenersInstalled;
     vi.restoreAllMocks();
   });
 
@@ -42,5 +50,40 @@ describe("startupMetrics", () => {
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
   });
-});
 
+  it("can report webview-loaded before listeners install, then re-emit after listeners are ready", async () => {
+    const listeners = new Map<string, (event: any) => void>();
+
+    const invoke = vi.fn((cmd: string) => {
+      if (cmd === "report_startup_webview_loaded") {
+        listeners.get("startup:window-visible")?.({ payload: 123 });
+        listeners.get("startup:webview-loaded")?.({ payload: 456 });
+        listeners.get("startup:metrics")?.({ payload: { window_visible_ms: 123, webview_loaded_ms: 456 } });
+      }
+      return Promise.resolve(null);
+    });
+
+    const listen = vi.fn(async (event: string, handler: (event: any) => void) => {
+      listeners.set(event, handler);
+      return () => listeners.delete(event);
+    });
+
+    (globalThis as any).__TAURI__ = { core: { invoke }, event: { listen } };
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS__ = undefined;
+    (globalThis as any).__FORMULA_STARTUP_TIMINGS_LISTENERS_INSTALLED__ = undefined;
+
+    // First report happens before listeners exist, so no timings should be captured.
+    reportStartupWebviewLoaded();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(getStartupTimings().webviewLoadedMs).toBeUndefined();
+
+    // Install listeners, then report again to re-emit timings.
+    await installStartupTimingsListeners();
+    reportStartupWebviewLoaded();
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    const timings = getStartupTimings();
+    expect(timings.windowVisibleMs).toBe(123);
+    expect(timings.webviewLoadedMs).toBe(456);
+  });
+});
