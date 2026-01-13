@@ -47,6 +47,7 @@
   border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-primary);
+  cursor: pointer;
   min-width: 0;
   max-width: 100%;
   font: inherit;
@@ -59,8 +60,22 @@
 
 .query-editor-container__toolbar select:focus {
   outline: none;
+}
+
+.query-editor-container__toolbar select:hover {
+  background: var(--bg-hover);
+}
+
+.query-editor-container__toolbar select:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+@supports not selector(:focus-visible) {
+  .query-editor-container__toolbar select:focus {
+    border-color: var(--selection-border);
+    box-shadow: 0 0 0 2px var(--selection-bg);
+  }
 }
 
 .query-editor-container__select {
@@ -411,8 +426,19 @@
 }
 
 .query-editor-add-step__ai-input:focus {
+  outline: none;
+}
+
+.query-editor-add-step__ai-input:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+@supports not selector(:focus-visible) {
+  .query-editor-add-step__ai-input:focus {
+    border-color: var(--selection-border);
+    box-shadow: 0 0 0 2px var(--selection-bg);
+  }
 }
 
 .query-editor-add-step__ai-button {
