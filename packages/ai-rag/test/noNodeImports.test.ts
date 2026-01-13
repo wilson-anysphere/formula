@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 const browserSafeEntrypoints = [
   new URL("../src/index.js", import.meta.url),
   new URL("../src/store/binaryStorage.js", import.meta.url),
+  new URL("../src/store/inMemoryVectorStore.js", import.meta.url),
   new URL("../src/store/jsonVectorStore.js", import.meta.url),
   new URL("../src/store/sqliteVectorStore.js", import.meta.url),
   new URL("../src/pipeline/indexWorkbook.js", import.meta.url),
