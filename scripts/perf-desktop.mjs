@@ -20,10 +20,16 @@ Environment (shared):
   FORMULA_PERF_HOME             Override the isolated HOME dir (default: target/perf-home)
   FORMULA_PERF_PRESERVE_HOME=1  Skip clearing FORMULA_PERF_HOME before running benchmarks
 
+Environment (startup):
+  FORMULA_DESKTOP_STARTUP_MODE=cold|warm
+    - cold (default): each measured run uses a fresh profile dir (true cold start)
+    - warm: one warmup run primes caches, then measured runs reuse the same profile
+
 Notes:
   - These commands are safe to run locally: they use a repo-local HOME so they don't touch
     ~/.config, ~/Library, etc.
   - Pass extra args after "--" to forward them to the underlying runner script.
+      pnpm perf:desktop-startup -- --mode warm
   - For shell startup benchmarking (no apps/desktop/dist required), pass:
       pnpm perf:desktop-startup -- --startup-bench
     or set:
