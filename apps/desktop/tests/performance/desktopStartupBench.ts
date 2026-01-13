@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -98,19 +98,45 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<StartupMetri
   const command = useXvfb ? resolve(repoRoot, 'scripts/xvfb-run-safe.sh') : binPath;
   const args = useXvfb ? [binPath] : [];
 
+  const perfHome = resolve(repoRoot, 'target', 'perf-home');
+  mkdirSync(perfHome, { recursive: true });
+
   return await new Promise<StartupMetrics>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // When running under the Xvfb wrapper we want to be able to reliably
+      // terminate the whole process tree (wrapper + Xvfb + desktop binary).
+      detached: useXvfb,
       env: {
         ...process.env,
         // Enable the Rust-side single-line log in release builds.
         FORMULA_STARTUP_METRICS: '1',
         // In case the app reads $HOME for config, keep per-run caches out of the real home dir.
-        HOME: resolve(repoRoot, 'target', 'perf-home'),
-        USERPROFILE: resolve(repoRoot, 'target', 'perf-home'),
+        HOME: perfHome,
+        USERPROFILE: perfHome,
       },
     });
+
+    const killChild = (signal: NodeJS.Signals = 'SIGTERM') => {
+      // On Linux headless runs we wrap the binary in xvfb-run-safe.sh, which
+      // starts additional processes (Xvfb + the actual desktop binary). If we
+      // only kill the wrapper, the child processes can be orphaned and linger
+      // into subsequent iterations.
+      if (useXvfb && child.pid) {
+        try {
+          process.kill(-child.pid, signal);
+          return;
+        } catch {
+          // Fall back to killing the wrapper process itself.
+        }
+      }
+      try {
+        child.kill(signal);
+      } catch {
+        // ignore
+      }
+    };
 
     let done = false;
     let captured: StartupMetrics | null = null;
@@ -120,7 +146,7 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<StartupMetri
     const deadline = setTimeout(() => {
       if (done) return;
       done = true;
-      child.kill();
+      killChild();
       cleanup();
       rejectPromise(new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
     }, timeoutMs);
@@ -142,14 +168,14 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<StartupMetri
       clearTimeout(deadline);
 
       // Stop the app after capturing the metrics so we can run multiple iterations.
-      child.kill();
+      killChild();
       exitDeadline = setTimeout(() => {
         if (done) return;
         done = true;
         try {
-          child.kill('SIGKILL');
+          killChild('SIGKILL');
         } catch {
-          child.kill();
+          killChild();
         }
         cleanup();
         rejectPromise(new Error('Timed out waiting for desktop process to exit after capturing metrics'));
@@ -159,9 +185,9 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<StartupMetri
       // background GUI processes during a multi-run benchmark.
       captureKillTimer = setTimeout(() => {
         try {
-          child.kill('SIGKILL');
+          killChild('SIGKILL');
         } catch {
-          child.kill();
+          killChild();
         }
       }, 2000);
     };

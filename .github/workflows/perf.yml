@@ -16,14 +16,16 @@ jobs:
 
   benchmark:
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    # Building + running the real desktop (Tauri) startup benchmark requires
+    # WebKit2GTK 4.1 which is available on Ubuntu 24.04 runners.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@v4
         with:
           version: 9
 
@@ -41,8 +43,82 @@ jobs:
       - name: Use shared Cargo home for CI caching
         run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
 
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Detect desktop (Tauri) changes in PRs
+        id: desktop_changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          # Default GITHUB_TOKEN has read access to changed files on PRs.
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            tauri:
+              - 'apps/desktop/src-tauri/**'
+              - 'apps/desktop/src/tauri/**'
+
+      - name: Decide whether to run real desktop startup benchmarks
+        id: desktop_bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${{ github.event_name }}" == "pull_request" && "${{ steps.desktop_changes.outputs.tauri }}" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=false" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux dependencies (Tauri/WebView + Xvfb)
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+
+      - name: Install wasm32 target (required for desktop renderer build)
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: cargo install wasm-pack --locked
+
+      - name: Build desktop frontend assets (Vite → tauri.conf.json build.frontendDist)
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: pnpm -C apps/desktop build
+
+      - name: Build desktop binary (Tauri, release)
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: |
+          bash scripts/cargo_agent.sh build \
+            -p formula-desktop-tauri \
+            --features desktop \
+            --bin formula-desktop \
+            --release \
+            --locked
+
       - name: Run benchmark suite
         id: perf
+        env:
+          # Enable the real desktop startup benchmark (Tauri shell) only when
+          # building it in this job (push-to-main, or relevant PRs).
+          FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
+          FORMULA_DESKTOP_STARTUP_RUNS: 7
+          FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: 20000
+          # Ensure the benchmark runs headless via scripts/xvfb-run-safe.sh.
+          # (desktopStartupBench.ts uses Xvfb only when DISPLAY is unset/empty.)
+          DISPLAY: ""
         run: pnpm benchmark
         continue-on-error: true
 
