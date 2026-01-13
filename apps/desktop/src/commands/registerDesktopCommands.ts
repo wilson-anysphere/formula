@@ -14,6 +14,7 @@ import {
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
+import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
 
 export type ApplyFormattingToSelection = (
@@ -44,6 +45,7 @@ export function registerDesktopCommands(params: {
   showQuickPick: <T>(items: QuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   findReplace: FindReplaceCommandHandlers;
   workbenchFileHandlers: WorkbenchFileCommandHandlers;
+  pageLayoutHandlers?: PageLayoutCommandHandlers | null;
   /**
    * Optional command palette opener. When provided, `workbench.showCommandPalette` will be
    * overridden to invoke this handler (instead of the built-in no-op registration).
@@ -66,6 +68,7 @@ export function registerDesktopCommands(params: {
     showQuickPick,
     findReplace,
     workbenchFileHandlers,
+    pageLayoutHandlers = null,
     openCommandPalette = null,
   } = params;
 
@@ -107,6 +110,9 @@ export function registerDesktopCommands(params: {
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
 
+  if (pageLayoutHandlers) {
+    registerPageLayoutCommands({ commandRegistry, handlers: pageLayoutHandlers });
+  }
   commandRegistry.registerBuiltinCommand("format.openFormatCells", t("command.format.openFormatCells"), () => openFormatCells(), {
     category: commandCategoryFormat,
     icon: null,

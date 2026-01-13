@@ -4,7 +4,6 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands.js";
-import { registerPageLayoutCommands } from "../../commands/registerPageLayoutCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
 
@@ -147,11 +146,15 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       getActiveCellNumberFormat: () => null,
       openFormatCells: () => {},
       showQuickPick: async () => null,
-      findReplace: {
-        openFind: () => {},
-        openReplace: () => {},
-        openGoTo: () => {},
+      pageLayoutHandlers: {
+        openPageSetupDialog: () => {},
+        updatePageSetup: () => {},
+        setPrintArea: () => {},
+        clearPrintArea: () => {},
+        addToPrintArea: () => {},
+        exportPdf: () => {},
       },
+      findReplace: { openFind: () => {}, openReplace: () => {}, openGoTo: () => {} },
       workbenchFileHandlers: {
         newWorkbook: () => {},
         openWorkbook: () => {},
@@ -164,18 +167,6 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
         quit: () => {},
       },
       openCommandPalette: () => {},
-    });
-
-    registerPageLayoutCommands({
-      commandRegistry,
-      handlers: {
-        openPageSetupDialog: () => {},
-        updatePageSetup: () => {},
-        setPrintArea: () => {},
-        clearPrintArea: () => {},
-        addToPrintArea: () => {},
-        exportPdf: () => {},
-      },
     });
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 

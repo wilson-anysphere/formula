@@ -132,7 +132,6 @@ import { createCommandPalette, installCommandPaletteRecentsTracking } from "./co
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
-import { registerPageLayoutCommands } from "./commands/registerPageLayoutCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
@@ -7257,6 +7256,14 @@ registerDesktopCommands({
     openReplace: () => showExclusiveFindReplaceDialog(replaceDialog as any),
     openGoTo: () => showExclusiveFindReplaceDialog(goToDialog as any),
   },
+  pageLayoutHandlers: {
+    openPageSetupDialog: () => handleRibbonPageSetup(),
+    updatePageSetup: (patch) => handleRibbonUpdatePageSetup(patch),
+    setPrintArea: () => handleRibbonSetPrintArea(),
+    clearPrintArea: () => handleRibbonClearPrintArea(),
+    addToPrintArea: () => handleRibbonAddToPrintArea(),
+    exportPdf: () => handleRibbonExportPdf(),
+  },
   workbenchFileHandlers: {
     newWorkbook: () => {
       if (!tauriBackend) {
@@ -7374,18 +7381,6 @@ registerFormatPainterCommand({
   },
 });
 
-registerPageLayoutCommands({
-  commandRegistry,
-  handlers: {
-    openPageSetupDialog: () => handleRibbonPageSetup(),
-    updatePageSetup: (patch) => handleRibbonUpdatePageSetup(patch),
-    setPrintArea: () => handleRibbonSetPrintArea(),
-    clearPrintArea: () => handleRibbonClearPrintArea(),
-    addToPrintArea: () => handleRibbonAddToPrintArea(),
-    exportPdf: () => handleRibbonExportPdf(),
-  },
-});
-
 // Home → Font dropdown actions are registered as canonical `format.*` commands so
 // ribbon actions and the command palette share a single command surface.
 registerFormatFontDropdownCommands({
@@ -7397,7 +7392,6 @@ registerFormatFontDropdownCommands({
   fontColorPicker,
   fillColorPicker,
 });
-
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
