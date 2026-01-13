@@ -1,0 +1,11 @@
+{
+  "_comment": "Optional config for scripts/verify-desktop-release-assets.mjs. Not used unless --expectations is passed.",
+  "expect": [
+    "windows-x64",
+    "windows-arm64",
+    "macos-universal",
+    "linux-x64",
+    "linux-arm64"
+  ]
+}
+

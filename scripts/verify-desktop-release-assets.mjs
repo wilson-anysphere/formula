@@ -159,6 +159,250 @@ function formatBytes(bytes) {
   return `${gb.toFixed(2)} GiB`;
 }
 
+// --- Optional expectations layer ------------------------------------------------
+
+const EXPECT_FLAG_MAP = new Map([
+  ["--expect-windows-x64", "windows-x64"],
+  ["--expect-windows-arm64", "windows-arm64"],
+  ["--expect-macos-x64", "macos-x64"],
+  ["--expect-macos-arm64", "macos-arm64"],
+  ["--expect-macos-universal", "macos-universal"],
+  ["--expect-linux-x64", "linux-x64"],
+  ["--expect-linux-arm64", "linux-arm64"],
+]);
+
+const ARCH_TOKENS = {
+  x64: ["x64", "x86_64", "amd64"],
+  arm64: ["arm64", "aarch64"],
+  universal: ["universal"],
+};
+
+/** @typedef {"windows" | "macos" | "linux"} DesktopOs */
+/** @typedef {"x64" | "arm64" | "universal"} DesktopArch */
+/**
+ * @typedef {{
+ *   id: string,
+ *   os: DesktopOs,
+ *   arch: DesktopArch,
+ *   installerExts: string[],
+ *   updaterPlatformKeys: string[],
+ *   allowMissingArchInInstallerName?: boolean,
+ * }} ExpectedTarget
+ */
+
+/** @type {Record<string, ExpectedTarget>} */
+const EXPECTED_TARGETS = {
+  "windows-x64": {
+    id: "windows-x64",
+    os: "windows",
+    arch: "x64",
+    installerExts: [".msi", ".exe"],
+    updaterPlatformKeys: ["windows-x86_64", "windows-x64"],
+  },
+  "windows-arm64": {
+    id: "windows-arm64",
+    os: "windows",
+    arch: "arm64",
+    installerExts: [".msi", ".exe"],
+    updaterPlatformKeys: ["windows-aarch64", "windows-arm64"],
+  },
+  "macos-x64": {
+    id: "macos-x64",
+    os: "macos",
+    arch: "x64",
+    installerExts: [".dmg", ".pkg"],
+    updaterPlatformKeys: ["darwin-x86_64", "darwin-x64", "macos-x86_64"],
+  },
+  "macos-arm64": {
+    id: "macos-arm64",
+    os: "macos",
+    arch: "arm64",
+    installerExts: [".dmg", ".pkg"],
+    updaterPlatformKeys: ["darwin-aarch64", "darwin-arm64", "macos-aarch64", "macos-arm64"],
+  },
+  "macos-universal": {
+    id: "macos-universal",
+    os: "macos",
+    arch: "universal",
+    installerExts: [".dmg", ".pkg"],
+    updaterPlatformKeys: ["darwin-universal", "macos-universal"],
+    // Some universal builds ship a single installer that omits the arch token (because the
+    // installer itself is universal). This is allowed only when `--expect-macos-universal` is set.
+    allowMissingArchInInstallerName: true,
+  },
+  "linux-x64": {
+    id: "linux-x64",
+    os: "linux",
+    arch: "x64",
+    installerExts: [".deb", ".rpm", ".AppImage", ".appimage"],
+    updaterPlatformKeys: ["linux-x86_64", "linux-x64"],
+  },
+  "linux-arm64": {
+    id: "linux-arm64",
+    os: "linux",
+    arch: "arm64",
+    installerExts: [".deb", ".rpm", ".AppImage", ".appimage"],
+    updaterPlatformKeys: ["linux-aarch64", "linux-arm64"],
+  },
+};
+
+/**
+ * @param {string} value
+ */
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Boundary-aware "token exists" regex builder.
+ *
+ * @param {string[]} tokens
+ */
+function tokenRegex(tokens) {
+  const inner = tokens.map((t) => escapeRegex(t)).join("|");
+  // Treat non-alphanumerics as boundaries so `_x86_64` and `-arm64` are matched as tokens.
+  return new RegExp(`(?:^|[^a-z0-9])(?:${inner})(?:[^a-z0-9]|$)`, "i");
+}
+
+/**
+ * @param {string} name
+ * @param {string[]} exts
+ */
+function hasAnyExtension(name, exts) {
+  const lower = name.toLowerCase();
+  return exts.some((ext) => lower.endsWith(ext.toLowerCase()));
+}
+
+/**
+ * @param {string} name
+ * @param {string} version
+ */
+function containsVersion(name, version) {
+  return name.includes(version) || name.includes(`v${version}`);
+}
+
+/**
+ * @param {string} name
+ */
+function containsAnyArchToken(name) {
+  return tokenRegex([...ARCH_TOKENS.x64, ...ARCH_TOKENS.arm64, ...ARCH_TOKENS.universal]).test(name);
+}
+
+/**
+ * @param {string} name
+ * @param {DesktopArch} arch
+ */
+function containsArchToken(name, arch) {
+  return tokenRegex(ARCH_TOKENS[arch]).test(name);
+}
+
+/**
+ * @param {DesktopOs} os
+ */
+function osArtifactRegex(os) {
+  switch (os) {
+    case "windows":
+      // Includes updater artifacts like `.msi.zip`, `.exe.sig`, etc.
+      return /(?:\.msi|\.exe)(?:\.|$)/i;
+    case "macos":
+      // Includes `.dmg`, `.pkg`, updater `.app.tar.gz`, etc.
+      return /(?:\.dmg|\.pkg|\.app\.tar\.gz)(?:\.|$)/i;
+    case "linux":
+      // Includes `.AppImage.tar.gz`, `.deb.sig`, etc.
+      return /(?:\.appimage|\.deb|\.rpm)(?:\.|$)/i;
+  }
+}
+
+/**
+ * @param {string[]} assetNames
+ * @param {DesktopOs} os
+ */
+function listOsArtifacts(assetNames, os) {
+  const re = osArtifactRegex(os);
+  return assetNames.filter((name) => re.test(name));
+}
+
+/**
+ * @param {string[]} assetNames
+ * @param {ExpectedTarget} target
+ * @param {string} version
+ */
+function findInstallerAssetsForTarget(assetNames, target, version) {
+  return assetNames
+    .filter((name) => hasAnyExtension(name, target.installerExts))
+    .filter((name) => containsVersion(name, version))
+    .filter((name) => {
+      if (containsArchToken(name, target.arch)) return true;
+      if (target.allowMissingArchInInstallerName && !containsAnyArchToken(name)) return true;
+      return false;
+    });
+}
+
+/**
+ * @param {string[]} assetNames
+ * @param {DesktopOs} os
+ * @param {DesktopArch[]} expectedArchsForOs
+ * @param {string} version
+ * @param {boolean} allowMissingArchToken
+ */
+function findAmbiguousAssetsForOs(assetNames, os, expectedArchsForOs, version, allowMissingArchToken) {
+  const tokens = expectedArchsForOs.flatMap((arch) => ARCH_TOKENS[arch]);
+  const re = tokenRegex(tokens);
+  const artifactNames = listOsArtifacts(assetNames, os).filter((name) => containsVersion(name, version));
+
+  return artifactNames.filter((name) => {
+    if (re.test(name)) return false;
+    if (allowMissingArchToken && !containsAnyArchToken(name)) return false;
+    return true;
+  });
+}
+
+/**
+ * @param {unknown} value
+ */
+function isStringArray(value) {
+  return Array.isArray(value) && value.every((v) => typeof v === "string");
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<{ targets: string[] }>}
+ */
+async function loadExpectationsFile(filePath) {
+  const resolvedPath = path.isAbsolute(filePath) ? filePath : path.join(repoRoot, filePath);
+  let raw;
+  try {
+    raw = await readFile(resolvedPath, "utf8");
+  } catch (err) {
+    throw new ActionableError(`Failed to read expectations file ${filePath}.`, [
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
+
+  /** @type {any} */
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new ActionableError(`Failed to parse expectations file ${filePath} as JSON.`, [
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
+
+  if (isStringArray(parsed)) {
+    return { targets: parsed };
+  }
+
+  if (parsed && typeof parsed === "object") {
+    if (isStringArray(parsed.expect)) return { targets: parsed.expect };
+    if (isStringArray(parsed.targets)) return { targets: parsed.targets };
+  }
+
+  throw new ActionableError(`Invalid expectations file ${filePath}.`, [
+    `Expected an array of strings or { "expect": string[] }.`,
+  ]);
+}
+
 function usage() {
   const cmd = "node scripts/verify-desktop-release-assets.mjs";
   console.log(
@@ -171,6 +415,17 @@ function usage() {
       "  --out <path>       Output path for SHA256SUMS.txt (default: ./SHA256SUMS.txt)",
       "  --dry-run          Validate manifest/assets only (skip bundle hashing)",
       "  --verify-assets    Download updater assets referenced in latest.json and verify their signatures (slow)",
+      "",
+      "Expectations (optional; off by default):",
+      "  --expectations <file>      Load expected targets from a JSON file",
+      "                             (see scripts/release-asset-expectations.json for a template)",
+      "  --expect-windows-x64",
+      "  --expect-windows-arm64",
+      "  --expect-macos-universal",
+      "  --expect-macos-x64",
+      "  --expect-macos-arm64",
+      "  --expect-linux-x64",
+      "  --expect-linux-arm64",
       "  -h, --help         Show help",
       "",
       "Env:",
@@ -188,8 +443,8 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
-  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean }} */
-  const parsed = { dryRun: false, verifyAssets: false, help: false };
+  /** @type {{ tag?: string; repo?: string; out?: string; dryRun: boolean; verifyAssets: boolean; help: boolean; expectationsFile?: string; expectedTargets: string[] }} */
+  const parsed = { dryRun: false, verifyAssets: false, help: false, expectedTargets: [] };
 
   const takeValue = (i, flag) => {
     const value = argv[i + 1];
@@ -241,6 +496,21 @@ function parseArgs(argv) {
     }
     if (arg.startsWith("--out=")) {
       parsed.out = arg.slice("--out=".length);
+      continue;
+    }
+    if (arg === "--expectations") {
+      parsed.expectationsFile = takeValue(i, "--expectations");
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--expectations=")) {
+      parsed.expectationsFile = arg.slice("--expectations=".length);
+      continue;
+    }
+
+    const mappedExpectation = EXPECT_FLAG_MAP.get(arg);
+    if (mappedExpectation) {
+      parsed.expectedTargets.push(mappedExpectation);
       continue;
     }
 
@@ -597,12 +867,16 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
 async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, token, publicKey, pubkeyKeyId }) {
   const platforms = manifest?.platforms;
   if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
-    throw new ActionableError("latest.json is missing a 'platforms' object; cannot verify updater asset signatures.");
+    throw new ActionableError(
+      "latest.json is missing a 'platforms' object; cannot verify updater asset signatures.",
+    );
   }
 
   const entries = Object.entries(platforms);
   if (entries.length === 0) {
-    throw new ActionableError("latest.json 'platforms' object is empty; cannot verify updater asset signatures.");
+    throw new ActionableError(
+      "latest.json 'platforms' object is empty; cannot verify updater asset signatures.",
+    );
   }
 
   console.log(`Verifying updater asset signatures for ${entries.length} platform(s)...`);
@@ -674,7 +948,9 @@ async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, to
 
     const size = typeof asset.size === "number" ? asset.size : undefined;
     console.log(
-      `- ${platformKey}: downloading ${assetName}${size ? ` (${formatBytes(size)})` : ""} for signature verification...`
+      `- ${platformKey}: downloading ${assetName}${
+        size ? ` (${formatBytes(size)})` : ""
+      } for signature verification...`,
     );
     const assetBytes = await downloadReleaseAssetBytes(asset, token);
     const ok = verify(null, assetBytes, publicKey, parsedSig.signatureBytes);
@@ -733,6 +1009,114 @@ function verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, updaterP
       `latest.json.sig does not verify latest.json with the configured updater public key.`,
       `This typically means latest.json and latest.json.sig were uploaded/generated inconsistently (race/overwrite), or TAURI_PRIVATE_KEY does not match plugins.updater.pubkey.`,
     ]);
+  }
+}
+
+/**
+ * Optional expectations layer.
+ *
+ * When enabled via `--expect-*` flags or `--expectations <file>`, asserts:
+ * - each expected (os, arch) has at least one installer asset whose filename includes version + arch
+ * - latest.json.platforms contains an entry for each expected updater target
+ * - no ambiguous multi-arch artifacts whose name omits any arch/universal discriminator
+ *
+ * @param {{ manifest: any; expectedVersion: string; assetNames: string[]; expectedTargets: ExpectedTarget[] }} opts
+ */
+function validateReleaseExpectations({ manifest, expectedVersion, assetNames, expectedTargets }) {
+  if (!expectedTargets || expectedTargets.length === 0) return;
+
+  const version = normalizeVersion(expectedVersion);
+
+  /** @type {string[]} */
+  const errors = [];
+
+  // 1) Installer presence per expected target.
+  for (const target of expectedTargets) {
+    const matches = findInstallerAssetsForTarget(assetNames, target, version);
+    if (matches.length > 0) continue;
+
+    const archTokens =
+      target.arch === "universal"
+        ? [
+            ...ARCH_TOKENS.universal,
+            ...(target.allowMissingArchInInstallerName ? ["(or no arch token; universal installer)"] : []),
+          ]
+        : ARCH_TOKENS[target.arch];
+
+    const osInstallers = assetNames
+      .filter((name) => hasAnyExtension(name, target.installerExts))
+      .filter((name) => containsVersion(name, version));
+
+    errors.push(`[${target.id}] Missing installer asset.`);
+    errors.push(
+      `  Looked for: version "${version}" + arch token (${archTokens.join(", ")}) + extension (${target.installerExts.join(
+        ", ",
+      )})`,
+    );
+    errors.push(
+      `  Found ${target.os} installer-like assets (version match): ${
+        osInstallers.length > 0 ? osInstallers.join(", ") : "(none)"
+      }`,
+    );
+  }
+
+  // 2) Updater targets must be present in latest.json.platforms.
+  const foundPlatforms = findPlatformsObject(manifest);
+  const platforms = foundPlatforms?.platforms;
+  if (!platforms) {
+    errors.push(`latest.json is missing a "platforms" object; cannot validate expected updater targets.`);
+  } else {
+    const platformKeys = Object.keys(platforms).sort();
+    for (const target of expectedTargets) {
+      const hasKey = target.updaterPlatformKeys.some((key) =>
+        Object.prototype.hasOwnProperty.call(platforms, key),
+      );
+      if (hasKey) continue;
+
+      errors.push(`[${target.id}] Missing updater platform entry in latest.json.`);
+      errors.push(`  Expected one of: ${target.updaterPlatformKeys.join(", ")}`);
+      errors.push(`  Found keys: ${platformKeys.length > 0 ? platformKeys.join(", ") : "(none)"}`);
+    }
+  }
+
+  // 3) Ambiguous asset names on multi-arch platforms.
+  /** @type {Map<DesktopOs, DesktopArch[]>} */
+  const expectedArchsByOs = new Map();
+  for (const target of expectedTargets) {
+    const current = expectedArchsByOs.get(target.os) ?? [];
+    current.push(target.arch);
+    expectedArchsByOs.set(target.os, current);
+  }
+
+  for (const [os, archs] of expectedArchsByOs.entries()) {
+    const uniqueArchs = Array.from(new Set(archs));
+    const isMultiArch = uniqueArchs.length > 1 || uniqueArchs.includes("universal");
+    if (!isMultiArch) continue;
+
+    const allowMissingArchToken = expectedTargets.some(
+      (t) => t.os === os && t.allowMissingArchInInstallerName === true,
+    );
+    const ambiguous = findAmbiguousAssetsForOs(assetNames, os, uniqueArchs, version, allowMissingArchToken);
+    if (ambiguous.length === 0) continue;
+
+    errors.push(`[${os}] Ambiguous artifacts detected (missing arch/universal discriminator).`);
+    errors.push(
+      `  Multi-arch enabled for ${os}: ${uniqueArchs.join(", ")}. Expected assets to include one of: ${uniqueArchs
+        .flatMap((a) => ARCH_TOKENS[a])
+        .join(", ")}`,
+    );
+    if (allowMissingArchToken) {
+      errors.push(
+        `  Note: ${os} allows a missing arch token for universal installers, but assets that include *some* arch token must still match one of the expected tokens.`,
+      );
+    }
+    for (const name of ambiguous) {
+      errors.push(`  ${name}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new ActionableError("Desktop release asset verification failed: expectation errors.", errors);
   }
 }
 
@@ -806,6 +1190,42 @@ async function main() {
       `Failed to construct an Ed25519 public key from plugins.updater.pubkey.`,
       err instanceof Error ? err.message : String(err),
     ]);
+  }
+
+  // Resolve opt-in expectations (off by default; safe for forks with fewer targets).
+  /** @type {string[]} */
+  const expectedTargetIds = [...args.expectedTargets];
+  if (args.expectationsFile) {
+    const fileConfig = await loadExpectationsFile(args.expectationsFile);
+    expectedTargetIds.push(...fileConfig.targets);
+  }
+
+  const normalizedTargetIds = expectedTargetIds.map((t) => t.trim()).filter(Boolean);
+  const uniqueTargetIds = Array.from(new Set(normalizedTargetIds));
+  const unknownTargets = uniqueTargetIds.filter((t) => !EXPECTED_TARGETS[t]);
+  if (unknownTargets.length > 0) {
+    throw new ActionableError("Unknown expectation target(s).", [
+      ...unknownTargets,
+      "Supported targets:",
+      ...Object.keys(EXPECTED_TARGETS).map((t) => `  ${t}`),
+    ]);
+  }
+
+  /** @type {ExpectedTarget[]} */
+  const expectedTargets = uniqueTargetIds.map((t) => EXPECTED_TARGETS[t]);
+  const expectationsEnabled = expectedTargets.length > 0;
+  if (expectationsEnabled) {
+    console.log(`Expectations enabled: ${expectedTargets.map((t) => t.id).join(", ")}`);
+
+    // Guard: macOS cannot be both universal and per-arch at the same time.
+    const macosUniversal = expectedTargets.some((t) => t.id === "macos-universal");
+    const macosPerArch = expectedTargets.some((t) => t.id === "macos-x64" || t.id === "macos-arm64");
+    if (macosUniversal && macosPerArch) {
+      throw new ActionableError("Invalid expectations.", [
+        "Cannot combine macos-universal with macos-x64/macos-arm64.",
+        "Choose either a universal build (--expect-macos-universal) or per-arch builds (--expect-macos-x64 + --expect-macos-arm64).",
+      ]);
+    }
   }
 
   /** @type {any} */
@@ -905,6 +1325,15 @@ async function main() {
         ]);
       }
       validateLatestJson(manifest, expectedVersion, assetsByName);
+
+      if (expectationsEnabled) {
+        validateReleaseExpectations({
+          manifest,
+          expectedVersion,
+          assetNames,
+          expectedTargets,
+        });
+      }
 
       // If we get here, manifest + asset cross-check has passed.
       console.log(
