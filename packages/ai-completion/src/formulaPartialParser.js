@@ -25,8 +25,11 @@
  * @returns {PartialFormulaContext}
  */
 export function parsePartialFormula(input, cursorPosition, functionRegistry) {
-  const safeCursor = clampCursor(input, cursorPosition);
-  const prefix = input.slice(0, safeCursor);
+  // This parser runs on every keystroke; it must be crash-proof even if called
+  // with unexpected inputs.
+  const safeInput = typeof input === "string" ? input : "";
+  const safeCursor = clampCursor(safeInput, cursorPosition);
+  const prefix = safeInput.slice(0, safeCursor);
 
   if (!prefix.startsWith("=")) {
     return { isFormula: false, inFunctionCall: false };
