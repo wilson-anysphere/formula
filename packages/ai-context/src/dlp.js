@@ -20,10 +20,10 @@ const API_KEY_RE =
 
 // Candidate detector only. Validate IBAN checksum (mod 97) before classifying/redacting.
 //
-// Note: require an ending digit to avoid common over-matches like:
-//   "GB82 ... 32 key=..."
-// where a greedy `...{11,30}` can swallow trailing identifiers.
-const IBAN_CANDIDATE_RE = /\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){10,29}\d\b/gi;
+// This regex is intentionally broad (IBAN lengths are country-specific). We rely on
+// checksum validation + prefix extraction to avoid false positives and to prevent the
+// greedy match from swallowing adjacent tokens like `key=...`.
+const IBAN_CANDIDATE_RE = /\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b/gi;
 
 function hasMatch(re, text) {
   re.lastIndex = 0;
@@ -162,24 +162,41 @@ function isValidIban(candidate) {
 
 /**
  * IBAN candidate regexes can be greedy when the input contains adjacent identifiers
- * (e.g. `iban=GB82 ... 32 key=...`). Attempt to trim trailing whitespace-delimited
- * tokens to recover the valid IBAN without leaking it in redaction output.
+ * (e.g. `iban=GB82 ... 32 key=...`). Attempt to extract the longest checksum-valid
+ * IBAN prefix without leaking it in redaction output.
  *
  * @param {string} candidate
  * @returns {{ iban: string, suffix: string } | null}
  */
 function extractValidIban(candidate) {
   const raw = String(candidate);
-  if (isValidIban(raw)) return { iban: raw, suffix: "" };
+  const normalized = normalizeIban(raw);
+  const maxLen = Math.min(34, normalized.length);
+  for (let len = maxLen; len >= 15; len--) {
+    // The candidate regex ensures the string begins with country+checksum digits.
+    const prefixNormalized = normalized.slice(0, len);
+    if (!isValidIban(prefixNormalized)) continue;
 
-  let trimmed = raw;
-  while (true) {
-    const next = trimmed.replace(/\s+[A-Za-z0-9]+$/, "");
-    if (next === trimmed) break;
-    trimmed = next;
-    if (isValidIban(trimmed)) {
-      return { iban: trimmed, suffix: raw.slice(trimmed.length) };
+    // Map the normalized prefix length back to a slice boundary in the raw string
+    // (which may include spaces).
+    let seen = 0;
+    let cut = raw.length;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      const code = ch.charCodeAt(0);
+      const isAlphaNum =
+        (code >= 48 && code <= 57) || // 0-9
+        (code >= 65 && code <= 90) || // A-Z
+        (code >= 97 && code <= 122); // a-z
+      if (!isAlphaNum) continue;
+      seen++;
+      if (seen === len) {
+        cut = i + 1;
+        break;
+      }
     }
+
+    return { iban: raw.slice(0, cut), suffix: raw.slice(cut) };
   }
 
   return null;

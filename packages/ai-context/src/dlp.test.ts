@@ -32,9 +32,13 @@ describe("dlp heuristic", () => {
   it("detects and validates IBANs (mod 97)", () => {
     const valid = "GB82 WEST 1234 5698 7654 32";
     const invalid = "GB82 WEST 1234 5698 7654 33";
+    // Valid example that ends with a letter.
+    const validEndsWithLetter = "MT84 MALT 0110 0001 2345 MTLC AST0 01S";
 
     expect(classifyText(`iban=${valid}`).findings).toContain("iban");
     expect(classifyText(`iban=${invalid}`).findings).not.toContain("iban");
+    expect(classifyText(`iban=${validEndsWithLetter}`).findings).toContain("iban");
+    expect(redactText(`iban=${validEndsWithLetter}`)).toBe("iban=[REDACTED_IBAN]");
   });
 
   it("redacts new detector types without leaking substrings", () => {
@@ -60,4 +64,3 @@ describe("dlp heuristic", () => {
     expect(redactText(`cc=${invalid}`)).toBe(`cc=${invalid}`);
   });
 });
-
