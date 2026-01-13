@@ -85,7 +85,7 @@
 }
 
 #grid-splitter {
-  background: var(--border);
+  background: var(--formula-grid-line, var(--border));
   /* Ensure pointer-based splitter drags stay responsive on touch devices. */
   touch-action: none;
   user-select: none;
