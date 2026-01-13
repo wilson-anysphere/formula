@@ -3,6 +3,14 @@ export class SqliteVectorStore {
     storage?: any;
     dimension: number;
     autoSave?: boolean;
+    /**
+     * When true (default), if a persisted DB exists with a different embedding
+     * dimension than requested, the store will wipe the persisted bytes and
+     * create a fresh empty DB so callers can re-index.
+     *
+     * Set to false to preserve the historical behaviour (throw on mismatch).
+     */
+    resetOnDimensionMismatch?: boolean;
     locateFile?: (file: string, prefix?: string) => string;
   }): Promise<SqliteVectorStore>;
 

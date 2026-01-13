@@ -173,18 +173,60 @@ export class SqliteVectorStore {
     }
 
     const storage = opts.storage ?? new InMemoryBinaryStorage();
+    // The vector store is a derived cache (it can always be re-indexed). If the
+    // embedding dimension changes between versions/configurations, the safest
+    // user experience is to reset the persisted DB and allow re-indexing rather
+    // than hard-failing on startup.
+    const resetOnDimensionMismatch = opts.resetOnDimensionMismatch ?? true;
     const SQL = await getSqlJs(opts.locateFile);
     const existing = await storage.load();
     const hadExisting = Boolean(existing);
 
-    const db = existing ? new SQL.Database(existing) : new SQL.Database();
-    const store = new SqliteVectorStore(db, {
+    const autoSave = opts.autoSave ?? true;
+
+    let db = existing ? new SQL.Database(existing) : new SQL.Database();
+    let store = new SqliteVectorStore(db, {
       storage,
       dimension: opts.dimension,
-      autoSave: opts.autoSave ?? true,
+      autoSave,
     });
 
-    store._ensureMeta(opts.dimension);
+    try {
+      store._ensureMeta(opts.dimension);
+    } catch (err) {
+      // Only reset for the specific "dimension mismatch" case. Other failures
+      // (e.g. corrupt DB bytes) should still surface to callers.
+      const message = err instanceof Error ? err.message : String(err);
+      const isDimMismatch = message.includes("SqliteVectorStore dimension mismatch");
+      if (!isDimMismatch || !resetOnDimensionMismatch) throw err;
+
+      try {
+        store._db?.close?.();
+      } catch {
+        // ignore
+      }
+
+      // Best-effort clear persisted bytes.
+      if (typeof storage.remove === "function") {
+        await storage.remove();
+      }
+
+      db = new SQL.Database();
+      store = new SqliteVectorStore(db, {
+        storage,
+        dimension: opts.dimension,
+        autoSave,
+      });
+      store._ensureMeta(opts.dimension);
+
+      // Overwrite whatever was previously persisted so future launches don't
+      // repeatedly hit the mismatch path.
+      store._ensureSchemaVersion();
+      store._dirty = true;
+      await store._persist();
+      return store;
+    }
+
     store._ensureSchemaVersion();
     // If we migrated an existing database and autoSave is enabled, persist the
     // migrated schema immediately so subsequent opens don't re-run the migration

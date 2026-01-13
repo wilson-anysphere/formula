@@ -15,6 +15,7 @@ export async function createSqliteFileVectorStore(opts) {
     storage,
     dimension: opts.dimension,
     autoSave: opts.autoSave,
+    resetOnDimensionMismatch: opts.resetOnDimensionMismatch,
     locateFile: opts.locateFile,
   });
 }
