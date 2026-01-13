@@ -899,9 +899,37 @@ jobs:
             exit 1
           fi
 
-          mapfile -d '' appimages < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/appimage/*.AppImage' -print0)
-          mapfile -d '' debs < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/deb/*.deb' -print0)
-          mapfile -d '' rpms < <(find "${bundle_roots[@]}" -type f -path '*/release/bundle/rpm/*.rpm' -print0)
+          # Canonicalize + de-dupe bundle roots (avoid duplicate scanning when CARGO_TARGET_DIR overlaps defaults).
+          declare -A seen_bundle_roots=()
+          uniq_bundle_roots=()
+          for root in "${bundle_roots[@]}"; do
+            abs="$(cd "$root" && pwd -P)"
+            if [[ -n "${seen_bundle_roots[${abs}]:-}" ]]; then
+              continue
+            fi
+            seen_bundle_roots["${abs}"]=1
+            uniq_bundle_roots+=("${abs}")
+          done
+          bundle_roots=("${uniq_bundle_roots[@]}")
+
+          # Use predictable bundle globs (fast) rather than `find` (which traverses the entire Cargo target dir).
+          shopt -s nullglob
+          appimages=()
+          debs=()
+          rpms=()
+          for root in "${bundle_roots[@]}"; do
+            appimages+=("$root"/release/bundle/appimage/*.AppImage)
+            appimages+=("$root"/*/release/bundle/appimage/*.AppImage)
+            debs+=("$root"/release/bundle/deb/*.deb)
+            debs+=("$root"/*/release/bundle/deb/*.deb)
+            rpms+=("$root"/release/bundle/rpm/*.rpm)
+            rpms+=("$root"/*/release/bundle/rpm/*.rpm)
+          done
+          shopt -u nullglob
+
+          if ((${#appimages[@]} > 0)); then mapfile -t appimages < <(printf '%s\n' "${appimages[@]}" | sort -u); fi
+          if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
+          if ((${#rpms[@]} > 0)); then mapfile -t rpms < <(printf '%s\n' "${rpms[@]}" | sort -u); fi
 
           echo "Bundle outputs:"
           printf '  AppImage: %s\n' "${#appimages[@]}"
