@@ -23,9 +23,10 @@ import {
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
-import { hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
+import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
+import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -806,6 +807,17 @@ export class SpreadsheetApp {
   // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
   private scrollX = 0;
   private scrollY = 0;
+
+  /**
+   * Cached drawing objects for the active sheet.
+   *
+   * This avoids recomputing/allocating draw-object lists on pointermove hover paths.
+   * `renderDrawings()` refreshes this list when the underlying drawing layer changes.
+   */
+  private drawingObjects: DrawingObject[] = [];
+  private drawingHitTestIndex: HitTestIndex | null = null;
+  private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private readonly drawingGeom: DrawingGridGeometry;
 
   private readonly cellWidth = 100;
   private readonly cellHeight = 24;
@@ -1986,10 +1998,12 @@ export class SpreadsheetApp {
       },
     };
 
+    this.drawingGeom = this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom;
+
     this.drawingOverlay = new DrawingOverlay(
       this.drawingCanvas,
       this.drawingImages,
-      this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom,
+      this.drawingGeom,
       new ChartRendererAdapter(this.formulaChartModelStore),
     );
 
@@ -2010,6 +2024,7 @@ export class SpreadsheetApp {
         () => {
           this.clearSharedHoverCellCache();
           this.hideCommentTooltip();
+          this.root.style.cursor = "";
         },
         { signal: this.domAbort.signal }
       );
@@ -5719,13 +5734,16 @@ export class SpreadsheetApp {
       if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
     }
-    // Fast path: if there are no comments indexed for the active sheet, we never
-    // need to pick cells or update the tooltip.
-    if (this.commentMetaByCoord.size === 0) {
+    const hasDrawings = this.drawingObjects.length !== 0;
+    const hasComments = this.commentMetaByCoord.size !== 0;
+
+    // Fast path: if the active sheet has neither comments nor drawings, skip all hover work.
+    if (!hasComments && !hasDrawings) {
       if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
         this.clearSharedHoverCellCache();
       }
       if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
+      if (this.root.style.cursor) this.root.style.cursor = "";
       return;
     }
 
@@ -5736,18 +5754,21 @@ export class SpreadsheetApp {
       if (this.vScrollbarTrack.contains(target) || this.hScrollbarTrack.contains(target) || this.outlineLayer.contains(target)) {
         this.clearSharedHoverCellCache();
         this.hideCommentTooltip();
+        if (this.root.style.cursor) this.root.style.cursor = "";
         return;
       }
     }
     if (this.commentsPanelVisible) {
       this.hideCommentTooltip();
+      if (this.root.style.cursor) this.root.style.cursor = "";
       return;
     }
     if (this.editor.isOpen()) {
       this.hideCommentTooltip();
+      if (this.root.style.cursor) this.root.style.cursor = "";
       return;
     }
-    if (e.buttons !== 0) {
+    if (e.buttons) {
       this.hideCommentTooltip();
       return;
     }
@@ -5769,6 +5790,26 @@ export class SpreadsheetApp {
     const y = useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
     if (x < 0 || y < 0 || x > this.width || y > this.height) {
       this.hideCommentTooltip();
+      if (this.root.style.cursor) this.root.style.cursor = "";
+      return;
+    }
+
+    const drawingCursor = this.drawingCursorAtPoint(x, y);
+    const nextCursor = drawingCursor ?? "";
+    if (this.root.style.cursor !== nextCursor) {
+      this.root.style.cursor = nextCursor;
+    }
+    // In shared-grid mode, the selection canvas sets its own cursor value, so apply drawing
+    // cursor feedback there as well when the pointermove targets the canvas surface.
+    if (drawingCursor && this.selectionCanvas.style.cursor !== drawingCursor) {
+      this.selectionCanvas.style.cursor = drawingCursor;
+    }
+
+    if (!hasComments) {
+      if (this.sharedHoverCellKey != null || this.sharedHoverCellRect != null) {
+        this.clearSharedHoverCellCache();
+      }
+      if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
       return;
     }
 
@@ -6089,6 +6130,28 @@ export class SpreadsheetApp {
         },
       }
     );
+  }
+
+  private getDrawingHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
+    const cached = this.drawingHitTestIndex;
+    if (cached && this.drawingHitTestIndexObjects === objects) return cached;
+    const index = buildHitTestIndex(objects, this.drawingGeom);
+    this.drawingHitTestIndex = index;
+    this.drawingHitTestIndexObjects = objects;
+    return index;
+  }
+
+  private drawingCursorAtPoint(x: number, y: number): string | null {
+    const objects = this.drawingObjects;
+    if (objects.length === 0) return null;
+
+    const index = this.getDrawingHitTestIndex(objects);
+    const viewport = this.getDrawingInteractionViewport();
+    const hit = hitTestDrawings(index, viewport, x, y);
+    if (!hit) return null;
+    const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
+    if (handle) return cursorForResizeHandle(handle, hit.object.transform);
+    return "move";
   }
 
   async getCellDisplayValueA1(a1: string): Promise<string> {
@@ -8674,6 +8737,7 @@ export class SpreadsheetApp {
   private renderDrawings(sharedViewport?: GridViewportState): void {
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
+    this.drawingObjects = objects;
     void this.drawingOverlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });
@@ -10533,6 +10597,14 @@ export class SpreadsheetApp {
       this.dragPointerPos.y = y;
     }
 
+    // Hover cursor feedback is only meaningful when no buttons are pressed. When a drawing is being
+    // dragged/resized via a separate overlay/controller, SpreadsheetApp still receives bubbled
+    // pointermoves; keep the cursor fixed by skipping hover hit testing while buttons are down.
+    if (!this.dragState && e.buttons) {
+      this.hideCommentTooltip();
+      return;
+    }
+
     if (this.dragState) {
       if (e.pointerId !== this.dragState.pointerId) return;
       if (this.editor.isOpen()) return;
@@ -10587,7 +10659,8 @@ export class SpreadsheetApp {
       x <= fillHandle.x + fillHandle.width &&
       y >= fillHandle.y &&
       y <= fillHandle.y + fillHandle.height;
-    const nextCursor = overFillHandle ? "crosshair" : "";
+    const drawingCursor = this.drawingCursorAtPoint(x, y);
+    const nextCursor = drawingCursor ?? (overFillHandle ? "crosshair" : "");
     if (this.root.style.cursor !== nextCursor) {
       this.root.style.cursor = nextCursor;
     }
