@@ -1551,6 +1551,16 @@ impl DataModel {
                 self.collect_same_table_column_dependencies_inner(left, current_table, out);
                 self.collect_same_table_column_dependencies_inner(right, current_table, out);
             }
+            Expr::Let { bindings, body } => {
+                for (_, binding_expr) in bindings {
+                    self.collect_same_table_column_dependencies_inner(
+                        binding_expr,
+                        current_table,
+                        out,
+                    );
+                }
+                self.collect_same_table_column_dependencies_inner(body, current_table, out);
+            }
             Expr::Number(_) | Expr::Text(_) | Expr::Boolean(_) | Expr::TableName(_) => {}
         }
     }
