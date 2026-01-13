@@ -24,6 +24,10 @@
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction / DC emit batch (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
  *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
+ *
+ * Optional CI-style enforcement (disabled unless set):
+ *   PERF_MAX_TOTAL_MS_YJS_TO_DC=15000   # fail if total runtime exceeds this (ms)
+ *   PERF_MAX_TOTAL_MS_DC_TO_YJS=15000   # fail if total runtime exceeds this (ms)
  */
 
 import test from "node:test";
@@ -281,6 +285,14 @@ perfTest(
       ].join("\n"),
     );
 
+    const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_YJS_TO_DC, 0);
+    if (maxTotalMs > 0) {
+      assert.ok(
+        totalMs <= maxTotalMs,
+        `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
+      );
+    }
+
     binder.destroy();
     session.destroy();
     ydoc.destroy();
@@ -367,6 +379,14 @@ perfTest(
         `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
       ].join("\n"),
     );
+
+    const maxTotalMs = readPositiveInt(process.env.PERF_MAX_TOTAL_MS_DC_TO_YJS, 0);
+    if (maxTotalMs > 0) {
+      assert.ok(
+        totalMs <= maxTotalMs,
+        `[session-binder-perf] expected total <= ${maxTotalMs}ms, got ${totalMs.toFixed(1)}ms`,
+      );
+    }
 
     binder.destroy();
     session.destroy();
