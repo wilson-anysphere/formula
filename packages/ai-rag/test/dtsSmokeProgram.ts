@@ -1,5 +1,6 @@
 import {
   ChunkedLocalStorageBinaryStorage,
+  type BinaryStorage,
   HashEmbedder,
   IndexedDBBinaryStorage,
   InMemoryBinaryStorage,
@@ -93,15 +94,15 @@ async function smoke() {
   void key;
   await localStorage.remove();
 
-  const chunkedLocalStorage = new ChunkedLocalStorageBinaryStorage({ workbookId: "wb", namespace: "ns" });
+  const chunkedLocalStorage: BinaryStorage = new ChunkedLocalStorageBinaryStorage({ workbookId: "wb", namespace: "ns" });
   await chunkedLocalStorage.save(new Uint8Array([1, 2, 3]));
   await chunkedLocalStorage.load();
-  await chunkedLocalStorage.remove();
+  await chunkedLocalStorage.remove?.();
 
-  const indexedDbStorage = new IndexedDBBinaryStorage({ workbookId: "wb", namespace: "ns", dbName: "db" });
+  const indexedDbStorage: BinaryStorage = new IndexedDBBinaryStorage({ workbookId: "wb", namespace: "ns", dbName: "db" });
   await indexedDbStorage.save(new Uint8Array([1, 2, 3]));
   await indexedDbStorage.load();
-  await indexedDbStorage.remove();
+  await indexedDbStorage.remove?.();
 
   const encoded: string = toBase64(new Uint8Array([1, 2, 3]));
   const decoded: Uint8Array = fromBase64(encoded);
