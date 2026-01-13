@@ -16,6 +16,7 @@ use crate::model::{
 };
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
+use formula_columnar::BitVec;
 use ordered_float::OrderedFloat;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -1773,10 +1774,7 @@ impl DaxEngine {
             && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
 
         let mut blanks = 0usize;
-        for (row, allowed) in rows_set.iter().enumerate() {
-            if !*allowed {
-                continue;
-            }
+        for row in rows_set.iter_ones() {
             if table_ref
                 .value_by_idx(row, idx)
                 .unwrap_or(Value::Blank)
@@ -2003,11 +2001,7 @@ impl DaxEngine {
         let include_virtual_blank = blank_row_allowed(filter, table)
             && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
 
-        let rows: Vec<usize> = rows_set
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, allowed)| allowed.then_some(idx))
-            .collect();
+        let rows: Vec<usize> = rows_set.iter_ones().collect();
 
         if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
             let mut out: HashSet<Value> = values.into_iter().collect();
@@ -2950,11 +2944,7 @@ impl DaxEngine {
                                 let Some(rows_set) = sets.get(table) else {
                                     return Err(DaxError::UnknownTable(table.to_string()));
                                 };
-                                let rows: Vec<usize> = rows_set
-                                    .iter()
-                                    .enumerate()
-                                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
-                                    .collect();
+                                let rows: Vec<usize> = rows_set.iter_ones().collect();
                                 (rows, Some(sets))
                             };
 
@@ -3075,11 +3065,7 @@ impl DaxEngine {
                                 let Some(rows_set) = sets.get(table) else {
                                     return Err(DaxError::UnknownTable(table.to_string()));
                                 };
-                                let rows: Vec<usize> = rows_set
-                                    .iter()
-                                    .enumerate()
-                                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
-                                    .collect();
+                                let rows: Vec<usize> = rows_set.iter_ones().collect();
                                 (rows, Some(sets))
                             };
 
@@ -3483,8 +3469,8 @@ impl DaxEngine {
                                             else {
                                                 continue;
                                             };
-                                            to_row_set.for_each_row(|to_row: usize| {
-                                                if allowed_to.get(to_row).copied().unwrap_or(false)
+                                            to_row_set.for_each_row(|to_row| {
+                                                if to_row < allowed_to.len() && allowed_to.get(to_row)
                                                 {
                                                     next_rows.insert(to_row);
                                                 }
@@ -3940,11 +3926,9 @@ impl DaxEngine {
                                             let Some(to_row_set) = rel_info.to_index.get(&fk) else {
                                                 continue;
                                             };
-                                            to_row_set.for_each_row(|to_row: usize| {
-                                                if allowed_to
-                                                    .get(to_row)
-                                                    .copied()
-                                                    .unwrap_or(false)
+                                            to_row_set.for_each_row(|to_row| {
+                                                if to_row < allowed_to.len()
+                                                    && allowed_to.get(to_row)
                                                 {
                                                     next_rows.insert(to_row);
                                                 }
@@ -4080,7 +4064,7 @@ impl DaxEngine {
                         if key.is_blank() {
                             if let Some(unmatched) = rel.unmatched_fact_rows.as_ref() {
                                 unmatched.for_each_row(|row| {
-                                    if allowed.get(row).copied().unwrap_or(false) {
+                                    if row < allowed.len() && allowed.get(row) {
                                         rows.push(row);
                                     }
                                 });
@@ -4088,7 +4072,7 @@ impl DaxEngine {
                                 for (fk, candidates) in from_index {
                                     if fk.is_blank() || !rel.to_index.contains_key(fk) {
                                         for &row in candidates {
-                                            if allowed.get(row).copied().unwrap_or(false) {
+                                            if row < allowed.len() && allowed.get(row) {
                                                 rows.push(row);
                                             }
                                         }
@@ -4096,14 +4080,10 @@ impl DaxEngine {
                                 }
                             } else {
                                 // Fallback: scan the fact table to preserve blank-member semantics.
-                                let from_table_ref =
-                                    model.table(target_table).ok_or_else(|| {
-                                        DaxError::UnknownTable(target_table.to_string())
-                                    })?;
-                                for row in 0..from_table_ref.row_count() {
-                                    if !allowed.get(row).copied().unwrap_or(false) {
-                                        continue;
-                                    }
+                                let from_table_ref = model.table(target_table).ok_or_else(|| {
+                                    DaxError::UnknownTable(target_table.to_string())
+                                })?;
+                                for row in allowed.iter_ones() {
                                     let v = from_table_ref
                                         .value_by_idx(row, rel.from_idx)
                                         .unwrap_or(Value::Blank);
@@ -4115,7 +4095,7 @@ impl DaxEngine {
                         } else if let Some(from_index) = rel.from_index.as_ref() {
                             if let Some(candidates) = from_index.get(&key) {
                                 for &row in candidates {
-                                    if allowed.get(row).copied().unwrap_or(false) {
+                                    if row < allowed.len() && allowed.get(row) {
                                         rows.push(row);
                                     }
                                 }
@@ -4128,16 +4108,13 @@ impl DaxEngine {
                                 from_table_ref.filter_eq(rel.from_idx, &key)
                             {
                                 for row in candidates {
-                                    if allowed.get(row).copied().unwrap_or(false) {
+                                    if row < allowed.len() && allowed.get(row) {
                                         rows.push(row);
                                     }
                                 }
                             } else {
-                                // Fallback: scan and compare.
-                                for row in 0..from_table_ref.row_count() {
-                                    if !allowed.get(row).copied().unwrap_or(false) {
-                                        continue;
-                                    }
+                                // Fallback: scan allowed rows and compare.
+                                for row in allowed.iter_ones() {
                                     let v = from_table_ref
                                         .value_by_idx(row, rel.from_idx)
                                         .unwrap_or(Value::Blank);
@@ -4291,7 +4268,7 @@ impl DaxEngine {
                             .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
                         current_rows
                             .into_iter()
-                            .filter(|row| allowed.get(*row).copied().unwrap_or(false))
+                            .filter(|row| *row < allowed.len() && allowed.get(*row))
                             .collect()
                     } else {
                         current_rows
@@ -4429,11 +4406,7 @@ pub(crate) fn resolve_table_rows(
     let Some(rows) = sets.get(table) else {
         return Err(DaxError::UnknownTable(table.to_string()));
     };
-    Ok(rows
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, allowed)| allowed.then_some(idx))
-        .collect())
+    Ok(rows.iter_ones().collect())
 }
 
 /// Resolve the current filter context to a per-table set of allowed physical rows.
@@ -4452,25 +4425,25 @@ pub(crate) fn resolve_table_rows(
 fn resolve_row_sets(
     model: &DataModel,
     filter: &FilterContext,
-) -> DaxResult<HashMap<String, Vec<bool>>> {
+) -> DaxResult<HashMap<String, BitVec>> {
     if filter.is_empty() {
         return Ok(model
             .tables
             .iter()
-            .map(|(name, table)| (name.clone(), vec![true; table.row_count()]))
+            .map(|(name, table)| (name.clone(), BitVec::with_len_all_true(table.row_count())))
             .collect());
     }
 
-    let mut sets: HashMap<String, Vec<bool>> = HashMap::new();
+    let mut sets: HashMap<String, BitVec> = HashMap::new();
 
     for (name, table) in model.tables.iter() {
         let row_count = table.row_count();
-        let mut allowed = vec![true; row_count];
+        let mut allowed = BitVec::with_len_all_true(row_count);
         if let Some(row_filter) = filter.row_filters.get(name) {
-            allowed.fill(false);
+            allowed = BitVec::with_len_all_false(row_count);
             for &row in row_filter {
                 if row < row_count {
-                    allowed[row] = true;
+                    allowed.set(row, true);
                 }
             }
         }
@@ -4485,7 +4458,7 @@ fn resolve_row_sets(
             })?;
 
             if values.is_empty() {
-                allowed.fill(false);
+                allowed = BitVec::with_len_all_false(row_count);
                 continue;
             }
 
@@ -4493,10 +4466,10 @@ fn resolve_row_sets(
             if values.len() == 1 {
                 let value = values.iter().next().expect("len==1");
                 if let Some(rows) = table.filter_eq(idx, value) {
-                    let mut next = vec![false; row_count];
+                    let mut next = BitVec::with_len_all_false(row_count);
                     for row in rows {
-                        if row < row_count && allowed[row] {
-                            next[row] = true;
+                        if row < row_count && allowed.get(row) {
+                            next.set(row, true);
                         }
                     }
                     allowed = next;
@@ -4507,10 +4480,10 @@ fn resolve_row_sets(
             if values.len() > 1 {
                 let values_vec: Vec<Value> = values.iter().cloned().collect();
                 if let Some(rows) = table.filter_in(idx, &values_vec) {
-                    let mut next = vec![false; row_count];
+                    let mut next = BitVec::with_len_all_false(row_count);
                     for row in rows {
-                        if row < row_count && allowed[row] {
-                            next[row] = true;
+                        if row < row_count && allowed.get(row) {
+                            next.set(row, true);
                         }
                     }
                     allowed = next;
@@ -4519,14 +4492,17 @@ fn resolve_row_sets(
             }
 
             // Fallback: scan and check membership.
-            for row in 0..row_count {
-                if !allowed[row] {
-                    continue;
-                }
+            let mut next = BitVec::with_len_all_false(row_count);
+            for row in allowed.iter_ones() {
                 let v = table.value_by_idx(row, idx).unwrap_or(Value::Blank);
-                if !values.contains(&v) {
-                    allowed[row] = false;
+                if values.contains(&v) {
+                    next.set(row, true);
                 }
+            }
+            allowed = next;
+
+            if allowed.count_ones() == 0 {
+                break;
             }
         }
 
@@ -4607,7 +4583,7 @@ enum Direction {
 
 fn propagate_filter(
     model: &DataModel,
-    sets: &mut HashMap<String, Vec<bool>>,
+    sets: &mut HashMap<String, BitVec>,
     relationship: &RelationshipInfo,
     direction: Direction,
     filter: &FilterContext,
@@ -4630,7 +4606,7 @@ fn propagate_filter(
 
             // If the one-side table is unfiltered (including the relationship's implicit blank
             // row), it should not restrict the many-side table.
-            if blank_row_allowed && to_set.iter().all(|allowed| *allowed) {
+            if blank_row_allowed && to_set.all_true() {
                 return Ok(false);
             }
 
@@ -4705,15 +4681,15 @@ fn propagate_filter(
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
-            let mut next = vec![false; from_set.len()];
+            let mut next = BitVec::with_len_all_false(from_set.len());
 
             if let Some(from_index) = relationship.from_index.as_ref() {
                 // Fast path: in-memory fact tables use a precomputed FK -> row list index.
                 for key in &allowed_keys {
                     if let Some(rows) = from_index.get(key) {
                         for &row in rows {
-                            if from_set.get(row).copied().unwrap_or(false) {
-                                next[row] = true;
+                            if row < from_set.len() && from_set.get(row) {
+                                next.set(row, true);
                             }
                         }
                     }
@@ -4725,8 +4701,8 @@ fn propagate_filter(
                     for (key, rows) in from_index {
                         if key.is_blank() || !relationship.to_index.contains_key(key) {
                             for &row in rows {
-                                if from_set.get(row).copied().unwrap_or(false) {
-                                    next[row] = true;
+                                if row < from_set.len() && from_set.get(row) {
+                                    next.set(row, true);
                                 }
                             }
                         }
@@ -4744,22 +4720,19 @@ fn propagate_filter(
                         from_table.filter_in(relationship.from_idx, &allowed_keys)
                     {
                         for row in rows {
-                            if from_set.get(row).copied().unwrap_or(false) {
-                                next[row] = true;
+                            if row < from_set.len() && from_set.get(row) {
+                                next.set(row, true);
                             }
                         }
                     } else {
                         // Fallback: scan and check membership.
                         let allowed_set: HashSet<Value> = allowed_keys.iter().cloned().collect();
-                        for row in 0..from_set.len() {
-                            if !from_set[row] {
-                                continue;
-                            }
+                        for row in from_set.iter_ones() {
                             let v = from_table
                                 .value_by_idx(row, relationship.from_idx)
                                 .unwrap_or(Value::Blank);
                             if allowed_set.contains(&v) {
-                                next[row] = true;
+                                next.set(row, true);
                             }
                         }
                     }
@@ -4768,32 +4741,26 @@ fn propagate_filter(
                 if blank_row_allowed {
                     if let Some(unmatched) = relationship.unmatched_fact_rows.as_ref() {
                         unmatched.for_each_row(|row| {
-                            if from_set.get(row).copied().unwrap_or(false) {
-                                next[row] = true;
+                            if row < from_set.len() && from_set.get(row) {
+                                next.set(row, true);
                             }
                         });
                     } else {
                         // Shouldn't happen for columnar relationships, but keep semantics by
                         // scanning if needed.
-                        for row in 0..from_set.len() {
-                            if !from_set[row] {
-                                continue;
-                            }
+                        for row in from_set.iter_ones() {
                             let v = from_table
                                 .value_by_idx(row, relationship.from_idx)
                                 .unwrap_or(Value::Blank);
                             if v.is_blank() || !relationship.to_index.contains_key(&v) {
-                                next[row] = true;
+                                next.set(row, true);
                             }
                         }
                     }
                 }
             }
 
-            let changed = from_set
-                .iter()
-                .zip(&next)
-                .any(|(prev, next)| *prev && !*next);
+            let changed = bitvec_any_removed(from_set, &next);
             if changed {
                 sets.insert(from_table_name.to_string(), next);
             }
@@ -4817,17 +4784,17 @@ fn propagate_filter(
             // Similarly, if the many-side table isn't filtered, it should not restrict the
             // one-side table. In particular, bidirectional relationships should not remove
             // dimension members that simply have no matching fact rows.
-            if from_set.iter().all(|allowed| *allowed) {
+            if from_set.all_true() {
                 return Ok(false);
             }
 
-            let mut next = vec![false; to_set.len()];
+            let mut next = BitVec::with_len_all_false(to_set.len());
 
             if let Some(from_index) = relationship.from_index.as_ref() {
                 for (key, rows) in from_index {
                     if !rows
                         .iter()
-                        .any(|row| from_set.get(*row).copied().unwrap_or(false))
+                        .any(|row| *row < from_set.len() && from_set.get(*row))
                     {
                         continue;
                     }
@@ -4836,8 +4803,8 @@ fn propagate_filter(
                         continue;
                     };
                     to_rows.for_each_row(|to_row| {
-                        if to_set.get(to_row).copied().unwrap_or(false) {
-                            next[to_row] = true;
+                        if to_row < to_set.len() && to_set.get(to_row) {
+                            next.set(to_row, true);
                         }
                     });
                 }
@@ -4847,11 +4814,7 @@ fn propagate_filter(
                     .table(from_table_name)
                     .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
 
-                let rows: Vec<usize> = from_set
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
-                    .collect();
+                let rows: Vec<usize> = from_set.iter_ones().collect();
 
                 let keys = from_table
                     .distinct_values_filtered(relationship.from_idx, Some(rows.as_slice()))
@@ -4874,20 +4837,30 @@ fn propagate_filter(
                         continue;
                     };
                     to_rows.for_each_row(|to_row| {
-                        if to_set.get(to_row).copied().unwrap_or(false) {
-                            next[to_row] = true;
+                        if to_row < to_set.len() && to_set.get(to_row) {
+                            next.set(to_row, true);
                         }
                     });
                 }
             }
 
-            let changed = to_set.iter().zip(&next).any(|(prev, next)| *prev && !*next);
+            let changed = bitvec_any_removed(to_set, &next);
             if changed {
                 sets.insert(to_table_name.to_string(), next);
             }
             Ok(changed)
         }
     }
+}
+
+fn bitvec_any_removed(prev: &BitVec, next: &BitVec) -> bool {
+    if prev.len() != next.len() {
+        return true;
+    }
+    prev.as_words()
+        .iter()
+        .zip(next.as_words())
+        .any(|(p, n)| (p & !n) != 0)
 }
 
 fn column_is_dax_numeric(table: &dyn TableBackend, idx: usize) -> Option<bool> {
@@ -5070,7 +5043,7 @@ fn virtual_blank_row_exists(
     model: &DataModel,
     filter: &FilterContext,
     table: &str,
-    sets: Option<&HashMap<String, Vec<bool>>>,
+    sets: Option<&HashMap<String, BitVec>>,
 ) -> DaxResult<bool> {
     // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
     // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
@@ -5152,7 +5125,7 @@ fn virtual_blank_row_exists(
                 if rows
                     .iter()
                     .copied()
-                    .any(|row| from_set.get(row).copied().unwrap_or(false))
+                    .any(|row| row < from_set.len() && from_set.get(row))
                 {
                     return Ok(true);
                 }

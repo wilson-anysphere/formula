@@ -3,7 +3,8 @@ use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
 use formula_columnar::{
-    ColumnSchema as ColumnarColumnSchema, ColumnType as ColumnarColumnType, Value as ColumnarValue,
+    BitVec, ColumnSchema as ColumnarColumnSchema, ColumnType as ColumnarColumnType,
+    Value as ColumnarValue,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -483,12 +484,12 @@ impl RowSet {
         }
     }
 
-    pub(crate) fn any_allowed(&self, allowed: &[bool]) -> bool {
+    pub(crate) fn any_allowed(&self, allowed: &BitVec) -> bool {
         match self {
-            RowSet::One(row) => allowed.get(*row).copied().unwrap_or(false),
+            RowSet::One(row) => *row < allowed.len() && allowed.get(*row),
             RowSet::Many(rows) => rows
                 .iter()
-                .any(|row| allowed.get(*row).copied().unwrap_or(false)),
+                .any(|row| *row < allowed.len() && allowed.get(*row)),
         }
     }
 
@@ -561,25 +562,18 @@ impl UnmatchedFactRows {
         }
     }
 
-    pub(crate) fn any_row_allowed(&self, allowed: &[bool]) -> bool {
+    pub(crate) fn any_row_allowed(&self, allowed: &BitVec) -> bool {
         match self {
             UnmatchedFactRows::Sparse(rows) => rows
                 .iter()
-                .copied()
-                .any(|row| allowed.get(row).copied().unwrap_or(false)),
-            UnmatchedFactRows::Dense { bits, len, .. } => {
-                for (word_idx, &word) in bits.iter().enumerate() {
-                    let mut w = word;
-                    while w != 0 {
-                        let tz = w.trailing_zeros() as usize;
-                        let row = word_idx * 64 + tz;
-                        if row >= *len {
-                            break;
-                        }
-                        if allowed.get(row).copied().unwrap_or(false) {
-                            return true;
-                        }
-                        w &= w - 1;
+                .any(|row| *row < allowed.len() && allowed.get(*row)),
+            UnmatchedFactRows::Dense { bits, .. } => {
+                // Fast path: intersect the dense "unmatched" bitmap with the current allowed set.
+                let allowed_words = allowed.as_words();
+                let min_words = bits.len().min(allowed_words.len());
+                for i in 0..min_words {
+                    if (bits[i] & allowed_words[i]) != 0 {
+                        return true;
                     }
                 }
                 false
