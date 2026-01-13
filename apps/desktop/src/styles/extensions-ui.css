@@ -12,8 +12,8 @@ dialog.extensions-ui {
 .extensions-ui .dialog__field {
   box-sizing: border-box;
   width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
@@ -26,7 +26,8 @@ dialog.extensions-ui {
     box-shadow var(--motion-duration) var(--motion-ease);
 }
 
-.extensions-ui .dialog__field:focus {
+.extensions-ui .dialog__field:focus,
+.extensions-ui .dialog__field:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
@@ -44,16 +45,16 @@ dialog.extensions-ui {
 .extensions-ui .quick-pick__list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 4px;
+  margin-top: 8px;
   max-height: min(340px, calc(100vh - 220px));
   overflow: auto;
 }
 
 .extensions-ui .quick-pick__item {
   text-align: left;
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
