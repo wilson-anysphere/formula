@@ -203,7 +203,7 @@ docker build -f services/sync-server/Dockerfile -t formula-sync-server .
   - cell edits are blocked via the binder-installed `DocumentController.canEditCell` guard (and rejected/reverted as defense-in-depth)
   - sheet-level view/format shared-state writes are suppressed via `canWriteSharedState: () => !session.isReadOnly()`
   - comments are gated via `session.canComment()`
-- **Awareness sanitization:** presence `id` forced to JWT `sub` (desktop should set its local presence id to `sub` so identities are stable)
+- **Awareness sanitization:** awareness identity fields are rewritten to the authenticated user id (`sub` for JWT; `userId` for token introspection). Desktop should use JWT `sub` as its local presence id when available so identities are stable.
 - **Encryption at rest:** AES-256-GCM for persisted documents
 - **IndexedDB persistence compaction:** `IndexedDbCollabPersistence.flush(docId)` writes a snapshot update and compacts by default (see `docs/06-collaboration.md` for details + knobs like `maxUpdates` / `compactDebounceMs`).
 

@@ -263,7 +263,7 @@ In desktop collaboration mode, the sync-server `token` may be either:
 When the token is a JWT, the desktop app **decodes the JWT payload without verifying it** and derives *client-side* permissions + identity:
 
 - `sub` → used as:
-  - the `PresenceManager` user id (so presence ids match what the sync-server will enforce), and
+  - the `PresenceManager` user id (so presence ids match what the sync-server will enforce; the sync-server sanitizes awareness identities to the authenticated user id), and
   - forwarded as `userId` in `CollabSession.setPermissions(...)` (so `modifiedBy` metadata attribution is stable).
 - `role` → forwarded as `role` in `CollabSession.setPermissions(...)`
 - `rangeRestrictions` → forwarded as `rangeRestrictions` in `CollabSession.setPermissions(...)`
