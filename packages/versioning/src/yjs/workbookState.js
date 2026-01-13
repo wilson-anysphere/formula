@@ -3,7 +3,6 @@ import {
   applyLayeredFormatsToCells,
   mergeCellDataIntoSheetCells,
   parseSpreadsheetCellKey,
-  sheetEntriesByIdFromYjsDoc,
   sheetFormatLayersFromSheetEntry,
   sheetHasLayeredFormats,
 } from "./sheetState.js";
@@ -368,9 +367,22 @@ export function workbookStateFromYjsDoc(doc) {
   const sheets = [];
   /** @type {string[]} */
   const sheetOrder = [];
+  /**
+   * Build a map from sheet id -> sheet entry, picking the last matching entry by array index.
+   *
+   * Note: this intentionally uses the same strict id semantics as `sheetStateFromYjsDoc`:
+   * only string `id` values participate. (Non-string ids are still coerced for `sheets[]`
+   * metadata, but will not receive layered formatting defaults.)
+   *
+   * @type {Map<string, any>}
+   */
+  const sheetEntriesById = new Map();
   for (const entry of sheetsArray.toArray()) {
-    const id = coerceString(readYMapOrObject(entry, "id"));
+    const rawId = readYMapOrObject(entry, "id");
+    const id = coerceString(rawId);
     if (!id) continue;
+    const strictId = yjsValueToJson(rawId);
+    if (typeof strictId === "string" && strictId) sheetEntriesById.set(strictId, entry);
     const name = coerceString(readYMapOrObject(entry, "name"));
     sheets.push({
       id,
@@ -404,8 +416,6 @@ export function workbookStateFromYjsDoc(doc) {
     }
     mergeCellDataIntoSheetCells(cells, parsed, rawKey, cellData);
   });
-
-  const sheetEntriesById = sheetEntriesByIdFromYjsDoc(doc);
 
   /** @type {Map<string, { cells: Map<string, any> }>} */
   const cellsBySheet = new Map();
