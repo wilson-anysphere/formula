@@ -123,6 +123,74 @@ function expectNonEmptyString(key, value) {
   }
 }
 
+/**
+ * Creates a Node.js public key object for an Ed25519 public key stored as raw bytes.
+ *
+ * Tauri stores updater keys as base64 strings, which decode to a 32-byte Ed25519 public key.
+ * Node's crypto APIs expect a SPKI wrapper, so we construct:
+ *   SubjectPublicKeyInfo  ::=  SEQUENCE  {
+ *     algorithm         AlgorithmIdentifier,
+ *     subjectPublicKey  BIT STRING
+ *   }
+ * where AlgorithmIdentifier is OID 1.3.101.112 (Ed25519).
+ *
+ * @param {Uint8Array} rawKey32
+ */
+function ed25519PublicKeyFromRaw(rawKey32) {
+  if (rawKey32.length !== 32) {
+    throw new Error(`Expected 32-byte Ed25519 public key, got ${rawKey32.length} bytes.`);
+  }
+  const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
+  const spkiDer = Buffer.concat([spkiPrefix, Buffer.from(rawKey32)]);
+  return crypto.createPublicKey({ key: spkiDer, format: "der", type: "spki" });
+}
+
+/**
+ * @param {Buffer} latestJsonBytes
+ * @param {string} signatureText
+ * @param {string} pubkeyBase64
+ */
+function verifyLatestJsonSignature(latestJsonBytes, signatureText, pubkeyBase64) {
+  const signatureB64 = signatureText.trim();
+  if (!signatureB64) {
+    throw new Error("latest.json.sig is empty.");
+  }
+
+  /** @type {Buffer} */
+  let signatureBytes;
+  try {
+    signatureBytes = Buffer.from(signatureB64, "base64");
+  } catch (err) {
+    throw new Error(
+      `latest.json.sig is not valid base64 (${err instanceof Error ? err.message : String(err)}).`,
+    );
+  }
+
+  if (signatureBytes.length !== 64) {
+    throw new Error(
+      `latest.json.sig decoded to ${signatureBytes.length} bytes (expected 64 for Ed25519 signature).`,
+    );
+  }
+
+  /** @type {Buffer} */
+  let pubkeyBytes;
+  try {
+    pubkeyBytes = Buffer.from(pubkeyBase64.trim(), "base64");
+  } catch (err) {
+    throw new Error(
+      `Updater pubkey is not valid base64 (${err instanceof Error ? err.message : String(err)}).`,
+    );
+  }
+
+  const publicKey = ed25519PublicKeyFromRaw(pubkeyBytes);
+  const ok = crypto.verify(null, latestJsonBytes, publicKey, signatureBytes);
+  if (!ok) {
+    throw new Error(
+      `latest.json.sig does not verify latest.json with the configured updater public key. This typically means latest.json and latest.json.sig were generated/uploaded inconsistently (race/overwrite).`,
+    );
+  }
+}
+
 async function main() {
   const refName = process.argv[2] ?? process.env.GITHUB_REF_NAME;
   if (!refName) {
@@ -281,6 +349,35 @@ async function main() {
   } else if (normalizeVersion(manifestVersion) !== expectedVersion) {
     errors.push(
       `latest.json version mismatch: expected ${JSON.stringify(expectedVersion)} (from tag ${tag}), got ${JSON.stringify(manifestVersion)}.`,
+    );
+  }
+
+  // Verify the manifest signature file matches latest.json. This catches a particularly nasty
+  // failure mode where concurrent jobs upload mismatched latest.json/latest.json.sig pairs.
+  try {
+    const tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json";
+    const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
+    const pubkey = tauriConfig?.plugins?.updater?.pubkey;
+    if (typeof pubkey !== "string" || pubkey.trim().length === 0) {
+      errors.push(
+        `Cannot verify latest.json.sig: missing plugins.updater.pubkey in ${tauriConfigPath}.`,
+      );
+    } else if (pubkey.trim() === "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY") {
+      // This should already be guarded by scripts/check-updater-config.mjs, but keep the
+      // validator robust to future config changes.
+      errors.push(
+        `Cannot verify latest.json.sig: updater pubkey is still the placeholder value in ${tauriConfigPath}.`,
+      );
+    } else {
+      verifyLatestJsonSignature(
+        readFileSync("latest.json"),
+        readFileSync("latest.json.sig", "utf8"),
+        pubkey,
+      );
+    }
+  } catch (err) {
+    errors.push(
+      `latest.json.sig verification failed: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 
