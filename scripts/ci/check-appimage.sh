@@ -19,6 +19,12 @@ Environment overrides:
 
   FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING
     Expected substring from `readelf -h` "Machine:" line (defaults based on uname -m).
+
+  FORMULA_CHECK_APPIMAGE_USE_HOST_LD_LIBRARY_PATH=1
+    By default the script ignores any existing host LD_LIBRARY_PATH when running `ldd`
+    (so results are deterministic and closer to a normal end-user environment). Set
+    this to include the host LD_LIBRARY_PATH in addition to the extracted AppImage
+    library directories.
 EOF
 }
 
@@ -460,17 +466,20 @@ main() {
       echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
     fi
 
-    ld_library_path="${LD_LIBRARY_PATH:-}"
-    if [ -n "$appdir_ld_library_path" ]; then
-      if [ -n "$ld_library_path" ]; then
-        ld_library_path="$appdir_ld_library_path:$ld_library_path"
+    # Prefer a deterministic library search path:
+    # - Always include bundled AppImage libraries.
+    # - Ignore host LD_LIBRARY_PATH by default (it can hide missing deps in CI/dev shells).
+    ld_library_path="$appdir_ld_library_path"
+    if [[ -n "${FORMULA_CHECK_APPIMAGE_USE_HOST_LD_LIBRARY_PATH:-}" && -n "${LD_LIBRARY_PATH:-}" ]]; then
+      if [[ -n "$ld_library_path" ]]; then
+        ld_library_path="$ld_library_path:$LD_LIBRARY_PATH"
       else
-        ld_library_path="$appdir_ld_library_path"
+        ld_library_path="$LD_LIBRARY_PATH"
       fi
     fi
 
     set +e
-    ldd_out="$(LD_LIBRARY_PATH="$ld_library_path" ldd "$main_bin" 2>&1)"
+    ldd_out="$(LD_LIBRARY_PATH="$ld_library_path" LD_PRELOAD= ldd "$main_bin" 2>&1)"
     ldd_status=$?
     set -e
 
