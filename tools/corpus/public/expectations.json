@@ -4,6 +4,11 @@
     "round_trip_ok": true,
     "diff_critical_count": 0
   },
+  "simple.xlsb": {
+    "open_ok": true,
+    "round_trip_ok": true,
+    "diff_critical_count": 0
+  },
   "simple.xlsx": {
     "open_ok": true,
     "round_trip_ok": true,

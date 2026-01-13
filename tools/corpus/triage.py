@@ -36,9 +36,9 @@ DEFAULT_DIFF_IGNORE = {
     # These tend to change across round-trips in most writers due to timestamps and app metadata.
     "docProps/core.xml",
     "docProps/app.xml",
-    # NOTE: calcChain (`xl/calcChain.xml`) is intentionally *not* ignored by default.
-    # `xlsx-diff` downgrades calcChain-related churn to WARNING so it shows up in metrics/dashboards
-    # without failing CI gates (which key off critical diffs).
+    # NOTE: calcChain (`xl/calcChain.xml` / `xl/calcChain.bin`) is intentionally *not* ignored by
+    # default. `xlsx-diff` downgrades calcChain-related churn to WARNING so it shows up in
+    # metrics/dashboards without failing CI gates (which key off critical diffs).
 }
 
 
@@ -588,6 +588,7 @@ def _run_rust_triage(
     exe: Path,
     workbook_bytes: bytes,
     *,
+    workbook_name: str,
     diff_ignore: set[str],
     diff_limit: int,
     recalc: bool,
@@ -596,13 +597,28 @@ def _run_rust_triage(
     """Invoke the Rust helper to run load/save/diff (+ optional recalc/render) on a workbook blob."""
 
     with tempfile.TemporaryDirectory(prefix="corpus-triage-") as tmpdir:
-        input_path = Path(tmpdir) / "input.xlsx"
+        # The Rust helper auto-detects based on file extension, so preserve `.xlsb` vs `.xlsx`
+        # here (we strip `.b64`/`.enc` earlier in `read_workbook_input`).
+        lower_name = (workbook_name or "").lower()
+        if lower_name.endswith(".xlsb"):
+            suffix = ".xlsb"
+            fmt = "xlsb"
+        elif lower_name.endswith(".xlsm"):
+            suffix = ".xlsm"
+            fmt = "xlsx"
+        else:
+            suffix = ".xlsx"
+            fmt = "xlsx"
+
+        input_path = Path(tmpdir) / f"input{suffix}"
         input_path.write_bytes(workbook_bytes)
 
         cmd = [
             str(exe),
             "--input",
             str(input_path),
+            "--format",
+            fmt,
             "--diff-limit",
             str(diff_limit),
         ]
@@ -675,6 +691,7 @@ def triage_workbook(
         rust_out = _run_rust_triage(
             rust_exe,
             workbook.data,
+            workbook_name=workbook.display_name,
             diff_ignore=diff_ignore,
             diff_limit=diff_limit,
             recalc=recalc,
@@ -912,6 +929,11 @@ def main() -> int:
         help="Number of parallel triage workers to use (default: 1).",
     )
     parser.add_argument(
+        "--include-xlsb",
+        action="store_true",
+        help="Also include `.xlsb` workbooks in corpus scans (off by default).",
+    )
+    parser.add_argument(
         "--leak-scan",
         action="store_true",
         help="Fail fast if any workbook contains obvious plaintext PII/secrets (emails, URLs, keys).",
@@ -961,7 +983,7 @@ def main() -> int:
     ensure_dir(reports_dir)
 
     fernet_key = os.environ.get(args.fernet_key_env)
-    paths = list(iter_workbook_paths(args.corpus_dir))
+    paths = list(iter_workbook_paths(args.corpus_dir, include_xlsb=args.include_xlsb))
     triage_out = _triage_paths(
         paths,
         rust_exe=str(rust_exe),

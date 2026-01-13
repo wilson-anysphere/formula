@@ -1991,6 +1991,7 @@ dependencies = [
  "clap",
  "formula-engine",
  "formula-model",
+ "formula-xlsb",
  "formula-xlsx",
  "serde",
  "serde_json",

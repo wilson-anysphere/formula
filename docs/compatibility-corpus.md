@@ -4,7 +4,7 @@
 
 Excel compatibility is won and lost on **real workbooks**. The goal of the compatibility corpus is to:
 
-- collect problematic/representative `.xlsx`/`.xlsm` files (from users and internal sources)
+- collect problematic/representative `.xlsx`/`.xlsm`/`.xlsb` files (from users and internal sources)
 - sanitize them with **privacy controls**
 - run automated triage (open → recalc → render-smoke → round-trip save → diff)
 - surface regressions quickly in CI, with scorecards that can be tracked over time
@@ -23,6 +23,7 @@ This repo supports two corpora:
 
 - Contains only **non-sensitive** fixtures.
 - Small files may be stored as `*.xlsx.b64` (base64 text) to avoid committing binaries.
+- Small XLSB fixtures may be stored as `*.xlsb.b64` (base64 text) as well.
 - Expected pass/fail states are tracked in `tools/corpus/public/expectations.json`.
 
 ### 2) Private corpus (runs in scheduled CI)
@@ -118,7 +119,8 @@ This stores:
 python -m tools.corpus.triage \
   --corpus-dir tools/corpus/public \
   --out-dir tools/corpus/out/public \
-  --expectations tools/corpus/public/expectations.json
+  --expectations tools/corpus/public/expectations.json \
+  --include-xlsb
 ```
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
@@ -278,9 +280,11 @@ The scheduled job should:
 `tools/corpus/triage.py` is intended to be a compatibility regression harness that runs:
 
 - load (via `formula-xlsx`)
+- load (via `formula-xlsx` / `formula-xlsb`)
 - **optional** recalculation correctness checks (`--recalc`)
 - **optional** headless render/print smoke (`--render-smoke`)
 - round-trip save (via `formula-xlsx`)
+- round-trip save (via `formula-xlsx` / `formula-xlsb`)
 - structural diff (via `xlsx-diff`)
 
 Recalc/render are opt-in because they are heavier and may exercise engine coverage gaps; the scheduled private

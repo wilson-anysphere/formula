@@ -8,6 +8,7 @@ on:
       # Run the corpus harness when the XLSX stack changes so we catch compatibility
       # regressions in load/save/diff behavior.
       - "crates/formula-corpus-triage/**"
+      - "crates/formula-xlsb/**"
       - "crates/formula-xlsx/**"
       - "crates/xlsx-diff/**"
       - "crates/formula-engine/**"
@@ -18,6 +19,7 @@ on:
       - "tools/corpus/**"
       - "docs/compatibility-corpus.md"
       - "crates/formula-corpus-triage/**"
+      - "crates/formula-xlsb/**"
       - "crates/formula-xlsx/**"
       - "crates/xlsx-diff/**"
       - "crates/formula-engine/**"
@@ -73,6 +75,7 @@ jobs:
             --corpus-dir tools/corpus/public \
             --out-dir tools/corpus/out/public \
             --expectations tools/corpus/public/expectations.json \
+            --include-xlsb \
             --leak-scan
       - name: Generate dashboard
         run: python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public

@@ -1,21 +1,30 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
 use formula_model::{CellRef, CellValue, DefinedNameScope, ErrorValue};
+use formula_xlsb::XlsbWorkbook;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 #[derive(Parser, Debug)]
 #[command(about = "Compatibility triage helper used by tools/corpus/triage.py")]
 struct Args {
-    /// Input workbook (XLSX/XLSM).
+    /// Input workbook (XLSX/XLSM/XLSB).
     #[arg(long)]
     input: PathBuf,
+
+    /// Workbook container format.
+    ///
+    /// Defaults to `auto` (detect from file extension, with a best-effort fallback based on
+    /// package contents).
+    #[arg(long, value_enum, default_value_t = WorkbookFormat::Auto)]
+    format: WorkbookFormat,
 
     /// Parts to ignore when diffing round-tripped output.
     #[arg(long = "ignore-part")]
@@ -32,6 +41,22 @@ struct Args {
     /// Run a lightweight headless render/pagination smoke test.
     #[arg(long = "render-smoke")]
     render_smoke: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum WorkbookFormat {
+    Auto,
+    Xlsx,
+    Xlsb,
+}
+
+impl WorkbookFormat {
+    fn resolve(self, input: &PathBuf, input_bytes: &[u8]) -> WorkbookFormat {
+        match self {
+            WorkbookFormat::Auto => detect_workbook_format(input, input_bytes),
+            other => other,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -206,179 +231,353 @@ fn main() -> Result<()> {
         }
     };
 
-    // Step: load (formula-xlsx)
-    let start = Instant::now();
-    let doc = match formula_xlsx::load_from_bytes(&input_bytes) {
-        Ok(doc) => doc,
-        Err(err) => {
-            output
-                .steps
-                .insert("load".to_string(), StepResult::failed(start, err));
-            output.result.open_ok = false;
-            output
-                .steps
-                .insert("recalc".to_string(), StepResult::skipped("open_failed"));
-            output
-                .steps
-                .insert("render".to_string(), StepResult::skipped("open_failed"));
-            output
-                .steps
-                .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
-            output
-                .steps
-                .insert("diff".to_string(), StepResult::skipped("open_failed"));
-            print_json(&output)?;
-            return Ok(());
-        }
-    };
+    let format = args.format.resolve(&args.input, &input_bytes);
+    match format {
+        WorkbookFormat::Xlsx => {
+            // Step: load (formula-xlsx)
+            let start = Instant::now();
+            let doc = match formula_xlsx::load_from_bytes(&input_bytes) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    output
+                        .steps
+                        .insert("load".to_string(), StepResult::failed(start, err));
+                    output.result.open_ok = false;
+                    output
+                        .steps
+                        .insert("recalc".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("render".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("diff".to_string(), StepResult::skipped("open_failed"));
+                    print_json(&output)?;
+                    return Ok(());
+                }
+            };
 
-    output.steps.insert(
-        "load".to_string(),
-        StepResult::ok(
-            start,
-            LoadDetails {
-                engine: "formula-xlsx",
-                parts: doc.parts().len(),
-                sheets: doc.workbook.sheets.len(),
-            },
-        ),
-    );
-    output.result.open_ok = true;
-
-    // Step: round-trip save (formula-xlsx)
-    let start = Instant::now();
-    let round_tripped = match doc.save_to_vec() {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            output
-                .steps
-                .insert("round_trip".to_string(), StepResult::failed(start, err));
-            output.result.round_trip_ok = false;
-            output
-                .steps
-                .insert("diff".to_string(), StepResult::skipped("round_trip_failed"));
             output.steps.insert(
-                "recalc".to_string(),
-                StepResult::skipped("round_trip_failed"),
+                "load".to_string(),
+                StepResult::ok(
+                    start,
+                    LoadDetails {
+                        engine: "formula-xlsx",
+                        parts: doc.parts().len(),
+                        sheets: doc.workbook.sheets.len(),
+                    },
+                ),
             );
+            output.result.open_ok = true;
+
+            // Step: round-trip save (formula-xlsx)
+            let start = Instant::now();
+            let round_tripped = match doc.save_to_vec() {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    output
+                        .steps
+                        .insert("round_trip".to_string(), StepResult::failed(start, err));
+                    output.result.round_trip_ok = false;
+                    output
+                        .steps
+                        .insert("diff".to_string(), StepResult::skipped("round_trip_failed"));
+                    output.steps.insert(
+                        "recalc".to_string(),
+                        StepResult::skipped("round_trip_failed"),
+                    );
+                    output.steps.insert(
+                        "render".to_string(),
+                        StepResult::skipped("round_trip_failed"),
+                    );
+                    print_json(&output)?;
+                    return Ok(());
+                }
+            };
+
+            let output_parts = xlsx_diff::WorkbookArchive::from_bytes(&round_tripped)
+                .map(|a| a.part_names().len())
+                .unwrap_or(0);
+
             output.steps.insert(
-                "render".to_string(),
-                StepResult::skipped("round_trip_failed"),
+                "round_trip".to_string(),
+                StepResult::ok(
+                    start,
+                    RoundTripDetails {
+                        engine: "formula-xlsx",
+                        output_size_bytes: round_tripped.len(),
+                        output_parts,
+                    },
+                ),
             );
-            print_json(&output)?;
-            return Ok(());
-        }
-    };
 
-    let output_parts = xlsx_diff::WorkbookArchive::from_bytes(&round_tripped)
-        .map(|a| a.part_names().len())
-        .unwrap_or(0);
+            // Step: diff (xlsx-diff)
+            let start = Instant::now();
+            let diff_details = match diff_workbooks(&input_bytes, &round_tripped, &args) {
+                Ok(details) => details,
+                Err(err) => {
+                    output
+                        .steps
+                        .insert("diff".to_string(), StepResult::failed(start, err));
+                    output.result.round_trip_ok = false;
+                    print_json(&output)?;
+                    return Ok(());
+                }
+            };
 
-    output.steps.insert(
-        "round_trip".to_string(),
-        StepResult::ok(
-            start,
-            RoundTripDetails {
-                engine: "formula-xlsx",
-                output_size_bytes: round_tripped.len(),
-                output_parts,
-            },
-        ),
-    );
+            output.result.diff_critical_count = diff_details.counts.critical;
+            output.result.diff_warning_count = diff_details.counts.warning;
+            output.result.diff_info_count = diff_details.counts.info;
+            output.result.diff_total_count = diff_details.counts.total;
+            output.result.round_trip_ok = diff_details.counts.critical == 0;
 
-    // Step: diff (xlsx-diff)
-    let start = Instant::now();
-    let diff_details = match diff_workbooks(&input_bytes, &round_tripped, &args) {
-        Ok(details) => details,
-        Err(err) => {
             output
                 .steps
-                .insert("diff".to_string(), StepResult::failed(start, err));
-            output.result.round_trip_ok = false;
-            print_json(&output)?;
-            return Ok(());
-        }
-    };
+                .insert("diff".to_string(), StepResult::ok(start, &diff_details));
 
-    output.result.diff_critical_count = diff_details.counts.critical;
-    output.result.diff_warning_count = diff_details.counts.warning;
-    output.result.diff_info_count = diff_details.counts.info;
-    output.result.diff_total_count = diff_details.counts.total;
-    output.result.round_trip_ok = diff_details.counts.critical == 0;
-
-    output
-        .steps
-        .insert("diff".to_string(), StepResult::ok(start, &diff_details));
-
-    // Step: recalc (optional)
-    if !args.recalc {
-        output.steps.insert(
-            "recalc".to_string(),
-            StepResult::skipped("disabled (pass --recalc)"),
-        );
-        output.result.calculate_ok = None;
-    } else {
-        let start = Instant::now();
-        match recalc_against_cached(&doc) {
-            Ok(Some(recalc)) => {
-                output.result.calculate_ok = Some(recalc.mismatch_count == 0);
-                output
-                    .steps
-                    .insert("recalc".to_string(), StepResult::ok(start, &recalc));
-            }
-            Ok(None) => {
+            // Step: recalc (optional)
+            if !args.recalc {
                 output.steps.insert(
                     "recalc".to_string(),
-                    StepResult::skipped("no_cached_formula_values_or_no_formulas"),
+                    StepResult::skipped("disabled (pass --recalc)"),
                 );
                 output.result.calculate_ok = None;
+            } else {
+                let start = Instant::now();
+                match recalc_against_cached(&doc) {
+                    Ok(Some(recalc)) => {
+                        output.result.calculate_ok = Some(recalc.mismatch_count == 0);
+                        output
+                            .steps
+                            .insert("recalc".to_string(), StepResult::ok(start, &recalc));
+                    }
+                    Ok(None) => {
+                        output.steps.insert(
+                            "recalc".to_string(),
+                            StepResult::skipped("no_cached_formula_values_or_no_formulas"),
+                        );
+                        output.result.calculate_ok = None;
+                    }
+                    Err(err) => {
+                        output.steps.insert(
+                            "recalc".to_string(),
+                            StepResult::skipped(format!(
+                                "engine_error (sha256={})",
+                                sha256_text(&err.to_string())
+                            )),
+                        );
+                        output.result.calculate_ok = None;
+                    }
+                }
             }
-            Err(err) => {
+
+            // Step: render smoke (optional)
+            if !args.render_smoke {
+                output.steps.insert(
+                    "render".to_string(),
+                    StepResult::skipped("disabled (pass --render-smoke)"),
+                );
+                output.result.render_ok = None;
+            } else {
+                let start = Instant::now();
+                match render_smoke(&doc) {
+                    Ok(details) => {
+                        output.result.render_ok = Some(details.pdf_size_bytes > 0);
+                        output
+                            .steps
+                            .insert("render".to_string(), StepResult::ok(start, details));
+                    }
+                    Err(err) => {
+                        output.result.render_ok = Some(false);
+                        output
+                            .steps
+                            .insert("render".to_string(), StepResult::failed(start, err));
+                    }
+                }
+            }
+
+            print_json(&output)?;
+            Ok(())
+        }
+        WorkbookFormat::Xlsb => {
+            let input_parts = xlsx_diff::WorkbookArchive::from_bytes(&input_bytes)
+                .map(|a| a.part_names().len())
+                .unwrap_or(0);
+
+            // Step: load (formula-xlsb)
+            let start = Instant::now();
+            let wb = match XlsbWorkbook::open(&args.input) {
+                Ok(wb) => wb,
+                Err(err) => {
+                    output
+                        .steps
+                        .insert("load".to_string(), StepResult::failed(start, err));
+                    output.result.open_ok = false;
+                    output
+                        .steps
+                        .insert("recalc".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("render".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("round_trip".to_string(), StepResult::skipped("open_failed"));
+                    output
+                        .steps
+                        .insert("diff".to_string(), StepResult::skipped("open_failed"));
+                    print_json(&output)?;
+                    return Ok(());
+                }
+            };
+
+            output.steps.insert(
+                "load".to_string(),
+                StepResult::ok(
+                    start,
+                    LoadDetails {
+                        engine: "formula-xlsb",
+                        parts: input_parts,
+                        sheets: wb.sheet_metas().len(),
+                    },
+                ),
+            );
+            output.result.open_ok = true;
+
+            // Step: round-trip save (formula-xlsb)
+            let start = Instant::now();
+            let mut round_tripped_writer = Cursor::new(Vec::new());
+            if let Err(err) = wb.save_as_to_writer(&mut round_tripped_writer) {
+                output
+                    .steps
+                    .insert("round_trip".to_string(), StepResult::failed(start, err));
+                output.result.round_trip_ok = false;
+                output
+                    .steps
+                    .insert("diff".to_string(), StepResult::skipped("round_trip_failed"));
                 output.steps.insert(
                     "recalc".to_string(),
-                    StepResult::skipped(format!(
-                        "engine_error (sha256={})",
-                        sha256_text(&err.to_string())
-                    )),
+                    StepResult::skipped("round_trip_failed"),
                 );
-                output.result.calculate_ok = None;
+                output.steps.insert(
+                    "render".to_string(),
+                    StepResult::skipped("round_trip_failed"),
+                );
+                print_json(&output)?;
+                return Ok(());
             }
-        }
-    }
+            let round_tripped = round_tripped_writer.into_inner();
 
-    // Step: render smoke (optional)
-    if !args.render_smoke {
-        output.steps.insert(
-            "render".to_string(),
-            StepResult::skipped("disabled (pass --render-smoke)"),
-        );
-        output.result.render_ok = None;
-    } else {
-        let start = Instant::now();
-        match render_smoke(&doc) {
-            Ok(details) => {
-                output.result.render_ok = Some(details.pdf_size_bytes > 0);
+            let output_parts = xlsx_diff::WorkbookArchive::from_bytes(&round_tripped)
+                .map(|a| a.part_names().len())
+                .unwrap_or(0);
+
+            output.steps.insert(
+                "round_trip".to_string(),
+                StepResult::ok(
+                    start,
+                    RoundTripDetails {
+                        engine: "formula-xlsb",
+                        output_size_bytes: round_tripped.len(),
+                        output_parts,
+                    },
+                ),
+            );
+
+            // Step: diff (xlsx-diff)
+            let start = Instant::now();
+            let diff_details = match diff_workbooks(&input_bytes, &round_tripped, &args) {
+                Ok(details) => details,
+                Err(err) => {
+                    output
+                        .steps
+                        .insert("diff".to_string(), StepResult::failed(start, err));
+                    output.result.round_trip_ok = false;
+                    print_json(&output)?;
+                    return Ok(());
+                }
+            };
+
+            output.result.diff_critical_count = diff_details.counts.critical;
+            output.result.diff_warning_count = diff_details.counts.warning;
+            output.result.diff_info_count = diff_details.counts.info;
+            output.result.diff_total_count = diff_details.counts.total;
+            output.result.round_trip_ok = diff_details.counts.critical == 0;
+
+            output
+                .steps
+                .insert("diff".to_string(), StepResult::ok(start, &diff_details));
+
+            // Recalc/render are currently implemented against the XLSX data model only.
+            if !args.recalc {
+                output.steps.insert(
+                    "recalc".to_string(),
+                    StepResult::skipped("disabled (pass --recalc)"),
+                );
+            } else {
                 output
                     .steps
-                    .insert("render".to_string(), StepResult::ok(start, details));
+                    .insert("recalc".to_string(), StepResult::skipped("unsupported_for_xlsb"));
             }
-            Err(err) => {
-                output.result.render_ok = Some(false);
+            output.result.calculate_ok = None;
+
+            if !args.render_smoke {
+                output.steps.insert(
+                    "render".to_string(),
+                    StepResult::skipped("disabled (pass --render-smoke)"),
+                );
+            } else {
                 output
                     .steps
-                    .insert("render".to_string(), StepResult::failed(start, err));
+                    .insert("render".to_string(), StepResult::skipped("unsupported_for_xlsb"));
             }
-        }
-    }
+            output.result.render_ok = None;
 
-    print_json(&output)?;
-    Ok(())
+            print_json(&output)?;
+            Ok(())
+        }
+        WorkbookFormat::Auto => unreachable!("auto resolved earlier"),
+    }
 }
 
 fn print_json(output: &TriageOutput) -> Result<()> {
     let json = serde_json::to_string(output).context("serialize triage output")?;
     println!("{json}");
     Ok(())
+}
+
+fn detect_workbook_format(input: &PathBuf, input_bytes: &[u8]) -> WorkbookFormat {
+    if let Some(ext) = input.extension().and_then(|s| s.to_str()) {
+        match ext.to_ascii_lowercase().as_str() {
+            "xlsb" => return WorkbookFormat::Xlsb,
+            "xlsx" | "xlsm" => return WorkbookFormat::Xlsx,
+            _ => {}
+        }
+    }
+
+    // Best-effort fallback: inspect the package for the XLSB workbook part.
+    if let Ok(archive) = xlsx_diff::WorkbookArchive::from_bytes(input_bytes) {
+        let mut has_workbook_bin = false;
+        let mut has_workbook_xml = false;
+        for part in archive.part_names() {
+            if part.eq_ignore_ascii_case("xl/workbook.bin") {
+                has_workbook_bin = true;
+            }
+            if part.eq_ignore_ascii_case("xl/workbook.xml") {
+                has_workbook_xml = true;
+            }
+        }
+        if has_workbook_bin && !has_workbook_xml {
+            return WorkbookFormat::Xlsb;
+        }
+        if has_workbook_bin {
+            return WorkbookFormat::Xlsb;
+        }
+    }
+
+    WorkbookFormat::Xlsx
 }
 
 fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDetails> {

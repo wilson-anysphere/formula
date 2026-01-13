@@ -40,11 +40,11 @@ class WorkbookInput:
 
 
 def read_workbook_input(path: Path, *, fernet_key: str | None = None) -> WorkbookInput:
-    """Read an XLSX blob from disk.
+    """Read a workbook blob from disk.
 
     Supports:
-    - raw `.xlsx`/`.xlsm` files
-    - base64-encoded `*.xlsx.b64` (text) for embedding small public fixtures
+    - raw `.xlsx`/`.xlsm`/`.xlsb` files
+    - base64-encoded `*.xlsx.b64`/`*.xlsm.b64`/`*.xlsb.b64` (text) for embedding small public fixtures
     - encrypted `*.enc` files (Fernet) for private corpus storage
     """
 
@@ -72,14 +72,22 @@ def read_workbook_input(path: Path, *, fernet_key: str | None = None) -> Workboo
     return WorkbookInput(display_name=display_name, data=data)
 
 
-def iter_workbook_paths(corpus_dir: Path) -> Iterator[Path]:
-    """Yield candidate workbook paths under `corpus_dir`."""
+def iter_workbook_paths(corpus_dir: Path, *, include_xlsb: bool = False) -> Iterator[Path]:
+    """Yield candidate workbook paths under `corpus_dir`.
+
+    By default only XLSX/XLSM workbooks are yielded. Pass `include_xlsb=True` to also include
+    `.xlsb` (and `.xlsb.b64`/`.xlsb.enc`) fixtures.
+    """
 
     for path in sorted(corpus_dir.rglob("*")):
         if not path.is_file():
             continue
         name = path.name.lower()
-        if name.endswith((".xlsx", ".xlsm", ".xlsx.b64", ".xlsm.b64", ".xlsx.enc", ".xlsm.enc")):
+        endings = (".xlsx", ".xlsm", ".xlsx.b64", ".xlsm.b64", ".xlsx.enc", ".xlsm.enc")
+        if include_xlsb:
+            endings = endings + (".xlsb", ".xlsb.b64", ".xlsb.enc")
+
+        if name.endswith(endings):
             yield path
 
 
