@@ -1738,9 +1738,6 @@ export class CanvasGridRenderer {
             end: Math.min(rowCount, viewport.main.rows.end + overscanRows)
           };
 
-    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
-    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
-
     const layoutEngine = this.textLayoutEngine;
 
     let maxMeasured = 0;
@@ -1867,9 +1864,6 @@ export class CanvasGridRenderer {
             start: Math.max(viewport.frozenCols, viewport.main.cols.start - overscanCols),
             end: Math.min(colCount, viewport.main.cols.end + overscanCols)
           };
-
-    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
-    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
 
     const layoutEngine = this.textLayoutEngine;
     const defaultHeight = this.scroll.rows.defaultSize;

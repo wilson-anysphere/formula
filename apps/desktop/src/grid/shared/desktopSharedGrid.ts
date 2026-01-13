@@ -18,8 +18,8 @@ import {
   DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
   describeActiveCellLabel,
   describeCell,
-  resolveGridThemeFromCssVars
-  wheelDeltaToPixels
+  resolveGridThemeFromCssVars,
+  wheelDeltaToPixels,
 } from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
