@@ -43,7 +43,7 @@ function main() {
     die(
       `webview2-config: ERROR Missing ${relConfigPath} -> bundle.windows.webviewInstallMode.\n` +
         `Set it to a non-'skip' option so Windows installers can install WebView2 on clean machines.\n` +
-        `Recommended: { "type": "downloadBootstrapper" }`,
+        `Recommended: { "type": "downloadBootstrapper", "silent": true }`,
     );
     return;
   }
@@ -90,4 +90,3 @@ function main() {
 }
 
 main();
-
