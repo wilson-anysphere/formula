@@ -6588,8 +6588,9 @@ export class SpreadsheetApp {
 
   private updateStatus(): void {
     this.status.activeCell.textContent = cellToA1(this.selection.active);
-    this.status.selectionRange.textContent =
+    const selectionRangeText =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
+    this.status.selectionRange.textContent = selectionRangeText;
     this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
     this.updateSelectionStats();
 
@@ -6597,7 +6598,7 @@ export class SpreadsheetApp {
       const address = cellToA1(this.selection.active);
       const input = this.getCellInputText(this.selection.active);
       const value = this.getCellComputedValue(this.selection.active);
-      this.formulaBar.setActiveCell({ address, input, value });
+      this.formulaBar.setActiveCell({ address, input, value, nameBox: selectionRangeText });
       this.formulaBarCompletion?.update();
     }
 

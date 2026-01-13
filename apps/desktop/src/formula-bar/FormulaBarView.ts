@@ -242,6 +242,7 @@ export class FormulaBarView {
   #hoverOverrideText: string | null = null;
   #selectedReferenceIndex: number | null = null;
   #mouseDownSelectedReferenceIndex: number | null = null;
+  #nameBoxValue = "A1";
   #isExpanded = false;
   #callbacks: FormulaBarViewCallbacks;
   #tooling: FormulaBarViewToolingOptions | null = null;
@@ -553,7 +554,7 @@ export class FormulaBarView {
 
       if (e.key === "Escape") {
         e.preventDefault();
-        address.value = this.model.activeCell.address;
+        address.value = this.#nameBoxValue;
         address.blur();
       }
     });
@@ -738,9 +739,11 @@ export class FormulaBarView {
     this.#onInputOrSelection();
   }
 
-  setActiveCell(info: { address: string; input: string; value: unknown }): void {
+  setActiveCell(info: { address: string; input: string; value: unknown; nameBox?: string }): void {
     if (this.model.isEditing) return;
-    this.model.setActiveCell(info);
+    const { nameBox, ...activeCell } = info;
+    this.model.setActiveCell(activeCell);
+    this.#nameBoxValue = nameBox ?? activeCell.address;
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
@@ -1390,7 +1393,7 @@ export class FormulaBarView {
     }
 
     if (document.activeElement !== this.#addressEl) {
-      this.#addressEl.value = this.model.activeCell.address;
+      this.#addressEl.value = this.#nameBoxValue;
     }
 
     if (!opts.preserveTextareaValue) {
