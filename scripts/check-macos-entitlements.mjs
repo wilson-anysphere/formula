@@ -92,6 +92,14 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+
+    if (arg.startsWith("-")) {
+      errBlock("macOS entitlements preflight failed", [
+        `Unknown argument: ${arg}`,
+        `Run with --help for usage.`,
+      ]);
+      return { repoRoot, entitlementsPathOverride: entitlementsPathOverride ?? "" };
+    }
   }
 
   const resolvedEntitlementsPathOverride = entitlementsPathOverride
@@ -105,6 +113,7 @@ function parseArgs(argv) {
 
 function main() {
   const { repoRoot, entitlementsPathOverride } = parseArgs(process.argv.slice(2));
+  if (process.exitCode) return;
   const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
   const relativeConfigPath = path.relative(repoRoot, configPath);
 
@@ -147,6 +156,13 @@ function main() {
   // (On other platforms, we avoid depending on `plutil`.)
   if (process.platform === "darwin") {
     const lint = spawnSync("plutil", ["-lint", entitlementsPath], { encoding: "utf8" });
+    if (lint.error) {
+      errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
+        `Failed to run plutil -lint.`,
+        `Error: ${lint.error instanceof Error ? lint.error.message : String(lint.error)}`,
+      ]);
+      return;
+    }
     if (lint.status !== 0) {
       const output = `${lint.stdout ?? ""}\n${lint.stderr ?? ""}`.trim();
       errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
