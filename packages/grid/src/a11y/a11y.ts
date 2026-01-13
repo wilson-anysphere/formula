@@ -91,5 +91,14 @@ export function describeCell(
   return `Active cell ${address}, value ${valueDescription}. Selection ${selectionDescription}.`;
 }
 
+export function describeCellForA11y(args: {
+  selection: { row: number; col: number } | null;
+  range: CellRange | null;
+  provider: CellProvider;
+  headerRows: number;
+  headerCols: number;
+}): string {
+  return describeCell(args.selection, args.range, args.provider, args.headerRows, args.headerCols);
+}
 // Include `.ts` so this module remains executable under Node's built-in "strip types" TS support.
 export { SR_ONLY_STYLE, applySrOnlyStyle } from "./srOnlyStyle.ts";

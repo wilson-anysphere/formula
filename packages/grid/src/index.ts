@@ -54,6 +54,7 @@ export {
   applySrOnlyStyle,
   describeActiveCellLabel,
   describeCell,
+  describeCellForA11y,
   formatCellDisplayText,
   toA1Address,
   toColumnName

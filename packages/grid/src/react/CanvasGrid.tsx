@@ -13,7 +13,7 @@ import type { FillMode } from "../interaction/fillHandle";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
-import { describeActiveCellLabel, describeCell, SR_ONLY_STYLE } from "../a11y/a11y";
+import { describeActiveCellLabel, describeCellForA11y, SR_ONLY_STYLE } from "../a11y/a11y";
 
 export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
 
@@ -401,12 +401,24 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const [cssTheme, setCssTheme] = useState<Partial<GridTheme>>({});
   const resolvedTheme = useMemo(() => resolveGridTheme(cssTheme, props.theme), [cssTheme, props.theme]);
   const [a11yStatusText, setA11yStatusText] = useState<string>(() =>
-    describeCell(null, null, providerRef.current, headerRowsRef.current, headerColsRef.current)
+    describeCellForA11y({
+      selection: null,
+      range: null,
+      provider: providerRef.current,
+      headerRows: headerRowsRef.current,
+      headerCols: headerColsRef.current
+    })
   );
   const [a11yActiveCell, setA11yActiveCell] = useState<{ row: number; col: number; label: string } | null>(null);
 
   const announceSelection = useCallback((selection: { row: number; col: number } | null, range: CellRange | null) => {
-    const text = describeCell(selection, range, providerRef.current, headerRowsRef.current, headerColsRef.current);
+    const text = describeCellForA11y({
+      selection,
+      range,
+      provider: providerRef.current,
+      headerRows: headerRowsRef.current,
+      headerCols: headerColsRef.current
+    });
     setA11yStatusText((prev) => (prev === text ? prev : text));
 
     setA11yActiveCell((prev) => {
