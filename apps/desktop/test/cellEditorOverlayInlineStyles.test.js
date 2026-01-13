@@ -80,7 +80,7 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
     // Shared-grid overlay layers are explicitly z-indexed in charts-overlay.css. Keep the
     // editor above all of them so it can sit on top of selection/charts overlays.
     const sharedSelectors = [
-      /\.chart-layer--shared\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
+      /\.grid-canvas--shared-chart\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
       /\.grid-canvas--shared-selection\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
       /\.outline-layer--shared\s*\{[\s\S]*?\bz-index\s*:\s*(\d+)/,
     ];
