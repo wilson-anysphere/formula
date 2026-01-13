@@ -6,3 +6,4 @@ export * from "./tokenBudget.js";
 export * from "./trimMessagesToBudget.js";
 export * from "./dlp.js";
 export * from "./contextManager.js";
+export * from "./queryAware.js";
