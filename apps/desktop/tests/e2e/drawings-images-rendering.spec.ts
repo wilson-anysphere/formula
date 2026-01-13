@@ -200,13 +200,13 @@ test.describe("drawing + image rendering regressions", () => {
       const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
       if (!canvas) throw new Error("Missing drawing-layer-canvas element");
 
-      const images = (app as any).drawingImages;
-      if (!images || typeof images.set !== "function") {
-        throw new Error("Missing SpreadsheetApp.drawingImages store");
-      }
-
       const bytes = Uint8Array.from(atob(fixture.imagePngBase64), (c) => c.charCodeAt(0));
-      images.set({ id: fixture.imageId, bytes, mimeType: "image/png" });
+      const doc = app.getDocument?.();
+      if (!doc) throw new Error("Missing SpreadsheetApp.getDocument()");
+      if (typeof doc.setImage !== "function") {
+        throw new Error("Missing DocumentController.setImage()");
+      }
+      doc.setImage(fixture.imageId, { bytes, mimeType: "image/png" });
 
       const viewport = (app as any).syncDrawingOverlayViewport?.();
       if (!viewport) throw new Error("Missing SpreadsheetApp.syncDrawingOverlayViewport()");
