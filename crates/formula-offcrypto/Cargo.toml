@@ -8,5 +8,11 @@ description = "Microsoft Office encryption (MS-OFFCRYPTO) helpers for Formula."
 [dependencies]
 aes = "0.8"
 base64 = "0.22"
+cbc = "0.1"
+cipher = { version = "0.4", features = ["block-padding"] }
 quick-xml = "0.37"
 sha1 = "0.10"
+sha2 = "0.10"
+
+[dev-dependencies]
+hex = "0.4"
