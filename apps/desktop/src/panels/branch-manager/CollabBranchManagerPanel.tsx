@@ -8,13 +8,14 @@ import { BranchManagerPanel, type Actor as BranchActor } from "./BranchManagerPa
 import { MergeBranchPanel } from "./MergeBranchPanel.js";
 import { useReservedRootGuardError } from "../collabReservedRootGuard.js";
 
-// Import the browser-safe branch store/service modules directly.
-//
-// `packages/versioning/branches/src/index.js` also re-exports a Node-only `SQLiteBranchStore`,
-// which pulls `node:*` built-ins into the web bundle and breaks the desktop web shell / e2e.
-import { BranchService } from "../../../../../packages/versioning/branches/src/BranchService.js";
-import { YjsBranchStore } from "../../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
-import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../../packages/versioning/branches/src/yjs/index.js";
+// Import branching helpers from the browser-safe entrypoint so bundlers don't
+// accidentally pull Node-only stores (e.g. SQLite) into the WebView bundle.
+import {
+  BranchService,
+  YjsBranchStore,
+  applyDocumentStateToYjsDoc,
+  yjsDocToDocumentState,
+} from "../../../../../packages/versioning/branches/src/browser.js";
 import { BRANCHING_APPLY_ORIGIN } from "../../collab/conflict-monitors.js";
 
 export function CollabBranchManagerPanel({
