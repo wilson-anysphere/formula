@@ -13,6 +13,7 @@ import { searchFunctionResults } from "../command-palette/commandPaletteSearch.j
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
 import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
+import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
 
 export type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -835,6 +836,26 @@ export class FormulaBarView {
     }
 
     // Excel behavior: Enter commits, Alt+Enter inserts newline.
+    if (e.key === "Enter" && e.altKey) {
+      e.preventDefault();
+
+      const prevText = this.textarea.value;
+      const cursorStart = this.textarea.selectionStart ?? prevText.length;
+      const cursorEnd = this.textarea.selectionEnd ?? prevText.length;
+
+      const indentation = computeFormulaIndentation(prevText, cursorStart);
+      const insertion = `\n${indentation}`;
+
+      this.textarea.value = prevText.slice(0, cursorStart) + insertion + prevText.slice(cursorEnd);
+
+      const nextCursor = cursorStart + insertion.length;
+      this.textarea.setSelectionRange(nextCursor, nextCursor);
+
+      // Reuse the standard input/selection path to keep the model + highlight in sync.
+      this.#onInputOrSelection();
+      return;
+    }
+
     if (e.key === "Enter" && !e.altKey) {
       e.preventDefault();
       this.#commit({ reason: "enter", shift: e.shiftKey });
