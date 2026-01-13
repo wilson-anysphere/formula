@@ -1571,12 +1571,38 @@ export class ContextManager {
             const r1 = rect.r1;
             const c1 = rect.c1;
             if (!sheetName || ![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) continue;
+            if (r1 < r0 || c1 < c0) continue;
             const rangeA1 = rangeToA1({ sheetName, startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
- 
+
+            // Structured DLP classifications: if this chunk range is disallowed due to explicit
+            // document/sheet/range selectors, do not include any derived header/type strings.
+            if (dlp) {
+              const range = rectToRange({ r0, c0, r1, c1 });
+              const sheetId = resolveDlpSheetId(sheetName);
+              if (range && sheetId) {
+                const index = getDlpDocumentIndex();
+                const recordClassification = index
+                  ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+                  : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+                const recordDecision = evaluatePolicy({
+                  action: DLP_ACTION.AI_CLOUD_PROCESSING,
+                  classification: recordClassification,
+                  policy: dlp.policy,
+                  options: { includeRestrictedContent },
+                });
+                if (recordDecision.decision !== DLP_DECISION.ALLOW) {
+                  const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
+                  const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${title}` : "";
+                  schemaLines.push(`- ${label}${nameSuffix} (range="${rangeA1}"): [REDACTED]`);
+                  continue;
+                }
+              }
+            }
+
             const storedText = typeof meta.text === "string" ? meta.text : "";
             const columns = extractColumnsLine(storedText);
             const isRedacted = /\[REDACTED\]/.test(storedText);
- 
+
             const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
             const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${title}` : "";
             const detail = columns ? columns : isRedacted ? "[REDACTED]" : "";

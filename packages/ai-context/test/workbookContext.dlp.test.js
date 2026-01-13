@@ -5,6 +5,7 @@ import { ContextManager } from "../src/contextManager.js";
 import { HashEmbedder } from "../../ai-rag/src/embedding/hashEmbedder.js";
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { InMemoryVectorStore } from "../../ai-rag/src/store/inMemoryVectorStore.js";
+import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
@@ -594,6 +595,69 @@ test("buildWorkbookContextFromSpreadsheetApi: redacts sensitive workbook chunks 
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].decision.decision, "redact");
+});
+
+test("buildWorkbookContext: workbook_schema fallback respects structured DLP even when skipIndexingWithDlp=true", async () => {
+  const workbookId = "wb-api-schema-structured";
+
+  const spreadsheet = {
+    listSheets() {
+      return ["Secrets"];
+    },
+    listNonEmptyCells(sheet) {
+      assert.equal(sheet, "Secrets");
+      return [
+        // Header row contains non-regex "TopSecret" (should be suppressed by structured DLP).
+        { address: { sheet: "Secrets", row: 1, col: 1 }, cell: { value: "TopSecret" } },
+        { address: { sheet: "Secrets", row: 1, col: 2 }, cell: { value: "Value" } },
+        { address: { sheet: "Secrets", row: 2, col: 1 }, cell: { value: "A" } },
+        { address: { sheet: "Secrets", row: 2, col: 2 }, cell: { value: 1 } },
+      ];
+    },
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  // Pre-index without DLP so the persisted chunk metadata contains the raw header.
+  const workbook = workbookFromSpreadsheetApi({ spreadsheet, workbookId, coordinateBase: "one" });
+  await indexWorkbook({ workbook, vectorStore, embedder });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 800,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContextFromSpreadsheetApi({
+    spreadsheet,
+    workbookId,
+    query: "ignore",
+    topK: 0, // force no retrieval (so schema comes from vectorStore.list fallback)
+    skipIndexing: true,
+    skipIndexingWithDlp: true,
+    dlp: {
+      documentId: workbookId,
+      policy: makePolicy({ maxAllowed: "Confidential", redactDisallowed: true }),
+      classificationRecords: [
+        {
+          selector: {
+            scope: "range",
+            documentId: workbookId,
+            sheetId: "Secrets",
+            range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } },
+          },
+          classification: { level: "Restricted", labels: [] },
+        },
+      ],
+    },
+  });
+
+  assert.equal(out.retrieved.length, 0);
+  assert.match(out.promptContext, /## workbook_schema/i);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+  assert.doesNotMatch(schemaSection, /TopSecret/);
+  assert.match(schemaSection, /\[REDACTED\]/);
 });
 
 test("buildWorkbookContextFromSpreadsheetApi: supports snake_case DLP options (structured block + audit documentId)", async () => {
