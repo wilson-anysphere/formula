@@ -216,6 +216,36 @@ function main() {
     ]);
   }
 
+  // Guardrail against broad/production-inappropriate entitlements being enabled by accident.
+  const forbiddenTrue = [
+    {
+      key: "com.apple.security.get-task-allow",
+      reason: "Debug entitlement (should never be true for Developer ID distribution).",
+    },
+    {
+      key: "com.apple.security.cs.disable-library-validation",
+      reason: "Allows loading unsigned/untrusted dylibs; only enable if absolutely required.",
+    },
+    {
+      key: "com.apple.security.cs.disable-executable-page-protection",
+      reason: "Broader W+X memory permission; prefer targeted JIT entitlements instead.",
+    },
+    {
+      key: "com.apple.security.cs.allow-dyld-environment-variables",
+      reason: "Allows DYLD_* injection; avoid in production builds.",
+    },
+  ];
+
+  const forbiddenEnabled = forbiddenTrue.filter(({ key }) => hasTrueEntitlement(xml, key));
+  if (forbiddenEnabled.length > 0) {
+    errBlock(`Disallowed macOS entitlements enabled (${relativeEntitlementsPath})`, [
+      `The following entitlements are present and set to <true/>:`,
+      ...forbiddenEnabled.map(({ key, reason }) => `${key} — ${reason}`),
+      ``,
+      `If you believe one of these is required, update entitlements.plist with a clear justification and adjust this guardrail accordingly.`,
+    ]);
+  }
+
   if (process.exitCode) {
     err(`\nmacOS entitlements preflight failed.\n`);
     return;
