@@ -6,17 +6,22 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { installExcelStyleFocusCycle } from "./installExcelStyleFocusCycle.js";
 
-function dispatchF6(opts: { shiftKey?: boolean } = {}): void {
+function dispatchF6(
+  opts: { shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean } = {},
+): KeyboardEvent {
   const target = (document.activeElement as HTMLElement | null) ?? window;
-  target.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "F6",
-      code: "F6",
-      shiftKey: Boolean(opts.shiftKey),
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
+  const event = new KeyboardEvent("keydown", {
+    key: "F6",
+    code: "F6",
+    shiftKey: Boolean(opts.shiftKey),
+    altKey: Boolean(opts.altKey),
+    ctrlKey: Boolean(opts.ctrlKey),
+    metaKey: Boolean(opts.metaKey),
+    bubbles: true,
+    cancelable: true,
+  });
+  target.dispatchEvent(event);
+  return event;
 }
 
 type ShellFixture = {
@@ -24,12 +29,14 @@ type ShellFixture = {
   ribbonTab: HTMLButtonElement;
   formulaAddress: HTMLInputElement;
   grid: HTMLDivElement;
+  gridSecondary: HTMLDivElement;
   sheetTab: HTMLButtonElement;
   zoomControl: HTMLSelectElement;
   versionHistoryButton: HTMLButtonElement;
+  outsideButton: HTMLButtonElement;
 };
 
-function setupShell(opts: { zoomDisabled?: boolean } = {}): ShellFixture {
+function setupShell(opts: { zoomDisabled?: boolean; withSecondaryGrid?: boolean } = {}): ShellFixture {
   document.body.innerHTML = "";
 
   const ribbonRoot = document.createElement("div");
@@ -61,6 +68,13 @@ function setupShell(opts: { zoomDisabled?: boolean } = {}): ShellFixture {
   grid.tabIndex = 0;
   document.body.appendChild(grid);
 
+  const gridSecondary = document.createElement("div");
+  gridSecondary.id = "grid-secondary";
+  gridSecondary.tabIndex = 0;
+  if (opts.withSecondaryGrid) {
+    document.body.appendChild(gridSecondary);
+  }
+
   const sheetTabsRoot = document.createElement("div");
   sheetTabsRoot.id = "sheet-tabs";
   document.body.appendChild(sheetTabsRoot);
@@ -89,6 +103,11 @@ function setupShell(opts: { zoomDisabled?: boolean } = {}): ShellFixture {
   versionHistoryButton.textContent = "Version history";
   statusBarRoot.appendChild(versionHistoryButton);
 
+  const outsideButton = document.createElement("button");
+  outsideButton.type = "button";
+  outsideButton.textContent = "Outside";
+  document.body.appendChild(outsideButton);
+
   const dispose = installExcelStyleFocusCycle({
     ribbonRoot,
     formulaBarRoot,
@@ -96,9 +115,20 @@ function setupShell(opts: { zoomDisabled?: boolean } = {}): ShellFixture {
     sheetTabsRoot,
     statusBarRoot,
     focusGrid: () => grid.focus(),
+    gridSecondaryRoot: opts.withSecondaryGrid ? gridSecondary : null,
   });
 
-  return { dispose, ribbonTab, formulaAddress, grid, sheetTab, zoomControl, versionHistoryButton };
+  return {
+    dispose,
+    ribbonTab,
+    formulaAddress,
+    grid,
+    gridSecondary,
+    sheetTab,
+    zoomControl,
+    versionHistoryButton,
+    outsideButton,
+  };
 }
 
 afterEach(() => {
@@ -197,5 +227,85 @@ describe("Excel-style focus cycling (F6 / Shift+F6)", () => {
       fixture.dispose();
     }
   });
-});
 
+  it("ignores modified F6 chords (Ctrl/Alt/Meta)", () => {
+    const fixture = setupShell({ zoomDisabled: false });
+    try {
+      fixture.grid.focus();
+      expect(document.activeElement).toBe(fixture.grid);
+
+      const ctrlEvent = dispatchF6({ ctrlKey: true });
+      expect(ctrlEvent.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(fixture.grid);
+
+      const altEvent = dispatchF6({ altKey: true });
+      expect(altEvent.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(fixture.grid);
+
+      const metaEvent = dispatchF6({ metaKey: true });
+      expect(metaEvent.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(fixture.grid);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("does not cycle focus when a modal dialog is open (focus trap friendly)", () => {
+    const fixture = setupShell({ zoomDisabled: false });
+    try {
+      const dialog = document.createElement("dialog");
+      dialog.setAttribute("open", "true");
+      document.body.appendChild(dialog);
+
+      const input = document.createElement("input");
+      input.type = "text";
+      dialog.appendChild(input);
+
+      input.focus();
+      expect(document.activeElement).toBe(input);
+
+      const event = dispatchF6();
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(input);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("starts cycling from the ribbon when focus is outside any known region", () => {
+    const fixture = setupShell({ zoomDisabled: false });
+    try {
+      fixture.outsideButton.focus();
+      expect(document.activeElement).toBe(fixture.outsideButton);
+
+      dispatchF6();
+      expect(document.activeElement).toBe(fixture.ribbonTab);
+
+      // Reverse from an unknown element should wrap to the last region (status bar).
+      fixture.outsideButton.focus();
+      expect(document.activeElement).toBe(fixture.outsideButton);
+
+      dispatchF6({ shiftKey: true });
+      expect(document.activeElement).toBe(fixture.zoomControl);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it("treats the secondary grid root as part of the grid region when cycling focus", () => {
+    const fixture = setupShell({ zoomDisabled: false, withSecondaryGrid: true });
+    try {
+      fixture.gridSecondary.focus();
+      expect(document.activeElement).toBe(fixture.gridSecondary);
+
+      dispatchF6();
+      expect(document.activeElement).toBe(fixture.sheetTab);
+
+      dispatchF6({ shiftKey: true });
+      // The focus cycle uses the primary grid focus handler.
+      expect(document.activeElement).toBe(fixture.grid);
+    } finally {
+      fixture.dispose();
+    }
+  });
+});
