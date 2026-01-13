@@ -892,6 +892,7 @@ export class FormulaBarView {
       testId: "name-box-menu",
       onClose: () => {
         this.#nameBoxDropdownEl.setAttribute("aria-expanded", "false");
+        this.#addressEl.setAttribute("aria-expanded", "false");
         if (this.#nameBoxMenuEscapeListener) {
           window.removeEventListener("keydown", this.#nameBoxMenuEscapeListener, true);
           this.#nameBoxMenuEscapeListener = null;
@@ -999,6 +1000,7 @@ export class FormulaBarView {
 
     const rect = this.#nameBoxDropdownEl.getBoundingClientRect();
     this.#nameBoxDropdownEl.setAttribute("aria-expanded", "true");
+    this.#addressEl.setAttribute("aria-expanded", "true");
     menu.open({ x: rect.left, y: rect.bottom, items });
   }
 
