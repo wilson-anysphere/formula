@@ -201,23 +201,23 @@ import { exportDocumentRangeToCsv } from "./import-export/csv/export.js";
 // measurement does not include the IPC overhead of installing listeners. Once the
 // listeners are installed, call it again (idempotent) to re-emit the timing events
 // for the now-ready listeners.
-void (async () => {
-  try {
-    reportStartupWebviewLoaded();
-  } catch {
+try {
+  reportStartupWebviewLoaded();
+} catch {
+  // Best-effort; instrumentation should never block startup.
+}
+
+void installStartupTimingsListeners()
+  .catch(() => {
     // Best-effort; instrumentation should never block startup.
-  }
-  try {
-    await installStartupTimingsListeners();
-  } catch {
-    // Best-effort; instrumentation should never block startup.
-  }
-  try {
-    reportStartupWebviewLoaded();
-  } catch {
-    // Best-effort; instrumentation should never block startup.
-  }
-})();
+  })
+  .finally(() => {
+    try {
+      reportStartupWebviewLoaded();
+    } catch {
+      // Best-effort; instrumentation should never block startup.
+    }
+  });
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
