@@ -173,22 +173,28 @@ async function main() {
 
   // 10k populated values in column A.
   const filledRows = 10_000;
+  const colA = new Float64Array(filledRows);
+  for (let i = 0; i < filledRows; i++) colA[i] = i + 1;
   const tenKColCells = {
     getCellValue(row, col) {
       if (col !== 0) return null;
       if (!Number.isInteger(row) || row < 0 || row >= filledRows) return null;
-      return row + 1;
+      return colA[row];
     },
   };
 
+  const patternColumn = new Array(200);
+  for (let i = 0; i < patternColumn.length; i++) {
+    if (i % 3 === 0) patternColumn[i] = "San Francisco";
+    else if (i % 10 === 0) patternColumn[i] = "San Jose";
+    else patternColumn[i] = null;
+  }
   const patternCells = {
     getCellValue(row, col) {
       if (col !== 0) return null;
       if (!Number.isInteger(row) || row < 0) return null;
-      // Some repeated strings around the current row.
-      if (row % 3 === 0) return "San Francisco";
-      if (row % 10 === 0) return "San Jose";
-      return null;
+      if (row >= patternColumn.length) return null;
+      return patternColumn[row] ?? null;
     },
   };
 
