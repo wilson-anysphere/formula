@@ -156,6 +156,58 @@ test("CursorTabCompletionClient resolves to empty string when an external AbortS
   assert.equal(sawAbort, true);
 });
 
+test("CursorTabCompletionClient returns empty string immediately when the external AbortSignal is already aborted", async () => {
+  let fetchCalls = 0;
+
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, async json() {} };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+  });
+
+  const controller = new AbortController();
+  controller.abort();
+
+  const completion = await client.completeTabCompletion({
+    input: "=1+",
+    cursorPosition: 3,
+    cellA1: "A1",
+    signal: controller.signal,
+  });
+
+  assert.equal(completion, "");
+  assert.equal(fetchCalls, 0);
+});
+
+test("CursorTabCompletionClient applies the timeout budget while awaiting getAuthHeaders", async () => {
+  let fetchCalls = 0;
+
+  const fetchImpl = async () => {
+    fetchCalls += 1;
+    return { ok: true, async json() {} };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 10,
+    getAuthHeaders: () => new Promise(() => {}), // never resolves
+  });
+
+  const start = Date.now();
+  const completion = await client.completeTabCompletion({ input: "=1+2", cursorPosition: 5, cellA1: "A1" });
+  const elapsed = Date.now() - start;
+
+  assert.equal(completion, "");
+  assert.equal(fetchCalls, 0);
+  assert.ok(elapsed < 200, `Expected completion to return quickly, got ${elapsed}ms`);
+});
+
 test("CursorTabCompletionClient returns empty string on non-2xx responses", async () => {
   const fetchImpl = async () => {
     return {

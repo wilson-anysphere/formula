@@ -61,13 +61,14 @@ export class CursorTabCompletionClient {
 
       const authHeaders =
         typeof this.getAuthHeaders === "function"
-          ? await this.getAuthHeaders()
+          ? await raceWithAbort(this.getAuthHeaders(), controller.signal)
           : null;
       if (controller.signal.aborted) return "";
 
       // Use lowercase so tests (and any header-inspecting consumers) can treat this as a plain
       // record without worrying about case. Fetch treats header keys as case-insensitive.
       const headers = { ...(authHeaders ?? {}), "content-type": "application/json" };
+      if (controller.signal.aborted) return "";
 
       const res = await this.fetchImpl(this.endpointUrl, {
         method: "POST",
@@ -125,4 +126,34 @@ function joinUrl(baseUrl, path) {
   const base = baseUrl.replace(/\/$/, "");
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${base}${suffix}`;
+}
+
+/**
+ * Await a promise-like value, but reject early if the provided AbortSignal fires.
+ *
+ * This is used to ensure the tab completion latency budget applies to both
+ * auth-header resolution and the fetch() call.
+ *
+ * @template T
+ * @param {T | Promise<T>} promiseLike
+ * @param {AbortSignal} signal
+ * @returns {Promise<T>}
+ */
+async function raceWithAbort(promiseLike, signal) {
+  if (!signal) return await promiseLike;
+  if (signal.aborted) throw signal.reason;
+
+  /** @type {(() => void) | null} */
+  let cleanup = null;
+  const abortPromise = new Promise((_, reject) => {
+    const onAbort = () => reject(signal.reason);
+    cleanup = () => signal.removeEventListener("abort", onAbort);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+
+  try {
+    return await Promise.race([Promise.resolve(promiseLike), abortPromise]);
+  } finally {
+    cleanup?.();
+  }
 }
