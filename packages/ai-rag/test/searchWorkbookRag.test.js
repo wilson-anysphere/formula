@@ -387,3 +387,37 @@ test("searchWorkbookRag requires workbookId when queryText is non-empty", async 
     /workbookId/
   );
 });
+
+test("searchWorkbookRag filters out results from other workbooks", async () => {
+  /** @type {{ workbookId?: string, signal?: AbortSignal }} */
+  let lastQueryOpts = {};
+
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query(_vector, _topK, opts = {}) {
+      lastQueryOpts = opts;
+      return [
+        { id: "good", score: 1, metadata: { workbookId: opts.workbookId } },
+        { id: "bad", score: 0.9, metadata: { workbookId: "other" } },
+      ];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 5,
+    vectorStore,
+    embedder,
+    rerank: false,
+    dedupe: false,
+  });
+
+  assert.equal(lastQueryOpts.workbookId, "wb");
+  assert.deepEqual(results.map((r) => r.id), ["good"]);
+});

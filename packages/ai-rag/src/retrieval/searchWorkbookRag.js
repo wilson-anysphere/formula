@@ -63,6 +63,10 @@ export async function searchWorkbookRag(params) {
   let results = await awaitWithAbort(vectorStore.query(qVec, queryK, { workbookId, signal }), signal);
   throwIfAborted(signal);
   if (!Array.isArray(results)) results = [];
+  // Defense in depth: even though we pass `workbookId` into the query options, filter the
+  // returned results to avoid accidental cross-workbook leakage if a store implementation
+  // ignores the option.
+  results = results.filter((r) => r && r.metadata && r.metadata.workbookId === workbookId);
 
   if (rerank) {
     results = rerankWorkbookResults({ queryText, results });
