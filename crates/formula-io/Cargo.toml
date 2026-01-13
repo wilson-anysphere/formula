@@ -12,6 +12,10 @@ parquet = ["dep:formula-columnar"]
 # This is kept opt-in because it adds a significant dependency surface and build
 # time (vendored OpenSSL in some environments).
 vba = ["formula-xlsx/vba"]
+# Enable password-based decryption for encrypted workbooks (OOXML + legacy XLS).
+#
+# This is currently used to gate integration tests while decryption support is landing.
+encrypted-workbooks = []
 
 [dependencies]
 cfb = "0.10"
