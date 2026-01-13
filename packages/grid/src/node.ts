@@ -22,6 +22,7 @@ export type {
 export type { GridPerfStats, ScrollToCellAlign } from "./rendering/CanvasGridRenderer.ts";
 export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer.ts";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker.ts";
+export type { Rect } from "./rendering/DirtyRegionTracker.ts";
 export { LruCache } from "./utils/LruCache.ts";
 
 export type { GridTheme } from "./theme/GridTheme.ts";

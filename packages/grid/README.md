@@ -265,10 +265,25 @@ Notable helpers:
   - If the cell is part of a merged range, this returns the merged bounds when possible.
   - If a merge crosses frozen boundaries (frozen vs scrollable quadrants), the merged bounds cannot be represented as a single viewport rect; in that case this falls back to the merged anchor cell rect.
 - `getViewportState()` returns the current scroll/viewport metrics (useful for overlay positioning without extra DOM reads).
-- `getFillHandleRect()` returns the active selection fill-handle rect (also in viewport coordinates).
-- `setZoom(zoom)` / `getZoom()` control the grid zoom level (scales cell sizes + text rendering).
-- `applyAxisSizeOverrides({ rows?, cols? }, { resetUnspecified? })` applies many row/column size overrides at once (single redraw).
-- Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
+  - `getFillHandleRect()` returns the active selection fill-handle rect (also in viewport coordinates).
+  - `setZoom(zoom)` / `getZoom()` control the grid zoom level (scales cell sizes + text rendering).
+  - `applyAxisSizeOverrides({ rows?, cols? }, { resetUnspecified? })` applies many row/column size overrides at once (single redraw).
+  - Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
+
+## Overlays / viewport helpers
+
+Overlays (diffs, auditing, presence, etc.) often need to convert a sheet `CellRange` into pixel geometry in the current viewport.
+
+`CanvasGridRenderer.getRangeRects(range)` returns an array of viewport-space `Rect` objects (relative to the grid canvases), clipped to the visible viewport and split across frozen-row/column quadrants when needed.
+
+```ts
+import type { CellRange, Rect } from "@formula/grid";
+
+const range: CellRange = { startRow: 0, endRow: 10, startCol: 0, endCol: 5 };
+const rects: Rect[] = renderer.getRangeRects(range);
+```
+
+To position DOM overlays in page coordinates, add the grid element’s `getBoundingClientRect().left/top` to each rect.
 
 ## Zoom
 

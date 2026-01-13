@@ -33,6 +33,7 @@ export {
 
 export { CanvasGridRenderer } from "./rendering/CanvasGridRenderer";
 export { DirtyRegionTracker } from "./rendering/DirtyRegionTracker";
+export type { Rect } from "./rendering/DirtyRegionTracker";
 export { LruCache } from "./utils/LruCache";
 
 export { VariableSizeAxis } from "./virtualization/VariableSizeAxis";

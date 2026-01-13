@@ -1025,6 +1025,20 @@ export class CanvasGridRenderer {
     return { x, y, width, height };
   }
 
+  /**
+   * Returns viewport-space rectangles (relative to the grid canvases) for the provided sheet
+   * `CellRange`, clipped to the visible viewport and split across frozen-row/column quadrants.
+   *
+   * This mirrors the internal selection rendering logic and is intended for overlay renderers
+   * (diff/audit/presence/etc) that need pixel-accurate range geometry.
+   */
+  getRangeRects(range: CellRange): Rect[] {
+    const normalized = this.normalizeSelectionRange(range);
+    if (!normalized) return [];
+    const viewport = this.scroll.getViewportState();
+    return this.rangeToViewportRects(normalized, viewport);
+  }
+
   getViewportState(): GridViewportState {
     return this.scroll.getViewportState();
   }
