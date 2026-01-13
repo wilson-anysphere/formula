@@ -9,6 +9,7 @@ import {
   setFillColor,
   setHorizontalAlign,
   toggleBold,
+  toggleStrikethrough,
   toggleWrap,
 } from "../toolbar.js";
 import { installFormattingShortcuts } from "../shortcuts.js";
@@ -188,4 +189,53 @@ test("toggleBold on a full column selection is fast + uses effective (layered) f
 
   // Column A is effectively bold, so toggleBold should toggle *off* (set bold=false).
   assert.deepEqual(lastPatch, { font: { bold: false } });
+});
+
+test("toggleStrikethrough produces expected style rendering", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", "Styled");
+
+  toggleStrikethrough(doc, "Sheet1", "A1");
+
+  const cell = doc.getCell("Sheet1", "A1");
+  const style = doc.styleTable.get(cell.styleId);
+  assert.equal(renderCellStyle(style), "text-decoration:line-through");
+});
+
+test("toggleStrikethrough on a full column selection is fast + uses effective (layered) formats", () => {
+  const doc = new DocumentController();
+
+  // Ensure the sheet exists in the model.
+  doc.getCell("Sheet1", "A1");
+
+  // Simulate layered formats: column A is strikethrough by default, while individual cells in the
+  // column keep `styleId=0` (no cell override).
+  const sheet = doc.model.sheets.get("Sheet1");
+  const strikeStyleId = doc.styleTable.intern({ font: { strike: true } });
+  sheet.colStyleIds.set(0, strikeStyleId);
+
+  const fullColumnA = "A1:A1048576";
+
+  // Guardrail: the previous naive implementation would have called `getCell()` once per row.
+  const originalGetCell = doc.getCell.bind(doc);
+  let getCellCalls = 0;
+  doc.getCell = (...args) => {
+    getCellCalls += 1;
+    if (getCellCalls > 10_000) {
+      throw new Error(`toggleStrikethrough performed O(rows) getCell calls (${getCellCalls})`);
+    }
+    return originalGetCell(...args);
+  };
+
+  // Stub the write so the test only exercises the read-path (toggle state), not the
+  // implementation details of applying formats to huge ranges.
+  let lastPatch = null;
+  doc.setRangeFormat = (_sheetId, _range, patch) => {
+    lastPatch = patch;
+  };
+
+  toggleStrikethrough(doc, "Sheet1", fullColumnA);
+
+  // Column A is effectively strikethrough, so toggleStrikethrough should toggle *off* (set strike=false).
+  assert.deepEqual(lastPatch, { font: { strike: false } });
 });
