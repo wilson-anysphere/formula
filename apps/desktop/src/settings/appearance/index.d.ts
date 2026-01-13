@@ -1,5 +1,7 @@
 export const THEME_PREFERENCES: readonly ["system", "light", "dark", "high-contrast"];
 
+export const DEFAULT_THEME_PREFERENCE: "light";
+
 export function isThemePreference(value: any): value is (typeof THEME_PREFERENCES)[number];
 
 export function createMemoryStorage(): {
@@ -23,4 +25,3 @@ export function setThemePreference(
   themePreference: any,
   storage?: { setItem(key: string, value: string): void },
 ): void;
-

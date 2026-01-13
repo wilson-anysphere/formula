@@ -1,7 +1,7 @@
 import { getDefaultStorage } from "./storage.js";
 
 const STORAGE_KEY = "formula.settings.appearance.v1";
-const DEFAULT_THEME_PREFERENCE = "light";
+export const DEFAULT_THEME_PREFERENCE = "light";
 
 /** @type {const} */
 export const THEME_PREFERENCES = ["system", "light", "dark", "high-contrast"];
