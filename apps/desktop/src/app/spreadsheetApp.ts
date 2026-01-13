@@ -11740,10 +11740,11 @@ export class SpreadsheetApp {
         const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
         return state?.value == null && state?.formula == null;
       },
-      // Shared-grid mode doesn't render outline-hidden rows/cols (yet). Ensure navigation
-      // logic doesn't treat outline-hidden indices as hidden unless the renderer actually hides them.
-      isRowHidden: (row: number) => (shared ? false : this.isRowHidden(row)),
-      isColHidden: (col: number) => (shared ? false : this.isColHidden(col)),
+      // Shared-grid mode currently supports manual row/col hide/unhide but does not yet render
+      // outline-collapsed (group) hidden state. Match Excel-like navigation by skipping user-hidden
+      // indices while ignoring outline-hidden ones.
+      isRowHidden: (row: number) => (shared ? this.outline.rows.entry(row + 1).hidden.user : this.isRowHidden(row)),
+      isColHidden: (col: number) => (shared ? this.outline.cols.entry(col + 1).hidden.user : this.isColHidden(col)),
     };
   }
 

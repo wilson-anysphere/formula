@@ -171,4 +171,62 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("skips user-hidden rows/cols for navigation in shared-grid mode", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("shared");
+
+      const outline = (app as any).outline as any;
+      // Hide row 2 and col B (0-based index 1) via the user-hidden flag.
+      outline.rows.entryMut(2).hidden.user = true;
+      outline.cols.entryMut(2).hidden.user = true;
+
+      const provider = (app as any).usedRangeProvider();
+      expect(provider.isRowHidden(1)).toBe(true);
+      expect(provider.isColHidden(1)).toBe(true);
+
+      const documentController = (app as any).document;
+      const sheetId = (app as any).sheetId;
+
+      // Make Ctrl+ArrowDown/Right want to stop on the hidden row/col if hidden indices weren't skipped.
+      // Keep the sheet's used range large (it is seeded to D5) so jump-to-edge has room to scan.
+      documentController.setCellValue(sheetId, { row: 1, col: 0 }, "X"); // hidden row
+      documentController.setCellValue(sheetId, { row: 2, col: 0 }, null);
+      documentController.setCellValue(sheetId, { row: 3, col: 0 }, null);
+      documentController.setCellValue(sheetId, { row: 4, col: 0 }, null);
+
+      // Ensure row 1 col 2/3 are empty so Ctrl+ArrowRight scans past the hidden column.
+      documentController.setCellValue(sheetId, { row: 0, col: 2 }, null);
+      documentController.setCellValue(sheetId, { row: 0, col: 3 }, null);
+
+      const selection = (app as any).selection;
+      const limits = (app as any).limits;
+
+      const movedDown = navigateSelectionByKey(selection, "ArrowDown", { shift: false, primary: false }, provider, limits);
+      expect(movedDown?.active.row).toBe(2);
+      const movedRight = navigateSelectionByKey(selection, "ArrowRight", { shift: false, primary: false }, provider, limits);
+      expect(movedRight?.active.col).toBe(2);
+
+      const jumpedDown = navigateSelectionByKey(selection, "ArrowDown", { shift: false, primary: true }, provider, limits);
+      expect(jumpedDown?.active.row).toBe(4);
+      const jumpedRight = navigateSelectionByKey(selection, "ArrowRight", { shift: false, primary: true }, provider, limits);
+      expect(jumpedRight?.active.col).toBe(3);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
