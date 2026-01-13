@@ -4,6 +4,16 @@ import type { Comment, CommentAuthor, CommentKind, Reply } from "./types.ts";
 
 export interface CommentManagerOptions {
   transact?: (fn: () => void) => void;
+  /**
+   * Optional permission guard for comment mutations.
+   *
+   * When provided and it returns `false`, all mutating APIs will throw:
+   * `Error("Permission denied: cannot comment")`.
+   *
+   * Read-only APIs (`listAll`, `listForCell`) remain available regardless of
+   * permissions so viewers can still read existing threads.
+   */
+  canComment?: () => boolean;
 }
 
 export type YCommentsMap = Y.Map<Y.Map<unknown>>;
@@ -271,10 +281,12 @@ function normalizeCommentsRootToLocalTypes(doc: Y.Doc): void {
 export class CommentManager {
   private readonly doc: Y.Doc;
   private readonly transact: (fn: () => void) => void;
+  private readonly canComment: () => boolean;
 
   constructor(doc: Y.Doc, options: CommentManagerOptions = {}) {
     this.doc = doc;
     this.transact = options.transact ?? ((fn) => doc.transact(fn));
+    this.canComment = options.canComment ?? (() => true);
   }
 
   listAll(): Comment[] {
@@ -300,6 +312,7 @@ export class CommentManager {
     now?: number;
     id?: string;
   }): string {
+    this.assertCanComment();
     const root = getCommentsRoot(this.doc);
     const id = input.id ?? createId();
     const now = input.now ?? Date.now();
@@ -362,6 +375,7 @@ export class CommentManager {
     now?: number;
     id?: string;
   }): string {
+    this.assertCanComment();
     const yComment = this.getYCommentForWrite(input.commentId);
 
     const replies = yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined;
@@ -402,6 +416,7 @@ export class CommentManager {
   }
 
   setResolved(input: { commentId: string; resolved: boolean; now?: number }): void {
+    this.assertCanComment();
     const yComment = this.getYCommentForWrite(input.commentId);
     const now = input.now ?? Date.now();
 
@@ -412,6 +427,7 @@ export class CommentManager {
   }
 
   setCommentContent(input: { commentId: string; content: string; now?: number }): void {
+    this.assertCanComment();
     const yComment = this.getYCommentForWrite(input.commentId);
     const now = input.now ?? Date.now();
 
@@ -422,6 +438,7 @@ export class CommentManager {
   }
 
   setReplyContent(input: { commentId: string; replyId: string; content: string; now?: number }): void {
+    this.assertCanComment();
     const yComment = this.getYCommentForWrite(input.commentId);
 
     const replies = yComment.get("replies") as Y.Array<Y.Map<unknown>> | undefined;
@@ -559,11 +576,16 @@ export class CommentManager {
 
     return Array.from(byId.values());
   }
+
+  private assertCanComment(): void {
+    if (this.canComment()) return;
+    throw new Error("Permission denied: cannot comment");
+  }
 }
 
 export function createCommentManagerForDoc(params: (
-  | { doc: Y.Doc; transactLocal: (fn: () => void) => void }
-  | { doc: Y.Doc; transact: (fn: () => void) => void }
+  | { doc: Y.Doc; transactLocal: (fn: () => void) => void; canComment?: () => boolean }
+  | { doc: Y.Doc; transact: (fn: () => void) => void; canComment?: () => boolean }
 )): CommentManager {
   // In Node environments, remote updates can be applied using a different Yjs
   // module instance (CJS vs ESM). This can leave nested comment maps (the values
@@ -621,6 +643,8 @@ export function createCommentManagerForDoc(params: (
       if ("transactLocal" in params) params.transactLocal(fn);
       else params.transact(fn);
     },
+    // Preserve the caller's `this` binding (e.g. `CollabSession.canComment`).
+    canComment: typeof params.canComment === "function" ? () => params.canComment() : undefined,
   });
 }
 

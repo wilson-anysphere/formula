@@ -773,6 +773,8 @@ export class SpreadsheetApp {
   private commentsPanelThreads!: HTMLDivElement;
   private commentsPanelCell!: HTMLDivElement;
   private newCommentInput!: HTMLInputElement;
+  private newCommentSubmitButton!: HTMLButtonElement;
+  private commentsPanelReadOnlyHint!: HTMLDivElement;
   private commentTooltip!: HTMLDivElement;
   private commentTooltipVisible = false;
 
@@ -987,6 +989,10 @@ export class SpreadsheetApp {
       // hydrated the document; older docs may still use a legacy Array-backed schema.
       this.commentManager = createCommentManagerForDoc({
         doc: this.commentsDoc,
+        // Gate comment writes on the current CollabSession permissions. We pass a
+        // callback (rather than a snapshot boolean) so role updates (if any) are
+        // reflected in subsequent comment mutations.
+        canComment: () => this.collabSession?.canComment() ?? true,
         // Ensure comment edits are tracked by the binder-origin collaborative UndoManager
         // (so Cmd/Ctrl+Z reverts comment add/edit/reply/resolve just like cell edits).
         transact: (fn) => {
@@ -4718,21 +4724,28 @@ export class SpreadsheetApp {
     const footer = document.createElement("div");
     footer.className = "comments-panel__footer";
 
+    this.commentsPanelReadOnlyHint = document.createElement("div");
+    this.commentsPanelReadOnlyHint.dataset.testid = "comments-readonly-hint";
+    this.commentsPanelReadOnlyHint.className = "comments-panel__readonly-hint";
+    this.commentsPanelReadOnlyHint.textContent = t("comments.readOnlyHint");
+    this.commentsPanelReadOnlyHint.hidden = true;
+    footer.appendChild(this.commentsPanelReadOnlyHint);
+
     this.newCommentInput = document.createElement("input");
     this.newCommentInput.dataset.testid = "new-comment-input";
     this.newCommentInput.type = "text";
     this.newCommentInput.placeholder = t("comments.new.placeholder");
     this.newCommentInput.className = "comments-panel__new-comment-input";
 
-    const submit = document.createElement("button");
-    submit.dataset.testid = "submit-comment";
-    submit.textContent = t("comments.new.submit");
-    submit.type = "button";
-    submit.className = "comments-panel__submit-button";
-    submit.addEventListener("click", () => this.submitNewComment());
+    this.newCommentSubmitButton = document.createElement("button");
+    this.newCommentSubmitButton.dataset.testid = "submit-comment";
+    this.newCommentSubmitButton.textContent = t("comments.new.submit");
+    this.newCommentSubmitButton.type = "button";
+    this.newCommentSubmitButton.className = "comments-panel__submit-button";
+    this.newCommentSubmitButton.addEventListener("click", () => this.submitNewComment());
 
     footer.appendChild(this.newCommentInput);
-    footer.appendChild(submit);
+    footer.appendChild(this.newCommentSubmitButton);
     panel.appendChild(footer);
 
     return panel;
@@ -5188,6 +5201,8 @@ export class SpreadsheetApp {
   private renderCommentsPanel(): void {
     if (!this.commentsPanelVisible) return;
 
+    this.syncCommentsPanelPermissions();
+
     const cellRef = this.commentCellRef(this.selection.active);
     const cellLabel = this.commentCellLabel(this.selection.active);
     this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef: cellLabel });
@@ -5209,6 +5224,7 @@ export class SpreadsheetApp {
   }
 
   private renderCommentThread(comment: Comment): HTMLElement {
+    const canComment = this.canUserComment();
     const container = document.createElement("div");
     container.dataset.testid = "comment-thread";
     container.dataset.commentId = comment.id;
@@ -5227,7 +5243,9 @@ export class SpreadsheetApp {
     resolve.textContent = comment.resolved ? t("comments.unresolve") : t("comments.resolve");
     resolve.type = "button";
     resolve.className = "comment-thread__resolve-button";
+    resolve.disabled = !canComment;
     resolve.addEventListener("click", () => {
+      if (!this.canUserComment()) return;
       this.commentManager.setResolved({
         commentId: comment.id,
         resolved: !comment.resolved,
@@ -5269,13 +5287,16 @@ export class SpreadsheetApp {
     replyInput.type = "text";
     replyInput.placeholder = t("comments.reply.placeholder");
     replyInput.className = "comment-thread__reply-input";
+    replyInput.disabled = !canComment;
 
     const submitReply = document.createElement("button");
     submitReply.dataset.testid = "submit-reply";
     submitReply.textContent = t("comments.reply.send");
     submitReply.type = "button";
     submitReply.className = "comment-thread__submit-reply-button";
+    submitReply.disabled = !canComment;
     submitReply.addEventListener("click", () => {
+      if (!this.canUserComment()) return;
       const content = replyInput.value.trim();
       if (!content) return;
       this.commentManager.addReply({
@@ -5295,6 +5316,7 @@ export class SpreadsheetApp {
   }
 
   private submitNewComment(): void {
+    if (!this.canUserComment()) return;
     const content = this.newCommentInput.value.trim();
     if (!content) return;
     const cellRef = this.commentCellRef(this.selection.active);
@@ -5308,6 +5330,20 @@ export class SpreadsheetApp {
 
     this.newCommentInput.value = "";
     this.maybeRefreshCommentsUiForLocalEdit();
+  }
+
+  private canUserComment(): boolean {
+    return this.collabMode ? (this.collabSession?.canComment() ?? true) : true;
+  }
+
+  private syncCommentsPanelPermissions(): void {
+    // Some unit tests call comment helpers on `Object.create(SpreadsheetApp.prototype)`
+    // without running the constructor.
+    if (!this.newCommentInput || !this.newCommentSubmitButton || !this.commentsPanelReadOnlyHint) return;
+    const canComment = this.canUserComment();
+    this.newCommentInput.disabled = !canComment;
+    this.newCommentSubmitButton.disabled = !canComment;
+    this.commentsPanelReadOnlyHint.hidden = canComment;
   }
 
   private onResize(): void {

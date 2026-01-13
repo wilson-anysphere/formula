@@ -7,6 +7,11 @@ export interface CommentsPanelProps {
   cellRef: string | null;
   comments: Comment[];
   currentUser: CommentAuthor;
+  /**
+   * Whether the current user is allowed to create/update comments.
+   * Viewers can read existing threads but cannot comment.
+   */
+  canComment?: boolean;
   onAddComment: (input: { cellRef: string; content: string }) => void;
   onAddReply: (input: { commentId: string; content: string }) => void;
   onSetResolved: (input: { commentId: string; resolved: boolean }) => void;
@@ -15,6 +20,7 @@ export interface CommentsPanelProps {
 export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
   const [newComment, setNewComment] = useState("");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const canComment = props.canComment ?? true;
 
   const threads = useMemo(() => {
     return props.comments
@@ -46,6 +52,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                 <button
                   type="button"
                   className="comment-thread__resolve-button"
+                  disabled={!canComment}
                   onClick={() => props.onSetResolved({ commentId: comment.id, resolved: !comment.resolved })}
                 >
                   {comment.resolved ? t("comments.unresolve") : t("comments.resolve")}
@@ -68,6 +75,7 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                 <input
                   value={replyDrafts[comment.id] ?? ""}
                   className="comment-thread__reply-input"
+                  disabled={!canComment}
                   onChange={(e) =>
                     setReplyDrafts((drafts) => ({
                       ...drafts,
@@ -79,7 +87,9 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
                 <button
                   type="button"
                   className="comment-thread__submit-reply-button"
+                  disabled={!canComment}
                   onClick={() => {
+                    if (!canComment) return;
                     const draft = (replyDrafts[comment.id] ?? "").trim();
                     if (!draft) return;
                     props.onAddReply({ commentId: comment.id, content: draft });
@@ -95,19 +105,21 @@ export function CommentsPanel(props: CommentsPanelProps): React.ReactElement {
       </div>
 
       <div className="comments-panel-view__footer">
+        {!canComment ? <div className="comments-panel__readonly-hint">{t("comments.readOnlyHint")}</div> : null}
         <div className="comments-panel-view__row">
           <input
             value={newComment}
             onChange={(e) => setNewComment(e.target.value)}
             placeholder={t("comments.new.placeholder")}
             className="comments-panel__new-comment-input"
-            disabled={!props.cellRef}
+            disabled={!props.cellRef || !canComment}
           />
           <button
             type="button"
             className="comments-panel__submit-button"
-            disabled={!props.cellRef || newComment.trim().length === 0}
+            disabled={!props.cellRef || !canComment || newComment.trim().length === 0}
             onClick={() => {
+              if (!canComment) return;
               if (!props.cellRef) return;
               const content = newComment.trim();
               if (!content) return;

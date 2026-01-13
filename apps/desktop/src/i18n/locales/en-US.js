@@ -52,6 +52,7 @@ export const enUS = {
   "comments.new.placeholder": "Add a comment…",
   "comments.new.submit": "Comment",
   "comments.closePanel": "Close comments panel",
+  "comments.readOnlyHint": "Read-only: you can’t add comments",
   "panels.versionHistory.title": "Version History",
   "panels.formulaDebugger.title": "Formula Debugger",
   "panels.scriptEditor.title": "Script Editor",
