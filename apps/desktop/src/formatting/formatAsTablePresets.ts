@@ -14,11 +14,11 @@ export type FormatAsTablePreset = {
   };
   borders: {
     /**
-     * Excel/OOXML color string (e.g. `#FF000000`).
+     * Excel/OOXML ARGB string (AARRGGBB), e.g. `FF000000`.
      */
     outlineColor: string;
     /**
-     * Excel/OOXML color string (e.g. `#FFBFBFBF`).
+     * Excel/OOXML ARGB string (AARRGGBB), e.g. `FFBFBFBF`.
      */
     innerHorizontalColor: string;
     style: string;
@@ -27,19 +27,19 @@ export type FormatAsTablePreset = {
 
 const PRESETS: Record<FormatAsTablePresetId, FormatAsTablePreset> = {
   light: {
-    header: { fill: "#FF4F81BD", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFFFFFFF", secondaryFill: "#FFD9E1F2" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FFBFBFBF", style: "thin" },
+    header: { fill: "FF4F81BD", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFFFFFFF", secondaryFill: "FFD9E1F2" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FFBFBFBF", style: "thin" },
   },
   medium: {
-    header: { fill: "#FF70AD47", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFFFFFFF", secondaryFill: "#FFE2EFDA" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FFBFBFBF", style: "thin" },
+    header: { fill: "FF70AD47", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFFFFFFF", secondaryFill: "FFE2EFDA" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FFBFBFBF", style: "thin" },
   },
   dark: {
-    header: { fill: "#FF1F4E79", fontColor: "#FFFFFFFF" },
-    bandedRows: { primaryFill: "#FFF2F2F2", secondaryFill: "#FFD9D9D9" },
-    borders: { outlineColor: "#FF000000", innerHorizontalColor: "#FF808080", style: "thin" },
+    header: { fill: "FF1F4E79", fontColor: "FFFFFFFF" },
+    bandedRows: { primaryFill: "FFF2F2F2", secondaryFill: "FFD9D9D9" },
+    borders: { outlineColor: "FF000000", innerHorizontalColor: "FF808080", style: "thin" },
   },
 };
 
@@ -155,4 +155,3 @@ function applyTableBorders(doc: DocumentController, sheetId: string, table: Cell
 
   return applied;
 }
-
