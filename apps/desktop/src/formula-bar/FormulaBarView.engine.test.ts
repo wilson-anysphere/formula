@@ -1,0 +1,152 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { describe, expect, it, vi } from "vitest";
+
+import type { EngineClient, FormulaPartialLexResult, FormulaPartialParseResult, FormulaToken } from "@formula/engine";
+
+import { FormulaBarView } from "./FormulaBarView.js";
+
+async function flushTooling(): Promise<void> {
+  // The FormulaBarView debounces engine tooling work to the next animation frame when
+  // available, otherwise it falls back to a `setTimeout(0)` tick.
+  if (typeof requestAnimationFrame === "function") {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  } else {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+  // Allow the async engine calls + follow-up render to complete.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+describe("FormulaBarView WASM editor tooling integration", () => {
+  it("wraps the engine parse error span in a dedicated error class", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const draft = "=1+";
+
+    const tokens: FormulaToken[] = [
+      { kind: "Eq", span: { start: 0, end: 1 } },
+      { kind: "Number", span: { start: 1, end: 2 }, value: "1" },
+      { kind: "Plus", span: { start: 2, end: 3 } },
+      { kind: "Eof", span: { start: 3, end: 3 } },
+    ];
+
+    const lexResult: FormulaPartialLexResult = { tokens, error: null };
+    const parseResult: FormulaPartialParseResult = {
+      ast: null,
+      error: { message: "Unexpected token", span: { start: 2, end: 3 } },
+      context: { function: null },
+    };
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => lexResult),
+      parseFormulaPartial: vi.fn(async () => parseResult),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {} },
+      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = draft;
+    view.textarea.setSelectionRange(draft.length, draft.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushTooling();
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const errorEl = highlight?.querySelector<HTMLElement>(".formula-bar-token--error");
+    expect(errorEl).toBeTruthy();
+    expect(errorEl?.textContent).toBe("+");
+
+    host.remove();
+  });
+
+  it("updates the function hint using engine parse context", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const draft = "=SUM(1, 2)";
+    const commaIndex = draft.indexOf(",");
+
+    const tokens: FormulaToken[] = [
+      { kind: "Eq", span: { start: 0, end: 1 } },
+      { kind: "Ident", span: { start: 1, end: 4 }, value: "SUM" },
+      { kind: "LParen", span: { start: 4, end: 5 } },
+      { kind: "Number", span: { start: 5, end: 6 }, value: "1" },
+      { kind: "ArgSep", span: { start: 6, end: 7 } },
+      { kind: "Whitespace", span: { start: 7, end: 8 }, value: " " },
+      { kind: "Number", span: { start: 8, end: 9 }, value: "2" },
+      { kind: "RParen", span: { start: 9, end: 10 } },
+      { kind: "Eof", span: { start: 10, end: 10 } },
+    ];
+
+    const lexResult: FormulaPartialLexResult = { tokens, error: null };
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => lexResult),
+      parseFormulaPartial: vi.fn(async (formula: string, cursor?: number) => {
+        const argIndex = cursor != null && cursor <= commaIndex ? 0 : 1;
+        return {
+          ast: null,
+          error: null,
+          context: { function: { name: "SUM", argIndex } },
+        } satisfies FormulaPartialParseResult;
+      }),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(
+      host,
+      { onCommit: () => {} },
+      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+    );
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    // Cursor within the first argument.
+    const cursorArg0 = draft.indexOf("1") + 1;
+    view.textarea.value = draft;
+    view.textarea.setSelectionRange(cursorArg0, cursorArg0);
+    view.textarea.dispatchEvent(new Event("input"));
+    await flushTooling();
+    expect(host.querySelector<HTMLElement>('[data-testid="formula-hint"]')?.textContent).toContain("SUM([number1]");
+
+    // Cursor within the second argument.
+    const cursorArg1 = draft.indexOf("2") + 1;
+    view.textarea.setSelectionRange(cursorArg1, cursorArg1);
+    view.textarea.dispatchEvent(new Event("select"));
+    await flushTooling();
+    expect(host.querySelector<HTMLElement>('[data-testid="formula-hint"]')?.textContent).toContain("SUM(number1");
+
+    host.remove();
+  });
+
+  it("falls back to the local tokenizer/highlighter when the engine is absent", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=ROUND(1, 2)";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const fn = highlight?.querySelector<HTMLElement>('span[data-kind="function"]');
+    expect(fn?.textContent).toBe("ROUND");
+
+    const hint = host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
+    expect(hint?.textContent).toContain("ROUND(");
+
+    host.remove();
+  });
+});

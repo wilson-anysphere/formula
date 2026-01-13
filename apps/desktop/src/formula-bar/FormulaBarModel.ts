@@ -1,5 +1,6 @@
 import { explainFormulaError, type ErrorExplanation } from "./errors.js";
 import { getFunctionHint, type FunctionHint } from "./highlight/functionContext.js";
+import { getFunctionSignature, signatureParts } from "./highlight/functionSignatures.js";
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
 import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
 import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
@@ -11,6 +12,14 @@ import {
   type ColoredFormulaReference,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
+import type {
+  FormulaParseError,
+  FormulaPartialLexResult,
+  FormulaPartialParseResult,
+  FormulaSpan,
+  FormulaToken as EngineFormulaToken,
+  FunctionContext as EngineFunctionContext,
+} from "@formula/engine";
 
 export type ActiveCellInfo = {
   address: string;
@@ -36,6 +45,11 @@ export class FormulaBarModel {
   #referenceColorByText = new Map<string, string>();
   #coloredReferences: ColoredFormulaReference[] = [];
   #activeReferenceIndex: number | null = null;
+  #engineHighlightSpans: HighlightSpan[] | null = null;
+  #engineFunctionContext: EngineFunctionContext | null = null;
+  #engineSyntaxError: FormulaParseError | null = null;
+  #engineToolingFormula: string | null = null;
+  #engineToolingLocaleId: string = "en-US";
   /**
    * Full text suggestion for the current draft (not just the "ghost text" tail).
    *
@@ -61,6 +75,7 @@ export class FormulaBarModel {
     this.#referenceColorByText.clear();
     this.#coloredReferences = [];
     this.#activeReferenceIndex = null;
+    this.#clearEditorTooling();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
   }
@@ -99,6 +114,7 @@ export class FormulaBarModel {
 
   beginEdit(): void {
     this.#isEditing = true;
+    this.#clearEditorTooling();
     this.#updateReferenceHighlights();
     this.#updateHoverFromCursor();
   }
@@ -109,6 +125,7 @@ export class FormulaBarModel {
     this.#cursorStart = Math.max(0, Math.min(cursorStart, draft.length));
     this.#cursorEnd = Math.max(0, Math.min(cursorEnd, draft.length));
     this.#rangeInsertion = null;
+    this.#clearEditorTooling();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#updateReferenceHighlights();
@@ -119,6 +136,7 @@ export class FormulaBarModel {
     this.#isEditing = false;
     this.#activeCell = { ...this.#activeCell, input: this.#draft };
     this.#rangeInsertion = null;
+    this.#clearEditorTooling();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
@@ -135,6 +153,7 @@ export class FormulaBarModel {
     this.#cursorStart = this.#draft.length;
     this.#cursorEnd = this.#draft.length;
     this.#rangeInsertion = null;
+    this.#clearEditorTooling();
     this.#aiSuggestion = null;
     this.#aiSuggestionPreview = null;
     this.#hoveredReference = null;
@@ -145,15 +164,64 @@ export class FormulaBarModel {
   }
 
   highlightedSpans(): HighlightSpan[] {
+    if (this.#engineToolingFormula === this.#draft && this.#engineHighlightSpans) {
+      return this.#engineHighlightSpans;
+    }
     return highlightFormula(this.#draft);
   }
 
   functionHint(): FunctionHint | null {
+    if (this.#engineToolingFormula === this.#draft && this.#engineFunctionContext) {
+      const ctx = this.#engineFunctionContext;
+      const signature = getFunctionSignature(ctx.name);
+      if (!signature) return null;
+
+      const argSeparator = inferArgSeparator(this.#engineToolingLocaleId);
+      return {
+        context: { name: ctx.name, argIndex: ctx.argIndex },
+        signature,
+        parts: signatureParts(signature, ctx.argIndex, { argSeparator }),
+      };
+    }
+
     return getFunctionHint(this.#draft, this.#cursorStart);
   }
 
   errorExplanation(): ErrorExplanation | null {
     return explainFormulaError(this.#activeCell.value);
+  }
+
+  syntaxError(): FormulaParseError | null {
+    if (this.#engineToolingFormula !== this.#draft) return null;
+    return this.#engineSyntaxError;
+  }
+
+  /**
+   * Apply editor tooling results from the WASM engine (`lexFormulaPartial` + `parseFormulaPartial`).
+   *
+   * The caller (FormulaBarView) is responsible for debouncing and stale response filtering.
+   */
+  applyEngineToolingResult(args: {
+    formula: string;
+    localeId: string;
+    lexResult: FormulaPartialLexResult;
+    parseResult: FormulaPartialParseResult;
+  }): void {
+    // Only accept tooling results that match the current draft.
+    if (args.formula !== this.#draft) return;
+
+    this.#engineToolingFormula = args.formula;
+    this.#engineToolingLocaleId = args.localeId || "en-US";
+    this.#engineFunctionContext = args.parseResult.context.function;
+
+    const error = args.parseResult.error ?? args.lexResult.error;
+    this.#engineSyntaxError = error;
+
+    const referenceTokens = tokenizeFormula(args.formula).filter((t) => t.type === "reference");
+    const engineSpans = highlightFromEngineTokens(args.formula, args.lexResult.tokens);
+    const withRefs = spliceReferenceSpans(args.formula, engineSpans, referenceTokens);
+    const withError = applyErrorSpan(args.formula, withRefs, error?.span ?? null);
+    this.#engineHighlightSpans = withError;
   }
 
   setHoveredReference(referenceText: string | null): void {
@@ -362,6 +430,13 @@ export class FormulaBarModel {
     this.#coloredReferences = colored;
     this.#activeReferenceIndex = activeIndex;
   }
+
+  #clearEditorTooling(): void {
+    this.#engineHighlightSpans = null;
+    this.#engineFunctionContext = null;
+    this.#engineSyntaxError = null;
+    this.#engineToolingFormula = null;
+  }
 }
 
 function formatRangeReference(range: RangeAddress, sheetId?: string): string {
@@ -373,4 +448,212 @@ function formatRangeReference(range: RangeAddress, sheetId?: string): string {
 function formatSheetPrefix(id: string): string {
   const name = formatSheetNameForA1(id);
   return name ? `${name}!` : "";
+}
+
+function inferArgSeparator(localeId: string): string {
+  const locale = localeId?.trim?.() || "en-US";
+  try {
+    // Excel typically uses `;` as the list/arg separator when the decimal separator is `,`.
+    // Infer this using Intl formatting rather than hardcoding locale tables.
+    const formatted = new Intl.NumberFormat(locale).format(1.1);
+    // E.g. "1.1", "1,1", "1٫1", ...
+    return formatted.includes(",") && !formatted.includes(".") ? "; " : ", ";
+  } catch {
+    return ", ";
+  }
+}
+
+function highlightFromEngineTokens(formula: string, tokens: EngineFormulaToken[]): HighlightSpan[] {
+  const filtered = tokens.filter((t) => t.kind !== "Eof");
+  filtered.sort((a, b) => a.span.start - b.span.start);
+
+  // Best-effort: treat an identifier immediately followed by "(" as a function name.
+  const functionIdentStarts = new Set<number>();
+  for (let i = 0; i < filtered.length; i += 1) {
+    const token = filtered[i]!;
+    if (token.kind !== "Ident" && token.kind !== "QuotedIdent") continue;
+    for (let j = i + 1; j < filtered.length; j += 1) {
+      const next = filtered[j]!;
+      if (next.kind === "Whitespace") continue;
+      if (next.kind === "LParen") functionIdentStarts.add(token.span.start);
+      break;
+    }
+  }
+
+  const spans: HighlightSpan[] = [];
+  let pos = 0;
+  for (const token of filtered) {
+    const start = Math.max(0, Math.min(token.span.start, formula.length));
+    const end = Math.max(0, Math.min(token.span.end, formula.length));
+    if (end < start) continue;
+
+    if (start > pos) {
+      spans.push({ kind: "unknown", start: pos, end: start, text: formula.slice(pos, start) });
+    }
+
+    if (end > start) {
+      spans.push({
+        kind: engineTokenKindToHighlightKind(token, functionIdentStarts.has(token.span.start)),
+        start,
+        end,
+        text: formula.slice(start, end),
+      });
+    }
+    pos = Math.max(pos, end);
+  }
+
+  if (pos < formula.length) {
+    spans.push({ kind: "unknown", start: pos, end: formula.length, text: formula.slice(pos) });
+  }
+
+  return spans;
+}
+
+function engineTokenKindToHighlightKind(token: EngineFormulaToken, isFunctionIdent: boolean): HighlightSpan["kind"] {
+  switch (token.kind) {
+    case "Whitespace":
+      return "whitespace";
+    case "Number":
+      return "number";
+    case "String":
+      return "string";
+    case "Boolean":
+      return "identifier";
+    case "Error":
+      return "error";
+    case "Cell":
+    case "R1C1Cell":
+    case "R1C1Row":
+    case "R1C1Col":
+      return "reference";
+    case "Ident":
+    case "QuotedIdent":
+      return isFunctionIdent ? "function" : "identifier";
+    case "Plus":
+    case "Minus":
+    case "Star":
+    case "Slash":
+    case "Caret":
+    case "Amp":
+    case "Percent":
+    case "Hash":
+    case "Eq":
+    case "Ne":
+    case "Lt":
+    case "Gt":
+    case "Le":
+    case "Ge":
+    case "At":
+    case "Union":
+    case "Intersect":
+      return "operator";
+    case "LParen":
+    case "RParen":
+    case "LBrace":
+    case "RBrace":
+    case "LBracket":
+    case "RBracket":
+    case "Bang":
+    case "Colon":
+    case "Dot":
+    case "ArgSep":
+    case "ArrayRowSep":
+    case "ArrayColSep":
+      return "punctuation";
+    default:
+      return "unknown";
+  }
+}
+
+function spliceReferenceSpans(
+  formula: string,
+  spans: HighlightSpan[],
+  referenceTokens: Array<{ start: number; end: number }>
+): HighlightSpan[] {
+  if (referenceTokens.length === 0) return spans;
+
+  const refs = [...referenceTokens].sort((a, b) => a.start - b.start);
+  const out: HighlightSpan[] = [];
+  let pos = 0;
+
+  for (const ref of refs) {
+    const start = Math.max(0, Math.min(ref.start, formula.length));
+    const end = Math.max(0, Math.min(ref.end, formula.length));
+    if (end <= start) continue;
+    if (start > pos) {
+      out.push(...sliceSpans(formula, spans, pos, start));
+    }
+    out.push({ kind: "reference", start, end, text: formula.slice(start, end) });
+    pos = end;
+  }
+
+  if (pos < formula.length) {
+    out.push(...sliceSpans(formula, spans, pos, formula.length));
+  }
+
+  return mergeAdjacent(out);
+}
+
+function sliceSpans(formula: string, spans: HighlightSpan[], start: number, end: number): HighlightSpan[] {
+  const out: HighlightSpan[] = [];
+  for (const span of spans) {
+    if (span.end <= start) continue;
+    if (span.start >= end) break;
+    const s = Math.max(span.start, start);
+    const e = Math.min(span.end, end);
+    if (e <= s) continue;
+    out.push({ ...span, start: s, end: e, text: formula.slice(s, e) });
+  }
+  return out;
+}
+
+function mergeAdjacent(spans: HighlightSpan[]): HighlightSpan[] {
+  if (spans.length === 0) return spans;
+  const out: HighlightSpan[] = [spans[0]!];
+  for (let i = 1; i < spans.length; i += 1) {
+    const prev = out[out.length - 1]!;
+    const next = spans[i]!;
+    if (prev.end === next.start && prev.kind === next.kind && (prev.className ?? "") === (next.className ?? "")) {
+      prev.end = next.end;
+      prev.text += next.text;
+      continue;
+    }
+    out.push(next);
+  }
+  return out;
+}
+
+function applyErrorSpan(formula: string, spans: HighlightSpan[], errorSpan: FormulaSpan | null): HighlightSpan[] {
+  if (!errorSpan) return spans;
+  const start = Math.max(0, Math.min(errorSpan.start, formula.length));
+  const end = Math.max(0, Math.min(errorSpan.end, formula.length));
+  if (end <= start) return spans;
+
+  const out: HighlightSpan[] = [];
+  for (const span of spans) {
+    if (span.end <= start || span.start >= end) {
+      out.push(span);
+      continue;
+    }
+
+    if (span.start < start) {
+      out.push({ ...span, end: start, text: formula.slice(span.start, start) });
+    }
+
+    const overlapStart = Math.max(span.start, start);
+    const overlapEnd = Math.min(span.end, end);
+    out.push({
+      ...span,
+      start: overlapStart,
+      end: overlapEnd,
+      text: formula.slice(overlapStart, overlapEnd),
+      className: [span.className, "formula-bar-token--error"].filter(Boolean).join(" "),
+    });
+
+    if (span.end > end) {
+      out.push({ ...span, start: end, text: formula.slice(end, span.end) });
+    }
+  }
+
+  return mergeAdjacent(out);
 }

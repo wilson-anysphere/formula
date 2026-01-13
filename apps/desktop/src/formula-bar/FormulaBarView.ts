@@ -8,6 +8,7 @@ import {
   toggleA1AbsoluteAtCursor,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
+import type { EngineClient, FormulaParseOptions } from "@formula/engine";
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
@@ -120,6 +121,21 @@ export interface FormulaBarCommit {
   shift: boolean;
 }
 
+export type FormulaBarViewToolingOptions = {
+  /**
+   * Returns the current WASM engine instance (may be null while the worker/WASM is still loading).
+   *
+   * When present, the formula bar will use `lexFormulaPartial` / `parseFormulaPartial` for syntax
+   * highlighting, function parameter hints, and syntax error spans.
+   */
+  getWasmEngine?: () => EngineClient | null;
+  /**
+   * Formula locale id (e.g. "en-US", "de-DE"). Defaults to `document.documentElement.lang` and then "en-US".
+   */
+  getLocaleId?: () => string;
+  referenceStyle?: NonNullable<FormulaParseOptions["referenceStyle"]>;
+};
+
 export class FormulaBarView {
   readonly model = new FormulaBarModel();
 
@@ -156,6 +172,19 @@ export class FormulaBarView {
   #selectedReferenceIndex: number | null = null;
   #mouseDownSelectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
+  #tooling: FormulaBarViewToolingOptions | null = null;
+  #toolingRequestId = 0;
+  #toolingScheduled:
+    | { id: number; kind: "raf" }
+    | { id: ReturnType<typeof setTimeout>; kind: "timeout" }
+    | null = null;
+  #toolingPending: {
+    requestId: number;
+    draft: string;
+    cursor: number;
+    localeId: string;
+    referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
+  } | null = null;
 
   #functionPickerEl: HTMLDivElement;
   #functionPickerInputEl: HTMLInputElement;
@@ -167,9 +196,10 @@ export class FormulaBarView {
   #functionPickerAnchorSelection: { start: number; end: number } | null = null;
   #functionPickerDocMouseDown = (e: MouseEvent) => this.#onFunctionPickerDocMouseDown(e);
 
-  constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks) {
+  constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks, tooling?: FormulaBarViewToolingOptions) {
     this.root = root;
     this.#callbacks = callbacks;
+    this.#tooling = tooling ?? null;
 
     root.classList.add("formula-bar");
 
@@ -524,6 +554,7 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   updateRangeSelection(range: RangeAddress, sheetId?: string): void {
@@ -532,6 +563,7 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: false });
     this.#setTextareaSelectionFromModel();
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   endRangeSelection(): void {
@@ -549,6 +581,7 @@ export class FormulaBarView {
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   #onInputOrSelection(): void {
@@ -568,6 +601,7 @@ export class FormulaBarView {
     this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(start, end);
     this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   #onTextareaMouseDown(): void {
@@ -615,6 +649,7 @@ export class FormulaBarView {
 
     this.#requestRender({ preserveTextareaValue: true });
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   #requestRender(opts: { preserveTextareaValue: boolean }): void {
@@ -665,6 +700,76 @@ export class FormulaBarView {
     this.#pendingRender = null;
   }
 
+  #scheduleEngineTooling(): void {
+    // Only run editor-tooling calls while editing; the formula bar view mode already
+    // uses stable highlights and we want to avoid late async updates after commit/cancel.
+    if (!this.model.isEditing) return;
+
+    const engine = this.#tooling?.getWasmEngine?.() ?? null;
+    if (!engine) return;
+
+    const localeId =
+      this.#tooling?.getLocaleId?.() ??
+      (typeof document !== "undefined" ? document.documentElement?.lang : "") ??
+      "en-US";
+    const referenceStyle = this.#tooling?.referenceStyle ?? "A1";
+
+    const cursor = this.model.cursorStart;
+    const draft = this.model.draft;
+    const requestId = ++this.#toolingRequestId;
+
+    this.#toolingPending = { requestId, draft, cursor, localeId: localeId || "en-US", referenceStyle };
+
+    // Coalesce multiple rapid edits/selection changes into one tooling request per frame.
+    if (this.#toolingScheduled) return;
+
+    const flush = (): void => {
+      this.#toolingScheduled = null;
+      const pending = this.#toolingPending;
+      this.#toolingPending = null;
+      if (!pending) return;
+      void this.#runEngineTooling(pending);
+    };
+
+    if (typeof requestAnimationFrame === "function") {
+      const id = requestAnimationFrame(() => flush());
+      this.#toolingScheduled = { id, kind: "raf" };
+    } else {
+      const id = setTimeout(() => flush(), 0);
+      this.#toolingScheduled = { id, kind: "timeout" };
+    }
+  }
+
+  async #runEngineTooling(pending: {
+    requestId: number;
+    draft: string;
+    cursor: number;
+    localeId: string;
+    referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
+  }): Promise<void> {
+    const engine = this.#tooling?.getWasmEngine?.() ?? null;
+    if (!engine) return;
+
+    try {
+      const options: FormulaParseOptions = { localeId: pending.localeId, referenceStyle: pending.referenceStyle };
+      const [lexResult, parseResult] = await Promise.all([
+        engine.lexFormulaPartial(pending.draft, options),
+        engine.parseFormulaPartial(pending.draft, pending.cursor, options),
+      ]);
+
+      // Ignore stale/out-of-order results.
+      if (pending.requestId !== this.#toolingRequestId) return;
+      if (!this.model.isEditing) return;
+      if (this.model.draft !== pending.draft) return;
+
+      this.model.applyEngineToolingResult({ formula: pending.draft, localeId: pending.localeId, lexResult, parseResult });
+      this.#requestRender({ preserveTextareaValue: true });
+    } catch {
+      // Best-effort: if the engine worker is unavailable/uninitialized, keep the local
+      // tokenizer/highlighter without surfacing errors to the user.
+    }
+  }
+
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
 
@@ -696,6 +801,7 @@ export class FormulaBarView {
       this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
+      this.#scheduleEngineTooling();
       return;
     }
 
@@ -712,6 +818,7 @@ export class FormulaBarView {
           this.#render({ preserveTextareaValue: false });
           this.#setTextareaSelectionFromModel();
           this.#emitOverlays();
+          this.#scheduleEngineTooling();
           return;
         }
       }
@@ -780,6 +887,7 @@ export class FormulaBarView {
       this.#selectedReferenceIndex = null;
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
+      this.#scheduleEngineTooling();
     }
 
     this.#openFunctionPicker();
@@ -839,6 +947,7 @@ export class FormulaBarView {
       this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(anchor.start, anchor.end);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
+      this.#scheduleEngineTooling();
     }
   }
 
@@ -952,6 +1061,7 @@ export class FormulaBarView {
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: true });
     this.#emitOverlays();
+    this.#scheduleEngineTooling();
   }
 
   #renderFunctionPickerResults(): void {
@@ -1065,27 +1175,53 @@ export class FormulaBarView {
 
     const isFormulaEditing = this.model.isEditing && this.model.draft.trim().startsWith("=");
     const referenceBySpanKey = new Map<string, { color: string; index: number; active: boolean }>();
+    const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
+    const activeReferenceIndex = isFormulaEditing ? this.model.activeReferenceIndex() : null;
     if (isFormulaEditing) {
-      const activeIndex = this.model.activeReferenceIndex();
-      for (const ref of this.model.coloredReferences()) {
+      for (const ref of coloredReferences) {
         referenceBySpanKey.set(`${ref.start}:${ref.end}`, {
           color: ref.color,
           index: ref.index,
-          active: activeIndex === ref.index
+          active: activeReferenceIndex === ref.index
         });
       }
     }
 
-    const renderSpan = (span: { kind: string; start: number; end: number }, text: string): string => {
+    const renderSpan = (
+      span: { kind: string; start: number; end: number; className?: string },
+      text: string
+    ): string => {
+      const extraClass = span.className?.trim?.() || "";
+      const classAttr = (base: string | null): string => {
+        const classes = [base, extraClass].filter(Boolean).join(" ").trim();
+        return classes ? ` class="${classes}"` : "";
+      };
+
       if (!isFormulaEditing) {
-        return `<span data-kind="${span.kind}">${escapeHtml(text)}</span>`;
+        return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
       }
-      const meta = referenceBySpanKey.get(`${span.start}:${span.end}`);
+
+      let meta = referenceBySpanKey.get(`${span.start}:${span.end}`) ?? null;
+      if (!meta && span.kind === "reference") {
+        // Engine-backed syntax error highlighting can split reference spans; preserve
+        // reference colors by falling back to a containment lookup.
+        const containing = coloredReferences.find((ref) => ref.start <= span.start && span.end <= ref.end) ?? null;
+        if (containing) {
+          meta = {
+            color: containing.color,
+            index: containing.index,
+            active: activeReferenceIndex === containing.index,
+          };
+        }
+      }
+
       if (!meta) {
-        return `<span data-kind="${span.kind}">${escapeHtml(text)}</span>`;
+        return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
       }
+
       const activeClass = meta.active ? " formula-bar-reference--active" : "";
-      return `<span data-kind="${span.kind}" data-ref-index="${meta.index}" class="formula-bar-reference${activeClass}" style="color: ${meta.color};">${escapeHtml(
+      const baseClass = `formula-bar-reference${activeClass}`;
+      return `<span data-kind="${span.kind}" data-ref-index="${meta.index}"${classAttr(baseClass)} style="color: ${meta.color};">${escapeHtml(
         text
       )}</span>`;
     };
@@ -1138,9 +1274,16 @@ export class FormulaBarView {
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
     this.root.classList.toggle("formula-bar--editing", this.model.isEditing);
 
-    const hint = this.model.functionHint();
+    const syntaxError = this.model.syntaxError();
+    this.#hintEl.classList.toggle("formula-bar-hint--syntax-error", Boolean(syntaxError));
+    const hint = syntaxError ? null : this.model.functionHint();
     this.#hintEl.replaceChildren();
-    if (hint) {
+    if (syntaxError) {
+      const message = document.createElement("div");
+      message.className = "formula-bar-hint-error";
+      message.textContent = syntaxError.message;
+      this.#hintEl.appendChild(message);
+    } else if (hint) {
       const panel = document.createElement("div");
       panel.className = "formula-bar-hint-panel";
 

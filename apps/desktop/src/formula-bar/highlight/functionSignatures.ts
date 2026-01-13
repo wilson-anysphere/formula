@@ -338,10 +338,15 @@ export function getFunctionSignature(name: string): FunctionSignature | null {
 
 export type SignaturePart = { text: string; kind: "name" | "param" | "paramActive" | "punct" };
 
-export function signatureParts(sig: FunctionSignature, activeParamIndex: number | null): SignaturePart[] {
+export function signatureParts(
+  sig: FunctionSignature,
+  activeParamIndex: number | null,
+  opts?: { argSeparator?: string }
+): SignaturePart[] {
+  const argSeparator = opts?.argSeparator ?? ", ";
   const parts: SignaturePart[] = [{ text: `${sig.name}(`, kind: "name" }];
   sig.params.forEach((param, index) => {
-    if (index > 0) parts.push({ text: ", ", kind: "punct" });
+    if (index > 0) parts.push({ text: argSeparator, kind: "punct" });
     const isActive = activeParamIndex !== null && activeParamIndex === index;
     parts.push({
       text: param.optional ? `[${param.name}]` : param.name,

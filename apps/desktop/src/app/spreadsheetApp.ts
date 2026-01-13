@@ -1869,7 +1869,9 @@ export class SpreadsheetApp {
     }
 
     if (opts.formulaBar) {
-      this.formulaBar = new FormulaBarView(opts.formulaBar, {
+      this.formulaBar = new FormulaBarView(
+        opts.formulaBar,
+        {
         onBeginEdit: () => {
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
@@ -1920,7 +1922,15 @@ export class SpreadsheetApp {
             }
           }
         }
-      });
+        },
+        {
+          getWasmEngine: () => this.wasmEngine,
+          // SpreadsheetApp does not currently expose an explicit "engine locale" getter.
+          // Use the document language (set by the i18n layer) as a best-effort proxy.
+          getLocaleId: () => (typeof document !== "undefined" ? document.documentElement?.lang : "") || "en-US",
+          referenceStyle: "A1",
+        }
+      );
 
       // Allow formula-bar range highlighting to resolve named ranges (e.g. `=SUM(SalesData)`)
       // into concrete sheet/range coordinates.

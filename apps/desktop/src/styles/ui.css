@@ -285,6 +285,15 @@
   font-weight: 600;
 }
 
+.formula-bar-highlight span.formula-bar-token--error {
+  background: var(--error-bg);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--error);
+  border-radius: 2px;
+}
+
 .formula-bar-highlight .formula-bar-preview {
   color: var(--text-secondary);
   opacity: 0.8;
@@ -372,6 +381,10 @@
   color: var(--text-secondary);
   line-height: 16px;
   min-height: 16px;
+}
+
+.formula-bar-hint.formula-bar-hint--syntax-error {
+  color: var(--error);
 }
 
 .formula-bar-hint-panel {
