@@ -233,7 +233,11 @@ export class IndexedDBBinaryStorage {
     if (!db) return;
     try {
       // Store a tight ArrayBuffer slice to avoid persisting unrelated bytes when `data` is a view.
-      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+      // Avoid copying when the view already spans the full buffer (common for sql.js exports).
+      const buffer =
+        data.byteOffset === 0 && data.byteLength === data.buffer.byteLength
+          ? data.buffer
+          : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
       await idbWrite(db, this.storeName, (store) => store.put(buffer, this.key));
     } catch {
       // Best-effort persistence. If IndexedDB writes fail (quota / permissions),
@@ -434,8 +438,11 @@ function idbWrite(db, storeName, fn) {
  * @returns {Promise<Uint8Array>}
  */
 async function normalizeBinary(value) {
-  if (value instanceof Uint8Array) return new Uint8Array(value);
-  if (value instanceof ArrayBuffer) return new Uint8Array(value.slice(0));
+  // Avoid extra copies: IndexedDB already returns structured-cloned values, so returning
+  // a view into the returned buffer is safe and significantly reduces memory churn for
+  // large sqlite exports.
+  if (value instanceof Uint8Array) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (value && typeof value === "object" && value.buffer instanceof ArrayBuffer) {
     // Structured clone can yield `{ buffer, byteOffset, byteLength }` shapes for typed arrays.
     const offset = typeof value.byteOffset === "number" ? value.byteOffset : 0;
@@ -445,8 +452,7 @@ async function normalizeBinary(value) {
         : typeof value.length === "number"
           ? value.length
           : value.buffer.byteLength;
-    const view = new Uint8Array(value.buffer, offset, length);
-    return new Uint8Array(view);
+    return new Uint8Array(value.buffer, offset, length);
   }
   if (typeof Blob !== "undefined" && value instanceof Blob) {
     const buffer = await value.arrayBuffer();
