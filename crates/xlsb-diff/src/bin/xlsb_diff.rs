@@ -4,7 +4,9 @@ use anyhow::Result;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(about = "Diff two XLSB workbooks at the Open Packaging Convention part level.")]
+#[command(
+    about = "Deprecated: use `xlsx-diff` (supports .xlsx/.xlsm/.xlsb) to diff workbooks at the OPC part level."
+)]
 struct Args {
     /// Original workbook.
     original: PathBuf,
@@ -20,6 +22,8 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
     let threshold = parse_severity(&args.fail_on)?;
+
+    eprintln!("warning: `xlsb-diff` is deprecated; use `xlsx-diff` (it supports .xlsb)");
 
     let report = xlsb_diff::diff_workbooks(&args.original, &args.modified)?;
 
@@ -60,4 +64,3 @@ fn parse_severity(input: &str) -> Result<xlsb_diff::Severity> {
         _ => anyhow::bail!("unknown severity '{input}' (expected: critical|warning|info)"),
     }
 }
-

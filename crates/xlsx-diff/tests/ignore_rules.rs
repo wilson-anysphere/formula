@@ -362,6 +362,24 @@ fn zip_entry_names_are_normalized_for_diffing() {
 }
 
 #[test]
+fn zip_entry_names_with_leading_slash_are_normalized_for_diffing() {
+    let payload = b"workbook-bytes";
+    let expected_zip = zip_bytes(&[("xl/workbook.bin", payload)]);
+    let actual_zip = zip_bytes(&[("/xl/workbook.bin", payload)]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    assert_eq!(actual.get("xl/workbook.bin"), Some(payload.as_slice()));
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        report.is_empty(),
+        "expected no diffs when entry names only differ by leading '/'; got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn workbook_archive_errors_on_duplicate_parts_after_normalization() {
     let zip = zip_bytes(&[
         ("xl/calcChain.xml", br#"<calcChain/>"#),

@@ -107,9 +107,11 @@ bash scripts/cargo_agent.sh build --release -p formula-xlsx
 bash scripts/cargo_agent.sh test -p formula-xlsx
 bash scripts/cargo_agent.sh test -p formula-xlsb
 
-# Run xlsx-diff tool
+# Run the OPC-level diff tool (supports .xlsx/.xlsm/.xlsb)
 bash scripts/cargo_agent.sh run -p xlsx-diff -- file1.xlsx file2.xlsx
 ```
+
+Note: `xlsb-diff` is a deprecated compatibility wrapper. Prefer `xlsx-diff` for both `.xlsx` and `.xlsb`.
 
 ---
 
@@ -135,7 +137,7 @@ tools/corpus/            # Real-world file corpus tools
 ### Round-Trip Testing
 
 ```bash
-# Use xlsx-diff to compare files
+# Use xlsx-diff to compare files (.xlsx/.xlsm/.xlsb)
 bash scripts/cargo_agent.sh run -p xlsx-diff -- original.xlsx roundtripped.xlsx
 
 # Run corpus tests
