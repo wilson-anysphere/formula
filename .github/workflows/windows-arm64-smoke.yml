@@ -90,30 +90,63 @@ jobs:
           $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
           $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
           $arm64Cl = Join-Path $arm64BinDir "cl.exe"
-          if ((Test-Path $arm64LibDir) -and (Test-Path $arm64Cl)) {
-            Write-Host "MSVC ARM64 tools already present:"
-            Write-Host "  - libs: $arm64LibDir"
-            Write-Host "  - cl.exe: $arm64Cl"
-            exit 0
+          $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
+          $hasArm64Toolchain = (Test-Path $arm64LibDir) -and (Test-Path $arm64Cl) -and (Test-Path $arm64LinkExe)
+
+          if (-not $hasArm64Toolchain) {
+            Write-Host "MSVC ARM64 toolchain not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+            $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+            if (!(Test-Path $vsInstaller)) {
+              throw "Visual Studio installer not found at $vsInstaller"
+            }
+            & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
+            $exitCode = $LASTEXITCODE
+            # 3010 is a common "success, reboot required" code for Windows installers.
+            if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+              throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+            }
+
+            $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+            $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
+            $arm64Cl = Join-Path $arm64BinDir "cl.exe"
+            $arm64LinkExe = Join-Path $arm64BinDir "link.exe"
           }
-          Write-Host "MSVC ARM64 toolchain not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          if (!(Test-Path $vsInstaller)) {
-            throw "Visual Studio installer not found at $vsInstaller"
+
+          if (!(Test-Path $arm64LibDir) -or !(Test-Path $arm64Cl) -or !(Test-Path $arm64LinkExe)) {
+            throw "MSVC ARM64 build tools were not found. Expected:\n  - $arm64LibDir\n  - $arm64Cl\n  - $arm64LinkExe\nGitHub-hosted runners may not include the required MSVC ARM64 workload; use a self-hosted runner with ARM64 build tools preinstalled."
           }
-          & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
-          $exitCode = $LASTEXITCODE
-          # 3010 is a common "success, reboot required" code for Windows installers.
-          if ($exitCode -ne 0 -and $exitCode -ne 3010) {
-            throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+
+          Write-Host "MSVC ARM64 tools present:"
+          Write-Host "  - libs: $arm64LibDir"
+          Write-Host "  - cl.exe: $arm64Cl"
+          Write-Host "  - link.exe: $arm64LinkExe"
+
+          $sdkLibRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Lib"
+          if (!(Test-Path $sdkLibRoot)) {
+            throw "Windows SDK lib root not found at $sdkLibRoot. Windows ARM64 builds require the Windows 10/11 SDK with ARM64 libraries."
           }
-          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
-          $arm64BinDir = Join-Path $msvcVersionDir.FullName "bin\Hostx64\arm64"
-          $arm64Cl = Join-Path $arm64BinDir "cl.exe"
-          if (!(Test-Path $arm64LibDir) -or !(Test-Path $arm64Cl)) {
-            throw "MSVC ARM64 build tools were not found after installation. Expected:\n  - $arm64LibDir\n  - $arm64Cl\nGitHub-hosted runners may not include the required MSVC ARM64 workload; use a self-hosted runner with ARM64 build tools preinstalled."
+
+          $sdkVersionDir = Get-ChildItem -Path $sdkLibRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$sdkVersionDir) {
+            throw "No Windows SDK lib versions found under $sdkLibRoot. Windows ARM64 builds require a Windows SDK installation with ARM64 libraries."
           }
+
+          $sdkUmArm64 = Join-Path $sdkVersionDir.FullName "um\arm64"
+          $sdkUcrtArm64 = Join-Path $sdkVersionDir.FullName "ucrt\arm64"
+          if (!(Test-Path $sdkUmArm64)) {
+            throw "Windows SDK ARM64 UM libraries not found at $sdkUmArm64. The runner image may be missing the Windows SDK ARM64 components."
+          }
+          if (!(Test-Path $sdkUcrtArm64)) {
+            throw "Windows SDK ARM64 UCRT libraries not found at $sdkUcrtArm64. The runner image may be missing the Windows SDK ARM64 components."
+          }
+
+          Write-Host "windows-arm64-toolchain: OK"
+          Write-Host " - MSVC: $($msvcVersionDir.FullName)"
+          Write-Host " - link.exe: $arm64LinkExe"
+          Write-Host " - MSVC lib: $arm64LibDir"
+          Write-Host " - SDK um/arm64: $sdkUmArm64"
+          Write-Host " - SDK ucrt/arm64: $sdkUcrtArm64"
 
       - name: Install WiX Toolset (required for MSI builds)
         shell: pwsh
