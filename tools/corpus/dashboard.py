@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import statistics
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -54,6 +56,81 @@ def _load_reports(reports_dir: Path) -> list[dict[str, Any]]:
     return reports
 
 
+def _percentile(sorted_values: list[float], p: float) -> float:
+    """Return the `p` percentile for pre-sorted values.
+
+    Uses linear interpolation between points (matches common spreadsheet percentile behavior and
+    produces stable results for small sample sizes).
+    """
+
+    if not sorted_values:
+        raise ValueError("cannot compute percentile of empty data")
+    if p <= 0.0:
+        return sorted_values[0]
+    if p >= 1.0:
+        return sorted_values[-1]
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+
+    # Linear interpolation between the surrounding ranks.
+    idx = p * (len(sorted_values) - 1)
+    lo = int(math.floor(idx))
+    hi = int(math.ceil(idx))
+    if lo == hi:
+        return sorted_values[lo]
+    frac = idx - lo
+    return (sorted_values[lo] * (1.0 - frac)) + (sorted_values[hi] * frac)
+
+
+def _round_trip_size_overhead(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    ratios: list[float] = []
+    for r in reports:
+        input_size = r.get("size_bytes")
+        if not isinstance(input_size, int) or input_size <= 0:
+            continue
+
+        steps = r.get("steps") or {}
+        if not isinstance(steps, dict):
+            continue
+        rt_step = steps.get("round_trip") or {}
+        if not isinstance(rt_step, dict):
+            continue
+        if rt_step.get("status") != "ok":
+            continue
+
+        details = rt_step.get("details") or {}
+        if not isinstance(details, dict):
+            continue
+        output_size = details.get("output_size_bytes")
+        if not isinstance(output_size, int):
+            continue
+
+        ratios.append(output_size / input_size)
+
+    ratios.sort()
+    count = len(ratios)
+    if count == 0:
+        return {
+            "count": 0,
+            "mean": None,
+            "p50": None,
+            "p90": None,
+            "max": None,
+            "count_over_1_05": 0,
+            "count_over_1_10": 0,
+        }
+
+    return {
+        "count": count,
+        "mean": statistics.fmean(ratios),
+        "p50": _percentile(ratios, 0.50),
+        "p90": _percentile(ratios, 0.90),
+        "max": ratios[-1],
+        "count_over_1_05": sum(1 for r in ratios if r > 1.05),
+        "count_over_1_10": sum(1 for r in ratios if r > 1.10),
+    }
+
+
 def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) -> str:
     counts = summary["counts"]
     rates = summary["rates"]
@@ -94,6 +171,31 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         lines.append(
             f"- Diff totals (critical/warn/info): **{diff_totals.get('critical', 0)} / {diff_totals.get('warning', 0)} / {diff_totals.get('info', 0)}**"
         )
+    lines.append("")
+
+    overhead = summary.get("round_trip_size_overhead") or {}
+    lines.append("## Round-trip size overhead")
+    lines.append("")
+    if isinstance(overhead, dict) and overhead.get("count", 0):
+        lines.append(f"- Workbooks with size data: **{overhead.get('count', 0)}**")
+        mean = overhead.get("mean")
+        p50 = overhead.get("p50")
+        p90 = overhead.get("p90")
+        max_ratio = overhead.get("max")
+        if all(isinstance(v, (int, float)) for v in (mean, p50, p90, max_ratio)):
+            lines.append(
+                "- Size ratio (output/input): "
+                f"mean **{float(mean):.3f}**, "
+                f"p50 **{float(p50):.3f}**, "
+                f"p90 **{float(p90):.3f}**, "
+                f"max **{float(max_ratio):.3f}**"
+            )
+        lines.append(
+            "- Exceeding ratio thresholds (>1.05 / >1.10): "
+            f"**{overhead.get('count_over_1_05', 0)} / {overhead.get('count_over_1_10', 0)}**"
+        )
+    else:
+        lines.append("_No successful round-trip size metrics found._")
     lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
@@ -310,6 +412,7 @@ def main() -> int:
             "render": (render_ok / render_attempted) if render_attempted else None,
             "round_trip": _rate(rt_ok, total),
         },
+        "round_trip_size_overhead": _round_trip_size_overhead(reports),
         "failures_by_category": dict(failures_by_category),
         "diff_totals": dict(diff_totals),
         "top_functions_in_failures": [
