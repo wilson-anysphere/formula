@@ -195,6 +195,8 @@ export function chunkToText(chunk, opts) {
           values.push(formatScalar(cell.v));
         }
       }
+      const extra = formatExtraColumns(fullColCount, rowColCount);
+      if (extra) values.push(extra);
       const compact = values.filter((v) => v !== "").join(" | ");
       if (compact) preRows.push(compact);
     }

@@ -43,6 +43,25 @@ test("chunkToText detects header rows below a title row and preserves the title 
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText includes column truncation indicator in PRE-HEADER ROWS when table is wide", () => {
+  const colCount = 25;
+  const titleRow = [{ v: "Revenue Summary" }, ...Array.from({ length: colCount - 1 }, () => ({}))];
+  const headerRow = Array.from({ length: colCount }, (_, i) => ({ v: `H${i + 1}` }));
+  const dataRow = Array.from({ length: colCount }, (_, i) => ({ v: `V${i + 1}` }));
+
+  const chunk = {
+    kind: "dataRegion",
+    title: "Wide region",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 2, c1: colCount - 1 },
+    cells: [titleRow, headerRow, dataRow],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1, maxColumnsForRows: 5, maxColumnsForSchema: 5 });
+  assert.match(text, /PRE-HEADER ROWS:/);
+  assert.match(text, /… \(\+20 more columns\)/);
+});
+
 test("chunkToText uses the widest sampled row when computing column counts (jagged samples)", () => {
   const chunk = {
     kind: "dataRegion",
