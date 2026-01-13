@@ -61,10 +61,10 @@ export async function indexWorkbook(params) {
   const onProgress = typeof params.onProgress === "function" ? params.onProgress : undefined;
   const embedBatchSize = (() => {
     const raw = params.embedBatchSize;
-    if (typeof raw !== "number" || raw <= 0) return Infinity;
-    if (Number.isFinite(raw)) return Math.max(1, Math.floor(raw));
-    // Allow Infinity to preserve current behavior.
-    return raw;
+    // Default (and any invalid values) preserve current behavior: one embed call for all texts.
+    if (raw === Infinity) return Infinity;
+    if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return Infinity;
+    return Math.max(1, Math.floor(raw));
   })();
   throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;

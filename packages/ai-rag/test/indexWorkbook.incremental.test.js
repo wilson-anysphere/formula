@@ -525,6 +525,30 @@ test("indexWorkbook batches embedding requests (embedBatchSize=1)", async () => 
   assert.equal(stored.length, 2);
 });
 
+test("indexWorkbook treats non-finite embedBatchSize as Infinity (single embed call)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+
+  let embedCalls = 0;
+  const embedder = {
+    async embedTexts(texts) {
+      embedCalls += 1;
+      return texts.map(() => new Float32Array(128));
+    },
+  };
+
+  const result = await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder,
+    embedBatchSize: Number.NaN,
+  });
+
+  assert.equal(result.totalChunks, 2);
+  assert.equal(result.upserted, 2);
+  assert.equal(embedCalls, 1);
+});
+
 test("indexWorkbook rejects when embedder returns the wrong number of vectors (no partial writes)", async () => {
   const workbook = makeWorkbookTwoTables();
   const store = new InMemoryVectorStore({ dimension: 128 });
