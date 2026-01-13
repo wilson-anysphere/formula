@@ -9,8 +9,8 @@ async function getActiveCell(page: import("@playwright/test").Page): Promise<{ r
 async function dispatchF6(page: import("@playwright/test").Page, opts: { shiftKey?: boolean } = {}): Promise<void> {
   // Browsers can reserve F6 for built-in chrome focus cycling (address bar/toolbars),
   // which can prevent Playwright's `keyboard.press("F6")` from reaching the app.
-  // Dispatching a synthetic `keydown` exercises our in-app focus cycling handler
-  // deterministically.
+  // Dispatching a synthetic `keydown` exercises our in-app keybinding pipeline
+  // (KeybindingService -> CommandRegistry -> focus cycle) deterministically.
   await page.evaluate(({ shiftKey }) => {
     const target = (document.activeElement as HTMLElement | null) ?? document.getElementById("grid") ?? window;
     target.dispatchEvent(

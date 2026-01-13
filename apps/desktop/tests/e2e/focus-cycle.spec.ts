@@ -31,7 +31,7 @@ test.describe("focus cycling (Excel-style F6)", () => {
       .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
       .toBe("grid");
 
-    // Forward cycle (matches apps/desktop/src/main.ts):
+    // Forward cycle (matches apps/desktop/src/commands/workbenchFocusCycle.ts):
     // ribbon -> formula bar -> grid -> sheet tabs -> status bar -> ribbon
     //
     // Starting from the grid, that means: sheet tabs -> status bar -> ribbon -> formula bar -> grid.
