@@ -20,6 +20,7 @@ import {
   type DlpOptions,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
+  type SpreadsheetApiLike,
   type WorkbookRagVectorStore,
   type WorkbookRagWorkbook,
 } from "./index.js";
@@ -39,6 +40,7 @@ type _WorkbookRetrievedShape = Assert<
 >;
 
 type _DlpOptionsNotAny = Assert<IsAny<DlpOptions> extends false ? true : false>;
+type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
 type _WorkbookNotAny = Assert<IsAny<WorkbookRagWorkbook> extends false ? true : false>;
 
@@ -67,6 +69,15 @@ await cm.buildWorkbookContext({
   workbook: { id: "wb-1", sheets: [] },
   query: "hi",
   skipIndexing: true,
+});
+
+// SpreadsheetApi wrapper types are checked too (cheap path).
+await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet: { listSheets: () => [] },
+  workbookId: "wb-1",
+  query: "hi",
+  skipIndexing: true,
+  skipIndexingWithDlp: true,
 });
 `;
 

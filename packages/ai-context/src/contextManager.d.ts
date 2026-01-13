@@ -56,6 +56,11 @@ export interface WorkbookRagSheet {
    * Optional alternative to `cells` (treated as `[row][col]`).
    */
   values?: unknown[][];
+  /**
+   * Optional random-access cell reader. When provided, workbook schema extraction can
+   * avoid materializing a dense matrix for very large sheets.
+   */
+  getCell?: (row: number, col: number) => unknown;
 }
 
 export interface WorkbookRagWorkbook {
@@ -64,6 +69,20 @@ export interface WorkbookRagWorkbook {
   tables?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
   namedRanges?: Array<{ name: string; sheetName: string; rect: WorkbookRagRect }>;
   [key: string]: unknown;
+}
+
+export interface SpreadsheetApiLike {
+  listSheets(): string[];
+  listNonEmptyCells?: (
+    sheet?: string,
+  ) => Array<{ address: { sheet: string; row: number; col: number }; cell: { value?: unknown; formula?: string } }>;
+  /**
+   * Optional sheet name resolver available on some SpreadsheetApi hosts (desktop).
+   * ContextManager forwards this through to DLP enforcement when callers do not
+   * provide an explicit resolver.
+   */
+  sheetNameResolver?: { getSheetIdByName(name: string): string | null | undefined };
+  sheet_name_resolver?: { getSheetIdByName(name: string): string | null | undefined };
 }
 
 export interface RetrievedSheetChunk {
@@ -208,7 +227,7 @@ export class ContextManager {
   }): Promise<BuildWorkbookContextResult>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
-    spreadsheet: unknown;
+    spreadsheet: SpreadsheetApiLike;
     workbookId: string;
     query: string;
     attachments?: Attachment[];
