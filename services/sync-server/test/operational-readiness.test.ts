@@ -14,7 +14,7 @@ function getMetricValue(body: string, name: string): number | null {
   // Allow default labels (e.g. `{service="sync-server"}`) while keeping the matcher simple.
   const match = body.match(
     new RegExp(
-      `^${name}(?:\\{[^}]*\\})?\\s+(-?\\\\d+(?:\\\\.\\\\d+)?(?:e[+-]?\\\\d+)?)$`,
+      `^${name}(?:\\{[^}]*\\})?\\s+(-?\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?)$`,
       "m"
     )
   );
