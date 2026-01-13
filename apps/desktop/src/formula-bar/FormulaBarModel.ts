@@ -403,23 +403,51 @@ export class FormulaBarModel {
   }
 
   #updateHoverFromCursor(): void {
-    if (this.#cursorStart !== this.#cursorEnd) {
+    const text = this.#draft;
+    if (!text) {
       this.#hoveredReference = null;
       this.#hoveredReferenceText = null;
       return;
     }
 
-    const cursor = this.#cursorStart;
-    const probe = cursor > 0 ? cursor - 1 : 0;
-    const token = tokenizeFormula(this.#draft).find((t) => t.start <= probe && probe < t.end);
-    if (!token || token.type !== "reference") {
-      this.#hoveredReference = null;
-      this.#hoveredReferenceText = null;
+    const tokens = tokenizeFormula(text);
+    const findReferenceTokenAt = (probe: number): string | null => {
+      if (!Number.isFinite(probe)) return null;
+      if (probe < 0 || probe >= text.length) return null;
+      const token = tokens.find((t) => t.start <= probe && probe < t.end);
+      if (!token || token.type !== "reference") return null;
+      return token.text;
+    };
+
+    // In edit mode, support both:
+    // - a collapsed caret inside a reference token
+    // - a selection that overlaps a reference token (Excel-style clicking selects the full token)
+    const selStart = Math.min(this.#cursorStart, this.#cursorEnd);
+    const selEnd = Math.max(this.#cursorStart, this.#cursorEnd);
+
+    const probes: number[] = [];
+    if (selStart === selEnd) {
+      const cursor = selStart;
+      // Probe the character immediately before the cursor so the end-of-token position counts as "inside".
+      if (cursor > 0) probes.push(cursor - 1);
+      // Also probe at the cursor so the start-of-token position counts as "inside".
+      probes.push(cursor);
+    } else {
+      // For non-collapsed selections, probe within the selected region.
+      probes.push(selEnd > 0 ? selEnd - 1 : selStart);
+      probes.push(selStart);
+    }
+
+    for (const probe of probes) {
+      const tokenText = findReferenceTokenAt(probe);
+      if (!tokenText) continue;
+      this.#hoveredReferenceText = tokenText;
+      this.#hoveredReference = parseSheetQualifiedA1Range(tokenText);
       return;
     }
 
-    this.#hoveredReferenceText = token.text;
-    this.#hoveredReference = parseSheetQualifiedA1Range(token.text);
+    this.#hoveredReference = null;
+    this.#hoveredReferenceText = null;
   }
 
   #updateReferenceHighlights(): void {

@@ -5195,49 +5195,81 @@ export class SpreadsheetApp {
     const sampleRows = Math.min(rowCount, FORMULA_RANGE_PREVIEW_SAMPLE_ROWS);
     const sampleCols = Math.min(colCount, FORMULA_RANGE_PREVIEW_SAMPLE_COLS);
 
+    // Materialize a small sample grid of *displayed* values (formatted numbers, etc).
+    const sampleValues = Array.from({ length: sampleRows }, () => Array<string>(sampleCols).fill(""));
+
     const table = document.createElement("table");
     table.className = "formula-range-preview-tooltip__grid";
     const tbody = document.createElement("tbody");
     table.appendChild(tbody);
 
     const coordScratch = { row: 0, col: 0 };
-    for (let r = 0; r < sampleRows; r += 1) {
-      const tr = document.createElement("tr");
-      for (let c = 0; c < sampleCols; c += 1) {
-        coordScratch.row = startRow + r;
-        coordScratch.col = startCol + c;
-        const td = document.createElement("td");
-        td.textContent = this.getCellDisplayValue(coordScratch);
-        tr.appendChild(td);
-      }
-      tbody.appendChild(tr);
-    }
-
-    tooltip.appendChild(table);
-
     const summary = document.createElement("div");
     summary.className = "formula-range-preview-tooltip__summary";
+
+    const formatDisplay = (computed: SpreadsheetValue): string => {
+      if (computed == null) return "";
+      return this.formatCellValueForDisplay(coordScratch, computed);
+    };
+
+    // Keep read cost bounded:
+    // - For large ranges, only read the small sample.
+    // - For small ranges (<= MAX_FORMULA_RANGE_PREVIEW_CELLS), enumerate each cell at most once,
+    //   collecting both sample display strings and numeric summary stats.
     if (tooLarge) {
+      for (let r = 0; r < sampleRows; r += 1) {
+        for (let c = 0; c < sampleCols; c += 1) {
+          coordScratch.row = startRow + r;
+          coordScratch.col = startCol + c;
+          const computed = this.getCellComputedValue(coordScratch);
+          sampleValues[r]![c] = formatDisplay(computed);
+        }
+      }
       summary.textContent = "(range too large)";
     } else {
       let sum = 0;
       let numericCount = 0;
       for (let row = startRow; row <= endRow; row += 1) {
+        const sampleRowIdx = row - startRow;
+        const inSampleRow = sampleRowIdx >= 0 && sampleRowIdx < sampleRows;
         for (let col = startCol; col <= endCol; col += 1) {
           coordScratch.row = row;
           coordScratch.col = col;
-          const n = coerceNumber(this.getCellComputedValue(coordScratch));
-          if (n == null) continue;
-          sum += n;
-          numericCount += 1;
+          const computed = this.getCellComputedValue(coordScratch);
+
+          if (inSampleRow) {
+            const sampleColIdx = col - startCol;
+            if (sampleColIdx >= 0 && sampleColIdx < sampleCols) {
+              sampleValues[sampleRowIdx]![sampleColIdx] = formatDisplay(computed);
+            }
+          }
+
+          // Match Excel/status-bar semantics: only treat actual numbers as numeric values.
+          if (typeof computed === "number" && Number.isFinite(computed)) {
+            sum += computed;
+            numericCount += 1;
+          }
         }
       }
+
       if (numericCount === 0) {
         summary.textContent = "No numeric values";
       } else {
         summary.textContent = `Sum: ${sum} · Count: ${numericCount}`;
       }
     }
+
+    for (let r = 0; r < sampleRows; r += 1) {
+      const tr = document.createElement("tr");
+      for (let c = 0; c < sampleCols; c += 1) {
+        const td = document.createElement("td");
+        td.textContent = sampleValues[r]![c] ?? "";
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+
+    tooltip.appendChild(table);
     tooltip.appendChild(summary);
 
     this.formulaRangePreviewTooltipVisible = true;
