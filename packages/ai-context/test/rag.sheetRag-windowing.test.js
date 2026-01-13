@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
 
-import { chunkSheetByRegions, RagIndex } from "../src/rag.js";
+import { chunkSheetByRegions, RagIndex, rangeToChunk } from "../src/rag.js";
 
 test(
   "chunkSheetByRegions: streams TSV for tall regions (avoids per-row slice allocations)",
@@ -72,3 +72,16 @@ test(
     assert.equal(results[0].range, "Sheet1!A91:A100");
   },
 );
+
+test("rangeToChunk: preserves ragged row TSV formatting (no trailing tabs)", () => {
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["a", "b", "c"],
+      ["d"],
+    ],
+  };
+
+  const chunk = rangeToChunk(sheet, { startRow: 0, startCol: 0, endRow: 1, endCol: 2 }, { maxRows: 10 });
+  assert.equal(chunk.text, "a\tb\tc\nd");
+});
