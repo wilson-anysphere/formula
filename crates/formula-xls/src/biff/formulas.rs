@@ -535,6 +535,15 @@ fn adjust_row_col(row0: u16, col_field: u16, delta_row: i64, delta_col: i64) -> 
     Some((new_row_u16, new_col_u16))
 }
 
+/// Materialize a BIFF8 `rgce` token stream from a base cell into the token stream that would
+/// appear in a target cell after applying shared-formula row/col deltas.
+///
+/// This adjusts `PtgRef`/`PtgArea` (and 3D variants) that use relative flags while preserving
+/// relative-offset tokens (`PtgRefN`/`PtgAreaN`) verbatim (those are resolved relative to the
+/// current formula cell at decode time).
+///
+/// Returns `None` when the token stream contains an unsupported or malformed token whose payload
+/// length cannot be determined.
 pub(crate) fn materialize_biff8_rgce(
     base: &[u8],
     base_row: u32,

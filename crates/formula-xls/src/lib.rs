@@ -4353,6 +4353,10 @@ fn import_biff8_shared_formulas(
             };
             let shared_rgce = &shared.rgce;
             let shared_rgcb = &shared.rgcb;
+
+            // SHRFMLA stores the shared `rgce` stream in the anchor cell's coordinate space.
+            // Materialize the token stream for the current cell by shifting any relative
+            // `PtgRef`/`PtgArea` (and 3D variants) by the (row,col) delta.
             let materialized = if row == anchor_row && col == anchor_col {
                 None
             } else {
@@ -4365,8 +4369,29 @@ fn import_biff8_shared_formulas(
                 )
             };
 
+            let rgce_bytes = match materialized.as_deref() {
+                Some(bytes) => bytes,
+                None => {
+                    // Best-effort: if we can't materialize the shared token stream (due to an
+                    // unsupported/malformed token), fall back to decoding the anchor token stream
+                    // as-is so the cell still has a recoverable formula.
+                    if row != anchor_row || col != anchor_col {
+                        push_import_warning(
+                            warnings,
+                            format!(
+                                "failed to import `.xls` shared formula in sheet `{}` at {}: unsupported or malformed shared rgce token stream",
+                                sheet.name,
+                                cell_ref.to_a1()
+                            ),
+                            suppressed,
+                        );
+                    }
+                    shared_rgce
+                }
+            };
+
             let decoded = biff::rgce::decode_biff8_rgce_with_base_and_rgcb(
-                materialized.as_deref().unwrap_or(shared_rgce),
+                rgce_bytes,
                 shared_rgcb,
                 &ctx,
                 Some(biff::rgce::CellCoord::new(row as u32, col as u32)),

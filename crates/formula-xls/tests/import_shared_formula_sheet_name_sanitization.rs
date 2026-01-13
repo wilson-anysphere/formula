@@ -39,6 +39,10 @@ fn rewrites_shared_formula_3d_refs_to_sanitized_sheet_names() {
         formula.contains("Bad_Name"),
         "expected formula to reference sanitized sheet name, got {formula:?}"
     );
+    assert_eq!(
+        formula,
+        "Bad_Name!A2",
+        "expected shared formula to be materialized for the target cell (row shift), got {formula:?}"
+    );
     assert_parseable_formula(formula);
 }
-
