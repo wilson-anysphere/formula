@@ -16,7 +16,16 @@ export type StartupMetrics = {
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-const perfHome = resolve(repoRoot, 'target', 'perf-home');
+function resolvePerfHome(): string {
+  const fromEnv = process.env.FORMULA_PERF_HOME;
+  if (fromEnv && fromEnv.trim() !== '') {
+    // `resolve(repoRoot, ...)` safely handles both absolute and relative paths.
+    return resolve(repoRoot, fromEnv);
+  }
+  return resolve(repoRoot, 'target', 'perf-home');
+}
+
+const perfHome = resolvePerfHome();
 const perfTmp = resolve(perfHome, 'tmp');
 const perfXdgConfig = resolve(perfHome, 'xdg-config');
 const perfXdgCache = resolve(perfHome, 'xdg-cache');

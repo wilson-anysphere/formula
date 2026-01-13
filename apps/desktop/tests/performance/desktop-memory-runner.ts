@@ -1,32 +1,49 @@
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-type StartupMetrics = {
-  windowVisibleMs: number;
-  webviewLoadedMs: number | null;
-  ttiMs: number;
-};
+import {
+  defaultDesktopBinPath,
+  parseStartupLine,
+  percentile,
+  shouldUseXvfb,
+  type StartupMetrics,
+} from "./desktopStartupRunnerShared.ts";
 
 type Summary = {
   runs: number;
-  rssMb: { p50: number; p95: number };
-  targetMb: number | null;
+  rssMb: { p50: number; p95: number; targetMb: number };
+  enforce: boolean;
 };
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
-const perfHome = resolve(repoRoot, "target", "perf-home");
+function resolvePerfHome(): string {
+  const fromEnv = process.env.FORMULA_PERF_HOME;
+  if (fromEnv && fromEnv.trim() !== "") {
+    return resolve(repoRoot, fromEnv);
+  }
+  return resolve(repoRoot, "target", "perf-home");
+}
+
+const perfHome = resolvePerfHome();
+const perfTmp = resolve(perfHome, "tmp");
+const perfXdgConfig = resolve(perfHome, "xdg-config");
+const perfXdgCache = resolve(perfHome, "xdg-cache");
+const perfXdgState = resolve(perfHome, "xdg-state");
+const perfXdgData = resolve(perfHome, "xdg-data");
+const perfAppData = resolve(perfHome, "AppData", "Roaming");
+const perfLocalAppData = resolve(perfHome, "AppData", "Local");
 
 function parseArgs(argv: string[]): {
   runs: number;
   timeoutMs: number;
   settleMs: number;
   binPath: string | null;
-  targetMb: number | null;
+  targetMb: number;
   allowInCi: boolean;
   enforce: boolean;
 } {
@@ -34,7 +51,11 @@ function parseArgs(argv: string[]): {
   const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? "") || 10;
   const envTimeoutMs = Number(process.env.FORMULA_DESKTOP_MEMORY_TIMEOUT_MS ?? "") || 30_000;
   const envSettleMs = Number(process.env.FORMULA_DESKTOP_MEMORY_SETTLE_MS ?? "") || 5_000;
-  const envTargetMb = Number(process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? "") || null;
+
+  const rawTarget =
+    process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB ?? process.env.FORMULA_DESKTOP_MEMORY_TARGET_MB ?? "";
+  const envTargetMb = Number(rawTarget) || 100;
+
   const envEnforce = process.env.FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH === "1";
   const envBin = process.env.FORMULA_DESKTOP_BIN ?? null;
 
@@ -43,7 +64,7 @@ function parseArgs(argv: string[]): {
     timeoutMs: Math.max(1, envTimeoutMs),
     settleMs: Math.max(0, envSettleMs),
     binPath: envBin as string | null,
-    targetMb: envTargetMb ? Math.max(1, envTargetMb) : null,
+    targetMb: Math.max(1, envTargetMb),
     allowInCi: false,
     enforce: envEnforce,
   };
@@ -54,63 +75,75 @@ function parseArgs(argv: string[]): {
     if (arg === "--runs" && args[0]) out.runs = Math.max(1, Number(args.shift()) || out.runs);
     else if (arg === "--timeout-ms" && args[0])
       out.timeoutMs = Math.max(1, Number(args.shift()) || out.timeoutMs);
-    else if (arg === "--settle-ms" && args[0]) out.settleMs = Math.max(0, Number(args.shift()) || out.settleMs);
+    else if (arg === "--settle-ms" && args[0])
+      out.settleMs = Math.max(0, Number(args.shift()) || out.settleMs);
     else if ((arg === "--bin" || arg === "--bin-path") && args[0]) out.binPath = args.shift()!;
     else if (arg === "--target-mb" && args[0]) {
       const raw = Number(args.shift());
       if (Number.isFinite(raw) && raw > 0) out.targetMb = raw;
-    }
-    else if (arg === "--allow-ci") out.allowInCi = true;
+    } else if (arg === "--allow-ci") out.allowInCi = true;
     else if (arg === "--enforce") out.enforce = true;
   }
 
   return out;
 }
 
-function defaultDesktopBinPath(): string | null {
-  const exe = process.platform === "win32" ? "formula-desktop.exe" : "formula-desktop";
-  const candidates = [
-    // Cargo workspace default target dir (most common).
-    resolve(repoRoot, "target/release", exe),
-    resolve(repoRoot, "target/debug", exe),
-    // Fallbacks in case a caller built with a custom target dir rooted under the app.
-    resolve(repoRoot, "apps/desktop/src-tauri/target/release", exe),
-    resolve(repoRoot, "apps/desktop/src-tauri/target/debug", exe),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+function closeReadline(rl: Interface | null): void {
+  if (!rl) return;
+  try {
+    rl.close();
+  } catch {
+    // ignore
   }
-  return null;
 }
 
-function shouldUseXvfb(): boolean {
-  if (process.platform !== "linux") return false;
-  // If DISPLAY is set, assume an X server is already available.
-  if (process.env.DISPLAY && process.env.DISPLAY.trim() !== "") return false;
-  const xvfb = resolve(repoRoot, "scripts/xvfb-run-safe.sh");
-  return existsSync(xvfb);
+function forceKill(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      return;
+    } catch {
+      // Fall through to best-effort `child.kill()`.
+    }
+  }
+
+  try {
+    if (process.platform !== "win32") {
+      // We spawn with `detached: true`, so the child is the process group leader.
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    try {
+      child.kill();
+    } catch {
+      // ignore
+    }
+  }
 }
 
-function percentile(values: number[], p: number): number {
-  if (values.length === 0) return NaN;
-  const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * p) - 1));
-  return sorted[idx]!;
-}
-
-function parseStartupLine(line: string): StartupMetrics | null {
-  // Example:
-  // [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
-  const match = line.match(
-    /^\[startup\]\s+window_visible_ms=(\d+)\s+webview_loaded_ms=(\d+|n\/a)\s+tti_ms=(\d+)\s*$/,
-  );
-  if (!match) return null;
-  const windowVisibleMs = Number(match[1]);
-  const webviewLoadedRaw = match[2]!;
-  const webviewLoadedMs = webviewLoadedRaw === "n/a" ? null : Number(webviewLoadedRaw);
-  const ttiMs = Number(match[3]);
-  if (!Number.isFinite(windowVisibleMs) || !Number.isFinite(ttiMs)) return null;
-  return { windowVisibleMs, webviewLoadedMs, ttiMs };
+function terminate(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+      return;
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    // ignore
+  }
 }
 
 function parsePsTable(output: string): { pid: number; ppid: number; rssKb: number }[] {
@@ -168,139 +201,186 @@ function processTreeRssKb(rootPid: number): number {
 }
 
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
-  const useXvfb = shouldUseXvfb();
-  const command = useXvfb ? resolve(repoRoot, "scripts/xvfb-run-safe.sh") : binPath;
-  const args = useXvfb ? [binPath] : [];
-
+  if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === "1") {
+    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
   mkdirSync(perfHome, { recursive: true });
+  mkdirSync(perfTmp, { recursive: true });
+  mkdirSync(perfXdgConfig, { recursive: true });
+  mkdirSync(perfXdgCache, { recursive: true });
+  mkdirSync(perfXdgState, { recursive: true });
+  mkdirSync(perfXdgData, { recursive: true });
+  mkdirSync(perfAppData, { recursive: true });
+  mkdirSync(perfLocalAppData, { recursive: true });
+
+  const useXvfb = shouldUseXvfb();
+  const xvfbPath = resolve(repoRoot, "scripts/xvfb-run-safe.sh");
+  const command = useXvfb ? "bash" : binPath;
+  const args = useXvfb ? [xvfbPath, binPath] : [];
+
+  const env = {
+    ...process.env,
+    // Keep perf benchmarks stable/quiet by disabling the automatic startup update check.
+    FORMULA_DISABLE_STARTUP_UPDATE_CHECK: "1",
+    // Enable the Rust-side single-line log in release builds.
+    FORMULA_STARTUP_METRICS: "1",
+    // Optional: allow downstream tooling to discover the chosen HOME root.
+    FORMULA_PERF_HOME: perfHome,
+    // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
+    HOME: perfHome,
+    USERPROFILE: perfHome,
+    XDG_CONFIG_HOME: perfXdgConfig,
+    XDG_CACHE_HOME: perfXdgCache,
+    XDG_STATE_HOME: perfXdgState,
+    XDG_DATA_HOME: perfXdgData,
+    APPDATA: perfAppData,
+    LOCALAPPDATA: perfLocalAppData,
+    TMPDIR: perfTmp,
+    TEMP: perfTmp,
+    TMP: perfTmp,
+  } satisfies NodeJS.ProcessEnv;
 
   return await new Promise<number>((resolvePromise, rejectPromise) => {
     const child = spawn(command, args, {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        FORMULA_STARTUP_METRICS: "1",
-        HOME: perfHome,
-        USERPROFILE: perfHome,
-      },
+      env,
+      detached: process.platform !== "win32",
+      windowsHide: true,
     });
 
-    let done = false;
+    let rlOut: Interface | null = null;
+    let rlErr: Interface | null = null;
+
+    let settled = false;
     let captured: StartupMetrics | null = null;
     let sampledRssMb: number | null = null;
-    let sampleTimer: NodeJS.Timeout | null = null;
-    let captureKillTimer: NodeJS.Timeout | null = null;
+
+    let startupTimeout: NodeJS.Timeout | null = null;
+    let settleTimer: NodeJS.Timeout | null = null;
+    let forceKillTimer: NodeJS.Timeout | null = null;
     let exitDeadline: NodeJS.Timeout | null = null;
-    const deadline = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try {
-        child.kill();
-      } catch {
-        // ignore
-      }
-      cleanup();
-      rejectPromise(new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
-    }, timeoutMs);
+
+    let timedOutWaitingForMetrics = false;
 
     const cleanup = () => {
-      clearTimeout(deadline);
-      if (sampleTimer) clearTimeout(sampleTimer);
-      if (captureKillTimer) clearTimeout(captureKillTimer);
+      if (startupTimeout) clearTimeout(startupTimeout);
+      if (settleTimer) clearTimeout(settleTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
       if (exitDeadline) clearTimeout(exitDeadline);
-      rlOut.close();
-      rlErr.close();
+      closeReadline(rlOut);
+      closeReadline(rlErr);
+    };
+
+    const settle = (kind: "resolve" | "reject", value: any) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (kind === "resolve") resolvePromise(value);
+      else rejectPromise(value);
+    };
+
+    const beginShutdown = (reason: "sampled" | "timeout") => {
+      if (exitDeadline) return;
+
+      terminate(child);
+      forceKillTimer = setTimeout(() => forceKill(child), 2000);
+      exitDeadline = setTimeout(() => {
+        forceKill(child);
+        const msg =
+          reason === "sampled"
+            ? "Timed out waiting for desktop process to exit after sampling memory"
+            : "Timed out waiting for desktop process to exit after timing out waiting for startup metrics";
+        settle("reject", new Error(msg));
+      }, 5000);
     };
 
     const onLine = (line: string) => {
-      if (done || captured) return;
-      const parsed = parseStartupLine(line.trim());
+      if (captured || timedOutWaitingForMetrics) return;
+      const parsed = parseStartupLine(line);
       if (!parsed) return;
       captured = parsed;
-      clearTimeout(deadline);
+      if (startupTimeout) {
+        clearTimeout(startupTimeout);
+        startupTimeout = null;
+      }
 
-      sampleTimer = setTimeout(() => {
-        if (done) return;
+      settleTimer = setTimeout(() => {
         try {
           const rootPid = child.pid;
           if (!rootPid || rootPid <= 0) {
             throw new Error("Desktop process PID was not available for memory sampling");
           }
-          const rssKb = processTreeRssKb(rootPid);
-          const rssMb = rssKb / 1024;
-          sampledRssMb = rssMb;
+          sampledRssMb = processTreeRssKb(rootPid) / 1024;
         } catch (err) {
-          done = true;
-          cleanup();
-          rejectPromise(err instanceof Error ? err : new Error(String(err)));
-          return;
-        } finally {
           try {
-            child.kill();
+            forceKill(child);
           } catch {
             // ignore
           }
+          settle("reject", err instanceof Error ? err : new Error(String(err)));
+          return;
         }
-
-        // If the process doesn't exit quickly, force-kill it so we don't accumulate
-        // background GUI processes during a multi-run benchmark.
-        captureKillTimer = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            child.kill();
-          }
-        }, 2000);
-
-        exitDeadline = setTimeout(() => {
-          if (done) return;
-          done = true;
-          cleanup();
-          rejectPromise(new Error("Timed out waiting for desktop process to exit after sampling memory"));
-        }, 5000);
+        beginShutdown("sampled");
       }, settleMs);
     };
 
-    const rlOut = createInterface({ input: child.stdout! });
-    const rlErr = createInterface({ input: child.stderr! });
-    rlOut.on("line", onLine);
-    rlErr.on("line", onLine);
+    if (child.stdout) {
+      rlOut = createInterface({ input: child.stdout });
+      rlOut.on("line", onLine);
+    }
+    if (child.stderr) {
+      rlErr = createInterface({ input: child.stderr });
+      rlErr.on("line", onLine);
+    }
+
+    startupTimeout = setTimeout(() => {
+      timedOutWaitingForMetrics = true;
+      beginShutdown("timeout");
+    }, timeoutMs);
 
     child.on("error", (err) => {
-      if (done) return;
-      done = true;
-      cleanup();
-      rejectPromise(err);
+      settle("reject", err);
     });
 
     child.on("exit", (code, signal) => {
-      if (done) return;
-      done = true;
-      cleanup();
-      if (sampledRssMb != null) {
-        resolvePromise(sampledRssMb);
-      } else if (captured) {
-        rejectPromise(new Error(`Desktop process exited before memory could be sampled (code=${code}, signal=${signal})`));
-      } else {
-        rejectPromise(
-          new Error(
-            `Desktop process exited before reporting startup metrics (code=${code}, signal=${signal})`,
-          ),
-        );
+      if (settled) return;
+
+      if (timedOutWaitingForMetrics) {
+        settle("reject", new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
+        return;
       }
+
+      if (sampledRssMb != null) {
+        settle("resolve", sampledRssMb);
+        return;
+      }
+
+      if (captured) {
+        settle(
+          "reject",
+          new Error(`Desktop process exited before memory could be sampled (code=${code}, signal=${signal})`),
+        );
+        return;
+      }
+
+      settle(
+        "reject",
+        new Error(`Desktop process exited before reporting startup metrics (code=${code}, signal=${signal})`),
+      );
     });
   });
 }
 
 function printSummary(summary: Summary): void {
-  const targetSuffix = summary.targetMb ? ` target=${summary.targetMb}MB` : "";
+  const status = summary.rssMb.p95 <= summary.rssMb.targetMb ? "PASS" : "FAIL";
   // eslint-disable-next-line no-console
   console.log(
     [
       "[desktop-memory]",
       `runs=${summary.runs}`,
-      `idleRssMb(p50=${summary.rssMb.p50.toFixed(1)}MB,p95=${summary.rssMb.p95.toFixed(1)}MB${targetSuffix})`,
+      `idleRssMb(${status} p50=${summary.rssMb.p50.toFixed(1)}MB,p95=${summary.rssMb.p95.toFixed(1)}MB,target=${summary.rssMb.targetMb}MB)`,
+      summary.enforce ? "enforced=1" : "enforced=0",
     ].join(" "),
   );
 }
@@ -321,17 +401,21 @@ async function main(): Promise<void> {
   const binPath = argBin ? resolve(argBin) : defaultDesktopBinPath();
   if (!binPath || !existsSync(binPath)) {
     throw new Error(
-      "Desktop binary not found. Build it via `bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop` and pass --bin <path>.",
+      "Desktop binary not found. Build it via `bash scripts/cargo_agent.sh build -p formula-desktop-tauri --bin formula-desktop --release --features desktop` and pass --bin <path> (or set FORMULA_DESKTOP_BIN).",
     );
   }
 
   // eslint-disable-next-line no-console
   console.log(
-    "[desktop-memory] measuring process RSS (resident set size) for the desktop app after TTI.\n" +
+    "[desktop-memory] measuring idle memory for the desktop app (RSS after TTI).\n" +
       `- runs: ${runs} (override via --runs or FORMULA_DESKTOP_MEMORY_RUNS)\n` +
+      `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_MEMORY_TIMEOUT_MS)\n` +
       `- settle: ${settleMs}ms (override via --settle-ms or FORMULA_DESKTOP_MEMORY_SETTLE_MS)\n` +
-      `- home: ${resolve(repoRoot, "target", "perf-home")} (repo-local)\n` +
-      (targetMb ? `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_MEMORY_TARGET_MB)\n` : ""),
+      `- target: ${targetMb}MB (override via --target-mb or FORMULA_DESKTOP_IDLE_RSS_TARGET_MB)\n` +
+      `- home: ${perfHome} (repo-local; override with FORMULA_PERF_HOME)\n` +
+      (enforce
+        ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=0 to disable)\n"
+        : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1 or pass --enforce to fail on regression)\n"),
   );
 
   const results: number[] = [];
@@ -344,24 +428,23 @@ async function main(): Promise<void> {
     console.log(`[desktop-memory]   idleRssMb=${rss.toFixed(1)}MB`);
   }
 
+  const sorted = [...results].sort((a, b) => a - b);
   const summary: Summary = {
     runs: results.length,
     rssMb: {
-      p50: percentile(results, 0.5),
-      p95: percentile(results, 0.95),
+      p50: percentile(sorted, 0.5),
+      p95: percentile(sorted, 0.95),
+      targetMb,
     },
-    targetMb,
+    enforce,
   };
 
   printSummary(summary);
 
-  if (enforce && targetMb && summary.rssMb.p95 > targetMb) {
-    // eslint-disable-next-line no-console
-    console.error(
-      `[desktop-memory] FAIL: p95=${summary.rssMb.p95.toFixed(1)}MB exceeds target=${targetMb}MB (set FORMULA_DESKTOP_MEMORY_TARGET_MB to adjust)`,
-    );
+  if (enforce && summary.rssMb.p95 > summary.rssMb.targetMb) {
     process.exitCode = 1;
   }
 }
 
 await main();
+

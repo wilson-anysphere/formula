@@ -67,6 +67,8 @@ The frontend installs listeners in `apps/desktop/src/tauri/startupMetrics.ts` an
   - builds `target/release/formula-desktop` (Rust, `--features desktop`)
   - runs `apps/desktop/tests/performance/desktop-startup-runner.ts`
   - uses a repo-local HOME (`target/perf-home`) so runs don't touch your real `~/.config` / `~/Library`
+    - override with `FORMULA_PERF_HOME=/path/to/dir`
+    - set `FORMULA_PERF_PRESERVE_HOME=1` to reuse the perf HOME between invocations
 
   Tuning knobs:
   - `FORMULA_DESKTOP_STARTUP_RUNS` (default: 20)
@@ -94,14 +96,38 @@ pnpm perf:desktop-memory
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
 sampled after the app becomes interactive and a short "settle" delay.
 
+The perf commands use a repo-local HOME (`target/perf-home`) by default:
+
+- override with `FORMULA_PERF_HOME=/path/to/dir`
+- set `FORMULA_PERF_PRESERVE_HOME=1` to reuse the perf HOME between invocations
+
 Tuning knobs:
 
 - `FORMULA_DESKTOP_MEMORY_RUNS` (default: 10)
 - `FORMULA_DESKTOP_MEMORY_SETTLE_MS` (default: 5000)
 - `FORMULA_DESKTOP_MEMORY_TIMEOUT_MS` (default: 30000)
-- `FORMULA_DESKTOP_MEMORY_TARGET_MB` to set a budget
+- `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` (default: 100) to set a budget
 - `FORMULA_ENFORCE_DESKTOP_MEMORY_BENCH=1` (or `--enforce`) to fail the command when p95 exceeds the budget
 - `FORMULA_RUN_DESKTOP_MEMORY_BENCH=1` to allow running in CI (the runner skips in CI by default)
+
+### Size report (dist + binary + bundles)
+
+To get a quick size breakdown for the desktop app, run:
+
+```bash
+pnpm perf:desktop-size
+```
+
+This reports:
+
+- `apps/desktop/dist` total size (and largest assets)
+- the built desktop binary size (`target/**/formula-desktop`)
+- if present, installer/bundle artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
+
+Bundle size gating knobs (used by the release workflow):
+
+- `FORMULA_BUNDLE_SIZE_LIMIT_MB` (default: 50)
+- `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
 
 ---
 

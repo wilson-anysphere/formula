@@ -111,7 +111,7 @@ async function main(): Promise<void> {
       `- timeout: ${timeoutMs}ms (override via --timeout-ms or FORMULA_DESKTOP_STARTUP_TIMEOUT_MS)\n` +
       `- window target: ${windowTargetMs}ms (override via --window-target-ms or FORMULA_DESKTOP_WINDOW_VISIBLE_TARGET_MS)\n` +
       `- tti target: ${ttiTargetMs}ms (override via --tti-target-ms or FORMULA_DESKTOP_TTI_TARGET_MS)\n` +
-      `- home: target/perf-home (repo-local; set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to reset between iterations)\n` +
+      `- home: target/perf-home (repo-local; override with FORMULA_PERF_HOME; set FORMULA_DESKTOP_BENCH_RESET_HOME=1 to reset between iterations)\n` +
       (enforce
         ? "- enforcement: enabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=0 to disable)\n"
         : "- enforcement: disabled (set FORMULA_ENFORCE_DESKTOP_STARTUP_BENCH=1 or pass --enforce to fail on regression)\n"),

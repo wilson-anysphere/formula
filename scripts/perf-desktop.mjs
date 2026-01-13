@@ -57,6 +57,7 @@ function perfEnv(extra = {}) {
     perfHome,
     env: {
       ...process.env,
+      FORMULA_PERF_HOME: perfHome,
       HOME: perfHome,
       USERPROFILE: perfHome,
       XDG_CACHE_HOME: path.join(xdgBase, ".cache"),
@@ -302,4 +303,3 @@ function main() {
 }
 
 main();
-
