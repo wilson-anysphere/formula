@@ -36,7 +36,10 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     const nowMs = Date.now();
     let entries = this.loadEntries();
     entries.push(cloneAuditEntry(entry));
-    entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    entries.sort((a, b) => {
+      if (a.timestamp_ms !== b.timestamp_ms) return a.timestamp_ms - b.timestamp_ms;
+      return compareIdsAsc(a.id, b.id);
+    });
     entries = this.enforceAgeRetention(entries, nowMs);
     while (entries.length > this.maxEntries) entries.shift();
     this.saveEntries(entries);
@@ -136,6 +139,13 @@ function compareIdsDesc(aId: string | undefined, bId: string | undefined): numbe
   const bVal = bId ?? "";
   if (aVal === bVal) return 0;
   return aVal < bVal ? 1 : -1;
+}
+
+function compareIdsAsc(aId: string | undefined, bId: string | undefined): number {
+  const aVal = aId ?? "";
+  const bVal = bId ?? "";
+  if (aVal === bVal) return 0;
+  return aVal < bVal ? -1 : 1;
 }
 
 function isEntryBeforeCursor(

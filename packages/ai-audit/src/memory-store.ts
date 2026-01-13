@@ -78,7 +78,10 @@ export class MemoryAIAuditStore implements AIAuditStore {
       maxEntries > 0 &&
       this.entries.length > maxEntries
     ) {
-      this.entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+      this.entries.sort((a, b) => {
+        if (a.timestamp_ms !== b.timestamp_ms) return a.timestamp_ms - b.timestamp_ms;
+        return compareIdsAsc(a.id, b.id);
+      });
       this.entries.splice(0, this.entries.length - maxEntries);
     }
   }
@@ -94,6 +97,13 @@ function compareIdsDesc(aId: string | undefined, bId: string | undefined): numbe
   const bVal = bId ?? "";
   if (aVal === bVal) return 0;
   return aVal < bVal ? 1 : -1;
+}
+
+function compareIdsAsc(aId: string | undefined, bId: string | undefined): number {
+  const aVal = aId ?? "";
+  const bVal = bId ?? "";
+  if (aVal === bVal) return 0;
+  return aVal < bVal ? -1 : 1;
 }
 
 function isEntryBeforeCursor(

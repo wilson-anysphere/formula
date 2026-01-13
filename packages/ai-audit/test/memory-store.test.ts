@@ -27,6 +27,18 @@ describe("MemoryAIAuditStore retention", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["entry-3-first", "entry-2-third"]);
   });
 
+  it("enforces max_entries deterministically when timestamps tie (id tiebreaker)", async () => {
+    const store = new MemoryAIAuditStore({ max_entries: 2 });
+
+    // Insert in an order that would previously make retention depend on insertion order.
+    await store.logEntry(makeEntry("c", 1000));
+    await store.logEntry(makeEntry("a", 1000));
+    await store.logEntry(makeEntry("b", 1000));
+
+    const entries = await store.listEntries();
+    expect(entries.map((entry) => entry.id)).toEqual(["c", "b"]);
+  });
+
   it("enforces max_age_ms (drops entries older than Date.now() - max_age_ms)", async () => {
     vi.useFakeTimers();
     try {
@@ -46,4 +58,3 @@ describe("MemoryAIAuditStore retention", () => {
     }
   });
 });
-

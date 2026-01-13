@@ -92,6 +92,32 @@ describe("workbook_id filtering (legacy fallback)", () => {
   });
 });
 
+describe("LocalStorageAIAuditStore max_entries retention", () => {
+  it("drops oldest entries deterministically when timestamps tie (id tiebreaker)", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    try {
+      const store = new LocalStorageAIAuditStore({ key: "audit_test_max_entries_tiebreaker", max_entries: 2 });
+
+      // Insert in an order that would previously make retention depend on insertion order.
+      await store.logEntry(makeEntry({ id: "c", session_id: "s1", timestamp_ms: 1000 }));
+      await store.logEntry(makeEntry({ id: "a", session_id: "s1", timestamp_ms: 1000 }));
+      await store.logEntry(makeEntry({ id: "b", session_id: "s1", timestamp_ms: 1000 }));
+
+      const entries = await store.listEntries({ session_id: "s1" });
+      expect(entries.map((entry) => entry.id)).toEqual(["c", "b"]);
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+});
+
 describe("LocalStorageAIAuditStore age-based retention", () => {
   it("drops expired entries on logEntry()", async () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
