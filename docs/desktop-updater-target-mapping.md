@@ -24,8 +24,8 @@ release contains **exactly** these `latest.json.platforms` keys:
 
 If Tauri changes these identifiers in a future upgrade, our CI guardrail
 (`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is
-expected to fail (or require adding a new alias) with a clear “expected vs actual” diff, and this
-document should be updated alongside the validator.
+expected to fail with a clear “expected vs actual” diff, and this document should be updated
+alongside the validator.
 
 ### Common equivalents (not accepted by tagged-release CI)
 
