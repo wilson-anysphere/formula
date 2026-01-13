@@ -63,6 +63,32 @@ test("Typing =<space> suggests starter functions (pure insertion)", async () => 
   );
 });
 
+test("Backend completion client is not called for empty formulas (just '=')", async () => {
+  let calls = 0;
+  const completionClient = {
+    async completeTabCompletion() {
+      calls += 1;
+      return "SHOULD_NOT_BE_USED";
+    },
+  };
+
+  const engine = new TabCompletionEngine({ completionClient, completionTimeoutMs: 200 });
+
+  const currentInput = "=";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(calls, 0);
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM("),
+    `Expected a SUM starter suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =VLO suggests VLOOKUP(", async () => {
   const engine = new TabCompletionEngine();
 

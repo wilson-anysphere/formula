@@ -191,11 +191,18 @@ export class TabCompletionEngine {
     if (!this.completionClient) return [];
     if (!parsed.isFormula) return [];
 
+    const input = context.currentInput ?? "";
+    // Avoid asking the backend when the formula body is empty (e.g. "=" / "= ").
+    // This keeps tab completion responsive and lets the curated starter functions
+    // appear immediately without waiting for the network timeout.
+    if (typeof input === "string" && input.startsWith("=") && input.slice(1).trim() === "") {
+      return [];
+    }
+
     // Rule-based completions are often better than LLM for function names and
     // argument structure. Only ask the backend when we have an actual formula body.
     if (parsed.functionNamePrefix) return [];
 
-    const input = context.currentInput ?? "";
     const cursor = clampCursor(input, context.cursorPosition);
     const cell = normalizeCellRef(context.cellRef);
 
