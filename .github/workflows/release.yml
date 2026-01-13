@@ -83,6 +83,10 @@ jobs:
         run: bash scripts/ci/check-node-version-pins.sh
       - name: "Guard: pnpm version pins match package.json + CI workflow"
         run: bash scripts/ci/check-pnpm-version-pins.sh
+      - name: "Guard: wasm-pack version pins match CI workflow"
+        run: bash scripts/ci/check-wasm-pack-version-pins.sh
+      - name: "Guard: Tauri CLI version pins match CI workflow"
+        run: bash scripts/ci/check-tauri-cli-version-pins.sh
 
   validate-version:
     name: Validate desktop version matches tag
