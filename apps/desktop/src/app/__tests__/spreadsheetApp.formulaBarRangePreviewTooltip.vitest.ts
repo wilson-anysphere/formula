@@ -143,5 +143,87 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     root.remove();
     formulaBar.remove();
   });
-});
 
+  it("renders a preview grid for named ranges when hovering an identifier in view mode", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, 2);
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 3);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 4);
+    app.getSearchWorkbook().defineName("SalesData", {
+      sheetName: "Sheet1",
+      range: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(SalesData)", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const nameSpan = highlight?.querySelector<HTMLElement>('span[data-kind="identifier"]');
+    expect(nameSpan?.textContent).toBe("SalesData");
+    nameSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    const header = tooltip!.querySelector<HTMLElement>(".formula-range-preview-tooltip__header");
+    expect(header?.textContent).toBe("SalesData (A1:B2)");
+
+    const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["1", "2", "3", "4"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("skips named-range previews when the named range points at a non-active sheet", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+    app.getSearchWorkbook().defineName("OtherSheetName", {
+      sheetName: "Sheet2",
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(OtherSheetName)", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const nameSpan = highlight?.querySelector<HTMLElement>('span[data-kind="identifier"]');
+    expect(nameSpan?.textContent).toBe("OtherSheetName");
+    nameSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(true);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+});
