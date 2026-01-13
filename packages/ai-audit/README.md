@@ -9,7 +9,16 @@ This package intentionally keeps the default/browser entry free of Node-only imp
 ### Browser / webview (safe default)
 
 ```ts
-import { AIAuditRecorder, LocalStorageAIAuditStore } from "@formula/ai-audit";
+import { AIAuditRecorder, createDefaultAIAuditStore } from "@formula/ai-audit";
+
+const store = await createDefaultAIAuditStore({
+  // Browser-like runtimes prefer IndexedDB when available, falling back to
+  // LocalStorage and then in-memory storage.
+  retention: { max_entries: 10_000, max_age_ms: 30 * 24 * 60 * 60 * 1000 },
+  // `bounded` is enabled by default (defense-in-depth against oversized entries).
+  // bounded: false,
+  // prefer: "indexeddb" | "localstorage" | "memory",
+});
 ```
 
 To hard-cap per-entry size (defense-in-depth for LocalStorage/IndexedDB quota limits), wrap any store:
