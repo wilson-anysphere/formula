@@ -74,6 +74,34 @@ class TriageSchemaTests(unittest.TestCase):
         self.assertIn("Calculate: **0 / 0** (SKIP", md)
         self.assertIn("Render: **0 / 0** (SKIP", md)
 
+    def test_dashboard_markdown_includes_style_stats_when_present(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "counts": {
+                "total": 2,
+                "open_ok": 2,
+                "calculate_ok": 2,
+                "render_ok": 2,
+                "round_trip_ok": 1,
+            },
+            "rates": {"open": 1.0, "calculate": 1.0, "render": 1.0, "round_trip": 0.5},
+            "style": {
+                "cellXfs": {
+                    "passing": {"count": 1, "avg": 10.0, "median": 10.0},
+                    "failing": {"count": 1, "avg": 100.0, "median": 100.0},
+                },
+                "top_failing_by_cellXfs": [{"workbook": "bad.xlsx", "cellXfs": 100}],
+            },
+        }
+        reports = [
+            {"display_name": "good.xlsx", "result": {"open_ok": True, "round_trip_ok": True}},
+            {"display_name": "bad.xlsx", "result": {"open_ok": True, "round_trip_ok": False}},
+        ]
+        md = _markdown_summary(summary, reports)
+        self.assertIn("Style complexity (cellXfs)", md)
+        self.assertIn("Top failing workbooks by cellXfs", md)
+        self.assertIn("bad.xlsx", md)
+
 
 if __name__ == "__main__":
     unittest.main()

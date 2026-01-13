@@ -348,6 +348,87 @@ def _extract_function_counts(z: zipfile.ZipFile) -> Counter[str]:
     return counts
 
 
+def _extract_style_stats(
+    z: zipfile.ZipFile, zip_names: list[str]
+) -> tuple[dict[str, int] | None, str | None]:
+    """Extract privacy-safe styling complexity metrics from `xl/styles.xml`.
+
+    Returns (stats, error). If the part is missing, returns (None, None). If parsing fails,
+    returns (None, "<error>") without raising.
+    """
+
+    styles_name = _find_zip_entry_case_insensitive(zip_names, "xl/styles.xml")
+    if not styles_name:
+        return None, None
+
+    try:
+        styles_bytes = z.read(styles_name)
+    except Exception as e:  # noqa: BLE001
+        return None, f"Failed to read {styles_name}: {e}"
+
+    try:
+        from xml.etree import ElementTree as ET
+
+        root = ET.fromstring(styles_bytes)
+    except Exception as e:  # noqa: BLE001
+        return None, f"Failed to parse {styles_name}: {e}"
+
+    def _local(tag: str) -> str:
+        return tag.split("}")[-1]
+
+    def _parse_int(value: str | None) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _find_child(local_name: str) -> Any | None:
+        for child in list(root):
+            if _local(child.tag) == local_name:
+                return child
+        return None
+
+    def _count_container(container_local: str, item_local: str | None) -> int:
+        container = _find_child(container_local)
+        if container is None:
+            return 0
+
+        declared = _parse_int(container.attrib.get("count"))
+
+        if item_local is None:
+            if declared is not None:
+                return declared
+            return len(list(container))
+
+        children = [c for c in list(container) if _local(c.tag) == item_local]
+        if children:
+            return len(children)
+        if declared is not None:
+            return declared
+        return 0
+
+    stats: dict[str, int] = {
+        # Core OOXML style collections.
+        "numFmts": _count_container("numFmts", "numFmt"),
+        "fonts": _count_container("fonts", "font"),
+        "fills": _count_container("fills", "fill"),
+        "borders": _count_container("borders", "border"),
+        "cellStyleXfs": _count_container("cellStyleXfs", "xf"),
+        "cellXfs": _count_container("cellXfs", "xf"),
+        "cellStyles": _count_container("cellStyles", "cellStyle"),
+        # Differential formats (used by conditional formatting, tables, etc).
+        "dxfs": _count_container("dxfs", "dxf"),
+        # Optional: custom table styles.
+        "tableStyles": _count_container("tableStyles", None),
+        # Extension list - often present in modern Excel output.
+        "extLst": _count_container("extLst", "ext"),
+    }
+
+    return stats, None
+
+
 def _repo_root() -> Path:
     # tools/corpus/triage.py -> tools/corpus -> tools -> repo root
     return Path(__file__).resolve().parents[2]
@@ -531,6 +612,11 @@ def triage_workbook(
                 if cell_images is not None:
                     report["cell_images"] = cell_images
             report["functions"] = dict(_extract_function_counts(z))
+            style_stats, style_err = _extract_style_stats(z, zip_names)
+            if style_stats is not None:
+                report["style_stats"] = style_stats
+            elif style_err:
+                report["style_stats_error"] = style_err
     except Exception as e:  # noqa: BLE001 (triage tool)
         # Feature scanning failures should not leak exception strings into JSON artifacts.
         msg = str(e)

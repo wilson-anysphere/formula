@@ -31,6 +31,22 @@ def _attempted(value: Any) -> bool:
     return value is True or value is False
 
 
+def _mean(values: list[int]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _median(values: list[int]) -> float | None:
+    if not values:
+        return None
+    values_sorted = sorted(values)
+    mid = len(values_sorted) // 2
+    if len(values_sorted) % 2 == 1:
+        return float(values_sorted[mid])
+    return (values_sorted[mid - 1] + values_sorted[mid]) / 2.0
+
+
 def _load_reports(reports_dir: Path) -> list[dict[str, Any]]:
     reports: list[dict[str, Any]] = []
     for path in sorted(reports_dir.glob("*.json")):
@@ -139,6 +155,49 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
             lines.append(f"| {row['feature']} | {row['count']} |")
         lines.append("")
 
+    style = summary.get("style") or {}
+    cellxfs = (style.get("cellXfs") or {}) if isinstance(style, dict) else {}
+    if cellxfs:
+        def _fmt_float(v: Any) -> str:
+            if v is None:
+                return ""
+            try:
+                return f"{float(v):.1f}"
+            except Exception:  # noqa: BLE001
+                return ""
+
+        lines.append("## Style complexity (cellXfs)")
+        lines.append("")
+        lines.append("| Group | Workbooks | Avg cellXfs | Median cellXfs |")
+        lines.append("|---|---:|---:|---:|")
+        for group in ("passing", "failing"):
+            row = cellxfs.get(group) or {}
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        group,
+                        str(row.get("count", 0)),
+                        _fmt_float(row.get("avg")),
+                        _fmt_float(row.get("median")),
+                    ]
+                )
+                + " |"
+            )
+        lines.append("")
+
+    top_failing_by_cellxfs = (
+        style.get("top_failing_by_cellXfs") if isinstance(style, dict) else None
+    ) or []
+    if top_failing_by_cellxfs:
+        lines.append("## Top failing workbooks by cellXfs")
+        lines.append("")
+        lines.append("| Workbook | cellXfs |")
+        lines.append("|---|---:|")
+        for row in top_failing_by_cellxfs[:20]:
+            lines.append(f"| {row.get('workbook', '?')} | {row.get('cellXfs', 0)} |")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -174,6 +233,9 @@ def main() -> int:
     failing_function_counts: Counter[str] = Counter()
     failing_feature_counts: Counter[str] = Counter()
     diff_totals: Counter[str] = Counter()
+    passing_cellxfs: list[int] = []
+    failing_cellxfs: list[int] = []
+    failing_cellxfs_by_workbook: list[tuple[int, str]] = []
 
     for r in reports:
         res = r.get("result", {})
@@ -181,6 +243,8 @@ def main() -> int:
             res.get(k) is False
             for k in ("open_ok", "calculate_ok", "render_ok", "round_trip_ok")
         )
+        cellxfs_val = (r.get("style_stats") or {}).get("cellXfs")
+        cellxfs: int | None = cellxfs_val if isinstance(cellxfs_val, int) else None
         if failed:
             failures_by_category[r.get("failure_category", "unknown")] += 1
             for fn, cnt in (r.get("functions") or {}).items():
@@ -188,6 +252,12 @@ def main() -> int:
             for feat, enabled in (r.get("features") or {}).items():
                 if enabled is True:
                     failing_feature_counts[feat] += 1
+            if cellxfs is not None:
+                failing_cellxfs.append(cellxfs)
+                failing_cellxfs_by_workbook.append((cellxfs, r.get("display_name", "?")))
+        else:
+            if cellxfs is not None:
+                passing_cellxfs.append(cellxfs)
 
         for key, out_key in [
             ("diff_critical_count", "critical"),
@@ -197,6 +267,27 @@ def main() -> int:
             val = res.get(key)
             if isinstance(val, int):
                 diff_totals[out_key] += val
+
+    style_summary: dict[str, Any] = {}
+    if passing_cellxfs or failing_cellxfs:
+        style_summary["cellXfs"] = {
+            "passing": {
+                "count": len(passing_cellxfs),
+                "avg": _mean(passing_cellxfs),
+                "median": _median(passing_cellxfs),
+            },
+            "failing": {
+                "count": len(failing_cellxfs),
+                "avg": _mean(failing_cellxfs),
+                "median": _median(failing_cellxfs),
+            },
+        }
+    if failing_cellxfs_by_workbook:
+        failing_cellxfs_by_workbook.sort(key=lambda x: (-x[0], x[1]))
+        style_summary["top_failing_by_cellXfs"] = [
+            {"workbook": name, "cellXfs": cellxfs}
+            for cellxfs, name in failing_cellxfs_by_workbook[:20]
+        ]
 
     summary: dict[str, Any] = {
         "timestamp": utc_now_iso(),
@@ -230,6 +321,8 @@ def main() -> int:
             for feat, cnt in failing_feature_counts.most_common(50)
         ],
     }
+    if style_summary:
+        summary["style"] = style_summary
 
     write_json(out_dir / "summary.json", summary)
     (out_dir / "summary.md").write_text(
