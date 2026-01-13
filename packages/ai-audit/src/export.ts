@@ -101,7 +101,8 @@ function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
 
   const t = typeof value;
   if (t === "string" || t === "number" || t === "boolean") return value;
-  if (t === "bigint") return value.toString();
+  // `t` is derived from `typeof value`, but TypeScript can't use that to narrow `value` here.
+  if (t === "bigint") return (value as bigint).toString();
   if (t === "undefined" || t === "function" || t === "symbol") return undefined;
 
   if (Array.isArray(value)) {
