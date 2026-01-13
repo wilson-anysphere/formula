@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 mod schema;
@@ -22,54 +22,6 @@ pub enum SortOrder {
     Ascending,
     Descending,
     Manual,
-}
-
-/// Excel-style layout mode for pivot output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Layout {
-    Compact,
-    Outline,
-    Tabular,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self::Tabular
-    }
-}
-
-/// Where subtotals appear for a grouped field.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SubtotalPosition {
-    Top,
-    Bottom,
-    None,
-}
-
-impl Default for SubtotalPosition {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-/// Controls whether grand totals are produced for rows and/or columns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GrandTotals {
-    pub rows: bool,
-    pub columns: bool,
-}
-
-impl Default for GrandTotals {
-    fn default() -> Self {
-        // Match Excel defaults.
-        Self {
-            rows: true,
-            columns: true,
-        }
-    }
 }
 
 /// Value representation used for manual pivot-field ordering.
@@ -271,16 +223,6 @@ impl PivotField {
         }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FilterField {
-    pub source_field: String,
-    /// Allowed values. `None` means allow all.
-    #[serde(default)]
-    pub allowed: Option<HashSet<PivotKeyPart>>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ScalarValue {
     Text(String),
@@ -349,39 +291,6 @@ pub struct ValueField {
     pub base_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
-}
-
-/// Top-level pivot table configuration schema.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PivotConfig {
-    pub row_fields: Vec<PivotField>,
-    pub column_fields: Vec<PivotField>,
-    pub value_fields: Vec<ValueField>,
-    pub filter_fields: Vec<FilterField>,
-    #[serde(default)]
-    pub calculated_fields: Vec<CalculatedField>,
-    #[serde(default)]
-    pub calculated_items: Vec<CalculatedItem>,
-    pub layout: Layout,
-    pub subtotals: SubtotalPosition,
-    pub grand_totals: GrandTotals,
-}
-
-impl Default for PivotConfig {
-    fn default() -> Self {
-        Self {
-            row_fields: Vec::new(),
-            column_fields: Vec::new(),
-            value_fields: Vec::new(),
-            filter_fields: Vec::new(),
-            calculated_fields: Vec::new(),
-            calculated_items: Vec::new(),
-            layout: Layout::default(),
-            subtotals: SubtotalPosition::default(),
-            grand_totals: GrandTotals::default(),
-        }
-    }
 }
 
 impl From<&str> for ScalarValue {
