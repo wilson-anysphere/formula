@@ -212,6 +212,9 @@ def _extract_failure_diff_part_groups(report: dict[str, Any]) -> set[str]:
         # Preferred schema: list of per-part summaries that includes a `group` field.
         pwd = container.get("parts_with_diffs")
         if isinstance(pwd, list):
+            part_groups_map = container.get("part_groups") or {}
+            if not isinstance(part_groups_map, dict):
+                part_groups_map = {}
             for row in pwd:
                 if not isinstance(row, dict):
                     continue
@@ -236,7 +239,12 @@ def _extract_failure_diff_part_groups(report: dict[str, Any]) -> set[str]:
                     ok = total > 0
                 if not ok:
                     continue
-                _add_group(row.get("group"))
+                group = row.get("group")
+                if not isinstance(group, str) or not group.strip():
+                    part = row.get("part")
+                    if isinstance(part, str) and part:
+                        group = part_groups_map.get(part)
+                _add_group(group)
             if groups:
                 return groups
 

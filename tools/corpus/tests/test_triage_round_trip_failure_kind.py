@@ -117,7 +117,56 @@ class TriageRoundTripFailureKindTests(unittest.TestCase):
         self.assertEqual(report.get("failure_category"), "round_trip_diff")
         self.assertEqual(report.get("round_trip_failure_kind"), "round_trip_styles")
 
+    def test_triage_uses_part_groups_mapping_when_group_missing(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "parts_with_diffs": [
+                                {
+                                    "part": "docProps/app.xml",
+                                    # No `group` field here; should fall back to `part_groups`.
+                                    "critical": 0,
+                                    "warning": 1,
+                                    "info": 0,
+                                    "total": 1,
+                                }
+                            ],
+                            "part_groups": {"docProps/app.xml": "doc_props"},
+                        },
+                    }
+                },
+                "result": {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "round_trip_fail_on": "warning",
+                    "diff_critical_count": 0,
+                    "diff_warning_count": 1,
+                    "diff_info_count": 0,
+                },
+            }
+
+            wb = WorkbookInput(display_name="book.xlsx", data=_make_minimal_xlsx())
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                round_trip_fail_on="warning",
+                recalc=False,
+                render_smoke=False,
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        self.assertEqual(report.get("failure_category"), "round_trip_diff")
+        self.assertEqual(report.get("round_trip_failure_kind"), "round_trip_doc_props")
+
 
 if __name__ == "__main__":
     unittest.main()
-
