@@ -73,6 +73,23 @@ test("read-only collab roles do not write sheet-level view/format state into Yjs
     assert.ok(sheetEntry && typeof sheetEntry.get === "function", "expected Sheet1 entry in Yjs");
     assert.equal(sheetEntry.get("view"), undefined);
     assert.equal(sheetEntry.get("defaultFormat"), undefined);
+
+    // Remote Yjs updates should still apply to the DocumentController, even in a read-only role.
+    const REMOTE_ORIGIN = { type: "remote-test" };
+    ydoc.transact(
+      () => {
+        sheetEntry.set("view", { frozenRows: 0, frozenCols: 3, colWidths: { "0": 200 } });
+        sheetEntry.set("defaultFormat", { font: { italic: true } });
+      },
+      REMOTE_ORIGIN,
+    );
+
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 0 && view.frozenCols === 3 && view.colWidths?.["0"] === 200;
+    });
+    await waitForCondition(() => documentController.getCellFormat("Sheet1", "A1")?.font?.italic === true);
+    assert.ok(updates > 0, "expected remote Yjs mutations to produce Yjs updates");
   } finally {
     ydoc.off("update", onUpdate);
     binder.destroy();
@@ -80,4 +97,3 @@ test("read-only collab roles do not write sheet-level view/format state into Yjs
     ydoc.destroy();
   }
 });
-
