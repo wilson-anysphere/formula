@@ -49,6 +49,16 @@ on:
         required: false
         default: ""
         type: string
+      min_calc_rate:
+        description: "Optional compatibility gate: fail if calculate pass rate (among attempted) drops below this (0-1). Empty disables."
+        required: false
+        default: ""
+        type: string
+      min_render_rate:
+        description: "Optional compatibility gate: fail if render pass rate (among attempted) drops below this (0-1). Empty disables."
+        required: false
+        default: ""
+        type: string
 
 jobs:
   conflict-marker-guard:
@@ -144,6 +154,9 @@ jobs:
       # Optional perf gates (opt-in). Can be configured via workflow_dispatch inputs or repo-level variables.
       CORPUS_GATE_LOAD_P90_MS: ${{ github.event.inputs.gate_load_p90_ms || vars.CORPUS_GATE_LOAD_P90_MS }}
       CORPUS_GATE_ROUND_TRIP_P90_MS: ${{ github.event.inputs.gate_round_trip_p90_ms || vars.CORPUS_GATE_ROUND_TRIP_P90_MS }}
+      # Optional compatibility gates for L2/L3 (opt-in). Values are rates in [0,1].
+      CORPUS_MIN_CALC_RATE: ${{ github.event.inputs.min_calc_rate || vars.CORPUS_MIN_CALC_RATE }}
+      CORPUS_MIN_RENDER_RATE: ${{ github.event.inputs.min_render_rate || vars.CORPUS_MIN_RENDER_RATE }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -331,9 +344,18 @@ jobs:
             echo "No private summary.json; skipping compatibility gate."
             exit 0
           fi
-          python -m tools.corpus.compat_gate \
-            --summary-json tools/corpus/out/private/summary.json \
+          GATE_ARGS=(
+            --summary-json tools/corpus/out/private/summary.json
             --min-round-trip-rate 0.97
+          )
+          # Optional L2/L3 gates (opt-in via workflow_dispatch inputs or repo variables).
+          if [ -n "${CORPUS_MIN_CALC_RATE}" ] && [ "${CORPUS_RUN_RECALC}" = "true" ]; then
+            GATE_ARGS+=(--min-calc-rate "${CORPUS_MIN_CALC_RATE}")
+          fi
+          if [ -n "${CORPUS_MIN_RENDER_RATE}" ] && [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
+            GATE_ARGS+=(--min-render-rate "${CORPUS_MIN_RENDER_RATE}")
+          fi
+          python -m tools.corpus.compat_gate "${GATE_ARGS[@]}"
       - name: Save private corpus trend cache
         if: always() && hashFiles('tools/corpus/out/private/trend.json') != ''
         uses: actions/cache/save@v4

@@ -407,6 +407,8 @@ changes:
 - `recalc`: run `tools.corpus.triage --recalc` (Calculate / L2). The nightly scheduled private corpus run
   enables this by default.
 - `render_smoke`: run `tools.corpus.triage --render-smoke` (Render smoke / L3).
+- `min_calc_rate`: optional CI gate threshold for Calculate pass rate (among attempted workbooks).
+- `min_render_rate`: optional CI gate threshold for Render pass rate (among attempted workbooks).
 
 Note: `--recalc` compares engine results against **cached formula values stored in the workbook**. If your
 corpus inputs were aggressively sanitized (e.g. redacting cell values), cached formula results are often
