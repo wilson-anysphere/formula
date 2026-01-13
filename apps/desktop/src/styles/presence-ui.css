@@ -1,0 +1,73 @@
+/*
+  Desktop collaborators/presence list UI.
+
+  Token-based: no hardcoded colors outside `tokens.css`
+  (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
+*/
+
+.presence-collaborators-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 40;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(260px, 40vw);
+}
+
+.presence-collaborators {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.presence-collaborators__item,
+.presence-collaborators__overflow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  min-width: 0;
+  /* Keep the pills readable when drawn over busy grids. */
+  box-shadow: var(--dialog-shadow);
+}
+
+.presence-collaborators__overflow {
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.presence-collaborators__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: var(--text-primary);
+}
+
+.presence-collaborators__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-collaborators__sheet {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+

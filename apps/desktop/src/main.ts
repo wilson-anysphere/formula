@@ -19,6 +19,7 @@ import "./styles/auditing.css";
 import "./styles/format-cells-dialog.css";
 import "./styles/context-menu.css";
 import "./styles/conflicts.css";
+import "./styles/presence-ui.css";
 import "./styles/macros-runner.css";
 import "./styles/script-editor.css";
 import "./styles/python-panel.css";

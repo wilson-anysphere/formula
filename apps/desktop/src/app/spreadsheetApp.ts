@@ -103,6 +103,10 @@ import { getCollabUserIdentity, overrideCollabUserIdentityId, type CollabUserIde
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
 import { StructuralConflictUiController } from "../collab/conflicts-ui/structural-conflict-ui-controller.js";
+import {
+  CollaboratorsListUiController,
+  type CollaboratorListEntry,
+} from "../collab/presence-ui/collaborators-list-ui-controller.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -747,6 +751,8 @@ export class SpreadsheetApp {
   private collabPresenceUnsubscribe: (() => void) | null = null;
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
+  private collaboratorsListUi: CollaboratorsListUiController | null = null;
+  private collaboratorsListContainer: HTMLDivElement | null = null;
   private structuralConflictUi: StructuralConflictUiController | null = null;
   private pendingFormulaConflicts: any[] = [];
   private pendingStructuralConflicts: any[] = [];
@@ -1935,6 +1941,13 @@ export class SpreadsheetApp {
       this.conflictUiContainer.classList.add("conflict-ui-overlay");
       this.root.appendChild(this.conflictUiContainer);
 
+      // Collaborators list (names + colors), similar to a Google Docs avatar strip.
+      // This is an always-on overlay, but is non-interactive so it never blocks grid pointer events.
+      this.collaboratorsListContainer = document.createElement("div");
+      this.collaboratorsListContainer.classList.add("presence-collaborators-overlay");
+      this.root.appendChild(this.collaboratorsListContainer);
+      this.collaboratorsListUi = new CollaboratorsListUiController({ container: this.collaboratorsListContainer });
+
       this.conflictUi = new ConflictUiController({
         container: this.conflictUiContainer,
         sheetNameResolver: this.sheetNameResolver,
@@ -2043,6 +2056,28 @@ export class SpreadsheetApp {
             } satisfies GridPresence;
           });
 
+          // Update the collaborators list UI. This is intentionally decoupled from cursor/selection
+          // movement: the UI controller diffs relevant fields (name/color/sheet) to avoid reflowing
+          // on every remote cursor update.
+          if (this.collaboratorsListUi) {
+            const allPresences = presence.getRemotePresences({ includeOtherSheets: true });
+            const activeSheet = this.sheetId;
+            const collaborators: CollaboratorListEntry[] = allPresences.map((p: any) => {
+              const id = String(p?.id ?? "");
+              const clientId = typeof p?.clientId === "number" ? p.clientId : -1;
+              const key = `${id || "client"}:${clientId}`;
+              const name = String(p?.name ?? t("presence.anonymous"));
+              const color = String(p?.color || defaultPresenceColor);
+              const sheetId = String(p?.activeSheet ?? "");
+              const sheetName =
+                sheetId && sheetId !== activeSheet
+                  ? this.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId
+                  : null;
+              return { key, name, color, sheetName };
+            });
+            this.collaboratorsListUi.setCollaborators(collaborators);
+          }
+
           if (this.sharedGrid) {
             const headerRows = this.sharedHeaderRows();
             const headerCols = this.sharedHeaderCols();
@@ -2112,6 +2147,10 @@ export class SpreadsheetApp {
 
     this.conflictUi?.destroy();
     this.conflictUi = null;
+    this.collaboratorsListUi?.destroy();
+    this.collaboratorsListUi = null;
+    this.collaboratorsListContainer?.remove();
+    this.collaboratorsListContainer = null;
     this.structuralConflictUi?.destroy();
     this.structuralConflictUi = null;
     this.pendingFormulaConflicts = [];
