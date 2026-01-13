@@ -964,6 +964,15 @@ export class SpreadsheetApp {
   private selectedChartId: string | null = null;
   private readonly chartModels = new Map<string, ChartModel>();
   private readonly chartRenderer: ChartRendererAdapter;
+  /**
+   * Chart ids whose cached `ChartModel.series[*].{categories,values,xValues,yValues}.cache`
+   * need to be refreshed before the next on-screen render.
+   *
+   * We keep this separate from `chartModels` so we can avoid rescanning chart data on
+   * every scroll, while still ensuring charts that were off-screen during edits refresh
+   * when scrolled into view.
+   */
+  private readonly dirtyChartIds = new Set<string>();
   private readonly chartOverlayImages: ImageStore = { get: () => undefined, set: () => {} };
   private chartOverlayGeom: DrawingGridGeometry | null = null;
   private chartSelectionOverlay: DrawingOverlay | null = null;
@@ -2218,6 +2227,10 @@ export class SpreadsheetApp {
         this.scheduleAuditingUpdate();
       }
 
+      // Track which charts' underlying data ranges were touched so off-screen charts can
+      // refresh their cached series data when scrolled into view.
+      this.markChartsDirtyFromDeltas(payload?.deltas);
+
       // DocumentController changes can also include sheet-level view deltas
       // (e.g. frozen panes). In shared-grid mode, frozen panes must be pushed
       // down to the CanvasGridRenderer explicitly.
@@ -3143,6 +3156,63 @@ export class SpreadsheetApp {
       if (!this.uiReady) return;
       this.renderCharts(true);
     });
+  }
+
+  private markChartsDirtyFromDeltas(deltas: unknown): void {
+    if (!Array.isArray(deltas) || deltas.length === 0) return;
+
+    const charts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (charts.length === 0) return;
+
+    type RangeRect = { chartId: string; startRow: number; endRow: number; startCol: number; endCol: number };
+    const rangesBySheet = new Map<string, RangeRect[]>();
+
+    for (const chart of charts) {
+      for (const ser of chart.series ?? []) {
+        const refs = [ser.categories, ser.values, ser.xValues, ser.yValues];
+        for (const rangeRef of refs) {
+          if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
+          const parsed = parseA1Range(rangeRef);
+          if (!parsed) continue;
+          const resolvedSheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : chart.sheetId;
+          if (!resolvedSheetId) continue;
+
+          let list = rangesBySheet.get(resolvedSheetId);
+          if (!list) {
+            list = [];
+            rangesBySheet.set(resolvedSheetId, list);
+          }
+          list.push({
+            chartId: chart.id,
+            startRow: parsed.startRow,
+            endRow: parsed.endRow,
+            startCol: parsed.startCol,
+            endCol: parsed.endCol,
+          });
+        }
+      }
+    }
+
+    const affected = new Set<string>();
+    for (const delta of deltas) {
+      const sheetId = String((delta as any)?.sheetId ?? "");
+      const row = Number((delta as any)?.row);
+      const col = Number((delta as any)?.col);
+      if (!sheetId) continue;
+      if (!Number.isInteger(row) || row < 0) continue;
+      if (!Number.isInteger(col) || col < 0) continue;
+
+      const ranges = rangesBySheet.get(sheetId);
+      if (!ranges) continue;
+
+      for (const range of ranges) {
+        if (row < range.startRow || row > range.endRow) continue;
+        if (col < range.startCol || col > range.endCol) continue;
+        affected.add(range.chartId);
+      }
+    }
+
+    for (const id of affected) this.dirtyChartIds.add(id);
   }
 
   focus(): void {
@@ -8065,7 +8135,8 @@ export class SpreadsheetApp {
       if (pane.width <= 0 || pane.height <= 0) continue;
       if (!intersects(chartRect, pane)) continue;
 
-      const shouldUpdateModel = renderContent || !this.chartModels.has(chart.id);
+      const isDirty = this.dirtyChartIds.has(chart.id);
+      const shouldUpdateModel = renderContent || isDirty || !this.chartModels.has(chart.id);
       if (shouldUpdateModel) {
         const base = buildBaseModel(chart);
         if (chartDataTooLarge(chart)) {
@@ -8074,6 +8145,7 @@ export class SpreadsheetApp {
             placeholder: `Chart range too large (>${MAX_CHART_DATA_CELLS.toLocaleString()} cells)`,
           };
           this.chartModels.set(chart.id, base);
+          this.dirtyChartIds.delete(chart.id);
         } else {
           if (!provider) provider = createProvider();
 
@@ -8103,6 +8175,7 @@ export class SpreadsheetApp {
           });
 
           this.chartModels.set(chart.id, { ...base, series: nextSeries });
+          this.dirtyChartIds.delete(chart.id);
         }
       }
 
@@ -8123,6 +8196,10 @@ export class SpreadsheetApp {
     for (const id of this.chartModels.keys()) {
       if (keep.has(id)) continue;
       this.chartModels.delete(id);
+    }
+    for (const id of this.dirtyChartIds) {
+      if (keep.has(id)) continue;
+      this.dirtyChartIds.delete(id);
     }
 
     if (this.selectedChartId != null && !keep.has(this.selectedChartId)) {
@@ -12962,6 +13039,7 @@ export class SpreadsheetApp {
       }
 
       if (this.uiReady && chartDeltas && chartDeltas.length > 0) {
+        this.markChartsDirtyFromDeltas(chartDeltas);
         this.scheduleChartContentRefresh({ deltas: chartDeltas });
       }
     }
