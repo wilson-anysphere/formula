@@ -143,7 +143,13 @@ export class InMemoryVectorStore {
     const k = Math.floor(topK);
     if (k <= 0) return [];
 
-    const q = normalizeL2(vector);
+    const qVec = toFloat32Array(vector);
+    if (qVec.length !== this._dimension) {
+      throw new Error(
+        `InMemoryVectorStore.query() vector dimension mismatch: expected ${this._dimension}, got ${qVec.length}`
+      );
+    }
+    const q = normalizeL2(qVec);
 
     // Keep only the best `k` results while scanning. This avoids allocating an array
     // proportional to the number of records (which can be very large) when callers only

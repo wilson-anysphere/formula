@@ -109,3 +109,8 @@ test("InMemoryVectorStore.query keeps only topK candidates while scanning (no fu
   assert.ok(maxSortLen <= topK, `expected query to sort <= ${topK} items, sorted ${maxSortLen}`);
   assert.ok(pushCalls <= topK, `expected query to push <= ${topK} items, pushed ${pushCalls}`);
 });
+
+test("InMemoryVectorStore.query throws on query vector dimension mismatch", async () => {
+  const store = new InMemoryVectorStore({ dimension: 3 });
+  await assert.rejects(store.query([1, 0], 1), /expected 3/);
+});
