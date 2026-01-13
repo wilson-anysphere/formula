@@ -239,7 +239,8 @@ export function scoreRegionForQuery(region, schema, query) {
   }
 
   if (!Number.isFinite(score)) return 0;
-  return score;
+  // Ensure `0` consistently means "no match".
+  return Math.max(0, score);
 }
 
 /**

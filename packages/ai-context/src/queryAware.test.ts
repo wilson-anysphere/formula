@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { extractSheetSchema } from "./schema.js";
-import { pickBestRegionForQuery } from "./queryAware.js";
+import { pickBestRegionForQuery, scoreRegionForQuery } from "./queryAware.js";
 
 describe("queryAware region selection", () => {
   it("picks the Region/Revenue table for 'revenue by region'", () => {
@@ -121,5 +121,46 @@ describe("queryAware region selection", () => {
 
     expect(pickBestRegionForQuery(schema, "revenue")).toEqual({ type: "table", index: 0, range: "Sheet1!A1:B4" });
     expect(pickBestRegionForQuery(schema, "cost")).toEqual({ type: "table", index: 1, range: "Sheet1!D1:E4" });
+  });
+
+  it("picks a dataRegion when tables are absent", () => {
+    const schema = {
+      name: "Sheet1",
+      tables: [],
+      namedRanges: [],
+      dataRegions: [
+        {
+          range: "Sheet1!A1:B10",
+          hasHeader: true,
+          headers: ["Category", "Cost"],
+          inferredColumnTypes: ["string", "number"],
+          rowCount: 9,
+          columnCount: 2,
+        },
+        {
+          range: "Sheet1!D1:E10",
+          hasHeader: true,
+          headers: ["Region", "Revenue"],
+          inferredColumnTypes: ["string", "number"],
+          rowCount: 9,
+          columnCount: 2,
+        },
+      ],
+    } as any;
+
+    expect(pickBestRegionForQuery(schema, "cost")).toEqual({ type: "dataRegion", index: 0, range: "Sheet1!A1:B10" });
+  });
+
+  it("never returns negative scores", () => {
+    const headerOnlyRegion = {
+      range: "Sheet1!A1:A1",
+      hasHeader: true,
+      headers: ["Foo"],
+      inferredColumnTypes: ["string"],
+      rowCount: 0,
+      columnCount: 1,
+    } as any;
+
+    expect(scoreRegionForQuery(headerOnlyRegion, null, "bar")).toBe(0);
   });
 });
