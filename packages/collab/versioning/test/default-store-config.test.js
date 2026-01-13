@@ -70,3 +70,45 @@ test("CollabVersioning ignores accidental yjsStoreOptions.doc overrides", async 
   assert.ok(store instanceof YjsVersionStore);
   assert.equal(store.doc, doc);
 });
+
+test("CollabVersioning derives maxChunksPerTransaction from chunkSize when not provided", async (t) => {
+  {
+    const doc = new Y.Doc();
+    t.after(() => doc.destroy());
+
+    const versioning = createCollabVersioning({
+      // @ts-expect-error - minimal session stub for unit tests
+      session: { doc },
+      autoStart: false,
+      yjsStoreOptions: { chunkSize: 128 * 1024 },
+    });
+    t.after(() => versioning.destroy());
+
+    const store = versioning.manager.store;
+    assert.ok(store instanceof YjsVersionStore);
+    assert.equal(store.writeMode, "stream");
+    assert.equal(store.chunkSize, 128 * 1024);
+    // Default target is ~512KiB per streamed update.
+    assert.equal(store.maxChunksPerTransaction, 4);
+  }
+
+  {
+    const doc = new Y.Doc();
+    t.after(() => doc.destroy());
+
+    const versioning = createCollabVersioning({
+      // @ts-expect-error - minimal session stub for unit tests
+      session: { doc },
+      autoStart: false,
+      yjsStoreOptions: { chunkSize: 32 * 1024 },
+    });
+    t.after(() => versioning.destroy());
+
+    const store = versioning.manager.store;
+    assert.ok(store instanceof YjsVersionStore);
+    assert.equal(store.writeMode, "stream");
+    assert.equal(store.chunkSize, 32 * 1024);
+    // Cap defaults at 16 chunks/update to avoid overly chatty streams.
+    assert.equal(store.maxChunksPerTransaction, 16);
+  }
+});
