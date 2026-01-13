@@ -209,13 +209,13 @@ const EXCEL_MAX_COL_INDEX = 16383; // XFD (1-based 16384)
  * Supported forms:
  * - A / A1 / $A$1
  * - A: / A1:
-  * - A:A / A1:A
-  *
-  * Notes:
-  * - We only support ranges within a single column. If the end column prefix can't be
-  *   the start column (e.g. "A1:B"), return null to avoid suggesting wrong 2D ranges.
-  * - If a partial range has no explicit end token (e.g. "A1:"), the end column inherits
-  *   the start column token/prefix (matching the existing single-token behavior).
+ * - A:A / A1:A
+ *
+ * Notes:
+ * - We only support ranges within a single column. If the end column prefix can't be
+ *   the start column (e.g. "A1:B"), return null to avoid suggesting wrong 2D ranges.
+ * - If a partial range has no explicit end token (e.g. "A1:"), the end column inherits
+ *   the start column token/prefix (matching the existing single-token behavior).
  *
  * @param {string} arg
  * @returns {{
