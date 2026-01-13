@@ -45,6 +45,7 @@ export function AddStepMenu(props: {
   };
 
   const schemaRequiredReason = t("queryEditor.addStep.schemaRequired");
+  const schemaRequiredHint = t("queryEditor.addStep.schemaRequiredHint");
 
   const menuGroups = useMemo(() => {
     const schemaRequiredDisabled = !schemaReady;
@@ -289,7 +290,7 @@ export function AddStepMenu(props: {
                 </div>
               </div>
             ))}
-            {!schemaReady ? <div className="query-editor-add-step__menu-hint">{schemaRequiredReason}</div> : null}
+            {!schemaReady ? <div className="query-editor-add-step__menu-hint">{schemaRequiredHint}</div> : null}
           </div>
         ) : null}
       </div>
