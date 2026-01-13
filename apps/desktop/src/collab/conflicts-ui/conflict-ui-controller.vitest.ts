@@ -75,5 +75,41 @@ describe("ConflictUiController", () => {
     ui.destroy();
     container.remove();
   });
-});
 
+  it("falls back to remote user id when resolveUserLabel throws", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      resolveUserLabel: () => {
+        throw new Error("boom");
+      },
+    });
+
+    ui.addConflict({
+      id: "c3",
+      kind: "formula",
+      cell: { sheetId: "Sheet1", row: 0, col: 0 },
+      cellKey: "Sheet1:0:0",
+      localFormula: "=1",
+      remoteFormula: "=2",
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const remotePanel = container.querySelector<HTMLElement>('[data-testid="conflict-remote"]');
+    expect(remotePanel).not.toBeNull();
+
+    const label = remotePanel!.querySelector<HTMLElement>(".conflict-dialog__panel-label");
+    expect(label?.textContent).toBe("Theirs (u2)");
+
+    ui.destroy();
+    container.remove();
+  });
+});

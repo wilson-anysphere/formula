@@ -79,6 +79,43 @@ describe("StructuralConflictUiController", () => {
     container.remove();
   });
 
+  it("falls back to remote user id when resolveUserLabel throws", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      resolveUserLabel: () => {
+        throw new Error("boom");
+      },
+    });
+
+    ui.addConflict({
+      id: "c_label_throw",
+      type: "cell",
+      reason: "content",
+      sheetId: "Sheet1",
+      cell: "A1",
+      cellKey: "Sheet1:0:0",
+      local: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { value: 1 } },
+      remote: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { value: 2 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+
+    const remotePanel = container.querySelector<HTMLElement>('[data-testid="structural-conflict-remote"]');
+    expect(remotePanel).not.toBeNull();
+    const label = remotePanel!.querySelector<HTMLElement>(".conflict-dialog__panel-label");
+    expect(label?.textContent).toBe("Theirs (u2)");
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("renders conflict locations using sheet display names when sheetNameResolver is provided", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
