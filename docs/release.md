@@ -471,9 +471,13 @@ Verification (signed artifacts):
 
 Timestamping:
 
+- Authenticode timestamping embeds a trusted signing time in the signature so it remains valid after
+  the code signing certificate expires.
 - The Authenticode timestamp server is configured in `apps/desktop/src-tauri/tauri.conf.json` under
   `bundle.windows.timestampUrl` (currently `https://timestamp.digicert.com`).
-  - Release CI preflight enforces this uses HTTPS (see `scripts/ci/check-windows-timestamp-url.mjs`).
+  - Release CI preflight enforces this uses HTTPS to avoid sending/receiving timestamp requests over
+    insecure HTTP and to reduce the risk of MITM tampering (see
+    `scripts/ci/check-windows-timestamp-url.mjs`).
 - If a release fails due to timestamping/network issues, switch `timestampUrl` to another **HTTPS**
   timestamp server provided/recommended by your signing certificate vendor and re-run the workflow.
   - For a one-off fallback without committing a config change, re-run the release workflow via
