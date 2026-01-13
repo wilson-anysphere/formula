@@ -128,11 +128,16 @@ echo "✓ Essential packages installed"
 echo ""
 echo "=== Checking Development Tools ==="
 
-# Node.js (via nvm or direct)
+# Node.js (>=22 recommended; keep in sync with CI/release workflows)
 if ! command -v node &> /dev/null; then
   echo "⚠️  Node.js not found. Install via nvm or your preferred method."
 else
-  echo "✓ Node.js: $(node --version)"
+  node_version="$(node --version)"
+  echo "✓ Node.js: ${node_version}"
+  node_major="$(node -p "process.versions.node.split('.')[0]")"
+  if [ "${node_major}" -lt 22 ]; then
+    echo "⚠️  Node.js ${node_version} detected; CI/release workflows run on Node 22. Consider upgrading for maximum parity."
+  fi
 fi
 
 # Rust
