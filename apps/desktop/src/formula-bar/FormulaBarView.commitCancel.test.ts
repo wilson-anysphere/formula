@@ -273,6 +273,105 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commitEdit() closes the function picker if it is open", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    view.textarea.value = "=1";
+    view.textarea.setSelectionRange(2, 2);
+    view.textarea.dispatchEvent(new Event("input"));
+    view.textarea.blur();
+
+    view.commitEdit();
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=1", { reason: "command", shift: false });
+    expect(view.model.isEditing).toBe(false);
+    expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("cancelEdit() closes the function picker if it is open", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "orig", value: null });
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    view.textarea.blur();
+
+    view.cancelEdit();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.textarea.value).toBe("orig");
+    expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("commitEdit()/cancelEdit() clear hover + reference highlights", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel, onHoverRange, onReferenceHighlights });
+    view.setActiveCell({ address: "A1", input: "=A1", value: null });
+    view.textarea.focus();
+
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
+
+    view.textarea.blur();
+    view.commitEdit("enter", false);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
+
+    // Start editing again so we can verify cancelEdit clears overlays too.
+    view.textarea.focus();
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toEqual(parseA1Range("A1"));
+    expect((onReferenceHighlights.mock.calls.at(-1)?.[0] ?? []).length).toBeGreaterThan(0);
+
+    view.textarea.blur();
+    view.cancelEdit();
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
+
+    host.remove();
+  });
+
   it("closes the function picker when canceling via ✕", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
