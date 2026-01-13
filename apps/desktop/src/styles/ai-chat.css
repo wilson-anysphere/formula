@@ -350,6 +350,12 @@
   display: inline-flex;
 }
 
+.ai-chat-panel__attachment-button-wrap .ai-chat-panel__attachment-button:disabled {
+  /* Ensure the wrapper span receives hover events so the `title` tooltip shows even when
+     the nested button is disabled (many browsers suppress tooltips on disabled controls). */
+  pointer-events: none;
+}
+
 .ai-chat-panel__attachment-button {
   padding: 4px 8px;
   border: 1px solid var(--border);
