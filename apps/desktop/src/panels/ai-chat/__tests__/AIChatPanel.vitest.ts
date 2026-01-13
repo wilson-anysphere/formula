@@ -531,6 +531,55 @@ describe("AIChatPanel attachments UI", () => {
     });
   });
 
+  it("shows a toast when attach table is clicked but tables are unavailable", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    // Simulate a stale render where the button appears enabled, but by the time the user clicks
+    // there are no tables.
+    const getTableOptions = vi
+      .fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getTableOptions"]>>()
+      .mockImplementationOnce(() => [{ name: "SalesTable" }])
+      .mockImplementationOnce(() => []);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getTableOptions,
+        }),
+      );
+    });
+
+    const attachTableBtn = container.querySelector('[data-testid="ai-chat-attach-table"]') as HTMLButtonElement | null;
+    expect(attachTableBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachTableBtn?.disabled).toBe(false);
+
+    await act(async () => {
+      attachTableBtn!.click();
+    });
+
+    const toast = toastRoot.querySelector('[data-testid="toast"]');
+    expect(toast?.textContent).toContain("No tables available");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("shows a toast when attach formula is clicked but no formula is available", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
@@ -642,6 +691,54 @@ describe("AIChatPanel attachments UI", () => {
     const wrap = attachChartBtn?.parentElement;
     expect(wrap?.classList.contains("ai-chat-panel__attachment-button-wrap")).toBe(true);
     expect(wrap?.getAttribute("title")).toBe("No chart selected");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("shows a toast when attach chart is clicked but charts are unavailable", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    // Simulate a stale render where charts existed, but are gone by click time.
+    const getChartOptions = vi
+      .fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getChartOptions"]>>()
+      .mockImplementationOnce(() => [{ id: "chart_1", label: "Chart 1" }])
+      .mockImplementationOnce(() => []);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getChartOptions,
+        }),
+      );
+    });
+
+    const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
+    expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachChartBtn?.disabled).toBe(false);
+
+    await act(async () => {
+      attachChartBtn!.click();
+    });
+
+    const toast = toastRoot.querySelector('[data-testid="toast"]');
+    expect(toast?.textContent).toContain("No charts available");
 
     await act(async () => {
       root.unmount();

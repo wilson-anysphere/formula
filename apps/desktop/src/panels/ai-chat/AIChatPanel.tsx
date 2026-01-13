@@ -194,7 +194,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
   async function attachTable() {
     if (sending) return;
     const tables = safeInvoke(props.getTableOptions) ?? [];
-    if (!tables.length) return;
+    if (!tables.length) {
+      toastBestEffort(t("chat.attachTable.disabled"));
+      return;
+    }
     const picked = await showQuickPick(
       tables.map((t) => ({
         label: t.name,
@@ -228,7 +231,10 @@ export function AIChatPanel(props: AIChatPanelProps) {
 
     const attachment = safeInvoke(props.getChartAttachment);
     if (!attachment) {
-      toastBestEffort(chartDisabledReason ?? t("chat.attachChart.disabled.noSelection"));
+      const reason = props.getChartOptions
+        ? t("chat.attachChart.disabled.noCharts")
+        : t("chat.attachChart.disabled.noSelection");
+      toastBestEffort(reason);
       return;
     }
     addAttachment(attachment);
