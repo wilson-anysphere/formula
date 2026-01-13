@@ -46,6 +46,13 @@ class TriageFeatureScanTests(unittest.TestCase):
         self.assertIn("has_cell_images", features)
         self.assertFalse(features["has_cell_images"])
 
+    def test_scan_features_normalizes_opc_paths_with_dot_dot_and_backslashes(self) -> None:
+        # The Rust `xlsx-diff` tool normalizes OPC part names by resolving `..` segments.
+        # Feature scanning should do the same so malformed packages still get consistent
+        # fingerprints.
+        features = _scan_features(["xl\\_rels\\..\\vbaProject.bin"])
+        self.assertTrue(features["has_vba"])
+
 
 if __name__ == "__main__":
     unittest.main()

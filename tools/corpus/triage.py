@@ -84,10 +84,35 @@ def _step_skipped(reason: str) -> StepResult:
     return StepResult(status="skipped", details={"reason": reason})
 
 
+def _normalize_opc_path(path: str) -> str:
+    """Normalize an OPC part path.
+
+    Mirrors `xlsx_diff::normalize_opc_path` behavior:
+    - Convert `\\` to `/`
+    - Strip any leading `/`
+    - Collapse empty / `.` segments
+    - Resolve `..` segments without ever escaping the package root (extra `..` are ignored)
+    """
+
+    normalized = (path or "").replace("\\", "/").lstrip("/")
+    out: list[str] = []
+    for segment in normalized.split("/"):
+        match segment:
+            case "" | ".":
+                continue
+            case "..":
+                if out:
+                    out.pop()
+                continue
+            case _:
+                out.append(segment)
+    return "/".join(out)
+
+
 def _normalize_zip_entry_name(name: str) -> str:
     # ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but some producers do.
     # Normalize for comparisons while preserving the original entry name for `ZipFile.read`.
-    return name.replace("\\", "/").lstrip("/")
+    return _normalize_opc_path(name)
 
 
 def _scan_features(zip_names: list[str]) -> dict[str, Any]:
@@ -202,7 +227,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 if el.tag.split("}")[-1] != "Override":
                     continue
                 part = el.attrib.get("PartName") or ""
-                normalized_part = part.lstrip("/").replace("\\", "/")
+                normalized_part = _normalize_opc_path(part)
                 if normalized_part.casefold() == part_name_normalized.casefold():
                     content_type = el.attrib.get("ContentType")
                     break
@@ -216,17 +241,20 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
             from xml.etree import ElementTree as ET
 
             def _resolve_workbook_target(target: str) -> str:
-                target = (target or "").strip().replace("\\", "/")
+                target = (target or "").strip()
+                # Relationship targets are URIs; internal targets may include a fragment
+                # (e.g. `foo.xml#bar`). OPC part names do not include fragments.
+                target = target.split("#", 1)[0].replace("\\", "/")
                 if not target:
                     return ""
                 if target.startswith("/"):
-                    return posixpath.normpath(target.lstrip("/"))
+                    return _normalize_opc_path(target)
                 # Some producers incorrectly include the `xl/` prefix without a leading `/`,
                 # even though relationship targets are supposed to be relative to the source
                 # part (`xl/workbook.xml`). Treat this as a package-root-relative path.
                 if target.casefold().startswith("xl/"):
-                    return posixpath.normpath(target)
-                return posixpath.normpath(posixpath.join("xl", target))
+                    return _normalize_opc_path(target)
+                return _normalize_opc_path(posixpath.join("xl", target))
 
             rels_root = ET.fromstring(z.read(workbook_rels_name))
             for el in rels_root.iter():
