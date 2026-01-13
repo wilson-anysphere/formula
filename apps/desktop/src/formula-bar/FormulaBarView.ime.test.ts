@@ -146,4 +146,29 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
+
+  it("clears the composing flag on blur (so Enter can commit after blur)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new Event("compositionstart"));
+    view.textarea.blur();
+
+    const enterAfterBlur = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(enterAfterBlur);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit.mock.calls[0]?.[0]).toBe("=1+2");
+
+    host.remove();
+  });
 });

@@ -792,6 +792,9 @@ export class FormulaBarView {
     textarea.addEventListener("compositionend", () => {
       this.#isComposing = false;
     });
+    textarea.addEventListener("blur", () => {
+      this.#isComposing = false;
+    });
 
     // Non-AI function autocomplete dropdown (Excel-like).
     // Mount after registering FormulaBarView's own listeners so focus/input updates keep the model in sync first.
