@@ -1473,8 +1473,37 @@ jobs:
             exit 1
           fi
           echo "Using deb: ${deb}"
+
+          echo "::group::dpkg -I ${deb}"
+          dpkg -I "${deb}" | tee dpkg-info.txt
+          echo "::endgroup::"
+
+          for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
+            if ! grep -qi "$needle" dpkg-info.txt; then
+              echo "::error::Expected runtime dependency '$needle' missing from dpkg -I output for ${deb}"
+              exit 1
+            fi
+          done
+
           tmpdir="$(mktemp -d)"
           dpkg-deb -x "${deb}" "${tmpdir}"
+
+          bin="${tmpdir}/usr/bin/formula-desktop"
+          if [[ ! -f "${bin}" ]]; then
+            echo "::error::Expected installed binary not found at ${bin} after extracting ${deb}"
+            echo "Extracted file tree (first 200 entries):"
+            find "${tmpdir}" -maxdepth 5 -type f -print | head -n 200
+            exit 1
+          fi
+
+          echo "::group::ldd ${bin}"
+          ldd "${bin}" | tee ldd.txt
+          echo "::endgroup::"
+          if grep -q "not found" ldd.txt; then
+            echo "::error::Missing shared library dependencies detected by ldd for ${bin}"
+            exit 1
+          fi
+
           python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
       - name: Report desktop bundle sizes
         env:
