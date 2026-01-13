@@ -490,6 +490,7 @@ are attached:
 
 1. Open the GitHub Release (draft) and confirm:
    - Updater metadata: `latest.json` and `latest.json.sig`
+   - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `x64` in the filename)
    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `arm64` in the filename)
@@ -598,6 +599,26 @@ are attached:
 4. Download/install on each platform (matching the architecture).
 5. Publish the release to make it visible to users and (if your updater endpoint references
    GitHub) available for auto-update.
+
+### Verifying installer checksums
+
+Each tagged release includes a `SHA256SUMS.txt` asset. To verify a download:
+
+1. Download the installer/bundle you want **and** `SHA256SUMS.txt` from the same release.
+2. Compute the SHA256 locally and compare it to the matching line in `SHA256SUMS.txt`:
+
+   ```bash
+   # macOS
+   shasum -a 256 Formula*.dmg
+
+   # Linux
+   sha256sum Formula*.AppImage
+   ```
+
+   ```powershell
+   # Windows (PowerShell)
+   Get-FileHash -Algorithm SHA256 .\Formula*.msi
+   ```
 
 Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
 

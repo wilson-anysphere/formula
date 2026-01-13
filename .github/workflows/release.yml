@@ -1235,3 +1235,37 @@ jobs:
 
           echo
           echo "Release asset verification passed."
+
+  checksums:
+    name: Generate SHA256SUMS.txt
+    needs:
+      - validate-updater-manifest
+      - verify-release-assets
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --dir release-assets
+
+      - name: Generate SHA256SUMS.txt
+        run: bash scripts/ci/generate-release-checksums.sh release-assets SHA256SUMS.txt
+
+      - name: Upload SHA256SUMS.txt to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
+            --repo "${{ github.repository }}" \
+            --clobber
