@@ -169,6 +169,21 @@ describe("tauri/api dynamic accessors", () => {
       expect(getTauriWindowHandleOrThrow()).toBe(handle);
     });
 
+    it("treats throwing getCurrent* accessors as unavailable and continues probing", () => {
+      const handle = { label: "fallback" };
+      (globalThis as any).__TAURI__ = {
+        window: {
+          getCurrentWebviewWindow: vi.fn(() => {
+            throw new Error("boom");
+          }),
+          getCurrentWindow: vi.fn(() => handle),
+        },
+      };
+
+      expect(getTauriWindowHandleOrNull()).toBe(handle);
+      expect(getTauriWindowHandleOrThrow()).toBe(handle);
+    });
+
     it("throws a distinct error when the window API exists but no handle can be resolved", () => {
       (globalThis as any).__TAURI__ = {
         window: {

@@ -103,12 +103,26 @@ export function getTauriWindowHandleOrNull(): any | null {
 
   // Tauri v2 exposes window handles via helper functions; keep this flexible since
   // we intentionally avoid a hard dependency on `@tauri-apps/api`.
+  const tryCall = (fn: unknown): any | null => {
+    if (typeof fn !== "function") return null;
+    try {
+      return (fn as (...args: any[]) => any).call(winApi);
+    } catch {
+      return null;
+    }
+  };
+
   const handle =
-    (typeof winApi.getCurrentWebviewWindow === "function" ? winApi.getCurrentWebviewWindow() : null) ??
-    (typeof winApi.getCurrentWindow === "function" ? winApi.getCurrentWindow() : null) ??
-    (typeof winApi.getCurrent === "function" ? winApi.getCurrent() : null) ??
-    winApi.appWindow ??
-    null;
+    tryCall(winApi.getCurrentWebviewWindow) ??
+    tryCall(winApi.getCurrentWindow) ??
+    tryCall(winApi.getCurrent) ??
+    (() => {
+      try {
+        return winApi.appWindow ?? null;
+      } catch {
+        return null;
+      }
+    })();
 
   return handle ?? null;
 }
