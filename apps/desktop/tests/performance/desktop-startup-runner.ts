@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 import {
   defaultDesktopBinPath,
@@ -30,6 +30,7 @@ function parseArgs(argv: string[]): {
   ttiTargetMs: number;
   allowInCi: boolean;
   enforce: boolean;
+  jsonPath: string | null;
 } {
   const args = [...argv];
   const envRuns = Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? "") || 20;
@@ -46,6 +47,7 @@ function parseArgs(argv: string[]): {
     ttiTargetMs: Math.max(1, envTtiTargetMs),
     allowInCi: false,
     enforce: envEnforce,
+    jsonPath: null as string | null,
   };
 
   while (args.length > 0) {
@@ -58,6 +60,7 @@ function parseArgs(argv: string[]): {
       out.windowTargetMs = Math.max(1, Number(args.shift()) || out.windowTargetMs);
     else if (arg === "--tti-target-ms" && args[0])
       out.ttiTargetMs = Math.max(1, Number(args.shift()) || out.ttiTargetMs);
+    else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
     else if (arg === "--allow-ci") out.allowInCi = true;
     else if (arg === "--enforce") out.enforce = true;
   }
@@ -82,7 +85,7 @@ function printSummary(summary: Summary): void {
 }
 
 async function main(): Promise<void> {
-  const { runs, timeoutMs, binPath: argBin, windowTargetMs, ttiTargetMs, allowInCi, enforce } = parseArgs(
+  const { runs, timeoutMs, binPath: argBin, windowTargetMs, ttiTargetMs, allowInCi, enforce, jsonPath } = parseArgs(
     process.argv.slice(2),
   );
 
@@ -155,8 +158,30 @@ async function main(): Promise<void> {
 
   printSummary(summary);
 
+  if (jsonPath) {
+    const outputPath = resolve(jsonPath);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(
+      outputPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          platform: process.platform,
+          binPath,
+          runs: results.length,
+          samples: results,
+          summary,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
+
   if (enforce) {
-    const failed = summary.windowVisible.p95 > summary.windowVisible.targetMs || summary.tti.p95 > summary.tti.targetMs;
+    const failed =
+      summary.windowVisible.p95 > summary.windowVisible.targetMs || summary.tti.p95 > summary.tti.targetMs;
     if (failed) process.exitCode = 1;
   }
 }
