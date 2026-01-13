@@ -20,6 +20,7 @@ type Summary = {
   firstRender: { p50: number; p95: number };
   tti: { p50: number; p95: number; targetMs: number };
   enforce: boolean;
+  webviewLoaded?: { p50: number; p95: number };
 };
 
 function parseArgs(argv: string[]): {
@@ -78,6 +79,9 @@ function printSummary(summary: Summary): void {
       `runs=${summary.runs}`,
       `windowVisible(${windowStatus} p50=${summary.windowVisible.p50}ms,p95=${summary.windowVisible.p95}ms,target=${summary.windowVisible.targetMs}ms)`,
       `firstRender(p50=${summary.firstRender.p50}ms,p95=${summary.firstRender.p95}ms)`,
+      summary.webviewLoaded
+        ? `webviewLoaded(p50=${summary.webviewLoaded.p50}ms,p95=${summary.webviewLoaded.p95}ms)`
+        : "webviewLoaded(n/a)",
       `tti(${ttiStatus} p50=${summary.tti.p50}ms,p95=${summary.tti.p95}ms,target=${summary.tti.targetMs}ms)`,
       summary.enforce ? "enforced=1" : "enforced=0",
     ].join(" "),
@@ -135,7 +139,16 @@ async function main(): Promise<void> {
     .map((r) => r.firstRenderMs)
     .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
     .sort((a, b) => a - b);
+  const webviewLoaded = results
+    .map((r) => r.webviewLoadedMs)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    .sort((a, b) => a - b);
   const tti = results.map((r) => r.ttiMs).sort((a, b) => a - b);
+
+  // Mirror the benchmark harness policy for handling missing `webview_loaded_ms` values:
+  // skip reporting it unless we have a representative sample.
+  const minWebviewLoadedFraction = 0.8;
+  const minWebviewLoadedRuns = Math.ceil(results.length * minWebviewLoadedFraction);
 
   const summary: Summary = {
     runs: results.length,
@@ -148,6 +161,14 @@ async function main(): Promise<void> {
       p50: percentile(firstRender, 0.5),
       p95: percentile(firstRender, 0.95),
     },
+    ...(webviewLoaded.length >= minWebviewLoadedRuns
+      ? {
+          webviewLoaded: {
+            p50: percentile(webviewLoaded, 0.5),
+            p95: percentile(webviewLoaded, 0.95),
+          },
+        }
+      : {}),
     tti: {
       p50: percentile(tti, 0.5),
       p95: percentile(tti, 0.95),
