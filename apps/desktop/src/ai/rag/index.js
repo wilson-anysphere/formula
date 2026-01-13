@@ -2,6 +2,7 @@ import { ContextManager } from "../../../../../packages/ai-context/src/contextMa
 import {
   HashEmbedder,
   IndexedDBBinaryStorage,
+  ChunkedLocalStorageBinaryStorage,
   LocalStorageBinaryStorage,
   SqliteVectorStore,
   indexWorkbook,
@@ -20,11 +21,66 @@ function defaultSqliteStorage(workbookId) {
 
   // Prefer IndexedDB for large SQLite exports (binary storage + higher quotas).
   if (hasIndexedDB) {
-    return new IndexedDBBinaryStorage({ namespace, workbookId, dbName: "formula.desktop.rag.sqlite" });
+    const primary = new IndexedDBBinaryStorage({ namespace, workbookId, dbName: "formula.desktop.rag.sqlite" });
+    // Backwards compatibility: older desktop builds used single-key base64 localStorage persistence.
+    // Also support the newer chunked localStorage format in case hosts opt into it.
+    const legacy = new LocalStorageBinaryStorage({ namespace, workbookId });
+    const chunked = new ChunkedLocalStorageBinaryStorage({ namespace, workbookId });
+
+    const bytesEqual = (a, b) => {
+      if (a.byteLength !== b.byteLength) return false;
+      for (let i = 0; i < a.byteLength; i += 1) {
+        if (a[i] !== b[i]) return false;
+      }
+      return true;
+    };
+
+    const migrate = async (data, source) => {
+      try {
+        await primary.save(data);
+        const check = await primary.load();
+        if (check && bytesEqual(check, data)) {
+          await source.remove?.();
+        }
+      } catch {
+        // ignore migration failures; callers will still get the legacy data for this session
+      }
+    };
+
+    return {
+      async load() {
+        const existing = await primary.load();
+        if (existing) return existing;
+
+        // Try legacy single-key storage first so we don't trigger chunked migration writes
+        // if we immediately plan to move the bytes into IndexedDB.
+        const legacyBytes = await legacy.load();
+        if (legacyBytes) {
+          await migrate(legacyBytes, legacy);
+          return legacyBytes;
+        }
+
+        const chunkedBytes = await chunked.load();
+        if (chunkedBytes) {
+          await migrate(chunkedBytes, chunked);
+          return chunkedBytes;
+        }
+
+        return null;
+      },
+      async save(data) {
+        await primary.save(data);
+      },
+      async remove() {
+        await primary.remove?.();
+        await legacy.remove?.();
+        await chunked.remove?.();
+      },
+    };
   }
 
   // Fallback for restricted environments that disable IndexedDB.
-  return new LocalStorageBinaryStorage({ namespace, workbookId });
+  return new ChunkedLocalStorageBinaryStorage({ namespace, workbookId });
 }
 
 export async function createDesktopRagSqlite(opts) {
