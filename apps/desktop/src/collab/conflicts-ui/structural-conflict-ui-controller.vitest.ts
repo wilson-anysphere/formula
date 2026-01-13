@@ -274,6 +274,40 @@ describe("StructuralConflictUiController", () => {
     container.remove();
   });
 
+  it("renders a token diff view when structural conflict ops include formulas", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+    });
+
+    ui.addConflict({
+      id: "c_formula",
+      type: "cell",
+      reason: "content",
+      sheetId: "Sheet1",
+      cell: "A1",
+      cellKey: "Sheet1:0:0",
+      local: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "=A1" } },
+      remote: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { formula: "=A2" } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+
+    const diff = container.querySelector<HTMLElement>('[data-testid="structural-conflict-formula-diff"]');
+    expect(diff).not.toBeNull();
+    expect(diff!.querySelector(".formula-diff-op--delete")).not.toBeNull();
+    expect(diff!.querySelector(".formula-diff-op--insert")).not.toBeNull();
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("resolves a move conflict via 'Use theirs destination' and removes it from the UI", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

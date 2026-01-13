@@ -1,6 +1,7 @@
 import { cellRefFromKey, numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 import { markKeybindingBarrier } from "../../keybindingBarrier.js";
+import { renderFormulaDiffDom } from "../../versioning/ui/formulaDiffDom.js";
 
 /**
  * A minimal DOM-based UI for resolving *structural* (move/delete-vs-edit) cell
@@ -135,6 +136,17 @@ export class StructuralConflictUiController {
       }),
     );
     dialog.appendChild(body);
+
+    const localFormula = extractFormulaFromOp(conflict.local);
+    const remoteFormula = extractFormulaFromOp(conflict.remote);
+    if (localFormula !== null || remoteFormula !== null) {
+      dialog.appendChild(
+        renderFormulaDiffDom(localFormula, remoteFormula, {
+          testid: "structural-conflict-formula-diff",
+          label: "Formula diff",
+        }),
+      );
+    }
 
     const actions = document.createElement("div");
     actions.className = "conflict-dialog__actions";
@@ -442,4 +454,18 @@ function formatRemoteLabel(remoteUserId, resolver) {
 
   const label = typeof resolved === "string" && resolved.trim() ? resolved : id;
   return `Theirs (${label})`;
+}
+
+/**
+ * @param {any} op
+ * @returns {string | null}
+ */
+function extractFormulaFromOp(op) {
+  if (!op || typeof op !== "object") return null;
+  let cell = null;
+  if (op.kind === "move") cell = op.cell ?? null;
+  else if (op.kind === "edit" || op.kind === "delete") cell = op.after ?? null;
+  if (!cell || typeof cell !== "object") return null;
+  const formula = cell.formula;
+  return typeof formula === "string" && formula.trim() ? formula : null;
 }

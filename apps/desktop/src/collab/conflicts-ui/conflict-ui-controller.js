@@ -1,7 +1,7 @@
 import { numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
 import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 import { markKeybindingBarrier } from "../../keybindingBarrier.js";
-import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "../../versioning/ui/formulaDiffRender.js";
+import { renderFormulaDiffDom } from "../../versioning/ui/formulaDiffDom.js";
 
 /**
  * A minimal DOM-based conflict UX for the desktop app.
@@ -145,8 +145,7 @@ export class ConflictUiController {
           ? { before: conflict.local.formula ?? null, after: conflict.remote.formula ?? null }
           : null;
     if (maybeFormulaDiff) {
-      const diff = renderFormulaDiffView(maybeFormulaDiff.before, maybeFormulaDiff.after);
-      if (diff) dialog.appendChild(diff);
+      dialog.appendChild(renderFormulaDiffDom(maybeFormulaDiff.before, maybeFormulaDiff.after, { testid: "conflict-formula-diff" }));
     }
 
     const actions = document.createElement("div");
@@ -371,51 +370,4 @@ function formatValue(value) {
   } catch {
     return String(value);
   }
-}
-
-/**
- * @param {string | null} before
- * @param {string | null} after
- * @returns {HTMLElement | null}
- */
-function renderFormulaDiffView(before, after) {
-  const root = document.createElement("div");
-  root.className = "conflict-dialog__formula-diff";
-  root.dataset.testid = "conflict-formula-diff";
-
-  const label = document.createElement("div");
-  label.className = "conflict-dialog__formula-diff-label";
-  label.textContent = "Diff";
-  root.appendChild(label);
-
-  const code = document.createElement("code");
-  code.className = "formula-diff-view";
-
-  const emptyBefore = isEffectivelyEmptyFormula(before);
-  const emptyAfter = isEffectivelyEmptyFormula(after);
-  if (emptyBefore && emptyAfter) {
-    code.classList.add("formula-diff-view--empty");
-    const marker = document.createElement("span");
-    marker.className = "formula-diff-empty-marker";
-    marker.textContent = "∅";
-    code.appendChild(marker);
-    root.appendChild(code);
-    return root;
-  }
-
-  const ops = diffFormulaToRenderOps(before, after);
-  for (const op of ops) {
-    const span = document.createElement("span");
-    span.className =
-      op.type === "insert"
-        ? "formula-diff-op formula-diff-op--insert"
-        : op.type === "delete"
-          ? "formula-diff-op formula-diff-op--delete"
-          : "formula-diff-op formula-diff-op--equal";
-    span.textContent = op.text;
-    code.appendChild(span);
-  }
-
-  root.appendChild(code);
-  return root;
 }
