@@ -68,6 +68,11 @@ function isEncryptedPrivateKey(privateKey) {
   const decoded = decodeBase64(trimmed);
   if (!decoded) return undefined;
 
+  // Some setups store the PEM contents base64-encoded in GitHub Secrets to avoid multiline
+  // formatting issues. Detect that by scanning the decoded bytes for PEM headers.
+  if (decoded.includes(Buffer.from("-----BEGIN ENCRYPTED PRIVATE KEY-----"))) return true;
+  if (decoded.includes(Buffer.from("-----BEGIN PRIVATE KEY-----"))) return false;
+
   // Raw Ed25519 secret key (32 bytes) or secret+public (64 bytes).
   if (decoded.length === 32 || decoded.length === 64) return false;
 

@@ -68,3 +68,11 @@ test("requires TAURI_KEY_PASSWORD for encrypted private keys", () => {
   }
 });
 
+test("passes with base64-encoded unencrypted PEM and empty password", () => {
+  const { privateKey } = generateKeyPairSync("ed25519");
+  const pem = privateKey.export({ format: "pem", type: "pkcs8" });
+  const b64 = Buffer.from(String(pem), "utf8").toString("base64");
+  const proc = run({ TAURI_PRIVATE_KEY: b64, TAURI_KEY_PASSWORD: "" });
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /preflight passed/i);
+});
