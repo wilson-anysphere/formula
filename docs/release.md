@@ -811,7 +811,7 @@ are attached:
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-universal` (macOS universal; sometimes `universal-apple-darwin`)
+   - `darwin-universal` (macOS universal updater payload; sometimes `universal-apple-darwin`)
    - `windows-x86_64` (Windows x64; sometimes `x86_64-pc-windows-msvc`)
    - `windows-aarch64` / `windows-arm64` (Windows ARM64; sometimes `aarch64-pc-windows-msvc`)
    - `linux-x86_64` (Linux; sometimes `x86_64-unknown-linux-gnu`)

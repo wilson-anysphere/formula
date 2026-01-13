@@ -487,9 +487,6 @@ async function main() {
     fatal("Missing GITHUB_TOKEN / GH_TOKEN (required to query/download draft release assets).");
   }
 
-  const expectedPlatforms = EXPECTED_PLATFORMS;
-  const expectedPlatformKeys = EXPECTED_PLATFORM_KEYS;
-
   const retryDelaysMs = [2000, 4000, 8000, 12000, 20000];
   /** @type {any | undefined} */
   let release;
@@ -695,293 +692,59 @@ async function main() {
   }
 
   const platforms = manifest?.platforms;
-  if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
-    errors.push(`latest.json missing required "platforms" object.`);
-  }
 
-  /** @type {Array<{ target: string; url: string; assetName: string }>} */
-  const missingAssets = [];
-  /** @type {Array<{ label: string; expectation: string }>} */
-  const missingTargets = [];
-  /** @type {Array<{ target: string; message: string }>} */
-  const invalidTargets = [];
-  /** @type {Array<{ target: string; url: string; assetName: string }>} */
-  const validatedTargets = [];
+  // Validate the per-platform updater entries (strict target keys + asset type checks).
+  // This is extracted so node:test can cover the tricky parts without GitHub API calls.
+  let platformValidation = validatePlatformEntries({ platforms, assetNames });
 
-  if (platforms && typeof platforms === "object" && !Array.isArray(platforms)) {
-    // Validate *every* platform entry, not just the required ones. If the manifest contains
-    // stale/invalid targets we want to catch them too.
-    for (const [target, entry] of Object.entries(platforms)) {
-      if (!entry || typeof entry !== "object") {
-        invalidTargets.push({ target, message: "platform entry is not an object" });
-        continue;
-      }
-
-      try {
-        expectNonEmptyString(`${target}.url`, /** @type {any} */ (entry).url);
-        expectNonEmptyString(`${target}.signature`, /** @type {any} */ (entry).signature);
-
-        // Ensure the signature string is plausibly a Tauri/minisign signature (base64 of either
-        // raw 64-byte Ed25519 signature bytes or a minisign wrapper structure).
-        const { keyId } = parseTauriUpdaterSignature(
-          /** @type {any} */ (entry).signature,
-          `${target}.signature`,
-        );
-        if (keyId && updaterPubkey?.keyId && keyId !== updaterPubkey.keyId) {
-          throw new Error(
-            `signature key id mismatch: expected ${updaterPubkey.keyId} but got ${keyId}`,
-          );
-        }
-      } catch (err) {
-        invalidTargets.push({
-          target,
-          message: err instanceof Error ? err.message : String(err),
-        });
-        continue;
-      }
-
-      let assetName = "";
-      try {
-        assetName = assetNameFromUrl(/** @type {any} */ (entry).url);
-      } catch (err) {
-        invalidTargets.push({
-          target,
-          message: `url is not a valid URL (${err instanceof Error ? err.message : String(err)})`,
-        });
-        continue;
-      }
-
-      if (!assetNames.has(assetName)) {
-        missingAssets.push({
-          target,
-          url: /** @type {any} */ (entry).url,
-          assetName,
-        });
-      }
-
-      validatedTargets.push({
-        target,
-        url: /** @type {any} */ (entry).url,
-        assetName,
-      });
-    }
-
-    // GitHub release assets can be eventually consistent right after upload. If the manifest
-    // references an asset we can't see yet, re-fetch the asset list a few times before failing.
-    if (missingAssets.length > 0) {
+  // GitHub release assets can be eventually consistent right after upload. If the manifest
+  // references an asset we can't see yet, re-fetch the asset list a few times before failing.
+    if (platformValidation.missingAssets.length > 0) {
       const refreshDelaysMs = [2000, 4000, 8000];
       for (const delay of refreshDelaysMs) {
         await sleep(delay);
-        try {
-          assets = await fetchAllReleaseAssets({ repo, releaseId, token });
-          ({ map: assetByName, names: assetNames } = indexAssetsByName(assets));
-        } catch {
-          // Ignore transient API errors; we'll fall back to the last-seen asset list.
-        }
+      try {
+        assets = await fetchAllReleaseAssets({ repo, releaseId, token });
+        ({ map: assetByName, names: assetNames } = indexAssetsByName(assets));
+      } catch {
+        // Ignore transient API errors; we'll fall back to the last-seen asset list.
+      }
 
-        const refreshedMissing = validatedTargets
-          .filter((t) => !assetNames.has(t.assetName))
-          .map((t) => ({ target: t.target, url: t.url, assetName: t.assetName }));
-
-        missingAssets.length = 0;
-        missingAssets.push(...refreshedMissing);
-
-        if (missingAssets.length === 0) {
-          break;
+      platformValidation = validatePlatformEntries({ platforms, assetNames });
+      if (platformValidation.missingAssets.length === 0) {
+        break;
         }
       }
     }
 
-    // Ensure platform URLs are unique (prevents collisions where multiple targets point at the same asset).
-    const urlToTargets = new Map();
-    for (const { target, url } of validatedTargets) {
-      const list = urlToTargets.get(url) ?? [];
-      list.push(target);
-      urlToTargets.set(url, list);
-    }
+  errors.push(...platformValidation.errors);
 
-    const duplicateUrls = [...urlToTargets.entries()].filter(([, targets]) => targets.length > 1);
-    if (duplicateUrls.length > 0) {
-      errors.push(
-        [
-          `Duplicate platform URLs in latest.json (target collision):`,
-          ...duplicateUrls
-            .slice()
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([url, targets]) => `  - ${targets.slice().sort().join(", ")} → ${url}`),
-        ].join("\n"),
-      );
-    }
-
-    // Ensure the manifest contains the expected *platform key* names.
-    const actualPlatformKeys = Object.keys(platforms).slice().sort();
-    const expectedKeySet = new Set(expectedPlatformKeys);
-    const expectedSortedKeys = expectedPlatformKeys.slice().sort();
-    const missingKeys = expectedSortedKeys.filter(
-      (k) => !Object.prototype.hasOwnProperty.call(platforms, k),
-    );
-    const unexpectedKeys = actualPlatformKeys.filter((k) => !expectedKeySet.has(k));
-    if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
-      errors.push(
-        [
-          `Unexpected latest.json.platforms keys (Tauri updater target identifiers).`,
-          ``,
-          `Expected (${expectedSortedKeys.length}):`,
-          ...expectedSortedKeys.map((k) => `  - ${k}`),
-          ``,
-          `Actual (${actualPlatformKeys.length}):`,
-          ...actualPlatformKeys.map((k) => `  - ${k}`),
-          ``,
-          ...(missingKeys.length > 0
-            ? [`Missing (${missingKeys.length}):`, ...missingKeys.map((k) => `  - ${k}`), ``]
-            : []),
-          ...(unexpectedKeys.length > 0
-            ? [`Unexpected (${unexpectedKeys.length}):`, ...unexpectedKeys.map((k) => `  - ${k}`), ``]
-            : []),
-          `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/ci/validate-updater-manifest.mjs together.`,
-        ].join("\n"),
-      );
-    }
-
-    // Asset name uniqueness is an extra safety net: for GitHub Releases, the asset name is the
-    // actual "identity" of the file. If two targets reference the same asset name, they are
-    // colliding even if the URL strings differ (e.g. querystrings/encoding differences).
-    const assetNameToTargets = new Map();
-    for (const { target, assetName } of validatedTargets) {
-      const list = assetNameToTargets.get(assetName) ?? [];
-      list.push(target);
-      assetNameToTargets.set(assetName, list);
-    }
-
-    const duplicateAssets = [...assetNameToTargets.entries()].filter(([, targets]) => targets.length > 1);
-    if (duplicateAssets.length > 0) {
-      errors.push(
-        [
-          `Duplicate platform assets in latest.json (multiple targets reference the same release asset):`,
-          ...duplicateAssets
-            .slice()
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([asset, targets]) => `  - ${targets.slice().sort().join(", ")} → ${asset}`),
-        ].join("\n"),
-      );
-    }
-
-    const validatedByTarget = new Map(validatedTargets.map((t) => [t.target, t]));
-
-    /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
-    const summaryRows = [];
-    /** @type {Array<{ target: string; url: string; assetName: string; expected: string }>} */
-    const wrongAssetTypes = [];
-
-    for (const expected of expectedPlatforms) {
-      const key = expected.key;
-      if (!Object.prototype.hasOwnProperty.call(platforms, key)) {
-        missingTargets.push({
-          label: expected.label,
-          expectation: `expected platform key ${JSON.stringify(key)}`,
-        });
-        continue;
-      }
-
-      const validated = validatedByTarget.get(key);
-      if (!validated) {
-        // Entry exists but was invalid; the invalid entry error should already be present, but keep
-        // the missing-target message tied to the human label.
-        missingTargets.push({
-          label: expected.label,
-          expectation: `platform key ${JSON.stringify(key)} exists but entry is invalid (missing url/signature?)`,
-        });
-        continue;
-      }
-
-      summaryRows.push({
-        label: expected.label,
-        key,
-        url: validated.url,
-        assetName: validated.assetName,
-      });
-
-      if (!expected.expectedAsset.matches(validated.assetName)) {
-        wrongAssetTypes.push({
-          target: key,
-          url: validated.url,
-          assetName: validated.assetName,
-          expected: expected.expectedAsset.description,
+  // Optional: sanity-check the format of each per-platform signature string (base64 minisign / Ed25519).
+  /** @type {Array<{ target: string; message: string }>} */
+  const signatureFormatErrors = [];
+  if (platforms && typeof platforms === "object" && !Array.isArray(platforms)) {
+    for (const [target, entry] of Object.entries(platforms)) {
+      if (!entry || typeof entry !== "object") continue;
+      const signature = /** @type {any} */ (entry).signature;
+      if (typeof signature !== "string") continue;
+      try {
+        const { keyId } = parseTauriUpdaterSignature(signature, `${target}.signature`);
+        if (keyId && updaterPubkey?.keyId && keyId !== updaterPubkey.keyId) {
+          signatureFormatErrors.push({
+            target,
+            message: `signature key id mismatch: expected ${updaterPubkey.keyId} but got ${keyId}`,
+          });
+        }
+      } catch (err) {
+        signatureFormatErrors.push({
+          target,
+          message: err instanceof Error ? err.message : String(err),
         });
       }
-    }
-
-    if (wrongAssetTypes.length > 0) {
-      errors.push(
-        [
-          `Updater asset type mismatch in latest.json.platforms:`,
-          ...wrongAssetTypes
-            .slice()
-            .sort((a, b) => a.target.localeCompare(b.target))
-            .map(
-              (t) =>
-                `  - ${t.target}: ${t.assetName} (from ${JSON.stringify(t.url)}; expected ${t.expected})`,
-            ),
-        ].join("\n"),
-      );
-    }
-
-    // Useful for debugging when the manifest contains extra targets.
-    const otherTargets = validatedTargets
-      .filter((t) => !expectedKeySet.has(t.target))
-      .sort((a, b) => a.target.localeCompare(b.target));
-
-    // Success: print a short summary (also write to the GitHub Actions step summary if available).
-    if (
-      errors.length === 0 &&
-      missingTargets.length === 0 &&
-      invalidTargets.length === 0 &&
-      missingAssets.length === 0
-    ) {
-      const allRows = [
-        ...summaryRows.map((row) => ({ target: row.key, assetName: row.assetName })),
-        ...otherTargets.map((t) => ({ target: t.target, assetName: t.assetName })),
-      ];
-      console.log(`Updater manifest validation passed for ${tag} (version ${expectedVersion}).`);
-      console.log(`\nUpdater manifest target → asset:\n${formatTargetAssetTable(allRows)}\n`);
-
-      const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
-      if (stepSummaryPath) {
-        const sha = crypto.createHash("sha256").update(readFileSync("latest.json")).digest("hex");
-        const sigSha = crypto
-          .createHash("sha256")
-          .update(readFileSync("latest.json.sig"))
-          .digest("hex");
-
-        const md = [
-          `## Updater manifest validation`,
-          ``,
-          `- Tag: \`${tag}\``,
-          `- Manifest version: \`${expectedVersion}\``,
-          `- latest.json sha256: \`${sha}\``,
-          `- latest.json.sig sha256: \`${sigSha}\``,
-          ``,
-          `### Targets`,
-          ``,
-          formatTargetAssetMarkdownTable(allRows),
-          ``,
-        ].join("\n");
-        // Overwrite the step summary rather than append (the job is dedicated to validation).
-        writeFileSync(stepSummaryPath, md, "utf8");
-      }
-
-      return;
     }
   }
 
-  if (missingTargets.length > 0) {
-    errors.push(
-      [
-        `Missing required platform targets in latest.json:`,
-        ...missingTargets.map((t) => `  - ${t.label} (${t.expectation})`),
-      ].join("\n"),
-    );
-  }
+  const invalidTargets = [...platformValidation.invalidTargets, ...signatureFormatErrors];
 
   if (invalidTargets.length > 0) {
     errors.push(
@@ -992,15 +755,56 @@ async function main() {
     );
   }
 
-  if (missingAssets.length > 0) {
+  if (platformValidation.missingAssets.length > 0) {
     errors.push(
       [
         `latest.json references assets that are not present on the GitHub Release:`,
-        ...missingAssets.map(
+        ...platformValidation.missingAssets.map(
           (a) => `  - ${a.target}: ${a.assetName} (from ${JSON.stringify(a.url)})`,
         ),
       ].join("\n"),
     );
+  }
+
+  // Success summary.
+  if (
+    errors.length === 0 &&
+    invalidTargets.length === 0 &&
+    platformValidation.missingAssets.length === 0
+  ) {
+    const allRows = platformValidation.validatedTargets.map((t) => ({
+      target: t.target,
+      assetName: t.assetName,
+    }));
+    console.log(`Updater manifest validation passed for ${tag} (version ${expectedVersion}).`);
+    console.log(`\nUpdater manifest target → asset:\n${formatTargetAssetTable(allRows)}\n`);
+
+    const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+    if (stepSummaryPath) {
+      const sha = crypto.createHash("sha256").update(readFileSync("latest.json")).digest("hex");
+      const sigSha = crypto
+        .createHash("sha256")
+        .update(readFileSync("latest.json.sig"))
+        .digest("hex");
+
+      const md = [
+        `## Updater manifest validation`,
+        ``,
+        `- Tag: \`${tag}\``,
+        `- Manifest version: \`${expectedVersion}\``,
+        `- latest.json sha256: \`${sha}\``,
+        `- latest.json.sig sha256: \`${sigSha}\``,
+        ``,
+        `### Targets`,
+        ``,
+        formatTargetAssetMarkdownTable(allRows),
+        ``,
+      ].join("\n");
+      // Overwrite the step summary rather than append (the job is dedicated to validation).
+      writeFileSync(stepSummaryPath, md, "utf8");
+    }
+
+    return;
   }
 
   if (errors.length > 0) {
@@ -1009,12 +813,12 @@ async function main() {
       platforms && typeof platforms === "object" && !Array.isArray(platforms)
         ? [
             `Manifest platforms (${Object.keys(platforms).length}):`,
-            ...(validatedTargets.length > 0
+            ...(platformValidation.validatedTargets.length > 0
               ? [
                   ``,
                   `Target → asset:`,
                   formatTargetAssetTable(
-                    validatedTargets.map((t) => ({
+                    platformValidation.validatedTargets.map((t) => ({
                       target: t.target,
                       assetName: assetNames.has(t.assetName)
                         ? t.assetName
