@@ -30,6 +30,11 @@ const TYPE_RTF: &str = "public.rtf"; // NSPasteboardTypeRTF
 const TYPE_PNG: &str = "public.png"; // NSPasteboardTypePNG
 const TYPE_TIFF: &str = "public.tiff"; // NSPasteboardTypeTIFF
 
+// TIFF clipboard payloads are often significantly larger than the corresponding PNG encoding (e.g.
+// uncompressed pixel buffers). Allow reading a larger TIFF payload so we can still convert to PNG
+// for IPC transport, while keeping the final PNG under `MAX_PNG_BYTES`.
+const MAX_TIFF_BYTES: usize = 4 * MAX_PNG_BYTES;
+
 // NSBitmapImageFileType values (from AppKit).
 const NSBITMAP_IMAGE_FILE_TYPE_TIFF: usize = 0; // NSBitmapImageFileTypeTIFF
 const NSBITMAP_IMAGE_FILE_TYPE_PNG: usize = 4; // NSBitmapImageFileTypePNG
@@ -154,9 +159,9 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
             "TIFF payload was empty".to_string(),
         ));
     }
-    if tiff.len() > MAX_PNG_BYTES {
+    if tiff.len() > MAX_TIFF_BYTES {
         return Err(ClipboardError::OperationFailed(format!(
-            "TIFF exceeds maximum size ({MAX_PNG_BYTES} bytes)"
+            "TIFF exceeds maximum size ({MAX_TIFF_BYTES} bytes)"
         )));
     }
 
@@ -354,7 +359,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let image_png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES)
             .map(|bytes| STANDARD.encode(&bytes))
             .or_else(|| {
-                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_PNG_BYTES)?;
+                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_TIFF_BYTES)?;
                 let png = tiff_to_png_bytes(&tiff).ok()?;
                 Some(STANDARD.encode(&png))
             });
@@ -529,6 +534,43 @@ mod tests {
         let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
         let png2 =
             autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
+        let dims_after = png_dimensions(&png2).expect("valid png output");
+
+        assert_eq!(dims_before, dims_after);
+    }
+
+    #[test]
+    fn tiff_over_png_cap_is_still_converted_to_png() {
+        // AppKit is not thread-safe. The Rust test harness may execute unit tests on worker
+        // threads, so avoid calling into AppKit unless we're already on the process main thread.
+        let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
+        if !is_main {
+            return;
+        }
+
+        // 1x1 transparent PNG.
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO9C9VwAAAAASUVORK5CYII=",
+            )
+            .unwrap();
+        let dims_before = png_dimensions(&png).expect("valid png");
+
+        let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
+        assert!(
+            tiff.len() < MAX_PNG_BYTES,
+            "expected baseline TIFF to be small enough to pad"
+        );
+
+        // Simulate large `public.tiff` payloads produced by macOS apps by padding the TIFF bytes
+        // beyond the PNG cap, but still within the TIFF cap.
+        let mut padded = tiff;
+        padded.resize(MAX_PNG_BYTES + 1, 0);
+        assert!(padded.len() > MAX_PNG_BYTES);
+        assert!(padded.len() <= MAX_TIFF_BYTES);
+
+        let png2 =
+            autoreleasepool(|_| unsafe { tiff_to_png_bytes(&padded) }).expect("tiff -> png");
         let dims_after = png_dimensions(&png2).expect("valid png output");
 
         assert_eq!(dims_before, dims_after);
