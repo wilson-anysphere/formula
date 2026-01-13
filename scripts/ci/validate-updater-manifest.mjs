@@ -167,8 +167,7 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (x86_64)",
     expectedAsset: {
       description: `Linux updater bundle (*.AppImage; not .deb/.rpm)`,
-      matches: (assetName) =>
-        assetName.endsWith(".AppImage") && /(x86_64|amd64|x64)/i.test(assetName),
+      matches: (assetName) => assetName.endsWith(".AppImage"),
     },
   },
   {
@@ -176,8 +175,7 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (ARM64)",
     expectedAsset: {
       description: `Linux updater bundle (*.AppImage; not .deb/.rpm)`,
-      matches: (assetName) =>
-        assetName.endsWith(".AppImage") && /(aarch64|arm64)/i.test(assetName),
+      matches: (assetName) => assetName.endsWith(".AppImage"),
     },
   },
 ];
@@ -420,6 +418,66 @@ export function validatePlatformEntries({ platforms, assetNames }) {
       [
         `Invalid Windows updater asset naming in latest.json.platforms (expected arch token in filename):`,
         ...wrongWindowsAssetNames
+          .slice()
+          .sort((a, b) => a.target.localeCompare(b.target))
+          .map((t) => `  - ${t.target}: ${t.assetName} (${t.expected})`),
+      ].join("\n"),
+    );
+  }
+
+  // Guardrail for multi-arch Linux releases: ensure the updater entries reference *arch-specific*
+  // assets (x86_64 vs aarch64) and that the filenames include an arch token. This prevents
+  // multi-target runs from clobbering assets on the GitHub Release (same name uploaded twice) and
+  // prevents shipping a manifest that points the x86_64 updater target at an ARM64 AppImage (or
+  // vice versa).
+  const linuxX64Token = /(x64|x86[_-]64|amd64)/i;
+  const linuxArm64Token = /(arm64|aarch64)/i;
+  /** @type {Array<{ target: string; assetName: string; expected: string }>} */
+  const wrongLinuxAssetNames = [];
+
+  for (const key of ["linux-x86_64", "linux-aarch64"]) {
+    const validated = validatedByTarget.get(key);
+    if (!validated) continue;
+    const name = validated.assetName;
+    const hasX64 = linuxX64Token.test(name);
+    const hasArm64 = linuxArm64Token.test(name);
+
+    if (key === "linux-x86_64") {
+      if (!hasX64) {
+        wrongLinuxAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename contains x86_64 token (x86_64/amd64/x64)`,
+        });
+      } else if (hasArm64) {
+        wrongLinuxAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename does not contain arm64 token (arm64/aarch64)`,
+        });
+      }
+    } else if (key === "linux-aarch64") {
+      if (!hasArm64) {
+        wrongLinuxAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename contains arm64 token (arm64/aarch64)`,
+        });
+      } else if (hasX64) {
+        wrongLinuxAssetNames.push({
+          target: key,
+          assetName: name,
+          expected: `filename does not contain x86_64 token (x86_64/amd64/x64)`,
+        });
+      }
+    }
+  }
+
+  if (wrongLinuxAssetNames.length > 0) {
+    errors.push(
+      [
+        `Invalid Linux updater asset naming in latest.json.platforms (expected arch token in filename):`,
+        ...wrongLinuxAssetNames
           .slice()
           .sort((a, b) => a.target.localeCompare(b.target))
           .map((t) => `  - ${t.target}: ${t.assetName} (${t.expected})`),

@@ -75,7 +75,7 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (x86_64)",
     expectedUpdaterAsset: {
       description: "Linux updater bundle (*.AppImage)",
-      matches: (name) => name.endsWith(".AppImage") && /(x86_64|amd64|x64)/i.test(name),
+      matches: (name) => name.endsWith(".AppImage"),
     },
   },
   {
@@ -83,7 +83,7 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (ARM64)",
     expectedUpdaterAsset: {
       description: "Linux updater bundle (*.AppImage)",
-      matches: (name) => name.endsWith(".AppImage") && /(aarch64|arm64)/i.test(name),
+      matches: (name) => name.endsWith(".AppImage"),
     },
   },
 ];
@@ -762,9 +762,9 @@ async function verifyOnce({ apiBase, repo, tag, token, wantsManifestSig }) {
     const inlineSig = hasInlineSignature(entry);
     const expectedAssetType = EXPECTED_PLATFORMS.find((p) => p.key === platformKey)?.expectedUpdaterAsset ?? null;
     const expectedArchForAsset =
-      platformKey === "windows-x86_64"
+      platformKey === "windows-x86_64" || platformKey === "linux-x86_64"
         ? "x86_64"
-        : platformKey === "windows-aarch64"
+        : platformKey === "windows-aarch64" || platformKey === "linux-aarch64"
           ? "aarch64"
           : null;
 

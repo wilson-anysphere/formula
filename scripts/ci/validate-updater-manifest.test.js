@@ -145,6 +145,20 @@ test("fails when Windows updater assets do not include an arch token in the file
   );
 });
 
+test("fails when Linux updater assets do not include an arch token in the filename", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["linux-x86_64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula.AppImage";
+  assetNames.delete("Formula_0.1.0_amd64.AppImage");
+  assetNames.add("Formula.AppImage");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.ok(
+    result.errors.some((e) => e.includes("Invalid Linux updater asset naming in latest.json.platforms")),
+    `Expected Linux arch-token validation error, got:\n${result.errors.join("\n\n")}`,
+  );
+});
+
 test("fails when latest.json.platforms is missing a required platform key", () => {
   const { platforms, assetNames } = baseline();
   delete platforms["linux-x86_64"];
