@@ -8,8 +8,11 @@ import {
   approximateTokenCount,
   chunkToText,
   chunkWorkbook,
+  dedupeOverlappingResults,
   indexWorkbook,
   rectToA1,
+  rerankWorkbookResults,
+  searchWorkbookRag,
   workbookFromSpreadsheetApi,
 } from "../src/index.js";
 import { fromBase64, toBase64 } from "../src/store/binaryStorage.js";
@@ -88,6 +91,24 @@ async function smoke() {
   });
 
   rectToA1({ r0: 0, c0: 0, r1: 0, c1: 0 });
+
+  const reranked = rerankWorkbookResults("hello", [
+    { id: "a", score: 0.5, metadata: { workbookId: "wb", sheetName: "Sheet1", kind: "table", title: "Hello" } },
+    { id: "b", score: 0.5, metadata: { workbookId: "wb", sheetName: "Sheet1", kind: "dataRegion", title: "Other" } },
+  ]);
+  const deduped = dedupeOverlappingResults(reranked, { overlapRatioThreshold: 0.8 });
+  void deduped;
+
+  await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 3,
+    vectorStore: store,
+    embedder,
+    rerank: true,
+    dedupe: true,
+    signal: abortController.signal,
+  });
 
   workbookFromSpreadsheetApi({
     workbookId: "wb",
