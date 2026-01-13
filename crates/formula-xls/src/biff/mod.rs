@@ -17,7 +17,6 @@ pub(crate) mod encryption;
 pub(crate) mod globals;
 mod comments;
 pub(crate) mod defined_names;
-pub(crate) mod encryption;
 pub(crate) mod externsheet;
 pub(crate) mod formulas;
 pub(crate) mod print_settings;
@@ -40,7 +39,7 @@ pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_hyperlinks,
     parse_biff_sheet_manual_page_breaks,
     parse_biff_sheet_merged_cells, parse_biff_sheet_protection, parse_biff_sheet_row_col_properties,
-    parse_biff_sheet_print_settings, parse_biff_sheet_view_state, SheetRowColProperties,
+    parse_biff_sheet_view_state, SheetRowColProperties,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
