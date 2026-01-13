@@ -23,15 +23,17 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const quickPick = page.getByTestId("quick-pick");
-    await expect(quickPick).toBeVisible();
-    await expect(quickPick).toContainText("E2E_NameBoxRange");
+    const menu = page.getByTestId("name-box-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText("E2E_NameBoxRange");
 
-    await quickPick.getByRole("button", { name: /E2E_NameBoxRange/ }).click();
-    await expect(quickPick).toBeHidden();
+    await menu.getByRole("button", { name: "E2E_NameBoxRange", exact: true }).click();
+    await expect(menu).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
     await expect(page.getByTestId("selection-range")).toHaveText("B2:C3");
+    // Navigating from the dropdown should restore focus to the grid so keyboard shortcuts work.
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id)).toBe("grid");
   });
 
   test("selecting a table navigates to its full range", async ({ page }) => {
@@ -64,12 +66,12 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const quickPick = page.getByTestId("quick-pick");
-    await expect(quickPick).toBeVisible();
-    await expect(quickPick).toContainText("E2E_NameBoxTable");
+    const menu = page.getByTestId("name-box-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText("E2E_NameBoxTable");
 
-    await quickPick.getByRole("button", { name: /E2E_NameBoxTable/ }).click();
-    await expect(quickPick).toBeHidden();
+    await menu.getByRole("button", { name: "E2E_NameBoxTable", exact: true }).click();
+    await expect(menu).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("A5");
     await expect(page.getByTestId("selection-range")).toHaveText("A5:B6");
@@ -101,18 +103,18 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const quickPick = page.getByTestId("quick-pick");
-    await expect(quickPick).toBeVisible();
+    const menu = page.getByTestId("name-box-menu");
+    await expect(menu).toBeVisible();
 
-    const first = quickPick.getByRole("button", { name: /E2E_Dropdown_A/ });
-    const second = quickPick.getByRole("button", { name: /E2E_Dropdown_B/ });
+    const first = menu.getByRole("button", { name: "E2E_Dropdown_A", exact: true });
+    const second = menu.getByRole("button", { name: "E2E_Dropdown_B", exact: true });
 
     await expect(first).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(second).toBeFocused();
 
     await page.keyboard.press("Enter");
-    await expect(quickPick).toBeHidden();
+    await expect(menu).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("D5");
     await expect(page.getByTestId("selection-range")).toHaveText("D5:E6");
@@ -142,14 +144,15 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const quickPick = page.getByTestId("quick-pick");
-    await expect(quickPick).toBeVisible();
-    await quickPick.getByRole("button", { name: /E2E_CrossSheetRange/ }).click();
-    await expect(quickPick).toBeHidden();
+    const menu = page.getByTestId("name-box-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "E2E_CrossSheetRange", exact: true }).click();
+    await expect(menu).toBeHidden();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("active-cell")).toHaveText("A10");
     await expect(page.getByTestId("selection-range")).toHaveText("A10:B11");
+    await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id)).toBe("grid");
   });
 
   test("Escape closes the dropdown without changing selection", async ({ page }) => {
@@ -173,11 +176,11 @@ test.describe("formula bar name box dropdown", () => {
 
     await page.getByTestId("name-box-dropdown").click();
 
-    const quickPick = page.getByTestId("quick-pick");
-    await expect(quickPick).toBeVisible();
+    const menu = page.getByTestId("name-box-menu");
+    await expect(menu).toBeVisible();
 
     await page.keyboard.press("Escape");
-    await expect(quickPick).toBeHidden();
+    await expect(menu).toBeHidden();
 
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("selection-range")).toHaveText("A1");
