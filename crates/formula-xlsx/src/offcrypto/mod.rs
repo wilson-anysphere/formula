@@ -56,6 +56,7 @@ mod agile_decrypt;
 mod crypto;
 mod encryption_info;
 mod error;
+mod rc4;
 
 pub use agile::{
     decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
@@ -77,4 +78,3 @@ pub use encryption_info::{
     KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
 };
 pub use error::{OffCryptoError, Result};
-
