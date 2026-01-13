@@ -225,7 +225,10 @@ function truncateString(value: string, maxLength: number): string {
 function safeJsonStringify(value: unknown): string {
   try {
     const json = JSON.stringify(value);
-    return typeof json === "string" ? json : String(value);
+    if (typeof json === "string") return json;
+    // JSON.stringify can return `undefined` for unsupported values (e.g. undefined, functions).
+    // Preserve a JSON-parseable representation by stringifying their string form instead.
+    return JSON.stringify(String(value));
   } catch {
     try {
       const json = JSON.stringify(String(value));
