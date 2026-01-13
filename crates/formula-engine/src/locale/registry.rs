@@ -11,8 +11,8 @@ struct FunctionTranslationMaps {
 
 /// Translation table for Excel function identifiers.
 ///
-/// Data is stored outside the Rust source in simple TSV files under `locale/data/`.
-/// See `locale/data/README.md` for the TSV format and the generator scripts that keep
+/// Data is stored outside the Rust source in simple TSV files under `src/locale/data/`.
+/// See `src/locale/data/README.md` for the TSV format and the generator scripts that keep
 /// these tables complete and normalized.
 /// This keeps the code small and provides a straightforward path to scale to hundreds
 /// of translated functions by generating the TSV from upstream sources (e.g. Office
