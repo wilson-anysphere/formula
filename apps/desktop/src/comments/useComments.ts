@@ -7,16 +7,16 @@ import type { Comment } from "@formula/collab-comments";
 export function useComments(
   doc: Y.Doc,
   cellRef: string | null,
-  opts: { transact?: (fn: () => void) => void } = {},
+  opts: { transact?: (fn: () => void) => void; canComment?: () => boolean } = {},
 ): {
   manager: CommentManager;
   comments: Comment[];
 } {
   const manager = useMemo(() => {
     return typeof opts.transact === "function"
-      ? createCommentManagerForDoc({ doc, transact: opts.transact })
-      : new CommentManager(doc);
-  }, [doc, opts.transact]);
+      ? createCommentManagerForDoc({ doc, transact: opts.transact, canComment: opts.canComment })
+      : new CommentManager(doc, { canComment: opts.canComment });
+  }, [doc, opts.transact, opts.canComment]);
   const [comments, setComments] = useState<Comment[]>([]);
 
   useEffect(() => {

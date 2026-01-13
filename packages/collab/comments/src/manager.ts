@@ -604,6 +604,17 @@ export function createCommentManagerForDoc(params: (
   const maybeNormalize = () => {
     if (didAttemptNormalize) return;
     if (!params.doc.share.get("comments")) return;
+    // View-only clients should not generate Yjs updates (including best-effort
+    // normalization transactions). If permissions are dynamic, we intentionally
+    // *do not* mark normalization as attempted so a later role upgrade (or other
+    // permission change) can enable normalization on the next write.
+    if (typeof params.canComment === "function") {
+      try {
+        if (!params.canComment()) return;
+      } catch {
+        return;
+      }
+    }
     // Only "finish" normalization once the comments root is known to be safe to
     // normalize (either it's a local `Y.Map`, or it's an Array schema where map
     // normalization doesn't apply).
