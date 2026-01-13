@@ -15,9 +15,10 @@
  * and ships an incomplete updater manifest.
  */
 import { readFileSync, writeFileSync, statSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { URL } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 
 /**
@@ -62,6 +63,238 @@ function formatTargetAssetMarkdownTable(rows) {
     `| --- | --- |`,
     ...sorted.map((r) => `| \`${r.target}\` | \`${r.assetName}\` |`),
   ].join("\n");
+}
+
+// Platform key mapping is intentionally strict.
+//
+// Source of truth:
+// - docs/desktop-updater-target-mapping.md
+//
+// Do NOT accept "alias" keys here (like Rust target triples). If Tauri/tauri-action changes
+// the platform key naming, we want this validator to fail loudly with an expected vs actual
+// diff so we can update the docs + verification logic together.
+const EXPECTED_PLATFORMS = [
+  {
+    key: "darwin-universal",
+    label: "macOS (universal)",
+    expectedAsset: {
+      description: `macOS updater archive (*.app.tar.gz)`,
+      matches: (assetName) => assetName.endsWith(".app.tar.gz"),
+    },
+  },
+  {
+    key: "windows-x86_64",
+    label: "Windows (x64)",
+    expectedAsset: {
+      description: `Windows updater installer (*.msi)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+    },
+  },
+  {
+    key: "windows-aarch64",
+    label: "Windows (ARM64)",
+    expectedAsset: {
+      description: `Windows updater installer (*.msi)`,
+      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+    },
+  },
+  {
+    key: "linux-x86_64",
+    label: "Linux (x86_64)",
+    expectedAsset: {
+      description: `Linux updater bundle (*.AppImage)`,
+      matches: (assetName) => assetName.endsWith(".AppImage"),
+    },
+  },
+];
+
+const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
+
+/**
+ * Validate the `platforms` section of a Tauri updater manifest (`latest.json`).
+ *
+ * Exported so node:test can cover the per-platform artifact type checks + collision guards without
+ * needing to hit the GitHub API.
+ *
+ * Note: this function does not attempt to refresh/re-fetch release assets for eventual consistency.
+ * The release workflow validator does that in `main()`.
+ *
+ * @param {{
+ *   platforms: any,
+ *   assetNames: Set<string>,
+ * }} opts
+ * @returns {{
+ *   errors: string[],
+ *   missingAssets: Array<{ target: string; url: string; assetName: string }>,
+ *   invalidTargets: Array<{ target: string; message: string }>,
+ *   validatedTargets: Array<{ target: string; url: string; assetName: string }>,
+ * }}
+ */
+export function validatePlatformEntries({ platforms, assetNames }) {
+  /** @type {string[]} */
+  const errors = [];
+  /** @type {Array<{ target: string; url: string; assetName: string }>} */
+  const missingAssets = [];
+  /** @type {Array<{ target: string; message: string }>} */
+  const invalidTargets = [];
+  /** @type {Array<{ target: string; url: string; assetName: string }>} */
+  const validatedTargets = [];
+
+  if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
+    errors.push(`latest.json missing required "platforms" object.`);
+    return { errors, missingAssets, invalidTargets, validatedTargets };
+  }
+
+  for (const [target, entry] of Object.entries(platforms)) {
+    if (!entry || typeof entry !== "object") {
+      invalidTargets.push({ target, message: "platform entry is not an object" });
+      continue;
+    }
+
+    try {
+      expectNonEmptyString(`${target}.url`, /** @type {any} */ (entry).url);
+      expectNonEmptyString(`${target}.signature`, /** @type {any} */ (entry).signature);
+    } catch (err) {
+      invalidTargets.push({
+        target,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+
+    let assetName = "";
+    try {
+      assetName = assetNameFromUrl(/** @type {any} */ (entry).url);
+    } catch (err) {
+      invalidTargets.push({
+        target,
+        message: `url is not a valid URL (${err instanceof Error ? err.message : String(err)})`,
+      });
+      continue;
+    }
+
+    if (!assetNames.has(assetName)) {
+      missingAssets.push({
+        target,
+        url: /** @type {any} */ (entry).url,
+        assetName,
+      });
+    }
+
+    validatedTargets.push({
+      target,
+      url: /** @type {any} */ (entry).url,
+      assetName,
+    });
+  }
+
+  // Ensure platform URLs are unique (prevents collisions where multiple targets point at the same asset).
+  const urlToTargets = new Map();
+  for (const { target, url } of validatedTargets) {
+    const list = urlToTargets.get(url) ?? [];
+    list.push(target);
+    urlToTargets.set(url, list);
+  }
+
+  const duplicateUrls = [...urlToTargets.entries()].filter(([, targets]) => targets.length > 1);
+  if (duplicateUrls.length > 0) {
+    errors.push(
+      [
+        `Duplicate platform URLs in latest.json (target collision):`,
+        ...duplicateUrls
+          .slice()
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([url, targets]) => `  - ${targets.slice().sort().join(", ")} → ${url}`),
+      ].join("\n"),
+    );
+  }
+
+  // Ensure the manifest contains the expected *platform key* names.
+  const actualPlatformKeys = Object.keys(platforms).slice().sort();
+  const expectedKeySet = new Set(EXPECTED_PLATFORM_KEYS);
+  const expectedSortedKeys = EXPECTED_PLATFORM_KEYS.slice().sort();
+  const missingKeys = expectedSortedKeys.filter(
+    (k) => !Object.prototype.hasOwnProperty.call(platforms, k),
+  );
+  const unexpectedKeys = actualPlatformKeys.filter((k) => !expectedKeySet.has(k));
+  if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
+    errors.push(
+      [
+        `Unexpected latest.json.platforms keys (Tauri updater target identifiers).`,
+        ``,
+        `Expected (${expectedSortedKeys.length}):`,
+        ...expectedSortedKeys.map((k) => `  - ${k}`),
+        ``,
+        `Actual (${actualPlatformKeys.length}):`,
+        ...actualPlatformKeys.map((k) => `  - ${k}`),
+        ``,
+        ...(missingKeys.length > 0
+          ? [`Missing (${missingKeys.length}):`, ...missingKeys.map((k) => `  - ${k}`), ``]
+          : []),
+        ...(unexpectedKeys.length > 0
+          ? [`Unexpected (${unexpectedKeys.length}):`, ...unexpectedKeys.map((k) => `  - ${k}`), ``]
+          : []),
+        `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/ci/validate-updater-manifest.mjs together.`,
+      ].join("\n"),
+    );
+  }
+
+  // Asset name uniqueness is an extra safety net: for GitHub Releases, the asset name is the
+  // actual "identity" of the file. If two targets reference the same asset name, they are
+  // colliding even if the URL strings differ (e.g. querystrings/encoding differences).
+  const assetNameToTargets = new Map();
+  for (const { target, assetName } of validatedTargets) {
+    const list = assetNameToTargets.get(assetName) ?? [];
+    list.push(target);
+    assetNameToTargets.set(assetName, list);
+  }
+
+  const duplicateAssets = [...assetNameToTargets.entries()].filter(([, targets]) => targets.length > 1);
+  if (duplicateAssets.length > 0) {
+    errors.push(
+      [
+        `Duplicate platform assets in latest.json (multiple targets reference the same release asset):`,
+        ...duplicateAssets
+          .slice()
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([asset, targets]) => `  - ${targets.slice().sort().join(", ")} → ${asset}`),
+      ].join("\n"),
+    );
+  }
+
+  // Per-platform updater artifact type checks.
+  const validatedByTarget = new Map(validatedTargets.map((t) => [t.target, t]));
+  /** @type {Array<{ target: string; url: string; assetName: string; expected: string }>} */
+  const wrongAssetTypes = [];
+  for (const expected of EXPECTED_PLATFORMS) {
+    const validated = validatedByTarget.get(expected.key);
+    if (!validated) continue;
+    if (!expected.expectedAsset.matches(validated.assetName)) {
+      wrongAssetTypes.push({
+        target: expected.key,
+        url: validated.url,
+        assetName: validated.assetName,
+        expected: expected.expectedAsset.description,
+      });
+    }
+  }
+
+  if (wrongAssetTypes.length > 0) {
+    errors.push(
+      [
+        `Updater asset type mismatch in latest.json.platforms:`,
+        ...wrongAssetTypes
+          .slice()
+          .sort((a, b) => a.target.localeCompare(b.target))
+          .map(
+            (t) =>
+              `  - ${t.target}: ${t.assetName} (from ${JSON.stringify(t.url)}; expected ${t.expected})`,
+          ),
+      ].join("\n"),
+    );
+  }
+
+  return { errors, missingAssets, invalidTargets, validatedTargets };
 }
 
 /**
@@ -365,49 +598,8 @@ async function main() {
     fatal("Missing GITHUB_TOKEN / GH_TOKEN (required to query/download draft release assets).");
   }
 
-  // Platform key mapping is intentionally strict.
-  //
-  // Source of truth:
-  // - docs/desktop-updater-target-mapping.md
-  //
-  // Do NOT accept "alias" keys here (like Rust target triples). If Tauri/tauri-action changes
-  // the platform key naming, we want this validator to fail loudly with an expected vs actual
-  // diff so we can update the docs + verification logic together.
-  const expectedPlatforms = [
-    {
-      key: "darwin-universal",
-      label: "macOS (universal)",
-      expectedAsset: {
-        description: `macOS updater archive (*.app.tar.gz)`,
-        matches: (assetName) => assetName.endsWith(".app.tar.gz"),
-      },
-    },
-    {
-      key: "windows-x86_64",
-      label: "Windows (x64)",
-      expectedAsset: {
-        description: `Windows updater installer (*.msi)`,
-        matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
-      },
-    },
-    {
-      key: "windows-aarch64",
-      label: "Windows (ARM64)",
-      expectedAsset: {
-        description: `Windows updater installer (*.msi)`,
-        matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
-      },
-    },
-    {
-      key: "linux-x86_64",
-      label: "Linux (x86_64)",
-      expectedAsset: {
-        description: `Linux updater bundle (*.AppImage)`,
-        matches: (assetName) => assetName.endsWith(".AppImage"),
-      },
-    },
-  ];
-  const expectedPlatformKeys = expectedPlatforms.map((p) => p.key);
+  const expectedPlatforms = EXPECTED_PLATFORMS;
+  const expectedPlatformKeys = EXPECTED_PLATFORM_KEYS;
 
   const retryDelaysMs = [2000, 4000, 8000, 12000, 20000];
   /** @type {any | undefined} */
@@ -969,6 +1161,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  fatal(err instanceof Error ? err.stack ?? err.message : String(err));
-});
+// Only execute the CLI when invoked as the entrypoint; allow importing this module from node:test.
+if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    fatal(err instanceof Error ? err.stack ?? err.message : String(err));
+  });
+}
