@@ -1,5 +1,5 @@
 import type { AIAuditEntry, AIAuditStore, AuditListFilters } from "@formula/ai-audit/browser";
-import { LocalStorageAIAuditStore, LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+import { BoundedAIAuditStore, LocalStorageAIAuditStore, LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
 
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 
@@ -100,7 +100,7 @@ async function resolveDesktopAIAuditStore(options: DesktopAIAuditStoreOptions = 
     // Best-effort fallback: keep audit logging functional even if sql.js fails to load
     // (e.g. blocked WASM fetch).
     return new LocalStorageAIAuditStore();
-  });
+  }).then((store) => new BoundedAIAuditStore(store));
   storePromiseByKey.set(storageKey, promise);
   return promise;
 }
