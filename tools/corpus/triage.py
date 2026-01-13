@@ -172,15 +172,86 @@ def _extract_critical_diff_parts(report: dict[str, Any]) -> set[str]:
     return parts
 
 
+def _extract_critical_diff_part_groups(report: dict[str, Any]) -> set[str]:
+    """Return diff part-group names containing CRITICAL diffs, if available.
+
+    Uses the Rust helper's per-part summaries when present:
+    - `parts_with_diffs`: list of `{part, group, critical, ...}`
+    - `critical_parts` + `part_groups`: fallback mapping
+
+    Returns normalized, lowercase group names (e.g. `rels`, `content_types`).
+    """
+
+    groups: set[str] = set()
+
+    steps = report.get("steps")
+    diff_step = steps.get("diff") if isinstance(steps, dict) else None
+    diff_details = diff_step.get("details") if isinstance(diff_step, dict) else {}
+    res = report.get("result") or {}
+
+    def _add_group(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        value = value.strip().casefold()
+        if value:
+            groups.add(value)
+
+    for container in (diff_details, res):
+        if not isinstance(container, dict):
+            continue
+
+        # Preferred schema: list of per-part summaries that includes a `group` field.
+        pwd = container.get("parts_with_diffs")
+        if isinstance(pwd, list):
+            for row in pwd:
+                if not isinstance(row, dict):
+                    continue
+                critical = row.get("critical")
+                if isinstance(critical, bool) or not isinstance(critical, int) or critical <= 0:
+                    continue
+                _add_group(row.get("group"))
+            if groups:
+                return groups
+
+        # Fallback schema: `critical_parts` list plus a `part_groups` mapping.
+        critical_parts = container.get("critical_parts")
+        part_groups = container.get("part_groups")
+        if isinstance(critical_parts, list) and isinstance(part_groups, dict):
+            for part in critical_parts:
+                if not isinstance(part, str):
+                    continue
+                group = part_groups.get(part)
+                _add_group(group)
+            if groups:
+                return groups
+
+    return groups
+
+
 def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
     """Return a high-signal category for round-trip diffs.
 
-    This is intentionally privacy-safe: it only looks at OPC part names (no XML paths/values).
+    This is intentionally privacy-safe: it only looks at OPC part names and part-group labels
+    (no XML paths/values).
     """
 
     res = report.get("result", {})
     if not isinstance(res, dict) or res.get("round_trip_ok") is not False:
         return None
+
+    # Prefer Rust helper part-group labels when available. This is more stable across formats
+    # (xlsx vs xlsb) and avoids fragile path-prefix heuristics.
+    critical_groups = _extract_critical_diff_part_groups(report)
+    if critical_groups:
+        if critical_groups == {"rels"}:
+            return "round_trip_rels"
+        if "content_types" in critical_groups:
+            return "round_trip_content_types"
+        if "styles" in critical_groups:
+            return "round_trip_styles"
+        if any(g.startswith("worksheet") for g in critical_groups):
+            return "round_trip_worksheets"
+        return "round_trip_other"
 
     critical_parts = {p.casefold() for p in _extract_critical_diff_parts(report)}
     if not critical_parts:
