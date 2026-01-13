@@ -18,6 +18,16 @@ fail() {
   exit 1
 }
 
+debug_list_bundle_roots() {
+  echo "::group::verify-linux-package-deps: debug bundle root listing"
+  for root in "${target_dirs[@]:-}"; do
+    echo "==> $root"
+    ls -lah "$root/release/bundle" 2>/dev/null || true
+    ls -lah "$root"/*/release/bundle 2>/dev/null || true
+  done
+  echo "::endgroup::"
+}
+
 require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -130,7 +140,11 @@ if [[ "${#bundle_dirs[@]}" -gt 0 ]]; then
 fi
 
 if [ "${#bundle_dirs[@]}" -eq 0 ]; then
-  fail "no Tauri bundle directories found (expected something like target/**/release/bundle)"
+  echo "::error::verify-linux-package-deps: no Tauri bundle directories found (expected something like target/**/release/bundle)" >&2
+  echo "Searched target dirs:" >&2
+  printf '  - %s\n' "${target_dirs[@]}" >&2
+  debug_list_bundle_roots
+  exit 1
 fi
 
 debs=()
@@ -164,11 +178,17 @@ if [[ "${#rpms[@]}" -gt 0 ]]; then
 fi
 
 if [ "${#debs[@]}" -eq 0 ]; then
-  fail "no .deb artifacts found under: ${bundle_dirs[*]}"
+  echo "::error::verify-linux-package-deps: no .deb artifacts found under bundle dirs:" >&2
+  printf '  - %s\n' "${bundle_dirs[@]}" >&2
+  debug_list_bundle_roots
+  exit 1
 fi
 
 if [ "${#rpms[@]}" -eq 0 ]; then
-  fail "no .rpm artifacts found under: ${bundle_dirs[*]}"
+  echo "::error::verify-linux-package-deps: no .rpm artifacts found under bundle dirs:" >&2
+  printf '  - %s\n' "${bundle_dirs[@]}" >&2
+  debug_list_bundle_roots
+  exit 1
 fi
 
 assert_contains_any() {
