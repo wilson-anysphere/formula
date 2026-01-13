@@ -278,3 +278,34 @@ test("searchWorkbookRag returns [] for topK<=0 without embedding or querying", a
   assert.equal(embedCalled, false);
   assert.equal(queryCalled, false);
 });
+
+test("searchWorkbookRag returns [] for empty queryText without embedding or querying", async () => {
+  let embedCalled = false;
+  let queryCalled = false;
+
+  const embedder = {
+    async embedTexts() {
+      embedCalled = true;
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query() {
+      queryCalled = true;
+      return [];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "   ",
+    workbookId: "wb",
+    topK: 3,
+    vectorStore,
+    embedder,
+  });
+
+  assert.deepEqual(results, []);
+  assert.equal(embedCalled, false);
+  assert.equal(queryCalled, false);
+});

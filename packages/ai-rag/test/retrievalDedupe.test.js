@@ -45,6 +45,24 @@ test("dedupeOverlappingResults does not dedupe across sheets", () => {
   assert.deepEqual(out.map((r) => r.id), ["a", "b", "c"]);
 });
 
+test("dedupeOverlappingResults does not dedupe across workbooks", () => {
+  const results = [
+    {
+      id: "a",
+      score: 1,
+      metadata: { workbookId: "wb1", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
+    },
+    {
+      id: "b",
+      score: 0.9,
+      metadata: { workbookId: "wb2", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 7, c1: 0 } },
+    },
+  ];
+
+  const out = dedupeOverlappingResults({ results });
+  assert.deepEqual(out.map((r) => r.id), ["a", "b"]);
+});
+
 test("dedupeOverlappingResults preserves distinct rects below the overlap threshold", () => {
   const results = [
     {
