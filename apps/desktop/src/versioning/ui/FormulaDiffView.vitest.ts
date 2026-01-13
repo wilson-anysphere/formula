@@ -36,4 +36,9 @@ describe("FormulaDiffView", () => {
     const html = renderToStaticMarkup(React.createElement(FormulaDiffView, { before: null, after: "='My Sheet'!A1" }));
     expect(html).toMatch(/(?:'|&#x27;)My Sheet(?:'|&#x27;)!A1/);
   });
+
+  it("re-adds quotes around sheet names that require quoting (e.g. hyphens)", () => {
+    const html = renderToStaticMarkup(React.createElement(FormulaDiffView, { before: null, after: "='Sheet-1'!A1" }));
+    expect(html).toMatch(/(?:'|&#x27;)Sheet-1(?:'|&#x27;)!A1/);
+  });
 });

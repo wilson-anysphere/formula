@@ -33,9 +33,91 @@ function escapeExcelSheetName(value: string): string {
   return value.replaceAll(`'`, `''`);
 }
 
-function tokenToText(token: Token): string {
+function isDigit(ch: string): boolean {
+  return ch >= "0" && ch <= "9";
+}
+
+function isAsciiLetter(ch: string): boolean {
+  return ch >= "A" && ch <= "Z" ? true : ch >= "a" && ch <= "z";
+}
+
+function isReservedUnquotedSheetName(name: string): boolean {
+  const lower = String(name ?? "").toLowerCase();
+  return lower === "true" || lower === "false";
+}
+
+function looksLikeA1CellReference(name: string): boolean {
+  // Mirrors the FormulaBar tokenizer rules: treat names like "A1" as requiring sheet quotes.
+  let i = 0;
+  let letters = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isAsciiLetter(ch)) break;
+    if (letters.length >= 3) return false;
+    letters += ch;
+    i += 1;
+  }
+
+  if (letters.length === 0) return false;
+
+  let digits = "";
+  while (i < name.length) {
+    const ch = name[i];
+    if (!ch || !isDigit(ch)) break;
+    digits += ch;
+    i += 1;
+  }
+
+  if (digits.length === 0) return false;
+  if (i !== name.length) return false;
+
+  const col = letters
+    .split("")
+    .reduce((acc, c) => acc * 26 + (c.toUpperCase().charCodeAt(0) - "A".charCodeAt(0) + 1), 0);
+  return col <= 16_384;
+}
+
+function looksLikeR1C1CellReference(name: string): boolean {
+  const upper = String(name ?? "").toUpperCase();
+  if (upper === "R" || upper === "C") return true;
+  if (!upper.startsWith("R")) return false;
+
+  let i = 1;
+  while (i < upper.length && isDigit(upper[i] ?? "")) i += 1;
+  if (i >= upper.length) return false;
+  if (upper[i] !== "C") return false;
+
+  i += 1;
+  while (i < upper.length && isDigit(upper[i] ?? "")) i += 1;
+  return i === upper.length;
+}
+
+function shouldQuoteSheetName(name: string): boolean {
+  const text = String(name ?? "");
+  if (!text) return true;
+  if (isReservedUnquotedSheetName(text)) return true;
+  if (looksLikeA1CellReference(text)) return true;
+  if (looksLikeR1C1CellReference(text)) return true;
+
+  // Unquoted sheet names follow identifier-like rules. Be conservative: if we see
+  // anything outside a small ASCII set, re-add quotes.
+  const first = text[0] ?? "";
+  if (!(isAsciiLetter(first) || first === "_")) return true;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] ?? "";
+    if (isAsciiLetter(ch) || isDigit(ch) || ch === "_" || ch === "." || ch === "$") continue;
+    return true;
+  }
+
+  return false;
+}
+
+function tokenToText(token: Token, nextToken: Token | null): string {
   if (token.type === "string") return `"${escapeExcelString(token.value)}"`;
-  if (token.type === "ident" && /\s/.test(token.value)) return `'${escapeExcelSheetName(token.value)}'`;
+  if (token.type === "ident" && nextToken?.type === "op" && nextToken.value === "!" && shouldQuoteSheetName(token.value)) {
+    return `'${escapeExcelSheetName(token.value)}'`;
+  }
   return token.value;
 }
 
@@ -133,10 +215,20 @@ export function FormulaDiffView({ before, after, className }: FormulaDiffViewPro
 
     for (let tokenIndex = 0; tokenIndex < op.tokens.length; tokenIndex += 1) {
       const token = op.tokens[tokenIndex]!;
+      let nextToken: Token | null = op.tokens[tokenIndex + 1] ?? null;
+      if (!nextToken) {
+        for (let nextOpIdx = opIndex + 1; nextOpIdx < ops.length; nextOpIdx += 1) {
+          const candidate = ops[nextOpIdx]?.tokens?.[0] ?? null;
+          if (candidate) {
+            nextToken = candidate;
+            break;
+          }
+        }
+      }
       if (shouldInsertLeadingSpace(prevPrevToken, prevToken, token)) {
         children.push(" ");
       }
-      children.push(tokenToText(token));
+      children.push(tokenToText(token, nextToken));
       prevPrevToken = prevToken;
       prevToken = token;
     }
