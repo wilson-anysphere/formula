@@ -7734,15 +7734,16 @@ fn bytecode_compile_diagnostics_reports_grid_and_range_limits() {
     // Out-of-bounds cell reference (column exceeds XFD).
     engine.set_cell_formula("Sheet1", "A1", "=XFE1").unwrap();
 
-    // Huge range that would require an enormous columnar buffer; bytecode compilation should skip it.
+    // Huge range: this should still be bytecode-eligible now that aggregates can iterate sparsely
+    // without materializing a full range buffer.
     engine
         .set_cell_formula("Sheet1", "B1", "=SUM(A1:XFD1048576)")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 2);
-    assert_eq!(stats.compiled, 0);
-    assert_eq!(stats.fallback, 2);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 1);
     assert_eq!(
         stats
             .fallback_reasons
@@ -7751,29 +7752,15 @@ fn bytecode_compile_diagnostics_reports_grid_and_range_limits() {
             .unwrap_or(0),
         1
     );
-    assert_eq!(
-        stats
-            .fallback_reasons
-            .get(&BytecodeCompileReason::ExceedsRangeCellLimit)
-            .copied()
-            .unwrap_or(0),
-        1
-    );
 
     let report = engine.bytecode_compile_report(usize::MAX);
-    assert_eq!(report.len(), 2);
+    assert_eq!(report.len(), 1);
 
     let a1 = report
         .iter()
         .find(|e| e.sheet == "Sheet1" && e.addr == parse_a1("A1").unwrap())
         .map(|e| e.reason.clone());
     assert_eq!(a1, Some(BytecodeCompileReason::ExceedsGridLimits));
-
-    let b1 = report
-        .iter()
-        .find(|e| e.sheet == "Sheet1" && e.addr == parse_a1("B1").unwrap())
-        .map(|e| e.reason.clone());
-    assert_eq!(b1, Some(BytecodeCompileReason::ExceedsRangeCellLimit));
 }
 
 #[test]

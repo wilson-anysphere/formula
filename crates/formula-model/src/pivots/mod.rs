@@ -5,8 +5,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-mod model;
 mod schema;
+mod model;
 pub mod slicers;
 
 pub use model::{
@@ -56,9 +56,7 @@ impl PivotKeyPart {
     pub fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => "(blank)".to_string(),
-            PivotKeyPart::Number(bits) => {
-                PivotValue::Number(f64::from_bits(*bits)).display_string()
-            }
+            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),

@@ -151,15 +151,11 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
         }
 
         seen.extend(pieces.iter().copied());
-        out.extend(
-            pieces
-                .into_iter()
-                .map(|range| ResolvedSheetRange {
-                    sheet,
-                    range,
-                    area_idx,
-                }),
-        );
+        out.extend(pieces.into_iter().map(|range| ResolvedSheetRange {
+            sheet,
+            range,
+            area_idx,
+        }));
     }
 
     out
@@ -171,6 +167,29 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
 /// `Vec<f64>` buffers for ranges like `A:A` on sparse sheets. When the cache is skipped, the
 /// bytecode runtime can still compute aggregates correctly by iterating only stored cells.
 pub(crate) const BYTECODE_SPARSE_RANGE_ROW_THRESHOLD: i32 = 262_144;
+
+/// Maximum number of cells the bytecode runtime is willing to materialize into an in-memory array.
+///
+/// This is a safety guard to avoid allocating enormous intermediate buffers for expressions that
+/// would otherwise require dense materialization (e.g. `A:A+1` on very large sheets). When the
+/// limit is exceeded, the runtime surfaces `#SPILL!` instead of attempting the allocation.
+pub(crate) const BYTECODE_MAX_RANGE_CELLS: usize = MAX_MATERIALIZED_ARRAY_CELLS;
+
+#[inline]
+fn range_should_iterate_sparse(range: ResolvedRange) -> bool {
+    let rows = range.rows();
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        return true;
+    }
+    let cols = range.cols();
+    if rows <= 0 || cols <= 0 {
+        return false;
+    }
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
+    cells > BYTECODE_MAX_RANGE_CELLS as i64
+}
 
 // Array aggregates (e.g. SUM({1,2,3,...})) are executed inside the bytecode runtime even when no
 // cell/range references are involved. These can be hot for large array literals or array-producing
@@ -1906,7 +1925,9 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let field_val = match args[1] {
         // `_FIELDACCESS` is an internal lowering builtin; callers may still provide a reference as
         // the field name via direct calls, so apply implicit intersection like normal scalar args.
-        Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(args[1].clone(), grid, base),
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[1].clone(), grid, base)
+        }
         _ => args[1].clone(),
     };
 
@@ -1982,7 +2003,9 @@ fn engine_value_to_bytecode(value: EngineValue) -> Value {
         }
         // Reference-producing values are not expected inside rich-value field payloads; treat them
         // as scalar type errors when surfaced.
-        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => {
+            Value::Error(ErrorKind::Value)
+        }
         // Lambdas cannot be represented in the bytecode runtime value model; match the engine's
         // cell-value conversion by surfacing `#CALC!`.
         EngineValue::Lambda(_) => Value::Error(ErrorKind::Calc),
@@ -3324,11 +3347,15 @@ fn fn_round_impl(args: &[Value], mode: RoundMode, grid: &dyn Grid, base: CellCoo
         return Value::Error(ErrorKind::Value);
     }
     let number = match &args[0] {
-        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[0].clone(), grid, base)),
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(deref_value_dynamic(args[0].clone(), grid, base))
+        }
         _ => None,
     };
     let digits = match &args[1] {
-        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[1].clone(), grid, base)),
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(deref_value_dynamic(args[1].clone(), grid, base))
+        }
         _ => None,
     };
     let number = number.as_ref().unwrap_or(&args[0]);
@@ -3364,11 +3391,15 @@ fn fn_mod(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     let n = match &args[0] {
-        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[0].clone(), grid, base)),
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(deref_value_dynamic(args[0].clone(), grid, base))
+        }
         _ => None,
     };
     let d = match &args[1] {
-        Value::Range(_) | Value::MultiRange(_) => Some(deref_value_dynamic(args[1].clone(), grid, base)),
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(deref_value_dynamic(args[1].clone(), grid, base))
+        }
         _ => None,
     };
     let n = n.as_ref().unwrap_or(&args[0]);
@@ -3852,7 +3883,7 @@ fn and_range(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -3946,7 +3977,7 @@ fn or_range(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -4058,7 +4089,7 @@ fn and_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -4170,7 +4201,7 @@ fn or_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -4887,7 +4918,7 @@ fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<Er
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -5004,7 +5035,7 @@ fn xor_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
             for (coord, v) in iter {
@@ -5095,8 +5126,12 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
-    let mut out =
-        String::with_capacity(left_str.as_ref().len().saturating_add(right_str.as_ref().len()));
+    let mut out = String::with_capacity(
+        left_str
+            .as_ref()
+            .len()
+            .saturating_add(right_str.as_ref().len()),
+    );
     out.push_str(left_str.as_ref());
     out.push_str(right_str.as_ref());
     Value::Text(out.into())
@@ -6058,7 +6093,10 @@ fn fn_sumif(
             return Value::Number(0.0);
         }
 
-        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        let cells = i64::from(rows)
+            .checked_mul(i64::from(cols))
+            .unwrap_or(i64::MAX);
+        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
             if let Some(iter) = grid.iter_cells() {
                 let row_delta = crit_range.row_start - sum_range.row_start;
                 let col_delta = crit_range.col_start - sum_range.col_start;
@@ -6336,7 +6374,10 @@ fn fn_sumifs(
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
             let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
@@ -6666,11 +6707,14 @@ fn fn_countifs(
     }
 
     let all_numeric = !numeric.is_empty() && numeric.len() == criteria.len();
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
         if let Some(iter) = grid.iter_cells() {
             let implicit_matches_all = criteria.iter().all(|c| c.matches(&EngineValue::Blank));
-            let total_cells = (rows as i64) * (cols as i64);
+            let total_cells = cells;
 
             // Track the set of (row_off, col_off) offsets where at least one input range contains a
             // stored (non-implicit-blank) cell. Offsets not present in this set are implicit blanks
@@ -7000,7 +7044,10 @@ fn fn_averageif(
             return Value::Error(ErrorKind::Div0);
         }
 
-        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        let cells = i64::from(rows)
+            .checked_mul(i64::from(cols))
+            .unwrap_or(i64::MAX);
+        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
             if let Some(iter) = grid.iter_cells() {
                 let row_delta = crit_range.row_start - avg_range.row_start;
                 let col_delta = crit_range.col_start - avg_range.col_start;
@@ -7310,8 +7357,11 @@ fn fn_averageifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
             let mut count = 0usize;
@@ -7702,8 +7752,11 @@ fn fn_minifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
         if let Some(iter) = grid.iter_cells() {
             let mut best: Option<f64> = None;
             let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
@@ -8023,8 +8076,11 @@ fn fn_maxifs(
     }
 
     let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+    let cells = i64::from(rows)
+        .checked_mul(i64::from(cols))
+        .unwrap_or(i64::MAX);
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD || cells > BYTECODE_MAX_RANGE_CELLS as i64 {
         if let Some(iter) = grid.iter_cells() {
             let mut best: Option<f64> = None;
             let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
@@ -8909,7 +8965,9 @@ fn parse_xmatch_match_mode(
             // implicit intersection based on the formula cell (matching `eval_scalar_arg` in the
             // AST evaluator).
             let v = match v {
-                Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(v.clone(), grid, base),
+                Value::Range(_) | Value::MultiRange(_) => {
+                    apply_implicit_intersection(v.clone(), grid, base)
+                }
                 _ => v.clone(),
             };
             if let Value::Error(e) = v {
@@ -8937,7 +8995,9 @@ fn parse_xmatch_search_mode(
             // implicit intersection based on the formula cell (matching `eval_scalar_arg` in the
             // AST evaluator).
             let v = match v {
-                Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(v.clone(), grid, base),
+                Value::Range(_) | Value::MultiRange(_) => {
+                    apply_implicit_intersection(v.clone(), grid, base)
+                }
                 _ => v.clone(),
             };
             if let Value::Error(e) = v {
@@ -9114,7 +9174,9 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     // values, but eagerly intersect references to match the AST evaluator's `eval_scalar_arg`
     // behavior.
     let if_not_found_intersected = if_not_found_arg.and_then(|v| match v {
-        Value::Range(_) | Value::MultiRange(_) => Some(apply_implicit_intersection(v.clone(), grid, base)),
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(apply_implicit_intersection(v.clone(), grid, base))
+        }
         _ => None,
     });
 
@@ -9365,9 +9427,7 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     }
                     let mut values = Vec::with_capacity(rows);
                     for row_offset in 0..rows {
-                        let raw_idx = row_offset
-                            .saturating_mul(arr.cols)
-                            .saturating_add(idx);
+                        let raw_idx = row_offset.saturating_mul(arr.cols).saturating_add(idx);
                         values.push(arr.values.get(raw_idx).cloned().unwrap_or(Value::Empty));
                     }
                     Value::Array(ArrayValue::new(rows, 1, values))
@@ -10003,7 +10063,7 @@ fn count_if_range_criteria(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
             let mut seen = 0usize;
@@ -10062,7 +10122,7 @@ fn count_if_range_criteria_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
             let mut seen = 0usize;
@@ -10344,7 +10404,7 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -10429,7 +10489,7 @@ fn sum_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut sum = 0.0;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -10511,7 +10571,7 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
             let mut count = 0usize;
@@ -10606,7 +10666,7 @@ fn sum_count_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut sum = 0.0;
             let mut count = 0usize;
@@ -10698,7 +10758,7 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
             for (coord, v) in iter {
@@ -10749,7 +10809,7 @@ fn count_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
             for (coord, v) in iter {
@@ -10800,7 +10860,7 @@ fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKin
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
             for (coord, v) in iter {
@@ -10857,7 +10917,7 @@ fn counta_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
             for (coord, v) in iter {
@@ -10912,7 +10972,7 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
 
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut non_blank = 0u64;
             for (coord, v) in iter {
@@ -10975,7 +11035,7 @@ fn countblank_range_on_sheet(
 
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut non_blank = 0u64;
             for (coord, v) in iter {
@@ -11034,7 +11094,7 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut out: Option<f64> = None;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -11119,7 +11179,7 @@ fn min_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut out: Option<f64> = None;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -11201,7 +11261,7 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut out: Option<f64> = None;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -11286,7 +11346,7 @@ fn max_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut out: Option<f64> = None;
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -11372,7 +11432,7 @@ fn count_if_range(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
             let mut seen = 0usize;
@@ -11440,7 +11500,7 @@ fn count_if_range_on_sheet(
         },
     );
 
-    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(range) {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
             let mut seen = 0usize;
@@ -11555,7 +11615,7 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
     let rows = a.rows();
     let cols = a.cols();
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+    if range_should_iterate_sparse(a) {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
             let mut best_error: Option<(i32, i32, u8, ErrorKind)> = None;
@@ -12268,14 +12328,8 @@ mod tests {
         }
 
         let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
-        let range_a = RangeRef::new(
-            Ref::new(0, 0, true, true),
-            Ref::new(row_end, 1, true, true),
-        );
-        let range_b = RangeRef::new(
-            Ref::new(0, 2, true, true),
-            Ref::new(row_end, 3, true, true),
-        );
+        let range_a = RangeRef::new(Ref::new(0, 0, true, true), Ref::new(row_end, 1, true, true));
+        let range_b = RangeRef::new(Ref::new(0, 2, true, true), Ref::new(row_end, 3, true, true));
 
         // Two different errors in the first (A) range:
         // - B1 (row 0, col 1) is earlier in row-major order than A2 (row 1, col 0).
@@ -12670,7 +12724,7 @@ mod tests {
         let base = CellCoord { row: 0, col: 0 };
         let locale = crate::LocaleConfig::en_us();
         let len = SIMD_ARRAY_MIN_LEN + 17;
- 
+
         let mut crit_values = Vec::with_capacity(len);
         let mut sum_values = Vec::with_capacity(len);
         let mut avg_values = Vec::with_capacity(len);
@@ -12685,15 +12739,19 @@ mod tests {
                 avg_values.push(Value::Number(i as f64));
             }
         }
- 
+
         let criteria_arr = ArrayValue::new(1, len, crit_values);
         let sum_arr = ArrayValue::new(1, len, sum_values);
         let avg_arr = ArrayValue::new(1, len, avg_values);
- 
+
         let criteria = Value::Text(Arc::from(">10"));
- 
+
         let sum_out = fn_sumif(
-            &[Value::Array(criteria_arr.clone()), criteria.clone(), Value::Array(sum_arr)],
+            &[
+                Value::Array(criteria_arr.clone()),
+                criteria.clone(),
+                Value::Array(sum_arr),
+            ],
             &grid,
             base,
             &locale,
@@ -12705,7 +12763,7 @@ mod tests {
             }
         }
         assert_eq!(sum_out, Value::Number(expected_sum));
- 
+
         let avg_out = fn_averageif(
             &[Value::Array(criteria_arr), criteria, Value::Array(avg_arr)],
             &grid,
@@ -12720,19 +12778,16 @@ mod tests {
                 expected_count += 1;
             }
         }
-        assert_eq!(
-            avg_out,
-            Value::Number(expected_sum / expected_count as f64)
-        );
+        assert_eq!(avg_out, Value::Number(expected_sum / expected_count as f64));
     }
- 
+
     #[test]
     fn sumif_averageif_array_numeric_criteria_propagate_errors() {
         let grid = ColumnarGrid::new(1, 1);
         let base = CellCoord { row: 0, col: 0 };
         let locale = crate::LocaleConfig::en_us();
         let len = SIMD_ARRAY_MIN_LEN + 8;
- 
+
         let mut crit_values = Vec::with_capacity(len);
         let mut sum_values = Vec::with_capacity(len);
         let mut avg_values = Vec::with_capacity(len);
@@ -12744,23 +12799,27 @@ mod tests {
         // Error at a matching index (15 > 10).
         sum_values[15] = Value::Error(ErrorKind::Div0);
         avg_values[15] = Value::Error(ErrorKind::Div0);
- 
+
         let criteria_arr = ArrayValue::new(1, len, crit_values);
         let sum_arr = ArrayValue::new(1, len, sum_values);
         let avg_arr = ArrayValue::new(1, len, avg_values);
- 
+
         let criteria = Value::Text(Arc::from(">10"));
- 
+
         assert_eq!(
             fn_sumif(
-                &[Value::Array(criteria_arr.clone()), criteria.clone(), Value::Array(sum_arr)],
+                &[
+                    Value::Array(criteria_arr.clone()),
+                    criteria.clone(),
+                    Value::Array(sum_arr)
+                ],
                 &grid,
                 base,
                 &locale,
             ),
             Value::Error(ErrorKind::Div0)
         );
- 
+
         assert_eq!(
             fn_averageif(
                 &[Value::Array(criteria_arr), criteria, Value::Array(avg_arr)],
@@ -12793,7 +12852,11 @@ mod tests {
         // SUMIFS(sum_range, criteria_range, criteria)
         assert_eq!(
             fn_sumifs(
-                &[Value::Array(sum_arr.clone()), Value::Array(criteria_arr.clone()), criteria.clone()],
+                &[
+                    Value::Array(sum_arr.clone()),
+                    Value::Array(criteria_arr.clone()),
+                    criteria.clone()
+                ],
                 &grid,
                 base,
                 &locale,
@@ -12818,7 +12881,12 @@ mod tests {
 
         // COUNTIFS(range, criteria)
         assert_eq!(
-            fn_countifs(&[Value::Array(criteria_arr), criteria], &grid, base, &locale),
+            fn_countifs(
+                &[Value::Array(criteria_arr), criteria],
+                &grid,
+                base,
+                &locale
+            ),
             Value::Number((len - 11) as f64)
         );
     }
