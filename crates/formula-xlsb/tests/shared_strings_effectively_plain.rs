@@ -215,7 +215,6 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_formula: None,
                 new_formula_flags: None,
                 new_rgcb: None,
-                new_formula_flags: None,
                 shared_string_index: None,
             },
             CellEdit {
@@ -226,7 +225,6 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_formula: None,
                 new_formula_flags: None,
                 new_rgcb: None,
-                new_formula_flags: None,
                 shared_string_index: None,
             },
         ],
