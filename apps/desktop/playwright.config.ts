@@ -50,6 +50,9 @@ const workers = Number.isFinite(parsedWorkers) ? Math.max(1, parsedWorkers) : 2;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Store `expect(...).toHaveScreenshot(...)` baselines in a stable, flat location that can be
+  // checked into git alongside the e2e specs.
+  snapshotPathTemplate: "{testDir}/__screenshots__/{testFilePath}/{arg}{ext}",
   // First-run Vite dependency optimization (and WASM/python worker boot) can exceed the default
   // Playwright timeout under heavy CI load. Use a slightly more forgiving default; individual
   // tests still override this when they need longer.
