@@ -25,6 +25,7 @@ jobs:
     needs: conflict-marker-guard
     # Desktop startup benchmarks require WebKitGTK 4.1 (Ubuntu 24.04+) and a headless display via Xvfb.
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
       contents: write
       pull-requests: write
