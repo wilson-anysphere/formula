@@ -1921,7 +1921,9 @@ export class SpreadsheetApp {
               startRow >= 0 &&
               endRow >= 0 &&
               startCol >= 0 &&
-              endCol >= 0
+              endCol >= 0 &&
+              startRow <= endRow &&
+              startCol <= endCol
             );
           };
 
@@ -1933,8 +1935,11 @@ export class SpreadsheetApp {
 
             const sheetName = typeof e?.sheetName === "string" ? e.sheetName.trim() : "";
             const range = e?.range;
-            const reference =
-              sheetName && isValidDocRange(range) ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
+            const reference = isValidDocRange(range)
+              ? sheetName
+                ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}`
+                : rangeToA1(range)
+              : null;
             namedRanges.push({ label: name, reference });
           }
 
@@ -1944,17 +1949,13 @@ export class SpreadsheetApp {
             const name = typeof table?.name === "string" ? table.name.trim() : "";
             if (!name) continue;
 
-            const sheetName = typeof table?.sheetName === "string" ? table.sheetName.trim() : "";
             const range = {
               startRow: table?.startRow,
               endRow: table?.endRow,
               startCol: table?.startCol,
               endCol: table?.endCol,
             };
-            const reference =
-              sheetName && isValidDocRange(range) ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
-            if (!reference) continue;
-            // Table navigation should always be actionable; omit broken table metadata from the menu.
+            const reference = isValidDocRange(range) ? `${name}[#All]` : null;
             tables.push({ label: name, reference });
           }
 
