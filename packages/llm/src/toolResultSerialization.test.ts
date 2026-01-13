@@ -31,6 +31,7 @@ describe("serializeToolResultForModel", () => {
     const payload = JSON.parse(serialized);
     expect(payload.tool).toBe("read_range");
     expect(payload.ok).toBe(true);
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
     expect(payload.data.shape).toEqual({ rows, cols });
 
     const previewRows = payload.data.values.length;
@@ -74,6 +75,7 @@ describe("serializeToolResultForModel", () => {
     const payload = JSON.parse(serialized);
     expect(payload.tool).toBe("filter_range");
     expect(payload.ok).toBe(true);
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
     expect(payload.data.range).toBe("Sheet1!A1:D2000");
     expect(payload.data.count).toBe(2_000);
     expect(payload.data.matching_rows.length).toBeLessThan(payload.data.count);
@@ -113,6 +115,7 @@ describe("serializeToolResultForModel", () => {
     const payload = JSON.parse(serialized);
     expect(payload.tool).toBe("detect_anomalies");
     expect(payload.ok).toBe(true);
+    expect(payload.timing).toEqual({ started_at_ms: 0, duration_ms: 1 });
     expect(payload.data.range).toBe("Sheet1!A1:A5000");
     expect(payload.data.method).toBe("zscore");
     expect(payload.data.total_anomalies).toBe(5_000);
