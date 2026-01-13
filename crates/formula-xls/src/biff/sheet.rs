@@ -856,7 +856,6 @@ fn parse_vertical_page_breaks_record(
             .insert(col.saturating_sub(1) as u32);
     }
 }
-
 #[derive(Debug, Clone, Copy)]
 struct Window2Flags {
     show_grid_lines: bool,
@@ -1863,7 +1862,6 @@ pub(crate) fn parse_biff8_sheet_formulas(
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<SheetFormulas, String> {
     let mut out = SheetFormulas::default();
-
     // Prefer the richer worksheet formula parser so we can resolve shared-formula indirections
     // (`PtgExp` via `SHRFMLA`/`ARRAY`) rather than always rendering `PtgExp` as `#UNKNOWN!`.
     let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;

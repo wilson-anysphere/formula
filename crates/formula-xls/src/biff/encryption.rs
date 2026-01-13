@@ -335,10 +335,6 @@ pub(crate) fn decrypt_workbook_stream(
             continue;
         }
 
-        if password.is_empty() {
-            return Err(DecryptError::PasswordRequired);
-        }
-
         let encryption = parse_filepass_record(biff_version, record.data)?;
         let encrypted_start = record
             .offset
@@ -1272,23 +1268,34 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_workbook_stream_requires_password_when_filepass_present() {
-        // Minimal BIFF8 stream: BOF + FILEPASS + EOF.
-        let bof_payload = [0x00, 0x06, 0x05, 0x00]; // BIFF8, workbook globals
-        let filepass_payload = [
-            0x00, 0x00, // wEncryptionType (XOR)
-            0x34, 0x12, // key
-            0x78, 0x56, // verifier
-        ];
-        let mut stream = [
-            record(records::RECORD_BOF_BIFF8, &bof_payload),
-            record(records::RECORD_FILEPASS, &filepass_payload),
-            record(records::RECORD_EOF, &[]),
-        ]
-        .concat();
+    fn rc4_decrypt_allows_empty_password_when_file_was_encrypted_with_empty_password() {
+        let password = "";
+        let salt: [u8; 16] = (0..16u8).collect::<Vec<_>>()[..].try_into().unwrap();
+        let key_len = 5;
 
-        let err = decrypt_workbook_stream(&mut stream, "").expect_err("expected error");
-        assert_eq!(err, DecryptError::PasswordRequired);
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(RECORD_BOF, &[0u8; 16]));
+        let filepass_record = make_filepass_rc4_record(password, salt, key_len);
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&filepass_record);
+
+        let payload = vec![0x42u8; 64];
+        plain.extend_from_slice(&record(RECORD_DUMMY, &payload));
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        let mut encrypted = plain.clone();
+        let filepass_len = u16::from_le_bytes([
+            encrypted[filepass_offset + 2],
+            encrypted[filepass_offset + 3],
+        ]) as usize;
+        let encrypted_start = filepass_offset + 4 + filepass_len;
+
+        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
+            .expect("encrypt");
+
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
     }
 
     #[test]

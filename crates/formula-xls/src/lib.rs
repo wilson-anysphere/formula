@@ -269,13 +269,18 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     import_xls_path_with_biff_reader(path.as_ref(), None, biff::read_workbook_stream_from_xls)
 }
 
-/// Import a legacy `.xls` workbook from disk using a password for BIFF8 `FILEPASS` encryption.
+/// Import a legacy `.xls` workbook from disk using a password for BIFF `FILEPASS` encryption.
 ///
 /// This supports BIFF5/BIFF8 `.xls` workbooks that use the legacy `FILEPASS` record for workbook
 /// password protection, including:
 /// - BIFF8 XOR obfuscation (`wEncryptionType=0x0000`)
 /// - BIFF8 RC4 "Standard Encryption" (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
 /// - BIFF8 RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
+///
+/// Notes on password handling:
+/// - BIFF8 RC4 *Standard* uses only the first 15 UTF-16 code units of the password (Excel truncation).
+/// - BIFF8 RC4 CryptoAPI uses the full password string (no 15-character truncation).
+/// - Some writers may emit an empty password; pass `""` to decrypt such files.
 pub fn import_xls_path_with_password(
     path: impl AsRef<Path>,
     password: &str,
@@ -336,7 +341,7 @@ fn import_xls_path_with_biff_reader(
         Err(other) => return Err(other),
     };
 
-    // Attempt to decrypt BIFF8 `FILEPASS` records when a password is provided. We do this before
+    // Attempt to decrypt BIFF `FILEPASS` records when a password is provided. We do this before
     // running any BIFF record parsers so downstream metadata scans see plaintext.
     let needs_decrypt = workbook_stream
         .as_deref()
@@ -361,6 +366,7 @@ fn import_xls_path_with_biff_reader(
         biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut decrypted);
         workbook_stream = Some(decrypted);
     }
+
     let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
@@ -1620,10 +1626,18 @@ fn import_xls_path_with_biff_reader(
                             Ok(parsed) => {
                                 for (cell_ref, formula) in parsed.formulas {
                                     let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                                    if !calamine_formula_failed && sheet.formula(anchor).is_some() {
-                                        // Prefer calamine's string representation when it is
-                                        // available, but fill any gaps (or entire sheets) from BIFF.
-                                        continue;
+                                    if !calamine_formula_failed {
+                                        if let Some(existing) = sheet.formula(anchor) {
+                                            // Prefer calamine's string representation when it is
+                                            // available, but fill any gaps from BIFF.
+                                            //
+                                            // Calamine can return `#UNKNOWN!` placeholders for
+                                            // formulas it cannot fully decode (e.g. shared-formula
+                                            // `PtgExp`), so allow BIFF parsing to overwrite those.
+                                            if !existing.contains("#UNKNOWN!") {
+                                                continue;
+                                            }
+                                        }
                                     }
 
                                     let Some(normalized) = normalize_formula_text(&formula) else {

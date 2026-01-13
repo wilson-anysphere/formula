@@ -37,16 +37,28 @@ crosses the 1024-byte boundary (to exercise RC4 per-block rekeying).
 - `import_xls_path` does **not** support encrypted workbooks and returns `ImportError::EncryptedWorkbook`.
 - `import_xls_path_with_password` supports these legacy `.xls` encryption schemes:
   - XOR obfuscation (`wEncryptionType=0x0000`)
-  - RC4 Standard (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
+  - RC4 “standard” (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0001`)
   - RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`)
 
 Note: In BIFF8, both RC4 variants use `wEncryptionType=0x0001`; the `subType` field distinguishes
 “RC4 standard” (`subType=0x0001`) from “RC4 CryptoAPI” (`subType=0x0002`).
 
+### Password semantics (Excel legacy)
+
+- **RC4 “standard” truncation:** only the first **15 UTF-16 code units** of the password are
+  significant; extra characters are ignored (so a 16-character password and its first 15 characters
+  are treated as equivalent).
+- **RC4 CryptoAPI:** uses the full password string (no 15-character truncation).
+- **Empty passwords:** third-party writers can emit a `FILEPASS` workbook with an empty password;
+  this is supported by the underlying key derivation. Excel UI flows may refuse to create such a
+  file, but we keep a fixture to ensure we handle it correctly.
+
 | File | Encryption scheme | BIFF version | Created with | Test password |
 |---|---|---:|---|---|
 | `biff8_xor_pw_open.xls` | XOR (legacy obfuscation) | BIFF8 | `cargo test -p formula-xls --test regenerate_encrypted_xls_fixtures -- --ignored` (this repo; writes a tiny CFB/BIFF stream via `cfb` `0.10`) | `password` |
 | `biff8_rc4_standard_pw_open.xls` | RC4 “standard” | BIFF8 | same as above | `password` |
+| `biff8_rc4_standard_pw_open_long_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `0123456789abcdef` (effective: `0123456789abcde`) |
+| `biff8_rc4_standard_pw_open_empty_password.xls` | RC4 “standard” | BIFF8 | generated from `basic.xls` (this repo) | `""` |
 | `biff8_rc4_cryptoapi_pw_open.xls` | RC4 (CryptoAPI) | BIFF8 | same as above; additionally used by `tests/import_encrypted_rc4_cryptoapi.rs` to validate `import_xls_path_with_password` | `correct horse battery staple` |
 
 ## Regenerating fixtures

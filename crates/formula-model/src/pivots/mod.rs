@@ -331,7 +331,7 @@ pub enum ShowAsType {
 ///
 /// This struct is part of the canonical pivot model (IPC/serialization friendly).
 /// `show_as: None` (or missing in serialized data) is treated as "normal".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValueField {
     pub source_field: PivotFieldRef,
