@@ -119,6 +119,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     if (rel === "ribbon/ribbonCommandRouter.ts") return false;
     if (rel.includes("/demo/")) return false;
     if (rel.includes("/__tests__/")) return false;
+    // Vitest entrypoints live under `src/` with a `.vitest.*` suffix; treat them like other tests.
+    // These files are not part of the shipped UI bundle and frequently contain hardcoded color
+    // literals in fixtures/assertions.
     if (/\.(test|spec|vitest)\.[jt]sx?$/.test(rel)) return false;
     return (
       rel.endsWith(".css") ||
