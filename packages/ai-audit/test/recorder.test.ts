@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { AIAuditRecorder } from "../src/recorder.js";
+import { FailingAIAuditStore } from "../src/failing-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
-import { FailingAIAuditStore } from "./failing-store.js";
 
 describe("AIAuditRecorder", () => {
   it("accumulates token usage, tool call approvals, and persists via the store", async () => {
