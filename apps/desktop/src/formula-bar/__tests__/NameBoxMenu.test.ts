@@ -155,4 +155,38 @@ describe("FormulaBarView name box dropdown menu", () => {
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
   });
+
+  it("closes on outside pointerdown and does not steal focus back to the name box", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    new FormulaBarView(host, {
+      onCommit: () => {},
+      getNameBoxMenuItems: () => [{ label: "MyRange", reference: "A1" }],
+    });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).toBeInstanceOf(HTMLInputElement);
+
+    const dropdown = host.querySelector<HTMLButtonElement>(".formula-bar-name-box-dropdown");
+    expect(dropdown).toBeInstanceOf(HTMLButtonElement);
+
+    dropdown!.click();
+    const overlay = document.querySelector<HTMLDivElement>('[data-testid="name-box-menu"]');
+    expect(overlay).toBeInstanceOf(HTMLDivElement);
+    expect(overlay?.hidden).toBe(false);
+
+    // Close via outside click.
+    const PointerEventCtor: ((type: string, init?: PointerEventInit) => Event) | undefined = (globalThis as any)
+      .PointerEvent as any;
+    const evt = PointerEventCtor
+      ? new (PointerEventCtor as any)("pointerdown", { bubbles: true, cancelable: true })
+      : new MouseEvent("pointerdown", { bubbles: true, cancelable: true });
+    document.body.dispatchEvent(evt);
+
+    expect(overlay?.hidden).toBe(true);
+    expect(dropdown?.getAttribute("aria-expanded")).toBe("false");
+    // Outside clicks should not force focus back to the name box (they should interact with the grid).
+    expect(document.activeElement).not.toBe(address);
+  });
 });
