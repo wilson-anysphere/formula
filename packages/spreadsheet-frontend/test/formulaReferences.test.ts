@@ -81,6 +81,47 @@ describe("extractFormulaReferences", () => {
     const { activeIndex } = extractFormulaReferences(input, input.length, input.length);
     expect(activeIndex).toBe(1);
   });
+
+  it("extracts named ranges when the resolver returns a range", () => {
+    const input = "=SUM(SalesData)";
+    const tokenStart = input.indexOf("SalesData");
+    const tokenEnd = tokenStart + "SalesData".length;
+
+    const { references } = extractFormulaReferences(input, 0, 0, {
+      resolveName: (name) =>
+        name === "SalesData" ? { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 } : null
+    });
+
+    expect(references).toEqual([
+      {
+        text: "SalesData",
+        range: { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 },
+        index: 0,
+        start: tokenStart,
+        end: tokenEnd
+      }
+    ]);
+  });
+
+  it("ignores unresolved identifiers so we don't highlight every name-like token", () => {
+    const input = "=UnknownName + A1";
+    const { references } = extractFormulaReferences(input, 0, 0, { resolveName: () => null });
+    expect(references.map((r) => r.text)).toEqual(["A1"]);
+  });
+
+  it("detects activeIndex for named ranges at the caret (including token end)", () => {
+    const input = "=SUM(SalesData)";
+    const tokenStart = input.indexOf("SalesData");
+    const tokenEnd = tokenStart + "SalesData".length;
+
+    const resolveName = (name: string) =>
+      name === "SalesData" ? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 } : null;
+
+    // Caret inside token.
+    expect(extractFormulaReferences(input, tokenStart + 1, tokenStart + 1, { resolveName }).activeIndex).toBe(0);
+    // Caret at end of token should still count as inside.
+    expect(extractFormulaReferences(input, tokenEnd, tokenEnd, { resolveName }).activeIndex).toBe(0);
+  });
 });
 
 describe("assignFormulaReferenceColors", () => {

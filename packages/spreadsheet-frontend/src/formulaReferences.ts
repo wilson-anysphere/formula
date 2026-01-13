@@ -49,22 +49,54 @@ export const FORMULA_REFERENCE_PALETTE: readonly string[] = [
   "#943634"
 ];
 
-export function extractFormulaReferences(input: string, cursorStart?: number, cursorEnd?: number): ExtractedFormulaReferences {
+export type ExtractFormulaReferencesOptions = {
+  /**
+   * Optional resolver for non-A1 identifiers (e.g. named ranges).
+   *
+   * If provided, any identifier token that is not a function call (no immediate `(`)
+   * and is not the TRUE/FALSE literals will be passed through this resolver. Only
+   * identifiers that resolve to a range will be included in the output.
+   */
+  resolveName?: (name: string) => FormulaReferenceRange | null;
+};
+
+export function extractFormulaReferences(
+  input: string,
+  cursorStart?: number,
+  cursorEnd?: number,
+  opts?: ExtractFormulaReferencesOptions
+): ExtractedFormulaReferences {
   const tokens = tokenizeFormula(input);
   const references: FormulaReference[] = [];
   let refIndex = 0;
 
   for (const token of tokens) {
-    if (token.type !== "reference") continue;
-    const parsed = parseA1RangeWithSheet(token.text);
-    if (!parsed) continue;
-    references.push({
-      text: token.text,
-      range: parsed,
-      index: refIndex++,
-      start: token.start,
-      end: token.end
-    });
+    if (token.type === "reference") {
+      const parsed = parseA1RangeWithSheet(token.text);
+      if (!parsed) continue;
+      references.push({
+        text: token.text,
+        range: parsed,
+        index: refIndex++,
+        start: token.start,
+        end: token.end
+      });
+      continue;
+    }
+
+    if (token.type === "identifier" && opts?.resolveName) {
+      const lower = token.text.toLowerCase();
+      if (lower === "true" || lower === "false") continue;
+      const resolved = opts.resolveName(token.text);
+      if (!resolved) continue;
+      references.push({
+        text: token.text,
+        range: resolved,
+        index: refIndex++,
+        start: token.start,
+        end: token.end
+      });
+    }
   }
 
   const activeIndex =
