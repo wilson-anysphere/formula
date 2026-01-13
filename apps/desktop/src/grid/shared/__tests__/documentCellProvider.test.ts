@@ -9,6 +9,9 @@ function createProvider(options: {
   getCell: (sheetId: string, coord: { row: number; col: number }) => CellState | null;
   headerRows?: number;
   headerCols?: number;
+  rowCount?: number;
+  colCount?: number;
+  sheetCacheMaxSize?: number;
   getComputedValue?: (cell: { row: number; col: number }) => string | number | boolean | null;
   getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
 }) {
@@ -24,11 +27,12 @@ function createProvider(options: {
     getSheetId: options.getSheetId,
     headerRows,
     headerCols,
-    rowCount: headerRows + 10,
-    colCount: headerCols + 10,
+    rowCount: options.rowCount ?? headerRows + 10,
+    colCount: options.colCount ?? headerCols + 10,
     showFormulas: () => false,
     getComputedValue: options.getComputedValue ?? (() => null),
     getCommentMeta: options.getCommentMeta,
+    sheetCacheMaxSize: options.sheetCacheMaxSize,
   });
 
   return { provider, doc };
@@ -225,6 +229,35 @@ describe("DocumentCellProvider (shared grid)", () => {
 
     // Cache map is preserved (we didn't drop all per-sheet caches).
     expect((provider as any).sheetCaches.size).toBe(1);
+  });
+
+  it("invalidateDocCells uses the configured sheetCacheMaxSize when deciding to invalidateAll", () => {
+    const sheetCacheMaxSize = 200_000;
+    const { provider } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+      // Make the grid big enough to cover the invalidation region.
+      rowCount: 1_000,
+      colCount: 1_000,
+      sheetCacheMaxSize,
+    });
+
+    // Populate cache so `sheetCaches.get(sheetId)` exists.
+    provider.getCell(1, 1);
+
+    const updates: any[] = [];
+    provider.subscribe((update) => updates.push(update));
+
+    const sheetCache = (provider as any).sheetCaches.get("sheet-1");
+    expect(sheetCache).toBeTruthy();
+    const keysSpy = vi.spyOn(sheetCache, "keys");
+
+    // 500x500 = 250k cells (~125% of sheetCacheMaxSize). This should take the invalidateAll path.
+    provider.invalidateDocCells({ startRow: 0, endRow: 500, startCol: 0, endCol: 500 });
+
+    expect(keysSpy).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ type: "invalidateAll" }]);
+    expect((provider as any).sheetCaches.size).toBe(0);
   });
 
   it("looks up comment metadata by numeric coords (no A1 string conversion)", () => {
