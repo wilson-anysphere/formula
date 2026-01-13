@@ -139,7 +139,7 @@ describe("dev collab encryption toggle", () => {
     const doc = new Y.Doc({ guid: docId });
 
     const encryption = resolveDevCollabEncryptionFromSearch({
-      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A1",
+      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A2",
       docId,
       defaultSheetId: "Sheet1",
     });
@@ -155,25 +155,37 @@ describe("dev collab encryption toggle", () => {
 
     // Binder writes into Yjs can be async (encryption via WebCrypto). Wait for a Yjs update so
     // assertions don't race the encryption/write chain.
-    const whenYjsUpdated = new Promise<void>((resolve) => {
-      const onUpdate = () => {
+    const nextYjsUpdate = () =>
+      new Promise<void>((resolve) => {
+        const onUpdate = () => {
+          // @ts-expect-error - Yjs typings are looser in some environments.
+          doc.off("update", onUpdate);
+          resolve();
+        };
         // @ts-expect-error - Yjs typings are looser in some environments.
-        doc.off("update", onUpdate);
-        resolve();
-      };
-      // @ts-expect-error - Yjs typings are looser in some environments.
-      doc.on("update", onUpdate);
-    });
+        doc.on("update", onUpdate);
+      });
 
     documentWithKey.setCellValue("Sheet1", { row: 0, col: 0 }, "secret");
-    await whenYjsUpdated;
+    await nextYjsUpdate();
+    await flushBinderWork();
+
+    documentWithKey.setCellFormula("Sheet1", { row: 1, col: 0 }, "=SUM(1,2)");
+    await nextYjsUpdate();
     await flushBinderWork();
 
     const cellKey = makeCellKey({ sheetId: "Sheet1", row: 0, col: 0 });
-    const yCell = sessionWithKey.cells.get(cellKey) as any;
-    expect(yCell?.get("enc")).toBeTruthy();
-    expect(yCell?.get("value")).toBeUndefined();
-    expect(yCell?.get("formula")).toBeUndefined();
+    const a2Key = makeCellKey({ sheetId: "Sheet1", row: 1, col: 0 });
+
+    const yCellA1 = sessionWithKey.cells.get(cellKey) as any;
+    expect(yCellA1?.get("enc")).toBeTruthy();
+    expect(yCellA1?.get("value")).toBeUndefined();
+    expect(yCellA1?.get("formula")).toBeUndefined();
+
+    const yCellA2 = sessionWithKey.cells.get(a2Key) as any;
+    expect(yCellA2?.get("enc")).toBeTruthy();
+    expect(yCellA2?.get("value")).toBeUndefined();
+    expect(yCellA2?.get("formula")).toBeUndefined();
 
     binder.destroy();
 
@@ -186,10 +198,12 @@ describe("dev collab encryption toggle", () => {
     });
     await flushBinderWork();
     expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
+    expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).value).toBe("###");
+    expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).formula).toBeNull();
 
     // Attempting a local edit without the key should be rejected by the binder-installed
     // canEditCell guard (so we never write plaintext into an encrypted cell).
-    const encBefore = yCell?.get("enc");
+    const encBefore = yCellA1?.get("enc");
     documentWithoutKey.setCellValue("Sheet1", { row: 0, col: 0 }, "hacked");
     await flushBinderWork();
     expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
@@ -197,6 +211,16 @@ describe("dev collab encryption toggle", () => {
     expect(yCellAfter?.get("enc")).toEqual(encBefore);
     expect(yCellAfter?.get("value")).toBeUndefined();
     expect(yCellAfter?.get("formula")).toBeUndefined();
+
+    const a2EncBefore = yCellA2?.get("enc");
+    documentWithoutKey.setCellFormula("Sheet1", { row: 1, col: 0 }, "=HACK()");
+    await flushBinderWork();
+    expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).value).toBe("###");
+    expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).formula).toBeNull();
+    const yCellA2After = sessionWithKey.cells.get(a2Key) as any;
+    expect(yCellA2After?.get("enc")).toEqual(a2EncBefore);
+    expect(yCellA2After?.get("value")).toBeUndefined();
+    expect(yCellA2After?.get("formula")).toBeUndefined();
 
     // Session-level APIs should also refuse to write plaintext into an encrypted cell
     // when the session has no encryption key.
@@ -206,6 +230,13 @@ describe("dev collab encryption toggle", () => {
     expect(yCellAfterSessionWrite?.get("enc")).toEqual(encBefore);
     expect(yCellAfterSessionWrite?.get("value")).toBeUndefined();
     expect(yCellAfterSessionWrite?.get("formula")).toBeUndefined();
+
+    expect(sessionWithoutKey.canEditCell({ sheetId: "Sheet1", row: 1, col: 0 })).toBe(false);
+    await expect(sessionWithoutKey.setCellFormula(a2Key, "=HACK()")).rejects.toThrow(/Missing encryption key/i);
+    const yCellA2AfterSessionWrite = sessionWithKey.cells.get(a2Key) as any;
+    expect(yCellA2AfterSessionWrite?.get("enc")).toEqual(a2EncBefore);
+    expect(yCellA2AfterSessionWrite?.get("value")).toBeUndefined();
+    expect(yCellA2AfterSessionWrite?.get("formula")).toBeUndefined();
     binder2.destroy();
   });
 });
