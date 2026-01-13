@@ -384,43 +384,6 @@ fn normalize_chart_ex_kind_hint(raw: &str) -> Option<String> {
     Some(lowercase_first(base))
 }
 
-fn collect_chart_ex_kind_hints(doc: &Document<'_>) -> Vec<String> {
-    fn push_unique(out: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, s: String) {
-        if seen.insert(s.clone()) {
-            out.push(s);
-        }
-    }
-
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    if let Some(node) = find_chart_type_node(doc) {
-        let name = node.tag_name().name();
-        push_unique(&mut out, &mut seen, format!("typeNode={name}"));
-        if let Some(norm) = normalize_chart_ex_kind_hint(name) {
-            push_unique(&mut out, &mut seen, format!("typeHint={norm}"));
-        }
-    }
-
-    // Collect layoutId hints on series nodes.
-    for series in doc.descendants().filter(|n| is_series_node(n)) {
-        if let Some(raw) = attribute_case_insensitive(series, "layoutId") {
-            let norm = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.to_string());
-            push_unique(&mut out, &mut seen, format!("layoutId={norm}"));
-        }
-    }
-
-    // Collect explicit chartType attributes (seen in some producer variations).
-    for node in doc.descendants().filter(|n| n.is_element()) {
-        if let Some(raw) = attribute_case_insensitive(node, "chartType") {
-            let norm = normalize_chart_ex_kind_hint(raw).unwrap_or_else(|| raw.to_string());
-            push_unique(&mut out, &mut seen, format!("chartType={norm}"));
-        }
-    }
-
-    out
-}
-
 #[derive(Debug, Clone, Default)]
 struct ChartExDataDefinition {
     categories: Option<SeriesTextData>,
