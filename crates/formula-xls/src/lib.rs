@@ -587,6 +587,31 @@ fn import_xls_path_with_biff_reader(
                 }
             }
 
+            // ROW/COLINFO records can reference default formats (ixfe) even when no individual cell
+            // record uses those XF indices. Include them in the "used" set so their styles are
+            // interned and can be applied to `Worksheet.row_properties[*].style_id` /
+            // `Worksheet.col_properties[*].style_id`.
+            if let Some(props_by_sheet) = row_col_props.as_ref() {
+                for props in props_by_sheet {
+                    for row_props in props.rows.values() {
+                        if let Some(xf_idx) = row_props.xf_index {
+                            let idx = xf_idx as usize;
+                            if idx < used.len() {
+                                used[idx] = true;
+                            }
+                        }
+                    }
+                    for col_props in props.cols.values() {
+                        if let Some(xf_idx) = col_props.xf_index {
+                            let idx = xf_idx as usize;
+                            if idx < used.len() {
+                                used[idx] = true;
+                            }
+                        }
+                    }
+                }
+            }
+
             for (xf_idx, style) in globals.resolve_styles_for_used_mask(&used) {
                 if style == Style::default() {
                     continue;
@@ -876,6 +901,7 @@ fn import_xls_path_with_biff_reader(
                 sheet_row_col_props = Some(props);
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
+                apply_row_col_style_ids(sheet, props, xf_style_ids.as_deref(), &mut warnings, &sheet_name);
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
                 sheet_stream_filter_columns = props.auto_filter_columns.clone();
@@ -2287,6 +2313,67 @@ fn apply_row_col_properties(
         }
     }
 }
+
+fn apply_row_col_style_ids(
+    sheet: &mut formula_model::Worksheet,
+    props: &biff::SheetRowColProperties,
+    xf_style_ids: Option<&[u32]>,
+    warnings: &mut Vec<ImportWarning>,
+    sheet_name: &str,
+) {
+    let Some(xf_style_ids) = xf_style_ids else {
+        return;
+    };
+
+    let mut out_of_range_rows: usize = 0;
+    for (&row, row_props) in &props.rows {
+        if row >= EXCEL_MAX_ROWS {
+            continue;
+        }
+        let Some(xf_idx) = row_props.xf_index else {
+            continue;
+        };
+        let Some(&style_id) = xf_style_ids.get(xf_idx as usize) else {
+            out_of_range_rows = out_of_range_rows.saturating_add(1);
+            continue;
+        };
+        if style_id != 0 {
+            sheet.set_row_style_id(row, Some(style_id));
+        }
+    }
+
+    let mut out_of_range_cols: usize = 0;
+    for (&col, col_props) in &props.cols {
+        if col >= EXCEL_MAX_COLS {
+            continue;
+        }
+        let Some(xf_idx) = col_props.xf_index else {
+            continue;
+        };
+        let Some(&style_id) = xf_style_ids.get(xf_idx as usize) else {
+            out_of_range_cols = out_of_range_cols.saturating_add(1);
+            continue;
+        };
+        if style_id != 0 {
+            sheet.set_col_style_id(col, Some(style_id));
+        }
+    }
+
+    if out_of_range_rows > 0 || out_of_range_cols > 0 {
+        let mut parts = Vec::new();
+        if out_of_range_rows > 0 {
+            parts.push(format!("{out_of_range_rows} rows"));
+        }
+        if out_of_range_cols > 0 {
+            parts.push(format!("{out_of_range_cols} columns"));
+        }
+        warnings.push(ImportWarning::new(format!(
+            "skipped {} in sheet `{sheet_name}` with out-of-range XF indices",
+            parts.join(" and ")
+        )));
+    }
+}
+
 fn apply_outline_properties(
     sheet: &mut formula_model::Worksheet,
     props: &biff::SheetRowColProperties,

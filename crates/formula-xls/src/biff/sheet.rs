@@ -157,6 +157,11 @@ pub(crate) struct SheetRowProperties {
     pub(crate) hidden: bool,
     pub(crate) outline_level: u8,
     pub(crate) collapsed: bool,
+    /// Default cell XF index (`ixfe`) for the row, when present.
+    ///
+    /// This corresponds to the legacy `.xls` row-level default format: cells in this row inherit
+    /// this format unless they have their own XF.
+    pub(crate) xf_index: Option<u16>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -166,6 +171,8 @@ pub(crate) struct SheetColProperties {
     pub(crate) hidden: bool,
     pub(crate) outline_level: u8,
     pub(crate) collapsed: bool,
+    /// Default cell XF index (`ixfe`) for the column, when present.
+    pub(crate) xf_index: Option<u16>,
 }
 
 // WINDOW2 grbit flags.
@@ -1334,10 +1341,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     push_warning_bounded(
                         &mut props.warnings,
                         format!(
-                        "malformed ROW record at offset {}: expected >=16 bytes, got {}",
-                        record.offset,
-                        data.len()
-                    ),
+                            "malformed ROW record at offset {}: expected >=16 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
                     );
                     continue;
                 }
@@ -1350,11 +1357,18 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let outline_level = ((options & ROW_OPTION_OUTLINE_LEVEL_MASK)
                     >> ROW_OPTION_OUTLINE_LEVEL_SHIFT) as u8;
                 let collapsed = (options & ROW_OPTION_COLLAPSED) != 0;
+                let ixfe = u16::from_le_bytes([data[14], data[15]]);
+                let xf_index = (ixfe != 0).then_some(ixfe);
 
                 let height =
                     (!default_height && height_twips > 0).then_some(height_twips as f32 / 20.0);
 
-                if hidden || height.is_some() || outline_level > 0 || collapsed {
+                if hidden
+                    || height.is_some()
+                    || outline_level > 0
+                    || collapsed
+                    || xf_index.is_some()
+                {
                     let entry = props.rows.entry(row).or_default();
                     if let Some(height) = height {
                         entry.height = Some(height);
@@ -1368,6 +1382,9 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     if collapsed {
                         entry.collapsed = true;
                     }
+                    if xf_index.is_some() {
+                        entry.xf_index = xf_index;
+                    }
                 }
             }
             // COLINFO [MS-XLS 2.4.48]
@@ -1377,16 +1394,17 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     push_warning_bounded(
                         &mut props.warnings,
                         format!(
-                        "malformed COLINFO record at offset {}: expected >=12 bytes, got {}",
-                        record.offset,
-                        data.len()
-                    ),
+                            "malformed COLINFO record at offset {}: expected >=12 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
                     );
                     continue;
                 }
                 let first_col = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let last_col = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let width_raw = u16::from_le_bytes([data[4], data[5]]);
+                let xf_index = u16::from_le_bytes([data[6], data[7]]);
                 let options = u16::from_le_bytes([data[8], data[9]]);
                 let hidden = (options & COLINFO_OPTION_HIDDEN) != 0;
                 let outline_level = ((options & COLINFO_OPTION_OUTLINE_LEVEL_MASK)
@@ -1395,8 +1413,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let collapsed = (options & COLINFO_OPTION_COLLAPSED) != 0;
 
                 let width = (width_raw > 0).then_some(width_raw as f32 / 256.0);
+                let xf_index = (xf_index != 0).then_some(xf_index);
 
-                if hidden || width.is_some() || outline_level > 0 || collapsed {
+                if hidden || width.is_some() || outline_level > 0 || collapsed || xf_index.is_some()
+                {
                     if first_col > last_col {
                         push_warning_bounded(
                             &mut props.warnings,
@@ -1448,6 +1468,9 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         }
                         if collapsed {
                             entry.collapsed = true;
+                        }
+                        if xf_index.is_some() {
+                            entry.xf_index = xf_index;
                         }
                     }
                 }

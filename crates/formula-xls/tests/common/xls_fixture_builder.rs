@@ -282,6 +282,22 @@ pub fn build_out_of_range_xf_no_formats_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that applies default formatting at the row and column level
+/// (ROW/COLINFO `ixfe`) without any cell records referencing those XF indices.
+pub fn build_row_col_style_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_row_col_style_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that stores a long custom number format split across a `CONTINUE`
 /// record.
 ///
@@ -4823,6 +4839,50 @@ fn build_out_of_range_xf_no_formats_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_row_col_style_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One default (General) cell XF plus two non-default XFs referenced only by ROW/COLINFO.
+    let xf_cell_general = 16u16;
+    let xf_row_percent = 17u16;
+    let xf_col_duration = 18u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false)); // General (default)
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 10, false)); // 0.00% (built-in)
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 46, false)); // [h]:mm:ss (built-in)
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "RowColStyles");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_row_col_style_sheet_stream(xf_cell_general, xf_row_percent, xf_col_duration);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_continued_format_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -7941,6 +8001,41 @@ fn build_out_of_range_xf_no_formats_sheet_stream() -> Vec<u8> {
 
     // A1: BLANK with an invalid/out-of-range XF index.
     push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, 5000));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_row_col_style_sheet_stream(xf_cell: u16, xf_row: u16, xf_col: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 2) cols [0, 3) (A..C, rows 1..2)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Row 2 (1-based): apply a row-level default format via ROW.ixfe.
+    let mut row_payload = row_record(1, false, 0, false);
+    row_payload[14..16].copy_from_slice(&xf_row.to_le_bytes());
+    push_record(&mut sheet, RECORD_ROW, &row_payload);
+
+    // Column C: apply a column-level default format via COLINFO.ixfe, without any other overrides.
+    let mut col_payload = colinfo_record(2, 2, false, 0, false);
+    col_payload[4..6].copy_from_slice(&0u16.to_le_bytes()); // cx: default width (no override)
+    col_payload[6..8].copy_from_slice(&xf_col.to_le_bytes());
+    push_record(&mut sheet, RECORD_COLINFO, &col_payload);
+
+    // Provide at least one cell so calamine returns a non-empty range. Do not reference the
+    // row/col XF indices here.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
