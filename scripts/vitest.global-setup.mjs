@@ -58,10 +58,19 @@ function shouldSkipWasmBuildForCurrentRun() {
       return false;
     }
 
-    const abs = path.isAbsolute(arg) ? arg : path.resolve(process.cwd(), arg);
+    let abs = path.isAbsolute(arg) ? arg : path.resolve(process.cwd(), arg);
     if (!existsSync(abs)) {
-      // If this doesn't exist, treat it as a non-path selector; keep the conservative default.
-      return false;
+      // Users sometimes pass repo-rooted paths while running vitest from a package subdirectory.
+      // (e.g. `vitest run packages/ai-audit/test/export.test.ts` from `packages/ai-audit/`).
+      // Fall back to resolving the path relative to the repo root before treating it as a
+      // non-path selector.
+      const repoAbs = path.resolve(repoRoot, arg);
+      if (existsSync(repoAbs)) {
+        abs = repoAbs;
+      } else {
+        // If this doesn't exist, treat it as a non-path selector; keep the conservative default.
+        return false;
+      }
     }
     resolved.push(abs);
   }
