@@ -44,6 +44,8 @@ checked into the repo. For these fixtures we commit a generated placeholder PNG
 (still **800 × 600 px**) so the corpus remains structurally complete in CI:
 
 - `area.png`
+- `bar-horizontal.png`
+- `radar.png`
 - `doughnut.png`
 - `combo-bar-line.png`
 

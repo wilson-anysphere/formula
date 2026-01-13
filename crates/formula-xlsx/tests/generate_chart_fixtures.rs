@@ -102,4 +102,9 @@ fn generate_chart_fixtures() {
     write_chart_fixture(&root.join("area.xlsx"), ChartType::Area);
     write_chart_fixture(&root.join("doughnut.xlsx"), ChartType::Doughnut);
     write_combo_chart_fixture(&root.join("combo-bar-line.xlsx"));
+
+    // Additional priority chart types from docs/17-charts.md that are useful to
+    // keep around as parsing regressions, even if we don't fully model them yet.
+    write_chart_fixture(&root.join("bar-horizontal.xlsx"), ChartType::Bar);
+    write_chart_fixture(&root.join("radar.xlsx"), ChartType::Radar);
 }
