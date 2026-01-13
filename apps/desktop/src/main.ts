@@ -169,7 +169,6 @@ import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import {
   applyAllBorders,
   NUMBER_FORMATS,
-  setHorizontalAlign,
   toggleBold,
   toggleItalic,
   toggleStrikethrough,
@@ -8582,47 +8581,6 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand("format.fontSize.set");
         return;
 
-      case "home.alignment.alignLeft":
-        applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
-        return;
-      case "home.alignment.topAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.middleAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.bottomAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.center":
-        applyFormattingToSelection("Align center", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "center"));
-        return;
-      case "home.alignment.alignRight":
-        applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
-        return;
-
       case "home.alignment.mergeCenter":
         // Dropdown container id; some ribbon interactions can surface this in `onCommand`.
         // Treat it as a no-op fallback (menu items trigger the real commands).
@@ -8715,90 +8673,6 @@ function handleRibbonCommand(commandId: string): void {
         app.focus();
         return;
       }
-
-      case "home.alignment.increaseIndent": {
-        const current = activeCellIndentLevel();
-        const next = Math.min(250, current + 1);
-        if (next === current) return;
-        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-
-      case "home.alignment.decreaseIndent": {
-        const current = activeCellIndentLevel();
-        const next = Math.max(0, current - 1);
-        if (next === current) return;
-        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      case "home.alignment.orientation.angleCounterclockwise":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.angleClockwise":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.verticalText":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.rotateUp":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.rotateDown":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.formatCellAlignment":
-        executeBuiltinCommand("format.openFormatCells");
-        return;
       case "home.cells.format":
         // This command is a dropdown with menu items; the top-level command is not expected
         // to fire when the menu is present. Keep this as a fallback.
