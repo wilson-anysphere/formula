@@ -103,6 +103,29 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("does not duplicate an existing opening paren (e.g. =VLO() → =VLOOKUP())", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO()";
+    // Caret before the existing "(" so autocomplete still triggers.
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.model.draft).toBe("=VLOOKUP()");
+    // Cursor inside the existing parens.
+    expect(view.textarea.selectionStart).toBe(9);
+    expect(view.textarea.selectionEnd).toBe(9);
+
+    host.remove();
+  });
+
   it("closes the dropdown on Escape", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

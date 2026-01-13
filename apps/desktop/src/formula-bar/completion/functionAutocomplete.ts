@@ -326,10 +326,14 @@ export class FormulaBarFunctionAutocompleteController {
     const input = this.#textarea.value;
     const canonical = `${ctx.qualifier}${selected.name}`;
     const insertedName = preserveTypedCasing(ctx.typedPrefix, canonical);
-    const inserted = `${insertedName}(`;
+    // Avoid duplicating the opening paren if the user already has one in the text (e.g. editing `=VLO()`).
+    const hasParen = input[ctx.replaceEnd] === "(";
+    const inserted = hasParen ? insertedName : `${insertedName}(`;
 
     const nextText = input.slice(0, ctx.replaceStart) + inserted + input.slice(ctx.replaceEnd);
-    const nextCursor = ctx.replaceStart + inserted.length;
+    // Always place the caret inside the parens (after `(`). When `(` already exists,
+    // step over it after inserting the function name.
+    const nextCursor = ctx.replaceStart + inserted.length + (hasParen ? 1 : 0);
 
     this.#textarea.value = nextText;
     this.#textarea.setSelectionRange(nextCursor, nextCursor);
