@@ -5,6 +5,18 @@ import { HashEmbedder } from "../src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
 import { indexWorkbook } from "../src/pipeline/indexWorkbook.js";
 
+function defer() {
+  /** @type {(value?: any) => void} */
+  let resolve;
+  /** @type {(reason?: any) => void} */
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function makeWorkbook() {
   return {
     id: "wb-incremental",
@@ -163,4 +175,77 @@ test("indexWorkbook respects AbortSignal and avoids partial writes", async () =>
 
   assert.equal(embedCalls, 1);
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
+
+test("indexWorkbook does not early-abort while awaiting vectorStore persistence", async () => {
+  const workbook = makeWorkbook();
+  const abortController = new AbortController();
+
+  const upsertCalled = defer();
+  const upsertDone = defer();
+  let upsertWasAwaited = false;
+
+  /** @type {any[]} */
+  let upsertRecords = [];
+
+  const vectorStore = {
+    async list() {
+      return [];
+    },
+    upsert(records) {
+      upsertRecords = records;
+      upsertCalled.resolve();
+
+      // Return a thenable so the test can detect whether the write was actually awaited.
+      return {
+        then(onFulfilled, onRejected) {
+          upsertWasAwaited = true;
+          return upsertDone.promise.then(onFulfilled, onRejected);
+        },
+      };
+    },
+    async delete() {
+      throw new Error("Unexpected delete() during test");
+    },
+  };
+
+  const embedder = {
+    async embedTexts(texts) {
+      return texts.map(() => new Float32Array(8));
+    },
+  };
+
+  const indexPromise = indexWorkbook({
+    workbook,
+    vectorStore,
+    embedder,
+    signal: abortController.signal,
+  });
+
+  let settled = false;
+  indexPromise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    }
+  );
+
+  // Wait until persistence has started (upsert called) but keep it blocked.
+  await upsertCalled.promise;
+  assert.ok(upsertRecords.length > 0);
+
+  // Give the await machinery a microtask turn to assimilate the thenable.
+  await Promise.resolve();
+  assert.equal(upsertWasAwaited, true);
+
+  // Abort while the upsert is still in flight. `indexWorkbook` should keep waiting for the
+  // store write to finish, then reject on abort afterwards.
+  abortController.abort();
+  await Promise.resolve();
+  assert.equal(settled, false);
+
+  upsertDone.resolve();
+  await assert.rejects(indexPromise, { name: "AbortError" });
 });
