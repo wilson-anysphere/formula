@@ -1,12 +1,10 @@
 use super::*;
 
 use serde_json::json;
-use std::collections::HashSet;
 
 #[test]
 fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
-    let mut allowed = HashSet::new();
-    allowed.insert(PivotKeyPart::Text("East".to_string()));
+    let allowed = vec![PivotKeyPart::Text("East".to_string())];
 
     let cfg = PivotConfig {
         row_fields: vec![PivotField::new("Region")],
@@ -109,4 +107,3 @@ fn pivot_key_part_display_string_matches_excel_like_expectations() {
         "0"
     );
 }
-
