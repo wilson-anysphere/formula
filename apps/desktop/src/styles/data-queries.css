@@ -48,7 +48,7 @@
 
 .data-queries-panel-container__banner-text {
   font-size: 12px;
-  opacity: 0.85;
+  color: var(--text-muted);
 }
 
 .data-queries-panel-container__banner-text--mb8 {
@@ -107,7 +107,7 @@
 
 .data-queries-provider-editor__tip {
   font-size: 11px;
-  opacity: 0.75;
+  color: var(--text-muted);
 }
 
 .data-queries-provider-editor__buttons {
@@ -134,14 +134,14 @@
   text-align: left;
   background: var(--grid-header-bg);
   color: var(--grid-header-text);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--grid-line);
   padding: var(--space-3) var(--space-4);
   font-size: 12px;
   font-weight: 600;
 }
 
 .data-queries-table__row {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--grid-line);
 }
 
 .data-queries-table__row:hover {

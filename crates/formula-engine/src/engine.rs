@@ -488,23 +488,23 @@ impl Workbook {
     /// Reorder a worksheet id within the workbook's tab order.
     ///
     /// This only affects `sheet_order` (sheet ids are stable and do not change).
-    fn reorder_sheet(&mut self, sheet_id: SheetId, new_index: usize) -> bool {
-        if !self.sheet_exists(sheet_id) {
+    fn reorder_sheet(&mut self, sheet: SheetId, new_index: usize) -> bool {
+        if !self.sheet_exists(sheet) {
             return false;
         }
         if new_index >= self.sheet_order.len() {
             return false;
         }
-        let Some(current) = self.sheet_order_index(sheet_id) else {
+        let Some(current) = self.sheet_order_index(sheet) else {
             return false;
         };
         if current == new_index {
             return true;
         }
-        let sheet_id = self.sheet_order.remove(current);
+        let id = self.sheet_order.remove(current);
         // `new_index` is expressed in terms of the final tab order; inserting at that index after
         // removal produces the expected result (Vec::insert supports `index == len`).
-        self.sheet_order.insert(new_index, sheet_id);
+        self.sheet_order.insert(new_index, id);
         true
     }
 

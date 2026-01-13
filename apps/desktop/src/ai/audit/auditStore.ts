@@ -70,7 +70,9 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   if (!href) return href;
   if (!isNodeRuntime()) return href;
 
-  let out = href;
+  // Vite can append cache-busting query params/fragments (e.g. `...?v=...`).
+  // Strip them since sql.js will load the wasm via `fs.readFileSync` in Node.
+  let out = String(href).split(/[?#]/, 1)[0] ?? String(href);
 
   // Vite can surface absolute filesystem paths through a special "/@fs/" URL prefix (or "@fs/").
   // In Node-based test runners, sql.js loads WASM via `fs.readFileSync`, so we must strip these

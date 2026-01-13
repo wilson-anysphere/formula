@@ -809,6 +809,11 @@ export class DrawingOverlay {
         if (!(screenRectScratch.width > 0 && screenRectScratch.height > 0)) continue;
         const aabb = getAabbForObject(screenRectScratch, obj.transform, aabbScratch);
 
+        // Avoid starting decode work for degenerate drawings (0x0 sized images).
+        // See the similar guard in the per-object render loop below.
+        if (!Number.isFinite(screenRectScratch.width) || !Number.isFinite(screenRectScratch.height)) continue;
+        if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
+
         if (clipRect.width <= 0 || clipRect.height <= 0) continue;
         if (!intersects(aabb, clipRect)) continue;
         if (!intersects(clipRect, viewportRect)) continue;
@@ -883,6 +888,13 @@ export class DrawingOverlay {
         }
 
         if (obj.kind.type === "image") {
+          // Avoid kicking off async image decoding work for degenerate drawings.
+          // Zero-size drawing objects can show up in corrupted/imported documents and in unit tests.
+          // `ctx.drawImage` would be a no-op, so skip decoding to keep render work bounded (and keep
+          // tests that stub `createImageBitmap` deterministic).
+          if (!Number.isFinite(screenRectScratch.width) || !Number.isFinite(screenRectScratch.height)) continue;
+          if (screenRectScratch.width <= 0 || screenRectScratch.height <= 0) continue;
+
           const imageId = obj.kind.imageId;
           const entry = this.images.get(imageId);
 
