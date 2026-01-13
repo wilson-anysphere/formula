@@ -88,6 +88,7 @@ import {
 } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
+import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 
@@ -867,6 +868,15 @@ export class SpreadsheetApp {
       const persistenceEnabled = collab.persistenceEnabled ?? collab.offlineEnabled ?? true;
       const persistence = persistenceEnabled === false ? undefined : new IndexedDbCollabPersistence();
 
+      const devEncryption =
+        typeof window !== "undefined"
+          ? resolveDevCollabEncryptionFromSearch({
+              search: window.location.search,
+              docId: collab.docId,
+              defaultSheetId: this.sheetId,
+            })
+          : null;
+
       this.collabSession = createCollabSession({
         docId: collab.docId,
         persistence,
@@ -877,6 +887,7 @@ export class SpreadsheetApp {
           disableBc: collab.disableBc,
         },
         presence: { user: collab.user, activeSheet: this.sheetId },
+        encryption: devEncryption ?? undefined,
         // Enable formula/value conflict monitoring in collab mode.
         formulaConflicts: {
           localUserId: sessionPermissions.userId,
