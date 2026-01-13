@@ -19,8 +19,9 @@ use super::retry::{retry_with_delays_if, total_delay, OPEN_CLIPBOARD_RETRY_DELAY
 use super::windows_dib::{dibv5_to_png, png_to_dib_and_dibv5};
 use super::windows_format_cache::CachedClipboardFormat;
 use super::{
-    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError,
-    ClipboardWritePayload, MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    debug_clipboard_log,
+    normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
+    MAX_PNG_BYTES, MAX_TEXT_BYTES,
 };
 
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
@@ -339,152 +340,192 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let _guard = open_clipboard_with_retry()?;
 
     // Best-effort reads: don't fail the entire operation if a single format can't be decoded.
-    let text = try_get_unicode_text()
-        .ok()
-        .flatten()
-        .or_else(|| try_get_ansi_text(CF_TEXT, CP_ACP).ok().flatten())
-        .or_else(|| try_get_ansi_text(CF_OEMTEXT, CP_OEMCP).ok().flatten());
+    let mut text_source: Option<&'static str> = None;
+    let mut text = match try_get_unicode_text() {
+        Ok(Some(s)) => {
+            text_source = Some("CF_UNICODETEXT");
+            Some(s)
+        }
+        _ => None,
+    };
+    if text.is_none() {
+        if let Ok(Some(s)) = try_get_ansi_text(CF_TEXT, CP_ACP) {
+            text_source = Some("CF_TEXT");
+            text = Some(s);
+        }
+    }
+    if text.is_none() {
+        if let Ok(Some(s)) = try_get_ansi_text(CF_OEMTEXT, CP_OEMCP) {
+            text_source = Some("CF_OEMTEXT");
+            text = Some(s);
+        }
+    }
 
-    let mut html = format_html
-        .and_then(|format| {
-            try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-        })
-        .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
-        .filter(|s| !s.is_empty());
+    let mut html_source: Option<&'static str> = None;
+    let mut html = None;
+    if let Some(format) = format_html {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+            let fragment = extract_cf_html_fragment_best_effort(&bytes);
+            if !fragment.is_empty() {
+                html_source = Some("HTML Format");
+                html = Some(fragment);
+            }
+        }
+    }
     if html.is_none() {
         if let Some(format) = format_text_html {
-            html = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let fragment = extract_cf_html_fragment_best_effort(&bytes);
+                if !fragment.is_empty() {
+                    html_source = Some("text/html");
+                    html = Some(fragment);
+                }
+            }
         }
     }
     if html.is_none() {
         if let Some(format) = format_text_html_utf8 {
-            html = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let fragment = extract_cf_html_fragment_best_effort(&bytes);
+                if !fragment.is_empty() {
+                    html_source = Some("text/html;charset=utf-8");
+                    html = Some(fragment);
+                }
+            }
         }
     }
     let html = html.and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+    if html.is_none() {
+        html_source = None;
+    }
 
-    let mut rtf = format_rtf
-        .and_then(|format| {
-            try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-        })
-        .map(|bytes| {
-            String::from_utf8_lossy(&bytes)
+    let mut rtf_source: Option<&'static str> = None;
+    let mut rtf = None;
+    if let Some(format) = format_rtf {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+            let s = String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
-                .to_string()
-        })
-        .filter(|s| !s.is_empty());
+                .to_string();
+            if !s.is_empty() {
+                rtf_source = Some("Rich Text Format");
+                rtf = Some(s);
+            }
+        }
+    }
     if rtf.is_none() {
         if let Some(format) = format_text_rtf {
-            rtf = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| {
-                    String::from_utf8_lossy(&bytes)
-                        .trim_end_matches('\0')
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let s = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !s.is_empty() {
+                    rtf_source = Some("text/rtf");
+                    rtf = Some(s);
+                }
+            }
         }
     }
     if rtf.is_none() {
         if let Some(format) = format_text_rtf_utf8 {
-            rtf = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| {
-                    String::from_utf8_lossy(&bytes)
-                        .trim_end_matches('\0')
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let s = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !s.is_empty() {
+                    rtf_source = Some("text/rtf;charset=utf-8");
+                    rtf = Some(s);
+                }
+            }
         }
     }
     if rtf.is_none() {
         if let Some(format) = format_application_rtf {
-            rtf = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| {
-                    String::from_utf8_lossy(&bytes)
-                        .trim_end_matches('\0')
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let s = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !s.is_empty() {
+                    rtf_source = Some("application/rtf");
+                    rtf = Some(s);
+                }
+            }
         }
     }
     if rtf.is_none() {
         if let Some(format) = format_application_x_rtf {
-            rtf = try_get_clipboard_bytes(format, MAX_TEXT_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| {
-                    String::from_utf8_lossy(&bytes)
-                        .trim_end_matches('\0')
-                        .to_string()
-                })
-                .filter(|s| !s.is_empty());
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_TEXT_BYTES) {
+                let s = String::from_utf8_lossy(&bytes)
+                    .trim_end_matches('\0')
+                    .to_string();
+                if !s.is_empty() {
+                    rtf_source = Some("application/x-rtf");
+                    rtf = Some(s);
+                }
+            }
         }
     }
     let rtf = rtf.and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+    if rtf.is_none() {
+        rtf_source = None;
+    }
 
-    let mut image_png_base64 = format_png
-        .and_then(|format| {
-            try_get_clipboard_bytes(format, MAX_PNG_BYTES)
-                .ok()
-                .flatten()
-        })
-        .map(|png_bytes| STANDARD.encode(png_bytes));
-
+    let mut image_source: Option<&'static str> = None;
+    let mut image_bytes: Option<usize> = None;
+    let mut image_png_base64 = None;
+    if let Some(format) = format_png {
+        if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+            image_source = Some("PNG");
+            image_bytes = Some(bytes.len());
+            image_png_base64 = Some(STANDARD.encode(&bytes));
+        }
+    }
     if image_png_base64.is_none() {
         if let Some(format) = format_image_png {
-            image_png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| STANDARD.encode(bytes));
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+                image_source = Some("image/png");
+                image_bytes = Some(bytes.len());
+                image_png_base64 = Some(STANDARD.encode(&bytes));
+            }
         }
     }
-
     if image_png_base64.is_none() {
         if let Some(format) = format_image_x_png {
-            image_png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
-                .ok()
-                .flatten()
-                .map(|bytes| STANDARD.encode(bytes));
+            if let Ok(Some(bytes)) = try_get_clipboard_bytes(format, MAX_PNG_BYTES) {
+                image_source = Some("image/x-png");
+                image_bytes = Some(bytes.len());
+                image_png_base64 = Some(STANDARD.encode(&bytes));
+            }
+        }
+    }
+    if image_png_base64.is_none() {
+        if let Ok(Some(dib_bytes)) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES) {
+            if let Ok(png) = dibv5_to_png(&dib_bytes) {
+                if png.len() <= MAX_PNG_BYTES {
+                    image_source = Some("CF_DIBV5->PNG");
+                    image_bytes = Some(png.len());
+                    image_png_base64 = Some(STANDARD.encode(&png));
+                }
+            }
+        }
+    }
+    if image_png_base64.is_none() {
+        if let Ok(Some(dib_bytes)) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES) {
+            if let Ok(png) = dibv5_to_png(&dib_bytes) {
+                if png.len() <= MAX_PNG_BYTES {
+                    image_source = Some("CF_DIB->PNG");
+                    image_bytes = Some(png.len());
+                    image_png_base64 = Some(STANDARD.encode(&png));
+                }
+            }
         }
     }
 
-    if image_png_base64.is_none() {
-        image_png_base64 = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)
-            .ok()
-            .flatten()
-            .and_then(|dib_bytes| dibv5_to_png(&dib_bytes).ok())
-            .filter(|png| png.len() <= MAX_PNG_BYTES)
-            .map(|png| STANDARD.encode(png));
-    }
-
-    if image_png_base64.is_none() {
-        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES)
-            .ok()
-            .flatten()
-        {
-            image_png_base64 = dibv5_to_png(&dib_bytes)
-                .ok()
-                .filter(|png| png.len() <= MAX_PNG_BYTES)
-                .map(|png| STANDARD.encode(png));
-        }
-    }
+    let text_bytes = text.as_ref().map(|s| s.as_bytes().len());
+    let html_bytes = html.as_ref().map(|s| s.as_bytes().len());
+    let rtf_bytes = rtf.as_ref().map(|s| s.as_bytes().len());
+    debug_clipboard_log(format_args!(
+        "windows read: text_source={text_source:?} text_bytes={text_bytes:?} html_source={html_source:?} html_bytes={html_bytes:?} rtf_source={rtf_source:?} rtf_bytes={rtf_bytes:?} image_source={image_source:?} image_bytes={image_bytes:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})"
+    ));
 
     Ok(ClipboardContent {
         text,
@@ -549,6 +590,17 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         Some((dib, dibv5)) => (Some(dib), Some(dibv5)),
         None => (None, None),
     };
+
+    let text_len = payload.text.as_ref().map(|s| s.as_bytes().len());
+    let cf_html_len = html_bytes.as_ref().map(|b| b.len());
+    let text_html_len = html_plain_bytes.as_ref().map(|b| b.len());
+    let rtf_len = rtf_bytes.as_ref().map(|b| b.len());
+    let png_len = png_bytes.as_ref().map(|b| b.len());
+    let dib_len = dib_bytes.as_ref().map(|b| b.len());
+    let dibv5_len = dibv5_bytes.as_ref().map(|b| b.len());
+    debug_clipboard_log(format_args!(
+        "windows write: text_bytes={text_len:?} cf_html_bytes={cf_html_len:?} text_html_bytes={text_html_len:?} rtf_bytes={rtf_len:?} png_bytes={png_len:?} dibv5_bytes={dibv5_len:?} dib_bytes={dib_len:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})"
+    ));
 
     let format_html = html_bytes
         .as_ref()

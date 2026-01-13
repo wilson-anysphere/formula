@@ -28,6 +28,12 @@ afterEach(() => {
     delete (globalThis as any).navigator;
   }
 
+  // Reset clipboard debug overrides (tests may toggle these).
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete (globalThis as any).FORMULA_DEBUG_CLIPBOARD;
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete (globalThis as any).__FORMULA_DEBUG_CLIPBOARD__;
+
   if (typeof originalTauri === "undefined") {
     // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
     delete (globalThis as any).__TAURI__;
@@ -39,6 +45,29 @@ afterEach(() => {
 });
 
 describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => {
+  it("debug logging is gated behind the FORMULA_DEBUG_CLIPBOARD flag", async () => {
+    const invoke = vi.fn().mockResolvedValue({ text: "hello", html: "<p>hello</p>" });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    setMockNavigatorClipboard({ readText });
+
+    const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    // Default: logs disabled.
+    const provider = await createClipboardProvider();
+    await provider.read();
+    expect(debugSpy).not.toHaveBeenCalled();
+
+    // Enabled via runtime global.
+    (globalThis as any).FORMULA_DEBUG_CLIPBOARD = true;
+    debugSpy.mockClear();
+
+    const provider2 = await createClipboardProvider();
+    await provider2.read();
+    expect(debugSpy).toHaveBeenCalled();
+  });
+
   it("read() uses __TAURI__.core.invoke('clipboard_read') when available and returns the payload", async () => {
     const invoke = vi.fn().mockResolvedValue({ text: "hello", html: "<p>hello</p>" });
     (globalThis as any).__TAURI__ = { core: { invoke } };

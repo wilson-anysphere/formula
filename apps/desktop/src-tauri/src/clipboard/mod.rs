@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 pub mod platform;
 
@@ -36,6 +37,49 @@ pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 // Internal aliases used by the backend for "image" (PNG) and rich text limits.
 const MAX_IMAGE_BYTES: usize = MAX_PNG_BYTES;
 const MAX_RICH_TEXT_BYTES: usize = MAX_TEXT_BYTES;
+
+// ---------------------------------------------------------------------------
+// Debug logging
+//
+// Clipboard interop issues are notoriously hard to diagnose in the field (formats vary per app,
+// platform, and clipboard manager). Provide an opt-in, lightweight logging mechanism that can be
+// enabled without attaching a native debugger.
+//
+// IMPORTANT: Do not log clipboard contents (privacy). Only log format names and sizes.
+
+const DEBUG_CLIPBOARD_ENV_VAR: &str = "FORMULA_DEBUG_CLIPBOARD";
+
+// 0 = unknown, 1 = disabled, 2 = enabled
+static DEBUG_CLIPBOARD_ENABLED: AtomicU8 = AtomicU8::new(0);
+
+#[inline]
+fn env_truthy(raw: &str) -> bool {
+    let v = raw.trim().to_ascii_lowercase();
+    !(v.is_empty() || v == "0" || v == "false")
+}
+
+#[inline]
+fn debug_clipboard_enabled() -> bool {
+    match DEBUG_CLIPBOARD_ENABLED.load(Ordering::Relaxed) {
+        1 => false,
+        2 => true,
+        _ => {
+            let enabled = std::env::var(DEBUG_CLIPBOARD_ENV_VAR)
+                .ok()
+                .is_some_and(|raw| env_truthy(&raw));
+            DEBUG_CLIPBOARD_ENABLED.store(if enabled { 2 } else { 1 }, Ordering::Relaxed);
+            enabled
+        }
+    }
+}
+
+#[inline]
+fn debug_clipboard_log(args: std::fmt::Arguments<'_>) {
+    if !debug_clipboard_enabled() {
+        return;
+    }
+    eprintln!("[clipboard] {}", args);
+}
 
 fn normalize_base64_str(mut base64: &str) -> &str {
     base64 = base64.trim();
@@ -528,15 +572,43 @@ fn sanitize_clipboard_content_with_limits(
 
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     let content = platform::read()?;
-    Ok(sanitize_clipboard_content_with_limits(
+    let sanitized = sanitize_clipboard_content_with_limits(
         content,
         MAX_RICH_TEXT_BYTES,
         MAX_IMAGE_BYTES,
-    ))
+    );
+
+    // Cross-platform summary (format names + byte counts only).
+    if debug_clipboard_enabled() {
+        let text_bytes = sanitized.text.as_ref().map(|s| s.as_bytes().len());
+        let html_bytes = sanitized.html.as_ref().map(|s| s.as_bytes().len());
+        let rtf_bytes = sanitized.rtf.as_ref().map(|s| s.as_bytes().len());
+        let png_bytes = sanitized
+            .image_png_base64
+            .as_deref()
+            .and_then(estimate_base64_decoded_len);
+        debug_clipboard_log(format_args!(
+            "read summary: text_bytes={text_bytes:?} html_bytes={html_bytes:?} rtf_bytes={rtf_bytes:?} png_bytes={png_bytes:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})"
+        ));
+    }
+
+    Ok(sanitized)
 }
 
 pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     payload.validate()?;
+    if debug_clipboard_enabled() {
+        let text_bytes = payload.text.as_ref().map(|s| s.as_bytes().len());
+        let html_bytes = payload.html.as_ref().map(|s| s.as_bytes().len());
+        let rtf_bytes = payload.rtf.as_ref().map(|s| s.as_bytes().len());
+        let png_bytes = payload
+            .image_png_base64
+            .as_deref()
+            .and_then(estimate_base64_decoded_len);
+        debug_clipboard_log(format_args!(
+            "write summary: text_bytes={text_bytes:?} html_bytes={html_bytes:?} rtf_bytes={rtf_bytes:?} png_bytes={png_bytes:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})"
+        ));
+    }
     platform::write(payload)
 }
 
@@ -607,6 +679,18 @@ pub async fn clipboard_write(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn env_truthy_parses_common_values() {
+        assert!(!env_truthy(""));
+        assert!(!env_truthy("  "));
+        assert!(!env_truthy("0"));
+        assert!(!env_truthy("false"));
+        assert!(!env_truthy(" FALSE "));
+        assert!(env_truthy("1"));
+        assert!(env_truthy("true"));
+        assert!(env_truthy(" TRUE "));
+    }
 
     #[test]
     fn estimate_base64_decoded_len_handles_padding() {

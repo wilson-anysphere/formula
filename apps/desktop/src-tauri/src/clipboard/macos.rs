@@ -15,6 +15,7 @@ use objc2::runtime::AnyObject;
 use std::ffi::{c_void, CStr};
 
 use super::{
+    debug_clipboard_log,
     bytes_to_string_trim_nuls, normalize_base64_str, string_within_limit, ClipboardContent,
     ClipboardError, ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES,
     MAX_TIFF_BYTES,
@@ -352,13 +353,30 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
         // Prefer PNG when present, but fall back to TIFF (converted to PNG) for interoperability
         // with macOS apps that primarily put `public.tiff` on the pasteboard.
-        let image_png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES)
-            .map(|bytes| STANDARD.encode(&bytes))
-            .or_else(|| {
-                let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_TIFF_BYTES)?;
-                let png = tiff_to_png_bytes(&tiff).ok()?;
-                Some(STANDARD.encode(&png))
-            });
+        let mut image_source: Option<&'static str> = None;
+        let mut image_bytes: Option<usize> = None;
+        let mut image_png_base64 = None;
+        if let Some(bytes) = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES) {
+            image_source = Some(TYPE_PNG);
+            image_bytes = Some(bytes.len());
+            image_png_base64 = Some(STANDARD.encode(&bytes));
+        } else if let Some(tiff) = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_TIFF_BYTES) {
+            if let Ok(png) = tiff_to_png_bytes(&tiff) {
+                image_source = Some("public.tiff->public.png");
+                image_bytes = Some(png.len());
+                image_png_base64 = Some(STANDARD.encode(&png));
+            }
+        }
+
+        let text_type = text.as_ref().map(|_| TYPE_STRING);
+        let html_type = html.as_ref().map(|_| TYPE_HTML);
+        let rtf_type = rtf.as_ref().map(|_| TYPE_RTF);
+        let text_bytes = text.as_ref().map(|s| s.as_bytes().len());
+        let html_bytes = html.as_ref().map(|s| s.as_bytes().len());
+        let rtf_bytes = rtf.as_ref().map(|s| s.as_bytes().len());
+        debug_clipboard_log(format_args!(
+            "macos read: text_type={text_type:?} text_bytes={text_bytes:?} html_type={html_type:?} html_bytes={html_bytes:?} rtf_type={rtf_type:?} rtf_bytes={rtf_bytes:?} image_type={image_source:?} image_bytes={image_bytes:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES}, tiff={MAX_TIFF_BYTES})"
+        ));
 
         Ok(ClipboardContent {
             text,
@@ -409,6 +427,12 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         }
         let item: Id<AnyObject, Owned> = Id::from_retained_ptr(item_ptr);
 
+        let text_bytes = payload.text.as_ref().map(|s| s.as_bytes().len());
+        let html_bytes = payload.html.as_ref().map(|s| s.as_bytes().len());
+        let rtf_bytes = payload.rtf.as_ref().map(|s| s.as_bytes().len());
+        let png_len = png_bytes.as_ref().map(|b| b.len());
+        let mut tiff_len: Option<usize> = None;
+
         if let Some(text) = payload.text.as_deref() {
             let ty_string = nsstring_from_str(TYPE_STRING)?;
             let text_ns = nsstring_from_str(text)?;
@@ -457,6 +481,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
             if bytes.len() <= MAX_PNG_BYTES {
                 if let Ok(tiff) = png_to_tiff_bytes(bytes) {
                     if !tiff.is_empty() && tiff.len() <= MAX_TIFF_BYTES {
+                        tiff_len = Some(tiff.len());
                         // Best-effort: if the TIFF representation fails to attach, still keep the
                         // PNG/text representations so the clipboard isn't left empty.
                         if let (Ok(ty_tiff), Ok(tiff_data)) =
@@ -469,6 +494,15 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
                 }
             }
         }
+
+        debug_clipboard_log(format_args!(
+            "macos write: text_type={:?} text_bytes={text_bytes:?} html_type={:?} html_bytes={html_bytes:?} rtf_type={:?} rtf_bytes={rtf_bytes:?} png_type={:?} png_bytes={png_len:?} tiff_type={:?} tiff_bytes={tiff_len:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES}, tiff={MAX_TIFF_BYTES})",
+            payload.text.as_ref().map(|_| TYPE_STRING),
+            payload.html.as_ref().map(|_| TYPE_HTML),
+            payload.rtf.as_ref().map(|_| TYPE_RTF),
+            png_bytes.as_ref().map(|_| TYPE_PNG),
+            tiff_len.map(|_| TYPE_TIFF),
+        ));
 
         let objects: *mut AnyObject =
             objc2::msg_send![objc2::class!(NSArray), arrayWithObject: &*item];

@@ -191,7 +191,9 @@ fn choose_targets_in_order<'a, T: AsRef<str>>(
 mod gtk_backend {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
+    use super::super::{
+        debug_clipboard_log, normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    };
     use super::{
         choose_best_target, decode_text_for_target, decode_text_for_target_lossy_utf8,
         decoded_pixbuf_len, target_prefers_utf8, ClipboardContent, ClipboardError,
@@ -268,7 +270,15 @@ mod gtk_backend {
         targets: &[&str],
         max_bytes: usize,
     ) -> Option<String> {
-        let mut lossy_utf8_fallback: Option<(&str, Vec<u8>)> = None;
+        wait_for_utf8_targets_with_source(clipboard, targets, max_bytes).map(|(_, value)| value)
+    }
+
+    fn wait_for_utf8_targets_with_source<'a>(
+        clipboard: &gtk::Clipboard,
+        targets: &'a [&'a str],
+        max_bytes: usize,
+    ) -> Option<(&'a str, String)> {
+        let mut lossy_utf8_fallback: Option<(&'a str, Vec<u8>)> = None;
         for target in targets {
             let atom = gdk::Atom::intern(target);
             let Some(data) = clipboard.wait_for_contents(&atom) else {
@@ -288,7 +298,7 @@ mod gtk_backend {
             }
             let bytes = data.data();
             if let Some(s) = decode_text_for_target(target, &bytes) {
-                return Some(s);
+                return Some((*target, s));
             }
             // As a last resort (only when no other target decodes successfully), allow lossy UTF-8
             // decoding for targets that are explicitly expected to be UTF-8.
@@ -299,15 +309,16 @@ mod gtk_backend {
                 lossy_utf8_fallback = Some((*target, bytes));
             }
         }
-        lossy_utf8_fallback
-            .and_then(|(target, bytes)| decode_text_for_target_lossy_utf8(target, &bytes))
+        lossy_utf8_fallback.and_then(|(target, bytes)| {
+            decode_text_for_target_lossy_utf8(target, &bytes).map(|s| (target, s))
+        })
     }
 
     fn wait_for_bytes_base64(
         clipboard: &gtk::Clipboard,
         target: &str,
         max_bytes: usize,
-    ) -> Option<String> {
+    ) -> Option<(String, usize)> {
         let atom = gdk::Atom::intern(target);
         let data = clipboard.wait_for_contents(&atom)?;
         // Avoid copying large clipboard payloads into a second buffer.
@@ -325,7 +336,7 @@ mod gtk_backend {
         if bytes.is_empty() {
             None
         } else {
-            Some(STANDARD.encode(bytes))
+            Some((STANDARD.encode(bytes), len))
         }
     }
 
@@ -333,8 +344,15 @@ mod gtk_backend {
         with_gtk_main_thread(|| {
             ensure_gtk()?;
 
-            let read_from_clipboard = |clipboard: &gtk::Clipboard| {
+            let read_from_clipboard = |clipboard: &gtk::Clipboard, selection: &'static str| {
                 let targets = clipboard_target_names(clipboard);
+
+                let mut text_target: Option<&str> = None;
+                let mut html_target: Option<&str> = None;
+                let mut rtf_target: Option<&str> = None;
+                let mut image_target: Option<&str> = None;
+                let mut image_bytes: Option<usize> = None;
+                let mut image_pixbuf_fallback = false;
 
                 // Read plain text in a size-limited way.
                 //
@@ -358,10 +376,14 @@ mod gtk_backend {
                         if candidates.is_empty() {
                             None
                         } else {
-                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                            wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
+                                .map(|(target, value)| {
+                                    text_target = Some(target);
+                                    value
+                                })
                         }
                     }
-                    None => wait_for_utf8_targets(
+                    None => wait_for_utf8_targets_with_source(
                         clipboard,
                         &[
                             "text/plain;charset=utf-8",
@@ -372,20 +394,29 @@ mod gtk_backend {
                             "TEXT",
                         ],
                         MAX_TEXT_BYTES,
-                    ),
+                    )
+                    .map(|(target, value)| {
+                        text_target = Some(target);
+                        value
+                    }),
                 }
                 .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+
                 let html = match targets.as_deref() {
                     Some(targets) => {
                         let candidates = super::choose_targets_in_order(targets, &["text/html"]);
                         if candidates.is_empty() {
                             None
                         } else {
-                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                            wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
+                                .map(|(target, value)| {
+                                    html_target = Some(target);
+                                    value
+                                })
                         }
                     }
                     // If target enumeration isn't available, fall back to the canonical target.
-                    None => wait_for_utf8_targets(
+                    None => wait_for_utf8_targets_with_source(
                         clipboard,
                         &[
                             "text/html",
@@ -393,8 +424,14 @@ mod gtk_backend {
                             "text/html; charset=utf-8",
                         ],
                         MAX_TEXT_BYTES,
-                    ),
-                };
+                    )
+                    .map(|(target, value)| {
+                        html_target = Some(target);
+                        value
+                    }),
+                }
+                .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+
                 let rtf = match targets.as_deref() {
                     Some(targets) => {
                         let candidates = super::choose_targets_in_order(
@@ -404,10 +441,14 @@ mod gtk_backend {
                         if candidates.is_empty() {
                             None
                         } else {
-                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                            wait_for_utf8_targets_with_source(clipboard, &candidates, MAX_TEXT_BYTES)
+                                .map(|(target, value)| {
+                                    rtf_target = Some(target);
+                                    value
+                                })
                         }
                     }
-                    None => wait_for_utf8_targets(
+                    None => wait_for_utf8_targets_with_source(
                         clipboard,
                         &[
                             "text/rtf",
@@ -417,12 +458,27 @@ mod gtk_backend {
                             "application/x-rtf",
                         ],
                         MAX_TEXT_BYTES,
-                    ),
-                };
+                    )
+                    .map(|(target, value)| {
+                        rtf_target = Some(target);
+                        value
+                    }),
+                }
+                .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
+
                 let image_png_base64 = match targets.as_deref() {
-                    Some(targets) => choose_best_target(targets, &["image/png"])
-                        .and_then(|t| wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES)),
-                    None => wait_for_bytes_base64(clipboard, "image/png", MAX_PNG_BYTES),
+                    Some(targets) => choose_best_target(targets, &["image/png"]).and_then(|t| {
+                        wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES).map(|(b64, len)| {
+                            image_target = Some(t);
+                            image_bytes = Some(len);
+                            b64
+                        })
+                    }),
+                    None => wait_for_bytes_base64(clipboard, "image/png", MAX_PNG_BYTES).map(|(b64, len)| {
+                        image_target = Some("image/png");
+                        image_bytes = Some(len);
+                        b64
+                    }),
                 }
                 .or_else(|| {
                     // Some applications expose images on the clipboard without an `image/png` target.
@@ -438,19 +494,32 @@ mod gtk_backend {
                     if bytes.len() > MAX_PNG_BYTES {
                         return None;
                     }
+                    image_target = Some("pixbuf->image/png");
+                    image_bytes = Some(bytes.len());
+                    image_pixbuf_fallback = true;
                     Some(STANDARD.encode(bytes))
                 });
 
-                ClipboardContent {
+                let content = ClipboardContent {
                     text,
                     html,
                     rtf,
                     image_png_base64,
-                }
+                };
+
+                let text_bytes = content.text.as_ref().map(|s| s.as_bytes().len());
+                let html_bytes = content.html.as_ref().map(|s| s.as_bytes().len());
+                let rtf_bytes = content.rtf.as_ref().map(|s| s.as_bytes().len());
+                debug_clipboard_log(format_args!(
+                    "linux read({selection}): targets_len={:?} text_target={text_target:?} text_bytes={text_bytes:?} html_target={html_target:?} html_bytes={html_bytes:?} rtf_target={rtf_target:?} rtf_bytes={rtf_bytes:?} image_target={image_target:?} image_bytes={image_bytes:?} pixbuf_fallback={image_pixbuf_fallback} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})",
+                    targets.as_ref().map(|t| t.len())
+                ));
+
+                content
             };
 
             let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
-            let content = read_from_clipboard(&clipboard);
+            let content = read_from_clipboard(&clipboard, "CLIPBOARD");
 
             // On X11, some apps only populate PRIMARY selection (middle-click paste). When
             // CLIPBOARD has no usable content we may fall back to PRIMARY.
@@ -467,7 +536,7 @@ mod gtk_backend {
             );
             if !has_usable_data && clipboard_fallback::should_attempt_primary_selection_from_env() {
                 let primary = gtk::Clipboard::get(&gdk::SELECTION_PRIMARY);
-                return Ok(read_from_clipboard(&primary));
+                return Ok(read_from_clipboard(&primary, "PRIMARY"));
             }
 
             Ok(content)
@@ -558,6 +627,19 @@ mod gtk_backend {
                 if png_bytes.is_some() {
                     targets.push(gtk::TargetEntry::new("image/png", flags, INFO_PNG));
                 }
+
+                let text_bytes = text.as_ref().map(|s| s.as_bytes().len());
+                let html_bytes = html.as_ref().map(|s| s.as_bytes().len());
+                let rtf_bytes = rtf.as_ref().map(|s| s.as_bytes().len());
+                let png_len = png_bytes.as_ref().map(|b| b.len());
+                debug_clipboard_log(format_args!(
+                    "linux write: targets_len={} has_text={} has_html={} has_rtf={} has_png={} text_bytes={text_bytes:?} html_bytes={html_bytes:?} rtf_bytes={rtf_bytes:?} png_bytes={png_len:?} caps(text={MAX_TEXT_BYTES}, png={MAX_PNG_BYTES})",
+                    targets.len(),
+                    text.is_some(),
+                    html.is_some(),
+                    rtf.is_some(),
+                    png_bytes.is_some(),
+                ));
 
                 // Note: the closure captures owned copies of the strings/bytes so the clipboard stays
                 // valid after this function returns.

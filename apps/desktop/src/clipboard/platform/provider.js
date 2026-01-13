@@ -39,6 +39,68 @@ function hasTauri() {
   return Boolean(globalThis.__TAURI__);
 }
 
+/**
+ * Parse a debug flag from common representations.
+ *
+ * Accepts:
+ * - boolean
+ * - numbers (0/1)
+ * - strings ("0"/"1"/"false"/"true")
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function parseDebugFlag(value) {
+  if (value === true) return true;
+  if (value === false || value == null) return false;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const v = value.trim().toLowerCase();
+    return !(v === "" || v === "0" || v === "false");
+  }
+  return false;
+}
+
+/**
+ * Best-effort check for the clipboard debug flag.
+ *
+ * Notes:
+ * - In production Vite builds, `import.meta.env` values are build-time constants.
+ * - For field diagnostics without rebuilding, callers can set
+ *   `globalThis.FORMULA_DEBUG_CLIPBOARD = true` via devtools.
+ *
+ * @returns {boolean}
+ */
+function isClipboardDebugEnabled() {
+  // Runtime override (devtools / injected global).
+  if (parseDebugFlag(globalThis.FORMULA_DEBUG_CLIPBOARD ?? globalThis.__FORMULA_DEBUG_CLIPBOARD__)) {
+    return true;
+  }
+
+  // Build-time Vite env.
+  try {
+    const env = /** @type {any} */ (import.meta).env;
+    if (!env || typeof env !== "object") return false;
+    return parseDebugFlag(env.VITE_FORMULA_DEBUG_CLIPBOARD ?? env.FORMULA_DEBUG_CLIPBOARD);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {boolean} enabled
+ * @param  {...any} args
+ */
+function clipboardDebug(enabled, ...args) {
+  if (!enabled) return;
+  try {
+    const fn = console?.debug ?? console?.log;
+    if (typeof fn === "function") fn.call(console, "[clipboard]", ...args);
+  } catch {
+    // ignore
+  }
+}
+
 const isTrimChar = (code) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
 
 /**
@@ -412,7 +474,12 @@ async function readClipboardItemPng(item, type, maxBytes) {
  * @returns {Promise<ClipboardProvider>}
  */
 export async function createClipboardProvider() {
-  if (hasTauri()) return createTauriClipboardProvider();
+  const debug = isClipboardDebugEnabled();
+  if (hasTauri()) {
+    clipboardDebug(debug, "provider=tauri");
+    return createTauriClipboardProvider();
+  }
+  clipboardDebug(debug, "provider=web");
   return createWebClipboardProvider();
 }
 
@@ -425,6 +492,9 @@ function createTauriClipboardProvider() {
 
   return {
     async read() {
+      const debug = isClipboardDebugEnabled();
+      /** @type {string[] | null} */
+      const path = debug ? [] : null;
       /** @type {any | undefined} */
       let native;
       let clipboardReadErrored = false;
@@ -435,6 +505,7 @@ function createTauriClipboardProvider() {
         try {
             const result = await tauriInvoke("clipboard_read");
             if (result && typeof result === "object") {
+              if (path) path.push("native-ipc:clipboard_read");
               /** @type {any} */
               const r = result;
               if (typeof r.text === "string" && !utf8WithinLimit(r.text, MAX_RICH_TEXT_BYTES)) {
@@ -459,15 +530,16 @@ function createTauriClipboardProvider() {
 
             // If we successfully read HTML from the native clipboard, we can return
             // immediately (it already includes rich spreadsheet formats on supported
-            // platforms). If we *only* have plain text, still fall through to the
-            // WebView Clipboard API so we can pick up richer formats (rtf/image) when
-            // available.
-            if (typeof native.html === "string") {
+             // platforms). If we *only* have plain text, still fall through to the
+             // WebView Clipboard API so we can pick up richer formats (rtf/image) when
+             // available.
+             if (typeof native.html === "string") {
+              if (path) clipboardDebug(true, "read path:", path.join(" -> "));
               return native;
-            }
+             }
 
-            // Keep `native` around to merge into web reads below (e.g. rtf-only/image-only reads).
-            if (Object.keys(native).length === 0) native = undefined;
+             // Keep `native` around to merge into web reads below (e.g. rtf-only/image-only reads).
+             if (Object.keys(native).length === 0) native = undefined;
           }
         } catch {
           // Ignore; command may not exist on older builds.
@@ -477,7 +549,8 @@ function createTauriClipboardProvider() {
 
       // 2) Fall back to rich reads via the WebView Clipboard API when available so we can
       // ingest HTML tables + formats from external spreadsheets.
-      const web = await createWebClipboardProvider().read();
+      if (path) path.push("web-clipboard");
+      const web = await createWebClipboardProvider({ suppressDebug: true }).read();
       // If the web clipboard path observed an oversized `text/plain` payload, do not fall back to
       // other plain-text clipboard APIs (they may allocate the same huge string).
       if (web && typeof web === "object" && web[SKIPPED_OVERSIZED_PLAINTEXT]) {
@@ -499,6 +572,7 @@ function createTauriClipboardProvider() {
       // best-effort merge (never clobbering WebView values).
       if (clipboardReadErrored && typeof tauriInvoke === "function") {
         try {
+          if (path) path.push("native-ipc:read_clipboard");
           const legacy = await tauriInvoke("read_clipboard");
           if (legacy && typeof legacy === "object" && typeof legacy.text === "string") {
             if (!utf8WithinLimit(legacy.text, MAX_RICH_TEXT_BYTES)) {
@@ -516,15 +590,20 @@ function createTauriClipboardProvider() {
         try {
           const text = await tauriClipboard.readText();
           if (isStringWithinUtf8Limit(text, MAX_RICH_TEXT_BYTES)) merged.text = text;
+          if (typeof merged.text === "string" && path) path.push("legacy-plaintext:tauriClipboard.readText");
         } catch {
           // Ignore.
         }
       }
 
+      if (path) clipboardDebug(true, "read path:", path.join(" -> "));
       return merged;
     },
 
     async write(payload) {
+      const debug = isClipboardDebugEnabled();
+      /** @type {string[] | null} */
+      const path = debug ? [] : null;
       const hasText = typeof payload.text === "string";
       // Preserve whether callers actually provided `text`. Historically we coerced missing
       // `payload.text` to the empty string, which could unintentionally clobber the user's
@@ -538,12 +617,18 @@ function createTauriClipboardProvider() {
         if (tauriClipboard?.writeText) {
           try {
             await tauriClipboard.writeText(text);
+            if (path) {
+              path.push("legacy-plaintext:tauriClipboard.writeText");
+              clipboardDebug(true, "write path:", path.join(" -> "));
+            }
             return;
           } catch {
             // Fall through to web clipboard fallback below.
           }
         }
-        await createWebClipboardProvider().write({ text });
+        if (path) path.push("web-clipboard");
+        await createWebClipboardProvider({ suppressDebug: true }).write({ text });
+        if (path) clipboardDebug(true, "write path:", path.join(" -> "));
         return;
       }
 
@@ -577,6 +662,7 @@ function createTauriClipboardProvider() {
           if (pngBase64) richPayload.pngBase64 = pngBase64;
 
           await tauriInvoke("clipboard_write", { payload: richPayload });
+          if (path) path.push("native-ipc:clipboard_write");
           wrote = true;
         } catch {
           wrote = false;
@@ -592,6 +678,7 @@ function createTauriClipboardProvider() {
             rtf,
             image_png_base64: pngBase64,
           });
+          if (path) path.push("native-ipc:write_clipboard");
           wrote = true;
         } catch {
           wrote = false;
@@ -606,11 +693,14 @@ function createTauriClipboardProvider() {
           if (tauriClipboard?.writeText) {
             try {
               await tauriClipboard.writeText(text);
+              if (path) path.push("legacy-plaintext:tauriClipboard.writeText");
             } catch {
-              await createWebClipboardProvider().write({ text });
+              if (path) path.push("web-clipboard");
+              await createWebClipboardProvider({ suppressDebug: true }).write({ text });
             }
           } else {
-            await createWebClipboardProvider().write({ text });
+            if (path) path.push("web-clipboard");
+            await createWebClipboardProvider({ suppressDebug: true }).write({ text });
           }
         }
       }
@@ -629,14 +719,15 @@ function createTauriClipboardProvider() {
           const itemPayload = {
             "text/html": new Blob([html], { type: "text/html" }),
           };
-          if (hasText) {
-            itemPayload["text/plain"] = new Blob([text], { type: "text/plain" });
-          }
+          if (hasText) itemPayload["text/plain"] = new Blob([text], { type: "text/plain" });
           await clipboard.write([new ClipboardItem(itemPayload)]);
+          if (path) path.push("web-clipboard:clipboard.write");
         } catch {
           // Ignore; some platforms deny rich clipboard writes.
         }
       }
+
+      if (path) clipboardDebug(true, "write path:", path.join(" -> "));
     },
   };
 }
@@ -644,9 +735,11 @@ function createTauriClipboardProvider() {
 /**
  * @returns {ClipboardProvider}
  */
-function createWebClipboardProvider() {
+function createWebClipboardProvider(options = {}) {
+  const suppressDebug = options && typeof options === "object" ? Boolean(options.suppressDebug) : false;
   return {
     async read() {
+      const debug = !suppressDebug && isClipboardDebugEnabled();
       const clipboard = globalThis.navigator?.clipboard;
 
       // If we skip an oversized plain-text payload from `clipboard.read()`, do not fall back to
@@ -657,6 +750,7 @@ function createWebClipboardProvider() {
       if (clipboard?.read) {
         try {
           const items = await clipboard.read();
+          clipboardDebug(debug, "read provider=web-clipboard.read()");
           for (const item of items) {
             const matchMime = (value, exact) => {
               if (typeof value !== "string") return false;
@@ -725,6 +819,7 @@ function createWebClipboardProvider() {
       let text;
       try {
         text = clipboard?.readText ? await clipboard.readText() : undefined;
+        if (typeof text === "string") clipboardDebug(debug, "read provider=web-clipboard.readText()");
       } catch {
         text = undefined;
       }
@@ -746,6 +841,7 @@ function createWebClipboardProvider() {
     },
 
     async write(payload) {
+      const debug = !suppressDebug && isClipboardDebugEnabled();
       const clipboard = globalThis.navigator?.clipboard;
 
       const hasText = typeof payload.text === "string";
@@ -758,6 +854,7 @@ function createWebClipboardProvider() {
         if (clipboard?.writeText) {
           try {
             await clipboard.writeText(text);
+            clipboardDebug(debug, "write provider=web-clipboard.writeText() (oversized text)");
           } catch {
             // Ignore; clipboard write requires user gesture/permissions in browsers.
           }
@@ -772,6 +869,7 @@ function createWebClipboardProvider() {
                 "text/plain": new Blob([text], { type: "text/plain" }),
               }),
             ]);
+            clipboardDebug(debug, "write provider=web-clipboard.write() (plain text fallback)");
           } catch {
             // Ignore.
           }
@@ -797,9 +895,10 @@ function createWebClipboardProvider() {
         if (hasText) itemPayload["text/plain"] = new Blob([text], { type: "text/plain" });
         if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
         if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
-        if (imagePngBlob) itemPayload["image/png"] = imagePngBlob;
+      if (imagePngBlob) itemPayload["image/png"] = imagePngBlob;
         try {
           await clipboard.write([new ClipboardItem(itemPayload)]);
+          clipboardDebug(debug, "write provider=web-clipboard.write() (ClipboardItem)");
           return;
         } catch {
           // Some platforms reject unknown/unsupported types (e.g. image/png, text/rtf).
@@ -811,10 +910,9 @@ function createWebClipboardProvider() {
               const fallbackPayload = {
                 "text/html": new Blob([html], { type: "text/html" }),
               };
-              if (hasText) {
-                fallbackPayload["text/plain"] = new Blob([text], { type: "text/plain" });
-              }
+              if (hasText) fallbackPayload["text/plain"] = new Blob([text], { type: "text/plain" });
               await clipboard.write([new ClipboardItem(fallbackPayload)]);
+              clipboardDebug(debug, "write provider=web-clipboard.write() (html fallback)");
               return;
             } catch {
               // Fall back to plain text below.
@@ -827,6 +925,7 @@ function createWebClipboardProvider() {
       if (hasText && clipboard?.writeText) {
         try {
           await clipboard.writeText(text);
+          clipboardDebug(debug, "write provider=web-clipboard.writeText()");
         } catch {
           // Ignore; clipboard write requires user gesture/permissions in browsers.
         }
