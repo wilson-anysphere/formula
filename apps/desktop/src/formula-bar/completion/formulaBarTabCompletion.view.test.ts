@@ -12,6 +12,9 @@ describe("FormulaBarView tab completion (integration)", () => {
   it("caps preview evaluation cell reads (MAX_CELL_READS) for large formulas", async () => {
     const doc = new DocumentController();
     const getCellSpy = vi.spyOn(doc, "getCell");
+    // Preview evaluation intentionally avoids materializing sheets in an empty workbook.
+    // Seed a single cell so Sheet1 exists and the evaluator will attempt to read the range.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
 
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -25,18 +28,20 @@ describe("FormulaBarView tab completion (integration)", () => {
       getSheetId: () => "Sheet1",
       limits: { maxRows: 10_000, maxCols: 10_000 },
       completionClient: {
-        completeTabCompletion: async () => "=SUM(A1:A6000)",
+        // Returning an insertion (not a full "=" formula) ensures we bypass the
+        // rule-based starter-function suggestions for the bare "=" case.
+        completeTabCompletion: async () => "SUM(A1:A6000)",
       },
     });
 
     view.focus({ cursor: "end" });
-    view.textarea.value = "=";
-    view.textarea.setSelectionRange(1, 1);
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
     view.textarea.dispatchEvent(new Event("input"));
 
     await completion.flushTabCompletion();
 
-    expect(view.model.aiSuggestion()).toBe("=SUM(A1:A6000)");
+    expect(view.model.aiSuggestion()).toBe("=1+SUM(A1:A6000)");
     expect(view.model.aiSuggestionPreview()).toBe("(preview unavailable)");
 
     // The preview evaluator should stop reading after hitting the hard cap.
