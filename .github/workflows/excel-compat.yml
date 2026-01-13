@@ -241,7 +241,7 @@ jobs:
           python @args
 
       - name: Write job summary
-        if: ${{ env.MODE == 'validate-engine' }}
+        if: ${{ always() && env.MODE == 'validate-engine' }}
         shell: powershell
         run: |
           $reportPath = "tests/compatibility/excel-oracle/reports/mismatch-report.json"
@@ -313,10 +313,28 @@ jobs:
             "## Sample mismatches" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
             $max = [Math]::Min(10, $report.mismatches.Count)
-            for ($i = 0; $i -lt $max; $i++) {
-              $m = $report.mismatches[$i]
-              "* `$($m.caseId)` `$($m.reason)` `$($m.formula)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            }
+             for ($i = 0; $i -lt $max; $i++) {
+               $m = $report.mismatches[$i]
+               "* `$($m.caseId)` `$($m.reason)` `$($m.formula)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+             }
+           }
+
+      - name: Run corpus triage (public) for unified scorecard
+        if: ${{ always() && env.MODE == 'validate-engine' }}
+        continue-on-error: true
+        shell: powershell
+        run: |
+          python -m tools.corpus.triage --corpus-dir tools/corpus/public --out-dir tools/corpus/out/public
+          python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
+
+      - name: Generate unified compatibility scorecard (corpus + Excel oracle)
+        if: ${{ always() && env.MODE == 'validate-engine' }}
+        continue-on-error: true
+        shell: powershell
+        run: |
+          python tools/compat_scorecard.py --corpus-summary tools/corpus/out/public/summary.json --oracle-report tests/compatibility/excel-oracle/reports/mismatch-report.json --out-md tests/compatibility/compat_scorecard.md --out-json tests/compatibility/compat_scorecard.json --allow-missing-inputs
+          if (Test-Path -LiteralPath "tests/compatibility/compat_scorecard.md") {
+            Get-Content -LiteralPath "tests/compatibility/compat_scorecard.md" -Raw -Encoding UTF8 | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
 
       - name: Upload oracle dataset + reports
@@ -327,3 +345,7 @@ jobs:
           path: |
             tests/compatibility/excel-oracle/datasets/**/*.json
             tests/compatibility/excel-oracle/reports/*.json
+            tools/corpus/out/public/summary.json
+            tools/corpus/out/public/summary.md
+            tests/compatibility/compat_scorecard.md
+            tests/compatibility/compat_scorecard.json
