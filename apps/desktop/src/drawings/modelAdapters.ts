@@ -384,9 +384,14 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
 
     const contentType = readOptionalString(pick(data, ["content_type", "contentType"]));
     const mimeType = contentType && contentType.length > 0 ? contentType : inferMimeTypeFromId(imageId);
-    const bytes = parseBytes(bytesValue, `ImageStore.images[${imageId}].bytes`);
-
-    store.set({ id: imageId, bytes, mimeType });
+    try {
+      const bytes = parseBytes(bytesValue, `ImageStore.images[${imageId}].bytes`);
+      store.set({ id: imageId, bytes, mimeType });
+    } catch {
+      // Best-effort: ignore malformed image payloads rather than aborting conversion
+      // for the entire workbook.
+      continue;
+    }
   }
 
   return store;

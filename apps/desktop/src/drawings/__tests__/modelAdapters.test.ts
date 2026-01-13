@@ -118,6 +118,20 @@ describe("drawings/modelAdapters", () => {
     expect(store.get("b64.png")?.bytes).toEqual(new Uint8Array([1, 2, 3]));
   });
 
+  it("ignores invalid image byte payloads (best-effort)", () => {
+    const modelImages = {
+      images: {
+        "good.png": { bytes: [1, 2, 3], content_type: "image/png" },
+        // Malformed: not an array / base64 / typed-array-ish object.
+        "bad.png": { bytes: { hello: "world" }, content_type: "image/png" },
+      },
+    };
+
+    const store = convertModelImageStoreToUiImageStore(modelImages);
+    expect(store.get("good.png")?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(store.get("bad.png")).toBeUndefined();
+  });
+
   it("converts a Workbook snapshot to per-sheet drawings + images store", () => {
     const workbook = {
       images: {
