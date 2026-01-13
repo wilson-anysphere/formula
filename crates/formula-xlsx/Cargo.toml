@@ -15,6 +15,7 @@ vba = ["dep:formula-vba"]
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+digest = "0.10"
 formula-engine = { path = "../formula-engine" }
 formula-format = { path = "../formula-format" }
 formula-columnar = { path = "../formula-columnar" }
@@ -24,6 +25,8 @@ quick-xml = { version = "0.37", features = ["serialize"] }
 roxmltree = "0.20"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha1 = "0.10"
+sha2 = "0.10"
 thiserror = "1"
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
