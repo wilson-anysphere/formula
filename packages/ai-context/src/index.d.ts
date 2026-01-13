@@ -7,4 +7,4 @@ export * from "./trimMessagesToBudget.js";
 export * from "./dlp.js";
 export * from "./contextManager.js";
 export * from "./budgetPlanner.js";
-
+export * from "./workbookSchema.js";

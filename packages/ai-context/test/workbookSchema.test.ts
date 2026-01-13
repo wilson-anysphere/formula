@@ -1,0 +1,101 @@
+import { describe, expect, it } from "vitest";
+
+import { extractWorkbookSchema } from "../src/workbookSchema.js";
+
+describe("extractWorkbookSchema", () => {
+  it("infers headers, column types, and row/column counts for workbook tables", () => {
+    const workbook = {
+      id: "wb1",
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            ["Product", "Sales", "Active"],
+            ["Alpha", 10, true],
+            ["Beta", 20, false],
+          ],
+        },
+      ],
+      tables: [
+        {
+          name: "SalesTable",
+          sheetName: "Sheet1",
+          rect: { r0: 0, c0: 0, r1: 2, c1: 2 },
+        },
+      ],
+      namedRanges: [{ name: "SalesData", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 2, c1: 2 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 50 });
+    expect(schema.id).toBe("wb1");
+    expect(schema.sheets).toEqual([{ name: "Sheet1" }]);
+    expect(schema.tables).toHaveLength(1);
+
+    const table = schema.tables[0];
+    expect(table).toMatchObject({
+      name: "SalesTable",
+      sheetName: "Sheet1",
+      rect: { r0: 0, c0: 0, r1: 2, c1: 2 },
+      rangeA1: "Sheet1!A1:C3",
+      rowCount: 2,
+      columnCount: 3,
+    });
+    expect(table.headers).toEqual(["Product", "Sales", "Active"]);
+    expect(table.inferredColumnTypes).toEqual(["string", "number", "boolean"]);
+
+    expect(schema.namedRanges).toEqual([
+      { name: "SalesData", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 2, c1: 2 }, rangeA1: "Sheet1!A1:C3" },
+    ]);
+  });
+
+  it("is deterministic (stable output independent of input ordering)", () => {
+    const sheet = {
+      name: "Sheet1",
+      cells: [
+        ["Name", "Age"],
+        ["A", 1],
+      ],
+    };
+
+    const tableA = { name: "A", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } };
+    const tableB = { name: "B", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } };
+
+    const schema1 = extractWorkbookSchema({ id: "wb", sheets: [sheet], tables: [tableB, tableA] });
+    const schema2 = extractWorkbookSchema({ id: "wb", sheets: [sheet], tables: [tableA, tableB] });
+
+    expect(schema1).toEqual(schema2);
+    expect(schema1.tables.map((t) => t.name)).toEqual(["A", "B"]);
+  });
+
+  it("bounds sampling work for very large table rects", () => {
+    let readCount = 0;
+    const sheet = {
+      name: "BigSheet",
+      getCell(row: number, col: number) {
+        readCount += 1;
+        if (row > 10) throw new Error(`scanned too far: row=${row}`);
+        if (row === 0) return ["H1", "H2", "H3"][col] ?? null;
+        if (row === 1) return ["A", 1, true][col] ?? null;
+        if (row === 2) return ["B", 2, false][col] ?? null;
+        return null;
+      },
+    };
+
+    const workbook = {
+      id: "wb-big",
+      sheets: [sheet],
+      tables: [{ name: "BigTable", sheetName: "BigSheet", rect: { r0: 0, c0: 0, r1: 999_999, c1: 2 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook, { maxAnalyzeRows: 2 });
+    expect(schema.tables[0].name).toBe("BigTable");
+
+    // We should only touch:
+    // - header row
+    // - next row for header detection
+    // - a bounded number of sample rows (`maxAnalyzeRows`)
+    // Each row touches 3 columns.
+    expect(readCount).toBeLessThanOrEqual(30);
+  });
+});
+
