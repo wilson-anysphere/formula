@@ -343,6 +343,39 @@ export class ContextManager {
     this._sheetNameToActiveCacheKey = new Map();
     /** @type {Map<string, Promise<void>>} */
     this._sheetIndexLocks = new Map();
+    /** @type {Promise<void>} */
+    this._sheetIndexGlobalLock = Promise.resolve();
+  }
+
+  /**
+   * Serialize operations that mutate the sheet-level RagIndex store across all sheets.
+   *
+   * This is used by `clearSheetIndexCache({ clearStore: true })` to ensure the store
+   * is emptied deterministically (i.e. no concurrent index operation can re-add chunks
+   * after the clear completes).
+   *
+   * @template T
+   * @param {AbortSignal | undefined} signal
+   * @param {() => Promise<T>} fn
+   * @returns {Promise<T>}
+   */
+  async _withGlobalSheetIndexLock(signal, fn) {
+    const prev = this._sheetIndexGlobalLock ?? Promise.resolve();
+    /** @type {() => void} */
+    let release = () => {};
+    const current = new Promise((resolve) => {
+      release = resolve;
+    });
+    const chain = prev.then(() => current);
+    this._sheetIndexGlobalLock = chain;
+
+    try {
+      await awaitWithAbort(prev, signal);
+      throwIfAborted(signal);
+      return await fn();
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -360,6 +393,9 @@ export class ContextManager {
    */
   async _withSheetIndexLock(sheetName, signal, fn) {
     const key = typeof sheetName === "string" ? sheetName : String(sheetName ?? "");
+    // Ensure we don't start an index pass while a global sheet-store operation (clear) is running.
+    await awaitWithAbort(this._sheetIndexGlobalLock, signal);
+    throwIfAborted(signal);
     const prev = this._sheetIndexLocks.get(key) ?? Promise.resolve();
     /** @type {() => void} */
     let release = () => {};
@@ -396,28 +432,37 @@ export class ContextManager {
     const clearStore = options.clearStore === true;
     throwIfAborted(signal);
 
-    this._sheetIndexCache.clear();
-    this._sheetNameToActiveCacheKey.clear();
+    await this._withGlobalSheetIndexLock(signal, async () => {
+      // Wait for all in-flight per-sheet indexing operations to finish before clearing the store.
+      const locks = Array.from(this._sheetIndexLocks.values());
+      if (locks.length) {
+        await awaitWithAbort(Promise.allSettled(locks), signal);
+        throwIfAborted(signal);
+      }
 
-    if (!clearStore) return;
-    const store = this.ragIndex?.store;
-    if (!store) return;
+      this._sheetIndexCache.clear();
+      this._sheetNameToActiveCacheKey.clear();
 
-    // Prefer the store's deleteByPrefix API so callers can abort long clears.
-    // Passing an empty prefix clears all ids (every string starts with "").
-    if (typeof store.deleteByPrefix === "function") {
-      await store.deleteByPrefix("", { signal });
-      return;
-    }
+      if (!clearStore) return;
+      const store = this.ragIndex?.store;
+      if (!store) return;
 
-    // Fall back to common in-memory store shapes.
-    if (typeof store.clear === "function") {
-      await store.clear();
-      return;
-    }
-    if (store.items && typeof store.items.clear === "function") {
-      store.items.clear();
-    }
+      // Prefer the store's deleteByPrefix API so callers can abort long clears.
+      // Passing an empty prefix clears all ids (every string starts with "").
+      if (typeof store.deleteByPrefix === "function") {
+        await store.deleteByPrefix("", { signal });
+        return;
+      }
+
+      // Fall back to common in-memory store shapes.
+      if (typeof store.clear === "function") {
+        await store.clear();
+        return;
+      }
+      if (store.items && typeof store.items.clear === "function") {
+        store.items.clear();
+      }
+    });
   }
 
   /**

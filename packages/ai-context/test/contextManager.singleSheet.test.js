@@ -217,6 +217,37 @@ test("clearSheetIndexCache: clears cached entries and can clear the in-memory st
   assert.equal(cm.ragIndex.store.size, 1);
 });
 
+test("clearSheetIndexCache: waits for in-flight indexing before clearing the store", async () => {
+  const ragIndex = new RagIndex();
+  let releaseGate;
+  const gate = new Promise((resolve) => {
+    releaseGate = resolve;
+  });
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    await gate;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  const build = cm.buildContext({ sheet, query: "revenue" });
+  // Let the buildContext call reach the gated indexSheet implementation.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const clear = cm.clearSheetIndexCache({ clearStore: true });
+
+  releaseGate();
+  await Promise.allSettled([build, clear]);
+
+  // If clear did not wait, the in-flight index could repopulate after the store was cleared.
+  assert.equal(cm.ragIndex.store.size, 0);
+});
+
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;
