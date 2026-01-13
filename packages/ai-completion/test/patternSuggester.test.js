@@ -31,6 +31,22 @@ test("suggestPatternValues suggests repeated string matches in the current row",
   assert.equal(suggestions[0]?.text, "Apple");
 });
 
+test("suggestPatternValues suggests repeated string matches in the current column", () => {
+  const ctx = createContext([
+    [3, 2, "Apple"],
+    [4, 2, "Apple"],
+  ]);
+
+  const suggestions = suggestPatternValues({
+    currentInput: "Ap",
+    cursorPosition: 2,
+    cellRef: { row: 5, col: 2 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0]?.text, "Apple");
+});
+
 test("suggestPatternValues ranks closer matches above farther matches", () => {
   const ctx = createContext([
     [5, 4, "Bazooka"], // distance 1
@@ -46,6 +62,22 @@ test("suggestPatternValues ranks closer matches above farther matches", () => {
 
   assert.equal(suggestions[0]?.text, "Bazooka");
   assert.equal(suggestions[1]?.text, "Bar");
+});
+
+test("suggestPatternValues returns no suggestions for formula inputs", () => {
+  const ctx = createContext([
+    [0, 0, "Apple"],
+    [0, 1, "Apple"],
+  ]);
+
+  const suggestions = suggestPatternValues({
+    currentInput: "=Ap",
+    cursorPosition: 3,
+    cellRef: { row: 0, col: 2 },
+    surroundingCells: ctx,
+  });
+
+  assert.deepEqual(suggestions, []);
 });
 
 test("suggestPatternValues suggests the next number in a simple column sequence", () => {
@@ -64,4 +96,3 @@ test("suggestPatternValues suggests the next number in a simple column sequence"
 
   assert.equal(suggestions[0]?.text, "4");
 });
-

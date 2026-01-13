@@ -156,6 +156,7 @@ export function suggestPatternValues(params: {
   cellRef: CellRef;
   surroundingCells: SurroundingCellsContext;
   maxScanRows?: number;
+  maxScanCols?: number;
 }): PatternSuggestion[];
 
 export function columnIndexToLetter(index: number): string;
