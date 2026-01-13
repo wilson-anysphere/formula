@@ -39,11 +39,22 @@ export function getResizeHandleCenters(bounds: Rect): ResizeHandleCenter[] {
 export function hitTestResizeHandle(bounds: Rect, x: number, y: number): ResizeHandle | null {
   const size = RESIZE_HANDLE_HIT_SIZE_PX;
   const half = size / 2;
-  for (const c of getResizeHandleCenters(bounds)) {
-    if (x >= c.x - half && x <= c.x + half && y >= c.y - half && y <= c.y + half) {
-      return c.handle;
-    }
-  }
+  const x1 = bounds.x;
+  const y1 = bounds.y;
+  const x2 = bounds.x + bounds.width;
+  const y2 = bounds.y + bounds.height;
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+
+  // Test in the same order as `getResizeHandleCenters` for deterministic behavior.
+  if (x >= x1 - half && x <= x1 + half && y >= y1 - half && y <= y1 + half) return "nw";
+  if (x >= cx - half && x <= cx + half && y >= y1 - half && y <= y1 + half) return "n";
+  if (x >= x2 - half && x <= x2 + half && y >= y1 - half && y <= y1 + half) return "ne";
+  if (x >= x2 - half && x <= x2 + half && y >= cy - half && y <= cy + half) return "e";
+  if (x >= x2 - half && x <= x2 + half && y >= y2 - half && y <= y2 + half) return "se";
+  if (x >= cx - half && x <= cx + half && y >= y2 - half && y <= y2 + half) return "s";
+  if (x >= x1 - half && x <= x1 + half && y >= y2 - half && y <= y2 + half) return "sw";
+  if (x >= x1 - half && x <= x1 + half && y >= cy - half && y <= cy + half) return "w";
   return null;
 }
 
@@ -63,4 +74,3 @@ export function cursorForResizeHandle(handle: ResizeHandle): string {
       return "ew-resize";
   }
 }
-
