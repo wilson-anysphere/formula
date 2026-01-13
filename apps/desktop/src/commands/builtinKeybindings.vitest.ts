@@ -36,6 +36,13 @@ describe("builtin keybinding catalog", () => {
     expect(autosum.map((kb) => kb.mac)).toEqual(expect.arrayContaining(["option+=", "option+shift+="]));
   });
 
+  it("includes Excel-style focus cycling keybindings (F6 / Shift+F6)", () => {
+    const next = builtinKeybindings.find((kb) => kb.command === "workbench.focusNextRegion" && kb.key === "f6");
+    const prev = builtinKeybindings.find((kb) => kb.command === "workbench.focusPrevRegion" && kb.key === "shift+f6");
+    expect(next).toEqual({ command: "workbench.focusNextRegion", key: "f6", mac: "f6", when: null });
+    expect(prev).toEqual({ command: "workbench.focusPrevRegion", key: "shift+f6", mac: "shift+f6", when: null });
+  });
+
   it("gates representative keybindings via focus/edit context keys (capture-phase safe)", () => {
     // Fail-closed behavior is important while migrating to capture-phase routing: if context
     // keys haven't been initialized yet, spreadsheet-affecting shortcuts should not fire.
@@ -52,6 +59,10 @@ describe("builtin keybinding catalog", () => {
     const undoWhen = builtinKeybindings.find((kb) => kb.command === "edit.undo" && kb.key === "ctrl+z")?.when;
     expect(undoWhen).toBeNull();
     expect(evaluateWhenClause(undoWhen, emptyLookup)).toBe(true);
+
+    const focusNextWhen = builtinKeybindings.find((kb) => kb.command === "workbench.focusNextRegion" && kb.key === "f6")?.when;
+    expect(focusNextWhen).toBeNull();
+    expect(evaluateWhenClause(focusNextWhen, emptyLookup)).toBe(true);
 
     const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")
       ?.when;
@@ -179,6 +190,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", otherIndex)).toBe("Ctrl+Q");
     expect(otherIndex.get("workbench.quit")).toEqual(expect.arrayContaining(["Ctrl+Q", "Ctrl+Meta+Q"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", otherIndex)).toBe("Ctrl+Shift+P");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.focusNextRegion", otherIndex)).toBe("F6");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.focusPrevRegion", otherIndex)).toBe("Shift+F6");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", otherIndex)).toBe("Ctrl+C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", otherIndex)).toBe("Ctrl+X");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.paste", otherIndex)).toBe("Ctrl+V");
@@ -227,6 +240,8 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("workbench.quit", macIndex)).toBe("⌘Q");
     expect(macIndex.get("workbench.quit")).toEqual(expect.arrayContaining(["⌘Q", "⌃⌘Q"]));
     expect(getPrimaryCommandKeybindingDisplay("workbench.showCommandPalette", macIndex)).toBe("⇧⌘P");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.focusNextRegion", macIndex)).toBe("F6");
+    expect(getPrimaryCommandKeybindingDisplay("workbench.focusPrevRegion", macIndex)).toBe("⇧F6");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.copy", macIndex)).toBe("⌘C");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.cut", macIndex)).toBe("⌘X");
     expect(getPrimaryCommandKeybindingDisplay("clipboard.paste", macIndex)).toBe("⌘V");

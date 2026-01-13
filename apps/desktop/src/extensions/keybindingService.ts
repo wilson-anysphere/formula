@@ -126,6 +126,9 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "f2",
   // Add Comment (Excel-style).
   "shift+f2",
+  // Focus cycling between major UI regions (Excel-style).
+  "f6",
+  "shift+f6",
   // Open context menu (Excel-style / Windows keyboard context-menu key).
   "shift+f10",
   "contextmenu",

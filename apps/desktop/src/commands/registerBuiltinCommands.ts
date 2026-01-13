@@ -7,6 +7,7 @@ import { t } from "../i18n/index.js";
 import { showQuickPick } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 import type { ThemeController } from "../theme/themeController.js";
+import { cycleWorkbenchFocusRegion, type WorkbenchFocusCycleDeps } from "./workbenchFocusCycle.js";
 
 export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
@@ -134,6 +135,30 @@ export function registerBuiltinCommands(params: {
     } catch {
       return false;
     }
+  };
+
+  const getWorkbenchFocusCycleDeps = (): WorkbenchFocusCycleDeps | null => {
+    if (typeof document === "undefined") return null;
+    const ribbonRootEl = document.getElementById("ribbon") as HTMLElement | null;
+    const formulaBarRootEl = document.getElementById("formula-bar") as HTMLElement | null;
+    const gridRootEl = document.getElementById("grid") as HTMLElement | null;
+    const statusBarRootEl = document.querySelector<HTMLElement>(".statusbar");
+    if (!ribbonRootEl || !formulaBarRootEl || !gridRootEl || !statusBarRootEl) return null;
+    return {
+      ribbonRootEl,
+      formulaBarRootEl,
+      gridRootEl,
+      statusBarRootEl,
+      focusGrid: () => {
+        try {
+          app.focus();
+        } catch {
+          // ignore (tests/minimal harnesses)
+        }
+      },
+      getSecondaryGridRoot: () => document.getElementById("grid-secondary") as HTMLElement | null,
+      getSheetTabsRoot: () => document.getElementById("sheet-tabs") as HTMLElement | null,
+    };
   };
 
   commandRegistry.registerBuiltinCommand(
@@ -290,6 +315,38 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.workbench.showCommandPalette"),
       keywords: ["command palette", "commands"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "workbench.focusNextRegion",
+    t("command.workbench.focusNextRegion"),
+    () => {
+      const deps = getWorkbenchFocusCycleDeps();
+      if (!deps) return;
+      cycleWorkbenchFocusRegion(deps, 1);
+    },
+    {
+      category: t("commandCategory.navigation"),
+      icon: null,
+      description: t("commandDescription.workbench.focusNextRegion"),
+      keywords: ["focus", "region", "next", "f6", "navigation"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "workbench.focusPrevRegion",
+    t("command.workbench.focusPrevRegion"),
+    () => {
+      const deps = getWorkbenchFocusCycleDeps();
+      if (!deps) return;
+      cycleWorkbenchFocusRegion(deps, -1);
+    },
+    {
+      category: t("commandCategory.navigation"),
+      icon: null,
+      description: t("commandDescription.workbench.focusPrevRegion"),
+      keywords: ["focus", "region", "previous", "prev", "shift+f6", "navigation"],
     },
   );
 

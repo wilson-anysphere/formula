@@ -174,6 +174,20 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: WHEN_EDIT_CELL,
   },
   {
+    // Excel-style focus cycling between major UI regions (ribbon/formula bar/grid/etc).
+    command: "workbench.focusNextRegion",
+    key: "f6",
+    mac: "f6",
+    // Intentionally permissive: this shortcut should work even when focus is in a text input.
+    when: null,
+  },
+  {
+    command: "workbench.focusPrevRegion",
+    key: "shift+f6",
+    mac: "shift+f6",
+    when: null,
+  },
+  {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
     // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
