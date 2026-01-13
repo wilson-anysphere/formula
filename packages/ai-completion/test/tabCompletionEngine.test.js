@@ -1624,6 +1624,52 @@ test("Structured references are not suggested when the user types '[' before the
   assert.equal(suggestions.length, 0);
 });
 
+test("Sheet-name prefixes are suggested as SheetName! inside range args (=SUM(she → sheet2!) without auto-closing parens", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2", "My Sheet", "A1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(she";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => ["=SUM(sheet1!", "=SUM(sheet2!"].includes(s.text)),
+    `Expected a sheet prefix suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Quoted sheet-name prefixes are suggested as 'Sheet Name'! inside range args (=SUM('my → 'my Sheet'!) without auto-closing parens", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2", "My Sheet", "A1"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('my";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('my Sheet'!"),
+    `Expected a quoted sheet prefix suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;

@@ -386,7 +386,9 @@ export class TabCompletionEngine {
 
     const addReplacement = (replacement, { confidence }) => {
       let newText = replaceSpan(input, spanStart, spanEnd, replacement);
-      if (cursor === input.length && functionCouldBeComplete) {
+      // Sheet-prefix completions (e.g. Sheet2! / 'My Sheet'!) are intentionally
+      // incomplete ranges, so don't auto-close function parens for them.
+      if (cursor === input.length && functionCouldBeComplete && !replacement.endsWith("!")) {
         newText = closeUnbalancedParens(newText);
       }
       suggestions.push({
@@ -439,6 +441,26 @@ export class TabCompletionEngine {
             });
           }
         }
+      }
+    } else if (rawPrefix) {
+      // 4) Sheet-prefix completion: allow typing "=SUM(She" → "=SUM(Sheet1!"
+      // (and for quoted sheet names: "=SUM('My" → "=SUM('My Sheet'!").
+      const typedQuoted = rawPrefix.startsWith("'");
+      for (const sheetName of sheetNames) {
+        if (typeof sheetName !== "string" || sheetName.length === 0) continue;
+
+        const requiresQuotes = needsSheetQuotes(sheetName);
+        // Only suggest unquoted sheet names when they don't require quotes.
+        if (!typedQuoted && requiresQuotes) continue;
+        // Only suggest quoted sheet names when the user started a quote.
+        if (typedQuoted && !requiresQuotes) continue;
+
+        const formattedPrefix = formatSheetPrefix(sheetName);
+        if (!startsWithIgnoreCase(formattedPrefix, rawPrefix)) continue;
+
+        addReplacement(completeIdentifier(formattedPrefix, rawPrefix), {
+          confidence: clamp01(0.6 + ratioBoost(rawPrefix, formattedPrefix) * 0.25),
+        });
       }
     }
 
