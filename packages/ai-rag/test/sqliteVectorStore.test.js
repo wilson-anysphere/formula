@@ -104,6 +104,67 @@ test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB (even with au
 });
 
 test(
+  "SqliteVectorStore.compact() waits for in-flight persistence before running VACUUM",
+  { skip: !sqlJsAvailable },
+  async () => {
+    class BlockingStorage {
+      saveCalls = 0;
+      #data = null;
+      #startedResolve = null;
+      started = new Promise((resolve) => {
+        this.#startedResolve = resolve;
+      });
+      release = () => {};
+
+      async load() {
+        return this.#data ? new Uint8Array(this.#data) : null;
+      }
+
+      async save(data) {
+        this.saveCalls += 1;
+        this.#data = new Uint8Array(data);
+        if (this.saveCalls === 1) {
+          this.#startedResolve?.();
+          await new Promise((resolve) => {
+            this.release = resolve;
+          });
+        }
+      }
+    }
+
+    const storage = new BlockingStorage();
+    const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+
+    let sawVacuum = false;
+    const originalRun = store._db.run.bind(store._db);
+    store._db.run = (sql) => {
+      if (typeof sql === "string" && sql.trim().toUpperCase() === "VACUUM;") {
+        sawVacuum = true;
+      }
+      return originalRun(sql);
+    };
+
+    const upsertPromise = store.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+
+    // Wait until the first persist (triggered by upsert) reaches storage.save and blocks.
+    await storage.started;
+
+    const compactPromise = store.compact();
+
+    // Let compact enqueue/work; it should not run VACUUM while the save is blocked.
+    await Promise.resolve();
+    assert.equal(sawVacuum, false);
+
+    // Unblock the save so compaction can proceed.
+    storage.release();
+
+    await Promise.all([upsertPromise, compactPromise]);
+    assert.equal(sawVacuum, true);
+    await store.close();
+  }
+);
+
+test(
   "SqliteVectorStore migrates v1 schema to v2 (structured metadata columns)",
   { skip: !sqlJsAvailable },
   async () => {
