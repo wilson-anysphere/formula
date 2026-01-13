@@ -17,7 +17,7 @@ describe("createLocaleAwarePartialFormulaParser", () => {
         const prefix = formula.slice(0, cursor);
         // Minimal "engine-like" result: count top-level semicolons inside the SUM(...) call.
         const argIndex = prefix.includes(";") ? 1 : 0;
-        return { context: { function: { name: "SUM", argIndex } } };
+        return { context: { function: { name: "SUMME", argIndex } } };
       },
     };
 
@@ -27,7 +27,7 @@ describe("createLocaleAwarePartialFormulaParser", () => {
     });
     const fnRegistry = new FunctionRegistry();
 
-    const input = "=SUM(A1;";
+    const input = "=SUMME(A1;";
     const result = await parser(input, input.length, fnRegistry);
 
     expect(calls.length).toBe(1);
@@ -35,6 +35,7 @@ describe("createLocaleAwarePartialFormulaParser", () => {
 
     expect(result.isFormula).toBe(true);
     expect(result.inFunctionCall).toBe(true);
+    // Adapter canonicalizes localized function names for completion metadata lookup.
     expect(result.functionName).toBe("SUM");
     expect(result.argIndex).toBe(1);
     expect(result.expectingRange).toBe(true);
