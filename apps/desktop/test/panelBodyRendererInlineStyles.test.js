@@ -28,6 +28,15 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     "CollabVersionHistoryPanel.tsx",
   );
   const versionHistorySource = fs.readFileSync(versionHistoryPath, "utf8");
+  const branchManagerPath = path.join(
+    __dirname,
+    "..",
+    "src",
+    "panels",
+    "branch-manager",
+    "CollabBranchManagerPanel.tsx",
+  );
+  const branchManagerSource = fs.readFileSync(branchManagerPath, "utf8");
 
   assert.equal(
     /<[^>]*\bstyle\s*=\s*\{/.test(source),
@@ -82,7 +91,7 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     "CollabVersionHistoryPanel should not use React inline styles; use CSS classes in workspace.css instead",
   );
 
-  const branchManagerSection = extractSection(source, "function CollabBranchManagerPanel", "export interface PanelBodyRendererOptions");
+  const branchManagerSection = branchManagerSource;
   assert.equal(
     /\bstyle=\{\{/.test(branchManagerSection),
     false,

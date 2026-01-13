@@ -37,9 +37,11 @@ test("Desktop main.ts wires Data → Queries & Connections controls to the panel
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
 
-  // Toggle opens/closes the DATA_QUERIES panel.
-  assert.match(main, /\bcase\s+["']data\.queriesConnections\.queriesConnections["']:/);
+  // Toggle opens/closes the DATA_QUERIES panel via ribbon toggle overrides.
+  assert.match(main, /\btoggleOverrides:\s*\{[\s\S]*?["']data\.queriesConnections\.queriesConnections["']\s*:/m);
   assert.match(main, /\bPanelIds\.DATA_QUERIES\b/);
+  assert.match(main, /\bopenPanel\(PanelIds\.DATA_QUERIES\)/);
+  assert.match(main, /\bclosePanel\(PanelIds\.DATA_QUERIES\)/);
 
   // Pressed state syncs from layout placement.
   assert.match(
