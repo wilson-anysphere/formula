@@ -23,6 +23,26 @@ test("parseGoTo canonicalizes currentSheetName for unqualified A1 references", (
   assert.deepEqual(parsed.range, { startRow: 2, endRow: 2, startCol: 1, endCol: 1 });
 });
 
+test("parseGoTo supports Excel-style full column references (A:A)", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  const parsed = parseGoTo("A:A", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "a1");
+  assert.equal(parsed.sheetName, "Sheet1");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 1_048_575, startCol: 0, endCol: 0 });
+});
+
+test("parseGoTo supports Excel-style full row references (1:1)", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  const parsed = parseGoTo("1:1", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(parsed.source, "a1");
+  assert.equal(parsed.sheetName, "Sheet1");
+  assert.deepEqual(parsed.range, { startRow: 0, endRow: 0, startCol: 0, endCol: 16_383 });
+});
+
 test("parseGoTo canonicalizes named range sheet names via workbook.getSheet when available", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");

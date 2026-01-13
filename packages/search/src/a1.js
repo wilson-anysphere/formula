@@ -79,6 +79,33 @@ export function parseA1Range(input) {
 }
 
 export function formatA1Range(range) {
+  // Excel-style shorthand formatting for full row/column selections.
+  // This is primarily used by `parseGoTo("A:A")` / `parseGoTo("1:1")`, which expands
+  // row/column references using Excel's default grid limits.
+  const DEFAULT_MAX_ROWS = 1_048_576;
+  const DEFAULT_MAX_COLS = 16_384;
+
+  const isFullSheet =
+    range.startRow === 0 &&
+    range.endRow === DEFAULT_MAX_ROWS - 1 &&
+    range.startCol === 0 &&
+    range.endCol === DEFAULT_MAX_COLS - 1;
+  if (!isFullSheet) {
+    const isFullColumns = range.startRow === 0 && range.endRow === DEFAULT_MAX_ROWS - 1;
+    if (isFullColumns) {
+      const startCol = indexToCol(range.startCol);
+      const endCol = indexToCol(range.endCol);
+      return startCol === endCol ? `${startCol}:${startCol}` : `${startCol}:${endCol}`;
+    }
+
+    const isFullRows = range.startCol === 0 && range.endCol === DEFAULT_MAX_COLS - 1;
+    if (isFullRows) {
+      const startRow = String(range.startRow + 1);
+      const endRow = String(range.endRow + 1);
+      return startRow === endRow ? `${startRow}:${startRow}` : `${startRow}:${endRow}`;
+    }
+  }
+
   const start = formatA1Address({ row: range.startRow, col: range.startCol });
   const end = formatA1Address({ row: range.endRow, col: range.endCol });
   return start === end ? start : `${start}:${end}`;

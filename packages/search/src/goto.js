@@ -1,8 +1,43 @@
-import { parseA1Range, splitSheetQualifier } from "./a1.js";
+import { colToIndex, parseA1Range, splitSheetQualifier } from "./a1.js";
 import { normalizeName } from "./workbook.js";
 
 function isLikelyA1(ref) {
   return /^(\$?[A-Za-z]{1,3}\$?\d+)(:\$?[A-Za-z]{1,3}\$?\d+)?$/.test(String(ref).trim());
+}
+
+const DEFAULT_MAX_ROWS = 1_048_576;
+const DEFAULT_MAX_COLS = 16_384;
+
+function parseA1RowOrColRange(ref) {
+  const s = String(ref).trim();
+
+  // Excel-style column range: A:A, A:C, $A:$C, etc.
+  const colMatch = /^(\$?[A-Za-z]{1,3})\s*:\s*(\$?[A-Za-z]{1,3})$/.exec(s);
+  if (colMatch) {
+    const a = colToIndex(colMatch[1].replaceAll("$", ""));
+    const b = colToIndex(colMatch[2].replaceAll("$", ""));
+    const startCol = Math.min(a, b);
+    const endCol = Math.max(a, b);
+    return { startRow: 0, endRow: DEFAULT_MAX_ROWS - 1, startCol, endCol };
+  }
+
+  // Excel-style row range: 1:1, 1:10, $1:$10, etc.
+  const rowMatch = /^(\$?\d+)\s*:\s*(\$?\d+)$/.exec(s);
+  if (rowMatch) {
+    const parseRow = (token) => {
+      const raw = Number.parseInt(String(token).replaceAll("$", ""), 10);
+      if (!Number.isFinite(raw) || raw < 1) return null;
+      return raw - 1;
+    };
+    const a = parseRow(rowMatch[1]);
+    const b = parseRow(rowMatch[2]);
+    if (a == null || b == null) return null;
+    const startRow = Math.min(a, b);
+    const endRow = Math.max(a, b);
+    return { startRow, endRow, startCol: 0, endCol: DEFAULT_MAX_COLS - 1 };
+  }
+
+  return null;
 }
 
 function parseStructuredRef(input) {
@@ -50,6 +85,7 @@ function resolveSheetName(name, workbook) {
  *
  * Supports:
  * - A1 references: `A1`, `A1:B2`
+ * - Full column/row ranges: `A:A`, `1:1`
  * - Sheet-qualified: `Sheet2!C3`, `'My Sheet'!A1`
  * - Named ranges: `MyName`
  * - Table structured refs:
@@ -144,6 +180,12 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
   // A1 reference
   if (isLikelyA1(ref)) {
     return { type: "range", source: "a1", sheetName, range: parseA1Range(ref) };
+  }
+
+  // Excel-style row/column references (A:A, 1:1).
+  const rowOrCol = parseA1RowOrColRange(ref);
+  if (rowOrCol) {
+    return { type: "range", source: "a1", sheetName, range: rowOrCol };
   }
 
   // Named range
