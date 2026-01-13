@@ -990,6 +990,22 @@ The Yjs-backed branch store reserves:
 
 Source: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js)
 
+#### Custom branch root name (`rootName`)
+
+Both `YjsBranchStore` and `CollabBranchingWorkflow` support a non-default `rootName` (prefix) for these roots:
+
+```ts
+const rootName = "myBranching";
+const store = new YjsBranchStore({ ydoc: session.doc, rootName });
+const branchService = new BranchService({ docId, store });
+const workflow = new CollabBranchingWorkflow({ session, branchService, rootName });
+```
+
+If you customize `rootName`:
+
+- update `CollabVersioningOptions.excludeRoots` so version snapshots/restores don’t include (and later rewind) the branch/commit graph (see “Snapshot/restore isolation” above)
+- if using sync-server in production, consider extending `SYNC_SERVER_RESERVED_ROOT_PREFIXES` so the reserved-root guard still blocks your custom prefix
+
 ### Branch commit size + sync-server message limits
 
 Branching history is stored *inside the shared Yjs document* under `branching:commits`.
