@@ -261,6 +261,49 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("previews structured references with #All + whitespace", async () => {
+    const doc = new DocumentController();
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 20);
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+      completionClient: {
+        completeTabCompletion: async () => "SUM(Table1[[ #All ], [Amount]])",
+      },
+      schemaProvider: {
+        getNamedRanges: () => [],
+        getSheetNames: () => ["Sheet1"],
+        getTables: () => [
+          { name: "Table1", columns: ["Amount"], sheetName: "Sheet1", startRow: 0, startCol: 0, endRow: 2, endCol: 0 },
+        ],
+        getCacheKey: () => "tables:Table1",
+      },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=1+SUM(Table1[[ #All ], [Amount]])");
+    expect(view.model.aiSuggestionPreview()).toBe(31);
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("does not create phantom sheets when suggesting sheet-qualified ranges", async () => {
     const doc = new DocumentController();
     // The completion controller may read from the active sheet as part of suggestion/preview
