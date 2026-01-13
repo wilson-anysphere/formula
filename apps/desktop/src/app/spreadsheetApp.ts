@@ -9969,7 +9969,7 @@ export class SpreadsheetApp {
       else this.scrollCellIntoView(selected.target);
 
       const formula = `=SUM(${rangeToA1(selected.sumRange)})`;
-      this.document.setCellInput(sheetId, selected.target, formula, { label: "AutoSum" });
+      this.applyEdit(sheetId, selected.target, formula, { label: "AutoSum" });
       return;
     }
 
@@ -10008,7 +10008,7 @@ export class SpreadsheetApp {
     if (!sumRange) return;
 
     const formula = `=SUM(${rangeToA1(sumRange)})`;
-    this.document.setCellInput(this.sheetId, active, formula, { label: t("command.edit.autoSum") });
+    this.applyEdit(this.sheetId, active, formula, { label: t("command.edit.autoSum") });
   }
 
   private shouldHandleSpreadsheetClipboardCommand(): boolean {
@@ -11403,9 +11403,13 @@ export class SpreadsheetApp {
     return value;
   }
 
-  private applyEdit(sheetId: string, cell: CellCoord, rawValue: string): void {
-    if (this.isReadOnly()) return;
-
+  private applyEdit(sheetId: string, cell: CellCoord, rawValue: string, options?: { label?: string }): void {
+    if (this.isReadOnly()) {
+      showCollabEditRejectedToast([
+        { sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     // In collab/permissioned contexts, `DocumentController.canEditCell` may filter out
     // user edits entirely. Without a UX signal this can look like the UI "snapped back".
     const canEditCell = (this.document as any)?.canEditCell;
@@ -11429,9 +11433,10 @@ export class SpreadsheetApp {
       }
     }
 
+    const label = options?.label ?? "Edit cell";
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     if (rawValue.trim() === "") {
-      this.document.clearCell(sheetId, cell, { label: "Clear cell" });
+      this.document.clearCell(sheetId, cell, { label: options?.label ?? "Clear cell" });
       return;
     }
 
@@ -11444,10 +11449,10 @@ export class SpreadsheetApp {
         // No-op edit: keep rich runs without creating a history entry.
         return;
       }
-      this.document.setCellValue(sheetId, cell, updated, { label: "Edit cell" });
+      this.document.setCellValue(sheetId, cell, updated, { label });
       return;
     }
-    this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
+    this.document.setCellInput(sheetId, cell, rawValue, { label });
   }
 
   private inferCollabEditRejectionReason(cell: { sheetId: string; row: number; col: number }): "permission" | "encryption" | "unknown" {
