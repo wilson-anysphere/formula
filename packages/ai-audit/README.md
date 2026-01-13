@@ -11,9 +11,14 @@ This package intentionally keeps the default/browser entry free of Node-only imp
 ```ts
 import { AIAuditRecorder, createDefaultAIAuditStore } from "@formula/ai-audit";
 
-const store = await createDefaultAIAuditStore({
-  // Browser-like runtimes prefer IndexedDB when available, falling back to
-  // LocalStorage and then in-memory storage.
+// Defaults to a bounded-on store:
+// - IndexedDB when available/usable
+// - else localStorage
+// - else in-memory
+const store = await createDefaultAIAuditStore();
+
+// Or configure retention and backend selection:
+const configured = await createDefaultAIAuditStore({
   retention: { max_entries: 10_000, max_age_ms: 30 * 24 * 60 * 60 * 1000 },
   // `bounded` is enabled by default (defense-in-depth against oversized entries).
   // bounded: false,
@@ -21,7 +26,7 @@ const store = await createDefaultAIAuditStore({
 });
 ```
 
-To hard-cap per-entry size (defense-in-depth for LocalStorage/IndexedDB quota limits), wrap any store:
+`createDefaultAIAuditStore()` wraps the selected backend in `BoundedAIAuditStore` by default. To hard-cap per-entry size manually (or to wrap a custom store), wrap any store:
 
 ```ts
 import { BoundedAIAuditStore, LocalStorageAIAuditStore } from "@formula/ai-audit";
@@ -29,6 +34,12 @@ import { BoundedAIAuditStore, LocalStorageAIAuditStore } from "@formula/ai-audit
 const store = new BoundedAIAuditStore(new LocalStorageAIAuditStore(), {
   max_entry_chars: 200_000,
 });
+```
+
+To disable bounding (useful for tests or advanced hosts):
+
+```ts
+const store = await createDefaultAIAuditStore({ bounded: false });
 ```
 
 When an entry is compacted, oversized fields like `input` and tool payloads are replaced with:
