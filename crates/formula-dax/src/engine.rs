@@ -224,6 +224,16 @@ impl RowContext {
         self.stack.pop();
     }
 
+    /// Update the row index for the innermost (top-of-stack) row context.
+    ///
+    /// This is useful in hot loops (e.g. calculated-column evaluation) where we want to reuse a
+    /// single [`RowContext`] and avoid allocating a new table name string for each row.
+    pub fn set_current_row(&mut self, row: usize) {
+        if let Some(frame) = self.stack.last_mut() {
+            frame.row = row;
+        }
+    }
+
     fn current_frame(&self) -> Option<&RowFrame> {
         self.stack.last()
     }

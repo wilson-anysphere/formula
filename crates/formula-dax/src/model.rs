@@ -1127,15 +1127,13 @@ impl DataModel {
             match &table_ref.storage {
                 TableStorage::InMemory(_) => {
                     let mut results = Vec::with_capacity(table_ref.row_count());
+                    let engine = crate::engine::DaxEngine::new();
+                    let filter_ctx = FilterContext::default();
+                    let mut row_ctx = RowContext::default();
+                    row_ctx.push(table_ref.name(), 0);
                     for row in 0..table_ref.row_count() {
-                        let mut row_ctx = RowContext::default();
-                        row_ctx.push(table_ref.name(), row);
-                        let value = crate::engine::DaxEngine::new().evaluate_expr(
-                            self,
-                            &parsed,
-                            &FilterContext::default(),
-                            &row_ctx,
-                        )?;
+                        row_ctx.set_current_row(row);
+                        let value = engine.evaluate_expr(self, &parsed, &filter_ctx, &row_ctx)?;
                         results.push(value);
                     }
                     NewColumn::InMemory(results)
@@ -1153,20 +1151,17 @@ impl DataModel {
                     let options = backend.table.options();
                     let row_count = table_ref.row_count();
                     let engine = crate::engine::DaxEngine::new();
+                    let filter_ctx = FilterContext::default();
+                    let mut row_ctx = RowContext::default();
+                    row_ctx.push(table_ref.name(), 0);
 
                     let mut leading_nulls: usize = 0;
                     let mut inferred_type: Option<ColumnType> = None;
                     let mut builder: Option<ColumnarTableBuilder> = None;
 
                     for row in 0..row_count {
-                        let mut row_ctx = RowContext::default();
-                        row_ctx.push(table_ref.name(), row);
-                        let value = engine.evaluate_expr(
-                            self,
-                            &parsed,
-                            &FilterContext::default(),
-                            &row_ctx,
-                        )?;
+                        row_ctx.set_current_row(row);
+                        let value = engine.evaluate_expr(self, &parsed, &filter_ctx, &row_ctx)?;
 
                         match (inferred_type, &value) {
                             (None, Value::Blank) => {
