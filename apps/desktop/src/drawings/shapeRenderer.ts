@@ -47,8 +47,24 @@ export interface ShapeStroke {
   widthEmu: number;
 }
 
+export type ShapeGeometry =
+  | { type: "rect" }
+  | { type: "ellipse" }
+  | { type: "line" }
+  | {
+      type: "roundRect";
+      /**
+       * Corner rounding adjustment value from `<a:avLst><a:gd name="adj" fmla="val …"/>`.
+       *
+       * DrawingML stores this value in the 0-100000 range, where 50000 is typically the
+       * "max" rounding (capsule). We keep the raw value and let the renderer map it
+       * into pixels based on the final bounds.
+       */
+      adj?: number;
+    };
+
 export interface ShapeRenderSpec {
-  geometry: { type: ShapePresetGeometry };
+  geometry: ShapeGeometry;
   fill: ShapeFill;
   stroke?: ShapeStroke;
   /** Best-effort first line of text from `<xdr:txBody>`. */
@@ -131,6 +147,16 @@ function findFirstDescendantByLocalName(root: XmlElementLike, name: string): Xml
   while (queue.length) {
     const node = queue.shift()!;
     if (localName(node) === name) return node;
+    queue.unshift(...childElements(node));
+  }
+  return null;
+}
+
+function findFirstDescendant(root: XmlElementLike, predicate: (node: XmlElementLike) => boolean): XmlElementLike | null {
+  const queue: XmlElementLike[] = [root];
+  while (queue.length) {
+    const node = queue.shift()!;
+    if (predicate(node)) return node;
     queue.unshift(...childElements(node));
   }
   return null;
@@ -277,6 +303,26 @@ function normalizePresetGeometry(prst: string): ShapePresetGeometry | null {
   }
 }
 
+function parseAlpha(node: XmlElementLike): number | null {
+  // DrawingML alpha is a percentage stored in 0-100000.
+  const alphaNode = findFirstDescendantByLocalName(node, "alpha");
+  if (!alphaNode) return null;
+  const val = getAttribute(alphaNode, "val");
+  if (!val) return null;
+  const parsed = Number.parseInt(val, 10);
+  if (!Number.isFinite(parsed)) return null;
+  const clamped = Math.max(0, Math.min(100_000, parsed));
+  const alpha = clamped / 100_000;
+  if (alpha >= 1) return null;
+  return alpha;
+}
+
+function formatAlpha(alpha: number): string {
+  const rounded = Math.round(alpha * 1000) / 1000;
+  // Ensure we never emit scientific notation for small numbers.
+  return rounded.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 function parseSrgbColor(node: XmlElementLike): string | null {
   const srgb = findFirstDescendantByLocalName(node, "srgbClr");
   if (!srgb) return null;
@@ -284,7 +330,14 @@ function parseSrgbColor(node: XmlElementLike): string | null {
   if (!val) return null;
   const hex = val.trim();
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
-  return `#${hex.toUpperCase()}`;
+
+  const alpha = parseAlpha(srgb);
+  if (alpha == null) return `#${hex.toUpperCase()}`;
+
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${formatAlpha(alpha)})`;
 }
 
 function parseFill(spPr: XmlElementLike): ShapeFill {
@@ -314,6 +367,21 @@ function parseStroke(spPr: XmlElementLike): ShapeStroke | undefined {
   const solid = childElements(ln).find((c) => localName(c) === "solidFill");
   const color = (solid ? parseSrgbColor(solid) : null) ?? "#000000";
   return { color, widthEmu };
+}
+
+function parseRoundRectAdj(prstGeom: XmlElementLike): number | undefined {
+  // Round-rect adjust is expressed via `<a:avLst><a:gd name="adj" fmla="val 16667"/></a:avLst>`.
+  const gd = findFirstDescendant(
+    prstGeom,
+    (node) => localName(node) === "gd" && getAttribute(node, "name") === "adj",
+  );
+  if (!gd) return undefined;
+  const fmla = getAttribute(gd, "fmla");
+  if (!fmla) return undefined;
+  const match = /\bval\s+(-?\d+)\b/.exec(fmla);
+  if (!match) return undefined;
+  const parsed = Number.parseInt(match[1]!, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseLabel(root: XmlElementLike): string | undefined {
@@ -374,10 +442,12 @@ export function parseShapeRenderSpec(rawXml: string): ShapeRenderSpec | null {
   if (!geometry) return cacheResult(rawXml, null);
 
   return cacheResult(rawXml, {
-    geometry: { type: geometry },
+    geometry:
+      geometry === "roundRect"
+        ? { type: "roundRect", adj: prstGeom ? parseRoundRectAdj(prstGeom) : undefined }
+        : { type: geometry },
     fill: parseFill(spPr),
     stroke: parseStroke(spPr),
     label: parseLabel(root),
   });
 }
-

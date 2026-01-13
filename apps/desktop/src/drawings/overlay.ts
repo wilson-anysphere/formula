@@ -373,7 +373,12 @@ function drawShape(
       ctx.rect(x, y, w, h);
       break;
     case "roundRect": {
-      const radius = Math.min(w, h) * 0.2;
+      // Excel encodes round-rect corner rounding as an adjustment value in the
+      // 0-100000 range (with 50000 roughly representing max rounding).
+      const adj = spec.geometry.adj;
+      const ratio =
+        typeof adj === "number" && Number.isFinite(adj) ? Math.max(0, Math.min(50_000, adj)) / 100_000 : 0.2;
+      const radius = Math.min(w, h) * ratio;
       roundRectPath(ctx, x, y, w, h, radius);
       break;
     }
