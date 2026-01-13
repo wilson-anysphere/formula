@@ -261,14 +261,27 @@ export class FormulaBarModel {
       };
     }
 
-    const hint = getFunctionHint(this.#draft, this.#cursorStart);
+    let hint = getFunctionHint(this.#draft, this.#cursorStart);
+
+    // Excel UX: keep showing the innermost function hint when the caret is just
+    // after a closing paren (e.g. "=ROUND(1,2)|"). The simple tokenizer-based
+    // parser considers the call "closed" once it consumes ')', which would
+    // otherwise clear the hint.
+    if (
+      !hint &&
+      this.#cursorStart === this.#cursorEnd &&
+      this.#cursorStart > 0 &&
+      this.#draft[this.#cursorStart - 1] === ")"
+    ) {
+      hint = getFunctionHint(this.#draft, this.#cursorStart - 1);
+    }
+
     if (!hint) return null;
 
     // Best-effort locale-aware separator in fallback mode (engine absent/unavailable).
     // This uses the document language (set by the i18n layer) as a proxy for the
     // formula locale, defaulting to en-US in non-DOM environments (tests).
-    const localeId =
-      (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
+    const localeId = (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
     const argSeparator = inferArgSeparator(localeId);
     if (argSeparator === ", ") return hint;
     return { ...hint, parts: signatureParts(hint.signature, hint.context.argIndex, { argSeparator }) };
