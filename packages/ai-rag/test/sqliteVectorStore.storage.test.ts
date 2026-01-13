@@ -196,6 +196,30 @@ maybeTest("SqliteVectorStore calls storage.remove() when resetting dimension mis
   await store2.close();
 });
 
+maybeTest("SqliteVectorStore treats invalid dimension metadata as corruption (not mismatch)", async () => {
+  const storage = new InMemoryBinaryStorage();
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+
+  // Corrupt the persisted dimension metadata.
+  (store1 as any)._db.run("UPDATE vector_store_meta SET value = 'not-a-number' WHERE key = 'dimension';");
+  (store1 as any)._dirty = true;
+  await store1.close();
+
+  // Even with resetOnDimensionMismatch disabled, this should be treated as corruption
+  // and recover as an empty store when resetOnCorrupt is enabled.
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+    resetOnCorrupt: true,
+  });
+  expect(await store2.list()).toEqual([]);
+  await store2.close();
+});
+
 maybeTest("SqliteVectorStore can reset dimension mismatch even when storage.remove() is missing", async () => {
   class NoRemoveBinaryStorage {
     #data: Uint8Array | null = null;

@@ -398,6 +398,13 @@ export class SqliteVectorStore {
     }
 
     const existingDim = Number(existing);
+    if (!Number.isFinite(existingDim) || existingDim <= 0) {
+      const err = new Error(
+        `SqliteVectorStore invalid dimension metadata: expected positive number, got ${JSON.stringify(existing)}`
+      );
+      err.name = "SqliteVectorStoreInvalidMetadataError";
+      throw err;
+    }
     if (existingDim !== dimension) {
       throw createDimensionMismatchError(existingDim, dimension);
     }

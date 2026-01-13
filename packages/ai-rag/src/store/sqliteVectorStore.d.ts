@@ -63,3 +63,9 @@ export class SqliteVectorStore {
   ): Promise<Array<{ id: string; score: number; metadata: any }>>;
   close(): Promise<void>;
 }
+
+export type SqliteVectorStoreDimensionMismatchError = Error & {
+  name: "SqliteVectorStoreDimensionMismatchError";
+  dbDimension: number;
+  requestedDimension: number;
+};
