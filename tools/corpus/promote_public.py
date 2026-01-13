@@ -148,15 +148,17 @@ def update_public_expectations_file(
     return changed
 
 
-def _run_public_triage(workbook: WorkbookInput, *, diff_limit: int = 25) -> dict[str, Any]:
+def _run_public_triage(
+    workbook: WorkbookInput, *, diff_limit: int = 25, recalc: bool = False, render_smoke: bool = False
+) -> dict[str, Any]:
     rust_exe = _build_rust_helper()
     return triage_workbook(
         workbook,
         rust_exe=rust_exe,
         diff_ignore=set(DEFAULT_DIFF_IGNORE),
         diff_limit=diff_limit,
-        recalc=False,
-        render_smoke=False,
+        recalc=recalc,
+        render_smoke=render_smoke,
     )
 
 
@@ -242,6 +244,16 @@ def main() -> int:
         default=25,
         help="Maximum number of diff entries to include in the triage report (privacy-safe).",
     )
+    parser.add_argument(
+        "--recalc",
+        action="store_true",
+        help="Enable best-effort recalculation correctness check during triage (off by default).",
+    )
+    parser.add_argument(
+        "--render-smoke",
+        action="store_true",
+        help="Enable lightweight headless render/print smoke test during triage (off by default).",
+    )
     args = parser.parse_args()
 
     try:
@@ -302,6 +314,8 @@ def main() -> int:
         report = _run_public_triage(
             WorkbookInput(display_name=display_name, data=workbook_bytes),
             diff_limit=args.diff_limit,
+            recalc=args.recalc,
+            render_smoke=args.render_smoke,
         )
     except Exception as e:  # noqa: BLE001
         print(f"Triage failed: {e}")

@@ -47,7 +47,9 @@ class PromotePublicCLITests(unittest.TestCase):
             original_run_public_triage = promote_mod._run_public_triage
             try:
                 # Avoid Rust build by stubbing triage.
-                def _fake_triage(wb, *, diff_limit: int = 25):  # type: ignore[no-untyped-def]
+                def _fake_triage(  # type: ignore[no-untyped-def]
+                    wb, *, diff_limit: int = 25, recalc: bool = False, render_smoke: bool = False
+                ):
                     return {
                         "sha256": sha256_hex(wb.data),
                         "result": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0},
@@ -106,7 +108,7 @@ class PromotePublicCLITests(unittest.TestCase):
             try:
                 # First run: diff_critical_count=0
                 promote_mod._run_public_triage = (  # type: ignore[assignment]
-                    lambda wb, *, diff_limit=25: {
+                    lambda wb, *, diff_limit=25, recalc=False, render_smoke=False: {
                         "sha256": sha256_hex(wb.data),
                         "result": {
                             "open_ok": True,
@@ -137,7 +139,7 @@ class PromotePublicCLITests(unittest.TestCase):
 
                 # Second run: new expectations, should refuse without --force.
                 promote_mod._run_public_triage = (  # type: ignore[assignment]
-                    lambda wb, *, diff_limit=25: {
+                    lambda wb, *, diff_limit=25, recalc=False, render_smoke=False: {
                         "sha256": sha256_hex(wb.data),
                         "result": {
                             "open_ok": True,
