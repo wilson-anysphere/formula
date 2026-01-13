@@ -6,6 +6,29 @@ import type { TokenEstimator } from "./tokenBudget.js";
 
 export type Attachment = { type: "range" | "formula" | "table" | "chart"; reference: string; data?: unknown };
 
+export interface ContextSheet {
+  name: string;
+  values: unknown[][];
+  /**
+   * Optional coordinate origin (0-based) for the provided `values` matrix.
+   *
+   * When `values` is a cropped window of a larger sheet (e.g. a capped used-range
+   * sample), `origin` lets schema extraction and context formatting produce
+   * correct absolute A1 ranges.
+   */
+  origin?: { row: number; col: number };
+  namedRanges?: NamedRangeSchema[];
+  /**
+   * Optional explicit table definitions (used by schema extraction).
+   */
+  tables?: Array<{ name: string; range: string }>;
+  /**
+   * Allow host-specific sheet fields without tripping TS excess-property checks
+   * (e.g. internal ids, metadata, etc).
+   */
+  [key: string]: unknown;
+}
+
 export interface WorkbookRagVectorStore {
   /**
    * Optional embedding dimension. When provided, indexing will validate that all
@@ -83,6 +106,7 @@ export interface SpreadsheetApiLike {
    */
   sheetNameResolver?: { getSheetIdByName(name: string): string | null | undefined };
   sheet_name_resolver?: { getSheetIdByName(name: string): string | null | undefined };
+  [key: string]: unknown;
 }
 
 export interface RetrievedSheetChunk {
@@ -203,7 +227,7 @@ export class ContextManager {
   });
 
   buildContext(params: {
-    sheet: { name: string; values: unknown[][]; origin?: { row: number; col: number }; namedRanges?: NamedRangeSchema[] };
+    sheet: ContextSheet;
     query: string;
     attachments?: Attachment[];
     sampleRows?: number;

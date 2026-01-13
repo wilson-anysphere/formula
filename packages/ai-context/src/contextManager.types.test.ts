@@ -17,6 +17,7 @@ import {
   ContextManager,
   type BuildContextResult,
   type BuildWorkbookContextResult,
+  type ContextSheet,
   type DlpOptions,
   type RetrievedSheetChunk,
   type RetrievedWorkbookChunk,
@@ -39,6 +40,7 @@ type _WorkbookRetrievedShape = Assert<
   BuildWorkbookContextResult["retrieved"][number] extends RetrievedWorkbookChunk ? true : false
 >;
 
+type _ContextSheetNotAny = Assert<IsAny<ContextSheet> extends false ? true : false>;
 type _DlpOptionsNotAny = Assert<IsAny<DlpOptions> extends false ? true : false>;
 type _SpreadsheetNotAny = Assert<IsAny<SpreadsheetApiLike> extends false ? true : false>;
 type _VectorStoreNotAny = Assert<IsAny<WorkbookRagVectorStore> extends false ? true : false>;
