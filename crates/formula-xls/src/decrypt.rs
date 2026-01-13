@@ -262,7 +262,219 @@ fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
 fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
     let block_bytes = block.to_le_bytes();
     let digest = sha1_bytes(&[key_material, &block_bytes]);
-    digest[..key_len].to_vec()
+
+    // Office/WinCrypt quirk: 40-bit RC4 keys are expressed as a 128-bit (16-byte) key where the
+    // low 40 bits are set and the remaining 88 bits are zero. Using the raw 5-byte key changes the
+    // RC4 key-scheduling algorithm (KSA) and yields the wrong keystream.
+    //
+    // [MS-OFFCRYPTO] calls this out for CryptoAPI RC4; Excel uses the same convention for BIFF8
+    // `FILEPASS` CryptoAPI encryption.
+    if key_len == 5 {
+        let mut key = Vec::with_capacity(16);
+        key.extend_from_slice(&digest[..5]);
+        key.resize(16, 0);
+        key
+    } else {
+        digest[..key_len].to_vec()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&record_id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    /// Spec-correct per-block RC4 key derivation for CryptoAPI RC4 (BIFF8 FILEPASS subtype 0x0002).
+    ///
+    /// This intentionally does **not** call `derive_block_key` so tests catch regressions in the
+    /// 40-bit padding behaviour.
+    fn derive_block_key_spec(key_material: &[u8; 20], block: u32, key_size_bits: u32) -> Vec<u8> {
+        let block_bytes = block.to_le_bytes();
+        let digest = sha1_bytes(&[key_material, &block_bytes]);
+        let key_len = (key_size_bits / 8) as usize;
+        if key_size_bits == 40 {
+            let mut key = Vec::with_capacity(16);
+            key.extend_from_slice(&digest[..5]);
+            key.resize(16, 0);
+            return key;
+        }
+        digest[..key_len].to_vec()
+    }
+
+    struct PayloadRc4Spec {
+        key_material: [u8; 20],
+        key_size_bits: u32,
+        block: u32,
+        pos_in_block: usize,
+        rc4: Rc4,
+    }
+
+    impl PayloadRc4Spec {
+        fn new(key_material: [u8; 20], key_size_bits: u32) -> Self {
+            let key = derive_block_key_spec(&key_material, 0, key_size_bits);
+            let rc4 = Rc4::new(&key);
+            Self {
+                key_material,
+                key_size_bits,
+                block: 0,
+                pos_in_block: 0,
+                rc4,
+            }
+        }
+
+        fn rekey(&mut self) {
+            self.block = self.block.wrapping_add(1);
+            let key = derive_block_key_spec(&self.key_material, self.block, self.key_size_bits);
+            self.rc4 = Rc4::new(&key);
+            self.pos_in_block = 0;
+        }
+
+        fn apply_keystream(&mut self, mut data: &mut [u8]) {
+            while !data.is_empty() {
+                if self.pos_in_block == PAYLOAD_BLOCK_SIZE {
+                    self.rekey();
+                }
+                let remaining_in_block = PAYLOAD_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+                let chunk_len = data.len().min(remaining_in_block);
+                let (chunk, rest) = data.split_at_mut(chunk_len);
+                self.rc4.apply_keystream(chunk);
+                self.pos_in_block += chunk_len;
+                data = rest;
+            }
+        }
+    }
+
+    #[test]
+    fn derive_block_key_pads_40_bit_rc4_to_16_bytes() {
+        let key_material = [0x11u8; 20];
+        let block = 0u32;
+
+        let block_bytes = block.to_le_bytes();
+        let digest = sha1_bytes(&[&key_material, &block_bytes]);
+        let mut expected = Vec::from(&digest[..5]);
+        expected.resize(16, 0);
+
+        let got = derive_block_key(&key_material, block, 5);
+        assert_eq!(got, expected);
+        assert_eq!(got.len(), 16);
+        assert!(got[5..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn decrypts_rc4_cryptoapi_40_bit_by_using_padded_rc4_key() {
+        // Build a minimal BIFF8 workbook stream:
+        // BOF (plaintext) + FILEPASS (plaintext) + one record with encrypted payload + EOF.
+        const RECORD_BOF: u16 = 0x0809;
+        const RECORD_EOF: u16 = 0x000A;
+
+        let password = "password";
+        let key_size_bits: u32 = 40;
+        let salt: [u8; 16] = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F, 0x10,
+        ];
+
+        // Derive key material per MS-OFFCRYPTO (SHA1).
+        let key_material = derive_key_material(password, &salt);
+
+        // Build the verifier fields (encrypted with block 0 key).
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+            0x0D, 0x0E, 0x0F,
+        ];
+        let verifier_hash_plain: [u8; 20] = sha1_bytes(&[&verifier_plain]);
+
+        let key0 = derive_block_key_spec(&key_material, 0, key_size_bits);
+        assert_eq!(key0.len(), 16, "40-bit RC4 key must be padded to 16 bytes");
+
+        let mut rc4 = Rc4::new(&key0);
+        let mut encrypted_verifier = verifier_plain;
+        rc4.apply_keystream(&mut encrypted_verifier);
+        let mut encrypted_verifier_hash = verifier_hash_plain.to_vec();
+        rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+        // Build CryptoAPI EncryptionInfo (minimal, SHA1 + RC4).
+        let mut enc_header = Vec::new();
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
+        enc_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // algId
+        enc_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash
+        enc_header.extend_from_slice(&key_size_bits.to_le_bytes()); // keySize (bits)
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // providerType
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
+        enc_header.extend_from_slice(&0u32.to_le_bytes()); // reserved2
+
+        let mut enc_info = Vec::new();
+        enc_info.extend_from_slice(&4u16.to_le_bytes()); // majorVersion (ignored by parser)
+        enc_info.extend_from_slice(&2u16.to_le_bytes()); // minorVersion (ignored by parser)
+        enc_info.extend_from_slice(&0u32.to_le_bytes()); // flags
+        enc_info.extend_from_slice(&(enc_header.len() as u32).to_le_bytes()); // headerSize
+        enc_info.extend_from_slice(&enc_header);
+        // EncryptionVerifier
+        enc_info.extend_from_slice(&(salt.len() as u32).to_le_bytes());
+        enc_info.extend_from_slice(&salt);
+        enc_info.extend_from_slice(&encrypted_verifier);
+        enc_info.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize
+        enc_info.extend_from_slice(&encrypted_verifier_hash);
+
+        let mut filepass_payload = Vec::new();
+        filepass_payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+        filepass_payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+        filepass_payload.extend_from_slice(&(enc_info.len() as u32).to_le_bytes());
+        filepass_payload.extend_from_slice(&enc_info);
+
+        // Plaintext record payload after FILEPASS. Make it >1024 bytes to ensure the decryptor
+        // rekeys (block 1 derivation must also follow the 40-bit padding rule).
+        let mut plaintext_payload = vec![0u8; 2048];
+        for (i, b) in plaintext_payload.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        const RECORD_DUMMY: u16 = 0x1234;
+
+        let bof_payload = [0u8; 16];
+        let plaintext_stream = [
+            record(RECORD_BOF, &bof_payload),
+            record(RECORD_FILEPASS, &filepass_payload),
+            record(RECORD_DUMMY, &plaintext_payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Encrypt record payloads after FILEPASS using the spec-correct RC4 key derivation.
+        let (filepass_offset, filepass_len) =
+            find_filepass_record_offset(&plaintext_stream).expect("FILEPASS offset");
+        let filepass_data_end = filepass_offset + 4 + filepass_len;
+
+        let mut encrypted_stream = plaintext_stream.clone();
+        let mut payload_cipher = PayloadRc4Spec::new(key_material, key_size_bits);
+
+        let mut offset = filepass_data_end;
+        while offset < encrypted_stream.len() {
+            let len = u16::from_le_bytes([encrypted_stream[offset + 2], encrypted_stream[offset + 3]])
+                as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+            payload_cipher.apply_keystream(&mut encrypted_stream[data_start..data_end]);
+            offset = data_end;
+        }
+
+        // Decrypt using the implementation under test.
+        let decrypted =
+            decrypt_biff8_workbook_stream_rc4_cryptoapi(&encrypted_stream, password).expect("decrypt");
+
+        // The decryptor masks the FILEPASS record id but otherwise yields the original plaintext.
+        let mut expected = plaintext_stream;
+        expected[filepass_offset..filepass_offset + 2]
+            .copy_from_slice(&RECORD_MASKED.to_le_bytes());
+        assert_eq!(decrypted, expected);
+    }
 }
 
 #[derive(Debug, Clone)]
