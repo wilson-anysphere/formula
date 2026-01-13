@@ -65,6 +65,13 @@ const ndjson = serializeAuditEntries(entries, {
 });
 ```
 
+If you only need the export utility (and want to avoid importing store implementations), you can
+use the dedicated entrypoint:
+
+```ts
+import { serializeAuditEntries } from "@formula/ai-audit/export";
+```
+
 Notes:
 - Output ordering is deterministic (stable key sorting).
 - `bigint` values are exported as decimal strings.
