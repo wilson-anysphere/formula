@@ -1,5 +1,5 @@
 import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellRichText, CellStyle } from "@formula/grid/node";
-import { LruCache } from "@formula/grid/node";
+import { LruCache, toColumnName } from "@formula/grid/node";
 import type { DocumentController } from "../../document/documentController.js";
 import { applyStylePatch } from "../../formatting/styleTable.js";
 import { resolveCssVar } from "../../theme/cssVars.js";
@@ -82,17 +82,6 @@ function parseImageCellPayload(value: unknown): CellData["image"] | null {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
-}
-
-function toColumnName(col0: number): string {
-  let value = col0 + 1;
-  let name = "";
-  while (value > 0) {
-    const rem = (value - 1) % 26;
-    name = String.fromCharCode(65 + rem) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
 }
 
 export class DocumentCellProvider implements CellProvider {

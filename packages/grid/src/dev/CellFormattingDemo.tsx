@@ -9,18 +9,8 @@ import type {
   CellProvider,
   CellStyle
 } from "../model/CellProvider";
+import { toColumnName } from "../a11y/a11y";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
-
-function toColumnName(col0: number): string {
-  let value = col0 + 1;
-  let name = "";
-  while (value > 0) {
-    const rem = (value - 1) % 26;
-    name = String.fromCharCode(65 + rem) + name;
-    value = Math.floor((value - 1) / 26);
-  }
-  return name;
-}
 
 function cellKey(row: number, col: number): string {
   return `${row},${col}`;
