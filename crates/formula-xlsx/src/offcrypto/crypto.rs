@@ -90,6 +90,21 @@ pub enum CryptoError {
     InvalidParameter(&'static str),
 }
 
+fn normalize_key_material_vec(mut bytes: Vec<u8>, out_len: usize) -> Vec<u8> {
+    if bytes.len() >= out_len {
+        bytes.truncate(out_len);
+    } else {
+        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
+        // implementations (e.g. `msoffcrypto-tool`).
+        bytes.resize(out_len, 0x36);
+    }
+    bytes
+}
+
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    normalize_key_material_vec(bytes.to_vec(), out_len)
+}
+
 /// MS-OFFCRYPTO Agile: block key used for deriving the "verifierHashInput" key.
 pub const VERIFIER_HASH_INPUT_BLOCK: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
 /// MS-OFFCRYPTO Agile: block key used for deriving the "verifierHashValue" key.
@@ -177,7 +192,7 @@ pub fn hash_password(
 ///
 /// Algorithm:
 /// 1. `K = Hash(H || blockKey)`
-/// 2. If `key_len > digest_len`, append `0x00` bytes; else truncate.
+/// 2. Apply `TruncateHash`/normalization to `key_len` bytes.
 pub fn derive_key(
     h: &[u8],
     block_key: &[u8],
@@ -200,7 +215,9 @@ pub fn derive_key(
     if key_len <= digest_len {
         Ok(digest[..key_len].to_vec())
     } else {
-        let mut out = vec![0u8; key_len];
+        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
+        // implementations (e.g. `msoffcrypto-tool`).
+        let mut out = vec![0x36u8; key_len];
         out[..digest_len].copy_from_slice(&digest[..digest_len]);
         Ok(out)
     }
@@ -210,7 +227,7 @@ pub fn derive_key(
 ///
 /// Algorithm:
 /// 1. `IV = Hash(salt || blockKey)`
-/// 2. If `iv_len > digest_len`, append `0x00` bytes; else truncate.
+/// 2. Apply `TruncateHash`/normalization to `iv_len` bytes.
 pub fn derive_iv(
     salt: &[u8],
     block_key: &[u8],
@@ -233,7 +250,9 @@ pub fn derive_iv(
     if iv_len <= digest_len {
         Ok(digest[..iv_len].to_vec())
     } else {
-        let mut out = vec![0u8; iv_len];
+        // MS-OFFCRYPTO `TruncateHash`/normalization uses `0x36` for expansion, matching common
+        // implementations (e.g. `msoffcrypto-tool`).
+        let mut out = vec![0x36u8; iv_len];
         out[..digest_len].copy_from_slice(&digest[..digest_len]);
         Ok(out)
     }
@@ -288,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_key_truncates_and_pads_with_zeros() {
+    fn derive_key_truncates_and_pads_with_0x36() {
         let h = vec![0x22u8; 32];
         let full = derive_key(&h, &VERIFIER_HASH_INPUT_BLOCK, 20, HashAlgorithm::Sha1).unwrap();
         assert_eq!(full.len(), 20);
@@ -300,11 +319,11 @@ mod tests {
         let padded = derive_key(&h, &VERIFIER_HASH_INPUT_BLOCK, 24, HashAlgorithm::Sha1).unwrap();
         assert_eq!(padded.len(), 24);
         assert_eq!(&padded[..20], &full[..]);
-        assert_eq!(&padded[20..], &[0u8; 4]);
+        assert_eq!(&padded[20..], &[0x36u8; 4]);
     }
 
     #[test]
-    fn derive_iv_truncates_and_pads_with_zeros() {
+    fn derive_iv_truncates_and_pads_with_0x36() {
         let salt = [0x33u8; 16];
         let full = derive_iv(&salt, &KEY_VALUE_BLOCK, 20, HashAlgorithm::Sha1).unwrap();
         assert_eq!(full.len(), 20);
@@ -316,7 +335,23 @@ mod tests {
         let padded = derive_iv(&salt, &KEY_VALUE_BLOCK, 28, HashAlgorithm::Sha1).unwrap();
         assert_eq!(padded.len(), 28);
         assert_eq!(&padded[..20], &full[..]);
-        assert_eq!(&padded[20..], &[0u8; 8]);
+        assert_eq!(&padded[20..], &[0x36u8; 8]);
+    }
+
+    #[test]
+    fn normalize_key_material_pads_with_0x36() {
+        assert_eq!(
+            normalize_key_material(&[0xAA, 0xBB], 5),
+            vec![0xAA, 0xBB, 0x36, 0x36, 0x36]
+        );
+    }
+
+    #[test]
+    fn normalize_key_material_truncates() {
+        assert_eq!(
+            normalize_key_material(&[0xAA, 0xBB, 0xCC], 2),
+            vec![0xAA, 0xBB]
+        );
     }
 
     #[test]

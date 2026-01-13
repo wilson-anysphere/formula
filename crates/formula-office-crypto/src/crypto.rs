@@ -182,6 +182,23 @@ pub(crate) fn hash_password(
     Zeroizing::new(out)
 }
 
+fn normalize_key_material_in_place(bytes: &mut Vec<u8>, out_len: usize) {
+    if bytes.len() >= out_len {
+        bytes.truncate(out_len);
+    } else {
+        // MS-OFFCRYPTO's `TruncateHash` expands by appending 0x36 bytes, matching common
+        // implementations such as `msoffcrypto-tool`'s `_normalize_key`.
+        bytes.resize(out_len, 0x36);
+    }
+}
+
+#[cfg(test)]
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    normalize_key_material_in_place(&mut out, out_len);
+    out
+}
+
 pub(crate) fn derive_agile_key(
     hash_alg: HashAlgorithm,
     salt: &[u8],
@@ -199,7 +216,8 @@ pub(crate) fn derive_agile_key(
     let mut digest: Zeroizing<[u8; MAX_DIGEST_LEN]> = Zeroizing::new([0u8; MAX_DIGEST_LEN]);
     hash_alg.digest_two_into(&h, block_key, &mut digest[..digest_len]);
 
-    let mut key: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0u8; key_bytes]);
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
+    let mut key: Zeroizing<Vec<u8>> = Zeroizing::new(vec![0x36u8; key_bytes]);
     let take = key_bytes.min(digest_len);
     key[..take].copy_from_slice(&digest[..take]);
     key
@@ -218,8 +236,14 @@ pub(crate) fn derive_iv(
     let mut digest = [0u8; MAX_DIGEST_LEN];
     hash_alg.digest_two_into(salt, block_key, &mut digest[..digest_len]);
 
-    let out_len = iv_len.min(digest_len);
-    digest[..out_len].to_vec()
+    if iv_len <= digest_len {
+        return digest[..iv_len].to_vec();
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
+    let mut out = vec![0x36u8; iv_len];
+    out[..digest_len].copy_from_slice(&digest[..digest_len]);
+    out
 }
 
 pub(crate) fn aes_cbc_decrypt(
@@ -478,8 +502,8 @@ mod tests {
                 b"Secret",
                 b"Attack at dawn",
                 &[
-                    0x45, 0xa0, 0x1f, 0x64, 0x5f, 0xc3, 0x5b, 0x38, 0x35, 0x52, 0x54, 0x4b,
-                    0x9b, 0xf5,
+                    0x45, 0xa0, 0x1f, 0x64, 0x5f, 0xc3, 0x5b, 0x38, 0x35, 0x52, 0x54,
+                    0x4b, 0x9b, 0xf5,
                 ],
             ),
         ];
@@ -503,5 +527,58 @@ mod tests {
                 std::str::from_utf8(key).ok()
             );
         }
+    }
+
+    #[test]
+    fn normalize_key_material_pads_with_0x36() {
+        assert_eq!(
+            normalize_key_material(&[0xAA, 0xBB], 5),
+            vec![0xAA, 0xBB, 0x36, 0x36, 0x36]
+        );
+    }
+
+    #[test]
+    fn normalize_key_material_truncates() {
+        assert_eq!(
+            normalize_key_material(&[0xAA, 0xBB, 0xCC], 2),
+            vec![0xAA, 0xBB]
+        );
+    }
+
+    #[test]
+    fn derive_agile_key_pads_with_0x36_when_longer_than_digest() {
+        let salt = [0x11u8; 16];
+        let pw_utf16 = password_to_utf16le("pw");
+        let block_key = [0x22u8; 8];
+
+        let key = derive_agile_key(HashAlgorithm::Sha1, &salt, &pw_utf16, 0, 24, &block_key);
+        assert_eq!(key.len(), 24);
+        assert_eq!(&key[20..], &[0x36u8; 4]);
+    }
+
+    #[test]
+    fn derive_iv_pads_with_0x36_when_longer_than_digest() {
+        let salt = [0x11u8; 16];
+        let block_key = [0x22u8; 8];
+
+        let iv = derive_iv(HashAlgorithm::Sha1, &salt, &block_key, 24);
+        assert_eq!(iv.len(), 24);
+        assert_eq!(&iv[20..], &[0x36u8; 4]);
+    }
+
+    #[test]
+    fn hash_password_perf_guard_spin_10k() {
+        // Regression guard: the spinCount loop is the hot path for both Standard (50k) and Agile
+        // (often 100k) password-based encryption.
+        let salt = [0x11u8; 16];
+        let pw = password_to_utf16le("password");
+
+        let start = Instant::now();
+        let _ = hash_password(HashAlgorithm::Sha256, &salt, &pw, 10_000);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "hash_password(spinCount=10_000) took too long: {:?}",
+            start.elapsed()
+        );
     }
 }

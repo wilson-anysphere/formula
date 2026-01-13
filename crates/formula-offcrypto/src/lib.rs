@@ -1630,6 +1630,17 @@ fn hash_digest(algo: HashAlgorithm, data: &[u8]) -> Vec<u8> {
     }
 }
 
+fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
+    if bytes.len() >= out_len {
+        return bytes[..out_len].to_vec();
+    }
+
+    // MS-OFFCRYPTO `TruncateHash` expansion: append 0x36 bytes (matches `msoffcrypto-tool`).
+    let mut out = vec![0x36u8; out_len];
+    out[..bytes.len()].copy_from_slice(bytes);
+    out
+}
+
 fn derive_iterated_hash_from_password(
     password: &str,
     salt_value: &[u8],
@@ -1672,14 +1683,7 @@ fn derive_encryption_key(
     buf.extend_from_slice(h);
     buf.extend_from_slice(block_key);
     let hfinal = Zeroizing::new(hash_digest(hash_algorithm, &buf));
-
-    if hfinal.len() < key_len {
-        return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "derived encryption key too short",
-        });
-    }
-
-    Ok(Zeroizing::new(hfinal[..key_len].to_vec()))
+    Ok(Zeroizing::new(normalize_key_material(&hfinal[..], key_len)))
 }
 
 fn aes_cbc_decrypt(
