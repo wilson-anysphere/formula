@@ -229,6 +229,7 @@ export function VersionHistoryCompareSection({
         removed: diff.sheets?.removed?.length ?? 0,
         renamed: diff.sheets?.renamed?.length ?? 0,
         moved: diff.sheets?.moved?.length ?? 0,
+        metaChanged: diff.sheets?.metaChanged?.length ?? 0,
       },
       cells: cellsTotals,
       metadata: {
@@ -292,6 +293,9 @@ export function VersionHistoryCompareSection({
                 </span>
                 <span className="collab-version-history__compare-badge collab-version-history__compare-badge--modified">
                   Renamed: {summary.sheets.renamed}
+                </span>
+                <span className="collab-version-history__compare-badge collab-version-history__compare-badge--modified">
+                  Meta: {summary.sheets.metaChanged}
                 </span>
                 <span className="collab-version-history__compare-badge collab-version-history__compare-badge--moved">
                   Moved: {summary.sheets.moved}
