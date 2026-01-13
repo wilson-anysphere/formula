@@ -354,6 +354,7 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
         return;
       }
 
+      let wroteKey: unknown = null;
       const txPromise = new Promise<void>((resolve, reject) => {
         try {
           const tx = (db as any).transaction([UPDATES_STORE_NAME], "readwrite");
@@ -368,10 +369,22 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
           cursorReq.onsuccess = () => {
             const cursor = cursorReq.result;
             if (!cursor) {
-              const merged =
-                existingUpdates.length > 0 ? Y.mergeUpdates([...existingUpdates, snapshot]) : snapshot;
-              store.clear();
-              store.add(merged);
+              let merged: Uint8Array;
+              try {
+                merged = existingUpdates.length > 0 ? Y.mergeUpdates([...existingUpdates, snapshot]) : snapshot;
+              } catch (err) {
+                reject(err);
+                return;
+              }
+
+              const clearReq = store.clear();
+              clearReq.onerror = () => reject(clearReq.error ?? new Error("IndexedDB clear failed"));
+
+              const addReq = store.add(merged);
+              addReq.onsuccess = () => {
+                wroteKey = addReq.result;
+              };
+              addReq.onerror = () => reject(addReq.error ?? new Error("IndexedDB add failed"));
               return;
             }
 
@@ -395,6 +408,11 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
       }
 
       this.updateCounts.set(docId, 0);
+      const internal = entry.persistence as any;
+      if (typeof wroteKey === "number") {
+        internal._dbref = wroteKey + 1;
+        internal._dbsize = 1;
+      }
     });
   }
 
