@@ -421,3 +421,30 @@ test("searchWorkbookRag filters out results from other workbooks", async () => {
   assert.equal(lastQueryOpts.workbookId, "wb");
   assert.deepEqual(results.map((r) => r.id), ["good"]);
 });
+
+test("searchWorkbookRag keeps results when metadata.workbookId is missing (assumes store respected filter)", async () => {
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    async query() {
+      return [{ id: "a", score: 1, metadata: {} }];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 1,
+    vectorStore,
+    embedder,
+    rerank: false,
+    dedupe: false,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, "a");
+});

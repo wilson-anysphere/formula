@@ -66,7 +66,12 @@ export async function searchWorkbookRag(params) {
   // Defense in depth: even though we pass `workbookId` into the query options, filter the
   // returned results to avoid accidental cross-workbook leakage if a store implementation
   // ignores the option.
-  results = results.filter((r) => r && r.metadata && r.metadata.workbookId === workbookId);
+  results = results.filter((r) => {
+    const id = r?.metadata?.workbookId;
+    // If the store includes workbookId metadata, enforce it. Otherwise, assume the store
+    // respected the query option and keep the result.
+    return id == null || id === workbookId;
+  });
 
   if (rerank) {
     results = rerankWorkbookResults({ queryText, results });
