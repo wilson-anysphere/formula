@@ -913,6 +913,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       # Pin Rust for deterministic builds (this repo uses rust-toolchain.toml).
       - uses: dtolnay/rust-toolchain@1.92.0
       - run: npm ci
@@ -923,6 +925,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: npm ci
       - run: npx playwright install
       - run: npm run test:e2e
@@ -932,6 +936,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: npm ci
       - run: npm run test:perf
       - uses: benchmark-action/github-action-benchmark@v1
@@ -945,6 +951,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: npm ci
       - run: npm run test:excel-compat
 ```
