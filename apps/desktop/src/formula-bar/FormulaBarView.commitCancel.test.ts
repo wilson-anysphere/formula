@@ -202,6 +202,27 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commitEdit() forwards explicit commit reasons + shift modifier", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "tab-commit";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.commitEdit("tab", true);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("tab-commit", { reason: "tab", shift: true });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("cancels via cancelEdit() API and restores the active cell input", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
