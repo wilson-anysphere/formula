@@ -3,6 +3,7 @@ import { InMemoryAuditLogger } from "../../../../../packages/security/dlp/src/au
 import { createDefaultOrgPolicy, mergePolicies } from "../../../../../packages/security/dlp/src/policy.js";
 import { LocalPolicyStore } from "../../../../../packages/security/dlp/src/policyStore.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { computeDlpCacheKey } from "./dlpCacheKey.js";
 
 type StorageLike = { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void };
 
@@ -207,6 +208,15 @@ function memoizedDlpData(params: { storage: StorageLike; documentId: string; org
 }
 
 export type AiCloudDlpOptions = {
+  /**
+   * Optional, safe-to-log cache key for the effective DLP state (policy +
+   * classification records + includeRestrictedContent).
+   *
+   * Surfaces can use this to cheaply detect DLP changes and avoid re-indexing /
+   * reusing caches under a stricter policy.
+   */
+  cacheKey?: string;
+  cache_key?: string;
   // ContextManager (camelCase)
   documentId: string;
   sheetId?: string;
@@ -258,7 +268,7 @@ export function getAiCloudDlpOptions(params: {
 
   const auditLogger = getAiDlpAuditLogger();
 
-  return {
+  const out: AiCloudDlpOptions = {
     documentId: params.documentId,
     sheetId: params.sheetId,
     ...(params.sheetNameResolver !== undefined
@@ -276,6 +286,16 @@ export function getAiCloudDlpOptions(params: {
     include_restricted_content: false,
     audit_logger: auditLogger
   };
+
+  const cacheKey = computeDlpCacheKey(out);
+  // `computeDlpCacheKey` may memoize `cacheKey` as a non-writable property. Avoid
+  // assigning to it directly; just attach the snake_case alias for tool surfaces.
+  try {
+    Object.defineProperty(out, "cache_key", { value: cacheKey, enumerable: false, configurable: true });
+  } catch {
+    out.cache_key = cacheKey;
+  }
+  return out;
 }
 
 /**
@@ -301,7 +321,7 @@ export function maybeGetAiCloudDlpOptions(params: {
 
   const auditLogger = getAiDlpAuditLogger();
 
-  return {
+  const out: AiCloudDlpOptions = {
     documentId: params.documentId,
     sheetId: params.sheetId,
     ...(params.sheetNameResolver !== undefined
@@ -319,4 +339,12 @@ export function maybeGetAiCloudDlpOptions(params: {
     include_restricted_content: false,
     audit_logger: auditLogger
   };
+
+  const cacheKey = computeDlpCacheKey(out);
+  try {
+    Object.defineProperty(out, "cache_key", { value: cacheKey, enumerable: false, configurable: true });
+  } catch {
+    out.cache_key = cacheKey;
+  }
+  return out;
 }
