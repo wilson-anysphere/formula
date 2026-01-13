@@ -6415,6 +6415,7 @@ export class SpreadsheetApp {
     let offsetY = 0;
     let width = 0;
     let height = 0;
+    const { frozenRows, frozenCols } = this.getFrozen();
 
     if (this.sharedGrid) {
       const viewport = sharedViewport ?? this.sharedGrid.renderer.scroll.getViewportState();
@@ -6438,14 +6439,14 @@ export class SpreadsheetApp {
 
     const memo = this.drawingViewportMemo;
     if (!memo || memo.width !== width || memo.height !== height || memo.dpr !== this.dpr) {
-      this.drawingOverlay.resize({ scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr });
+      this.drawingOverlay.resize({ scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr, frozenRows, frozenCols });
       this.drawingViewportMemo = { width, height, dpr: this.dpr, offsetX, offsetY };
     } else if (memo.offsetX !== offsetX || memo.offsetY !== offsetY) {
       memo.offsetX = offsetX;
       memo.offsetY = offsetY;
     }
 
-    return { scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr };
+    return { scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr, frozenRows, frozenCols };
   }
 
   private listDrawingObjectsForSheet(): DrawingObject[] {
