@@ -83,6 +83,14 @@ export interface Viewport {
    */
   headerOffsetX?: number;
   headerOffsetY?: number;
+  /**
+   * Optional zoom factor applied to the viewport.
+   *
+   * Pointer interactions often operate in screen-space pixels, while drawing
+   * anchors are stored in document-space units; callers can use this to
+   * translate between the two.
+   */
+  zoom?: number;
 }
 
 export interface ChartRenderer {

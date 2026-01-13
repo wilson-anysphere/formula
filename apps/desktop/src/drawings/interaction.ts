@@ -13,6 +13,17 @@ export interface DrawingInteractionCallbacks {
   onSelectionChange?(selectedId: number | null): void;
 }
 
+export interface DrawingInteractionControllerOptions {
+  /**
+   * Register pointer listeners in capture phase.
+   *
+   * This is useful when the controller is attached to a grid root element and
+   * needs to intercept events before a child canvas (e.g. the shared-grid
+   * selection canvas).
+   */
+  capture?: boolean;
+}
+
 /**
  * Minimal MVP interactions: click-to-select and drag to move.
  */
@@ -44,33 +55,61 @@ export class DrawingInteractionController {
   private selectedId: number | null = null;
 
   constructor(
-    private readonly canvas: HTMLCanvasElement,
+    private readonly element: HTMLElement,
     private readonly geom: GridGeometry,
     private readonly callbacks: DrawingInteractionCallbacks,
+    options: DrawingInteractionControllerOptions = {},
   ) {
-    this.canvas.addEventListener("pointerdown", this.onPointerDown);
-    this.canvas.addEventListener("pointermove", this.onPointerMove);
-    this.canvas.addEventListener("pointerleave", this.onPointerLeave);
-    this.canvas.addEventListener("pointerup", this.onPointerUp);
-    this.canvas.addEventListener("pointercancel", this.onPointerUp);
+    this.listenerOptions = { capture: options.capture ?? false };
+    this.element.addEventListener("pointerdown", this.onPointerDown, this.listenerOptions);
+    this.element.addEventListener("pointermove", this.onPointerMove, this.listenerOptions);
+    this.element.addEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
+    this.element.addEventListener("pointerup", this.onPointerUp, this.listenerOptions);
+    this.element.addEventListener("pointercancel", this.onPointerUp, this.listenerOptions);
   }
 
   dispose(): void {
-    this.canvas.removeEventListener("pointerdown", this.onPointerDown);
-    this.canvas.removeEventListener("pointermove", this.onPointerMove);
-    this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
-    this.canvas.removeEventListener("pointerup", this.onPointerUp);
-    this.canvas.removeEventListener("pointercancel", this.onPointerUp);
+    this.element.removeEventListener("pointerdown", this.onPointerDown, this.listenerOptions);
+    this.element.removeEventListener("pointermove", this.onPointerMove, this.listenerOptions);
+    this.element.removeEventListener("pointerleave", this.onPointerLeave, this.listenerOptions);
+    this.element.removeEventListener("pointerup", this.onPointerUp, this.listenerOptions);
+    this.element.removeEventListener("pointercancel", this.onPointerUp, this.listenerOptions);
+  }
+
+  /**
+   * Cached bounding rect (client-space) used to convert `clientX/Y` → local
+   * coordinates without doing per-pointermove layout reads.
+   *
+   * This is set on pointerdown when a drag/resize starts and cleared on
+   * pointerup/cancel.
+   */
+  private activeRect: DOMRect | null = null;
+  private readonly listenerOptions: AddEventListenerOptions;
+
+  private getLocalPoint(e: PointerEvent, rect: DOMRect): { x: number; y: number } {
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  private stopPointerEvent(e: PointerEvent): void {
+    e.preventDefault();
+    // Stop both bubbling to parents and any subsequent listeners on the same element.
+    e.stopPropagation();
+    // `stopImmediatePropagation` isn't strictly required for the grid-root capture use case,
+    // but it makes arbitration resilient when multiple listeners are attached to the same element.
+    e.stopImmediatePropagation();
   }
 
   private readonly onPointerDown = (e: PointerEvent) => {
+    const rect = this.element.getBoundingClientRect();
+    const { x, y } = this.getLocalPoint(e, rect);
+
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
     const index = this.getHitTestIndex(objects);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
-    const inHeader = e.offsetX < paneLayout.headerOffsetX || e.offsetY < paneLayout.headerOffsetY;
-    const pointInFrozenCols = !inHeader && e.offsetX < paneLayout.frozenBoundaryX;
-    const pointInFrozenRows = !inHeader && e.offsetY < paneLayout.frozenBoundaryY;
+    const inHeader = x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY;
+    const pointInFrozenCols = !inHeader && x < paneLayout.frozenBoundaryX;
+    const pointInFrozenRows = !inHeader && y < paneLayout.frozenBoundaryY;
 
     // Allow grabbing a resize handle for the current selection even when the
     // pointer is slightly outside the object's bounds (handles are centered on
@@ -89,58 +128,67 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
-        const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY, selectedObject.transform);
+        const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
         if (handle) {
-          this.canvas.setPointerCapture(e.pointerId);
+          this.stopPointerEvent(e);
+          this.activeRect = rect;
+          this.element.setPointerCapture(e.pointerId);
           this.resizing = {
             id: selectedObject.id,
             handle,
-            startX: e.offsetX,
-            startY: e.offsetY,
+            startX: x,
+            startY: y,
             startObjects: objects,
             transform: selectedObject.transform,
           };
-          this.canvas.style.cursor = cursorForResizeHandle(handle, selectedObject.transform);
+          this.element.style.cursor = cursorForResizeHandle(handle, selectedObject.transform);
           return;
         }
       }
     }
 
-    const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY, this.geom, paneLayout);
+    const hit = hitTestDrawings(index, viewport, x, y, this.geom, paneLayout);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
     if (!hit) {
-      this.canvas.style.cursor = "default";
+      this.element.style.cursor = "default";
       return;
     }
 
-    this.canvas.setPointerCapture(e.pointerId);
-    const handle = hitTestResizeHandle(hit.bounds, e.offsetX, e.offsetY, hit.object.transform);
+    this.stopPointerEvent(e);
+    this.activeRect = rect;
+    this.element.setPointerCapture(e.pointerId);
+    const handle = hitTestResizeHandle(hit.bounds, x, y, hit.object.transform);
     if (handle) {
       this.resizing = {
         id: hit.object.id,
         handle,
-        startX: e.offsetX,
-        startY: e.offsetY,
+        startX: x,
+        startY: y,
         startObjects: objects,
         transform: hit.object.transform,
       };
-      this.canvas.style.cursor = cursorForResizeHandle(handle, hit.object.transform);
+      this.element.style.cursor = cursorForResizeHandle(handle, hit.object.transform);
     } else {
       this.dragging = {
         id: hit.object.id,
-        startX: e.offsetX,
-        startY: e.offsetY,
+        startX: x,
+        startY: y,
         startObjects: objects,
       };
-      this.canvas.style.cursor = "move";
+      this.element.style.cursor = "move";
     }
   };
 
   private readonly onPointerMove = (e: PointerEvent) => {
     if (this.resizing) {
-      const dx = e.offsetX - this.resizing.startX;
-      const dy = e.offsetY - this.resizing.startY;
+      this.stopPointerEvent(e);
+      const rect = this.activeRect ?? this.element.getBoundingClientRect();
+      const { x, y } = this.getLocalPoint(e, rect);
+
+      const zoom = this.callbacks.getViewport().zoom ?? 1;
+      const dx = (x - this.resizing.startX) / zoom;
+      const dy = (y - this.resizing.startY) / zoom;
 
       const next = this.resizing.startObjects.map((obj) => {
         if (obj.id !== this.resizing!.id) return obj;
@@ -150,13 +198,18 @@ export class DrawingInteractionController {
         };
       });
       this.callbacks.setObjects(next);
-      this.canvas.style.cursor = cursorForResizeHandle(this.resizing.handle, this.resizing.transform);
+      this.element.style.cursor = cursorForResizeHandle(this.resizing.handle, this.resizing.transform);
       return;
     }
 
     if (this.dragging) {
-      const dx = e.offsetX - this.dragging.startX;
-      const dy = e.offsetY - this.dragging.startY;
+      this.stopPointerEvent(e);
+      const rect = this.activeRect ?? this.element.getBoundingClientRect();
+      const { x, y } = this.getLocalPoint(e, rect);
+
+      const zoom = this.callbacks.getViewport().zoom ?? 1;
+      const dx = (x - this.dragging.startX) / zoom;
+      const dy = (y - this.dragging.startY) / zoom;
 
       const next = this.dragging.startObjects.map((obj) => {
         if (obj.id !== this.dragging!.id) return obj;
@@ -166,17 +219,21 @@ export class DrawingInteractionController {
         };
       });
       this.callbacks.setObjects(next);
-      this.canvas.style.cursor = "move";
+      this.element.style.cursor = "move";
       return;
     }
 
-    this.updateCursor(e.offsetX, e.offsetY);
+    const rect = this.element.getBoundingClientRect();
+    const { x, y } = this.getLocalPoint(e, rect);
+    this.updateCursor(x, y);
   };
 
   private readonly onPointerUp = (e: PointerEvent) => {
     const dragging = this.dragging;
     const resizing = this.resizing;
     if (!dragging && !resizing) return;
+
+    this.stopPointerEvent(e);
 
     // Commit-time patching only: pointermove updates anchors for live previews,
     // while pointerup updates preserved DrawingML fragments (`rawXml`, `xlsx.pic_xml`)
@@ -212,16 +269,20 @@ export class DrawingInteractionController {
       }
     }
 
+    const rect = this.activeRect ?? this.element.getBoundingClientRect();
+    const { x, y } = this.getLocalPoint(e, rect);
+
     this.dragging = null;
     this.resizing = null;
-    this.canvas.releasePointerCapture(e.pointerId);
-    this.updateCursor(e.offsetX, e.offsetY);
+    this.activeRect = null;
+    this.element.releasePointerCapture(e.pointerId);
+    this.updateCursor(x, y);
   };
 
   private readonly onPointerLeave = () => {
     // Avoid leaving the resize/move cursor stuck when the pointer leaves the overlay canvas.
     if (this.dragging || this.resizing) return;
-    this.canvas.style.cursor = "default";
+    this.element.style.cursor = "default";
   };
 
   private updateCursor(x: number, y: number): void {
@@ -230,7 +291,7 @@ export class DrawingInteractionController {
     const index = this.getHitTestIndex(objects);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     if (x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY) {
-      this.canvas.style.cursor = "default";
+      this.element.style.cursor = "default";
       return;
     }
     const pointInFrozenCols = x < paneLayout.frozenBoundaryX;
@@ -250,11 +311,11 @@ export class DrawingInteractionController {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
           const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
           if (handle) {
-            this.canvas.style.cursor = cursorForResizeHandle(handle, selected.transform);
+            this.element.style.cursor = cursorForResizeHandle(handle, selected.transform);
             return;
           }
           if (pointInRect(x, y, bounds)) {
-            this.canvas.style.cursor = "move";
+            this.element.style.cursor = "move";
             return;
           }
         }
@@ -263,11 +324,11 @@ export class DrawingInteractionController {
 
     const hit = hitTestDrawingsObject(index, viewport, x, y, this.geom, paneLayout);
     if (hit) {
-      this.canvas.style.cursor = "move";
+      this.element.style.cursor = "move";
       return;
     }
 
-    this.canvas.style.cursor = "default";
+    this.element.style.cursor = "default";
   }
 
   private getHitTestIndex(objects: readonly DrawingObject[]): HitTestIndex {
