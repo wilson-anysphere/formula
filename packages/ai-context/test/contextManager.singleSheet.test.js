@@ -98,6 +98,37 @@ test("buildContext: switching sheet.origin forces re-indexing for the active sto
   assert.equal(out0b.retrieved[0].range, "Sheet1!A1:A3");
 });
 
+test("buildContext: schema metadata updates (namedRanges) do not force re-indexing", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = {
+    name: "Sheet1",
+    values: [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ],
+    namedRanges: [],
+  };
+
+  const out1 = await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(indexCalls, 1);
+  assert.deepEqual(out1.schema.namedRanges, []);
+
+  // Update named range metadata (should update schema output, but not re-embed/re-index).
+  sheet.namedRanges = [{ name: "MyRange", range: "Sheet1!A1:B1" }];
+  const out2 = await cm.buildContext({ sheet, query: "revenue" });
+  assert.equal(indexCalls, 1);
+  assert.deepEqual(out2.schema.namedRanges, sheet.namedRanges);
+});
+
 test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;

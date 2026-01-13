@@ -28,6 +28,7 @@ const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.R
 const DEFAULT_SHEET_INDEX_CACHE_LIMIT = 32;
 const DEFAULT_RAG_MAX_CHUNK_ROWS = 30;
 const SHEET_INDEX_SIGNATURE_VERSION = 1;
+const SHEET_SCHEMA_SIGNATURE_VERSION = 1;
 
 const FNV_OFFSET_64 = 0xcbf29ce484222325n;
 const FNV_PRIME_64 = 0x100000001b3n;
@@ -167,6 +168,7 @@ function computeSheetIndexSignature(sheet, options = {}) {
   throwIfAborted(signal);
   const origin = normalizeSheetOrigin(sheet?.origin);
   const maxChunkRows = options.maxChunkRows ?? DEFAULT_RAG_MAX_CHUNK_ROWS;
+  const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
 
   let hash = FNV_OFFSET_64;
   hash = fnv1a64Update(hash, `sig:v${SHEET_INDEX_SIGNATURE_VERSION}\n`);
@@ -174,7 +176,37 @@ function computeSheetIndexSignature(sheet, options = {}) {
   hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
   hash = fnv1a64Update(hash, `maxChunkRows:${String(maxChunkRows)}\n`);
   hash = fnv1a64Update(hash, "values:");
-  hash = fnv1a64Update(hash, stableHashValue(sheet?.values ?? [], { signal }));
+  hash = fnv1a64Update(hash, valuesHash);
+  return hash.toString(16).padStart(16, "0");
+}
+
+/**
+ * Deterministic signature of inputs that affect schema extraction.
+ *
+ * This is intentionally separate from the RAG index signature so callers can update
+ * schema-only metadata (e.g. named ranges / tables) without re-embedding.
+ *
+ * @param {{ name?: string, origin?: any, values?: unknown[][], tables?: any, namedRanges?: any }} sheet
+ * @param {{ valuesHash?: string, signal?: AbortSignal }} [options]
+ */
+function computeSheetSchemaSignature(sheet, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+  const origin = normalizeSheetOrigin(sheet?.origin);
+  const valuesHash = options.valuesHash ?? stableHashValue(sheet?.values ?? [], { signal });
+  const tablesHash = stableHashValue(sheet?.tables ?? [], { signal });
+  const namedRangesHash = stableHashValue(sheet?.namedRanges ?? [], { signal });
+
+  let hash = FNV_OFFSET_64;
+  hash = fnv1a64Update(hash, `schema:v${SHEET_SCHEMA_SIGNATURE_VERSION}\n`);
+  hash = fnv1a64Update(hash, `name:${sheet?.name ?? ""}\n`);
+  hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
+  hash = fnv1a64Update(hash, "values:");
+  hash = fnv1a64Update(hash, valuesHash);
+  hash = fnv1a64Update(hash, "\ntables:");
+  hash = fnv1a64Update(hash, tablesHash);
+  hash = fnv1a64Update(hash, "\nnamedRanges:");
+  hash = fnv1a64Update(hash, namedRangesHash);
   return hash.toString(16).padStart(16, "0");
 }
 
@@ -272,7 +304,7 @@ export class ContextManager {
     this.sheetRagTopK = normalizeNonNegativeInt(options.sheetRagTopK, 5);
 
     this.cacheSheetIndex = options.cacheSheetIndex ?? true;
-    /** @type {Map<string, { signature: string, schema: any, sheetName: string }>} */
+    /** @type {Map<string, { signature: string, schemaSignature: string, schema: any, sheetName: string }>} */
     this._sheetIndexCache = new Map();
     this._sheetIndexCacheLimit = DEFAULT_SHEET_INDEX_CACHE_LIMIT;
     /** @type {Map<string, string>} */
@@ -299,8 +331,10 @@ export class ContextManager {
       return { schema };
     }
 
+    const valuesHash = stableHashValue(sheet?.values ?? [], { signal });
     const cacheKey = sheetIndexCacheKey(sheet);
-    const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows });
+    const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows, valuesHash });
+    const schemaSignature = computeSheetSchemaSignature(sheet, { signal, valuesHash });
 
     const cached = this._sheetIndexCache.get(cacheKey);
     if (cached) {
@@ -311,7 +345,21 @@ export class ContextManager {
 
     const activeKey = this._sheetNameToActiveCacheKey.get(sheet.name);
     const upToDate = cached?.signature === signature && activeKey === cacheKey;
-    if (upToDate) return { schema: cached.schema };
+    if (upToDate) {
+      if (cached?.schemaSignature === schemaSignature) return { schema: cached.schema };
+      // Schema-only metadata changed (e.g. named ranges / tables). Recompute schema without
+      // re-indexing/embedding.
+      const schema = extractSheetSchema(sheet, { signal });
+      const nextCached = {
+        signature,
+        schemaSignature,
+        schema,
+        sheetName: sheet.name,
+      };
+      this._sheetIndexCache.delete(cacheKey);
+      this._sheetIndexCache.set(cacheKey, nextCached);
+      return { schema };
+    }
 
     const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
     const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
@@ -319,7 +367,7 @@ export class ContextManager {
     // Update caches after successful indexing.
     this._sheetNameToActiveCacheKey.set(sheet.name, cacheKey);
     this._sheetIndexCache.delete(cacheKey);
-    this._sheetIndexCache.set(cacheKey, { signature, schema, sheetName: sheet.name });
+    this._sheetIndexCache.set(cacheKey, { signature, schemaSignature, schema, sheetName: sheet.name });
     while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
       const oldestKey = this._sheetIndexCache.keys().next().value;
       if (oldestKey === undefined) break;
