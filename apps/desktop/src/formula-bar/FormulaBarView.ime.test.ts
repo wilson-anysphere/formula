@@ -110,4 +110,38 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
+
+  it("does not intercept ArrowUp/ArrowDown (function autocomplete navigation) during composition", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+
+    view.textarea.dispatchEvent(new Event("compositionstart"));
+
+    const downDuringComposition = new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true });
+    view.textarea.dispatchEvent(downDuringComposition);
+    expect(downDuringComposition.defaultPrevented).toBe(false);
+
+    const upDuringComposition = new KeyboardEvent("keydown", { key: "ArrowUp", cancelable: true });
+    view.textarea.dispatchEvent(upDuringComposition);
+    expect(upDuringComposition.defaultPrevented).toBe(false);
+
+    view.textarea.dispatchEvent(new Event("compositionend"));
+
+    const downAfterComposition = new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true });
+    view.textarea.dispatchEvent(downAfterComposition);
+    expect(downAfterComposition.defaultPrevented).toBe(true);
+
+    host.remove();
+  });
 });

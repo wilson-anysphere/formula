@@ -1378,7 +1378,12 @@ export class FormulaBarView {
 
     if (
       (this.#isComposing || e.isComposing) &&
-      (e.key === "Enter" || e.key === "Escape" || e.key === "Tab" || e.key === "F4")
+      (e.key === "Enter" ||
+        e.key === "Escape" ||
+        e.key === "Tab" ||
+        e.key === "F4" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowUp")
     ) {
       return;
     }
