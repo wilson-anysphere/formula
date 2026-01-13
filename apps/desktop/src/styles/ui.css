@@ -1006,6 +1006,14 @@
   background: var(--cmdk-input-bg);
   color: var(--text-primary);
   outline: none;
+  transition:
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.command-palette__input:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .command-palette__hint {
