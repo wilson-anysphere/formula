@@ -571,6 +571,8 @@ async function main() {
 
   /** @type {string[]} */
   const errors = [];
+  /** @type {{ keyIdHex: string; publicKey: Buffer } | null} */
+  let updaterPubkey = null;
 
   const manifestVersion = typeof manifest?.version === "string" ? manifest.version : "";
   if (!manifestVersion) {
@@ -598,6 +600,7 @@ async function main() {
         `Cannot verify latest.json.sig: updater pubkey looks like a placeholder value in ${tauriConfigPath}.`,
       );
     } else {
+      updaterPubkey = parseTauriUpdaterPubkey(pubkey);
       verifyLatestJsonSignature(
         readFileSync("latest.json"),
         readFileSync("latest.json.sig", "utf8"),
@@ -636,6 +639,15 @@ async function main() {
       try {
         expectNonEmptyString(`${target}.url`, /** @type {any} */ (entry).url);
         expectNonEmptyString(`${target}.signature`, /** @type {any} */ (entry).signature);
+
+        // Ensure the signature string is plausibly a Tauri/minisign signature (base64 of either
+        // raw 64-byte Ed25519 signature bytes or a minisign wrapper structure).
+        const { keyIdHex } = parseTauriSignature(/** @type {any} */ (entry).signature);
+        if (keyIdHex && updaterPubkey && keyIdHex !== updaterPubkey.keyIdHex) {
+          throw new Error(
+            `signature key id mismatch: expected ${updaterPubkey.keyIdHex} but got ${keyIdHex}`,
+          );
+        }
       } catch (err) {
         invalidTargets.push({
           target,
