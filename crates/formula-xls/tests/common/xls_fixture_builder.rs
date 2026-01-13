@@ -848,6 +848,8 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
             0.6,  // footer margin
         ),
     );
+    // Enable fit-to-page scaling (WSBOOL.fFitToPage=1).
+    push_record(&mut sheet, RECORD_WSBOOL, &0x0100u16.to_le_bytes());
 
     // Manual page breaks.
     // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
@@ -881,7 +883,7 @@ fn setup_record(
     out.extend_from_slice(&fit_width.to_le_bytes()); // iFitWidth
     out.extend_from_slice(&fit_height.to_le_bytes()); // iFitHeight
     let mut grbit = 0u16;
-    // BIFF8 SETUP.grbit bit1 is `fPortrait`: 0=landscape, 1=portrait.
+    // SETUP.grbit fPortrait (0x0002): when set, the sheet is in portrait mode; when clear, landscape.
     if !landscape {
         grbit |= 0x0002;
     }
