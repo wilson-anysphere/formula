@@ -538,6 +538,7 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
   - Enforces range limits (e.g. `max_read_range_cells`) and (when configured) DLP policy at execution time.
 - The LLM-facing adapter is [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`),
   which connects the ToolExecutor to a host `SpreadsheetApi` (desktop uses `DocumentControllerSpreadsheetApi`).
+- Desktop `SpreadsheetApi` implementation: [`apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts`](../apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts)
 
 ### Tool loop orchestration + approval gating
 
