@@ -1649,7 +1649,9 @@ jobs:
           repo="${GITHUB_REPOSITORY}"
           tag="${TAG_NAME}"
 
-          api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
+          api_base="${GITHUB_API_URL:-https://api.github.com}"
+          api_base="${api_base%/}"
+          api_url="${api_base}/repos/${repo}/releases/tags/${tag}"
           retry_delays=(2 4 8 12 20)
           # Tauri output naming varies slightly between bundlers (e.g. "x64", "x86_64", "x86-64", "amd64", "win64").
           # Treat these as equivalent x64 markers for collision detection.
@@ -1675,7 +1677,7 @@ jobs:
                 -H "Authorization: Bearer ${GH_TOKEN}" \
                 -H 'Accept: application/vnd.github+json' \
                 -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "https://api.github.com/repos/${repo}/releases/${release_id}/assets?per_page=${per_page}&page=${page}")"
+                "${api_base}/repos/${repo}/releases/${release_id}/assets?per_page=${per_page}&page=${page}")"
 
               all="$(jq -s '.[0] + .[1]' <(echo "$all") <(echo "$page_json"))"
 
