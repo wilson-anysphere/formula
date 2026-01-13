@@ -347,7 +347,7 @@ then revert the change—do not commit it).
    app="$(find apps/desktop/src-tauri/target -maxdepth 8 -type d -path '*/release/bundle/macos/*.app' | head -n 1)"
    echo "Checking app at: $app"
    codesign --verify --deep --strict --verbose=2 "$app"
-   codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory"
+   codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory|network\\.client"
    spctl --assess --type execute -vv "$app"
 
    # (Optional) If you're testing a notarized/stapled CI artifact:
@@ -372,6 +372,7 @@ If a signed/notarized build launches with a blank window or crashes immediately,
    Ensure it includes:
    - `com.apple.security.cs.allow-jit`
    - `com.apple.security.cs.allow-unsigned-executable-memory`
+   - `com.apple.security.network.client` (outbound network; enforced when sandboxing is enabled)
 
 2. The signature is valid and the hardened runtime is enabled:
 
