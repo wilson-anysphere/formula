@@ -804,9 +804,15 @@ export class SqliteVectorStore {
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     throwIfAborted(signal);
+    if (!Number.isFinite(topK)) {
+      throw new Error(`Invalid topK: expected a finite number, got ${String(topK)}`);
+    }
+    // We deterministically floor floats (e.g. 1.9 -> 1) so SQLite never sees a
+    // fractional LIMIT value, and so query semantics match InMemoryVectorStore.
+    const k = Math.floor(topK);
+    if (k <= 0) return [];
     const qVec = toFloat32Array(vector);
     assertVectorDim(qVec, this._dimension, "SqliteVectorStore.query() vector dimension mismatch");
-    if (topK <= 0) return [];
     const q = normalizeL2(qVec);
     const qBlob = float32ToBlob(q);
 
@@ -823,8 +829,8 @@ export class SqliteVectorStore {
      * This keeps the common case fast while still guaranteeing correctness.
      */
     const oversampleFactor = filter ? 4 : 1;
-    const minLimit = filter ? 64 : topK;
-    let limit = Math.max(topK * oversampleFactor, minLimit);
+    const minLimit = filter ? 64 : k;
+    let limit = Math.max(k * oversampleFactor, minLimit);
 
     const sql = workbookId
       ? `
@@ -904,14 +910,14 @@ export class SqliteVectorStore {
 
           const score = Number(row[13]);
           out.push({ id, score, metadata });
-          if (out.length >= topK) break;
+          if (out.length >= k) break;
         }
         throwIfAborted(signal);
       } finally {
         stmt.free();
       }
 
-      if (out.length >= topK) return out;
+      if (out.length >= k) return out;
       // If SQLite returned fewer rows than we requested, we've exhausted the
       // candidate set, so return whatever matches we found.
       if (rows < limit) return out;

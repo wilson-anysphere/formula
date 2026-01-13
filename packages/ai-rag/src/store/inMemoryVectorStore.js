@@ -98,33 +98,23 @@ export class InMemoryVectorStore {
     const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
+
+    if (!Number.isFinite(topK)) {
+      throw new Error(`Invalid topK: expected a finite number, got ${String(topK)}`);
+    }
+    // We deterministically floor floats (e.g. 1.9 -> 1) so vector stores behave
+    // consistently even if callers compute `topK` dynamically.
+    const k = Math.floor(topK);
+    if (k <= 0) return [];
+
     const q = normalizeL2(vector);
 
-    // Keep only the best `topK` results while scanning. This avoids allocating an array
+    // Keep only the best `k` results while scanning. This avoids allocating an array
     // proportional to the number of records (which can be very large) when callers only
     // need a small set of nearest neighbors.
     //
     // When cosine scores tie, break ties deterministically by id (ascending) so result
     // ordering is stable across store implementations.
-    /**
-     * Normalize `topK` the same way `Array.prototype.slice(0, topK)` did in the previous
-     * implementation:
-     *  - `undefined` means "all"
-     *  - non-integers are truncated toward 0
-     */
-    /** @type {number} */
-    let k;
-    if (topK === undefined) {
-      k = Number.POSITIVE_INFINITY;
-    } else {
-      const n = Number(topK);
-      if (!Number.isFinite(n)) {
-        // NaN, -Infinity => behave like slice(0, 0) and return nothing.
-        k = n === Number.POSITIVE_INFINITY ? n : 0;
-      } else {
-        k = Math.trunc(n);
-      }
-    }
 
     /**
      * Heap items (min-heap of the "worse" result so we can keep only the topK).
@@ -174,9 +164,6 @@ export class InMemoryVectorStore {
       if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
       if (filter && !filter(rec.metadata, id)) continue;
 
-      // Fast path: if `topK` is 0/null/negative, keep nothing.
-      if (k <= 0) continue;
-
       const score = cosineSimilarity(q, rec.vector);
 
       if (heap.length < k) {
@@ -205,7 +192,6 @@ export class InMemoryVectorStore {
       return 0;
     });
     throwIfAborted(signal);
-
     return heap.map(({ id, score, metadata }) => ({ id, score, metadata }));
   }
 
