@@ -41,6 +41,9 @@ struct Args {
     /// Format: `<part_glob>:<path_substring>`. Repeatable.
     #[arg(long = "ignore-path-in")]
     ignore_paths_in: Vec<String>,
+    /// Treat calcChain-related diffs as CRITICAL instead of downgrading them to WARNING.
+    #[arg(long = "strict-calc-chain")]
+    strict_calc_chain: bool,
 
     /// Output format.
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -100,6 +103,7 @@ fn main() -> Result<()> {
             .filter(|s| !s.is_empty())
             .collect(),
         ignore_paths: build_ignore_path_rules(&args)?,
+        strict_calc_chain: args.strict_calc_chain,
     };
 
     for pattern in &options.ignore_globs {

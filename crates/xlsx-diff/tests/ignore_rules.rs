@@ -50,6 +50,115 @@ fn missing_calcchain_bin_is_warning() {
 }
 
 #[test]
+fn missing_calcchain_xml_is_critical_when_strict_enabled() {
+    let expected_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
+    let actual_zip = zip_bytes(&[]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "missing_part");
+    assert_eq!(report.differences[0].part, "xl/calcChain.xml");
+    assert_eq!(report.differences[0].severity, Severity::Critical);
+}
+
+#[test]
+fn missing_calcchain_bin_is_critical_when_strict_enabled() {
+    let expected_zip = zip_bytes(&[("xl/calcChain.bin", &[0x01, 0x02, 0x03])]);
+    let actual_zip = zip_bytes(&[]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert_eq!(report.differences.len(), 1);
+    assert_eq!(report.differences[0].kind, "missing_part");
+    assert_eq!(report.differences[0].part, "xl/calcChain.bin");
+    assert_eq!(report.differences[0].severity, Severity::Critical);
+}
+
+#[test]
+fn calcchain_related_rels_and_content_types_remain_critical_when_strict_enabled() {
+    let expected_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+</Relationships>"#,
+        ),
+        ("xl/calcChain.xml", br#"<calcChain/>"#),
+    ]);
+
+    let actual_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        strict_calc_chain: true,
+        ..Default::default()
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.differences.iter().any(|d| d.part == "xl/calcChain.xml"
+            && d.kind == "missing_part"
+            && d.severity == Severity::Critical),
+        "expected missing xl/calcChain.xml to be CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "[Content_Types].xml" && d.severity == Severity::Critical),
+        "expected [Content_Types].xml calcChain diffs to remain CRITICAL, got {:#?}",
+        report.differences
+    );
+    assert!(
+        report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/_rels/workbook.xml.rels" && d.severity == Severity::Critical),
+        "expected workbook.xml.rels calcChain diffs to remain CRITICAL, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
 fn calcchain_related_rels_and_content_types_downgrade_to_warning() {
     let expected_zip = zip_bytes(&[
         (
@@ -312,6 +421,7 @@ fn ignore_glob_suppresses_calcchain_diffs() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/calcChain.*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -336,6 +446,7 @@ fn ignore_rules_normalize_leading_slashes_and_backslashes() {
         ignore_parts,
         ignore_globs: vec![r"\xl\calcChain.*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -439,6 +550,7 @@ fn ignore_glob_suppresses_calcchain_related_plumbing_diffs() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/calcChain.*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -496,6 +608,7 @@ fn ignore_glob_suppresses_docprops_plumbing_diffs() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["docProps/*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -550,6 +663,7 @@ fn ignore_rules_do_not_hide_relationship_target_changes_to_non_ignored_parts() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["docProps/*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -590,6 +704,7 @@ fn ignore_glob_suppresses_rels_targets_with_parent_dir_segments() {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/media/*".to_string()],
         ignore_paths: Vec::new(),
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -643,6 +758,7 @@ fn ignore_path_suppresses_specific_xml_attribute_diffs() {
             path_substring: "dyDescent".to_string(),
             kind: None,
         }],
+        strict_calc_chain: false,
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);
@@ -806,6 +922,22 @@ fn cli_exit_code_honors_fail_on_with_only_warning_diffs() {
     assert!(
         output.status.success(),
         "expected exit 0, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--strict-calc-chain")
+        .arg("--fail-on")
+        .arg("critical")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit with --strict-calc-chain, got {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

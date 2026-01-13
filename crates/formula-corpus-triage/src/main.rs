@@ -602,6 +602,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
             ignore_parts: ignore,
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
+            strict_calc_chain: false,
         },
     );
 

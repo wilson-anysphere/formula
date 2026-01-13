@@ -201,6 +201,17 @@ pub struct DiffOptions {
     /// Rules are evaluated against the `(part, XmlDiff.path, XmlDiff.kind)`
     /// tuple. When `ignore_paths` is empty, existing behavior is unchanged.
     pub ignore_paths: Vec<IgnorePathRule>,
+    /// When enabled, calcChain-related diffs are treated as CRITICAL instead of being
+    /// downgraded to WARNING.
+    ///
+    /// By default, the diff tool intentionally downgrades calcChain-related churn
+    /// (missing `xl/calcChain.{xml,bin}` plus the corresponding plumbing diffs in
+    /// `[Content_Types].xml` and `xl/_rels/workbook.*.rels`) to WARNING. This supports
+    /// patch workflows where Excel invalidates the calculation chain as a side effect.
+    ///
+    /// For strict round-trip preservation scoring, callers can set this to `true` to
+    /// keep calcChain diffs CRITICAL.
+    pub strict_calc_chain: bool,
 }
 
 /// Fine-grained ignore rule for XML diffs (`XmlDiff`).
@@ -266,7 +277,7 @@ pub fn diff_archives_with_options(
 
     for part in expected_parts.difference(&actual_parts) {
         report.differences.push(Difference::new(
-            severity_for_missing_part(part),
+            severity_for_missing_part(part, options.strict_calc_chain),
             (*part).to_string(),
             "",
             "missing_part",
@@ -277,7 +288,7 @@ pub fn diff_archives_with_options(
 
     for part in actual_parts.difference(&expected_parts) {
         report.differences.push(Difference::new(
-            severity_for_extra_part(part),
+            severity_for_extra_part(part, options.strict_calc_chain),
             (*part).to_string(),
             "",
             "extra_part",
@@ -310,7 +321,7 @@ pub fn diff_archives_with_options(
                 xml::NormalizedXml::parse(part, actual_bytes),
             ) {
                 (Ok(expected_xml), Ok(actual_xml)) => {
-                    let base = severity_for_part(part);
+                    let base = severity_for_part(part, options.strict_calc_chain);
                     let calc_chain_rel_ids = if part.ends_with(".rels") {
                         // Merge calcChain relationship ids from both sides so diffs can be
                         // downgraded even when the relationship is newly added (as opposed to
@@ -361,6 +372,7 @@ pub fn diff_archives_with_options(
                                 diff.expected.as_deref(),
                                 diff.actual.as_deref(),
                                 &calc_chain_rel_ids,
+                                options.strict_calc_chain,
                             )
                         };
                         report.differences.push(Difference::new(
@@ -389,7 +401,7 @@ pub fn diff_archives_with_options(
                         let (expected_summary, actual_summary) =
                             binary_diff_summary(expected_bytes, actual_bytes);
                         report.differences.push(Difference::new(
-                            severity_for_part(part),
+                            severity_for_part(part, options.strict_calc_chain),
                             part.to_string(),
                             "",
                             "binary_diff",
@@ -411,7 +423,7 @@ pub fn diff_archives_with_options(
                         let (expected_summary, actual_summary) =
                             binary_diff_summary(expected_bytes, actual_bytes);
                         report.differences.push(Difference::new(
-                            severity_for_part(part),
+                            severity_for_part(part, options.strict_calc_chain),
                             part.to_string(),
                             "",
                             "binary_diff",
@@ -425,7 +437,7 @@ pub fn diff_archives_with_options(
             let (expected_summary, actual_summary) =
                 binary_diff_summary(expected_bytes, actual_bytes);
             report.differences.push(Difference::new(
-                severity_for_part(part),
+                severity_for_part(part, options.strict_calc_chain),
                 part.to_string(),
                 "",
                 "binary_diff",
@@ -545,7 +557,7 @@ fn looks_like_xml(bytes: &[u8]) -> bool {
     false
 }
 
-fn severity_for_part(part: &str) -> Severity {
+fn severity_for_part(part: &str, strict_calc_chain: bool) -> Severity {
     if part == "[Content_Types].xml" {
         return Severity::Critical;
     }
@@ -558,18 +570,30 @@ fn severity_for_part(part: &str) -> Severity {
         return Severity::Critical;
     }
 
-    if part.starts_with("xl/theme/") || is_calc_chain_part(part) {
+    if part.starts_with("xl/theme/") {
         return Severity::Warning;
+    }
+
+    if is_calc_chain_part(part) {
+        return if strict_calc_chain {
+            Severity::Critical
+        } else {
+            Severity::Warning
+        };
     }
 
     Severity::Critical
 }
 
-fn severity_for_missing_part(part: &str) -> Severity {
-    severity_for_part(part)
+fn severity_for_missing_part(part: &str, strict_calc_chain: bool) -> Severity {
+    severity_for_part(part, strict_calc_chain)
 }
 
-fn severity_for_extra_part(part: &str) -> Severity {
+fn severity_for_extra_part(part: &str, strict_calc_chain: bool) -> Severity {
+    if strict_calc_chain && is_calc_chain_part(part) {
+        return Severity::Critical;
+    }
+
     if part == "[Content_Types].xml" || part.ends_with(".rels") {
         return Severity::Critical;
     }
@@ -937,8 +961,13 @@ fn adjust_xml_diff_severity(
     expected: Option<&str>,
     actual: Option<&str>,
     calc_chain_rel_ids: &BTreeSet<String>,
+    strict_calc_chain: bool,
 ) -> Severity {
     if severity != Severity::Critical {
+        return severity;
+    }
+
+    if strict_calc_chain {
         return severity;
     }
 
