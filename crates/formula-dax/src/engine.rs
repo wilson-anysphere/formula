@@ -204,6 +204,26 @@ impl DaxEngine {
         Self
     }
 
+    /// Apply `CALCULATE`-style filter arguments to an existing filter context, returning the
+    /// resulting [`FilterContext`].
+    ///
+    /// This is primarily useful for APIs that accept a [`FilterContext`] (like [`crate::pivot`])
+    /// but need to support DAX filter expressions that can't be expressed with
+    /// [`FilterContext::with_column_equals`], such as `Table[Column] <> BLANK()`.
+    pub fn apply_calculate_filters(
+        &self,
+        model: &DataModel,
+        filter: &FilterContext,
+        filter_args: &[&str],
+    ) -> DaxResult<FilterContext> {
+        let mut parsed_args = Vec::with_capacity(filter_args.len());
+        for arg in filter_args {
+            parsed_args.push(crate::parser::parse(arg)?);
+        }
+        let row_ctx = RowContext::default();
+        self.build_calculate_filter(model, filter, &row_ctx, &parsed_args)
+    }
+
     pub fn evaluate(
         &self,
         model: &DataModel,

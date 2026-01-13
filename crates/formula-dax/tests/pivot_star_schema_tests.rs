@@ -2,7 +2,7 @@ use formula_columnar::{
     ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
 };
 use formula_dax::{
-    pivot, Cardinality, CrossFilterDirection, DataModel, FilterContext, GroupByColumn,
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, GroupByColumn,
     PivotMeasure, Relationship, Table, Value,
 };
 use pretty_assertions::assert_eq;
@@ -358,6 +358,20 @@ fn pivot_includes_blank_group_for_unmatched_relationship_keys() {
         result.rows,
         vec![
             vec![Value::Blank, 7.0.into()],
+            vec![Value::from("East"), 10.0.into()],
+            vec![Value::from("West"), 5.0.into()],
+        ]
+    );
+
+    // Applying a filter that explicitly excludes BLANK while including all real members should
+    // remove the virtual blank row, and therefore exclude unmatched foreign keys from the pivot.
+    let non_blank_filter = DaxEngine::new()
+        .apply_calculate_filters(&model, &FilterContext::empty(), &["Customers[Region] <> BLANK()"])
+        .unwrap();
+    let result = pivot(&model, "Sales", &group_by, &measures, &non_blank_filter).unwrap();
+    assert_eq!(
+        result.rows,
+        vec![
             vec![Value::from("East"), 10.0.into()],
             vec![Value::from("West"), 5.0.into()],
         ]
