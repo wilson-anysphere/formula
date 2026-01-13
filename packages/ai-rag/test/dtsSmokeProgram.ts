@@ -185,6 +185,20 @@ async function smoke() {
     },
   });
 
+  // Object-literal embedder support: ensure `embedder.name` is allowed in the public types
+  // (runtime reads it when present).
+  const objectEmbedder = {
+    name: "object-embedder",
+    async embedTexts(texts: string[]) {
+      return texts.map(() => new Float32Array(embedder.dimension));
+    },
+  };
+  await indexWorkbook({
+    workbook,
+    vectorStore: store,
+    embedder: objectEmbedder,
+  });
+
   const rect: Rect = { r0: 0, c0: 0, r1: 0, c1: 0 };
   rectToA1(rect);
   cellToA1(0, 0);
