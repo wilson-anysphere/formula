@@ -993,6 +993,298 @@ fn pivot_columnar_groups_with_measure_eval(
     }))
 }
 
+enum StarSchemaGroupKeyAccessor<'a> {
+    Base { key_pos: usize },
+    Related {
+        fk_key_pos: usize,
+        to_index: &'a std::collections::HashMap<Value, usize>,
+        to_table: &'a crate::model::Table,
+        to_column_idx: usize,
+    },
+}
+
+fn pivot_columnar_star_schema_group_by(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<Option<PivotResult>> {
+    if group_by.is_empty() {
+        // Preserve the existing grand-total behavior by falling back to the legacy code paths.
+        return Ok(None);
+    }
+
+    let table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut group_idxs: Vec<usize> = Vec::new();
+    let mut idx_to_pos: HashMap<usize, usize> = HashMap::new();
+    let mut accessors: Vec<StarSchemaGroupKeyAccessor<'_>> = Vec::with_capacity(group_by.len());
+    let mut base_group_idxs: HashSet<usize> = HashSet::new();
+
+    for col in group_by {
+        if col.table == base_table {
+            let idx = table_ref
+                .column_idx(&col.column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: base_table.to_string(),
+                    column: col.column.clone(),
+                })?;
+            base_group_idxs.insert(idx);
+            let pos = *idx_to_pos.entry(idx).or_insert_with(|| {
+                let pos = group_idxs.len();
+                group_idxs.push(idx);
+                pos
+            });
+            accessors.push(StarSchemaGroupKeyAccessor::Base { key_pos: pos });
+            continue;
+        }
+
+        let Some(rel_info) = model.relationships().iter().find(|rel| {
+            rel.rel.is_active && rel.rel.from_table == base_table && rel.rel.to_table == col.table
+        }) else {
+            // Multi-hop or unrelated group-by columns aren't supported by this fast path.
+            return Ok(None);
+        };
+
+        let from_idx = table_ref
+            .column_idx(&rel_info.rel.from_column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: base_table.to_string(),
+                column: rel_info.rel.from_column.clone(),
+            })?;
+
+        let pos = *idx_to_pos.entry(from_idx).or_insert_with(|| {
+            let pos = group_idxs.len();
+            group_idxs.push(from_idx);
+            pos
+        });
+
+        let to_table_ref = model
+            .table(&col.table)
+            .ok_or_else(|| DaxError::UnknownTable(col.table.clone()))?;
+        let to_column_idx =
+            to_table_ref
+                .column_idx(&col.column)
+                .ok_or_else(|| DaxError::UnknownColumn {
+                    table: col.table.clone(),
+                    column: col.column.clone(),
+                })?;
+
+        accessors.push(StarSchemaGroupKeyAccessor::Related {
+            fk_key_pos: pos,
+            to_index: &rel_info.to_index,
+            to_table: to_table_ref,
+            to_column_idx,
+        });
+    }
+
+    let mut agg_specs: Vec<AggregationSpec> = Vec::new();
+    let mut agg_map: HashMap<(AggregationKind, Option<usize>), usize> = HashMap::new();
+    let mut plans: Vec<PlannedExpr> = Vec::with_capacity(measures.len());
+    for measure in measures {
+        let Some(plan) = plan_pivot_expr(
+            model,
+            table_ref,
+            base_table,
+            &measure.parsed,
+            0,
+            &mut agg_specs,
+            &mut agg_map,
+        )?
+        else {
+            return Ok(None);
+        };
+        plans.push(plan);
+    }
+
+    // The rollup step requires that aggregations be composable across groups. Avoid AVERAGE (needs
+    // sum+count rollup) and DISTINCTCOUNT (non-additive) for this first iteration.
+    for spec in &agg_specs {
+        match spec.kind {
+            AggregationKind::Average => return Ok(None),
+            AggregationKind::DistinctCount => {
+                let Some(idx) = spec.column_idx else {
+                    return Ok(None);
+                };
+                // Allow DISTINCTCOUNT only when it is constant within the *final* group. This is
+                // the case when the column itself is part of the user-specified group-by keys.
+                if !base_group_idxs.contains(&idx) {
+                    return Ok(None);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let rows_buffer;
+    let rows = if filter.is_empty() {
+        None
+    } else {
+        rows_buffer = crate::engine::resolve_table_rows(model, filter, base_table)?;
+        Some(rows_buffer.as_slice())
+    };
+
+    let Some(grouped_rows) = table_ref.group_by_aggregations(&group_idxs, &agg_specs, rows) else {
+        return Ok(None);
+    };
+
+    #[derive(Clone)]
+    enum RollupAggState {
+        Sum { sum: f64, count: usize },
+        Min { best: Option<f64> },
+        Max { best: Option<f64> },
+        CountRows { count: i64 },
+        DistinctCountConst { any: bool },
+    }
+
+    impl RollupAggState {
+        fn new(spec: &AggregationSpec) -> Option<Self> {
+            Some(match spec.kind {
+                AggregationKind::Sum => RollupAggState::Sum { sum: 0.0, count: 0 },
+                AggregationKind::Min => RollupAggState::Min { best: None },
+                AggregationKind::Max => RollupAggState::Max { best: None },
+                AggregationKind::CountRows => RollupAggState::CountRows { count: 0 },
+                AggregationKind::DistinctCount => RollupAggState::DistinctCountConst { any: false },
+                AggregationKind::Average => return None,
+            })
+        }
+
+        fn update(&mut self, value: &Value) {
+            match self {
+                RollupAggState::Sum { sum, count } => {
+                    if let Value::Number(n) = value {
+                        *sum += n.0;
+                        *count += 1;
+                    }
+                }
+                RollupAggState::Min { best } => {
+                    if let Value::Number(n) = value {
+                        *best = Some(best.map_or(n.0, |current| current.min(n.0)));
+                    }
+                }
+                RollupAggState::Max { best } => {
+                    if let Value::Number(n) = value {
+                        *best = Some(best.map_or(n.0, |current| current.max(n.0)));
+                    }
+                }
+                RollupAggState::CountRows { count } => {
+                    if let Value::Number(n) = value {
+                        *count += n.0 as i64;
+                    }
+                }
+                RollupAggState::DistinctCountConst { any } => {
+                    if !value.is_blank() {
+                        *any = true;
+                    }
+                }
+            }
+        }
+
+        fn finalize(self) -> Value {
+            match self {
+                RollupAggState::Sum { sum, count } => {
+                    if count == 0 {
+                        Value::Blank
+                    } else {
+                        Value::from(sum)
+                    }
+                }
+                RollupAggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                RollupAggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
+                RollupAggState::CountRows { count } => Value::from(count),
+                RollupAggState::DistinctCountConst { any } => {
+                    if any {
+                        Value::from(1)
+                    } else {
+                        Value::Blank
+                    }
+                }
+            }
+        }
+    }
+
+    let mut state_template: Vec<RollupAggState> = Vec::with_capacity(agg_specs.len());
+    for spec in &agg_specs {
+        let Some(state) = RollupAggState::new(spec) else {
+            return Ok(None);
+        };
+        state_template.push(state);
+    }
+
+    let key_len = group_idxs.len();
+    let mut groups: HashMap<Vec<Value>, Vec<RollupAggState>> = HashMap::new();
+    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+
+    for row in grouped_rows {
+        let keys = row.get(..key_len).unwrap_or(&[]);
+        let values = row.get(key_len..).unwrap_or(&[]);
+
+        key_buf.clear();
+        for accessor in &accessors {
+            match accessor {
+                StarSchemaGroupKeyAccessor::Base { key_pos } => {
+                    key_buf.push(keys.get(*key_pos).cloned().unwrap_or(Value::Blank));
+                }
+                StarSchemaGroupKeyAccessor::Related {
+                    fk_key_pos,
+                    to_index,
+                    to_table,
+                    to_column_idx,
+                } => {
+                    let fk = keys.get(*fk_key_pos).cloned().unwrap_or(Value::Blank);
+                    if fk.is_blank() {
+                        key_buf.push(Value::Blank);
+                    } else if let Some(&to_row) = to_index.get(&fk) {
+                        key_buf.push(to_table.value_by_idx(to_row, *to_column_idx).unwrap_or(Value::Blank));
+                    } else {
+                        key_buf.push(Value::Blank);
+                    }
+                }
+            }
+        }
+
+        if let Some(states) = groups.get_mut(key_buf.as_slice()) {
+            for (state, value) in states.iter_mut().zip(values) {
+                state.update(value);
+            }
+            continue;
+        }
+
+        let mut states = state_template.clone();
+        for (state, value) in states.iter_mut().zip(values) {
+            state.update(value);
+        }
+        groups.insert(key_buf.clone(), states);
+    }
+
+    let final_key_len = group_by.len();
+    let mut rows_out: Vec<Vec<Value>> = Vec::with_capacity(groups.len());
+    for (key, states) in groups {
+        let agg_values: Vec<Value> = states.into_iter().map(RollupAggState::finalize).collect();
+        let mut row = key;
+        for plan in &plans {
+            row.push(eval_planned(plan, &agg_values));
+        }
+        rows_out.push(row);
+    }
+
+    rows_out.sort_by(|a, b| cmp_key(&a[..final_key_len], &b[..final_key_len]));
+
+    let mut columns: Vec<String> = group_by
+        .iter()
+        .map(|c| format!("{}[{}]", c.table, c.column))
+        .collect();
+    columns.extend(measures.iter().map(|m| m.name.clone()));
+
+    Ok(Some(PivotResult {
+        columns,
+        rows: rows_out,
+    }))
+}
+
 fn pivot_planned_row_group_by(
     model: &DataModel,
     base_table: &str,
@@ -1281,6 +1573,12 @@ pub fn pivot(
         return Ok(result);
     }
 
+    if let Some(result) =
+        pivot_columnar_star_schema_group_by(model, base_table, group_by, measures, filter)?
+    {
+        return Ok(result);
+    }
+
     if let Some(result) = pivot_planned_row_group_by(model, base_table, group_by, measures, filter)?
     {
         return Ok(result);
@@ -1490,6 +1788,204 @@ mod tests {
             scan_elapsed,
             fast_elapsed,
             scan_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64()
+        );
+
+        // Star schema benchmark: group by a related dimension attribute instead of a fact column.
+        // This is the common case where the previous implementation fell back to per-row decoding.
+        let fact_rows = 1_000_000usize;
+        let dim_rows = 10_000usize;
+        let regions = ["East", "West", "North", "South", "Central"];
+
+        let customers_schema = vec![
+            ColumnSchema {
+                name: "CustomerId".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Region".to_string(),
+                column_type: ColumnType::String,
+            },
+        ];
+        let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+        for id in 1..=dim_rows {
+            customers.append_row(&[
+                formula_columnar::Value::Number(id as f64),
+                formula_columnar::Value::String(Arc::<str>::from(regions[id % regions.len()])),
+            ]);
+        }
+
+        let sales_schema = vec![
+            ColumnSchema {
+                name: "CustomerId".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+        for i in 0..fact_rows {
+            let customer_id = (i % dim_rows + 1) as f64;
+            sales.append_row(&[
+                formula_columnar::Value::Number(customer_id),
+                formula_columnar::Value::Number((i % 100) as f64),
+            ]);
+        }
+
+        let mut star_model = DataModel::new();
+        star_model
+            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .unwrap();
+        star_model
+            .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
+            .unwrap();
+        star_model
+            .add_relationship(crate::Relationship {
+                name: "Sales_Customers".into(),
+                from_table: "Sales".into(),
+                from_column: "CustomerId".into(),
+                to_table: "Customers".into(),
+                to_column: "CustomerId".into(),
+                cardinality: crate::Cardinality::OneToMany,
+                cross_filter_direction: crate::CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: true,
+            })
+            .unwrap();
+        star_model.add_measure("Total", "SUM(Sales[Amount])").unwrap();
+
+        let measures = vec![PivotMeasure::new("Total", "[Total]").unwrap()];
+        let group_by = vec![GroupByColumn::new("Customers", "Region")];
+        let filter = FilterContext::empty();
+
+        let start = Instant::now();
+        let planned_scan = pivot_planned_row_group_by(
+            &star_model,
+            "Sales",
+            &group_by,
+            &measures,
+            &filter,
+        )
+        .unwrap()
+        .unwrap();
+        let planned_elapsed = start.elapsed();
+
+        let start = Instant::now();
+        let fast = pivot(&star_model, "Sales", &group_by, &measures, &filter).unwrap();
+        let fast_elapsed = start.elapsed();
+
+        assert_eq!(planned_scan, fast);
+
+        println!(
+            "pivot planned row-scan (RELATED): {:?}, columnar star-schema group-by: {:?} ({:.2}x speedup)",
+            planned_elapsed,
+            fast_elapsed,
+            planned_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64()
+        );
+    }
+
+    #[test]
+    fn pivot_columnar_star_schema_group_by_fast_path_returns_result() {
+        let options = TableOptions {
+            page_size_rows: 64,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+
+        let customers_schema = vec![
+            ColumnSchema {
+                name: "CustomerId".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Region".to_string(),
+                column_type: ColumnType::String,
+            },
+        ];
+        let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+        customers.append_row(&[
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::String(Arc::<str>::from("East")),
+        ]);
+        customers.append_row(&[
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::String(Arc::<str>::from("East")),
+        ]);
+        customers.append_row(&[
+            formula_columnar::Value::Number(3.0),
+            formula_columnar::Value::String(Arc::<str>::from("West")),
+        ]);
+
+        let sales_schema = vec![
+            ColumnSchema {
+                name: "CustomerId".to_string(),
+                column_type: ColumnType::Number,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+        sales.append_row(&[
+            formula_columnar::Value::Number(1.0),
+            formula_columnar::Value::Number(10.0),
+        ]);
+        sales.append_row(&[
+            formula_columnar::Value::Number(2.0),
+            formula_columnar::Value::Number(5.0),
+        ]);
+        sales.append_row(&[
+            formula_columnar::Value::Number(3.0),
+            formula_columnar::Value::Number(7.0),
+        ]);
+
+        let mut model = DataModel::new();
+        model
+            .add_table(crate::Table::from_columnar("Customers", customers.finalize()))
+            .unwrap();
+        model
+            .add_table(crate::Table::from_columnar("Sales", sales.finalize()))
+            .unwrap();
+        model
+            .add_relationship(crate::Relationship {
+                name: "Sales_Customers".into(),
+                from_table: "Sales".into(),
+                from_column: "CustomerId".into(),
+                to_table: "Customers".into(),
+                to_column: "CustomerId".into(),
+                cardinality: crate::Cardinality::OneToMany,
+                cross_filter_direction: crate::CrossFilterDirection::Single,
+                is_active: true,
+                enforce_referential_integrity: true,
+            })
+            .unwrap();
+        model
+            .add_measure("Total Sales", "SUM(Sales[Amount])")
+            .unwrap();
+
+        let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+        let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+        let result = pivot_columnar_star_schema_group_by(
+            &model,
+            "Sales",
+            &group_by,
+            &measures,
+            &FilterContext::empty(),
+        )
+        .unwrap();
+
+        let Some(result) = result else {
+            panic!("expected star schema fast path to return Some");
+        };
+
+        assert_eq!(
+            result.rows,
+            vec![
+                vec![Value::from("East"), 15.0.into()],
+                vec![Value::from("West"), 7.0.into()],
+            ]
         );
     }
 
