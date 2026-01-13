@@ -42,6 +42,16 @@ This ADR defines **one canonical pivot schema** and the **single intended data f
 
 ### 1) Crate ownership (single source of truth)
 
+Quick summary:
+
+| Crate | Owns | Does **not** own |
+|---|---|---|
+| `formula-model` | Canonical pivot *definitions* (PivotTable/PivotConfig/PivotSource), slicer/timeline state, serialization/IPC schema | Pivot computation, cache building, OpenXML parsing |
+| `formula-engine` | Worksheet/range pivot computation, runtime cache building/invalidation, writing results to sheet | Persisted pivot schema, Data Model measure/relationship evaluation, OpenXML I/O |
+| `formula-dax` | Data Model pivot computation (group-by, measures, relationships) | Worksheets/ranges, OpenXML I/O, pivot rendering into sheet cells |
+| `formula-xlsx` | OpenXML pivot cache/table + slicer/timeline parts import/export + round-trip preservation, bridge to model schema | Pivot computation engine |
+| `formula-wasm` | JS API surface to mutate model + call engine refresh/compute | Pivot computation |
+
 #### `formula-model` — canonical persisted/IPC schema (NO computation)
 
 Owns the **serialization-friendly, stable workbook schema** for pivots and related UX objects:
