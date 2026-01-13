@@ -1204,6 +1204,70 @@ impl DaxEngine {
                 };
                 self.eval_related(model, arg, filter, row_ctx)
             }
+            "CONTAINSROW" => {
+                if args.len() < 2 {
+                    return Err(DaxError::Eval(
+                        "CONTAINSROW expects at least 2 arguments".into(),
+                    ));
+                }
+                let (table_expr, value_exprs) = args.split_first().expect("checked above");
+
+                // MVP: only support one-column tables.
+                // `CONTAINSROW` is commonly used with one-column tables like:
+                //   - table constructors: {1, 2, 3}
+                //   - VALUES(Table[Column])
+                if value_exprs.len() != 1 {
+                    return Err(DaxError::Eval(
+                        "CONTAINSROW currently only supports one-column tables".into(),
+                    ));
+                }
+                let needle = self.eval_scalar(model, &value_exprs[0], filter, row_ctx, env)?;
+
+                // Table constructors are not (yet) represented as a `TableResult`, but we can
+                // evaluate them directly as a one-column list of values.
+                if matches!(table_expr, Expr::TableLiteral { .. }) {
+                    let values =
+                        self.eval_one_column_table_literal(model, table_expr, filter, row_ctx, env)?;
+                    for value in values {
+                        if compare_values(&BinaryOp::Equals, &value, &needle)? {
+                            return Ok(Value::Boolean(true));
+                        }
+                    }
+                    return Ok(Value::Boolean(false));
+                }
+
+                let table_result = self.eval_table(model, table_expr, filter, row_ctx, env)?;
+                let table_ref = model
+                    .table(&table_result.table)
+                    .ok_or_else(|| DaxError::UnknownTable(table_result.table.clone()))?;
+
+                let visible_cols: Vec<usize> = match table_result.visible_cols.as_deref() {
+                    Some(cols) => cols.to_vec(),
+                    None => (0..table_ref.columns().len()).collect(),
+                };
+
+                if visible_cols.len() != value_exprs.len() {
+                    return Err(DaxError::Eval(format!(
+                        "CONTAINSROW expected {} value arguments, got {}",
+                        visible_cols.len(),
+                        value_exprs.len()
+                    )));
+                }
+                if visible_cols.len() != 1 {
+                    return Err(DaxError::Eval(
+                        "CONTAINSROW currently only supports one-column tables".into(),
+                    ));
+                }
+
+                let col_idx = visible_cols[0];
+                for row in table_result.rows.iter().copied() {
+                    let value = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                    if compare_values(&BinaryOp::Equals, &value, &needle)? {
+                        return Ok(Value::Boolean(true));
+                    }
+                }
+                Ok(Value::Boolean(false))
+            }
             "EARLIER" => {
                 if args.is_empty() || args.len() > 2 {
                     return Err(DaxError::Eval("EARLIER expects 1 or 2 arguments".into()));
