@@ -60,6 +60,16 @@ test.describe("visual chrome", () => {
   for (const theme of themes) {
     for (const scenario of scenarios) {
       test(`visual chrome (${theme}, ${scenario.label}, ${scenario.viewport.width}x${scenario.viewport.height})`, async ({ page }) => {
+        // Ensure deterministic ribbon/theming state before the app bootstraps.
+        await page.addInitScript((theme: Theme) => {
+          try {
+            localStorage.setItem("formula.ui.ribbonCollapsed", "false");
+            localStorage.setItem("formula.settings.appearance.v1", JSON.stringify({ themePreference: theme }));
+          } catch {
+            // ignore storage errors (disabled/quota/etc.)
+          }
+        }, theme);
+
         await page.setViewportSize(scenario.viewport);
 
         await gotoDesktop(page);
@@ -87,4 +97,3 @@ test.describe("visual chrome", () => {
     }
   }
 });
-

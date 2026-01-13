@@ -34,6 +34,7 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
+  let networkChangedResolve: (() => void) | null = null;
 
   const onConsole = (msg: any): void => {
     try {
@@ -59,6 +60,10 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       const failure = typeof req?.failure === "function" ? req.failure() : null;
       const suffix = failure?.errorText ? ` (${failure.errorText})` : "";
       requestFailures.push(`${method} ${url}${suffix}`.trim());
+      if (failure?.errorText?.includes?.("net::ERR_NETWORK_CHANGED")) {
+        networkChangedResolve?.();
+        networkChangedResolve = null;
+      }
     } catch {
       // ignore listener failures
     }
@@ -112,15 +117,31 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
 
   // Vite may trigger a one-time full reload after dependency optimization. If that
   // happens mid-wait, retry once after the navigation completes.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const networkChangedPromise = new Promise<void>((resolve) => {
+      networkChangedResolve = resolve;
+    });
+
     try {
       // Desktop e2e relies on waiting for `__formulaApp` (and `whenIdle`) rather than the
       // window `load` event. Under heavy load, waiting for `load` can occasionally hang
       // (e.g. if a long-lived request prevents the event from firing).
       await page.goto(path, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean(window.__formulaApp), undefined, {
-        timeout: typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000,
-      });
+      const appReadyTimeout = typeof appReadyTimeoutMs === "number" && appReadyTimeoutMs > 0 ? appReadyTimeoutMs : 60_000;
+      const raceResult = await Promise.race([
+        page
+          .waitForFunction(() => Boolean(window.__formulaApp), undefined, { timeout: appReadyTimeout })
+          .then(() => ({ tag: "ready" as const }))
+          .catch((err) => ({ tag: "error" as const, err })),
+        networkChangedPromise.then(() => ({ tag: "networkChanged" as const })),
+      ]);
+      if (raceResult.tag === "networkChanged") {
+        throw new Error("net::ERR_NETWORK_CHANGED");
+      }
+      if (raceResult.tag === "error") {
+        throw raceResult.err;
+      }
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
       await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
@@ -177,9 +198,11 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
       const message = err instanceof Error ? err.message : String(err);
       const sawNetworkChanged = requestFailures.some((failure) => failure.includes("net::ERR_NETWORK_CHANGED"));
       if (
-        attempt === 0 &&
+        attempt < maxAttempts - 1 &&
         (message.includes("Execution context was destroyed") ||
           message.includes("net::ERR_ABORTED") ||
+          message.includes("net::ERR_NETWORK_CHANGED") ||
+          requestFailures.some((f) => f.includes("net::ERR_NETWORK_CHANGED")) ||
           message.includes("interrupted by another navigation") ||
           message.includes("frame was detached") ||
           // Occasionally the Vite dev server will restart under us (or the browser will observe a

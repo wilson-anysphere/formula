@@ -451,6 +451,10 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     // Avoid generating a nested package.json in the output directory; consumers
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack",
+    // wasm-opt currently fails validating bulk memory / saturating float-to-int
+    // instructions emitted by newer Rust toolchains. Skip wasm-opt to keep
+    // `pnpm -w build:wasm` and e2e workflows functional.
+    "--no-opt",
     ...cargoExtraArgs,
   ];
 

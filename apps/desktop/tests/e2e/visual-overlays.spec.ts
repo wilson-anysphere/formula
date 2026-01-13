@@ -52,8 +52,15 @@ async function openFormatCellsDialog(page: Page): Promise<Locator> {
   const ribbonRoot = page.getByTestId("ribbon-root");
   await ribbonRoot.getByRole("tab", { name: "Home", exact: true }).click();
 
-  await ribbonRoot.locator('[data-command-id="home.number.moreFormats"]').click();
-  await page.locator('[role="menuitem"][data-command-id="format.openFormatCells"]').click();
+  // Prefer the dedicated button when available (stable, avoids dropdown timing).
+  const directButton = ribbonRoot.getByTestId("ribbon-format-cells");
+  if (await directButton.isVisible()) {
+    await directButton.click();
+  } else {
+    await ribbonRoot.locator('[data-command-id="home.number.moreFormats"]').click();
+    // The dropdown menu uses the canonical command id.
+    await page.locator('[role="menuitem"][data-command-id="format.openFormatCells"]').click();
+  }
 
   const dialog = page.getByTestId("format-cells-dialog");
   await expect(dialog).toBeVisible();
