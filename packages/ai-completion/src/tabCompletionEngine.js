@@ -1151,6 +1151,34 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "6", displayText: "6 (MIN)", confidence: 0.62 },
     ],
   },
+  ADDRESS: {
+    // abs_num
+    2: [
+      { replacement: "1", displayText: "1 (absolute row & col)", confidence: 0.67 },
+      { replacement: "4", displayText: "4 (relative row & col)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (absolute row, relative col)", confidence: 0.65 },
+      { replacement: "3", displayText: "3 (relative row, absolute col)", confidence: 0.64 },
+    ],
+    // a1
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (A1 style)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (R1C1 style)", confidence: 0.65 },
+    ],
+  },
+  INDIRECT: {
+    // a1
+    1: [
+      { replacement: "TRUE", displayText: "TRUE (A1 style)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (R1C1 style)", confidence: 0.65 },
+    ],
+  },
+  RANDARRAY: {
+    // whole_number
+    4: [
+      { replacement: "TRUE", displayText: "TRUE (whole numbers)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (decimals)", confidence: 0.65 },
+    ],
+  },
   LINEST: {
     // const (TRUE = calculate intercept, FALSE = force intercept=0)
     2: [

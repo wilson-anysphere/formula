@@ -2391,6 +2391,88 @@ test("LINEST stats suggests TRUE/FALSE with meaning", async () => {
   );
 });
 
+test("ADDRESS abs_num suggests 1, 4, 2, 3", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ADDRESS(1, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "4", "2", "3"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=ADDRESS(1, 2, ${v}`),
+      `Expected ADDRESS to suggest abs_num=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("ADDRESS a1 suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ADDRESS(1, 2, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=ADDRESS(1, 2, 1, TRUE"),
+    `Expected ADDRESS to suggest a1=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=ADDRESS(1, 2, 1, FALSE"),
+    `Expected ADDRESS to suggest a1=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("INDIRECT a1 suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = '=INDIRECT("A1", ';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=INDIRECT("A1", TRUE'),
+    `Expected INDIRECT to suggest a1=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === '=INDIRECT("A1", FALSE'),
+    `Expected INDIRECT to suggest a1=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("RANDARRAY whole_number suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=RANDARRAY(2, 3, 0, 1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDARRAY(2, 3, 0, 1, TRUE"),
+    `Expected RANDARRAY to suggest whole_number=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=RANDARRAY(2, 3, 0, 1, FALSE"),
+    `Expected RANDARRAY to suggest whole_number=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("CEILING.MATH mode suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
