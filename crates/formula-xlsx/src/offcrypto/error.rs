@@ -1,3 +1,4 @@
+use super::crypto::CryptoError;
 use thiserror::Error;
 
 /// Result type for `[MS-OFFCRYPTO]` operations.
@@ -23,6 +24,9 @@ pub enum OffCryptoError {
 
     #[error("unsupported OOXML encryption hash algorithm `{hash}`")]
     UnsupportedHashAlgorithm { hash: String },
+
+    #[error("invalid OOXML Agile encryption parameter: {param}")]
+    InvalidAgileParameter { param: &'static str },
 
     // --- EncryptionInfo XML parsing ------------------------------------------------------------
     #[error("EncryptionInfo XML is not valid UTF-8: {source}")]
@@ -99,5 +103,50 @@ impl From<std::str::Utf8Error> for OffCryptoError {
 impl From<roxmltree::Error> for OffCryptoError {
     fn from(source: roxmltree::Error) -> Self {
         Self::EncryptionInfoXmlMalformed { source }
+    }
+}
+
+impl From<CryptoError> for OffCryptoError {
+    fn from(source: CryptoError) -> Self {
+        match source {
+            CryptoError::UnsupportedHashAlgorithm(hash) => Self::UnsupportedHashAlgorithm { hash },
+            CryptoError::InvalidParameter(param) => Self::InvalidAgileParameter { param },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offcrypto::crypto::{hash_password, HashAlgorithm};
+
+    #[test]
+    fn maps_crypto_error_unsupported_hash_algorithm() {
+        let err = HashAlgorithm::parse_offcrypto_name("md5").expect_err("md5 not supported");
+        let off: OffCryptoError = err.into();
+        assert!(
+            matches!(off, OffCryptoError::UnsupportedHashAlgorithm { ref hash } if hash == "md5"),
+            "expected UnsupportedHashAlgorithm, got {off:?}"
+        );
+        assert!(
+            off.to_string().to_lowercase().contains("encryption"),
+            "message should mention encryption context: {}",
+            off
+        );
+    }
+
+    #[test]
+    fn maps_crypto_error_invalid_parameter() {
+        let err = hash_password("pw", &[], 0, HashAlgorithm::Sha1).expect_err("empty salt");
+        let off: OffCryptoError = err.into();
+        assert!(
+            matches!(off, OffCryptoError::InvalidAgileParameter { param } if param.contains("salt")),
+            "expected InvalidAgileParameter, got {off:?}"
+        );
+        assert!(
+            off.to_string().to_lowercase().contains("agile"),
+            "message should mention Agile encryption context: {}",
+            off
+        );
     }
 }
