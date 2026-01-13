@@ -70,6 +70,17 @@ function blobToFloat32WithContext(blob, context) {
   }
 }
 
+function createDimensionMismatchError(existingDim, requestedDim) {
+  const err = new Error(
+    `SqliteVectorStore dimension mismatch: db has ${existingDim}, requested ${requestedDim}`
+  );
+  err.name = "SqliteVectorStoreDimensionMismatchError";
+  // Non-standard fields for programmatic handling/debugging.
+  err.dbDimension = existingDim;
+  err.requestedDimension = requestedDim;
+  return err;
+}
+
 /**
  * @param {Float32Array} vec
  * @param {number} expectedDim
@@ -307,7 +318,9 @@ export class SqliteVectorStore {
       }
 
       const message = err instanceof Error ? err.message : String(err);
-      const isDimMismatch = message.includes("SqliteVectorStore dimension mismatch");
+      const isDimMismatch =
+        (err && typeof err === "object" && err.name === "SqliteVectorStoreDimensionMismatchError") ||
+        message.includes("SqliteVectorStore dimension mismatch");
       if (isDimMismatch) {
         if (!resetOnDimensionMismatch) throw err;
       } else {
@@ -386,9 +399,7 @@ export class SqliteVectorStore {
 
     const existingDim = Number(existing);
     if (existingDim !== dimension) {
-      throw new Error(
-        `SqliteVectorStore dimension mismatch: db has ${existingDim}, requested ${dimension}`
-      );
+      throw createDimensionMismatchError(existingDim, dimension);
     }
   }
 
