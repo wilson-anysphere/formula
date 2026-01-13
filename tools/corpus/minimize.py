@@ -744,7 +744,8 @@ def main() -> int:
         default=triage_mod._PRIVACY_PUBLIC,  # noqa: SLF001
         help=(
             "Control redaction of minimize outputs. `public` preserves filenames/URLs; "
-            "`private` anonymizes display_name and hashes non-standard URLs."
+            "`private` anonymizes display_name and hashes non-standard URLs. "
+            "In private mode, local output paths and error strings are also redacted."
         ),
     )
     parser.add_argument(

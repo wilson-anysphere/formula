@@ -1542,7 +1542,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Control redaction of triage reports. "
             "`public` preserves filenames/URIs; `private` anonymizes display_name and hashes "
-            "custom URI-like strings (defense in depth for private corpus CI artifacts)."
+            "custom URI-like strings (including expanded XML namespaces in diff paths). "
+            "In private mode, CI metadata like run_url and local paths in index.json are also hashed."
         ),
     )
     parser.add_argument(
