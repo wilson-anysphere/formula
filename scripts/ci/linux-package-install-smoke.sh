@@ -178,7 +178,9 @@ deb_smoke_test_dir() {
         echo "${out}" | grep "not found" || true
         exit 1
       fi
-      if [ "${status}" -ne 0 ] && ! echo "${out}" | grep -q "not a dynamic executable" && ! echo "${out}" | grep -q "statically linked"; then
+      # Treat any `ldd` failure as fatal. Note: `ldd` can emit "not a dynamic executable"
+      # for non-native-arch binaries (e.g. ARM on x86_64) and still exit non-zero.
+      if [ "${status}" -ne 0 ]; then
         echo "ldd exited with status ${status}" >&2
         exit 1
       fi
@@ -232,7 +234,9 @@ rpm_smoke_test_dir() {
         echo "${out}" | grep "not found" || true
         exit 1
       fi
-      if [ "${status}" -ne 0 ] && ! echo "${out}" | grep -q "not a dynamic executable" && ! echo "${out}" | grep -q "statically linked"; then
+      # Treat any `ldd` failure as fatal. Note: `ldd` can emit "not a dynamic executable"
+      # for non-native-arch binaries (e.g. ARM on x86_64) and still exit non-zero.
+      if [ "${status}" -ne 0 ]; then
         echo "ldd exited with status ${status}" >&2
         exit 1
       fi
