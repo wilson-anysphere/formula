@@ -6,8 +6,8 @@
 //! repeatedly propagating constraints across relationships until reaching a fixed point (see
 //! `resolve_row_sets` / `propagate_filter`).
 //!
-//! For many-to-many relationships ([`Cardinality::ManyToMany`]), the intended propagation uses the
-//! **distinct set of visible key values** on the source side (conceptually similar to
+//! For many-to-many relationships ([`Cardinality::ManyToMany`]), propagation uses the **distinct
+//! set of visible key values** on the source side (conceptually similar to
 //! `TREATAS(VALUES(source[key]), target[key])`) instead of requiring a unique lookup row.
 use crate::backend::TableBackend;
 use crate::model::{
@@ -3340,8 +3340,9 @@ pub(crate) fn resolve_table_rows(
 /// The fixed-point iteration is required because relationships can form cycles (for example via
 /// bidirectional filtering).
 ///
-/// For [`Cardinality::ManyToMany`], the intended propagation is based on the distinct set of keys
-/// visible on the source side rather than a unique lookup row.
+/// For [`Cardinality::ManyToMany`], propagation is based on the distinct set of keys visible on the
+/// source side (a key is considered visible if *any* row with that key is allowed), rather than a
+/// unique lookup row.
 fn resolve_row_sets(
     model: &DataModel,
     filter: &FilterContext,

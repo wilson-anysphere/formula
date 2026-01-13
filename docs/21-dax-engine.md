@@ -140,41 +140,48 @@ Relationships are registered via `DataModel::add_relationship(Relationship)` (se
 
 `Relationship` is defined with:
 
-- `from_table` / `from_column`: the fact-side table (often the "many" side) and its key/foreign-key column
-- `to_table` / `to_column`: the lookup-side table (often the "one" side) and its key column
+- `from_table` / `from_column`: the fact-side table (often the "many" side for 1:*) and its key/foreign-key column
+- `to_table` / `to_column`: the lookup-side table (often the "one" side for 1:*) and its key column
 
 The relationship is *oriented*: by default (`CrossFilterDirection::Single`) filters propagate
-`to_table → from_table`. This orientation is intended to remain meaningful for
-`Cardinality::ManyToMany` relationships as well.
+`to_table → from_table`. This orientation is meaningful for `Cardinality::ManyToMany` relationships
+as well (it defines default propagation and how `RELATED` / `RELATEDTABLE` navigate).
 
 Internally, `DataModel` materializes two indices (`RelationshipInfo`):
 
-- `to_index: HashMap<Value, usize>` mapping **to_table key → to_table row index** (unique-key relationships)
+- `to_index: HashMap<Value, RowSet>` mapping **to_table key → one or more to_table row indices**  
+  (`RowSet::One(row)` for unique keys; `RowSet::Many(rows)` when a key maps to multiple rows, e.g. many-to-many)
 - `from_index: HashMap<Value, Vec<usize>>` mapping **from_table key → from_table row indices**
 
 These indices are built eagerly when the relationship is added, and updated on `DataModel::insert_row(...)`.
 
 ### Cardinality
 
-Currently supported cardinalities:
+Supported cardinalities:
 
 - `Cardinality::OneToMany`
 - `Cardinality::OneToOne`
+- `Cardinality::ManyToMany`
 
-Many-to-many (planned semantics):
-
-- `Cardinality::ManyToMany` is currently rejected by `DataModel::add_relationship` (returns
-  `DaxError::UnsupportedCardinality`).
-- Intended filter propagation is **distinct-key propagation** (conceptually like
-  `TREATAS(VALUES(source[key]), target[key])`).
-- `RELATED` is ambiguous when there is more than one match on the `to_table` side (error).
-- `RELATEDTABLE` returns the set of matching rows (can be >1 for many-to-many).
-- Pivot/group-by: the current pivot/group-by implementation does not expand a base row into multiple
-  related rows when traversing a many-to-many relationship, so grouping across many-to-many is
-  currently ambiguous/unsupported.
+For `OneToMany` relationships, the engine enforces uniqueness on the `to_table` key when the
+relationship is added (`DaxError::NonUniqueKey`).
 
 For `OneToOne` relationships, the engine enforces uniqueness on **both** sides when the relationship is
 added (`DaxError::NonUniqueKey`), treating `BLANK` as a real key for uniqueness checks.
+
+For `ManyToMany` relationships, keys are allowed to map to multiple rows on the `to_table` side.
+Filter propagation uses **distinct-key propagation** (conceptually like
+`TREATAS(VALUES(source[key]), target[key])`): the engine computes the set of visible key values on
+the source side and keeps rows on the target side whose key is in that set.
+
+Navigation notes:
+
+- `RELATED` errors if the current key matches more than one row in `to_table` (ambiguous).
+- `RELATEDTABLE` returns all matching rows and can naturally return multiple rows.
+
+Pivot/group-by note: grouping by columns across a many-to-many relationship does not expand a base
+row into multiple related rows; it effectively relies on `RELATED`-like semantics and will error
+when a key matches multiple rows on the `to_table` side.
 
 ### Cross-filter direction
 

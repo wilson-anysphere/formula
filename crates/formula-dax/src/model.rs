@@ -12,9 +12,8 @@ use std::sync::Arc;
 /// Relationship cardinality between two tables.
 ///
 /// `formula-dax` models relationships in the same oriented way as Tabular/Power Pivot: every
-/// relationship has a `from_*` side and a `to_*` side. That orientation is intended to remain
-/// meaningful even for [`Cardinality::ManyToMany`] relationships (see [`Relationship`] for
-/// details).
+/// relationship has a `from_*` side and a `to_*` side. That orientation is meaningful even for
+/// [`Cardinality::ManyToMany`] relationships (see [`Relationship`] for details).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cardinality {
     OneToMany,
@@ -64,9 +63,9 @@ pub enum CrossFilterDirection {
 ///
 /// - With [`CrossFilterDirection::Single`], filters propagate from `to_table` to `from_table`.
 /// - With [`CrossFilterDirection::Both`], filters propagate in both directions.
-/// - For [`Cardinality::ManyToMany`], the intended propagation is based on the **distinct set of
-///   visible key values** on the source side (conceptually similar to
-///   `TREATAS(VALUES(source[key]), target[key])`), rather than relying on a unique lookup row.
+/// - For [`Cardinality::ManyToMany`], propagation is based on the **distinct set of visible key
+///   values** on the source side (conceptually similar to `TREATAS(VALUES(source[key]),
+///   target[key])`), rather than relying on a unique lookup row.
 ///
 /// ## Referential integrity and the implicit blank/unknown member
 /// Tabular models treat fact-side rows whose key is BLANK (or has no match in the related table) as
