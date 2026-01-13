@@ -181,7 +181,9 @@ for deb in "${debs[@]}"; do
   # Core runtime deps (WebView + GTK + tray + SSL). Keep these checks intentionally fuzzy:
   # - Ubuntu/Debian may rename packages (e.g. *t64 suffix in Ubuntu 24.04)
   # - We accept either `libappindicator*` or `libayatana-appindicator*`
-  # WebKitGTK 4.1 is required by our Linux builds.
+  #
+  # But do enforce WebKitGTK **4.1** specifically (Tauri v2.9 + wry expects WebKitGTK 4.1
+  # in this repo); accidentally drifting to 4.0 would break runtime compatibility.
   assert_contains_any "$depends" "$deb" "WebKitGTK 4.1 (webview)" "libwebkit2gtk-4\\.1"
   assert_contains_any "$depends" "$deb" "GTK3" "libgtk-3"
   assert_contains_any "$depends" "$deb" "AppIndicator (tray)" "appindicator"
@@ -198,8 +200,11 @@ for rpm_path in "${rpms[@]}"; do
   # `rpm -qpR` lists "capabilities" which may be package names (when explicitly declared)
   # or shared-library requirements (auto-generated). Match either so the check is robust
   # across rpm-based distros and packaging strategies.
-  # WebKitGTK 4.1 is required by our Linux builds. On Fedora the package is `webkit2gtk4.1`.
-  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4\\.1"
+  #
+  # Enforce WebKitGTK **4.1** specifically. We accept both Fedora-style package names
+  # (`webkit2gtk4.1`) and openSUSE-style library packages (`libwebkit2gtk-4_1-0`), along
+  # with the auto-generated soname requirements (`libwebkit2gtk-4.1.so.*`).
+  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1" "libwebkit2gtk-4\\.1"
   assert_contains_any "$requires" "$rpm_path" "GTK3" "(^|[^a-z0-9])gtk3" "libgtk-3"
   assert_contains_any "$requires" "$rpm_path" "AppIndicator (tray)" "appindicator"
   assert_contains_any "$requires" "$rpm_path" "librsvg2 (icons)" "librsvg"
