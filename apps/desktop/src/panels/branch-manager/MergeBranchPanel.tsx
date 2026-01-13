@@ -350,6 +350,15 @@ function parseValueFromEditorText(text: string): unknown {
   return trimmed;
 }
 
+function normalizeFormulaInput(text: string): string | null {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return null;
+  const withoutEquals = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const body = withoutEquals.trim();
+  if (!body) return null;
+  return `=${body}`;
+}
+
 function normalizeManualCell(cell: Cell | null): Cell | null {
   if (!cell || typeof cell !== "object") return null;
 
@@ -357,8 +366,8 @@ function normalizeManualCell(cell: Cell | null): Cell | null {
 
   if (cell.enc !== null && cell.enc !== undefined) out.enc = cell.enc;
 
-  const formula = typeof cell.formula === "string" ? cell.formula.trim() : "";
-  if (formula.length > 0) out.formula = formula;
+    const formula = normalizeFormulaInput(cell.formula);
+    if (formula) out.formula = formula;
 
   if (cell.value !== null && cell.value !== undefined) out.value = cell.value;
 
@@ -395,7 +404,7 @@ function initialDraftForCellConflict(
     deleteCell: seed === null,
     encSource: hasEnc && cellHasEnc(seed) ? seedSource : "custom",
     valueText: seed && seed.formula ? "" : valueToEditorText(seed?.value),
-    formulaText: seed && seed.formula ? seed.formula : "",
+    formulaText: seed && seed.formula ? normalizeFormulaInput(seed.formula) ?? seed.formula : "",
     formatText: seed?.format ? JSON.stringify(seed.format, null, 2) : "",
     formatError: null,
   };
@@ -438,8 +447,8 @@ function manualCellFromDraft(
   /** @type {Cell} */
   const cell: Cell = {};
 
-  const formula = draft.formulaText.trim();
-  if (formula.length > 0) {
+  const formula = normalizeFormulaInput(draft.formulaText);
+  if (formula) {
     cell.formula = formula;
   } else {
     const nextValue = parseValueFromEditorText(draft.valueText);
