@@ -376,6 +376,13 @@ test("CollabSession↔DocumentController binder encryptFormat encrypts cell form
   const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
   let binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
 
+  // Seed a legacy plaintext `style` key to ensure encryptFormat writes scrub it.
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("style", { font: { underline: true } });
+    sessionA.cells.set("Sheet1:0:0", cell);
+  });
+
   dcA.setCellValue("Sheet1", "A1", "top-secret");
   dcA.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
 
@@ -399,6 +406,7 @@ test("CollabSession↔DocumentController binder encryptFormat encrypts cell form
   assert.equal(cellMap.get("value"), undefined);
   assert.equal(cellMap.get("formula"), undefined);
   assert.equal(cellMap.get("format"), undefined);
+  assert.equal(cellMap.get("style"), undefined);
   assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
 
   // Now "grant" the key on B by recreating the session and re-binding.

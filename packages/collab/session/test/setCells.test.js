@@ -179,6 +179,7 @@ test("CollabSession setCells encryptFormat migrates plaintext `format` into the 
   assert.equal(encCell.get("value"), undefined);
   assert.equal(encCell.get("formula"), undefined);
   assert.equal(encCell.get("format"), undefined);
+  assert.equal(encCell.get("style"), undefined);
   assert.ok(encCell.get("enc"), "expected encrypted payload under `enc`");
 
   const decrypted = await session.getCell("Sheet1:0:0");

@@ -1638,7 +1638,10 @@ export function bindYjsToDocumentController(options) {
             cell.set("enc", encryptedPayload);
             cell.delete("value");
             cell.delete("formula");
-            if (encryptFormat) cell.delete("format");
+            if (encryptFormat) {
+              cell.delete("format");
+              cell.delete("style");
+            }
           } else {
             cell.delete("enc");
             if (formula != null) {
@@ -1663,6 +1666,7 @@ export function bindYjsToDocumentController(options) {
             }
           } else {
             cell.delete("format");
+            cell.delete("style");
           }
 
           cell.set("modified", Date.now());

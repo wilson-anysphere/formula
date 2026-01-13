@@ -2182,11 +2182,12 @@ export class CollabSession {
             const ycell = getYMapCell(this.cells.get(key));
             if (!ycell) continue;
             const raw = ycell.get("format");
-            if (raw === undefined) continue;
-            if (raw && typeof raw === "object" && Object.keys(raw as any).length === 0) {
+            const rawOrStyle = raw === undefined ? ycell.get("style") : raw;
+            if (rawOrStyle === undefined) continue;
+            if (rawOrStyle && typeof rawOrStyle === "object" && Object.keys(rawOrStyle as any).length === 0) {
               formatToEncrypt = null;
             } else {
-              formatToEncrypt = raw ?? null;
+              formatToEncrypt = rawOrStyle ?? null;
             }
             break;
           }
@@ -2249,7 +2250,10 @@ export class CollabSession {
           ycell.set("enc", encryptedPayload);
           ycell.delete("value");
           ycell.delete("formula");
-          if (encryptFormat) ycell.delete("format");
+          if (encryptFormat) {
+            ycell.delete("format");
+            ycell.delete("style");
+          }
           ycell.set("modified", modified);
           if (userId) ycell.set("modifiedBy", userId);
         }
@@ -2357,11 +2361,12 @@ export class CollabSession {
             const ycell = getYMapCell(this.cells.get(key));
             if (!ycell) continue;
             const raw = ycell.get("format");
-            if (raw === undefined) continue;
-            if (raw && typeof raw === "object" && Object.keys(raw as any).length === 0) {
+            const rawOrStyle = raw === undefined ? ycell.get("style") : raw;
+            if (rawOrStyle === undefined) continue;
+            if (rawOrStyle && typeof rawOrStyle === "object" && Object.keys(rawOrStyle as any).length === 0) {
               formatToEncrypt = null;
             } else {
-              formatToEncrypt = raw ?? null;
+              formatToEncrypt = rawOrStyle ?? null;
             }
             break;
           }
@@ -2408,7 +2413,10 @@ export class CollabSession {
           cell.set("enc", encryptedPayload);
           cell.delete("value");
           cell.delete("formula");
-          if (encryptFormat) cell.delete("format");
+          if (encryptFormat) {
+            cell.delete("format");
+            cell.delete("style");
+          }
           cell.set("modified", modified);
           if (userId) cell.set("modifiedBy", userId);
         }
@@ -2594,11 +2602,12 @@ export class CollabSession {
             const ycell = getYMapCell(this.cells.get(key));
             if (!ycell) continue;
             const raw = ycell.get("format");
-            if (raw === undefined) continue;
-            if (raw && typeof raw === "object" && Object.keys(raw as any).length === 0) {
+            const rawOrStyle = raw === undefined ? ycell.get("style") : raw;
+            if (rawOrStyle === undefined) continue;
+            if (rawOrStyle && typeof rawOrStyle === "object" && Object.keys(rawOrStyle as any).length === 0) {
               formatToEncrypt = null;
             } else {
-              formatToEncrypt = raw ?? null;
+              formatToEncrypt = rawOrStyle ?? null;
             }
             break;
           }
@@ -2688,7 +2697,10 @@ export class CollabSession {
             ycell.set("enc", enc);
             ycell.delete("value");
             ycell.delete("formula");
-            if (encryptFormat) ycell.delete("format");
+            if (encryptFormat) {
+              ycell.delete("format");
+              ycell.delete("style");
+            }
             ycell.set("modified", modified);
             if (userId) ycell.set("modifiedBy", userId);
           }

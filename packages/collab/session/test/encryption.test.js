@@ -165,6 +165,7 @@ test("CollabSession E2E cell encryption: encryptFormat encrypts per-cell format 
   const raw = sessionA.cells.get("Sheet1:0:0");
   assert.ok(raw, "expected Yjs cell map to exist");
   assert.equal(raw.get("format"), undefined);
+  assert.equal(raw.get("style"), undefined);
   assert.ok(raw.get("enc"), "expected encrypted payload under `enc`");
 
   const decrypted = await sessionA.getCell("Sheet1:0:0");
@@ -177,6 +178,53 @@ test("CollabSession E2E cell encryption: encryptFormat encrypts per-cell format 
 
   sessionA.destroy();
   sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession E2E cell encryption: encryptFormat migrates legacy `style` key into ciphertext and removes plaintext", async () => {
+  const docId = "collab-session-encryption-test-doc-encryptFormat-style";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    encryption: { keyForCell: keyForA1, encryptFormat: true },
+  });
+
+  const style = { font: { italic: true } };
+
+  // Seed a legacy plaintext `style` field and then encrypt via `setCellValue`. The encrypted write should
+  // migrate `style` into the ciphertext and remove it from the shared Yjs map.
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "plaintext");
+    cell.set("style", style);
+    sessionA.cells.set("Sheet1:0:0", cell);
+  });
+
+  await sessionA.setCellValue("Sheet1:0:0", "top-secret");
+
+  const raw = sessionA.cells.get("Sheet1:0:0");
+  assert.ok(raw, "expected Yjs cell map to exist");
+  assert.equal(raw.get("format"), undefined);
+  assert.equal(raw.get("style"), undefined);
+  assert.ok(raw.get("enc"), "expected encrypted payload under `enc`");
+
+  const decrypted = await sessionA.getCell("Sheet1:0:0");
+  assert.deepEqual(decrypted?.format, style);
+
+  sessionA.destroy();
   disconnect();
   docA.destroy();
   docB.destroy();
