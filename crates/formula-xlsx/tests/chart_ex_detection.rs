@@ -30,6 +30,17 @@ fn detects_chart_ex_parts_and_parses_kind() {
         );
 
         let chart = &charts[0];
+        let chart_part = &chart.parts.chart;
+        let chart_rels_path = chart_part
+            .rels_path
+            .as_deref()
+            .expect("fixture charts should include chart rels");
+        assert_eq!(
+            chart_part.rels_bytes.as_deref(),
+            pkg.part(chart_rels_path),
+            "chart rels bytes should be embedded on the extracted OpcPart for {name}.xlsx"
+        );
+
         let chart_ex = chart
             .parts
             .chart_ex
@@ -39,6 +50,12 @@ fn detects_chart_ex_parts_and_parses_kind() {
         assert!(
             chart_ex.rels_path.is_some(),
             "fixture should include chartEx rels"
+        );
+        let chart_ex_rels_path = chart_ex.rels_path.as_deref().unwrap();
+        assert_eq!(
+            chart_ex.rels_bytes.as_deref(),
+            pkg.part(chart_ex_rels_path),
+            "chartEx rels bytes should be embedded on the extracted OpcPart for {name}.xlsx"
         );
 
         let model = chart.model.as_ref().expect("chart model present");
