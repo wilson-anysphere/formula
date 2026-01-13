@@ -1188,7 +1188,7 @@ jobs:
           }
 
       - name: Validate macOS notarization + stapling (Gatekeeper)
-        if: ${{ runner.os == 'macOS' && ((secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') || vars.FORMULA_REQUIRE_CODESIGN == '1') }}
+        if: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
         working-directory: apps/desktop/src-tauri
         shell: bash
         run: |
