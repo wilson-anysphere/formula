@@ -121,6 +121,7 @@ import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import { registerWorkbenchFileCommands, WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
+import { registerNumberFormatCommands } from "./commands/registerNumberFormatCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -142,7 +143,6 @@ import {
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import {
   applyAllBorders,
-  applyNumberFormatPreset,
   NUMBER_FORMATS,
   setFillColor,
   setFontColor,
@@ -1615,39 +1615,6 @@ function stepFontSize(current: number, direction: "increase" | "decrease"): numb
   }
   return resolved;
 }
-function parseDecimalPlaces(format: string): number {
-  const dot = format.indexOf(".");
-  if (dot === -1) return 0;
-  let count = 0;
-  for (let i = dot + 1; i < format.length; i++) {
-    const ch = format[i];
-    if (ch === "0" || ch === "#") count += 1;
-    else break;
-  }
-  return count;
-}
-
-function stepDecimalPlacesInNumberFormat(format: string | null, direction: "increase" | "decrease"): string | null {
-  const raw = (format ?? "").trim();
-  const section = (raw.split(";")[0] ?? "").trim();
-  const lower = section.toLowerCase();
-  // Avoid trying to manipulate date/time format codes.
-  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
-
-  const currencyMatch = /[$€£¥]/.exec(section);
-  const prefix = currencyMatch?.[0] ?? "";
-  const suffix = section.includes("%") ? "%" : "";
-  const useThousands = section.includes(",");
-  const decimals = parseDecimalPlaces(section);
-
-  const nextDecimals =
-    direction === "increase" ? Math.min(10, decimals + 1) : Math.max(0, decimals - 1);
-  if (nextDecimals === decimals) return null;
-
-  const integer = useThousands ? "#,##0" : "0";
-  const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
-  return `${prefix}${integer}${fraction}${suffix}`;
-}
 if (collabStatus) installCollabStatusIndicator(app, collabStatus);
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
@@ -2203,21 +2170,21 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.bottomAlign": true,
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
-            "home.alignment.alignRight": true,
-            "home.alignment.orientation": true,
-            "home.alignment.increaseIndent": true,
-            "home.alignment.decreaseIndent": true,
-            "home.number.numberFormat": true,
-            "home.number.moreFormats": true,
-            "format.numberFormat.percent": true,
-            "format.numberFormat.currency": true,
-            "format.numberFormat.date": true,
-            "home.number.comma": true,
-            "home.number.increaseDecimal": true,
-            "home.number.decreaseDecimal": true,
-            "home.number.formatCells": true,
-          }
-        : null),
+             "home.alignment.alignRight": true,
+             "home.alignment.orientation": true,
+             "home.alignment.increaseIndent": true,
+             "home.alignment.decreaseIndent": true,
+             "home.number.numberFormat": true,
+             "home.number.moreFormats": true,
+             "format.numberFormat.percent": true,
+             "format.numberFormat.accounting": true,
+             "format.numberFormat.shortDate": true,
+             "format.numberFormat.commaStyle": true,
+             "format.numberFormat.increaseDecimal": true,
+             "format.numberFormat.decreaseDecimal": true,
+             "home.number.formatCells": true,
+           }
+         : null),
       ...(printExportAvailable
         ? null
         : {
@@ -5353,41 +5320,13 @@ if (
     { category: commandCategoryFormat },
   );
 
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.currency",
-    t("command.format.numberFormat.currency"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.currency"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.percent",
-    t("command.format.numberFormat.percent"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.percent"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
-
-  commandRegistry.registerBuiltinCommand(
-    "format.numberFormat.date",
-    t("command.format.numberFormat.date"),
-    () =>
-      applyFormattingToSelection(
-        t("command.format.numberFormat.date"),
-        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"),
-        { forceBatch: true },
-      ),
-    { category: commandCategoryFormat },
-  );
+  registerNumberFormatCommands({
+    commandRegistry,
+    applyFormattingToSelection,
+    getActiveCellNumberFormat: activeCellNumberFormat,
+    t,
+    category: commandCategoryFormat,
+  });
 
   commandRegistry.registerBuiltinCommand(
     "format.openFormatCells",
@@ -8572,6 +8511,11 @@ mountRibbon(ribbonReactRoot, {
       return;
     }
 
+    if (commandId.startsWith("format.numberFormat.")) {
+      executeBuiltinCommand(commandId);
+      return;
+    }
+
     const openRibbonPanel = (panelId: string): void => {
       const layoutController = ribbonLayoutController;
       if (!layoutController) {
@@ -8888,120 +8832,6 @@ mountRibbon(ribbonReactRoot, {
           { forceBatch: true },
         );
       }
-      return;
-    }
-
-    const numberFormatPrefix = "home.number.numberFormat.";
-    if (commandId.startsWith(numberFormatPrefix)) {
-      const kind = commandId.slice(numberFormatPrefix.length);
-      if (kind === "general") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: null }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "number") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "0.00" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "currency" || kind === "accounting") {
-        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) =>
-          applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
-        );
-        return;
-      }
-      if (kind === "percentage") {
-        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
-        return;
-      }
-      if (kind === "shortDate" || kind === "longDate") {
-        applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
-        return;
-      }
-      if (kind === "time") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "fraction") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "# ?/?" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "scientific") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "0.00E+00" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      if (kind === "text") {
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "@" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      return;
-    }
-
-    const accountingPrefix = "home.number.accounting.";
-    if (commandId.startsWith(accountingPrefix)) {
-      const currency = commandId.slice(accountingPrefix.length);
-      const symbol = (() => {
-        switch (currency) {
-          case "eur":
-            return "€";
-          case "gbp":
-            return "£";
-          case "jpy":
-            return "¥";
-          case "usd":
-          default:
-            return "$";
-        }
-      })();
-
-      applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-        let applied = true;
-        for (const range of ranges) {
-          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
-          if (ok === false) applied = false;
-        }
-        return applied;
-      });
       return;
     }
 
@@ -9401,50 +9231,6 @@ mountRibbon(ribbonReactRoot, {
         openFormatCells();
         return;
 
-      case "format.numberFormat.currency":
-      case "format.numberFormat.percent":
-      case "format.numberFormat.date":
-        executeBuiltinCommand(commandId);
-        // Formatting commands should leave the grid focused even if the underlying command
-        // is a no-op (e.g. selection guards).
-        app.focus();
-        return;
-      case "home.number.comma":
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.number.increaseDecimal": {
-        const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "increase");
-        if (!next) return;
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-      case "home.number.decreaseDecimal": {
-        const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "decrease");
-        if (!next) return;
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
       case "home.number.formatCells":
       case "home.number.moreFormats.formatCells":
       case "home.number.moreFormats.custom":
