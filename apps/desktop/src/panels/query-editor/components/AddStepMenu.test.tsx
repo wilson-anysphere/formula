@@ -195,6 +195,29 @@ describe("AddStepMenu", () => {
     expect((document.activeElement as HTMLElement | null)?.textContent?.trim()).toBe("Keep Top Rows");
   });
 
+  it("allows pressing Enter on a focused menu item to apply it", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const onAddStep = vi.fn();
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={onAddStep} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(5);
+    });
+
+    expect((document.activeElement as HTMLElement | null)?.textContent?.trim()).toBe("Keep Top Rows");
+
+    await act(async () => {
+      (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(onAddStep).toHaveBeenCalledWith({ type: "take", count: 100 });
+    expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeNull();
+  });
+
   it("handles empty AI intent and renders returned suggestions with readable labels", async () => {
     const preview = new DataTable([{ name: "Region", type: "string" }], []);
     const query = baseQuery();

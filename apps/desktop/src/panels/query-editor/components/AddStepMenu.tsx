@@ -177,7 +177,14 @@ export function AddStepMenu(props: {
   }, [menuOpen]);
 
   const handleMenuKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (evt) => {
-    if (evt.key !== "ArrowDown" && evt.key !== "ArrowUp" && evt.key !== "Home" && evt.key !== "End") return;
+    if (
+      evt.key !== "ArrowDown" &&
+      evt.key !== "ArrowUp" &&
+      evt.key !== "Home" &&
+      evt.key !== "End" &&
+      evt.key !== "Enter"
+    )
+      return;
     const root = menuRootRef.current;
     if (!root) return;
     const items = Array.from(
@@ -187,6 +194,14 @@ export function AddStepMenu(props: {
 
     const active = document.activeElement;
     const currentIdx = items.findIndex((el) => el === active);
+
+    if (evt.key === "Enter") {
+      if (active && active instanceof HTMLButtonElement && items.includes(active)) {
+        evt.preventDefault();
+        active.click();
+      }
+      return;
+    }
 
     let nextIdx = 0;
     if (evt.key === "Home") {
