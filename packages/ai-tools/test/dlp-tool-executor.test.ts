@@ -69,6 +69,73 @@ describe("ToolExecutor DLP enforcement", () => {
     expect(event.decision?.decision).toBe("redact");
   });
 
+  it("read_range enforces table-based column selectors when a resolver is provided", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 100 });
+    workbook.setCell(parseA1Cell("Sheet1!C1"), { value: 3 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.COLUMN,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              tableId: "t1",
+              columnId: "cB"
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        table_column_resolver: {
+          getColumnIndex(sheetId: string, tableId: string, columnId: string) {
+            if (sheetId === "Sheet1" && tableId === "t1" && columnId === "cB") return 1; // Column B
+            return null;
+          }
+        },
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Sheet1!A1:C1", include_formulas: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.values).toEqual([[1, "[REDACTED]", 3]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "read_range",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:C1",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
+
   it("read_range redacts restricted cells even when the tool call uses a display sheet name", async () => {
     const workbook = new InMemoryWorkbook(["Sheet2"]);
     workbook.setCell(parseA1Cell("Sheet2!A1"), { value: "ok" });
@@ -318,6 +385,71 @@ describe("ToolExecutor DLP enforcement", () => {
       tool: "compute_statistics",
       action: DLP_ACTION.AI_CLOUD_PROCESSING,
       range: "Sheet1!A1:B1",
+      redactedCellCount: 1
+    });
+    expect(event.decision?.decision).toBe("redact");
+  });
+
+  it("compute_statistics excludes values from table-based restricted column selectors under REDACT policy", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 100 });
+    workbook.setCell(parseA1Cell("Sheet1!C1"), { value: 3 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.COLUMN,
+              documentId: "doc-1",
+              sheetId: "Sheet1",
+              tableId: "t1",
+              columnId: "cB"
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        table_column_resolver: {
+          getColumnIndex(sheetId: string, tableId: string, columnId: string) {
+            if (sheetId === "Sheet1" && tableId === "t1" && columnId === "cB") return 1; // Column B
+            return null;
+          }
+        },
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:C1", measures: ["mean", "min", "max"] }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics).toEqual({ mean: 2, min: 1, max: 3 });
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "compute_statistics",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet1!A1:C1",
       redactedCellCount: 1
     });
     expect(event.decision?.decision).toBe("redact");

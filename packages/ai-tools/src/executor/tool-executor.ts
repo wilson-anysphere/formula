@@ -9,7 +9,7 @@ import { redactUrlSecrets } from "../utils/urlRedaction.ts";
 
 import { DLP_ACTION } from "../../../security/dlp/src/actions.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../security/dlp/src/policyEngine.js";
-import { CLASSIFICATION_LEVEL, classificationRank } from "../../../security/dlp/src/classification.js";
+import { CLASSIFICATION_LEVEL, classificationRank, maxClassification } from "../../../security/dlp/src/classification.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../security/dlp/src/selectors.js";
 
 import { parseSpreadsheetNumber } from "./number-parsing.ts";
@@ -290,6 +290,20 @@ export interface ToolExecutorOptions {
     policy: any;
     classification_records?: Array<{ selector: any; classification: any }>;
     classification_store?: { list(documentId: string): Array<{ selector: any; classification: any }> };
+    /**
+     * Optional resolver for table-based column selectors.
+     *
+     * DLP records may express column scopes using `(tableId, columnId)` pairs instead of
+     * absolute sheet column indices. ToolExecutor operates on sheet coordinates, so hosts
+     * can optionally provide a resolver that maps a table column to a 0-based sheet
+     * `columnIndex`.
+     *
+     * When provided, ToolExecutor will enforce DLP policies for table-based column
+     * selectors during both policy evaluation and per-cell redaction.
+     */
+    table_column_resolver?: {
+      getColumnIndex(sheetId: string, tableId: string, columnId: string): number | null;
+    };
     include_restricted_content?: boolean;
     audit_logger?: { log(event: any): void };
   };
@@ -345,10 +359,10 @@ type DlpRangeIndex = {
   /**
    * Records that cannot be indexed by (row,col)/(columnIndex).
    *
-   * ToolExecutor currently operates on sheet coordinates only (no table metadata), so
-   * table-based selectors (tableId/columnId) cannot be evaluated and are ignored when
-   * building the index. As a result this list is effectively always empty today, but
-   * is kept for future extensibility.
+   * ToolExecutor currently operates on sheet coordinates only (no table metadata). When
+   * a `table_column_resolver` is provided, table-based column selectors (tableId/columnId)
+   * can be resolved to sheet `columnIndex` values and will be indexed normally. Records
+   * that still cannot be indexed are kept here for future extensibility.
    */
   fallbackRecords: Array<{ selector: any; classification: any }>;
 };
@@ -1313,7 +1327,7 @@ export class ToolExecutor {
       end: { row: range.endRow - 1, col: range.endCol - 1 }
     });
 
-    const selectionClassification = effectiveRangeClassification(
+    let selectionClassification = effectiveRangeClassification(
       {
         documentId,
         sheetId,
@@ -1321,6 +1335,28 @@ export class ToolExecutor {
       },
       records
     );
+
+    const tableColumnResolver = dlp.table_column_resolver;
+    if (tableColumnResolver) {
+      for (const record of records || []) {
+        if (!record || !record.selector || typeof record.selector !== "object") continue;
+        const selector = record.selector;
+        if (selector.documentId !== documentId) continue;
+        if (selector.scope !== "column") continue;
+        if (selector.sheetId !== sheetId) continue;
+        // Column selectors expressed directly in sheet coordinates are already handled by
+        // `effectiveRangeClassification`. Only consider table-based selectors.
+        if (typeof selector.columnIndex === "number") continue;
+        const tableId = selector.tableId;
+        const columnId = selector.columnId;
+        if (!tableId || !columnId) continue;
+        const resolvedColIndex = tableColumnResolver.getColumnIndex(sheetId, tableId, columnId);
+        if (typeof resolvedColIndex !== "number" || !Number.isInteger(resolvedColIndex) || resolvedColIndex < 0) continue;
+        if (resolvedColIndex < normalizedSelectionRange.start.col || resolvedColIndex > normalizedSelectionRange.end.col) continue;
+        selectionClassification = maxClassification(selectionClassification, record.classification);
+        if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
+      }
+    }
 
     const decision = evaluatePolicy({
       action: DLP_ACTION.AI_CLOUD_PROCESSING,
@@ -1375,6 +1411,7 @@ export class ToolExecutor {
     const rowCount = selectionRange.end.row - selectionRange.start.row + 1;
     const colCount = selectionRange.end.col - selectionRange.start.col + 1;
     const { maxAllowedRank } = opts;
+    const tableColumnResolver = this.options.dlp?.table_column_resolver;
 
     const rankFromClassification = (classification: any): number => {
       if (!classification) return DEFAULT_CLASSIFICATION_RANK;
@@ -1417,16 +1454,16 @@ export class ToolExecutor {
         }
         case "column": {
           if (selector.sheetId !== ref.sheetId) break;
+          let colIndex: number | null = null;
           if (typeof selector.columnIndex === "number") {
-            const colIndex = selector.columnIndex;
-            if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
-            const offset = colIndex - startCol;
-            if (recordRank > columnRankByOffset[offset]!) columnRankByOffset[offset] = recordRank;
-          } else {
-            // Table/columnId selectors require table metadata (tableId/columnId) to evaluate.
-            // ToolExecutor currently operates on sheet coordinates only, so these selectors cannot
-            // apply to our per-cell checks and are ignored.
+            colIndex = selector.columnIndex;
+          } else if (tableColumnResolver && selector.tableId && selector.columnId) {
+            colIndex = tableColumnResolver.getColumnIndex(ref.sheetId, selector.tableId, selector.columnId);
           }
+          if (typeof colIndex !== "number" || !Number.isInteger(colIndex) || colIndex < 0) break;
+          if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
+          const offset = colIndex - startCol;
+          if (recordRank > columnRankByOffset[offset]!) columnRankByOffset[offset] = recordRank;
           break;
         }
         case "cell": {
