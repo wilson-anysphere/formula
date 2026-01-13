@@ -5,6 +5,7 @@
 //! container bytes. This avoids false positives from differing compression or
 //! timestamp metadata while still catching fidelity regressions.
 
+mod part_kind;
 mod xml;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,6 +21,7 @@ use roxmltree::Document;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+pub use part_kind::{classify_part, PartKind};
 pub use xml::{diff_xml, NormalizedXml};
 
 #[cfg(test)]
@@ -284,14 +286,17 @@ pub fn diff_archives_with_options(
                         // removed).
                         let mut ids =
                             calc_chain_relationship_ids(part, expected_bytes).unwrap_or_default();
-                        ids.extend(calc_chain_relationship_ids(part, actual_bytes).unwrap_or_default());
+                        ids.extend(
+                            calc_chain_relationship_ids(part, actual_bytes).unwrap_or_default(),
+                        );
                         ids
                     } else {
                         BTreeSet::new()
                     };
                     let ignored_rel_ids = if part.ends_with(".rels") {
-                        let expected = relationship_target_ignore_map(part, expected_bytes, &ignore)
-                            .unwrap_or_default();
+                        let expected =
+                            relationship_target_ignore_map(part, expected_bytes, &ignore)
+                                .unwrap_or_default();
                         let actual = relationship_target_ignore_map(part, actual_bytes, &ignore)
                             .unwrap_or_default();
                         RelationshipIgnoreMaps { expected, actual }
@@ -369,7 +374,8 @@ pub fn diff_archives_with_options(
                 }
             }
         } else if expected_bytes != actual_bytes {
-            let (expected_summary, actual_summary) = binary_diff_summary(expected_bytes, actual_bytes);
+            let (expected_summary, actual_summary) =
+                binary_diff_summary(expected_bytes, actual_bytes);
             report.differences.push(Difference::new(
                 severity_for_part(part),
                 part.to_string(),
@@ -558,8 +564,8 @@ fn relationship_target_ignore_map(
     bytes: &[u8],
     ignore: &IgnoreMatcher,
 ) -> Result<BTreeMap<String, bool>> {
-    let text =
-        std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
+    let text = std::str::from_utf8(bytes)
+        .with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
     let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
 
     let mut ids = BTreeMap::new();
