@@ -493,7 +493,19 @@ jobs:
         if: runner.os == 'Linux' || vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0'
         run: pnpm -C apps/desktop check:coi
 
+      - name: Cache pinned Tauri CLI binary (cargo-tauri)
+        id: tauri-cli-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/cargo-tauri.exe
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install pinned Tauri CLI (cargo tauri)
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
         run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
 
       - name: Print Tauri CLI version
