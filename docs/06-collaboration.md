@@ -897,7 +897,20 @@ Important detail: when the store is `YjsVersionStore`, excluding `versions` and 
 - recursive snapshots (history containing itself)
 - restores rolling back version history
 
-Note: `CollabBranchingWorkflow` supports customizing the branch graph `rootName`; `CollabVersioning` only excludes the default `"branching:*"` roots today.
+Note: `CollabBranchingWorkflow` supports customizing the branch graph `rootName` (default `"branching"`). If you use a non-default root name, you must also tell `CollabVersioning` to exclude those internal roots; otherwise version snapshots/restores can accidentally include (and later rewind) branch history.
+
+Use `excludeRoots` to extend the built-in exclusions:
+
+```ts
+import { createCollabVersioning } from "@formula/collab-versioning";
+
+const rootName = "myBranching";
+
+const versioning = createCollabVersioning({
+  session,
+  excludeRoots: [`${rootName}:branches`, `${rootName}:commits`, `${rootName}:meta`],
+});
+```
 
 ---
 
