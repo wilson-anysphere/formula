@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve, relative } from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
@@ -26,13 +26,36 @@ function resolvePerfHome(): string {
 }
 
 const perfHome = resolvePerfHome();
-const perfTmp = resolve(perfHome, 'tmp');
-const perfXdgConfig = resolve(perfHome, 'xdg-config');
-const perfXdgCache = resolve(perfHome, 'xdg-cache');
-const perfXdgState = resolve(perfHome, 'xdg-state');
-const perfXdgData = resolve(perfHome, 'xdg-data');
-const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
-const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
+
+function isSubpath(parentDir: string, maybeChild: string): boolean {
+  const rel = relative(parentDir, maybeChild);
+  if (rel === '' || rel.startsWith('..')) return false;
+  // `path.relative()` can return an absolute path on Windows when drives differ.
+  if (isAbsolute(rel)) return false;
+  return true;
+}
+
+function resolveProfileDirs(profileDir: string): {
+  home: string;
+  tmp: string;
+  xdgConfig: string;
+  xdgCache: string;
+  xdgState: string;
+  xdgData: string;
+  appData: string;
+  localAppData: string;
+} {
+  return {
+    home: profileDir,
+    tmp: resolve(profileDir, 'tmp'),
+    xdgConfig: resolve(profileDir, 'xdg-config'),
+    xdgCache: resolve(profileDir, 'xdg-cache'),
+    xdgState: resolve(profileDir, 'xdg-state'),
+    xdgData: resolve(profileDir, 'xdg-data'),
+    appData: resolve(profileDir, 'AppData', 'Roaming'),
+    localAppData: resolve(profileDir, 'AppData', 'Local'),
+  };
+}
 
 export function defaultDesktopBinPath(): string | null {
   const exe = process.platform === 'win32' ? 'formula-desktop.exe' : 'formula-desktop';
@@ -134,6 +157,12 @@ type RunOnceOptions = {
   binPath: string;
   timeoutMs: number;
   envOverrides?: NodeJS.ProcessEnv;
+  /**
+   * Root directory for all app/user-data state for this run (HOME, XDG dirs, temp dirs, etc).
+   *
+   * If omitted, defaults to `target/perf-home`.
+   */
+  profileDir?: string;
 };
 
 function mergeEnvParts(parts: Array<NodeJS.ProcessEnv | undefined>): NodeJS.ProcessEnv {
@@ -161,20 +190,35 @@ function closeReadline(rl: Interface | null): void {
   }
 }
 
-export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptions): Promise<StartupMetrics> {
+export async function runOnce({
+  binPath,
+  timeoutMs,
+  envOverrides,
+  profileDir: profileDirRaw,
+}: RunOnceOptions): Promise<StartupMetrics> {
+  const profileDir = profileDirRaw ? resolve(repoRoot, profileDirRaw) : perfHome;
+  const dirs = resolveProfileDirs(profileDir);
+
   // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
   // Optionally, force a clean state between iterations to avoid cache pollution.
   if (process.env.FORMULA_DESKTOP_BENCH_RESET_HOME === '1') {
-    rmSync(perfHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    const safeRoot = perfHome;
+    if (profileDir !== safeRoot && !isSubpath(safeRoot, profileDir)) {
+      throw new Error(
+        `Refusing to reset desktop benchmark profile dir outside ${safeRoot} (got ${profileDir})`,
+      );
+    }
+    rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-  mkdirSync(perfHome, { recursive: true });
-  mkdirSync(perfTmp, { recursive: true });
-  mkdirSync(perfXdgConfig, { recursive: true });
-  mkdirSync(perfXdgCache, { recursive: true });
-  mkdirSync(perfXdgState, { recursive: true });
-  mkdirSync(perfXdgData, { recursive: true });
-  mkdirSync(perfAppData, { recursive: true });
-  mkdirSync(perfLocalAppData, { recursive: true });
+
+  mkdirSync(dirs.home, { recursive: true });
+  mkdirSync(dirs.tmp, { recursive: true });
+  mkdirSync(dirs.xdgConfig, { recursive: true });
+  mkdirSync(dirs.xdgCache, { recursive: true });
+  mkdirSync(dirs.xdgState, { recursive: true });
+  mkdirSync(dirs.xdgData, { recursive: true });
+  mkdirSync(dirs.appData, { recursive: true });
+  mkdirSync(dirs.localAppData, { recursive: true });
 
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
@@ -190,17 +234,17 @@ export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptio
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
       // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
-      HOME: perfHome,
-      USERPROFILE: perfHome,
-      XDG_CONFIG_HOME: perfXdgConfig,
-      XDG_CACHE_HOME: perfXdgCache,
-      XDG_STATE_HOME: perfXdgState,
-      XDG_DATA_HOME: perfXdgData,
-      APPDATA: perfAppData,
-      LOCALAPPDATA: perfLocalAppData,
-      TMPDIR: perfTmp,
-      TEMP: perfTmp,
-      TMP: perfTmp,
+      HOME: dirs.home,
+      USERPROFILE: dirs.home,
+      XDG_CONFIG_HOME: dirs.xdgConfig,
+      XDG_CACHE_HOME: dirs.xdgCache,
+      XDG_STATE_HOME: dirs.xdgState,
+      XDG_DATA_HOME: dirs.xdgData,
+      APPDATA: dirs.appData,
+      LOCALAPPDATA: dirs.localAppData,
+      TMPDIR: dirs.tmp,
+      TEMP: dirs.tmp,
+      TMP: dirs.tmp,
     },
     envOverrides,
   ]);

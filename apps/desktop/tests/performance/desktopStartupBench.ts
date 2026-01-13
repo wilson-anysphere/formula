@@ -14,13 +14,14 @@
  * - macOS/Linux: `TMPDIR` => `target/perf-home/tmp`
  *
  * Startup modes:
- * - `FORMULA_DESKTOP_STARTUP_MODE=cold` (default when enabled): reset `target/perf-home` before
- *   each iteration so every launch uses a fresh app/webview profile.
- * - `FORMULA_DESKTOP_STARTUP_MODE=warm`: reset `target/perf-home` once, then reuse it so subsequent
- *   launches benefit from persisted caches (first run is treated as warmup).
+ * - `FORMULA_DESKTOP_STARTUP_MODE=cold` (default when enabled): each iteration uses a fresh
+ *   profile directory under `target/perf-home` so every launch is a true cold start.
+ * - `FORMULA_DESKTOP_STARTUP_MODE=warm`: a single profile directory is initialized once (warmup),
+ *   then reused for the measured runs so persisted caches are reflected in the results.
  */
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { type BenchmarkResult } from './benchmark.ts';
 import {
@@ -40,6 +41,9 @@ import {
 // - `FORMULA_STARTUP_METRICS=1` enables the Rust-side one-line startup metrics log we parse.
 
 type StartupMode = 'cold' | 'warm';
+
+// Ensure paths are rooted at repo root even when invoked from elsewhere.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 function buildResult(name: string, values: number[], targetMs: number): BenchmarkResult {
   const sorted = [...values].sort((a, b) => a - b);
@@ -78,7 +82,10 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const mode: StartupMode = modeRaw;
 
   const runs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_RUNS ?? '20') || 20);
-  const timeoutMs = Math.max(1, Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? '15000') || 15000);
+  const timeoutMs = Math.max(
+    1,
+    Number(process.env.FORMULA_DESKTOP_STARTUP_TIMEOUT_MS ?? '15000') || 15000,
+  );
   const binPath = process.env.FORMULA_DESKTOP_BIN
     ? resolve(process.env.FORMULA_DESKTOP_BIN)
     : defaultDesktopBinPath();
@@ -91,8 +98,18 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
 
   const envOverrides: NodeJS.ProcessEnv = { FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1' };
 
-  // `desktopStartupUtil.runOnce()` can optionally reset `target/perf-home` on each
-  // invocation via this parent-process env var. Make startup mode deterministic by managing
+  const perfHome =
+    process.env.FORMULA_PERF_HOME && process.env.FORMULA_PERF_HOME.trim() !== ''
+      ? resolve(repoRoot, process.env.FORMULA_PERF_HOME)
+      : resolve(repoRoot, 'target', 'perf-home');
+
+  const profileRoot = resolve(
+    perfHome,
+    `desktop-startup-${mode}-${Date.now()}-${process.pid}`,
+  );
+
+  // `desktopStartupUtil.runOnce()` can optionally reset the profile directory (HOME/XDG/etc) on
+  // each invocation via this parent-process env var. Make startup mode deterministic by managing
   // it here (and restoring the previous value after the benchmark completes).
   const prevResetHome = process.env.FORMULA_DESKTOP_BENCH_RESET_HOME;
   const setResetHome = (value: string | undefined) => {
@@ -106,25 +123,27 @@ export async function runDesktopStartupBenchmarks(): Promise<BenchmarkResult[]> 
   const metrics: StartupMetrics[] = [];
   try {
     if (mode === 'warm') {
+      const profileDir = resolve(profileRoot, 'profile');
       // Start from a clean profile, then allow subsequent launches to reuse caches.
       setResetHome('1');
       // eslint-disable-next-line no-console
-      console.log('[desktop-startup] warmup run 1/1 (warm)...');
-      await runOnce({ binPath, timeoutMs, envOverrides });
+      console.log(`[desktop-startup] warmup run 1/1 (warm, profile=${profileDir})...`);
+      await runOnce({ binPath, timeoutMs, envOverrides, profileDir });
 
       setResetHome(undefined);
       for (let i = 0; i < runs; i += 1) {
         // eslint-disable-next-line no-console
-        console.log(`[desktop-startup] run ${i + 1}/${runs} (warm)...`);
-        metrics.push(await runOnce({ binPath, timeoutMs, envOverrides }));
+        console.log(`[desktop-startup] run ${i + 1}/${runs} (warm, profile=${profileDir})...`);
+        metrics.push(await runOnce({ binPath, timeoutMs, envOverrides, profileDir }));
       }
     } else {
       // Reset before *every* run to avoid mixing cold + warm starts.
       setResetHome('1');
       for (let i = 0; i < runs; i += 1) {
+        const profileDir = resolve(profileRoot, `run-${String(i + 1).padStart(2, '0')}`);
         // eslint-disable-next-line no-console
-        console.log(`[desktop-startup] run ${i + 1}/${runs} (cold)...`);
-        metrics.push(await runOnce({ binPath, timeoutMs, envOverrides }));
+        console.log(`[desktop-startup] run ${i + 1}/${runs} (cold, profile=${profileDir})...`);
+        metrics.push(await runOnce({ binPath, timeoutMs, envOverrides, profileDir }));
       }
     }
   } finally {
