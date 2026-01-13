@@ -153,6 +153,8 @@ export async function indexWorkbook(params) {
   if (toUpsert.length > 0) {
     const texts = toUpsert.map((r) => r.text);
     onProgress?.({ phase: "embed", processed: 0, total: texts.length });
+    // Allow callers to cancel from within onProgress before kicking off embedding work.
+    throwIfAborted(signal);
 
     if (texts.length > embedBatchSize) {
       for (let i = 0; i < texts.length; i += embedBatchSize) {
@@ -215,6 +217,8 @@ export async function indexWorkbook(params) {
     // store is still writing.
     throwIfAborted(signal);
     onProgress?.({ phase: "upsert", processed: 0, total: toUpsert.length });
+    // Allow callers to cancel from within onProgress before starting persistence.
+    throwIfAborted(signal);
     await vectorStore.upsert(
       toUpsert.map((r, i) => ({
         id: r.id,
@@ -236,6 +240,8 @@ export async function indexWorkbook(params) {
     // store is still writing.
     throwIfAborted(signal);
     onProgress?.({ phase: "delete", processed: 0, total: staleIds.length });
+    // Allow callers to cancel from within onProgress before starting persistence.
+    throwIfAborted(signal);
     await vectorStore.delete(staleIds);
     onProgress?.({ phase: "delete", processed: staleIds.length, total: staleIds.length });
   }

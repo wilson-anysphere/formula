@@ -396,3 +396,33 @@ test("indexWorkbook rejects when embedder vectors have the wrong dimension (no p
 
   assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
 });
+
+test("indexWorkbook can be aborted from onProgress before persistence (no partial writes)", async () => {
+  const workbook = makeWorkbookTwoTables();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+  const abortController = new AbortController();
+
+  let sawUpsertStart = false;
+  const onProgress = (info) => {
+    if (info.phase === "upsert" && info.processed === 0) {
+      sawUpsertStart = true;
+      abortController.abort();
+    }
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+
+  await assert.rejects(
+    indexWorkbook({
+      workbook,
+      vectorStore: store,
+      embedder,
+      onProgress,
+      signal: abortController.signal,
+    }),
+    { name: "AbortError" }
+  );
+
+  assert.equal(sawUpsertStart, true);
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});
