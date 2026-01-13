@@ -189,7 +189,7 @@ jobs:
           echo "should_validate_version=${should_validate_version}" >> "${GITHUB_OUTPUT}"
           echo "windows_timestamp_url=${windows_timestamp_url}" >> "${GITHUB_OUTPUT}"
 
-      - name: Guard: tag must be on main
+      - name: "Guard: tag must be on main"
         if: steps.params.outputs.upload == 'true'
         shell: bash
         run: |
@@ -872,8 +872,10 @@ jobs:
           # doesn't fail when the build output layout changes.
           search_roots=(
             apps/desktop/src-tauri/target/universal-apple-darwin
+            apps/desktop/target/universal-apple-darwin
             target/universal-apple-darwin
             apps/desktop/src-tauri/target
+            apps/desktop/target
             target
           )
 
@@ -1737,7 +1739,7 @@ jobs:
             exit 0
           fi
 
-          search_roots=(target apps/desktop/src-tauri/target)
+          search_roots=(target apps/desktop/src-tauri/target apps/desktop/target)
           app_path=""
           for root in "${search_roots[@]}"; do
             if [[ -d "$root" ]]; then
