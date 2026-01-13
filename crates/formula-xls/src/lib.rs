@@ -1267,15 +1267,20 @@ fn import_xls_path_with_biff_reader(
                             warnings.extend(recovered.warnings.drain(..).map(ImportWarning::new));
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                // Best-effort fallback only: do not override formulas that were
+                                // already resolved by calamine (normal SHRFMLA/ARRAY handling).
+                                if sheet.formula(anchor).is_some() {
+                                    continue;
+                                }
                                 if let Some(normalized) = normalize_formula_text(&formula_text) {
                                     sheet.set_formula(anchor, Some(normalized));
-                                }
-                                if let Some(resolved) = style_id_for_cell_xf(
-                                    xf_style_ids.as_deref(),
-                                    sheet_cell_xfs,
-                                    anchor,
-                                ) {
-                                    sheet.set_style_id(anchor, resolved);
+                                    if let Some(resolved) = style_id_for_cell_xf(
+                                        xf_style_ids.as_deref(),
+                                        sheet_cell_xfs,
+                                        anchor,
+                                    ) {
+                                        sheet.set_style_id(anchor, resolved);
+                                    }
                                 }
                             }
                         }
