@@ -38,6 +38,7 @@ export class DrawingInteractionController {
         startX: number;
         startY: number;
         startObjects: DrawingObject[];
+        transform?: DrawingTransform;
       }
     | null = null;
   private selectedId: number | null = null;
@@ -97,8 +98,9 @@ export class DrawingInteractionController {
             startX: e.offsetX,
             startY: e.offsetY,
             startObjects: objects,
+            transform: selectedObject.transform,
           };
-          this.canvas.style.cursor = cursorForResizeHandle(handle);
+          this.canvas.style.cursor = cursorForResizeHandle(handle, selectedObject.transform);
           return;
         }
       }
@@ -121,8 +123,9 @@ export class DrawingInteractionController {
         startX: e.offsetX,
         startY: e.offsetY,
         startObjects: objects,
+        transform: hit.object.transform,
       };
-      this.canvas.style.cursor = cursorForResizeHandle(handle);
+      this.canvas.style.cursor = cursorForResizeHandle(handle, hit.object.transform);
     } else {
       this.dragging = {
         id: hit.object.id,
@@ -147,7 +150,7 @@ export class DrawingInteractionController {
         };
       });
       this.callbacks.setObjects(next);
-      this.canvas.style.cursor = cursorForResizeHandle(this.resizing.handle);
+      this.canvas.style.cursor = cursorForResizeHandle(this.resizing.handle, this.resizing.transform);
       return;
     }
 
@@ -247,7 +250,7 @@ export class DrawingInteractionController {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
           const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
           if (handle) {
-            this.canvas.style.cursor = cursorForResizeHandle(handle);
+            this.canvas.style.cursor = cursorForResizeHandle(handle, selected.transform);
             return;
           }
           if (pointInRect(x, y, bounds)) {

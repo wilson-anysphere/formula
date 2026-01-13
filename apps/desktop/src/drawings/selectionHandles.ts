@@ -85,19 +85,56 @@ export function hitTestResizeHandle(
   return null;
 }
 
-export function cursorForResizeHandle(handle: ResizeHandle): string {
-  switch (handle) {
-    case "nw":
-    case "se":
-      return "nwse-resize";
-    case "ne":
-    case "sw":
-      return "nesw-resize";
-    case "n":
-    case "s":
-      return "ns-resize";
-    case "e":
-    case "w":
-      return "ew-resize";
+export function cursorForResizeHandle(handle: ResizeHandle, transform?: DrawingTransform): string {
+  // Fast path for untransformed objects (the common case).
+  if (!hasNonIdentityTransform(transform)) {
+    switch (handle) {
+      case "nw":
+      case "se":
+        return "nwse-resize";
+      case "ne":
+      case "sw":
+        return "nesw-resize";
+      case "n":
+      case "s":
+        return "ns-resize";
+      case "e":
+      case "w":
+        return "ew-resize";
+    }
   }
+
+  // For rotated/flipped objects, map the local handle axis into screen-space and
+  // choose the closest available CSS cursor.
+  //
+  // We only have four cursor options (horizontal/vertical + two diagonals), so
+  // this is an approximation — but it keeps 90° rotations and flips intuitive.
+  const axis = (() => {
+    switch (handle) {
+      case "n":
+      case "s":
+        return { x: 0, y: 1 };
+      case "e":
+      case "w":
+        return { x: 1, y: 0 };
+      case "nw":
+      case "se":
+        return { x: 1, y: 1 };
+      case "ne":
+      case "sw":
+        return { x: 1, y: -1 };
+    }
+  })();
+
+  const v = applyTransformVector(axis.x, axis.y, transform!);
+  const ax = Math.abs(v.x);
+  const ay = Math.abs(v.y);
+
+  if (handle === "n" || handle === "s" || handle === "e" || handle === "w") {
+    // Edge handles: choose horizontal vs vertical based on dominant axis.
+    return ax >= ay ? "ew-resize" : "ns-resize";
+  }
+
+  // Corner handles: choose the diagonal based on the transformed axis orientation.
+  return v.x * v.y >= 0 ? "nwse-resize" : "nesw-resize";
 }

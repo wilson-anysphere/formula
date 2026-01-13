@@ -8,6 +8,7 @@ import {
   hitTestResizeHandle,
   type ResizeHandle,
 } from "../selectionHandles";
+import type { DrawingTransform } from "../types";
 import type { DrawingObject } from "../types";
 import type { GridGeometry, Viewport } from "../overlay";
 
@@ -38,6 +39,20 @@ describe("drawings selection handles", () => {
     for (const [handle, cursor] of Object.entries(expected) as Array<[ResizeHandle, string]>) {
       expect(cursorForResizeHandle(handle)).toBe(cursor);
     }
+  });
+
+  it("cursorForResizeHandle accounts for object rotation", () => {
+    const t90: DrawingTransform = { rotationDeg: 90, flipH: false, flipV: false };
+    expect(cursorForResizeHandle("n", t90)).toBe("ew-resize");
+    expect(cursorForResizeHandle("s", t90)).toBe("ew-resize");
+    expect(cursorForResizeHandle("e", t90)).toBe("ns-resize");
+    expect(cursorForResizeHandle("w", t90)).toBe("ns-resize");
+
+    // 90° rotation swaps the diagonals.
+    expect(cursorForResizeHandle("nw", t90)).toBe("nesw-resize");
+    expect(cursorForResizeHandle("se", t90)).toBe("nesw-resize");
+    expect(cursorForResizeHandle("ne", t90)).toBe("nwse-resize");
+    expect(cursorForResizeHandle("sw", t90)).toBe("nwse-resize");
   });
 
   it("DrawingInteractionController updates cursor on hover for selected object handles", () => {
