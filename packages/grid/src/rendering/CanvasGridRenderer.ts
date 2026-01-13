@@ -5453,32 +5453,19 @@ export class CanvasGridRenderer {
 
       const sheetX = quadrant.scrollBaseX + (intersection.x - quadrant.originX);
       const sheetY = quadrant.scrollBaseY + (intersection.y - quadrant.originY);
-      const sheetXEnd = sheetX + intersection.width;
-      const sheetYEnd = sheetY + intersection.height;
-
-      const startRow = this.scroll.rows.indexAt(sheetY, {
+      const rowsRange = this.scroll.rows.visibleRange(sheetY, intersection.height, {
         min: quadrant.minRow,
-        maxInclusive: quadrant.maxRowExclusive - 1
+        maxExclusive: quadrant.maxRowExclusive
       });
-      const endRow = Math.min(
-        this.scroll.rows.indexAt(sheetYEnd, {
-          min: quadrant.minRow,
-          maxInclusive: quadrant.maxRowExclusive - 1
-        }) + 1,
-        quadrant.maxRowExclusive
-      );
-
-      const startCol = this.scroll.cols.indexAt(sheetX, {
+      const colsRange = this.scroll.cols.visibleRange(sheetX, intersection.width, {
         min: quadrant.minCol,
-        maxInclusive: quadrant.maxColExclusive - 1
+        maxExclusive: quadrant.maxColExclusive
       });
-      const endCol = Math.min(
-        this.scroll.cols.indexAt(sheetXEnd, {
-          min: quadrant.minCol,
-          maxInclusive: quadrant.maxColExclusive - 1
-        }) + 1,
-        quadrant.maxColExclusive
-      );
+
+      const startRow = rowsRange.start;
+      const endRow = rowsRange.end;
+      const startCol = colsRange.start;
+      const endCol = colsRange.end;
 
       if (endRow <= startRow || endCol <= startCol) continue;
 
