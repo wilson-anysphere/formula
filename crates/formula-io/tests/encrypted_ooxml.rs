@@ -1,6 +1,9 @@
 use std::io::Cursor;
 
-use formula_io::{detect_workbook_format, open_workbook, open_workbook_model, Error};
+use formula_io::{
+    detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model, Error,
+    WorkbookEncryptionKind,
+};
 
 fn encrypted_ooxml_bytes() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -23,6 +26,11 @@ fn detects_encrypted_ooxml_xlsx_container() {
     for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
         let path = tmp.path().join(filename);
         std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+        let info = detect_workbook_encryption(&path)
+            .expect("detect encryption")
+            .expect("expected encrypted workbook to be detected");
+        assert_eq!(info.kind, WorkbookEncryptionKind::OoxmlOleEncryptedPackage);
 
         let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
         assert!(

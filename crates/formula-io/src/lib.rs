@@ -143,6 +143,24 @@ pub enum WorkbookFormat {
     Unknown,
 }
 
+/// Best-effort workbook encryption classification.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum WorkbookEncryptionKind {
+    /// An Office-encrypted OOXML package stored in an OLE container via the `EncryptionInfo` +
+    /// `EncryptedPackage` streams (e.g. a password-protected `.xlsx`).
+    OoxmlOleEncryptedPackage,
+    /// A legacy BIFF workbook stream containing a `FILEPASS` record (open password).
+    XlsFilepass,
+    /// An OLE compound file that appears to be encrypted, but doesn't match the known workbook
+    /// encryption patterns.
+    UnknownOleEncrypted,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct WorkbookEncryptionInfo {
+    pub kind: WorkbookEncryptionKind,
+}
+
 fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
     if prefix.is_empty() {
         return false;
@@ -460,6 +478,64 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     }
 
     Ok(WorkbookFormat::Unknown)
+}
+
+/// Detect whether a workbook is password-protected/encrypted.
+///
+/// This is best-effort and conservative:
+/// - Returns `Ok(Some(..))` only when encryption markers are found.
+/// - Returns `Ok(None)` for non-OLE files, OLE files without encryption markers, and malformed OLE
+///   containers that can't be parsed.
+pub fn detect_workbook_encryption(
+    path: impl AsRef<Path>,
+) -> Result<Option<WorkbookEncryptionInfo>, Error> {
+    let path = path.as_ref();
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let header = &header[..n];
+
+    if header.len() < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.rewind().map_err(|source| Error::DetectIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; we can't reliably sniff streams.
+        return Ok(None);
+    };
+
+    let has_encryption_info = stream_exists(&mut ole, "EncryptionInfo");
+    let has_encrypted_package = stream_exists(&mut ole, "EncryptedPackage");
+
+    if has_encryption_info || has_encrypted_package {
+        let kind = if has_encryption_info && has_encrypted_package {
+            WorkbookEncryptionKind::OoxmlOleEncryptedPackage
+        } else {
+            WorkbookEncryptionKind::UnknownOleEncrypted
+        };
+        return Ok(Some(WorkbookEncryptionInfo { kind }));
+    }
+
+    if ole_workbook_has_biff_filepass_record(&mut ole) {
+        return Ok(Some(WorkbookEncryptionInfo {
+            kind: WorkbookEncryptionKind::XlsFilepass,
+        }));
+    }
+
+    Ok(None)
 }
 
 fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
