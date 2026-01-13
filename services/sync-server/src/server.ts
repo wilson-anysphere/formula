@@ -5,7 +5,7 @@ import https from "node:https";
 import { promises as fs, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
-import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 
@@ -131,62 +131,6 @@ function rawDataByteLength(raw: WebSocket.RawData): number {
 const MAX_CLIENT_IP_CHARS = 128;
 const MAX_USER_AGENT_CHARS = 512;
 const MAX_DOC_NAME_BYTES = 1024;
-
-let eventLoopDelayHistogram: IntervalHistogram | null = null;
-let eventLoopDelayHistogramUsers = 0;
-
-function acquireEventLoopDelayHistogram(): IntervalHistogram | null {
-  if (eventLoopDelayHistogram) {
-    eventLoopDelayHistogramUsers += 1;
-    return eventLoopDelayHistogram;
-  }
-
-  try {
-    // `monitorEventLoopDelay()` was added in Node 11 and is guaranteed in our
-    // supported runtime (Node >= 20), but guard so the server can still start
-    // in older environments.
-    if (typeof monitorEventLoopDelay !== "function") return null;
-    eventLoopDelayHistogram = monitorEventLoopDelay({ resolution: 20 });
-    eventLoopDelayHistogram.enable();
-    eventLoopDelayHistogramUsers = 1;
-    return eventLoopDelayHistogram;
-  } catch {
-    eventLoopDelayHistogram = null;
-    eventLoopDelayHistogramUsers = 0;
-    return null;
-  }
-}
-
-function releaseEventLoopDelayHistogram(): void {
-  if (eventLoopDelayHistogramUsers <= 0) return;
-  eventLoopDelayHistogramUsers -= 1;
-  if (eventLoopDelayHistogramUsers > 0) return;
-
-  const histogram = eventLoopDelayHistogram;
-  eventLoopDelayHistogram = null;
-
-  if (!histogram) return;
-  try {
-    histogram.disable();
-  } catch {
-    // ignore
-  }
-  try {
-    histogram.reset();
-  } catch {
-    // ignore
-  }
-}
-
-function getEventLoopDelayMs(): number | undefined {
-  const histogram = eventLoopDelayHistogram;
-  if (!histogram) return undefined;
-
-  // Values are reported in nanoseconds.
-  const meanNs = histogram.mean;
-  if (!Number.isFinite(meanNs)) return 0;
-  return meanNs / 1e6;
-}
 
 function sendUpgradeRejection(
   socket: Duplex,
@@ -364,6 +308,11 @@ export function createSyncServer(
     metrics.eventLoopDelayMs.set(eventLoopDelay.percentile(99) / 1e6);
     // Reset so each collection is roughly per-interval, not cumulative.
     eventLoopDelay.reset();
+  };
+  const getEventLoopDelayMs = (): number => {
+    const p99Ns = eventLoopDelay.percentile(99);
+    // Values are reported in nanoseconds.
+    return Number.isFinite(p99Ns) ? p99Ns / 1e6 : 0;
   };
 
   const closeCodeLabel = (code: number): string => {
@@ -1169,7 +1118,6 @@ export function createSyncServer(
       if (req.method === "GET" && pathname === "/healthz") {
         const snapshot = connectionTracker.snapshot();
         const mem = process.memoryUsage();
-        const eventLoopDelayMs = getEventLoopDelayMs();
         res.setHeader("cache-control", "no-store");
         sendJson(res, 200, {
           status: "ok",
@@ -1177,7 +1125,7 @@ export function createSyncServer(
           rssBytes: mem.rss,
           heapUsedBytes: mem.heapUsed,
           heapTotalBytes: mem.heapTotal,
-          ...(eventLoopDelayMs === undefined ? {} : { eventLoopDelayMs }),
+          eventLoopDelayMs: getEventLoopDelayMs(),
           connections: snapshot,
           backend: persistenceBackend ?? config.persistence.backend,
           encryptionEnabled: config.persistence.encryption.mode !== "off",
@@ -1231,14 +1179,13 @@ export function createSyncServer(
             .slice(0, 10);
 
           const mem = process.memoryUsage();
-          const eventLoopDelayMs = getEventLoopDelayMs();
 
           sendJson(res, 200, {
             ok: true,
             rssBytes: mem.rss,
             heapUsedBytes: mem.heapUsed,
             heapTotalBytes: mem.heapTotal,
-            ...(eventLoopDelayMs === undefined ? {} : { eventLoopDelayMs }),
+            eventLoopDelayMs: getEventLoopDelayMs(),
             persistence: {
               backend,
               dataDir: config.dataDir,
@@ -1744,7 +1691,6 @@ export function createSyncServer(
 
   const handle: SyncServerHandle = {
     async start() {
-      acquireEventLoopDelayHistogram();
       if (!config.disableDataDirLock && !dataDirLock) {
         dataDirLock = await acquireDataDirLock(config.dataDir);
         logger.info({ lockPath: dataDirLock.lockPath }, "data_dir_lock_acquired");
@@ -1769,7 +1715,6 @@ export function createSyncServer(
           });
         });
       } catch (err) {
-        releaseEventLoopDelayHistogram();
         if (persistenceCleanup) {
           try {
             await persistenceCleanup();
@@ -1916,13 +1861,6 @@ export function createSyncServer(
         } finally {
           dataDirLock = null;
         }
-      }
-
-      try {
-        releaseEventLoopDelayHistogram();
-      } catch (err) {
-        errors.push(err);
-        logger.warn({ err }, "event_loop_delay_monitor_shutdown_failed");
       }
 
       if (errors.length > 0) {
