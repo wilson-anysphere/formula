@@ -7,6 +7,8 @@
  *   presence overlay renderer style.
  */
 
+import { resolveCssVar } from "../../theme/cssVars.js";
+
 /**
  * @param {import("../../versioning/index.js").DiffResult} diff
  */
@@ -41,10 +43,7 @@ function withAlpha(color, alpha) {
 }
 
 function readCssVarColor(varName, root = null, fallback = "transparent") {
-  if (!root || typeof getComputedStyle !== "function") return fallback;
-  const value = getComputedStyle(root).getPropertyValue(varName);
-  const trimmed = typeof value === "string" ? value.trim() : "";
-  return trimmed || fallback;
+  return resolveCssVar(varName, { root, fallback });
 }
 
 function drawCellHighlight(ctx, rect, style, options) {

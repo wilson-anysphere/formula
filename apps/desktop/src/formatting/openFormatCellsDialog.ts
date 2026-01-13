@@ -6,6 +6,7 @@ import { markKeybindingBarrier } from "../keybindingBarrier.js";
 import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
 import type { GridLimits, Range } from "../selection/types";
 import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "./selectionSizeGuard.js";
+import { resolveCssVar } from "../theme/cssVars.js";
 
 export type FormatCellsDialogHost = {
   isEditing: () => boolean;
@@ -35,13 +36,7 @@ const FILL_SWATCH_CSS_VAR_BY_ID: Record<string, string> = {
 };
 
 function resolveCssVarValue(varName: string): string {
-  // Custom properties preserve their authored value, so this can return either a
-  // literal (e.g. "#rrggbb") or a `var(--other)` reference.
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  if (!raw) return "";
-  const refMatch = raw.match(/^var\((--[^,)\s]+)[^)]*\)$/);
-  if (refMatch) return resolveCssVarValue(refMatch[1]!);
-  return raw;
+  return resolveCssVar(varName, { fallback: "" });
 }
 
 function cssHexToArgb(hex: string): string | null {
