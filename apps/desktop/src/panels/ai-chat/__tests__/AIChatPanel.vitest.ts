@@ -494,6 +494,80 @@ describe("AIChatPanel attachments UI", () => {
     });
   });
 
+  it("disables attach chart with a no-charts tooltip when there are no charts", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getChartOptions = vi.fn(() => []);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getChartOptions,
+        }),
+      );
+    });
+
+    const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
+    expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachChartBtn?.disabled).toBe(true);
+
+    const wrap = attachChartBtn?.parentElement;
+    expect(wrap?.classList.contains("ai-chat-panel__attachment-button-wrap")).toBe(true);
+    expect(wrap?.getAttribute("title")).toBe("No charts available");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("disables attach chart with a no-selection tooltip when using a selected-chart provider and none is selected", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getChartAttachment = vi.fn(() => null);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getChartAttachment,
+        }),
+      );
+    });
+
+    const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
+    expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachChartBtn?.disabled).toBe(true);
+
+    const wrap = attachChartBtn?.parentElement;
+    expect(wrap?.classList.contains("ai-chat-panel__attachment-button-wrap")).toBe(true);
+    expect(wrap?.getAttribute("title")).toBe("No chart selected");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("can attach and remove a selection before sending (and includes attachments on the user message)", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
