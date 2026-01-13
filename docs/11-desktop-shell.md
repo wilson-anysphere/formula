@@ -507,12 +507,15 @@ Implementation notes:
   - Backend emits: `oauth-redirect` (payload: `string` URL)
   - Frontend emits: `oauth-redirect-ready` once its `listen("oauth-redirect", ...)` handler is installed, which flushes any queued URLs.
 - The frontend handles redirects in `apps/desktop/src/main.ts` (via the OAuth broker) without requiring manual copy/paste.
-- For OAuth providers that don't support custom URI schemes, the desktop broker also supports **RFC 8252 loopback redirects** (`http://127.0.0.1:<port>/...`):
+- For OAuth providers that don't support custom URI schemes, the desktop broker also supports **RFC 8252 loopback redirects**:
+  - `http://127.0.0.1:<port>/...`
+  - `http://localhost:<port>/...`
+  - `http://[::1]:<port>/...`
   - `DesktopOAuthBroker.openAuthUrl(...)` detects loopback `redirect_uri` parameters and invokes the `oauth_loopback_listen` command to start a temporary local HTTP listener in the Rust host.
   - The listener emits the same `oauth-redirect` event when it receives the browser redirect.
   - Notes:
-    - The current implementation supports only `127.0.0.1` (not `localhost` / `::1`) to avoid IPv6 resolution differences between platforms.
     - The redirect URI must include an explicit, non-zero port.
+    - The listener times out after 5 minutes.
 
 #### Tray + app menu + global shortcuts
 
