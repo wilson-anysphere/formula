@@ -65,14 +65,13 @@ pub use aes_cbc::{
     AES_BLOCK_SIZE,
 };
 pub use agile::{
-    decrypt_agile_encrypted_package_stream, decrypt_agile_encrypted_package_stream_with_key,
-    decrypt_agile_keys, parse_agile_encryption_info_stream,
-    parse_agile_encryption_info_stream_with_options, AgileDataIntegrity, AgileDecryptedKeys,
-    AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
+    decrypt_agile_encrypted_package_stream as decrypt_agile_encrypted_package_bytes,
+    decrypt_agile_encrypted_package_stream_with_key, decrypt_agile_keys,
+    parse_agile_encryption_info_stream, parse_agile_encryption_info_stream_with_options,
+    AgileDataIntegrity, AgileDecryptedKeys, AgileEncryptionInfo, AgileKeyData, AgilePasswordKeyEncryptor,
     AgileEncryptionInfoWarning,
 };
-pub use agile_decrypt::decrypt_agile_encrypted_package;
-#[allow(unused_imports)]
+pub use agile_decrypt::{decrypt_agile_encrypted_package, decrypt_agile_encrypted_package_stream};
 pub use crypto::{
     derive_iv, derive_key, derive_segment_iv, hash_password, segment_block_key, CryptoError,
     HashAlgorithm, HMAC_KEY_BLOCK, HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK,
@@ -113,6 +112,7 @@ pub fn decrypt_agile_ooxml_from_cfb<R: Read + Seek>(
 pub fn decrypt_agile_ooxml_from_ole_bytes(ole_bytes: &[u8], password: &str) -> Result<Vec<u8>> {
     let mut cfb =
         cfb::CompoundFile::open(Cursor::new(ole_bytes)).map_err(|source| OffCryptoError::Io {
+            context: "opening OLE compound file",
             source,
         })?;
     decrypt_agile_ooxml_from_cfb(&mut cfb, password)
@@ -126,7 +126,10 @@ pub fn decrypt_agile_ooxml_from_ole_reader<R: Read + Seek>(
     reader: R,
     password: &str,
 ) -> Result<Vec<u8>> {
-    let mut cfb = cfb::CompoundFile::open(reader).map_err(|source| OffCryptoError::Io { source })?;
+    let mut cfb = cfb::CompoundFile::open(reader).map_err(|source| OffCryptoError::Io {
+        context: "opening OLE compound file",
+        source,
+    })?;
     decrypt_agile_ooxml_from_cfb(&mut cfb, password)
 }
 
@@ -145,15 +148,28 @@ fn read_cfb_stream_bytes<R: Read + Seek>(
                         stream: name.to_string(),
                     });
                 }
-                Err(err) => return Err(OffCryptoError::Io { source: err }),
+                Err(source) => {
+                    return Err(OffCryptoError::Io {
+                        context: "opening encrypted OLE stream",
+                        source,
+                    })
+                }
             }
         }
-        Err(err) => return Err(OffCryptoError::Io { source: err }),
+        Err(source) => {
+            return Err(OffCryptoError::Io {
+                context: "opening encrypted OLE stream",
+                source,
+            })
+        }
     };
 
     let mut buf = Vec::new();
     stream
         .read_to_end(&mut buf)
-        .map_err(|source| OffCryptoError::Io { source })?;
+        .map_err(|source| OffCryptoError::Io {
+            context: "reading encrypted OLE stream bytes",
+            source,
+        })?;
     Ok(buf)
 }

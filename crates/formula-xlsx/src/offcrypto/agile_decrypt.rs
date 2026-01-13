@@ -1,9 +1,12 @@
 //! MS-OFFCRYPTO Agile decryption for OOXML `EncryptedPackage`.
 
+use std::io::{Read, Seek, SeekFrom, Write};
 use digest::Digest as _;
 use hmac::{Hmac, Mac};
 
-use super::aes_cbc::{decrypt_aes_cbc_no_padding, AES_BLOCK_SIZE};
+use super::aes_cbc::{
+    decrypt_aes_cbc_no_padding, decrypt_aes_cbc_no_padding_in_place, AES_BLOCK_SIZE,
+};
 use super::crypto::{
     derive_iv, derive_key, hash_password, segment_block_key, HashAlgorithm, HMAC_KEY_BLOCK,
     HMAC_VALUE_BLOCK, KEY_VALUE_BLOCK, VERIFIER_HASH_INPUT_BLOCK, VERIFIER_HASH_VALUE_BLOCK,
@@ -188,6 +191,67 @@ fn decrypt_agile_package_key_from_password(
     };
 
     Ok(key_value)
+}
+
+#[derive(Debug)]
+enum HmacCtx {
+    Sha1(Hmac<sha1::Sha1>),
+    Sha256(Hmac<sha2::Sha256>),
+    Sha384(Hmac<sha2::Sha384>),
+    Sha512(Hmac<sha2::Sha512>),
+}
+
+impl HmacCtx {
+    fn new(alg: HashAlgorithm, key: &[u8]) -> Result<Self> {
+        match alg {
+            HashAlgorithm::Sha1 => Ok(Self::Sha1(Hmac::new_from_slice(key).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacKey".to_string(),
+                    reason: e.to_string(),
+                }
+            })?)),
+            HashAlgorithm::Sha256 => Ok(Self::Sha256(Hmac::new_from_slice(key).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacKey".to_string(),
+                    reason: e.to_string(),
+                }
+            })?)),
+            HashAlgorithm::Sha384 => Ok(Self::Sha384(Hmac::new_from_slice(key).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacKey".to_string(),
+                    reason: e.to_string(),
+                }
+            })?)),
+            HashAlgorithm::Sha512 => Ok(Self::Sha512(Hmac::new_from_slice(key).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacKey".to_string(),
+                    reason: e.to_string(),
+                }
+            })?)),
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
+        match self {
+            HmacCtx::Sha1(mac) => mac.update(data),
+            HmacCtx::Sha256(mac) => mac.update(data),
+            HmacCtx::Sha384(mac) => mac.update(data),
+            HmacCtx::Sha512(mac) => mac.update(data),
+        }
+    }
+
+    fn finalize(self) -> Vec<u8> {
+        match self {
+            HmacCtx::Sha1(mac) => mac.finalize().into_bytes().to_vec(),
+            HmacCtx::Sha256(mac) => mac.finalize().into_bytes().to_vec(),
+            HmacCtx::Sha384(mac) => mac.finalize().into_bytes().to_vec(),
+            HmacCtx::Sha512(mac) => mac.finalize().into_bytes().to_vec(),
+        }
+    }
 }
 
 /// Decrypt an MS-OFFCRYPTO Agile `EncryptedPackage` stream (OOXML password protection).
@@ -394,6 +458,248 @@ fn validate_ciphertext_block_aligned(field: &'static str, ciphertext: &[u8]) -> 
         });
     }
     Ok(())
+}
+
+/// Decrypt an MS-OFFCRYPTO Agile `EncryptedPackage` stream incrementally (OOXML password protection).
+///
+/// Unlike [`decrypt_agile_encrypted_package`], this function avoids loading the full ciphertext into
+/// memory by streaming the `EncryptedPackage` bytes from `encrypted_package_stream` while
+/// simultaneously computing and validating the `dataIntegrity` HMAC over the encrypted bytes.
+///
+/// Returns the declared plaintext length (from the `EncryptedPackage` 8-byte header).
+pub fn decrypt_agile_encrypted_package_stream<R: Read + Seek, W: Write>(
+    encryption_info: &[u8],
+    encrypted_package_stream: &mut R,
+    password: &str,
+    out: &mut W,
+) -> Result<u64> {
+    let info = parse_agile_encryption_info(encryption_info)?;
+
+    // Validate AES-CBC ciphertext buffers up-front to avoid confusing crypto backend errors and to
+    // ensure we can report which field was malformed.
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashInput",
+        &info.password_key.encrypted_verifier_hash_input,
+    )?;
+    validate_ciphertext_block_aligned(
+        "encryptedVerifierHashValue",
+        &info.password_key.encrypted_verifier_hash_value,
+    )?;
+    validate_ciphertext_block_aligned("encryptedKeyValue", &info.password_key.encrypted_key_value)?;
+    validate_ciphertext_block_aligned(
+        "dataIntegrity.encryptedHmacKey",
+        &info.data_integrity.encrypted_hmac_key,
+    )?;
+    validate_ciphertext_block_aligned(
+        "dataIntegrity.encryptedHmacValue",
+        &info.data_integrity.encrypted_hmac_value,
+    )?;
+
+    // 1) Verify password and unwrap the package key ("keyValue").
+    let password_hash = hash_password(
+        password,
+        &info.password_key.salt_value,
+        info.password_key.spin_count,
+        info.password_key.hash_algorithm,
+    )
+    .map_err(|e| OffCryptoError::InvalidAttribute {
+        element: "p:encryptedKey".to_string(),
+        attr: "hash_password".to_string(),
+        reason: e.to_string(),
+    })?;
+
+    let key_encrypt_key_len =
+        key_len_bytes(info.password_key.key_bits, "p:encryptedKey", "keyBits")?;
+    let package_key_len = key_len_bytes(info.key_data.key_bits, "keyData", "keyBits")?;
+
+    // Some producers vary how the AES-CBC IV is derived for the password-key-encryptor blobs.
+    // Try both strategies for compatibility.
+    let key_value = match decrypt_agile_package_key_from_password(
+        &info,
+        &password_hash,
+        key_encrypt_key_len,
+        package_key_len,
+        PasswordKeyIvDerivation::SaltValue,
+    ) {
+        Ok(key) => key,
+        Err(OffCryptoError::WrongPassword) => decrypt_agile_package_key_from_password(
+            &info,
+            &password_hash,
+            key_encrypt_key_len,
+            package_key_len,
+            PasswordKeyIvDerivation::Derived,
+        )?,
+        Err(other) => return Err(other),
+    };
+
+    // 2) Decrypt the integrity HMAC key/value (encrypted with the package key).
+    let hmac_key = {
+        let iv = derive_iv_or_err(
+            &info.key_data.salt_value,
+            &HMAC_KEY_BLOCK,
+            info.key_data.block_size,
+            info.key_data.hash_algorithm,
+        )?;
+        let decrypted =
+            decrypt_aes_cbc_no_padding(&key_value, &iv, &info.data_integrity.encrypted_hmac_key).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "dataIntegrity".to_string(),
+                    attr: "encryptedHmacKey".to_string(),
+                    reason: e.to_string(),
+                }
+            })?;
+        decrypted
+            .get(..info.key_data.hash_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "encryptedHmacKey".to_string(),
+                reason: "decrypted HMAC key shorter than hashSize".to_string(),
+            })?
+            .to_vec()
+    };
+    let expected_hmac = {
+        let iv = derive_iv_or_err(
+            &info.key_data.salt_value,
+            &HMAC_VALUE_BLOCK,
+            info.key_data.block_size,
+            info.key_data.hash_algorithm,
+        )?;
+        let decrypted = decrypt_aes_cbc_no_padding(
+            &key_value,
+            &iv,
+            &info.data_integrity.encrypted_hmac_value,
+        )
+        .map_err(|e| OffCryptoError::InvalidAttribute {
+            element: "dataIntegrity".to_string(),
+            attr: "encryptedHmacValue".to_string(),
+            reason: e.to_string(),
+        })?;
+        decrypted
+            .get(..info.key_data.hash_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "encryptedHmacValue".to_string(),
+                reason: "decrypted HMAC value shorter than hashSize".to_string(),
+            })?
+            .to_vec()
+    };
+
+    // 3) Stream-decrypt the ciphertext while computing the HMAC over the encrypted bytes.
+    encrypted_package_stream
+        .seek(SeekFrom::Start(0))
+        .map_err(|source| OffCryptoError::Io {
+            context: "seeking EncryptedPackage to start",
+            source,
+        })?;
+
+    let mut ciphertext_mac = HmacCtx::new(info.key_data.hash_algorithm, &hmac_key)?;
+    let mut plaintext_mac = HmacCtx::new(info.key_data.hash_algorithm, &hmac_key)?;
+
+    let mut header = [0u8; 8];
+    encrypted_package_stream
+        .read_exact(&mut header)
+        .map_err(|source| OffCryptoError::Io {
+            context: "reading EncryptedPackage length header",
+            source,
+        })?;
+    ciphertext_mac.update(&header);
+    let declared_len = u64::from_le_bytes(header);
+
+    let mut remaining_to_write = declared_len;
+    let mut written: u64 = 0;
+
+    let mut segment_index: u32 = 0;
+    let mut buf = [0u8; SEGMENT_SIZE];
+
+    loop {
+        let mut filled = 0usize;
+        while filled < SEGMENT_SIZE {
+            let n = encrypted_package_stream
+                .read(&mut buf[filled..])
+                .map_err(|source| OffCryptoError::Io {
+                    context: "reading EncryptedPackage ciphertext",
+                    source,
+                })?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+
+        if filled == 0 {
+            break;
+        }
+
+        validate_ciphertext_block_aligned("EncryptedPackage", &buf[..filled])?;
+
+        ciphertext_mac.update(&buf[..filled]);
+
+        if remaining_to_write > 0 {
+            let block_key = segment_block_key(segment_index);
+            let iv = derive_iv_or_err(
+                &info.key_data.salt_value,
+                &block_key,
+                info.key_data.block_size,
+                info.key_data.hash_algorithm,
+            )?;
+            decrypt_aes_cbc_no_padding_in_place(&key_value, &iv, &mut buf[..filled]).map_err(|e| {
+                OffCryptoError::InvalidAttribute {
+                    element: "EncryptedPackage".to_string(),
+                    attr: "ciphertext".to_string(),
+                    reason: e.to_string(),
+                }
+            })?;
+
+            let to_write = std::cmp::min(remaining_to_write, filled as u64) as usize;
+            plaintext_mac.update(&buf[..to_write]);
+            out.write_all(&buf[..to_write]).map_err(|source| OffCryptoError::Io {
+                context: "writing decrypted plaintext",
+                source,
+            })?;
+            remaining_to_write -= to_write as u64;
+            written += to_write as u64;
+        }
+
+        segment_index = segment_index.checked_add(1).ok_or_else(|| {
+            OffCryptoError::InvalidAttribute {
+                element: "EncryptedPackage".to_string(),
+                attr: "segmentIndex".to_string(),
+                reason: "EncryptedPackage segment index overflow".to_string(),
+            }
+        })?;
+    }
+
+    if remaining_to_write != 0 {
+        return Err(OffCryptoError::DecryptedLengthShorterThanHeader {
+            declared_len: usize::try_from(declared_len).unwrap_or(usize::MAX),
+            available_len: usize::try_from(written).unwrap_or(usize::MAX),
+        });
+    }
+
+    let actual_ciphertext_hmac_full = ciphertext_mac.finalize();
+    let actual_ciphertext_hmac = actual_ciphertext_hmac_full
+        .get(..info.key_data.hash_size)
+        .ok_or_else(|| OffCryptoError::InvalidAttribute {
+            element: "dataIntegrity".to_string(),
+            attr: "hashAlgorithm".to_string(),
+            reason: "HMAC output shorter than hashSize".to_string(),
+        })?;
+
+    if !ct_eq(actual_ciphertext_hmac, &expected_hmac) {
+        let actual_plaintext_hmac_full = plaintext_mac.finalize();
+        let actual_plaintext_hmac = actual_plaintext_hmac_full
+            .get(..info.key_data.hash_size)
+            .ok_or_else(|| OffCryptoError::InvalidAttribute {
+                element: "dataIntegrity".to_string(),
+                attr: "hashAlgorithm".to_string(),
+                reason: "HMAC output shorter than hashSize".to_string(),
+            })?;
+        if !ct_eq(actual_plaintext_hmac, &expected_hmac) {
+            return Err(OffCryptoError::IntegrityMismatch);
+        }
+    }
+
+    Ok(declared_len)
 }
 
 fn parse_encrypted_package_stream(encrypted_package: &[u8]) -> Result<(usize, &[u8])> {
