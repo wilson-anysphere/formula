@@ -2592,7 +2592,13 @@ export function bindYjsToDocumentController(options) {
         rejected.push({
           ...delta,
           rejectionKind: "cell",
-          rejectionReason: !allowedByPermissions ? "permission" : !allowedByEncryption ? "encryption" : "unknown",
+          // Prefer the dedicated encryption guard when determining why an edit was rejected.
+          //
+          // Note: `allowedByPermissions` can be `false` for encryption failures when callers
+          // provide a `canEditCell` guard that already incorporates encryption invariants
+          // (e.g. `CollabSession.canEditCell`). In those cases we still want the UI to
+          // surface "missing encryption key" rather than a generic permission error.
+          rejectionReason: !allowedByEncryption ? "encryption" : !allowedByPermissions ? "permission" : "unknown",
         });
         if (!allowedByEncryption) {
           console.warn(

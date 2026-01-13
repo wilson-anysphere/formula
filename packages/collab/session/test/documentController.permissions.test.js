@@ -262,7 +262,16 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   const dcB = new DocumentController();
 
   const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  let binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB, maskCellFormat: true });
+  /** @type {any[] | null} */
+  let rejected = null;
+  let binderB = await bindCollabSessionToDocumentController({
+    session: sessionB,
+    documentController: dcB,
+    maskCellFormat: true,
+    onEditRejected: (deltas) => {
+      rejected = deltas;
+    },
+  });
 
   // Edit through the DocumentController path so binder is responsible for encryption.
   dcA.setCellValue("Sheet1", "A1", "top-secret");
@@ -289,6 +298,26 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
     const cellB = dcB.getCell("Sheet1", "A1");
     return cellB.value === "###" && cellB.formula == null && cellB.styleId === 0;
   });
+
+  // Attempt an edit without the encryption key. This simulates a UI path that bypasses
+  // `DocumentController.canEditCell` (e.g. via `applyExternalDeltas`), and should be
+  // rejected with an explicit encryption reason.
+  const before = dcB.getCell("Sheet1", "A1");
+  dcB.applyExternalDeltas(
+    [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before,
+        after: { value: "hacked", formula: null, styleId: before.styleId },
+      },
+    ],
+    { recalc: false },
+  );
+
+  assert.ok(Array.isArray(rejected), "expected onEditRejected to be called for missing encryption key");
+  assert.equal(rejected?.[0]?.rejectionReason, "encryption");
 
   await waitForCondition(() => {
     const cellMap = sessionA.cells.get("Sheet1:0:0");
