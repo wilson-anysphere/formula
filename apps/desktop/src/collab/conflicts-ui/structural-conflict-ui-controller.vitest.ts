@@ -6,6 +6,79 @@ import { StructuralConflictUiController } from "./structural-conflict-ui-control
 import { CellStructuralConflictMonitor } from "../../../../../packages/collab/conflicts/index.js";
 
 describe("StructuralConflictUiController", () => {
+  it("renders a Jump to cell button and invokes the callback with the conflict cell", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const onNavigateToCell = vi.fn();
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      onNavigateToCell,
+    });
+
+    ui.addConflict({
+      id: "c_jump",
+      type: "cell",
+      reason: "content",
+      sheetId: "Sheet1",
+      cell: "B2",
+      cellKey: "Sheet1:1:1",
+      local: { kind: "edit", cellKey: "Sheet1:1:1", before: null, after: { value: 1 } },
+      remote: { kind: "edit", cellKey: "Sheet1:1:1", before: null, after: { value: 2 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+
+    const jump = container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-jump-to-cell"]');
+    expect(jump).not.toBeNull();
+    jump!.click();
+
+    expect(onNavigateToCell).toHaveBeenCalledTimes(1);
+    expect(onNavigateToCell).toHaveBeenCalledWith({ sheetId: "Sheet1", row: 1, col: 1 });
+
+    ui.destroy();
+    container.remove();
+  });
+
+  it("applies a user label resolver when rendering the remote (theirs) panel label", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const ui = new StructuralConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      resolveUserLabel: (userId: string) => (userId === "u2" ? "Bob" : userId),
+    });
+
+    ui.addConflict({
+      id: "c_label",
+      type: "cell",
+      reason: "content",
+      sheetId: "Sheet1",
+      cell: "A1",
+      cellKey: "Sheet1:0:0",
+      local: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { value: 1 } },
+      remote: { kind: "edit", cellKey: "Sheet1:0:0", before: null, after: { value: 2 } },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="structural-conflict-toast-open"]')!.click();
+
+    const remotePanel = container.querySelector<HTMLElement>('[data-testid="structural-conflict-remote"]');
+    expect(remotePanel).not.toBeNull();
+    const label = remotePanel!.querySelector<HTMLElement>(".conflict-dialog__panel-label");
+    expect(label?.textContent).toBe("Theirs (Bob)");
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("renders conflict locations using sheet display names when sheetNameResolver is provided", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
