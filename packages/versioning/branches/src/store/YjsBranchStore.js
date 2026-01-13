@@ -469,7 +469,48 @@ export class YjsBranchStore {
     if (staleUnreachable.length === 0) return;
 
     this.#ydoc.transact(() => {
+      /** @type {Set<string>} */
+      const stillReferenced = new Set();
+
+      const currentRoot = this.#meta.get("rootCommitId");
+      if (typeof currentRoot === "string" && currentRoot.length > 0) {
+        stillReferenced.add(currentRoot);
+      }
+
+      this.#branches.forEach((value) => {
+        const branchMap = getYMap(value);
+        if (!branchMap) return;
+        const branchDocId = branchMap.get("docId");
+        if (
+          typeof branchDocId === "string" &&
+          branchDocId.length > 0 &&
+          branchDocId !== docId
+        ) {
+          return;
+        }
+        const head = branchMap.get("headCommitId");
+        if (typeof head === "string" && head.length > 0) stillReferenced.add(head);
+      });
+
+      this.#commits.forEach((value) => {
+        const commitMap = getYMap(value);
+        if (!commitMap) return;
+        const commitDocId = commitMap.get("docId");
+        if (
+          typeof commitDocId === "string" &&
+          commitDocId.length > 0 &&
+          commitDocId !== docId
+        ) {
+          return;
+        }
+        const parent = commitMap.get("parentCommitId");
+        if (typeof parent === "string" && parent.length > 0) stillReferenced.add(parent);
+        const mergeParent = commitMap.get("mergeParentCommitId");
+        if (typeof mergeParent === "string" && mergeParent.length > 0) stillReferenced.add(mergeParent);
+      });
+
       for (const commitId of staleUnreachable) {
+        if (stillReferenced.has(commitId)) continue;
         const commitMap = getYMap(this.#commits.get(commitId));
         if (!commitMap) continue;
         if (this.#isCommitComplete(commitMap)) continue;
