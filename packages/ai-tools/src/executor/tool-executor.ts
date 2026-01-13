@@ -2350,16 +2350,30 @@ function mulberry32(seed: number): () => number {
 }
 
 function sampleIndicesWithoutReplacement(length: number, sampleSize: number, rng: () => number): number[] {
-  const indices = Array.from({ length }, (_, idx) => idx);
   const count = Math.min(sampleSize, length);
+  if (count <= 0) return [];
+
+  // Partial Fisher-Yates shuffle without materializing a full `[0..length)` array.
+  // We represent the shuffled index array lazily using a sparse swap map.
+  const swapByIndex = new Map<number, number>();
+  const result = new Array<number>(count);
+
+  const get = (index: number): number => swapByIndex.get(index) ?? index;
+
   for (let i = 0; i < count; i++) {
     const j = i + Math.floor(rng() * (length - i));
-    const tmp = indices[i]!;
-    indices[i] = indices[j]!;
-    indices[j] = tmp;
+    const valueAtI = get(i);
+    const valueAtJ = get(j);
+    result[i] = valueAtJ;
+
+    // After swapping positions i and j, only position j remains in the pool.
+    if (valueAtI === j) swapByIndex.delete(j);
+    else swapByIndex.set(j, valueAtI);
+
+    // Position i will never be read again (future j's are always >= next i), so drop it.
+    swapByIndex.delete(i);
   }
-  indices.length = count;
-  return indices;
+  return result;
 }
 
 const harmonicNumberCache: number[] = [0];

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ToolExecutor } from "../src/executor/tool-executor.js";
 import { InMemoryWorkbook } from "../src/spreadsheet/in-memory-workbook.js";
 
@@ -69,5 +69,41 @@ describe("detect_anomalies isolation_forest", () => {
 
     expect(result.data.anomalies).toHaveLength(2);
     expect(result.data.anomalies[0]?.cell).toBe("Sheet1!A5");
+  });
+
+  it("avoids Array.from({length: n}) allocations per tree", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook);
+
+    const n = 2048;
+    const values: number[][] = [];
+    for (let i = 0; i < n; i++) values.push([i]);
+    values[n - 1]![0] = 1_000_000;
+
+    await executor.execute({
+      name: "set_range",
+      parameters: {
+        range: `Sheet1!A1:A${n}`,
+        values
+      }
+    });
+
+    const fromSpy = vi.spyOn(Array, "from");
+    try {
+      const result = await executor.execute({
+        name: "detect_anomalies",
+        parameters: { range: `Sheet1!A1:A${n}`, method: "isolation_forest" }
+      });
+      expect(result.ok).toBe(true);
+
+      const fullRangeAllocations = fromSpy.mock.calls.filter(([arg]) => {
+        if (!arg || typeof arg !== "object") return false;
+        if (Array.isArray(arg)) return false;
+        return "length" in arg && (arg as any).length === n;
+      });
+      expect(fullRangeAllocations.length).toBeLessThan(5);
+    } finally {
+      fromSpy.mockRestore();
+    }
   });
 });
