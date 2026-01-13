@@ -1952,6 +1952,175 @@ fn columnar_tables_support_calculated_columns() {
 }
 
 #[test]
+fn columnar_tables_support_calculated_columns_materialized_into_storage() {
+    let mut model = DataModel::new();
+
+    let customers_schema = vec![
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Name".to_string(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "Region".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+    customers.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("Alice")),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("Bob")),
+        formula_columnar::Value::String(Arc::<str>::from("West")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::String(Arc::<str>::from("Carol")),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    model
+        .add_table(Table::from_columnar("Customers", customers.finalize()))
+        .unwrap();
+
+    let orders_schema = vec![
+        ColumnSchema {
+            name: "OrderId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut orders = ColumnarTableBuilder::new(orders_schema, options);
+    orders.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(101.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(20.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(102.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(5.0),
+    ]);
+    orders.append_row(&[
+        formula_columnar::Value::Number(103.0),
+        formula_columnar::Value::Number(3.0),
+        formula_columnar::Value::Number(8.0),
+    ]);
+    model
+        .add_table(Table::from_columnar("Orders", orders.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_calculated_column("Orders", "CustomerName", "RELATED(Customers[Name])")
+        .unwrap();
+    model
+        .add_calculated_column("Orders", "Double Amount", "[Amount] * 2")
+        .unwrap();
+
+    let orders = model.table("Orders").unwrap();
+    assert_eq!(
+        orders.columns(),
+        &[
+            "OrderId".to_string(),
+            "CustomerId".to_string(),
+            "Amount".to_string(),
+            "CustomerName".to_string(),
+            "Double Amount".to_string()
+        ]
+    );
+
+    let columnar = orders.columnar_table().unwrap();
+    assert_eq!(columnar.column_count(), 5);
+    assert_eq!(columnar.row_count(), 4);
+
+    let names: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "CustomerName").unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            Value::from("Alice"),
+            Value::from("Alice"),
+            Value::from("Bob"),
+            Value::from("Carol")
+        ]
+    );
+
+    let doubled: Vec<Value> = (0..orders.row_count())
+        .map(|row| orders.value(row, "Double Amount").unwrap())
+        .collect();
+    assert_eq!(
+        doubled,
+        vec![20.0.into(), 40.0.into(), 10.0.into(), 16.0.into()]
+    );
+}
+
+#[test]
+fn columnar_tables_reject_mixed_type_calculated_columns() {
+    let mut model = DataModel::new();
+
+    let schema = vec![ColumnSchema {
+        name: "OrderId".to_string(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[formula_columnar::Value::Number(100.0)]);
+    fact.append_row(&[formula_columnar::Value::Number(101.0)]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    let err = model
+        .add_calculated_column("Fact", "Mixed", "IF([OrderId] = 100, 1, \"x\")")
+        .unwrap_err();
+    assert!(matches!(err, DaxError::Type(_)));
+}
+
+#[test]
 fn measure_in_row_context_performs_implicit_context_transition() {
     let mut model = build_model();
     model
