@@ -5,12 +5,12 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-mod schema;
 mod model;
+mod schema;
 pub mod slicers;
 
-pub use schema::{CalculatedField, CalculatedItem};
 pub use model::{PivotCacheId, PivotDestination, PivotSource, PivotTableModel};
+pub use schema::{CalculatedField, CalculatedItem};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
@@ -101,7 +101,9 @@ impl PivotKeyPart {
     pub fn display_string(&self) -> String {
         match self {
             PivotKeyPart::Blank => "(blank)".to_string(),
-            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Number(bits) => {
+                PivotValue::Number(f64::from_bits(*bits)).display_string()
+            }
             PivotKeyPart::Date(d) => d.to_string(),
             PivotKeyPart::Text(s) => s.clone(),
             PivotKeyPart::Bool(b) => b.to_string(),

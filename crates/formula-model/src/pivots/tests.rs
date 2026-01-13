@@ -90,7 +90,10 @@ fn pivot_value_to_key_part_canonicalizes_numbers() {
 
 #[test]
 fn pivot_value_uses_tagged_ipc_serde_layout() {
-    assert_eq!(serde_json::to_value(&PivotValue::Blank).unwrap(), json!({"type": "blank"}));
+    assert_eq!(
+        serde_json::to_value(&PivotValue::Blank).unwrap(),
+        json!({"type": "blank"})
+    );
     assert_eq!(
         serde_json::to_value(&PivotValue::Text("hi".to_string())).unwrap(),
         json!({"type": "text", "value": "hi"})

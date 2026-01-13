@@ -40,7 +40,10 @@ pub enum PivotSource {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum PivotDestination {
     /// Anchor the pivot at a specific top-left cell.
-    Cell { sheet_id: WorksheetId, cell: CellRef },
+    Cell {
+        sheet_id: WorksheetId,
+        cell: CellRef,
+    },
     /// Anchor the pivot to a range (typically the existing pivot output range).
     Range { sheet_id: WorksheetId, range: Range },
 }
