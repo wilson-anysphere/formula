@@ -2,7 +2,6 @@ import type { Anchor, DrawingObject, DrawingTransform, ImageStore, Rect } from "
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
-import { resolveCssVar } from "../theme/cssVars.js";
 import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
 import { applyTransformVector, degToRad } from "./transform";
 
@@ -11,37 +10,156 @@ import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 export { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu };
 export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
 
-function resolveOverlayColorTokens(): {
+type CssVarStyle = Pick<CSSStyleDeclaration, "getPropertyValue">;
+
+type OverlayColorTokens = {
   placeholderChartStroke: string;
   placeholderOtherStroke: string;
   placeholderGraphicFrameStroke: string;
   placeholderLabel: string;
   selectionStroke: string;
   selectionHandleFill: string;
-} {
+};
+
+const DEFAULT_OVERLAY_COLOR_TOKENS: OverlayColorTokens = {
+  placeholderChartStroke: "blue",
+  placeholderOtherStroke: "cyan",
+  placeholderGraphicFrameStroke: "magenta",
+  placeholderLabel: "black",
+  selectionStroke: "blue",
+  selectionHandleFill: "white",
+};
+
+function getRootCssStyle(): CssVarStyle | null {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") return null;
+  try {
+    return getComputedStyle(document.documentElement);
+  } catch {
+    return null;
+  }
+}
+
+function parseCssVarFunction(value: unknown): { name: string; fallback: string | null } | null {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed.startsWith("var(") || !trimmed.endsWith(")")) return null;
+
+  const inner = trimmed.slice(4, -1).trim();
+  if (!inner.startsWith("--")) return null;
+
+  let depth = 0;
+  let comma = -1;
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i];
+    const prev = i > 0 ? inner[i - 1] : "";
+
+    if (inSingle) {
+      if (ch === "'" && prev !== "\\") inSingle = false;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '"' && prev !== "\\") inDouble = false;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      continue;
+    }
+    if (ch === '"') {
+      inDouble = true;
+      continue;
+    }
+
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      comma = i;
+      break;
+    }
+  }
+
+  const name = comma === -1 ? inner : inner.slice(0, comma);
+  const varName = name.trim();
+  if (!varName.startsWith("--")) return null;
+
+  const fallbackValue = comma === -1 ? null : inner.slice(comma + 1).trim() || null;
+  return { name: varName, fallback: fallbackValue };
+}
+
+function resolveCssValue(
+  style: CssVarStyle | null,
+  value: unknown,
+  fallback: string,
+  opts?: { maxDepth?: number; seen?: Set<string> },
+): string {
+  const maxDepth = opts?.maxDepth ?? 8;
+  const read = (name: string) => {
+    if (!style) return "";
+    const raw = style.getPropertyValue(name);
+    return typeof raw === "string" ? raw.trim() : "";
+  };
+
+  let current = String(value ?? "").trim();
+  let lastFallback: string | null = null;
+  const seen = opts?.seen ?? new Set<string>();
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    const parsed = parseCssVarFunction(current);
+    if (!parsed) return current || fallback;
+
+    const nextName = parsed.name;
+    if (parsed.fallback != null) lastFallback = parsed.fallback;
+
+    // Handle cycles and enforce a max indirection depth.
+    if (seen.has(nextName)) {
+      current = parsed.fallback ?? lastFallback ?? "";
+      continue;
+    }
+    seen.add(nextName);
+
+    const nextValue = read(nextName);
+    if (nextValue) {
+      current = nextValue;
+      continue;
+    }
+
+    const fb = parsed.fallback ?? lastFallback;
+    if (fb != null) return resolveCssValue(style, fb, fallback, { maxDepth, seen });
+    return fallback;
+  }
+
+  if (lastFallback != null) return resolveCssValue(style, lastFallback, fallback, { maxDepth, seen });
+  return fallback;
+}
+
+function resolveCssVarFromStyle(style: CssVarStyle | null, varName: string, fallback: string): string {
+  if (!style) return fallback;
+  const start = style.getPropertyValue(varName);
+  const trimmed = typeof start === "string" ? start.trim() : "";
+  if (!trimmed) return fallback;
+  return resolveCssValue(style, trimmed, fallback, { seen: new Set([varName]) });
+}
+
+function resolveOverlayColorTokens(style: CssVarStyle | null): OverlayColorTokens {
   return {
-    placeholderChartStroke: resolveCssVar("--chart-series-1", { fallback: "blue" }),
-    placeholderOtherStroke: resolveCssVar("--chart-series-2", { fallback: "cyan" }),
-    placeholderGraphicFrameStroke: resolveCssVar("--chart-series-3", { fallback: "magenta" }),
-    placeholderLabel: resolveCssVar("--text-primary", { fallback: "black" }),
-    selectionStroke: resolveCssVar("--selection-border", { fallback: "blue" }),
-    selectionHandleFill: resolveCssVar("--bg-primary", { fallback: "white" })
+    placeholderChartStroke: resolveCssVarFromStyle(style, "--chart-series-1", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderChartStroke),
+    placeholderOtherStroke: resolveCssVarFromStyle(style, "--chart-series-2", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderOtherStroke),
+    placeholderGraphicFrameStroke: resolveCssVarFromStyle(
+      style,
+      "--chart-series-3",
+      DEFAULT_OVERLAY_COLOR_TOKENS.placeholderGraphicFrameStroke,
+    ),
+    placeholderLabel: resolveCssVarFromStyle(style, "--text-primary", DEFAULT_OVERLAY_COLOR_TOKENS.placeholderLabel),
+    selectionStroke: resolveCssVarFromStyle(style, "--selection-border", DEFAULT_OVERLAY_COLOR_TOKENS.selectionStroke),
+    selectionHandleFill: resolveCssVarFromStyle(style, "--bg-primary", DEFAULT_OVERLAY_COLOR_TOKENS.selectionHandleFill),
   };
 }
 
-function resolveCanvasColor(input: string, fallback: string): string {
-  const value = String(input ?? "").trim();
-  if (!value) return fallback;
-
-  const match = /^var\(\s*(--[^,\s)]+)\s*(?:,\s*([^)]+))?\)$/.exec(value);
-  if (!match) return value;
-
-  const token = match[1];
-  const nestedFallback = match[2]?.trim() ?? "";
-  const resolved = resolveCssVar(token, { fallback: "" }).trim();
-  if (resolved) return resolved;
-  if (nestedFallback) return resolveCanvasColor(nestedFallback, fallback);
-  return fallback;
+function resolveCanvasColor(style: CssVarStyle | null, input: string, fallback: string): string {
+  return resolveCssValue(style, input, fallback);
 }
 
 export interface GridGeometry {
@@ -158,6 +276,10 @@ export class DrawingOverlay {
   private selectedId: number | null = null;
   private renderSeq = 0;
   private renderAbort: AbortController | null = null;
+  private cssVarStyle: CssVarStyle | null | undefined = undefined;
+  private colorTokens: OverlayColorTokens | null = null;
+  private orderedObjects: DrawingObject[] = [];
+  private orderedObjectsSource: DrawingObject[] | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -178,6 +300,33 @@ export class DrawingOverlay {
     this.ctx.setTransform(viewport.dpr, 0, 0, viewport.dpr, 0, 0);
   }
 
+  refreshThemeTokens(): void {
+    this.cssVarStyle = undefined;
+    this.colorTokens = null;
+  }
+
+  private getCssVarStyle(): CssVarStyle | null {
+    if (this.cssVarStyle !== undefined) return this.cssVarStyle;
+    this.cssVarStyle = getRootCssStyle();
+    return this.cssVarStyle;
+  }
+
+  private getOrderedObjects(objects: DrawingObject[]): DrawingObject[] {
+    if (this.orderedObjectsSource === objects) return this.orderedObjects;
+    this.orderedObjectsSource = objects;
+
+    let sorted = true;
+    for (let i = 1; i < objects.length; i += 1) {
+      if (objects[i - 1]!.zOrder > objects[i]!.zOrder) {
+        sorted = false;
+        break;
+      }
+    }
+
+    this.orderedObjects = sorted ? objects : [...objects].sort((a, b) => a.zOrder - b.zOrder);
+    return this.orderedObjects;
+  }
+
   async render(objects: DrawingObject[], viewport: Viewport, options?: { drawObjects?: boolean }): Promise<void> {
     this.renderSeq += 1;
     const seq = this.renderSeq;
@@ -193,8 +342,9 @@ export class DrawingOverlay {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
-    const colors = resolveOverlayColorTokens();
-    const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder);
+    const cssVarStyle = this.getCssVarStyle();
+    const colors = this.colorTokens ?? (this.colorTokens = resolveOverlayColorTokens(cssVarStyle));
+    const ordered = this.getOrderedObjects(objects);
     const drawObjects = options?.drawObjects !== false;
     const zoom = viewport.zoom ?? 1;
 
@@ -362,7 +512,7 @@ export class DrawingOverlay {
             withClip(() => {
               try {
                 withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
-                  drawShape(ctx, localRect, specToDraw, colors);
+                  drawShape(ctx, localRect, specToDraw, colors, cssVarStyle);
                   if (hasText) {
                     renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
                   }
@@ -455,7 +605,7 @@ export class DrawingOverlay {
     // Selection overlay.
     if (seq !== this.renderSeq) return;
     if (this.selectedId != null) {
-      const selected = objects.find((o) => o.id === this.selectedId);
+      const selected = ordered.find((o) => o.id === this.selectedId);
       if (selected) {
         const rect = anchorToRectPx(selected.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
@@ -516,6 +666,10 @@ export class DrawingOverlay {
     this.renderAbort = null;
     this.bitmapCache.clear();
     this.shapeTextCache.clear();
+    this.cssVarStyle = undefined;
+    this.colorTokens = null;
+    this.orderedObjects = [];
+    this.orderedObjectsSource = null;
   }
 }
 
@@ -609,7 +763,7 @@ function drawTransformedRect(ctx: CanvasRenderingContext2D, rect: Rect, transfor
 function drawSelection(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
-  colors: ReturnType<typeof resolveOverlayColorTokens>,
+  colors: OverlayColorTokens,
   transform?: DrawingTransform,
 ): void {
   ctx.save();
@@ -642,7 +796,8 @@ function drawShape(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
   spec: ShapeRenderSpec,
-  colors: ReturnType<typeof resolveOverlayColorTokens>,
+  colors: OverlayColorTokens,
+  cssVarStyle: CssVarStyle | null,
 ): void {
   // Clip to the anchored bounds; this matches the chart rendering behaviour and
   // avoids accidental overdraw if we misinterpret a shape transform.
@@ -682,12 +837,12 @@ function drawShape(
   }
 
   if (spec.geometry.type !== "line" && spec.fill.type === "solid") {
-    ctx.fillStyle = resolveCanvasColor(spec.fill.color, colors.placeholderLabel);
+    ctx.fillStyle = resolveCanvasColor(cssVarStyle, spec.fill.color, colors.placeholderLabel);
     ctx.fill();
   }
 
   if (spec.stroke && strokeWidthPx > 0) {
-    ctx.strokeStyle = resolveCanvasColor(spec.stroke.color, colors.placeholderLabel);
+    ctx.strokeStyle = resolveCanvasColor(cssVarStyle, spec.stroke.color, colors.placeholderLabel);
     ctx.lineWidth = strokeWidthPx;
     ctx.setLineDash(dashPatternForPreset(spec.stroke.dashPreset, strokeWidthPx));
     ctx.stroke();
