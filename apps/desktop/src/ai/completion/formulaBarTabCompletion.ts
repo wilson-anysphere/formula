@@ -208,6 +208,10 @@ export class FormulaBarTabCompletionController {
       getCellValue: (row: number, col: number, sheetName?: string): unknown => {
         if (row < 0 || col < 0) return null;
         if (this.#limits && (row >= this.#limits.maxRows || col >= this.#limits.maxCols)) return null;
+        // Avoid materializing sheets during completion. DocumentController creates
+        // sheets lazily on read, so in an empty workbook we treat surrounding cells
+        // as unknown/empty rather than forcing the current sheet into existence.
+        if (knownSheets.length === 0) return null;
 
         const targetSheet =
           typeof sheetName === "string" && sheetName.length > 0 ? resolveSheetId(sheetName) : sheetId;
@@ -447,6 +451,11 @@ function createPreviewEvaluator(params: {
       const key = `${targetSheet}:${normalized}`;
       if (memo.has(key)) return memo.get(key) as SpreadsheetValue;
       if (stack.has(key)) return "#REF!";
+
+      // DocumentController creates sheets lazily on read; tab completion previews should be
+      // side-effect free. If the workbook hasn't materialized any sheets yet, treat all cell
+      // references as invalid rather than forcing the current sheet into existence.
+      if (knownSheets.length === 0) return "#REF!";
 
       stack.add(key);
       const state = document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null };
