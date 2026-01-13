@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const scriptPath = path.join(repoRoot, "scripts", "verify-tauri-latest-json.mjs");
+
+/**
+ * @param {any} manifest
+ * @param {{ includeSig?: boolean; sigContent?: string }} [opts]
+ */
+function runLocal(manifest, opts = {}) {
+  const includeSig = opts.includeSig ?? true;
+  const sigContent = opts.sigContent ?? "dummy-signature";
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-tauri-latest-json-"));
+  const manifestPath = path.join(tmpDir, "latest.json");
+  const sigPath = path.join(tmpDir, includeSig ? "latest.json.sig" : "missing.sig");
+
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  if (includeSig) {
+    fs.writeFileSync(sigPath, sigContent, "utf8");
+  }
+
+  const proc = spawnSync(
+    process.execPath,
+    [scriptPath, "--manifest", manifestPath, "--sig", sigPath],
+    {
+      encoding: "utf8",
+      cwd: repoRoot,
+    },
+  );
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  if (proc.error) throw proc.error;
+  return proc;
+}
+
+test("passes for universal macOS + windows x64/arm64 + linux x64", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+      "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /verification passed/i);
+});
+
+test("passes for per-arch macOS keys instead of universal", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "x86_64-apple-darwin": { url: "https://example.com/app-x64.tar.gz", signature: "sig" },
+      "aarch64-apple-darwin": { url: "https://example.com/app-arm.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+      "aarch64-pc-windows-msvc": { url: "https://example.com/app-arm.msi", signature: "sig" },
+      "x86_64-unknown-linux-gnu": { url: "https://example.com/app.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("finds nested platforms objects", () => {
+  const proc = runLocal({
+    meta: { something: true },
+    data: {
+      platforms: {
+        "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
+        "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+      },
+    },
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+});
+
+test("fails when windows-arm64 is missing", () => {
+  const proc = runLocal({
+    version: "0.0.0",
+    platforms: {
+      "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+      "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+    },
+  });
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /windows-aarch64/);
+});
+
+test("fails when latest.json.sig is missing", () => {
+  const proc = runLocal(
+    {
+      version: "0.0.0",
+      platforms: {
+        "darwin-universal": { url: "https://example.com/app.tar.gz", signature: "sig" },
+        "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+        "windows-aarch64": { url: "https://example.com/app-arm.msi", signature: "sig" },
+        "linux-x86_64": { url: "https://example.com/app.AppImage", signature: "sig" },
+      },
+    },
+    { includeSig: false },
+  );
+
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /missing signature file/i);
+});
+
