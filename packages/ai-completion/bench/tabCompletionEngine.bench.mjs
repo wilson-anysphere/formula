@@ -33,6 +33,13 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    // Some package managers (e.g. `pnpm run <script> -- <args>`) will forward a
+    // literal `--` separator to the underlying script. Treat it as a no-op so
+    // users can invoke the benchmark with either:
+    //   pnpm bench:tab-completion --runs 200
+    // or
+    //   pnpm bench:tab-completion -- --runs 200
+    if (arg === "--") continue;
     if (arg === "--runs") {
       out.runs = parsePositiveInt(argv[++i], out.runs);
       continue;
