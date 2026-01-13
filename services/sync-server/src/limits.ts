@@ -89,9 +89,12 @@ export class SlidingWindowRateLimiter {
         nowMs - this.lastSweepMs > sweepIntervalMs)
     ) {
       for (const [windowKey, window] of this.windows) {
-        const timestamps = window.timestamps;
+        const { timestamps } = window;
         const lastTimestamp = timestamps[timestamps.length - 1];
-        if (lastTimestamp !== undefined && lastTimestamp <= cutoff) {
+        // If the most recent accepted event is outside the window (or the
+        // timestamps array was compacted down to empty), this key has no effect
+        // on future decisions and can be evicted.
+        if (lastTimestamp === undefined || lastTimestamp <= cutoff) {
           this.windows.delete(windowKey);
         }
       }
@@ -120,7 +123,8 @@ export class SlidingWindowRateLimiter {
       existing.startIndex = 0;
     }
 
-    this.windows.set(key, existing);
+    if (existing.timestamps.length === 0) this.windows.delete(key);
+    else this.windows.set(key, existing);
     return true;
   }
 
