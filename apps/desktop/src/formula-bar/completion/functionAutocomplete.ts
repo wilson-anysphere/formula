@@ -86,8 +86,10 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   while (replaceEnd < input.length && isIdentifierChar(input[replaceEnd]!)) replaceEnd += 1;
 
   const typedPrefix = input.slice(replaceStart, cursor);
-  // Avoid stealing Tab from range completion or normal editing for 1-character prefixes.
-  if (typedPrefix.length < 2) return null;
+  if (typedPrefix.length < 1) return null;
+  // Only trigger on identifier-looking starts.
+  // (We handle `_xlfn.` separately below.)
+  if (!/^[_A-Za-z]/.test(typedPrefix)) return null;
 
   // Ensure we're at the start of an expression-like position:
   // `=VLO`, `=1+VLO`, `=SUM(VLO`, `=SUM(A, VLO)`
@@ -96,13 +98,14 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   if (prev < 0) return null;
 
   const prevChar = input[prev]!;
-  const startsExpression = prevChar === "=" || prevChar === "(" || prevChar === "," || "+-*/^&=><%".includes(prevChar);
+  const startsExpression =
+    prevChar === "=" || prevChar === "(" || prevChar === "," || prevChar === ";" || "+-*/^&=><%@".includes(prevChar);
   if (!startsExpression) return null;
 
   // In argument positions (after `(` or `,`), very short alphabetic identifiers are
   // much more likely to be column/range refs (e.g. `SUM(A` / `SUM(AB`) than function
   // names. Be conservative here so we don't steal Tab from range completion.
-  if ((prevChar === "(" || prevChar === ",") && typedPrefix.length <= 2 && /^[A-Za-z]+$/.test(typedPrefix)) {
+  if ((prevChar === "(" || prevChar === "," || prevChar === ";") && typedPrefix.length <= 2 && /^[A-Za-z]+$/.test(typedPrefix)) {
     return null;
   }
 
