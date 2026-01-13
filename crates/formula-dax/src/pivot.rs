@@ -474,6 +474,53 @@ fn fill_group_key(
     Ok(())
 }
 
+fn requires_many_to_many_grouping(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    filter: &FilterContext,
+) -> DaxResult<bool> {
+    // Fast path: no relationship traversal needed.
+    if group_by.iter().all(|col| col.table == base_table) {
+        return Ok(false);
+    }
+
+    let (_, accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
+    for accessor in &accessors {
+        let GroupKeyAccessor::RelatedPath { hops, .. } = accessor else {
+            continue;
+        };
+        for hop in hops {
+            if hop
+                .to_index
+                .values()
+                .any(|rows| matches!(rows, RowSet::Many(_)))
+            {
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+fn insert_cartesian_keys(
+    values: &[Vec<Value>],
+    idx: usize,
+    buf: &mut Vec<Value>,
+    out: &mut HashSet<Vec<Value>>,
+) {
+    if idx == values.len() {
+        out.insert(buf.clone());
+        return;
+    }
+    for v in &values[idx] {
+        buf.push(v.clone());
+        insert_cartesian_keys(values, idx + 1, buf, out);
+        buf.pop();
+    }
+}
+
 #[derive(Clone, Debug)]
 enum PlannedExpr {
     Const(Value),
@@ -1518,15 +1565,10 @@ fn pivot_columnar_star_schema_group_by(
                     } else if let Some(to_row_set) = to_index.get(&fk) {
                         let to_row = match to_row_set {
                             RowSet::One(row) => *row,
-                            RowSet::Many(rows) => {
-                                if rows.len() == 1 {
-                                    rows[0]
-                                } else {
-                                    return Err(DaxError::Eval(format!(
-                                        "pivot related group key is ambiguous: key {fk} matches multiple rows in {}",
-                                        to_table.name()
-                                    )));
-                                }
+                            RowSet::Many(_) => {
+                                // Many-to-many expansion isn't supported by this star-schema fast
+                                // path; fall back to the generic (slower) implementation.
+                                return Ok(None);
                             }
                         };
                         key_buf.push(
@@ -1874,6 +1916,177 @@ fn pivot_row_scan(
     })
 }
 
+fn pivot_row_scan_many_to_many(
+    model: &DataModel,
+    base_table: &str,
+    group_by: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<PivotResult> {
+    let engine = DaxEngine::new();
+
+    let table_ref = model
+        .table(base_table)
+        .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let base_rows = (!filter.is_empty())
+        .then(|| crate::engine::resolve_table_rows(model, filter, base_table))
+        .transpose()?;
+
+    let (_, group_key_accessors) = build_group_key_accessors(model, base_table, group_by, filter)?;
+
+    // Precompute the set of allowed rows per hop table so group construction respects the existing
+    // filter context (including relationship propagation).
+    let mut allowed_rows: HashMap<String, Vec<bool>> = HashMap::new();
+    if !filter.is_empty() {
+        let mut tables: HashSet<String> = HashSet::new();
+        for accessor in &group_key_accessors {
+            if let GroupKeyAccessor::RelatedPath { hops, .. } = accessor {
+                for hop in hops {
+                    tables.insert(hop.to_table.name().to_string());
+                }
+            }
+        }
+
+        for table in tables {
+            let table_ref = model
+                .table(&table)
+                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+            let mut allowed = vec![false; table_ref.row_count()];
+            for row in crate::engine::resolve_table_rows(model, filter, &table)? {
+                if row < allowed.len() {
+                    allowed[row] = true;
+                }
+            }
+            allowed_rows.insert(table, allowed);
+        }
+    }
+
+    let mut seen: HashSet<Vec<Value>> = HashSet::new();
+    let mut per_col_values: Vec<Vec<Value>> =
+        (0..group_by.len()).map(|_| Vec::new()).collect();
+    let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
+
+    let mut process_row = |row: usize| -> DaxResult<()> {
+        for (out, accessor) in per_col_values.iter_mut().zip(group_key_accessors.iter()) {
+            out.clear();
+            match accessor {
+                GroupKeyAccessor::Base { idx } => {
+                    out.push(table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank));
+                }
+                GroupKeyAccessor::RelatedPath {
+                    hops,
+                    to_column_idx,
+                } => {
+                    // Walk the relationship path, expanding many-to-many matches into multiple
+                    // candidate rows.
+                    let mut current_table = table_ref;
+                    let mut current_rows: Vec<usize> = vec![row];
+                    for hop in hops {
+                        let allowed = allowed_rows.get(hop.to_table.name());
+                        let mut next_rows: HashSet<usize> = HashSet::new();
+                        for &current_row in &current_rows {
+                            let key = current_table
+                                .value_by_idx(current_row, hop.from_idx)
+                                .unwrap_or(Value::Blank);
+                            if key.is_blank() {
+                                continue;
+                            }
+                            let Some(to_row_set) = hop.to_index.get(&key) else {
+                                continue;
+                            };
+                            to_row_set.for_each_row(|to_row| {
+                                if allowed
+                                    .map(|set| set.get(to_row).copied().unwrap_or(false))
+                                    .unwrap_or(true)
+                                {
+                                    next_rows.insert(to_row);
+                                }
+                            });
+                        }
+
+                        if next_rows.is_empty() {
+                            current_rows.clear();
+                            break;
+                        }
+
+                        current_table = hop.to_table;
+                        current_rows = next_rows.into_iter().collect();
+                    }
+
+                    if current_rows.is_empty() {
+                        out.push(Value::Blank);
+                        continue;
+                    }
+
+                    let mut unique = HashSet::new();
+                    for &to_row in &current_rows {
+                        unique.insert(
+                            current_table
+                                .value_by_idx(to_row, *to_column_idx)
+                                .unwrap_or(Value::Blank),
+                        );
+                    }
+
+                    if unique.is_empty() {
+                        out.push(Value::Blank);
+                    } else {
+                        out.extend(unique.into_iter());
+                    }
+                }
+            }
+        }
+
+        key_buf.clear();
+        insert_cartesian_keys(&per_col_values, 0, &mut key_buf, &mut seen);
+        Ok(())
+    };
+
+    if let Some(rows) = base_rows {
+        for row in rows {
+            process_row(row)?;
+        }
+    } else {
+        for row in 0..table_ref.row_count() {
+            process_row(row)?;
+        }
+    }
+
+    let mut groups: Vec<Vec<Value>> = seen.into_iter().collect();
+    groups.sort_by(|a, b| cmp_key(a, b));
+
+    let mut columns: Vec<String> = group_by
+        .iter()
+        .map(|c| format!("{}[{}]", c.table, c.column))
+        .collect();
+    columns.extend(measures.iter().map(|m| m.name.clone()));
+
+    let mut rows_out = Vec::with_capacity(groups.len());
+    let mut group_filter = filter.clone();
+    for key in groups {
+        for (col, value) in group_by.iter().zip(key.iter()) {
+            group_filter.set_column_equals(&col.table, &col.column, value.clone());
+        }
+
+        let mut row = key;
+        for measure in measures {
+            let value = engine.evaluate_expr(
+                model,
+                &measure.parsed,
+                &group_filter,
+                &RowContext::default(),
+            )?;
+            row.push(value);
+        }
+        rows_out.push(row);
+    }
+
+    Ok(PivotResult {
+        columns,
+        rows: rows_out,
+    })
+}
+
 /// Compute a grouped table suitable for rendering a pivot table.
 ///
 /// This API is intentionally small: it takes a base table (typically the fact table),
@@ -1895,6 +2108,11 @@ pub fn pivot(
     {
         maybe_trace_pivot_path(PivotPath::ColumnarGroupsWithMeasureEval);
         return Ok(result);
+    }
+
+    if requires_many_to_many_grouping(model, base_table, group_by, filter)? {
+        maybe_trace_pivot_path(PivotPath::RowScan);
+        return pivot_row_scan_many_to_many(model, base_table, group_by, measures, filter);
     }
 
     if let Some(result) =

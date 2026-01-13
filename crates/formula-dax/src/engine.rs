@@ -1941,6 +1941,7 @@ impl DaxEngine {
             expr: &Expr,
             eval_filter: &FilterContext,
             row_ctx: &RowContext,
+            env: &mut VarEnv,
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
@@ -2104,6 +2105,7 @@ impl DaxEngine {
                     arg,
                     &eval_filter,
                     row_ctx,
+                    env,
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
@@ -2119,6 +2121,7 @@ impl DaxEngine {
                         arg,
                         &eval_filter,
                         row_ctx,
+                        env,
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
@@ -2941,27 +2944,40 @@ impl DaxEngine {
                         accessors.push(GroupAccessor::BaseColumn(idx));
                     }
 
+                    let row_sets = resolve_row_sets(model, filter)?;
+
                     let mut seen: HashSet<Vec<Value>> = HashSet::new();
                     let mut rows = Vec::new();
+
+                    // Reuse buffers across base rows to avoid repeated allocations.
+                    let mut per_col_values: Vec<Vec<Value>> =
+                        (0..accessors.len()).map(|_| Vec::new()).collect();
+                    let mut partials: Vec<Vec<Value>> = Vec::new();
+
                     for row in base.rows {
-                        let mut key = Vec::with_capacity(accessors.len());
-                        for accessor in &accessors {
+                        // Collect candidate values per grouping column for this base row.
+                        for (out, accessor) in per_col_values.iter_mut().zip(accessors.iter()) {
+                            out.clear();
                             match accessor {
-                                GroupAccessor::BaseColumn(idx) => key.push(
-                                    table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
-                                ),
+                                GroupAccessor::BaseColumn(idx) => {
+                                    out.push(
+                                        table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank),
+                                    );
+                                }
                                 GroupAccessor::RelatedPath {
                                     hops,
                                     to_table,
                                     to_col_idx,
                                 } => {
-                                    let mut current_row = row;
-                                    let mut ok = true;
+                                    // Track all reachable row indices along the relationship path,
+                                    // expanding many-to-many hops as needed.
+                                    let mut current_rows: Vec<usize> = vec![row];
                                     for hop in hops {
                                         let rel_info = model
                                             .relationships()
                                             .get(hop.relationship_idx)
                                             .expect("valid relationship index");
+
                                         let from_table_ref = model
                                             .table(&rel_info.rel.from_table)
                                             .ok_or_else(|| {
@@ -2970,52 +2986,88 @@ impl DaxEngine {
                                                 )
                                             })?;
 
-                                        let fk = from_table_ref
-                                            .value_by_idx(current_row, hop.from_idx)
-                                            .unwrap_or(Value::Blank);
-                                        if fk.is_blank() {
-                                            ok = false;
+                                        let allowed_to = row_sets
+                                            .get(rel_info.rel.to_table.as_str())
+                                            .ok_or_else(|| {
+                                                DaxError::UnknownTable(rel_info.rel.to_table.clone())
+                                            })?;
+
+                                        let mut next_rows: HashSet<usize> = HashSet::new();
+                                        for &current_row in &current_rows {
+                                            let fk = from_table_ref
+                                                .value_by_idx(current_row, hop.from_idx)
+                                                .unwrap_or(Value::Blank);
+                                            if fk.is_blank() {
+                                                continue;
+                                            }
+                                            let Some(to_row_set) = rel_info.to_index.get(&fk) else {
+                                                continue;
+                                            };
+                                            to_row_set.for_each_row(|to_row| {
+                                                if allowed_to
+                                                    .get(to_row)
+                                                    .copied()
+                                                    .unwrap_or(false)
+                                                {
+                                                    next_rows.insert(to_row);
+                                                }
+                                            });
+                                        }
+
+                                        if next_rows.is_empty() {
+                                            current_rows.clear();
                                             break;
                                         }
 
-                                        let Some(to_row_set) = rel_info.to_index.get(&fk) else {
-                                            ok = false;
-                                            break;
-                                        };
-                                        let to_row = match to_row_set {
-                                            RowSet::One(row) => *row,
-                                            RowSet::Many(rows) => {
-                                                if rows.len() == 1 {
-                                                    rows[0]
-                                                } else {
-                                                    return Err(DaxError::Eval(format!(
-                                                        "SUMMARIZE grouping is ambiguous: key {fk} matches multiple rows in {} (relationship {})",
-                                                        rel_info.rel.to_table, rel_info.rel.name
-                                                    )));
-                                                }
-                                            }
-                                        };
-                                        current_row = to_row;
+                                        current_rows = next_rows.into_iter().collect();
                                     }
 
-                                    if !ok {
-                                        key.push(Value::Blank);
+                                    if current_rows.is_empty() {
+                                        out.push(Value::Blank);
                                         continue;
                                     }
 
                                     let to_table_ref = model
                                         .table(to_table)
                                         .ok_or_else(|| DaxError::UnknownTable(to_table.clone()))?;
-                                    key.push(
-                                        to_table_ref
-                                            .value_by_idx(current_row, *to_col_idx)
-                                            .unwrap_or(Value::Blank),
-                                    );
+
+                                    let mut unique = HashSet::new();
+                                    for &to_row in &current_rows {
+                                        unique.insert(
+                                            to_table_ref
+                                                .value_by_idx(to_row, *to_col_idx)
+                                                .unwrap_or(Value::Blank),
+                                        );
+                                    }
+
+                                    if unique.is_empty() {
+                                        out.push(Value::Blank);
+                                    } else {
+                                        out.extend(unique.into_iter());
+                                    }
                                 }
                             }
                         }
-                        if seen.insert(key) {
-                            rows.push(row);
+
+                        // Expand per-column value sets into full group key tuples.
+                        partials.clear();
+                        partials.push(Vec::new());
+                        for values in &per_col_values {
+                            let mut next: Vec<Vec<Value>> = Vec::new();
+                            for partial in &partials {
+                                for value in values {
+                                    let mut key = partial.clone();
+                                    key.push(value.clone());
+                                    next.push(key);
+                                }
+                            }
+                            partials = next;
+                        }
+
+                        for key in partials.drain(..) {
+                            if seen.insert(key) {
+                                rows.push(row);
+                            }
                         }
                     }
 
