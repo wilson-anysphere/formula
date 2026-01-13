@@ -2,11 +2,34 @@ use formula_model::{charts::ColorRef, Color};
 use roxmltree::Node;
 
 pub fn parse_color(node: Node<'_, '_>) -> Option<ColorRef> {
-    match node.tag_name().name() {
+    let color = match node.tag_name().name() {
         "srgbClr" => node.attribute("val").and_then(parse_srgb).map(Color::Argb),
         "schemeClr" => parse_scheme(node),
+        // System colors are dynamic; Excel often includes a `lastClr` fallback with an sRGB value.
+        "sysClr" => node
+            .attribute("lastClr")
+            .and_then(parse_srgb)
+            .map(Color::Argb),
+        "prstClr" => node
+            .attribute("val")
+            .and_then(preset_to_argb)
+            .map(Color::Argb),
+        "scrgbClr" => parse_scrgb(node).map(Color::Argb),
         _ => None,
+    }?;
+
+    // DrawingML represents alpha as a transform on the color element.
+    //
+    // We only support the absolute `<a:alpha val="..."/>` transform for now, and only for colors
+    // we can represent as a concrete ARGB value.
+    if let Color::Argb(argb) = color {
+        if let Some(alpha) = parse_alpha(node) {
+            let argb = (argb & 0x00FF_FFFF) | ((alpha as u32) << 24);
+            return Some(Color::Argb(argb));
+        }
     }
+
+    Some(color)
 }
 
 fn parse_scheme(node: Node<'_, '_>) -> Option<ColorRef> {
@@ -25,6 +48,74 @@ fn parse_srgb(val: &str) -> Option<u32> {
         8 => u32::from_str_radix(hex, 16).ok(),
         _ => None,
     }
+}
+
+fn preset_to_argb(preset: &str) -> Option<u32> {
+    // DrawingML preset colors (a:prstClr) are a set of named sRGB colors.
+    // We only map the most common names used by Excel charts/shapes.
+    //
+    // Spec reference: ECMA-376 5th ed. Part 1, §20.1.2.3.30 (PresetColorVal).
+    Some(match preset {
+        "black" => 0xFF000000,
+        "white" => 0xFFFFFFFF,
+        "red" => 0xFFFF0000,
+        "green" => 0xFF00FF00,
+        "blue" => 0xFF0000FF,
+        "yellow" => 0xFFFFFF00,
+        "cyan" | "aqua" => 0xFF00FFFF,
+        "magenta" | "fuchsia" => 0xFFFF00FF,
+        "gray" | "grey" => 0xFF808080,
+        "ltGray" => 0xFFC0C0C0,
+        "dkGray" => 0xFF404040,
+        // Less common, but still seen in Office-generated documents.
+        "orange" => 0xFFFFA500,
+        "brown" => 0xFFA52A2A,
+        "purple" => 0xFF800080,
+        _ => return None,
+    })
+}
+
+fn parse_scrgb(node: Node<'_, '_>) -> Option<u32> {
+    // scRGB values are expressed as fixed-point percentages in the range 0..=100000.
+    // The values are linear; convert to gamma-encoded sRGB for rendering.
+    let r = node.attribute("r")?.parse::<i32>().ok()?;
+    let g = node.attribute("g")?.parse::<i32>().ok()?;
+    let b = node.attribute("b")?.parse::<i32>().ok()?;
+
+    let r = linear_to_srgb8(scrgb_pct_to_linear(r));
+    let g = linear_to_srgb8(scrgb_pct_to_linear(g));
+    let b = linear_to_srgb8(scrgb_pct_to_linear(b));
+
+    Some(0xFF00_0000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32))
+}
+
+fn scrgb_pct_to_linear(v: i32) -> f64 {
+    (v.clamp(0, 100_000) as f64) / 100_000.0
+}
+
+fn linear_to_srgb8(v: f64) -> u8 {
+    // https://en.wikipedia.org/wiki/SRGB#From_CIE_XYZ_to_sRGB
+    // (Standard piecewise linear->sRGB transfer function.)
+    let v = v.clamp(0.0, 1.0);
+    let srgb = if v <= 0.003_130_8 {
+        12.92 * v
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn parse_alpha(node: Node<'_, '_>) -> Option<u8> {
+    let alpha = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "alpha")
+        .and_then(|n| n.attribute("val"))
+        .and_then(|v| v.parse::<u32>().ok())?
+        .clamp(0, 100_000);
+
+    // Convert percentage-in-100000 to 8-bit alpha.
+    // Use integer math with rounding half-up.
+    Some(((alpha * 255 + 50_000) / 100_000) as u8)
 }
 
 fn parse_tint_thousandths(node: Node<'_, '_>) -> Option<i16> {

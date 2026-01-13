@@ -33,6 +33,38 @@ fn solid_fill_scheme_with_tint() {
 }
 
 #[test]
+fn solid_fill_sys_clr_uses_last_clr() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:sysClr val="windowText" lastClr="112233"/>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0xFF112233));
+}
+
+#[test]
+fn solid_fill_prst_clr_mapping() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:prstClr val="red"/>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0xFFFF0000));
+}
+
+#[test]
+fn solid_fill_alpha_transform() {
+    let xml = r#"<a:solidFill xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:srgbClr val="FF0000">
+            <a:alpha val="50000"/>
+        </a:srgbClr>
+    </a:solidFill>"#;
+    let doc = Document::parse(xml).unwrap();
+    let fill = parse_solid_fill(doc.root_element()).unwrap();
+    assert_eq!(fill.color, Color::Argb(0x80FF0000));
+}
+
+#[test]
 fn line_width_and_dash() {
     let xml = r#"<a:ln xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" w="12700">
         <a:prstDash val="dash"/>

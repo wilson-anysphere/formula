@@ -31,9 +31,9 @@ pub fn parse_solid_fill(node: Node<'_, '_>) -> Option<SolidFill> {
         return None;
     }
 
-    let color_node = node.children().find(|n| {
-        n.is_element() && (n.tag_name().name() == "srgbClr" || n.tag_name().name() == "schemeClr")
-    })?;
+    // `a:solidFill` contains exactly one color element (e.g. `a:srgbClr`, `a:schemeClr`,
+    // `a:sysClr`, `a:prstClr`, `a:scrgbClr`).
+    let color_node = node.children().find(|n| n.is_element())?;
     let color = parse_color(color_node)?;
     Some(SolidFill { color })
 }
