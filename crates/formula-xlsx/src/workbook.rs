@@ -183,6 +183,7 @@ impl XlsxPackage {
                 let mut chart_ex_part = None;
                 let mut style_part = None;
                 let mut colors_part = None;
+                let mut user_shapes_part = None;
 
                 if let Some(chart_rels_path) = chart_rels_path.as_deref() {
                     if let Some(chart_rels_xml) = self.part(chart_rels_path) {
@@ -210,6 +211,13 @@ impl XlsxPackage {
                                 && is_chart_colors_relationship(&rel_type, &rel_target)
                             {
                                 colors_part = Some(target_path);
+                                continue;
+                            }
+
+                            if user_shapes_part.is_none()
+                                && is_chart_user_shapes_relationship(&rel_type, &rel_target)
+                            {
+                                user_shapes_part = Some(target_path);
                                 continue;
                             }
                         }
@@ -269,6 +277,26 @@ impl XlsxPackage {
                         diagnostics.push(ChartDiagnostic {
                             severity: ChartDiagnosticSeverity::Warning,
                             message: format!("missing chart colors part: {path}"),
+                            part: Some(path),
+                            xpath: None,
+                        });
+                        None
+                    }
+                });
+
+                let user_shapes = user_shapes_part.and_then(|path| match self.part(&path) {
+                    Some(bytes) => {
+                        let rels_path = rels_for_part(&path);
+                        Some(OpcPart {
+                            path,
+                            rels_path: self.part(&rels_path).map(|_| rels_path),
+                            bytes: bytes.to_vec(),
+                        })
+                    }
+                    None => {
+                        diagnostics.push(ChartDiagnostic {
+                            severity: ChartDiagnosticSeverity::Warning,
+                            message: format!("missing chart userShapes part: {path}"),
                             part: Some(path),
                             xpath: None,
                         });
@@ -374,6 +402,7 @@ impl XlsxPackage {
                         chart_ex,
                         style,
                         colors,
+                        user_shapes,
                     },
                     model,
                     diagnostics,
@@ -507,6 +536,14 @@ fn is_chart_colors_relationship(rel_type: &str, rel_target: &str) -> bool {
         return true;
     }
     rel_target.ends_with(".xml") && rel_target.contains("colors")
+}
+
+fn is_chart_user_shapes_relationship(rel_type: &str, rel_target: &str) -> bool {
+    if rel_type.contains("chartusershapes") {
+        return true;
+    }
+    // Fallback to filename heuristic for producers that omit the relationship type.
+    rel_target.ends_with(".xml") && rel_target.contains("drawing")
 }
 
 fn format_chart_space_error(err: &ChartSpaceParseError) -> String {

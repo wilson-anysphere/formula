@@ -30,6 +30,12 @@ pub struct ChartParts {
     pub chart_ex: Option<OpcPart>,
     pub style: Option<OpcPart>,
     pub colors: Option<OpcPart>,
+    /// Optional DrawingML part that stores user-defined shapes for the chart
+    /// (callouts, overlays, etc.).
+    ///
+    /// This is referenced from the chart part's `.rels` via the
+    /// `.../relationships/chartUserShapes` relationship type.
+    pub user_shapes: Option<OpcPart>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
