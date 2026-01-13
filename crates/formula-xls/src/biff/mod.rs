@@ -40,6 +40,7 @@ pub(crate) use globals::{
 pub(crate) use print_settings::parse_biff_sheet_print_settings;
 pub(crate) use sheet::{
     parse_biff8_sheet_formulas,
+    parse_biff8_sheet_table_formulas,
     parse_biff_sheet_cell_xf_indices_filtered,
     parse_biff_sheet_hyperlinks,
     parse_biff_sheet_labelsst_indices,

@@ -1840,6 +1840,38 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
+        // Best-effort: recover What-If Analysis data-table formulas (`TABLE(...)`) that are encoded
+        // in BIFF8 as `PtgTbl` tokens plus a worksheet-level `TABLE` record.
+        //
+        // Calamine’s formula extraction may omit these formulas because the `TABLE` record context
+        // lives outside the `rgce` token stream. When BIFF workbook bytes are available, decode
+        // them directly from the worksheet substream so we do not silently drop cell formulas.
+        if let (Some(workbook_stream), Some(biff_version), Some(biff_idx)) =
+            (workbook_stream.as_deref(), biff_version, biff_idx)
+        {
+            if biff_version == biff::BiffVersion::Biff8 {
+                if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                    match biff::parse_biff8_sheet_table_formulas(workbook_stream, sheet_info.offset)
+                    {
+                        Ok(mut parsed) => {
+                            for (cell_ref, formula) in parsed.formulas.drain() {
+                                let anchor = sheet.merged_regions.resolve_cell(cell_ref);
+                                sheet.set_formula(anchor, Some(formula));
+                            }
+                            warnings.extend(parsed.warnings.drain(..).map(|w| {
+                                ImportWarning::new(format!(
+                                    "failed to fully import `.xls` TABLE formulas for sheet `{sheet_name}`: {w}"
+                                ))
+                            }));
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` TABLE formulas for sheet `{sheet_name}`: {err}"
+                        ))),
+                    }
+                }
+            }
+        }
+
         // `calamine` does not surface `BLANK` records via `used_cells()`, but Excel
         // allows formatting empty cells. Apply any XF-derived number formats to
         // the sheet even when the value is empty so those cells round-trip.

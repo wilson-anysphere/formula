@@ -78,6 +78,11 @@ const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
+/// TABLE [MS-XLS 2.4.313]
+///
+/// Used for What-If Analysis data tables (the legacy `TABLE()` function), referenced by `PtgTbl`
+/// tokens inside FORMULA `rgce` streams.
+const RECORD_TABLE: u16 = 0x0236;
 
 /// Scan a worksheet BIFF substream for string cell records (`LABELSST`, id `0x00FD`) and return a
 /// mapping from cell address to SST index.
@@ -1927,6 +1932,299 @@ pub(crate) fn parse_biff8_sheet_formulas(
 }
 
 #[derive(Debug, Default)]
+pub(crate) struct SheetTableFormulas {
+    pub(crate) formulas: HashMap<CellRef, String>,
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TableArg {
+    Missing,
+    Ref(CellRef),
+    RefError,
+}
+
+impl TableArg {
+    fn render(self) -> String {
+        match self {
+            TableArg::Missing => String::new(),
+            TableArg::Ref(cell) => cell.to_a1(),
+            TableArg::RefError => "#REF!".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TableRecordDecoded {
+    row_input: TableArg,
+    col_input: TableArg,
+}
+
+impl TableRecordDecoded {
+    fn render_formula(&self) -> String {
+        // Preserve Excel's missing-argument syntax to keep the formula parseable, mirroring how
+        // BIFF `PtgMissArg` tokens are rendered elsewhere (`TABLE(A1,)`, `TABLE(,B1)`).
+        let row = self.row_input.render();
+        let col = self.col_input.render();
+        format!("TABLE({row},{col})")
+    }
+}
+
+/// Best-effort scan of a BIFF8 worksheet substream for What-If Analysis data-table formulas.
+///
+/// BIFF8 represents data tables using:
+/// - `PtgTbl` (`0x02`) as the *entire* formula token stream for data-table result cells, and
+/// - a `TABLE` record (`0x0236`) in the worksheet substream that provides row/column input-cell
+///   references.
+///
+/// Most BIFF formula decoders do not surface these as a textual `TABLE(...)` formula because the
+/// `TABLE` record lives outside the `rgce` stream. For `.xls` worksheet import we *do* have that
+/// worksheet context, so we can synthesize a stable, parseable formula string.
+pub(crate) fn parse_biff8_sheet_table_formulas(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<SheetTableFormulas, String> {
+    // [MS-XLS] 2.5.198.21 (PtgTbl): [ptg:0x02][rw:u16][col:u16]
+    const PTG_TBL: u8 = 0x02;
+
+    // Best-effort guess for TABLE record flags indicating presence of input cells.
+    //
+    // The MS-XLS spec defines a `grbit` field, but producers in the wild vary. We interpret the
+    // low bits as "row input present" and "col input present" when set, but if neither bit is set
+    // we assume *both* inputs are present to avoid rendering `TABLE(,)` for two-input tables when
+    // the flag semantics differ.
+    const TABLE_GRBIT_HAS_ROW_INPUT: u16 = 0x0001;
+    const TABLE_GRBIT_HAS_COL_INPUT: u16 = 0x0002;
+
+    let mut out = SheetTableFormulas::default();
+
+    let mut tables: HashMap<(u16, u16), TableRecordDecoded> = HashMap::new();
+    let mut ptg_tbl_cells: Vec<(CellRef, Option<(u16, u16)>, usize)> = Vec::new();
+
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings
+                    .push(format!("malformed BIFF record in sheet stream: {err}"));
+                break;
+            }
+        };
+
+        // BOF indicates the start of a new substream; stop before yielding the next BOF in case
+        // the worksheet is missing its EOF.
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        let data = record.data;
+        match record.record_id {
+            RECORD_TABLE => {
+                // TABLE record payload (BIFF8) [MS-XLS 2.4.313].
+                //
+                // Common layout:
+                //   [rw: u16][col: u16][grbit: u16]
+                //   [rwInpRow: u16][colInpRow: u16]
+                //   [rwInpCol: u16][colInpCol: u16]
+                if data.len() < 4 {
+                    out.warnings.push(format!(
+                        "truncated TABLE record at offset {}: expected >=4 bytes, got {}",
+                        record.offset,
+                        data.len()
+                    ));
+                    continue;
+                }
+
+                let base_row = u16::from_le_bytes([data[0], data[1]]);
+                let base_col = u16::from_le_bytes([data[2], data[3]]) & 0x3FFF;
+
+                let grbit = if data.len() >= 6 {
+                    u16::from_le_bytes([data[4], data[5]])
+                } else {
+                    out.warnings.push(format!(
+                        "truncated TABLE record at offset {}: expected >=6 bytes for grbit, got {}",
+                        record.offset,
+                        data.len()
+                    ));
+                    0
+                };
+
+                // Determine which input cells are present.
+                let has_row_flag = (grbit & TABLE_GRBIT_HAS_ROW_INPUT) != 0;
+                let has_col_flag = (grbit & TABLE_GRBIT_HAS_COL_INPUT) != 0;
+                let assume_both_present = !has_row_flag && !has_col_flag;
+                let row_present = has_row_flag || assume_both_present;
+                let col_present = has_col_flag || assume_both_present;
+
+                let decoded = if data.len() < 14 {
+                    out.warnings.push(format!(
+                        "truncated TABLE record at offset {}: expected >=14 bytes, got {}; rendering #REF! placeholders",
+                        record.offset,
+                        data.len()
+                    ));
+
+                    TableRecordDecoded {
+                        row_input: if row_present {
+                            TableArg::RefError
+                        } else {
+                            TableArg::Missing
+                        },
+                        col_input: if col_present {
+                            TableArg::RefError
+                        } else {
+                            TableArg::Missing
+                        },
+                    }
+                } else {
+                    let row_inp_row = u16::from_le_bytes([data[6], data[7]]);
+                    let row_inp_col_raw = u16::from_le_bytes([data[8], data[9]]);
+                    let col_inp_row = u16::from_le_bytes([data[10], data[11]]);
+                    let col_inp_col_raw = u16::from_le_bytes([data[12], data[13]]);
+
+                    let decode_cell_ref = |rw: u16,
+                                           col_raw: u16,
+                                           label: &str,
+                                           warnings: &mut Vec<String>|
+                     -> TableArg {
+                        let col = (col_raw & 0x3FFF) as u32;
+                        let row = rw as u32;
+                        if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+                            warnings.push(format!(
+                                    "TABLE record at offset {} has out-of-bounds {label} reference (row={row}, col={col}); rendering #REF!",
+                                    record.offset
+                                ));
+                            return TableArg::RefError;
+                        }
+                        TableArg::Ref(CellRef::new(row, col))
+                    };
+
+                    let row_input = if row_present {
+                        // Best-effort missing sentinel: some writers use 0xFFFF for an unused input.
+                        if row_inp_col_raw == 0xFFFF {
+                            TableArg::Missing
+                        } else {
+                            decode_cell_ref(
+                                row_inp_row,
+                                row_inp_col_raw,
+                                "row input",
+                                &mut out.warnings,
+                            )
+                        }
+                    } else {
+                        TableArg::Missing
+                    };
+                    let col_input = if col_present {
+                        if col_inp_col_raw == 0xFFFF {
+                            TableArg::Missing
+                        } else {
+                            decode_cell_ref(
+                                col_inp_row,
+                                col_inp_col_raw,
+                                "col input",
+                                &mut out.warnings,
+                            )
+                        }
+                    } else {
+                        TableArg::Missing
+                    };
+
+                    TableRecordDecoded {
+                        row_input,
+                        col_input,
+                    }
+                };
+
+                if tables.insert((base_row, base_col), decoded).is_some() {
+                    out.warnings.push(format!(
+                        "duplicate TABLE record for base cell row={base_row} col={base_col} at offset {}; last one wins",
+                        record.offset
+                    ));
+                }
+            }
+            RECORD_FORMULA => {
+                // FORMULA record payload (BIFF8) [MS-XLS 2.4.127].
+                if data.len() < 22 {
+                    out.warnings.push(format!(
+                        "truncated FORMULA record at offset {}: expected >=22 bytes, got {}",
+                        record.offset,
+                        data.len()
+                    ));
+                    continue;
+                }
+
+                let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+                let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+                if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+                    out.warnings.push(format!(
+                        "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let cell = CellRef::new(row, col);
+
+                let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+                let Some(rgce) = data.get(22..22 + cce) else {
+                    out.warnings.push(format!(
+                        "truncated FORMULA rgce stream at offset {}: need {} bytes, got {}",
+                        record.offset,
+                        cce,
+                        data.len().saturating_sub(22)
+                    ));
+                    continue;
+                };
+
+                if rgce.first().copied() != Some(PTG_TBL) {
+                    continue;
+                }
+
+                if rgce.len() < 5 {
+                    out.warnings.push(format!(
+                        "truncated PtgTbl token in FORMULA record at offset {}: expected 4-byte payload, got {} bytes",
+                        record.offset,
+                        rgce.len().saturating_sub(1)
+                    ));
+                    out.formulas.insert(cell, "TABLE(#REF!,#REF!)".to_string());
+                    continue;
+                }
+
+                let base_row = u16::from_le_bytes([rgce[1], rgce[2]]);
+                let base_col = u16::from_le_bytes([rgce[3], rgce[4]]) & 0x3FFF;
+                ptg_tbl_cells.push((cell, Some((base_row, base_col)), record.offset));
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    // Resolve PtgTbl references after scanning the full substream so TABLE records can appear
+    // before or after their referencing formula cells.
+    for (cell, base, offset) in ptg_tbl_cells {
+        let Some((base_row, base_col)) = base else {
+            out.formulas.insert(cell, "TABLE(#REF!,#REF!)".to_string());
+            continue;
+        };
+
+        let formula = match tables.get(&(base_row, base_col)) {
+            Some(def) => def.render_formula(),
+            None => {
+                out.warnings.push(format!(
+                    "PtgTbl formula at offset {} (cell {}) references missing TABLE record at row={base_row} col={base_col}; rendering TABLE()",
+                    offset,
+                    cell.to_a1()
+                ));
+                "TABLE()".to_string()
+            }
+        };
+
+        out.formulas.insert(cell, formula);
+    }
+
+    Ok(out)
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct SheetHyperlinks {
     pub(crate) hyperlinks: Vec<Hyperlink>,
     pub(crate) warnings: Vec<String>,
@@ -2550,6 +2848,7 @@ fn unquote_sheet_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_engine::{parse_formula, ParseOptions};
     use std::collections::BTreeSet;
 
     use formula_model::{Orientation, PageSetup, Scaling};
@@ -2635,6 +2934,71 @@ mod tests {
             err.contains("implausible file moniker ANSI path length"),
             "expected implausible ANSI length error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn decodes_ptgtbl_table_records_into_table_formula_text() {
+        // TABLE record anchored at F11 (row=10, col=5), with two input cells: A1 (row input) and
+        // B2 (col input).
+        let base_row: u16 = 10;
+        let base_col: u16 = 5;
+        let grbit: u16 = 0x0003; // best-effort: both inputs present
+
+        let mut table_payload = Vec::new();
+        table_payload.extend_from_slice(&base_row.to_le_bytes());
+        table_payload.extend_from_slice(&base_col.to_le_bytes());
+        table_payload.extend_from_slice(&grbit.to_le_bytes());
+        // row input: A1
+        table_payload.extend_from_slice(&0u16.to_le_bytes()); // rwInpRow
+        table_payload.extend_from_slice(&0u16.to_le_bytes()); // colInpRow
+        // col input: B2
+        table_payload.extend_from_slice(&1u16.to_le_bytes()); // rwInpCol
+        table_payload.extend_from_slice(&1u16.to_le_bytes()); // colInpCol
+
+        // FORMULA record at D21 whose rgce is a single PtgTbl referencing the TABLE base cell.
+        let cell_row: u16 = 20;
+        let cell_col: u16 = 3;
+        let rgce = [
+            0x02u8, // PtgTbl
+            base_row.to_le_bytes()[0],
+            base_row.to_le_bytes()[1],
+            base_col.to_le_bytes()[0],
+            base_col.to_le_bytes()[1],
+        ];
+
+        let mut formula_payload = Vec::new();
+        formula_payload.extend_from_slice(&cell_row.to_le_bytes());
+        formula_payload.extend_from_slice(&cell_col.to_le_bytes());
+        formula_payload.extend_from_slice(&0u16.to_le_bytes()); // xf
+        formula_payload.extend_from_slice(&0f64.to_le_bytes()); // cached result
+        formula_payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        formula_payload.extend_from_slice(&0u32.to_le_bytes()); // chn
+        formula_payload.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        formula_payload.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_TABLE, &table_payload),
+            record(RECORD_FORMULA, &formula_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_sheet_table_formulas(&stream, 0).expect("parse");
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+
+        let expected_cell = CellRef::new(cell_row as u32, cell_col as u32);
+        assert_eq!(
+            parsed.formulas.get(&expected_cell).map(String::as_str),
+            Some("TABLE(A1,B2)")
+        );
+
+        // Ensure the synthesized formula is parseable by our formula lexer/parser.
+        parse_formula("TABLE(A1,B2)", ParseOptions::default()).expect("parseable");
     }
 
     #[test]
