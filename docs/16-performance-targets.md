@@ -61,6 +61,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | 10MB xlsx loaded | <200MB | Heap snapshot |
 | 100MB xlsx loaded | <500MB | Heap snapshot |
 | Memory per cell | <100 bytes | Calculated from heap |
+| Desktop idle RSS (empty workbook) | <100MB | CI benchmark `desktop.memory.idle_rss_mb.p95` (process RSS + child processes) |
 
 ### Collaboration
 
