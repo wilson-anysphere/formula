@@ -4,6 +4,17 @@ import { BoundedAIAuditStore, LocalStorageAIAuditStore, MemoryAIAuditStore } fro
 import type { AIAuditEntry } from "../src/types.js";
 
 describe("BoundedAIAuditStore", () => {
+  it("defaults max_entry_chars to 200k and normalizes invalid values", () => {
+    const storeA = new BoundedAIAuditStore(new MemoryAIAuditStore());
+    expect(storeA.maxEntryChars).toBe(200_000);
+
+    const storeB = new BoundedAIAuditStore(new MemoryAIAuditStore(), { max_entry_chars: -1 });
+    expect(storeB.maxEntryChars).toBe(200_000);
+
+    const storeC = new BoundedAIAuditStore(new MemoryAIAuditStore(), { max_entry_chars: Number.NaN });
+    expect(storeC.maxEntryChars).toBe(200_000);
+  });
+
   it("stores entries as-is when they are under the size cap", async () => {
     const underlying = new MemoryAIAuditStore();
     const maxEntryChars = 2_000;
