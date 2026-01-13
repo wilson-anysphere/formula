@@ -93,6 +93,68 @@ test("searchWorkbookRag honors workbookId filtering", async () => {
   assert.ok(results.every((r) => r.metadata.title !== "Salaries"));
 });
 
+test("searchWorkbookRag reranks + dedupes by default (kind priority + overlap)", async () => {
+  const calls = { queryTopK: 0 };
+  const embedder = {
+    async embedTexts() {
+      return [[1, 0, 0]];
+    },
+  };
+
+  const rect = { r0: 0, c0: 0, r1: 2, c1: 2 };
+
+  const vectorStore = {
+    /**
+     * @param {ArrayLike<number>} vector
+     * @param {number} topK
+     * @param {{ workbookId?: string }} [opts]
+     */
+    async query(vector, topK, opts = {}) {
+      calls.queryTopK = topK;
+      assert.deepEqual(Array.from(vector), [1, 0, 0]);
+      assert.equal(opts.workbookId, "wb");
+      return [
+        {
+          id: "data",
+          score: 0.51,
+          metadata: {
+            workbookId: "wb",
+            sheetName: "Sheet1",
+            kind: "dataRegion",
+            title: "Data region A1:C3",
+            rect,
+            tokenCount: 50,
+          },
+        },
+        {
+          id: "table",
+          score: 0.5,
+          metadata: {
+            workbookId: "wb",
+            sheetName: "Sheet1",
+            kind: "table",
+            title: "RevenueByRegion",
+            rect,
+            tokenCount: 50,
+          },
+        },
+      ];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "revenue by region",
+    workbookId: "wb",
+    topK: 2,
+    vectorStore,
+    embedder,
+  });
+
+  assert.ok(calls.queryTopK > 2, "expected oversampled queryK when rerank/dedupe enabled");
+  // After reranking, the table should bubble up; after dedupe, the overlapping dataRegion should be removed.
+  assert.deepEqual(results.map((r) => r.id), ["table"]);
+});
+
 test("searchWorkbookRag respects AbortSignal", async () => {
   const embedder = new HashEmbedder({ dimension: 8 });
   const store = new InMemoryVectorStore({ dimension: 8 });
