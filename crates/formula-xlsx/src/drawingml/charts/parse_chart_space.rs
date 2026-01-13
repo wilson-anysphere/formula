@@ -137,7 +137,7 @@ pub fn parse_chart_space(
     let plot_area_style = plot_area_node
         .children()
         .filter(|n| n.is_element())
-        .flat_map(flatten_alternate_content)
+        .flat_map(|n| flatten_alternate_content(n, is_sppr_node))
         .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
@@ -175,7 +175,7 @@ fn parse_plot_area_chart(
     let chart_elems: Vec<_> = plot_area_node
         .children()
         .filter(|n| n.is_element())
-        .flat_map(flatten_alternate_content)
+        .flat_map(|n| flatten_alternate_content(n, is_plot_area_chart_node))
         .filter(|n| n.tag_name().name().ends_with("Chart"))
         .collect();
 
@@ -212,7 +212,9 @@ fn parse_plot_area_chart(
         let plot_area = parse_plot_area_model(primary_chart, &chart_kind, diagnostics);
         let series = primary_chart
             .children()
-            .filter(|n| n.is_element() && n.tag_name().name() == "ser")
+            .filter(|n| n.is_element())
+            .flat_map(|n| flatten_alternate_content(n, is_ser_node))
+            .filter(|n| n.tag_name().name() == "ser")
             .map(|ser| parse_series(ser, diagnostics, None))
             .collect();
         return (chart_kind, plot_area, series);
@@ -229,7 +231,9 @@ fn parse_plot_area_chart(
         let start = series.len();
         for ser in chart_node
             .children()
-            .filter(|n| n.is_element() && n.tag_name().name() == "ser")
+            .filter(|n| n.is_element())
+            .flat_map(|n| flatten_alternate_content(n, is_ser_node))
+            .filter(|n| n.tag_name().name() == "ser")
         {
             series.push(parse_series(ser, diagnostics, Some(plot_index)));
         }
@@ -439,7 +443,7 @@ fn parse_axes(
     for axis in plot_area_node
         .children()
         .filter(|n| n.is_element())
-        .flat_map(flatten_alternate_content)
+        .flat_map(|n| flatten_alternate_content(n, is_plot_area_axis_node))
     {
         let tag = axis.tag_name().name();
         if tag == "catAx" || tag == "valAx" || tag == "dateAx" || tag == "serAx" {
@@ -463,26 +467,53 @@ fn parse_axes(
     axes
 }
 
+fn is_plot_area_chart_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name().ends_with("Chart")
+}
+
+fn is_plot_area_axis_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    if !node.is_element() {
+        return false;
+    }
+    matches!(
+        node.tag_name().name(),
+        "catAx" | "valAx" | "dateAx" | "serAx"
+    )
+}
+
+fn is_sppr_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "spPr"
+}
+
+fn is_layout_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "layout"
+}
+
+fn is_ser_node<'a, 'input>(node: Node<'a, 'input>) -> bool {
+    node.is_element() && node.tag_name().name() == "ser"
+}
+
 /// Flattens `mc:AlternateContent` wrappers for the chartSpace parser.
 ///
 /// Excel often uses markup-compatibility wrappers to conditionally include newer
-/// OOXML content. For chart parsing, we treat these wrappers as transparent:
-/// - non-`AlternateContent` nodes are yielded as-is
-/// - `AlternateContent` yields the element children of the first non-empty `Choice`
-///   branch, falling back to `Fallback` if no `Choice` yields elements.
+/// OOXML content. For chart parsing, we treat these wrappers as transparent.
+///
+/// Branch selection is search-dependent: for an `mc:AlternateContent` node we
+/// first try the first `mc:Choice` branch that contains a node matching `desired`
+/// (searching within that branch), falling back to `mc:Fallback` branches when no
+/// choice matches. This lets us successfully locate e.g. chart-type nodes in
+/// `Fallback` even when `Choice` contains other (unrelated) elements.
 ///
 /// The caller is responsible for any further filtering (e.g., `*Chart`, `*Ax`).
-fn flatten_alternate_content<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
+fn flatten_alternate_content<'a, 'input>(
+    node: Node<'a, 'input>,
+    desired: fn(Node<'a, 'input>) -> bool,
+) -> Vec<Node<'a, 'input>> {
     if node.tag_name().name() != "AlternateContent" {
         return vec![node];
     }
 
-    // Prefer `<mc:Choice>` content (in document order), but fall back to
-    // `<mc:Fallback>` if no choice yields any element children. This matches the
-    // general OOXML expectation that `Choice` contains the "preferred" content,
-    // while `Fallback` exists for older consumers. Importantly, we avoid emitting
-    // both branches to prevent duplicate chart/axis nodes from being interpreted
-    // as a combo chart.
+    let mut first_choice_children: Option<Vec<Node<'a, 'input>>> = None;
     for choice in node
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "Choice")
@@ -490,13 +521,17 @@ fn flatten_alternate_content<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a,
         let children: Vec<_> = choice
             .children()
             .filter(|n| n.is_element())
-            .flat_map(flatten_alternate_content)
+            .flat_map(|n| flatten_alternate_content(n, desired))
             .collect();
-        if !children.is_empty() {
+        if first_choice_children.is_none() && !children.is_empty() {
+            first_choice_children = Some(children.clone());
+        }
+        if choice.descendants().any(desired) {
             return children;
         }
     }
 
+    let mut first_fallback_children: Option<Vec<Node<'a, 'input>>> = None;
     for fallback in node
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "Fallback")
@@ -504,18 +539,28 @@ fn flatten_alternate_content<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a,
         let children: Vec<_> = fallback
             .children()
             .filter(|n| n.is_element())
-            .flat_map(flatten_alternate_content)
+            .flat_map(|n| flatten_alternate_content(n, desired))
             .collect();
-        if !children.is_empty() {
+        if first_fallback_children.is_none() && !children.is_empty() {
+            first_fallback_children = Some(children.clone());
+        }
+        if fallback.descendants().any(desired) {
             return children;
         }
+    }
+
+    if let Some(children) = first_choice_children {
+        return children;
+    }
+    if let Some(children) = first_fallback_children {
+        return children;
     }
 
     // Unknown structure: treat AlternateContent as transparent and just emit its
     // direct element children.
     node.children()
         .filter(|n| n.is_element())
-        .flat_map(flatten_alternate_content)
+        .flat_map(|n| flatten_alternate_content(n, desired))
         .collect()
 }
 
@@ -1253,7 +1298,9 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
 fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
     let layout_node = node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "layout")?;
+        .filter(|n| n.is_element())
+        .flat_map(|n| flatten_alternate_content(n, is_layout_node))
+        .find(|n| n.tag_name().name() == "layout")?;
     let manual_node = layout_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;

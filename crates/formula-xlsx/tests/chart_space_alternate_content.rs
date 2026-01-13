@@ -11,6 +11,10 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
   <c:chart>
     <c:plotArea>
       <mc:AlternateContent>
+        <mc:Choice>
+          <!-- Non-chart elements can appear in Choice while the chart type lives in Fallback. -->
+          <c:spPr />
+        </mc:Choice>
         <mc:Fallback>
           <c:barChart>
             <c:barDir val="col"/>
