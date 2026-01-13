@@ -2559,11 +2559,10 @@ test("Completion client request is structured and completion inserts at the curs
     surroundingCells: createMockCellContext({}),
   });
 
-  assert.deepEqual(seenReq, {
-    input: currentInput,
-    cursorPosition: currentInput.length,
-    cellA1: "A1",
-  });
+  assert.equal(seenReq?.input, currentInput);
+  assert.equal(seenReq?.cursorPosition, currentInput.length);
+  assert.equal(seenReq?.cellA1, "A1");
+  assert.equal(typeof seenReq?.signal?.aborted, "boolean");
   assert.ok(
     suggestions.some(s => s.text === "=1+2"),
     `Expected the completion to be inserted, got: ${suggestions.map(s => s.text).join(", ")}`
@@ -3393,11 +3392,10 @@ test("Completion client request falls back to A1 when cellRef is invalid", async
     surroundingCells: createMockCellContext({}),
   });
 
-  assert.deepEqual(seenReq, {
-    input: currentInput,
-    cursorPosition: currentInput.length,
-    cellA1: "A1",
-  });
+  assert.equal(seenReq?.input, currentInput);
+  assert.equal(seenReq?.cursorPosition, currentInput.length);
+  assert.equal(seenReq?.cellA1, "A1");
+  assert.equal(typeof seenReq?.signal?.aborted, "boolean");
   assert.ok(Array.isArray(suggestions));
 });
 

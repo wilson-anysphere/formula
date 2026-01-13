@@ -289,13 +289,16 @@ export class TabCompletionEngine {
     const cell = safeNormalizeCellRef(context?.cellRef);
 
     try {
+      const controller = new AbortController();
       const completion = await withTimeout(
         this.completionClient.completeTabCompletion({
           input,
           cursorPosition: cursor,
           cellA1: safeToA1(cell),
+          signal: controller.signal,
         }),
-        this.completionTimeoutMs
+        this.completionTimeoutMs,
+        () => controller.abort()
       );
 
       const suggestionText = normalizeBackendCompletion(input, cursor, completion);
@@ -1582,14 +1585,33 @@ async function attachPreviews(suggestions, context, previewEvaluator) {
  * @template T
  * @param {Promise<T>} promise
  * @param {number} timeoutMs
+ * @param {(() => void) | undefined} onTimeout
  * @returns {Promise<T>}
  */
-function withTimeout(promise, timeoutMs) {
+function withTimeout(promise, timeoutMs, onTimeout) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
-  ]);
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      try {
+        onTimeout?.();
+      } catch {
+        // ignore
+      }
+      reject(new Error("timeout"));
+    }, timeoutMs);
+
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
 }
 
 const DEFAULT_CELL_REF = Object.freeze({ row: 0, col: 0 });
