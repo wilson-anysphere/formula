@@ -41,6 +41,43 @@ describe("ConflictUiController", () => {
     container.remove();
   });
 
+  it("ignores errors thrown by onNavigateToCell", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+    const onNavigateToCell = vi.fn(() => {
+      throw new Error("boom");
+    });
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+      onNavigateToCell,
+    });
+
+    ui.addConflict({
+      id: "c_jump_throw",
+      kind: "formula",
+      cell: { sheetId: "Sheet1", row: 3, col: 2 },
+      cellKey: "Sheet1:3:2",
+      localFormula: "=1",
+      remoteFormula: "=2",
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const jump = container.querySelector<HTMLButtonElement>('[data-testid="conflict-jump-to-cell"]');
+    expect(jump).not.toBeNull();
+    expect(() => jump!.click()).not.toThrow();
+    expect(onNavigateToCell).toHaveBeenCalledWith({ sheetId: "Sheet1", row: 3, col: 2 });
+
+    ui.destroy();
+    container.remove();
+  });
+
   it("applies a user label resolver when rendering the remote (theirs) panel label", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

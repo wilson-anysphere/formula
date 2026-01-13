@@ -163,7 +163,11 @@ export class ConflictUiController {
         if (!sheetId) return;
         if (!Number.isInteger(row) || row < 0) return;
         if (!Number.isInteger(col) || col < 0) return;
-        this.onNavigateToCell({ sheetId, row, col });
+        try {
+          this.onNavigateToCell({ sheetId, row, col });
+        } catch {
+          // Best-effort: ignore navigation failures so conflict UI remains usable.
+        }
       })
     );
 
