@@ -126,6 +126,16 @@ copy that:
 - truncates tool `parameters` and `audit_result_summary` similarly
 - drops full tool `result` payloads
 
+When compaction happens, `input`/tool payloads are replaced with a JSON-friendly summary object:
+
+```ts
+{
+  audit_truncated: true,
+  audit_original_chars: number,
+  audit_json: string // truncated JSON string prefix (may not be parseable JSON)
+}
+```
+
 In extreme cases (very large inputs / tool logs), the compaction step may also drop some tool calls
 and optional fields to fit under the cap.
 

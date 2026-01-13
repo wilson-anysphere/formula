@@ -22,6 +22,16 @@ const store = new BoundedAIAuditStore(new LocalStorageAIAuditStore(), {
 });
 ```
 
+When an entry is compacted, oversized fields like `input` and tool payloads are replaced with:
+
+```ts
+{
+  audit_truncated: true,
+  audit_original_chars: number,
+  audit_json: string // truncated JSON prefix (may not be parseable JSON)
+}
+```
+
 Or explicitly:
 
 ```ts
