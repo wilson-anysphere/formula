@@ -283,6 +283,17 @@
   color: var(--error);
 }
 
+.collab-panel__message--warning {
+  color: var(--warning);
+}
+
+.collab-branch-manager {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .collab-version-history {
   flex: 1;
   min-height: 0;
@@ -387,6 +398,18 @@
 
 .branch-manager__item-title {
   font-weight: 600;
+}
+
+.branch-manager__current-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .branch-manager__item-description {

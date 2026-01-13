@@ -25,6 +25,7 @@ export type Actor = { userId: string; role: "owner" | "admin" | "editor" | "comm
 
 export type BranchService = {
   listBranches(): Promise<Branch[]>;
+  getCurrentBranchName(): Promise<string>;
   createBranch(actor: Actor, input: { name: string; description?: string }): Promise<Branch>;
   renameBranch(actor: Actor, input: { oldName: string; newName: string }): Promise<void>;
   deleteBranch(actor: Actor, input: { name: string }): Promise<void>;
@@ -45,13 +46,19 @@ export function BranchManagerPanel({
   onStartMerge: (sourceBranch: string) => void;
 }) {
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [currentBranchName, setCurrentBranchName] = useState<string | null>(null);
   const [newBranchName, setNewBranchName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const reload = async () => {
     try {
       setError(null);
-      setBranches(await branchService.listBranches());
+      const [nextBranches, current] = await Promise.all([
+        branchService.listBranches(),
+        branchService.getCurrentBranchName(),
+      ]);
+      setBranches(nextBranches);
+      setCurrentBranchName(current);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -59,7 +66,7 @@ export function BranchManagerPanel({
 
   useEffect(() => {
     void reload();
-  }, []);
+  }, [branchService]);
 
   const canManage = useMemo(() => actor.role === "owner" || actor.role === "admin", [actor.role]);
 
@@ -101,13 +108,18 @@ export function BranchManagerPanel({
       </div>
 
       <ul className="branch-manager__list">
-        {branches.map((b) => (
+        {branches.map((b) => {
+          const isCurrent = b.name === currentBranchName;
+          return (
           <li
             key={b.id}
-            className="branch-manager__item"
+            className={isCurrent ? "branch-manager__item branch-manager__item--current" : "branch-manager__item"}
           >
             <div className="branch-manager__item-content">
-              <div className="branch-manager__item-title">{b.name}</div>
+              <div className="branch-manager__item-title">
+                {b.name}
+                {isCurrent ? <span className="branch-manager__current-badge">{t("branchManager.current")}</span> : null}
+              </div>
               {b.description ? <div className="branch-manager__item-description">{b.description}</div> : null}
             </div>
             <div className="branch-manager__item-actions">
@@ -128,7 +140,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.rename")}
               </button>
               <button
-                disabled={!canManage}
+                disabled={!canManage || isCurrent}
                 onClick={async () => {
                   try {
                     await branchService.checkoutBranch(actor, { name: b.name });
@@ -141,7 +153,7 @@ export function BranchManagerPanel({
                 {t("branchManager.actions.switch")}
               </button>
               <button
-                disabled={!canManage || b.name === "main"}
+                disabled={!canManage || b.name === "main" || isCurrent}
                 onClick={async () => {
                   const ok = await nativeDialogs.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }));
                   if (!ok) return;
@@ -163,7 +175,8 @@ export function BranchManagerPanel({
               </button>
             </div>
           </li>
-        ))}
+        );
+        })}
       </ul>
     </div>
   );

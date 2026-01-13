@@ -222,11 +222,49 @@ function CollabBranchManagerPanel({
 }) {
   const actor = useMemo<BranchActor>(() => {
     const userId = session.presence?.localPresence?.id ?? "desktop";
-    return { userId, role: "owner" };
+    const roleMaybe = (session as any)?.permissions?.role;
+    const role: BranchActor["role"] =
+      roleMaybe === "owner" ||
+      roleMaybe === "admin" ||
+      roleMaybe === "editor" ||
+      roleMaybe === "commenter" ||
+      roleMaybe === "viewer"
+        ? roleMaybe
+        : "owner";
+    return { userId, role };
   }, [session]);
   const docId = session.doc.guid;
 
-  const store = useMemo(() => new YjsBranchStore({ ydoc: session.doc }), [session]);
+  const { store, storeWarning } = useMemo(() => {
+    const chunkSize = 64 * 1024;
+    const maxChunksPerTransaction = 8;
+
+    const proc = (globalThis as any).process;
+    const isNodeRuntime = Boolean(proc?.versions?.node);
+    const hasCompressionStream = typeof (globalThis as any).CompressionStream !== "undefined";
+    const hasDecompressionStream = typeof (globalThis as any).DecompressionStream !== "undefined";
+
+    try {
+      if (!isNodeRuntime && (!hasCompressionStream || !hasDecompressionStream)) {
+        throw new Error("CompressionStream is unavailable");
+      }
+      return {
+        store: new YjsBranchStore({
+          ydoc: session.doc,
+          payloadEncoding: "gzip-chunks",
+          chunkSize,
+          maxChunksPerTransaction,
+        }),
+        storeWarning: null as string | null,
+      };
+    } catch (e) {
+      return {
+        store: new YjsBranchStore({ ydoc: session.doc, payloadEncoding: "json" }),
+        storeWarning:
+          "Branch payload compression is unavailable in this environment. Falling back to JSON payloads; large branch commits may fail to sync.",
+      };
+    }
+  }, [session.doc]);
   const branchService = useMemo(() => new BranchService({ docId, store }), [docId, store]);
 
   const [error, setError] = useState<string | null>(null);
@@ -260,6 +298,7 @@ function CollabBranchManagerPanel({
     };
 
     return {
+      getCurrentBranchName: () => branchService.getCurrentBranchName(),
       listBranches: () => branchService.listBranches(),
       createBranch: async (a: BranchActor, input: { name: string; description?: string }) => {
         await commitCurrentState("auto: create branch");
@@ -304,22 +343,28 @@ function CollabBranchManagerPanel({
 
   if (mergeSource) {
     return (
-      <MergeBranchPanel
-        actor={actor}
-        branchService={workflow}
-        sourceBranch={mergeSource}
-        sheetNameResolver={sheetNameResolver ?? null}
-        onClose={() => setMergeSource(null)}
-      />
+      <div className="collab-branch-manager">
+        {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
+        <MergeBranchPanel
+          actor={actor}
+          branchService={workflow}
+          sourceBranch={mergeSource}
+          sheetNameResolver={sheetNameResolver ?? null}
+          onClose={() => setMergeSource(null)}
+        />
+      </div>
     );
   }
 
   return (
-    <BranchManagerPanel
-      actor={actor}
-      branchService={workflow}
-      onStartMerge={(sourceBranch) => setMergeSource(sourceBranch)}
-    />
+    <div className="collab-branch-manager">
+      {storeWarning ? <div className="collab-panel__message collab-panel__message--warning">{storeWarning}</div> : null}
+      <BranchManagerPanel
+        actor={actor}
+        branchService={workflow}
+        onStartMerge={(sourceBranch) => setMergeSource(sourceBranch)}
+      />
+    </div>
   );
 }
 

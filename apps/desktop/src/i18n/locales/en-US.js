@@ -109,6 +109,7 @@ export const enUS = {
   "print.pageSetup.margins.bottom": "Bottom",
   "print.pageSetup.close": "Close",
   "branchManager.title": "Branches",
+  "branchManager.current": "Current",
   "branchManager.permissionWarning": "Branch operations require owner/admin permissions.",
   "branchManager.newBranch.placeholder": "new branch name",
   "branchManager.newBranch.create": "Create",
