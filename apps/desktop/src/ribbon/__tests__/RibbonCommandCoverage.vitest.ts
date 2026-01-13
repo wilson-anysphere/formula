@@ -4,6 +4,7 @@ import { CommandRegistry } from "../../extensions/commandRegistry.js";
 import { createDefaultLayout, openPanel, closePanel } from "../../layout/layoutState.js";
 import { panelRegistry } from "../../panels/panelRegistry.js";
 import { registerBuiltinCommands } from "../../commands/registerBuiltinCommands.js";
+import { registerNumberFormatCommands } from "../../commands/registerNumberFormatCommands.js";
 import { registerWorkbenchFileCommands } from "../../commands/registerWorkbenchFileCommands.js";
 
 import { defaultRibbonSchema } from "../ribbonSchema";
@@ -135,6 +136,17 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       },
     });
 
+    // Number format commands are registered in the desktop shell via `registerNumberFormatCommands(...)`
+    // (today invoked from `apps/desktop/src/main.ts`). Register them here so ribbon ids like
+    // `format.numberFormat.accounting.*` stay covered without needing a long stub list.
+    registerNumberFormatCommands({
+      commandRegistry,
+      applyFormattingToSelection: () => {},
+      getActiveCellNumberFormat: () => null,
+      t: (key) => key,
+      category: null,
+    });
+
     // Some canonical commands are still registered inline in `apps/desktop/src/main.ts`
     // (because they depend on UI dialogs / selection helpers). Mirror those ids here so
     // this test remains a Ribbon↔CommandRegistry drift guard even before command
@@ -145,10 +157,9 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       "format.toggleBold",
       "format.toggleItalic",
       "format.toggleUnderline",
+      "format.toggleStrikethrough",
       "format.toggleWrapText",
-      "format.numberFormat.currency",
-      "format.numberFormat.percent",
-      "format.numberFormat.date",
+      "format.openFormatCells",
     ]) {
       if (commandRegistry.getCommand(id)) continue;
       commandRegistry.registerBuiltinCommand(id, id, () => {});
