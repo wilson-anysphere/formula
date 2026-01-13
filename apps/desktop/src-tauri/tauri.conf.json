@@ -134,7 +134,7 @@
       "active": true,
       "dialog": false,
       "endpoints": ["https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json"],
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2RDZCNkU4Qjk5RUUwRDEKUldUUjRKNjU2TGJXaG02dEloekV3WWMzbzRZZTZkdGIvejlJdHJkOHpRQ3JLQjNIb0p0YWVYTCsK",
       "windows": {
         "installMode": "passive"
       }

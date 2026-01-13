@@ -7,7 +7,7 @@ const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
 const relativeConfigPath = path.relative(repoRoot, configPath);
 
-const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
+const PLACEHOLDER_PUBKEY_MARKER = "REPLACE_WITH";
 const PLACEHOLDER_ENDPOINTS = new Set([
   // Documented as a placeholder in docs/release.md.
   "https://releases.formula.app/{{target}}/{{current_version}}",
@@ -61,9 +61,9 @@ function main() {
       `  cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate`,
       `See docs/release.md ("Tauri updater keys").`,
     ]);
-  } else if (pubkey === PLACEHOLDER_PUBKEY) {
+  } else if (pubkey.includes(PLACEHOLDER_PUBKEY_MARKER)) {
     errBlock(`Invalid updater config: plugins.updater.pubkey`, [
-      `Still set to the placeholder value "${PLACEHOLDER_PUBKEY}".`,
+      `Looks like a placeholder value (contains "${PLACEHOLDER_PUBKEY_MARKER}").`,
       `Replace it with the real updater public key (safe to commit).`,
       `The matching private key must be present in GitHub Actions as the TAURI_PRIVATE_KEY secret.`,
       `See docs/release.md ("Tauri updater keys").`,

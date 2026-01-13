@@ -274,8 +274,7 @@ Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). Rele
 updater public key (`pubkey`) and fetch update metadata from `endpoints` (this repo defaults to the
 GitHub Releases `latest.json` manifest; see `docs/release.md`):
 
-- `plugins.updater.pubkey` → updater public key (base64; safe to commit). Must match the private key
-  used in CI to sign update artifacts (see `docs/release.md`).
+- `plugins.updater.pubkey` → updater public key (base64; safe to commit; committed in this repo). Must match the private key used in CI (`TAURI_PRIVATE_KEY`) to sign update artifacts (see `docs/release.md`).
 - `plugins.updater.endpoints` → update JSON endpoint(s). This repo defaults to the GitHub Releases manifest:
   - `https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json`
   - (The matching signature, `latest.json.sig`, is uploaded by `tauri-action` and verified using `pubkey`.)
@@ -304,8 +303,8 @@ restart/apply without waiting for a second download. The frontend consumes `upda
 showing a lightweight “Update ready to install” toast and uses the `install_downloaded_update` command
 as part of the restart-to-install flow (falling back to the updater plugin API if needed).
 
-Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
-are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
+Release CI note: when `plugins.updater.active=true`, tagged releases validate `pubkey`/`endpoints`
+via `node scripts/check-updater-config.mjs`.
 
 ### `plugins.notification`
 
@@ -366,7 +365,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "active": true,
       "dialog": false,
       "endpoints": ["https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json"],
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+      "pubkey": "<updater public key (see apps/desktop/src-tauri/tauri.conf.json)>"
     },
     "notification": {}
   }

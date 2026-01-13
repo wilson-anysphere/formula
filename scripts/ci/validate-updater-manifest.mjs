@@ -473,11 +473,11 @@ async function main() {
       errors.push(
         `Cannot verify latest.json.sig: missing plugins.updater.pubkey in ${tauriConfigPath}.`,
       );
-    } else if (pubkey.trim() === "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY") {
+    } else if (pubkey.trim().includes("REPLACE_WITH")) {
       // This should already be guarded by scripts/check-updater-config.mjs, but keep the
       // validator robust to future config changes.
       errors.push(
-        `Cannot verify latest.json.sig: updater pubkey is still the placeholder value in ${tauriConfigPath}.`,
+        `Cannot verify latest.json.sig: updater pubkey looks like a placeholder value in ${tauriConfigPath}.`,
       );
     } else {
       verifyLatestJsonSignature(

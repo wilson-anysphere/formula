@@ -76,22 +76,40 @@ incomplete updater manifest.
 
 Tauri's updater verifies update artifacts using an Ed25519 signature.
 
-### Generate a keypair
+This repo already includes the updater **public key** in `apps/desktop/src-tauri/tauri.conf.json`
+(`plugins.updater.pubkey`). Tagged releases must be signed with the matching **private key**.
 
-Run this from the repo root (requires the Tauri CLI, `cargo-tauri`). In agent environments, use
-the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
+### Store the private key in GitHub Actions
+
+Add the following repository secrets (required for release signing):
+
+- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate`
+- `TAURI_KEY_PASSWORD` – optional; only needed if the private key was generated with a password
+
+The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
+
+CI note: if `plugins.updater.active=true`, tagged releases will **fail fast** if these secrets are
+missing (the workflow prints a “Missing Tauri updater signing secrets” error). Without the private
+key, the release workflow cannot generate the updater signature files (`*.sig`) required for
+auto-update.
+
+### (Optional) Generate / rotate a keypair
+
+Only do this if you need to rotate keys (e.g. compromised secret). Run this from the repo root
+(requires the Tauri CLI, `cargo-tauri`, installed from the `tauri-cli` crate). In agent environments,
+use the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
 
 ```bash
 # (Agents) Initialize safe defaults (memory limits, isolated CARGO_HOME, etc.)
 source scripts/agent-init.sh
 
-bash scripts/cargo_agent.sh install cargo-tauri --locked
+bash scripts/cargo_agent.sh install tauri-cli --locked
 (cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate)
 ```
 
 This prints:
-- a **public key** (safe to commit)
-- a **private key** (must be stored as a secret)
+- a **public key** (safe to commit; embed it in `tauri.conf.json`)
+- a **private key** (store it as a secret)
 
 ### Configure the public key in the app
 
@@ -100,8 +118,8 @@ Update `apps/desktop/src-tauri/tauri.conf.json`:
 - `plugins.updater.pubkey` → paste the public key (base64 string)
 - `plugins.updater.endpoints` → point at your update JSON endpoint(s)
 
-CI note: tagged releases will fail if `plugins.updater.pubkey` or `plugins.updater.endpoints` are
-still set to placeholder values. Verify locally with:
+CI note: tagged releases will fail if `plugins.updater.pubkey` or `plugins.updater.endpoints`
+still look like placeholder values. Verify locally with:
 
 ```bash
 node scripts/check-updater-config.mjs
@@ -110,20 +128,6 @@ node scripts/check-updater-config.mjs
 Note: the desktop Rust binary is built with the Cargo feature `desktop` (configured in
 `build.features` inside `tauri.conf.json`) so that unit tests can run without the system WebView
 toolchain.
-
-### Store the private key in GitHub Actions
-
-Add the following repository secrets:
-
-- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate` (see above)
-- `TAURI_KEY_PASSWORD` – the password used to encrypt the private key (if prompted)
-
-The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
-
-CI note: if `plugins.updater.active=true`, tagged releases will **fail fast** if these secrets are
-missing (the workflow prints a “Missing Tauri updater signing secrets” error). Without the private
-key, the release workflow cannot generate the updater signature files (`*.sig`) required for
-auto-update.
 
 ## 3) Code signing (optional but recommended)
 
