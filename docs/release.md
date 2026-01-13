@@ -182,10 +182,15 @@ Add the following repository secrets (required for updater signing; password opt
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
 
-CI note: if `plugins.updater.active=true`, tagged releases will **fail fast** if these secrets are
-missing (the workflow prints a “Missing Tauri updater signing secrets” error). Without the private
-key, the release workflow cannot generate the updater signature files (`*.sig`) required for
-auto-update.
+CI note:
+
+- In the upstream repo (`wilson-anysphere/formula`), tagged releases (and `workflow_dispatch` runs
+  with `upload=true`) will **fail fast** if these secrets are missing (the workflow prints a
+  “Missing Tauri updater signing secrets” error). Without the private key, the release workflow
+  cannot generate the updater signature files (`*.sig`) required for auto-update.
+- On forks/dry-runs without these secrets, the workflow can still build and upload artifacts, but
+  updater signature/manifest validation jobs are skipped and auto-update will not work until you
+  configure your own updater keypair/secrets.
 
 ### (Optional) Generate / rotate a keypair
 
@@ -253,7 +258,7 @@ Secrets used by `tauri-apps/tauri-action`:
 
 - `APPLE_CERTIFICATE` – base64-encoded `.p12` Developer ID certificate
 - `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY` – e.g. `Developer ID Application: Your Company (TEAMID)`
+- `APPLE_SIGNING_IDENTITY` – optional but recommended; e.g. `Developer ID Application: Your Company (TEAMID)`
 - `APPLE_ID` – Apple ID email
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
