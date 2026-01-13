@@ -106,3 +106,26 @@ test("migrateLegacyCellKeys is idempotent", () => {
   assert.deepEqual(second, { migrated: 0, removed: 0, collisions: 0 });
 });
 
+test("migrateLegacyCellKeys deep-clones nested Yjs types (avoids integration errors)", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  const legacyCell = new Y.Map();
+  legacyCell.set("value", 1);
+  const format = new Y.Map();
+  format.set("bold", true);
+  legacyCell.set("format", format);
+
+  cells.set("Sheet1:0,0", legacyCell);
+
+  const result = migrateLegacyCellKeys(doc);
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 0 });
+
+  assert.equal(cells.has("Sheet1:0,0"), false);
+  const migrated = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(migrated);
+  const migratedFormat = migrated.get("format");
+  assert.ok(migratedFormat instanceof Y.Map);
+  assert.notEqual(migratedFormat, format);
+  assert.equal(migratedFormat.get("bold"), true);
+});

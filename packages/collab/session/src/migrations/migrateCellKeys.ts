@@ -48,6 +48,47 @@ function getYMapLike(value: unknown): YMapLike | null {
   return maybe as YMapLike;
 }
 
+function getYMap(value: unknown): any | null {
+  if (value instanceof Y.Map) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/keys/forEach; require Yjs observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getYArray(value: unknown): any | null {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
+function getYText(value: unknown): any | null {
+  if (value instanceof Y.Text) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = value as any;
+  if (typeof maybe.toDelta !== "function") return null;
+  if (typeof maybe.applyDelta !== "function") return null;
+  if (typeof maybe.insert !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
+}
+
 function isEncryptedCellValue(value: unknown): boolean {
   const map = getYMapLike(value);
   if (map) return map.get("enc") !== undefined;
@@ -70,17 +111,49 @@ function deletePlaintextFields(value: unknown): void {
   delete (value as any).formula;
 }
 
-function cloneCellValue(value: unknown, MapCtor: new () => Y.Map<unknown>): unknown {
-  const map = getYMapLike(value);
+function cloneYjsValue(value: unknown): unknown {
+  const map = getYMap(value);
   if (map) {
+    const MapCtor = (map as any).constructor as new () => any;
     const out = new MapCtor();
-    map.forEach((v, k) => {
-      out.set(k, v);
+    map.forEach((v: unknown, k: string) => {
+      out.set(k, cloneYjsValue(v));
     });
     return out;
   }
+
+  const array = getYArray(value);
+  if (array) {
+    const ArrayCtor = (array as any).constructor as new () => any;
+    const out = new ArrayCtor();
+    const items = typeof array.toArray === "function" ? array.toArray() : [];
+    for (const item of items) {
+      out.push([cloneYjsValue(item)]);
+    }
+    return out;
+  }
+
+  const text = getYText(value);
+  if (text) {
+    const TextCtor = (text as any).constructor as new () => any;
+    const out = new TextCtor();
+    out.applyDelta(structuredClone(text.toDelta()));
+    return out;
+  }
+
   if (value && typeof value === "object") return structuredClone(value);
   return value;
+}
+
+function cloneCellValue(value: unknown, MapCtor: new () => Y.Map<unknown>): unknown {
+  const map = getYMapLike(value);
+  if (!map) return cloneYjsValue(value);
+
+  const out = new MapCtor();
+  map.forEach((v, k) => {
+    out.set(k, cloneYjsValue(v));
+  });
+  return out;
 }
 
 function mergeCellValues(params: {
@@ -93,7 +166,7 @@ function mergeCellValues(params: {
   const canonicalMap = getYMapLike(canonical);
   if (canonicalMap) {
     canonicalMap.forEach((v, k) => {
-      out.set(k, v);
+      out.set(k, cloneYjsValue(v));
     });
   }
 
@@ -103,7 +176,7 @@ function mergeCellValues(params: {
     legacyMap.forEach((v, k) => {
       // "merge" is intentionally conservative: keep canonical values when a field
       // exists, but salvage missing fields from legacy payloads.
-      if (out.get(k) === undefined) out.set(k, v);
+      if (out.get(k) === undefined) out.set(k, cloneYjsValue(v));
     });
   }
   return out;
