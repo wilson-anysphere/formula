@@ -336,6 +336,15 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "MAKEARRAY",
+    description: "Returns an array of the specified size by applying a LAMBDA to each element.",
+    args: [
+      { name: "rows", type: "number" },
+      { name: "columns", type: "number" },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
     name: "DAVERAGE",
     description: "Averages values in a list or database that match conditions you specify.",
     args: [

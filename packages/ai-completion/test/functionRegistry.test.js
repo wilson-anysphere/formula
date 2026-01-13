@@ -120,6 +120,7 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Dynamic array helpers
   assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
   assert.ok(registry.isRangeArg("BYCOL", 0), "Expected BYCOL array to be a range");
+  assert.equal(registry.getFunction("MAKEARRAY")?.args?.[2]?.name, "lambda", "Expected MAKEARRAY arg3 to be lambda");
   assert.ok(registry.isRangeArg("MAP", 0), "Expected MAP array to be a range");
   assert.equal(registry.isRangeArg("MAP", 1), false, "Expected MAP lambda not to be a range");
 
