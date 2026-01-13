@@ -31,5 +31,6 @@ export function extractCells(sheet, rect, opts) {
     }
     out.push(row);
   }
+  throwIfAborted(signal);
   return out;
 }

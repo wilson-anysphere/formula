@@ -32,3 +32,20 @@ test("extractCells checks AbortSignal periodically during extraction", () => {
 
   assert.throws(() => extractCells(sheet, rect, { signal: abortController.signal }), { name: "AbortError" });
 });
+
+test("extractCells observes aborts that happen late in a small extraction", () => {
+  const abortController = new AbortController();
+  let cellReads = 0;
+  const sheet = {
+    getCell() {
+      cellReads += 1;
+      // Small rects may not hit the periodic inner-loop check again; ensure we still
+      // throw before returning when aborted.
+      if (cellReads === 2) abortController.abort();
+      return null;
+    },
+  };
+
+  const rect = { r0: 0, c0: 0, r1: 0, c1: 10 };
+  assert.throws(() => extractCells(sheet, rect, { signal: abortController.signal }), { name: "AbortError" });
+});
