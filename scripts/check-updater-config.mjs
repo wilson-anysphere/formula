@@ -58,7 +58,8 @@ function main() {
     errBlock(`Invalid updater config: plugins.updater.pubkey`, [
       `Expected a non-empty string because plugins.updater.active=true.`,
       `Set ${relativeConfigPath} → plugins.updater.pubkey to the public key printed by:`,
-      `  cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate`,
+      `  cd apps/desktop/src-tauri && cargo tauri signer generate`,
+      `  # Agents: cd apps/desktop/src-tauri && bash ../../../scripts/cargo_agent.sh tauri signer generate`,
       `See docs/release.md ("Tauri updater keys").`,
     ]);
   } else if (pubkey.includes(PLACEHOLDER_PUBKEY_MARKER)) {
