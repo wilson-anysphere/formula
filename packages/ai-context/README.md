@@ -71,6 +71,9 @@ Key options:
 - `workbookRag`: enables workbook retrieval (`buildWorkbookContext*`). Requires:
   - `vectorStore` implementing `query(...)` / `upsert(...)` (e.g. `InMemoryVectorStore`, `SqliteVectorStore`)
   - `embedder` implementing `embedTexts([...])` (e.g. `HashEmbedder`)
+  - Optional tuning:
+    - `topK`: default number of retrieved chunks per query (can be overridden per call).
+    - `sampleRows`: how many rows of each workbook chunk to include when generating chunk text during indexing (lower keeps the index smaller/faster).
 
 Many APIs in this package also accept `signal?: AbortSignal` to allow cancellation from UI surfaces.
 
@@ -230,6 +233,37 @@ console.log(workbookCtx.promptContext);
 - `promptContext` (string): token-budgeted context intended for an LLM prompt.
 - `retrieved` (array): retrieved chunks with prompt-safe `text` plus metadata.
 - `indexStats` (object): indexing stats from `packages/ai-rag` (helpful for performance/debug).
+
+### Common options for `buildWorkbookContextFromSpreadsheetApi()`
+
+```js
+const workbookCtx = await cm.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet,
+  workbookId,
+  query,
+
+  // Retrieval:
+  topK: 8,
+
+  // Indexing:
+  // - If you maintain an incremental/persistent index elsewhere, you can skip indexing here.
+  // - Safety: when `dlp` is enabled, indexing normally still runs (so chunk redaction can be applied
+  //   before embedding/persistence). Use `skipIndexingWithDlp: true` only if you already enforced DLP
+  //   during indexing.
+  skipIndexing: false,
+  skipIndexingWithDlp: false,
+
+  // Output shaping:
+  // - Set false if you only want structured `retrieved` results and will format your own prompt.
+  includePromptContext: true,
+
+  // Cancellation:
+  signal,
+
+  // Structured DLP (optional):
+  dlp,
+});
+```
 
 ---
 
