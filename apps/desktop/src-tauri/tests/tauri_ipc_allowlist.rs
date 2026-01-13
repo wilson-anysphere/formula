@@ -151,6 +151,18 @@ fn parse_core_allow_invoke_commands(capability_file: &JsonValue) -> Option<BTree
     Some(commands)
 }
 
+fn format_command_bullets(commands: &BTreeSet<String>) -> String {
+    if commands.is_empty() {
+        "  (none)".to_string()
+    } else {
+        commands
+            .iter()
+            .map(|cmd| format!("  - {cmd}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 #[test]
 fn tauri_main_capability_scopes_to_main_window() {
     let tauri_conf_path = repo_path("tauri.conf.json");
@@ -271,13 +283,29 @@ fn tauri_core_allow_invoke_is_subset_of_allow_invoke_permission() {
         serde_json::from_str(&permission_raw).unwrap_or_else(|err| panic!("invalid JSON: {err}"));
     let allow_invoke = parse_allow_invoke_permission_commands(&permission_file);
 
-    // `core:allow-invoke` is a defense-in-depth allowlist, but it should never grant
-    // access to a command name that isn't also allowed via the application permission
-    // (`allow-invoke`).
-    for cmd in core_allow_invoke {
-        assert!(
-            allow_invoke.contains(&cmd),
-            "`core:allow-invoke` command `{cmd}` missing from application `allow-invoke` permission"
+    // `core:allow-invoke` is a defense-in-depth allowlist, but it must remain *identical* to the
+    // canonical application permission allowlist (`allow-invoke`).
+    //
+    // Subset checks aren't enough: missing commands will break IPC on toolchains that enforce
+    // `core:allow-invoke`, and extra commands widen the available surface area.
+    let missing_from_core: BTreeSet<String> = allow_invoke
+        .difference(&core_allow_invoke)
+        .cloned()
+        .collect();
+    let only_in_core: BTreeSet<String> = core_allow_invoke
+        .difference(&allow_invoke)
+        .cloned()
+        .collect();
+
+    if !missing_from_core.is_empty() || !only_in_core.is_empty() {
+        panic!(
+            "`core:allow-invoke` command list drift detected.\n\n\
+             The per-command allowlist in `src-tauri/capabilities/main.json` (`core:allow-invoke`) must be identical to the canonical application permission allowlist in `src-tauri/permissions/allow-invoke.json` (`allow-invoke` -> `commands.allow`).\n\n\
+             Commands missing from `core:allow-invoke` (present in `allow-invoke`):\n{}\n\n\
+             Commands present only in `core:allow-invoke` (not in `allow-invoke`):\n{}\n\n\
+             Keep these lists identical to avoid subtle capability drift.\n",
+            format_command_bullets(&missing_from_core),
+            format_command_bullets(&only_in_core)
         );
     }
 }
