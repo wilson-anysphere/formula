@@ -185,8 +185,8 @@ function computeSheetIndexSignature(sheet, options = {}) {
 function normalizeNonNegativeInt(value, fallback) {
   if (value === undefined || value === null) return fallback;
   const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(0, Math.floor(n));
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
 }
 
 // NOTE: workbook schema extraction helpers live in `workbookSchema.js`. ContextManager

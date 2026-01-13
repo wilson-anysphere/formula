@@ -236,6 +236,15 @@ test("buildContext: maxChunkRows affects sheet-level retrieved chunk previews", 
   assert.doesNotMatch(previewLarge, /… \(/);
 });
 
+test("buildContext: negative maxContextRows/maxContextCells fall back to defaults", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: -1, maxContextCells: -1 });
+  const sheet = makeSheet([["r1"], ["r2"], ["r3"], ["r4"], ["r5"]]);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100 });
+  assert.equal(out.sampledRows.length, 5);
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:A5");
+});
+
 test("buildContext: respects AbortSignal", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
   const sheet = makeSheet([
