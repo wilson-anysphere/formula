@@ -64,9 +64,10 @@ pub(crate) fn relationship_semantic_id_map(
     rels_part: &str,
     bytes: &[u8],
 ) -> Result<Option<BTreeMap<RelationshipSemanticKey, String>>> {
-    let text =
-        std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
-    let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
+    let text = super::decode_xml_bytes(bytes)
+        .with_context(|| format!("decode xml bytes for {rels_part}"))?;
+    let doc =
+        Document::parse(text.as_ref()).with_context(|| format!("parse xml for {rels_part}"))?;
 
     let mut map: BTreeMap<RelationshipSemanticKey, String> = BTreeMap::new();
 
@@ -82,7 +83,9 @@ pub(crate) fn relationship_semantic_id_map(
         let mode = RelationshipTargetMode::from_attribute(node.attribute("TargetMode"));
         let resolved_target = match mode {
             RelationshipTargetMode::External => target.replace('\\', "/"),
-            RelationshipTargetMode::Internal => super::resolve_relationship_target(rels_part, target),
+            RelationshipTargetMode::Internal => {
+                super::resolve_relationship_target(rels_part, target)
+            }
         };
 
         let key = RelationshipSemanticKey {
