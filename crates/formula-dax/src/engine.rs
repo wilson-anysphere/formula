@@ -343,6 +343,41 @@ impl DaxEngine {
                     Ok(Value::Blank)
                 }
             }
+            "SWITCH" => {
+                if args.len() < 3 {
+                    return Err(DaxError::Eval(
+                        "SWITCH expects at least 3 arguments".into(),
+                    ));
+                }
+
+                // DAX evaluates the expression once, then compares it against each value in
+                // order, returning the result for the first match.
+                let expr = self.eval_scalar(model, &args[0], filter, row_ctx)?;
+
+                // DAX syntax:
+                //   SWITCH(<expr>, <value1>, <result1>, ..., [<else>])
+                //
+                // After the initial expression, arguments come in (value, result) pairs.
+                // If the total arity is even, an <else> expression is provided as the last
+                // argument. Otherwise, missing <else> returns BLANK().
+                let has_else = args.len() % 2 == 0;
+                let pair_end = if has_else { args.len() - 1 } else { args.len() };
+
+                let mut idx = 1usize;
+                while idx + 1 < pair_end {
+                    let value = self.eval_scalar(model, &args[idx], filter, row_ctx)?;
+                    if compare_values(&BinaryOp::Equals, &expr, &value)? {
+                        return self.eval_scalar(model, &args[idx + 1], filter, row_ctx);
+                    }
+                    idx += 2;
+                }
+
+                if has_else {
+                    self.eval_scalar(model, &args[args.len() - 1], filter, row_ctx)
+                } else {
+                    Ok(Value::Blank)
+                }
+            }
             "DIVIDE" => {
                 if args.len() < 2 || args.len() > 3 {
                     return Err(DaxError::Eval("DIVIDE expects 2 or 3 arguments".into()));

@@ -401,6 +401,48 @@ fn coalesce_returns_first_non_blank_value() {
 }
 
 #[test]
+fn switch_supports_simple_and_true_idiom_forms() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SWITCH(1, 0, \"a\", 1, \"b\", \"c\")",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("b")
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SWITCH(1, 0, \"a\", 2, \"b\", \"c\")",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("c")
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SWITCH(TRUE(), 1=2, \"no\", 2=2, \"yes\")",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        Value::from("yes")
+    );
+}
+
+#[test]
 fn selectedvalue_and_hasonevalue_use_filter_context() {
     let mut model = build_model();
     model
