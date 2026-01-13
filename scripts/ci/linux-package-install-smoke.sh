@@ -82,6 +82,20 @@ find_pkg_dirs() {
     exit 1
   fi
 
+  # Canonicalize + de-dupe roots (avoid double-scanning when CARGO_TARGET_DIR overlaps defaults).
+  local -A seen_roots=()
+  local -a uniq_roots=()
+  local root_abs
+  for root in "${search_roots[@]}"; do
+    root_abs="$(cd "$root" && pwd -P)"
+    if [[ -n "${seen_roots[${root_abs}]:-}" ]]; then
+      continue
+    fi
+    seen_roots["${root_abs}"]=1
+    uniq_roots+=("${root_abs}")
+  done
+  search_roots=("${uniq_roots[@]}")
+
   local -a files
   # Use globs instead of `find` to avoid traversing the entire Cargo target directory,
   # which can contain many build artifacts. The bundle output layout is predictable:
