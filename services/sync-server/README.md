@@ -539,6 +539,7 @@ Notable metrics (prefix `sync_server_`):
   - `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB). Set to `0` to disable (not recommended).
 
 - WebSocket upgrade URL/token size limits (defense-in-depth against oversized request lines / auth headers):
+  - These limits help prevent memory/CPU spikes and log amplification from attacker-controlled, extremely large upgrade requests (before URL parsing, token hashing/verification, or token introspection).
 
   - `SYNC_SERVER_MAX_URL_BYTES` (default: `8192`; set to `0` to disable).
     - If exceeded, the websocket upgrade is rejected with HTTP `414` and increments
