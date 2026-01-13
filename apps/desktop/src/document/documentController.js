@@ -3623,46 +3623,18 @@ export class DocumentController {
   }
 
   /**
-   * Best-effort permission gate for sheet-level view mutations (freeze panes, row/col sizes).
+   * Sheet-level view mutations (freeze panes, row/col sizes) are treated as view/UI
+   * interactions and are allowed even when cell edits are blocked via `canEditCell`.
    *
-   * Most DocumentController mutations are per-cell and can be checked directly via
-   * `canEditCell({ sheetId, row, col })`. Sheet-view changes don't target a single cell,
-   * but in collab/read-only contexts we still need to avoid applying local mutations
-   * when the current user cannot edit *any* cells.
-   *
-   * We probe a small set of early-sheet coordinates to decide whether sheet-view edits
-   * should be allowed. This is intentionally permissive for editors with partial range
-   * restrictions (if at least one probe cell is editable, allow sheet-view edits), while
-   * still blocking fully read-only roles like `viewer` / `commenter`.
+   * In collaborative scenarios, the collaboration binders are responsible for deciding
+   * whether these mutations should be persisted into shared state (e.g. viewers/commenters
+   * should not write them into Yjs, but can still adjust their local view).
    *
    * @param {string} sheetId
    * @returns {boolean}
    */
   #canEditSheetView(sheetId) {
-    if (!this.canEditCell) return true;
-
-    // Probe a few representative coordinates so a small restricted range near the
-    // origin (e.g. header cells like A1:B2) doesn't unnecessarily block sheet-view
-    // changes for an otherwise-editable sheet.
-    const probes = [
-      { row: 0, col: 0 },
-      { row: 0, col: 1 },
-      { row: 1, col: 0 },
-      { row: 1, col: 1 },
-      { row: 10, col: 10 },
-      { row: 100, col: 100 },
-      { row: 1000, col: 1000 },
-      { row: 0, col: 1000 },
-      { row: 1000, col: 0 },
-    ];
-    for (const probe of probes) {
-      try {
-        if (this.canEditCell({ sheetId, row: probe.row, col: probe.col })) return true;
-      } catch {
-        // Ignore guard errors; treat as "not editable" for this probe.
-      }
-    }
-    return false;
+    return true;
   }
 
   /**
