@@ -2958,6 +2958,13 @@ impl DaxEngine {
                         return Err(DaxError::Eval("RELATEDTABLE requires row context".into()));
                     };
 
+                    let current_row = row_ctx
+                        .row_for(current_table)
+                        .ok_or_else(|| DaxError::Eval("missing current row".into()))?;
+
+                    // Resolve a unique active relationship chain in the reverse direction
+                    // (one-to-many at each hop). This also catches ambiguous cases where multiple
+                    // relationship paths exist.
                     let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
                     for &idx in filter.relationship_overrides() {
                         if let Some(rel) = model.relationships().get(idx) {
@@ -2977,17 +2984,25 @@ impl DaxEngine {
                         is_active && !filter.is_relationship_disabled(idx)
                     };
 
-                    let current_row = row_ctx
-                        .row_for(current_table)
-                        .ok_or_else(|| DaxError::Eval("missing current row".into()))?;
+                    let Some(path) = model.find_unique_active_relationship_path(
+                        current_table,
+                        target_table,
+                        RelationshipPathDirection::OneToMany,
+                        |idx, rel| is_relationship_active(idx, rel),
+                    )?
+                    else {
+                        return Err(DaxError::Eval(format!(
+                            "no active relationship between {current_table} and {target_table}"
+                        )));
+                    };
 
                     // Fast path: direct relationship `target_table (many) -> current_table (one)`.
-                    if let Some(rel) = model.relationships().iter().enumerate().find_map(|(idx, rel)| {
-                        (rel.rel.from_table == *target_table
-                            && rel.rel.to_table == current_table
-                            && is_relationship_active(idx, rel))
-                        .then_some(rel)
-                    }) {
+                    if path.len() == 1 {
+                        let rel = model
+                            .relationships()
+                            .get(path[0])
+                            .expect("relationship index from path");
+
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
@@ -3002,13 +3017,13 @@ impl DaxEngine {
                             .value_by_idx(current_row, to_idx)
                             .unwrap_or(Value::Blank);
 
-                        if key.is_blank() {
-                            let sets = resolve_row_sets(model, filter)?;
-                            let allowed = sets
-                                .get(target_table)
-                                .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
+                        let sets = resolve_row_sets(model, filter)?;
+                        let allowed = sets
+                            .get(target_table)
+                            .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
-                            let mut rows = Vec::new();
+                        let mut rows: Vec<usize> = Vec::new();
+                        if key.is_blank() {
                             for (fk, candidates) in &rel.from_index {
                                 if fk.is_blank() || !rel.to_index.contains_key(fk) {
                                     for &row in candidates {
@@ -3018,23 +3033,7 @@ impl DaxEngine {
                                     }
                                 }
                             }
-
-                            return Ok(TableResult {
-                                table: target_table.clone(),
-                                rows,
-                            });
-                        }
-
-                        // `RELATEDTABLE` is frequently used inside iterators. Use the relationship
-                        // index to fetch candidate fact rows, and only then apply the existing filter
-                        // context (including relationship propagation).
-                        let sets = resolve_row_sets(model, filter)?;
-                        let allowed = sets
-                            .get(target_table)
-                            .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
-
-                        let mut rows = Vec::new();
-                        if let Some(candidates) = rel.from_index.get(&key) {
+                        } else if let Some(candidates) = rel.from_index.get(&key) {
                             for &row in candidates {
                                 if allowed.get(row).copied().unwrap_or(false) {
                                     rows.push(row);
@@ -3047,21 +3046,6 @@ impl DaxEngine {
                             rows,
                         });
                     }
-
-                    // Multi-hop case: follow a unique active relationship chain in the reverse
-                    // direction (one-to-many at each hop).
-                    let Some(path) = model.find_unique_active_relationship_path(
-                        current_table,
-                        target_table,
-                        RelationshipPathDirection::OneToMany,
-                        |idx, rel| is_relationship_active(idx, rel),
-                    )?
-                    else {
-                        return Err(DaxError::Eval(format!(
-                            "no active relationship between {current_table} and {target_table}"
-                        )));
-                    };
-
                     let mut current_rows: Vec<usize> = vec![current_row];
                     for rel_idx in path {
                         let rel_info = model
