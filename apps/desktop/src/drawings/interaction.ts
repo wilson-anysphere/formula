@@ -66,8 +66,10 @@ export class DrawingInteractionController {
     const selectedIndex = this.selectedId != null ? index.byId.get(this.selectedId) : undefined;
     const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
     if (selectedObject && !inHeader) {
-      const objectPane = resolveAnchorPane(selectedObject.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-      if (objectPane.inFrozenCols === pointInFrozenCols && objectPane.inFrozenRows === pointInFrozenRows) {
+      const anchor = selectedObject.anchor;
+      const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+      const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
+      if (objInFrozenCols === pointInFrozenCols && objInFrozenRows === pointInFrozenRows) {
         const selectedBounds = objectToScreenRect(
           selectedObject,
           viewport,
@@ -215,10 +217,12 @@ export class DrawingInteractionController {
       const selectedIndex = index.byId.get(this.selectedId);
       if (selectedIndex != null) {
         const selected = index.ordered[selectedIndex]!;
-        const selectedPane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        const anchor = selected.anchor;
+        const selectedInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < paneLayout.frozenRows;
+        const selectedInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < paneLayout.frozenCols;
         if (
-          selectedPane.inFrozenCols === pointInFrozenCols &&
-          selectedPane.inFrozenRows === pointInFrozenRows
+          selectedInFrozenCols === pointInFrozenCols &&
+          selectedInFrozenRows === pointInFrozenRows
         ) {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
           const handle = hitTestResizeHandle(bounds, x, y);
@@ -550,9 +554,11 @@ function objectToScreenRect(
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
   const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
 
-  const pane = resolveAnchorPane(obj.anchor, frozenRows, frozenCols);
-  const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
-  const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
+  const anchor = obj.anchor;
+  const inFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+  const inFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+  const scrollX = inFrozenCols ? 0 : viewport.scrollX;
+  const scrollY = inFrozenRows ? 0 : viewport.scrollY;
   const target = out ?? { x: 0, y: 0, width: 0, height: 0 };
   target.x = rect.x - scrollX + headerOffsetX;
   target.y = rect.y - scrollY + headerOffsetY;
@@ -630,14 +636,4 @@ function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry): Pane
   return { frozenRows, frozenCols, headerOffsetX, headerOffsetY, frozenBoundaryX, frozenBoundaryY };
 }
 
-function resolveAnchorPane(
-  anchor: DrawingObject["anchor"],
-  frozenRows: number,
-  frozenCols: number,
-): { inFrozenRows: boolean; inFrozenCols: boolean } {
-  if (anchor.type === "absolute") return { inFrozenRows: false, inFrozenCols: false };
-  return {
-    inFrozenRows: anchor.from.cell.row < frozenRows,
-    inFrozenCols: anchor.from.cell.col < frozenCols,
-  };
-}
+// NOTE: Call sites avoid allocating pane objects by computing frozen-row/col membership inline.
