@@ -1277,24 +1277,114 @@ export class ToolExecutor {
       );
     }
     const measures: string[] = params.measures ?? [];
+    const requested = new Set(measures);
+
+    const needsDistributionValues = requested.has("median") || requested.has("mode") || requested.has("quartiles");
+
+    const needsStreamingAgg =
+      requested.has("count") ||
+      requested.has("sum") ||
+      requested.has("mean") ||
+      requested.has("stdev") ||
+      requested.has("variance") ||
+      requested.has("min") ||
+      requested.has("max");
+
+    const wantsCorrelation = requested.has("correlation");
+    const cols = range.endCol - range.startCol + 1;
+    const correlationSupported = cols === 2;
+    const needsStreamingCorrelation = wantsCorrelation && correlationSupported;
+
     const cells = this.spreadsheet.readRange(range);
-    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
-    const values: number[] = [];
+    const includeFormulaValues = Boolean(
+      this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW)
+    );
+    const values: number[] | null = needsDistributionValues ? [] : null;
     let redactedCellCount = 0;
+
+    // Basic streaming aggregates (Welford).
+    let count = 0;
+    let sum = 0;
+    let mean = 0;
+    let m2 = 0;
+    let min = 0;
+    let max = 0;
+    let hasMinMax = false;
+
+    // Streaming correlation (online covariance / Pearson r).
+    let correlationCount = 0;
+    let correlationMeanX = 0;
+    let correlationMeanY = 0;
+    let correlationC = 0;
+    let correlationM2X = 0;
+    let correlationM2Y = 0;
+
     for (let r = 0; r < cells.length; r++) {
       const row = cells[r]!;
+      // Track correlation pair values for this row without re-reading cells (important for Proxy-based rows).
+      let leftAllowed = true;
+      let rightAllowed = true;
+      let leftValue: number | null = null;
+      let rightValue: number | null = null;
+
       for (let c = 0; c < row.length; c++) {
+        const cell = row[c]!;
+        let allowed = true;
         if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
           const rowIndex = range.startRow + r;
           const colIndex = range.startCol + c;
-          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+          allowed = this.isDlpCellAllowed(dlp, rowIndex, colIndex);
+          if (!allowed) {
             redactedCellCount++;
+            if (needsStreamingCorrelation) {
+              if (c === 0) leftAllowed = false;
+              else if (c === 1) rightAllowed = false;
+            }
             continue;
           }
         }
-        const numeric = toNumber(row[c]!, { includeFormulaValues });
+        const numeric = toNumber(cell, { includeFormulaValues });
+        if (needsStreamingCorrelation) {
+          if (c === 0) leftValue = numeric;
+          else if (c === 1) rightValue = numeric;
+        }
         if (numeric === null) continue;
-        values.push(numeric);
+
+        if (values) values.push(numeric);
+
+        if (needsStreamingAgg) {
+          if (!hasMinMax) {
+            min = numeric;
+            max = numeric;
+            hasMinMax = true;
+          } else {
+            // Avoid Math.min/Math.max so NaN values behave consistently with the previous
+            // "scan an array" implementation (NaN only poisons min/max if it is the first value).
+            if (numeric < min) min = numeric;
+            if (numeric > max) max = numeric;
+          }
+
+          count += 1;
+          sum += numeric;
+          const delta = numeric - mean;
+          mean += delta / count;
+          const delta2 = numeric - mean;
+          m2 += delta * delta2;
+        }
+      }
+
+      if (needsStreamingCorrelation) {
+        if (leftAllowed && rightAllowed && leftValue !== null && rightValue !== null) {
+          correlationCount += 1;
+          const n = correlationCount;
+          const deltaX = leftValue - correlationMeanX;
+          correlationMeanX += deltaX / n;
+          const deltaY = rightValue - correlationMeanY;
+          correlationMeanY += deltaY / n;
+          correlationC += deltaX * (rightValue - correlationMeanY);
+          correlationM2X += deltaX * (leftValue - correlationMeanX);
+          correlationM2Y += deltaY * (rightValue - correlationMeanY);
+        }
       }
     }
 
@@ -1302,52 +1392,42 @@ export class ToolExecutor {
     for (const measure of measures) {
       switch (measure) {
         case "mean":
-          stats.mean = values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : null;
+          stats.mean = count ? sum / count : null;
           break;
         case "sum":
-          stats.sum = values.length ? values.reduce((sum, v) => sum + v, 0) : null;
+          stats.sum = count ? sum : null;
           break;
         case "count":
-          stats.count = values.length;
+          stats.count = count;
           break;
         case "median":
-          stats.median = values.length ? median(values) : null;
+          stats.median = values && values.length ? median(values) : null;
           break;
         case "mode":
-          stats.mode = values.length ? mode(values) : null;
+          stats.mode = values && values.length ? mode(values) : null;
           break;
         case "stdev":
-          stats.stdev = values.length ? stdev(values) : null;
+          if (!count) {
+            stats.stdev = null;
+            break;
+          }
+          stats.stdev = Math.sqrt(count < 2 ? 0 : m2 / (count - 1));
           break;
         case "variance":
-          stats.variance = values.length ? variance(values) : null;
+          if (!count) {
+            stats.variance = null;
+            break;
+          }
+          stats.variance = count < 2 ? 0 : m2 / (count - 1);
           break;
         case "min":
-          if (values.length) {
-            let min = values[0]!;
-            for (let i = 1; i < values.length; i++) {
-              const v = values[i]!;
-              if (v < min) min = v;
-            }
-            stats.min = min;
-          } else {
-            stats.min = null;
-          }
+          stats.min = hasMinMax ? min : null;
           break;
         case "max":
-          if (values.length) {
-            let max = values[0]!;
-            for (let i = 1; i < values.length; i++) {
-              const v = values[i]!;
-              if (v > max) max = v;
-            }
-            stats.max = max;
-          } else {
-            stats.max = null;
-          }
+          stats.max = hasMinMax ? max : null;
           break;
         case "quartiles": {
-          if (!values.length) {
+          if (!values || !values.length) {
             stats.q1 = null;
             stats.q2 = null;
             stats.q3 = null;
@@ -1360,26 +1440,16 @@ export class ToolExecutor {
           break;
         }
         case "correlation": {
-          const cols = range.endCol - range.startCol + 1;
-          if (cols !== 2) {
+          if (!correlationSupported) {
             stats.correlation = null;
             break;
           }
-          const pairs: Array<[number, number]> = [];
-          for (let r = 0; r < cells.length; r++) {
-            const row = cells[r]!;
-            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
-              const rowIndex = range.startRow + r;
-            const leftAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol);
-            const rightAllowed = this.isDlpCellAllowed(dlp, rowIndex, range.startCol + 1);
-            if (!leftAllowed || !rightAllowed) continue;
+          if (!correlationCount) {
+            stats.correlation = null;
+            break;
           }
-          const left = toNumber(row[0]!, { includeFormulaValues });
-          const right = toNumber(row[1]!, { includeFormulaValues });
-          if (left === null || right === null) continue;
-          pairs.push([left, right]);
-        }
-        stats.correlation = pairs.length ? correlation(pairs) : null;
+          const denominator = Math.sqrt(correlationM2X * correlationM2Y);
+          stats.correlation = denominator === 0 ? 0 : correlationC / denominator;
           break;
         }
         default:
