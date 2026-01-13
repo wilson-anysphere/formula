@@ -20,7 +20,7 @@ export interface ImageBitmapCacheOptions {
    *
    * Set to 0 to disable.
    *
-   * @defaultValue 250
+   * @defaultValue 0
    */
   negativeCacheMs?: number;
 }
@@ -37,6 +37,22 @@ export interface ImageBitmapCacheGetOptions {
 type CacheEntry = {
   promise: Promise<ImageBitmap>;
   bitmap?: ImageBitmap;
+  /**
+   * Number of signal-based waiters currently attached to this in-flight decode.
+   *
+   * This lets us avoid dropping the cache entry when *one* caller aborts but
+   * another caller is still awaiting the same decode (e.g. overlapping render
+   * passes).
+   */
+  waiters: number;
+  /**
+   * True if any consumer requested the bitmap without an AbortSignal while the
+   * decode is still in-flight.
+   *
+   * These consumers are not tracked as `waiters`, so we conservatively treat the
+   * decode as wanted and keep the cache entry.
+   */
+  pinned: boolean;
 };
 
 type NegativeCacheEntry = {
@@ -90,7 +106,7 @@ export class ImageBitmapCache {
   constructor(options: ImageBitmapCacheOptions = {}) {
     const max = options.maxEntries;
     this.maxEntries = ImageBitmapCache.normalizeMaxEntries(max ?? 256);
-    this.negativeCacheMs = options.negativeCacheMs ?? 250;
+    this.negativeCacheMs = options.negativeCacheMs ?? 0;
   }
 
   setMaxEntries(maxEntries: number): void {
@@ -105,7 +121,11 @@ export class ImageBitmapCache {
       // Mark as most-recently-used.
       this.entries.delete(id);
       this.entries.set(id, existing);
-      return this.wrapWithAbort(id, existing, opts.signal);
+      if (!existing.bitmap) {
+        if (opts.signal) existing.waiters++;
+        else existing.pinned = true;
+      }
+      return this.wrapWithAbort(id, existing, opts.signal, Boolean(opts.signal) && !existing.bitmap);
     }
 
     // If the request is already aborted, don't start decoding (and don't poison
@@ -123,7 +143,12 @@ export class ImageBitmapCache {
     }
 
     const promise = ImageBitmapCache.decode(entry);
-    const record: CacheEntry = { promise, bitmap: undefined as ImageBitmap | undefined };
+    const record: CacheEntry = {
+      promise,
+      bitmap: undefined as ImageBitmap | undefined,
+      waiters: opts.signal ? 1 : 0,
+      pinned: !opts.signal,
+    };
     this.entries.set(id, record);
 
     // Once the decode finishes, populate the LRU cache *only if* this promise is
@@ -134,6 +159,15 @@ export class ImageBitmapCache {
       (bitmap) => {
         const current = this.entries.get(id);
         if (current !== record || current.promise !== promise) return;
+
+        // If the decode finishes after all callers have aborted (and no
+        // untracked waiters exist), drop it immediately to avoid caching a bitmap
+        // nobody will use.
+        if (!record.pinned && record.waiters === 0) {
+          this.entries.delete(id);
+          ImageBitmapCache.tryClose(bitmap);
+          return;
+        }
 
         // A max size of 0 means caching is disabled. Still dedupe the in-flight
         // request, but don't store the decoded bitmap (and do not close it,
@@ -177,7 +211,7 @@ export class ImageBitmapCache {
       },
     );
 
-    return this.wrapWithAbort(id, record, opts.signal);
+    return this.wrapWithAbort(id, record, opts.signal, Boolean(opts.signal));
   }
 
   invalidate(imageId: string): void {
@@ -204,15 +238,30 @@ export class ImageBitmapCache {
     this.negativeCache.clear();
   }
 
-  private wrapWithAbort(imageId: string, record: CacheEntry, signal?: AbortSignal): Promise<ImageBitmap> {
+  private wrapWithAbort(
+    imageId: string,
+    record: CacheEntry,
+    signal: AbortSignal | undefined,
+    trackWaiter: boolean,
+  ): Promise<ImageBitmap> {
     if (!signal) return record.promise;
 
+    let released = false;
+    const release = () => {
+      if (!trackWaiter) return;
+      if (released) return;
+      released = true;
+      record.waiters = Math.max(0, record.waiters - 1);
+    };
+
     const abortAndCleanup = (): Error => {
-      const current = this.entries.get(imageId);
-      // Only drop in-flight decodes (no bitmap yet). Resolved entries stay cached.
-      if (current === record && !record.bitmap) {
-        this.entries.delete(imageId);
-      }
+      release();
+      // Do not immediately delete the cache entry here.
+      //
+      // Multiple callers can share an in-flight decode promise; if one aborts we
+      // still want others (or a subsequent render pass) to be able to reuse the
+      // decode. If everyone aborts, the `.then` handler attached in `get()`
+      // cleans up the entry once the decode finishes.
       return createAbortError();
     };
 
@@ -232,10 +281,12 @@ export class ImageBitmapCache {
       record.promise.then(
         (bitmap) => {
           signal.removeEventListener("abort", onAbort);
+          release();
           resolve(bitmap);
         },
         (err) => {
           signal.removeEventListener("abort", onAbort);
+          release();
           reject(err);
         },
       );

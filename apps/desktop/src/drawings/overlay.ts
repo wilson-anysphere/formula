@@ -133,10 +133,11 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry): Rect {
 
 export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
-  private readonly bitmapCache = new ImageBitmapCache();
+  private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });
   private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
   private selectedId: number | null = null;
   private renderSeq = 0;
+  private renderAbort: AbortController | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -161,6 +162,14 @@ export class DrawingOverlay {
     this.renderSeq += 1;
     const seq = this.renderSeq;
 
+    // Cancel any prior render pass so we don't draw stale content after a newer
+    // render begins (e.g. rapid scroll/zoom updates). This also lets callers
+    // abort in-flight image decode awaits for offscreen images.
+    this.renderAbort?.abort();
+    const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
+    this.renderAbort = abort;
+    const signal = abort?.signal;
+
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -172,7 +181,8 @@ export class DrawingOverlay {
 
     for (const obj of ordered) {
       if (seq !== this.renderSeq) return;
-
+      if (signal?.aborted) return;
+      if (seq !== this.renderSeq) return;
       const rect = anchorToRectPx(obj.anchor, this.geom);
       const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
       const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
@@ -211,13 +221,21 @@ export class DrawingOverlay {
 
       if (obj.kind.type === "image") {
         const entry = this.images.get(obj.kind.imageId);
-        if (!entry) continue;
-        const bitmap = await this.bitmapCache.get(entry);
-        if (seq !== this.renderSeq) return;
-        withClip(() => {
-          ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-        });
-        continue;
+        if (entry) {
+          try {
+            const bitmap = await this.bitmapCache.get(entry, signal ? { signal } : undefined);
+            if (signal?.aborted) return;
+            if (seq !== this.renderSeq) return;
+            withClip(() => {
+              ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            });
+            continue;
+          } catch (err) {
+            if (signal?.aborted || isAbortError(err)) return;
+            if (seq !== this.renderSeq) return;
+            // Fall through to placeholder rendering.
+          }
+        }
       }
 
       if (obj.kind.type === "chart") {
@@ -397,6 +415,10 @@ export class DrawingOverlay {
   setSelectedId(id: number | null): void {
     this.selectedId = id;
   }
+}
+
+function isAbortError(err: unknown): boolean {
+  return typeof (err as { name?: unknown } | null)?.name === "string" && (err as any).name === "AbortError";
 }
 
 function intersects(a: Rect, b: Rect): boolean {
