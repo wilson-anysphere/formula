@@ -587,15 +587,19 @@ Also verify **cross-origin isolation** is enabled in the packaged app (required 
 - Or in an installed build: ensure there is no startup toast complaining about missing cross-origin isolation, and (if you have DevTools)
   confirm `globalThis.crossOriginIsolated === true`.
 
-## 6) Bundle size reporting + (optional) size gate
+## 6) Bundle size reporting + size gate (tagged releases enforced)
 
 The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /
-AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**.
+AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails tagged releases** if
+any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
-There is also an optional size gate (off by default):
+### Configuration / override (GitHub Actions variables)
 
-- `FORMULA_ENFORCE_BUNDLE_SIZE=1` → fail the workflow if any artifact exceeds the limit
-- `FORMULA_BUNDLE_SIZE_LIMIT_MB=50` → override the default **50 MB** per artifact budget
+The tagged release workflow defaults to `FORMULA_ENFORCE_BUNDLE_SIZE=1`. To override, set repository
+variables in **Settings → Secrets and variables → Actions → Variables**:
+
+- `FORMULA_BUNDLE_SIZE_LIMIT_MB=50` → override the default **50 MB** per-artifact budget
+- `FORMULA_ENFORCE_BUNDLE_SIZE=0` (or `false`) → disable enforcement for exceptional releases
 
 ### Run the size check locally
 
@@ -616,10 +620,10 @@ There is also an optional size gate (off by default):
 
 3. (Optional) enforce the budget locally:
 
-   ```bash
-   FORMULA_ENFORCE_BUNDLE_SIZE=1 FORMULA_BUNDLE_SIZE_LIMIT_MB=50 \
-     python scripts/desktop_bundle_size_report.py
-   ```
+    ```bash
+    FORMULA_ENFORCE_BUNDLE_SIZE=1 FORMULA_BUNDLE_SIZE_LIMIT_MB=50 \
+      python scripts/desktop_bundle_size_report.py
+    ```
 
 ## 7) Rollback / downgrade support (do not delete old releases)
 

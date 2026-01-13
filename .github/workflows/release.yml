@@ -952,10 +952,11 @@ jobs:
           /usr/bin/codesign -d --entitlements :- "$exe_path" || true
       - name: Report desktop bundle sizes
         env:
-          # Optional: set these as GitHub Actions "Variables" to enable gating.
-          # - FORMULA_ENFORCE_BUNDLE_SIZE=1 to fail when any artifact exceeds the limit
+          # Enforce the bundle size budget on tagged releases by default.
+          # Override via GitHub Actions "Variables":
+          # - FORMULA_ENFORCE_BUNDLE_SIZE=0 (or "false") to disable enforcement
           # - FORMULA_BUNDLE_SIZE_LIMIT_MB=50 to adjust the default 50 MB budget
-          FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
+          FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE || '1' }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py
 
