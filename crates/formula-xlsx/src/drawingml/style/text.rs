@@ -12,7 +12,7 @@ pub fn parse_txpr(node: Node<'_, '_>) -> Option<TextRunStyle> {
     // model a single "effective" run style by merging a best-effort cascade:
     //
     //   1) list-style defaults (`a:lstStyle/*/a:defRPr`)
-    //   2) direct defaults (`defRPr` directly under `txPr`) (observed in some axis/title payloads)
+    //   2) direct defaults (`defRPr` directly under `txPr`) (some producers omit paragraph wrappers)
     //   3) first paragraph defaults (`a:p/a:pPr/a:defRPr`)
     //   4) first run overrides (`a:p/a:r/a:rPr`)
     //   5) paragraph-end run props (`a:p/a:endParaRPr`)
