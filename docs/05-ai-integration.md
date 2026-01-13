@@ -93,63 +93,15 @@ Suggestions:
   - =SUM(B1:B14)       [Detect "total" intent, suggest formula]
 ```
 
-**Implementation:**
-
-```typescript
-class TabCompletionEngine {
-  private cursorBackend: CursorAIClient;
-  private cache: LRUCache<string, Suggestion[]>;
-  
-  async getSuggestions(context: CompletionContext): Promise<Suggestion[]> {
-    // Check cache first
-    const cacheKey = this.buildCacheKey(context);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!;
-    }
-    
-    // Parallel strategies
-    const [formulaSuggestions, valueSuggestions, patternSuggestions] = await Promise.all([
-      this.getFormulaSuggestions(context),
-      this.getValueSuggestions(context),
-      this.getPatternSuggestions(context)
-    ]);
-    
-    // Rank and deduplicate
-    const suggestions = this.rankSuggestions([
-      ...formulaSuggestions,
-      ...valueSuggestions,
-      ...patternSuggestions
-    ]);
-    
-    this.cache.set(cacheKey, suggestions);
-    return suggestions.slice(0, 5);  // Top 5
-  }
-  
-  private async getFormulaSuggestions(context: CompletionContext): Promise<Suggestion[]> {
-    if (!context.currentInput.startsWith("=")) return [];
-    
-    // Parse partial formula
-    const partialAST = this.parsePartial(context.currentInput);
-    
-    if (partialAST.inFunctionCall) {
-      // Suggest arguments based on function signature
-      return this.suggestFunctionArgs(partialAST.functionName, partialAST.argIndex, context);
-    }
-    
-    if (partialAST.expectingRange) {
-      // Suggest ranges based on data layout
-      return this.suggestRanges(context);
-    }
-    
-    // General formula completion via Cursor backend
-    return this.cursorBackend.complete(context.currentInput, {
-      maxTokens: 50,
-      temperature: 0.1,
-      stop: [")", ",", "\n"]
-    });
-  }
-}
-```
+**Implementation notes (actual):**
+- For a deep-dive (algorithms, schema integration, tests), see [AI Tab Completion](ai-tab-completion.md).
+- `TabCompletionEngine.getSuggestions()` (`packages/ai-completion/...`) parses the partial draft and merges three sources (in parallel), caching the base results:
+  - rule-based suggestions (functions, ranges, argument hints)
+  - pattern suggestions (nearby repeated values for non-formula input)
+  - optional Cursor backend completion via `CursorTabCompletionClient` (strict timeout for UI responsiveness)
+- Desktop attaches formula previews by evaluating the suggested formula locally (see `createPreviewEvaluator` in
+  [`apps/desktop/src/ai/completion/formulaBarTabCompletion.ts`](../apps/desktop/src/ai/completion/formulaBarTabCompletion.ts), which uses
+  [`apps/desktop/src/spreadsheet/evaluateFormula.ts`](../apps/desktop/src/spreadsheet/evaluateFormula.ts)).
 
 #### Locale-aware partial parsing (WASM engine)
 
@@ -362,71 +314,14 @@ Implementation notes (actual):
 - Autonomous error correction
 - Progress reporting
 
-```typescript
-interface AgentTask {
-  goal: string;
-  constraints?: string[];
-  maxIterations?: number;
-  requireApproval?: boolean;
-}
-
-interface AgentStep {
-  thought: string;
-  action: ToolCall;
-  observation: string;
-  status: "success" | "error" | "needs_approval";
-}
-
-class AgentEngine {
-  async executeTask(task: AgentTask): Promise<AgentResult> {
-    const steps: AgentStep[] = [];
-    let iteration = 0;
-    const maxIterations = task.maxIterations || 20;
-    
-    while (iteration < maxIterations) {
-      iteration++;
-      
-      // Plan next action
-      const plan = await this.planNextAction(task.goal, steps);
-      
-      if (plan.complete) {
-        return { success: true, steps, finalResult: plan.result };
-      }
-      
-      // Check if approval needed
-      if (task.requireApproval && plan.action.requiresApproval) {
-        const approved = await this.requestApproval(plan);
-        if (!approved) {
-          return { success: false, steps, reason: "User cancelled" };
-        }
-      }
-      
-      // Execute action
-      const observation = await this.executeAction(plan.action);
-      
-      steps.push({
-        thought: plan.thought,
-        action: plan.action,
-        observation: observation.result,
-        status: observation.status
-      });
-      
-      // Report progress
-      this.reportProgress(steps);
-      
-      if (observation.status === "error") {
-        // Try to recover
-        const recovery = await this.planRecovery(steps, observation.error);
-        if (!recovery.canRecover) {
-          return { success: false, steps, reason: observation.error };
-        }
-      }
-    }
-    
-    return { success: false, steps, reason: "Max iterations reached" };
-  }
-}
-```
+**Implementation sketch (aligned with code):**
+- Entry function: `runAgentTask(params: RunAgentTaskParams)` in
+  [`apps/desktop/src/ai/agent/agentOrchestrator.ts`](../apps/desktop/src/ai/agent/agentOrchestrator.ts).
+- Agent loop:
+  - Builds bounded workbook context via `WorkbookContextBuilder.build(...)` (schema-first + RAG + DLP).
+  - Runs the tool-calling loop via `runChatWithToolsAudited` with `SpreadsheetLLMToolExecutor`.
+  - Generates previews via `PreviewEngine` and requests approval for any non-noop mutation (default `approval_cell_threshold: 0`).
+  - Emits `AgentProgressEvent` updates to the UI.
 
 ---
 
@@ -696,6 +591,9 @@ subsequent turns.
 
 ### Preview Before Apply
 
+(Illustrative interfaces below; see the real preview implementation in
+[`packages/ai-tools/src/preview/preview-engine.ts`](../packages/ai-tools/src/preview/preview-engine.ts).)
+
 ```typescript
 interface ActionPreview {
   description: string;
@@ -750,6 +648,10 @@ class PreviewEngine {
 
 ### Verification Layer
 
+(Illustrative; real verification hooks live in
+[`packages/ai-tools/src/llm/verification.ts`](../packages/ai-tools/src/llm/verification.ts) and are wired via
+[`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts).)
+
 ```typescript
 class AIVerifier {
   // For factual claims about data, verify against actual values
@@ -800,6 +702,10 @@ class AIVerifier {
 
 ### Audit Trail
 
+(Illustrative; audit store interfaces + recorder live in `packages/ai-audit` (see
+[`packages/ai-audit/src/store.ts`](../packages/ai-audit/src/store.ts) and
+[`packages/ai-audit/src/recorder.ts`](../packages/ai-audit/src/recorder.ts)).)
+
 ```typescript
 interface AIAuditEntry {
   timestamp: Date;
@@ -845,6 +751,12 @@ class AIAuditLog {
 
 > **All AI is managed by Cursor.** There are no user-configurable API keys, no provider selection, and no local models. Cursor controls the harness, prompts, and model routing.
 
+**Code entrypoints (desktop + shared):**
+- Desktop LLM client wrapper (Cursor-only; no provider selection / API keys): [`apps/desktop/src/ai/llm/desktopLLMClient.ts`](../apps/desktop/src/ai/llm/desktopLLMClient.ts) (`getDesktopLLMClient`, `getDesktopModel`)
+- Shared Cursor-only LLM client:
+  - [`packages/llm/src/createLLMClient.js`](../packages/llm/src/createLLMClient.js) (throws if provider selection is attempted)
+  - [`packages/llm/src/cursor.js`](../packages/llm/src/cursor.js) (`CursorLLMClient`; does not read user API keys)
+
 ```typescript
 // Configuration is Cursor-managed, not user-configurable
 interface CursorAIConfig {
@@ -864,36 +776,22 @@ const LATENCY_TARGETS: Record<AIMode, number> = {
 };
 ```
 
-### Client Integration
+### Client integration (how requests reach Cursor)
 
-```typescript
-class CursorAIClient {
-  // All requests go through Cursor's authenticated backend
-  // No API keys needed - Cursor handles authentication
-  
-  async complete(prompt: string, options: CompletionOptions): Promise<string> {
-    const response = await this.cursorBackend.request({
-      type: "completion",
-      prompt,
-      options
-    });
-    return response.completion;
-  }
-  
-  async chat(messages: Message[], tools?: Tool[]): Promise<ChatResponse> {
-    const response = await this.cursorBackend.request({
-      type: "chat",
-      messages,
-      tools
-    });
-    return response;
-  }
-}
-```
+- Desktop code calls `getDesktopLLMClient()` (see link above), which internally uses `createLLMClient()` to construct a Cursor-backed `LLMClient`.
+- `createLLMClient()` is intentionally **Cursor-only**:
+  - rejects provider selection at construction time
+  - does **not** read user API keys from env/local storage
+- All tool-calling requests (chat / inline edit / agent) are sent with tool definitions and return tool calls in the provider-agnostic format used by `packages/llm`.
 
 ---
 
 ## Testing Strategy
+
+Note: The snippets below are illustrative. For real tests, see:
+- `packages/ai-completion/test/*` (Node `node:test`)
+- `packages/ai-tools/src/**/*.test.ts` / `*.vitest.ts`
+- `apps/desktop/src/ai/**/__tests__` and `apps/desktop/src/spreadsheet/*test.ts`
 
 ### AI Response Testing
 
