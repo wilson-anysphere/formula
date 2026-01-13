@@ -384,6 +384,59 @@ maybeTest("SqliteVectorStore does not reset chunked localStorage on dimension mi
   await store2.close();
 });
 
+maybeTest("SqliteVectorStore does not reset LocalStorageBinaryStorage on dimension mismatch when reset is disabled", async () => {
+  const storage = new LocalStorageBinaryStorage({
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-local-dim-mismatch-no-reset",
+  });
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  const localStorage = getTestLocalStorage();
+  const before = localStorage.getItem(storage.key);
+  expect(before).toBeTypeOf("string");
+
+  let removed = false;
+  const originalRemove = (storage as any).remove?.bind(storage) as (() => Promise<void>) | undefined;
+  // eslint-disable-next-line no-param-reassign
+  (storage as any).remove = async () => {
+    removed = true;
+    if (originalRemove) await originalRemove();
+  };
+
+  await expect(
+    SqliteVectorStore.create({
+      storage,
+      dimension: 4,
+      autoSave: false,
+      resetOnDimensionMismatch: false,
+      resetOnCorrupt: false,
+    })
+  ).rejects.toMatchObject({
+    name: "SqliteVectorStoreDimensionMismatchError",
+    dbDimension: 3,
+    requestedDimension: 4,
+  });
+  expect(removed).toBe(false);
+
+  const after = localStorage.getItem(storage.key);
+  expect(after).toBe(before);
+
+  // Ensure the original DB is still readable.
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 3,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+    resetOnCorrupt: false,
+  });
+  const rec = await store2.get("a");
+  expect(rec).not.toBeNull();
+  await store2.close();
+});
+
 maybeTest("SqliteVectorStore throws on dimension mismatch when resetOnDimensionMismatch=false", async () => {
   const storage = new InMemoryBinaryStorage();
 
