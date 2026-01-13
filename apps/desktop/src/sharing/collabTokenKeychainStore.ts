@@ -57,7 +57,8 @@ export class CollabTokenKeychainStore {
     const key = String(tokenKey ?? "").trim();
     const token = typeof entry?.token === "string" ? entry.token : "";
     if (!key || !token) return;
-    const expiresAtMs = entry.expiresAtMs == null ? null : Number(entry.expiresAtMs);
+    const expiresAtMs =
+      entry.expiresAtMs == null ? null : Math.trunc(Number(entry.expiresAtMs));
     await this.invoke("collab_token_set", {
       token_key: key,
       entry: { token, expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : null },
@@ -70,4 +71,3 @@ export class CollabTokenKeychainStore {
     await this.invoke("collab_token_delete", { token_key: key });
   }
 }
-

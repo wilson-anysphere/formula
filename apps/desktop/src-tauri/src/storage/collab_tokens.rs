@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::encryption::{
     DesktopStorageEncryption, DesktopStorageEncryptionError, KeychainProvider, OsKeychainProvider,
@@ -68,10 +69,29 @@ impl<P: KeychainProvider> CollabTokenStore<P> {
         let Some(value) = self.storage.load_document(token_key)? else {
             return Ok(None);
         };
-        Ok(Some(serde_json::from_value(value)?))
+        let parsed: CollabTokenEntry = serde_json::from_value(value)?;
+
+        if let Some(expires_at_ms) = parsed.expires_at_ms {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .min(i64::MAX as u128) as i64;
+            if expires_at_ms <= now_ms {
+                // Best-effort cleanup: remove expired tokens eagerly.
+                let _ = self.storage.delete_document(token_key);
+                return Ok(None);
+            }
+        }
+
+        Ok(Some(parsed))
     }
 
-    pub fn set(&self, token_key: &str, entry: CollabTokenEntry) -> Result<(), CollabTokenStoreError> {
+    pub fn set(
+        &self,
+        token_key: &str,
+        entry: CollabTokenEntry,
+    ) -> Result<(), CollabTokenStoreError> {
         self.ensure_encrypted()?;
         self.storage
             .save_document(token_key, serde_json::to_value(&entry)?)?;
@@ -94,17 +114,20 @@ mod tests {
 
     use std::fs;
 
+    use crate::storage::encryption::DesktopStorageEncryption;
     use crate::storage::encryption::InMemoryKeychainProvider;
 
     #[test]
     fn tokens_are_encrypted_at_rest_and_can_be_deleted() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file_path = dir.path().join("collab_tokens.json");
-        let store = CollabTokenStore::new(file_path.clone(), InMemoryKeychainProvider::default());
+        let keychain = InMemoryKeychainProvider::default();
+        let store = CollabTokenStore::new(file_path.clone(), keychain.clone());
 
         let entry = CollabTokenEntry {
             token: "supersecret-token".to_string(),
-            expires_at_ms: Some(1_700_000_000_000),
+            // Far-future expiry so the test remains stable over time.
+            expires_at_ms: Some(4_000_000_000_000),
         };
         store
             .set("token-key", entry.clone())
@@ -124,5 +147,36 @@ mod tests {
         store.delete("token-key").expect("delete");
         assert!(store.get("token-key").expect("get after delete").is_none());
     }
-}
 
+    #[test]
+    fn get_deletes_expired_tokens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("collab_tokens.json");
+        let keychain = InMemoryKeychainProvider::default();
+        let store = CollabTokenStore::new(file_path.clone(), keychain.clone());
+
+        // Store an already-expired token.
+        store
+            .set(
+                "expired-key",
+                CollabTokenEntry {
+                    token: "expired-token".to_string(),
+                    expires_at_ms: Some(0),
+                },
+            )
+            .expect("set expired token");
+
+        // `get` should delete it and return None.
+        assert!(store.get("expired-key").expect("get expired").is_none());
+
+        // Verify the underlying encrypted store no longer contains the doc id.
+        let storage = DesktopStorageEncryption::new(file_path.clone(), keychain)
+            .with_keychain_namespace(COLLAB_TOKEN_KEYCHAIN_SERVICE, COLLAB_TOKEN_KEYCHAIN_ACCOUNT)
+            .with_aad_scope(COLLAB_TOKEN_AAD_SCOPE);
+        let ids = storage.list_document_ids().expect("list ids");
+        assert!(
+            !ids.iter().any(|id| id == "expired-key"),
+            "expected expired entry to be removed from encrypted store"
+        );
+    }
+}

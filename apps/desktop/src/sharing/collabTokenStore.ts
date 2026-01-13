@@ -72,11 +72,11 @@ function jwtExpMs(token: string): number | null {
     const parsed = JSON.parse(decoded) as any;
     const exp = parsed?.exp;
     if (typeof exp === "number" && Number.isFinite(exp)) {
-      return exp * 1000;
+      return Math.trunc(exp * 1000);
     }
     if (typeof exp === "string" && exp.trim() !== "") {
       const expNum = Number(exp);
-      if (Number.isFinite(expNum)) return expNum * 1000;
+      if (Number.isFinite(expNum)) return Math.trunc(expNum * 1000);
     }
   } catch {
     // ignore parse failures
@@ -101,7 +101,7 @@ function computeExpiresAtMs(token: string, nowMs: number): number | null {
   const expFromJwt = jwtExpMs(token);
   if (expFromJwt != null) return expFromJwt;
 
-  const ttl = opaqueTokenTtlMs();
+  const ttl = Math.trunc(opaqueTokenTtlMs());
   if (!Number.isFinite(ttl) || ttl <= 0) return null;
   return nowMs + ttl;
 }
