@@ -63,6 +63,29 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.count).toBe(1);
   });
 
+  it("does not fall back to comparing formula text when include_formula_values is enabled but a formula cell has no computed value", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
+    // Simulate a backend that stores the formula but has not computed/filled `value` yet.
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { formula: "=SECRET()", value: null });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "filter_range",
+      parameters: {
+        range: "Sheet1!A1:A2",
+        has_header: true,
+        criteria: [{ column: "A", operator: "contains", value: "SECRET" }],
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("filter_range");
+    if (!result.ok || result.tool !== "filter_range") throw new Error("Unexpected tool result");
+    expect(result.data?.matching_rows).toEqual([]);
+    expect(result.data?.count).toBe(0);
+  });
+
   it("sort_range compares formula cells using computed values when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });

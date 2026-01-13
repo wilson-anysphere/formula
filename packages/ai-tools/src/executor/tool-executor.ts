@@ -2323,7 +2323,7 @@ function compareCellForSort(left: CellData, right: CellData, opts: { includeForm
 
 function cellComparableValue(cell: CellData, opts: { includeFormulaValues?: boolean } = {}): string | number | boolean | null {
   if (cell.formula) {
-    if (opts.includeFormulaValues && cell.value !== null) return cell.value;
+    if (opts.includeFormulaValues) return cell.value;
     return cell.formula;
   }
   return cell.value;
