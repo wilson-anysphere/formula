@@ -5,7 +5,7 @@ Utilities for turning large spreadsheets into **LLM-friendly context** safely an
 This package focuses on:
 
 - **Schema-first extraction**: infer table/region structure, headers, and column types without sending full raw data.
-- **Sampling**: random and stratified row sampling for “show me examples” / statistical questions.
+- **Sampling**: random, stratified, head, tail, and systematic row sampling for “show me examples” / statistical questions.
 - **RAG over cells**: lightweight similarity search for relevant regions (single-sheet) and workbook-scale retrieval via `packages/ai-rag`.
 - **Token budgeting**: build context strings that fit a budget (with deterministic trimming).
 - **Message trimming**: trim/summarize conversation history to fit a model context window.
@@ -34,6 +34,9 @@ import {
   summarizeRegion,
   randomSampleRows,
   stratifiedSampleRows,
+  headSampleRows,
+  tailSampleRows,
+  systematicSampleRows,
 
   // Query-aware selection
   scoreRegionForQuery,
@@ -178,6 +181,12 @@ const ctx = await cm.buildContext({
   query,
   // Optional knobs:
   sampleRows: 25,
+  // Sampling strategies:
+  // - "random" (default)
+  // - "stratified"
+  // - "head"
+  // - "tail"
+  // - "systematic"
   samplingStrategy: "stratified",
   stratifyByColumn: 2, // stratify by the "Category" column
   attachments: [{ type: "range", reference: "Transactions!A1:D100" }],
