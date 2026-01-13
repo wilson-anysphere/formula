@@ -75,11 +75,11 @@ function normalizeNonNegativeInt(value: unknown): number | null {
   return value;
 }
 
-function normalizeSelectorForCacheKey(value: unknown): unknown {
-  if (!value || typeof value !== "object") return value ?? null;
+function selectorKeyForCacheKey(value: unknown): string {
+  if (!value || typeof value !== "object") return safeStableJsonStringify(value ?? null);
   const selector = value as any;
   const scope = typeof selector.scope === "string" ? selector.scope : "";
-  const documentId = typeof selector.documentId === "string" ? selector.documentId : null;
+  const documentId = typeof selector.documentId === "string" ? selector.documentId : "";
 
   // When we can't recognize the selector shape, fall back to a stable JSON form so
   // the cache key remains sensitive to changes.
@@ -87,48 +87,21 @@ function normalizeSelectorForCacheKey(value: unknown): unknown {
 
   switch (scope) {
     case "document":
-      return { scope, documentId };
-    case "sheet":
-      return {
-        scope,
-        documentId,
-        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
-      };
-    case "column": {
-      const out: any = {
-        scope,
-        documentId,
-        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
-      };
-      const columnIndex = normalizeNonNegativeInt(selector.columnIndex);
-      if (columnIndex !== null) out.columnIndex = columnIndex;
-      if (typeof selector.columnId === "string") out.columnId = selector.columnId;
-      if (typeof selector.tableId === "string") out.tableId = selector.tableId;
-      return out;
+      return `document:${documentId}`;
+    case "sheet": {
+      if (typeof selector.sheetId !== "string") return fallback();
+      return `sheet:${documentId}:${selector.sheetId}`;
     }
     case "cell": {
+      if (typeof selector.sheetId !== "string") return fallback();
       const row = normalizeNonNegativeInt(selector.row);
       const col = normalizeNonNegativeInt(selector.col);
-      const out: any = {
-        scope,
-        documentId,
-        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
-        row,
-        col,
-      };
-      if (typeof selector.tableId === "string") out.tableId = selector.tableId;
-      if (typeof selector.columnId === "string") out.columnId = selector.columnId;
-      return out;
+      if (row === null || col === null) return fallback();
+      return `cell:${documentId}:${selector.sheetId}:${row},${col}`;
     }
     case "range": {
-      if (!selector.range || typeof selector.range !== "object") {
-        return {
-          scope,
-          documentId,
-          sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
-          range: null,
-        };
-      }
+      if (typeof selector.sheetId !== "string") return fallback();
+      if (!selector.range || typeof selector.range !== "object") return fallback();
       const start = (selector.range as any).start;
       const end = (selector.range as any).end;
       if (!start || typeof start !== "object" || !end || typeof end !== "object") return fallback();
@@ -141,12 +114,19 @@ function normalizeSelectorForCacheKey(value: unknown): unknown {
       const r1 = Math.max(startRow!, endRow!);
       const c0 = Math.min(startCol!, endCol!);
       const c1 = Math.max(startCol!, endCol!);
-      return {
-        scope,
-        documentId,
-        sheetId: typeof selector.sheetId === "string" ? selector.sheetId : null,
-        range: { start: { row: r0, col: c0 }, end: { row: r1, col: c1 } },
-      };
+      return `range:${documentId}:${selector.sheetId}:${r0},${c0}:${r1},${c1}`;
+    }
+    case "column": {
+      if (typeof selector.sheetId !== "string") return fallback();
+      const tablePart = typeof selector.tableId === "string" ? `:table:${selector.tableId}` : "";
+      const columnIndex = normalizeNonNegativeInt(selector.columnIndex);
+      if (columnIndex !== null) {
+        return `column:${documentId}:${selector.sheetId}${tablePart}:col:${columnIndex}`;
+      }
+      if (typeof selector.columnId === "string") {
+        return `column:${documentId}:${selector.sheetId}${tablePart}:colId:${selector.columnId}`;
+      }
+      return fallback();
     }
     default:
       return fallback();
@@ -155,12 +135,18 @@ function normalizeSelectorForCacheKey(value: unknown): unknown {
 
 function normalizedClassificationRecordKeysForCacheKey(records: unknown): string[] {
   const list = Array.isArray(records) ? records : [];
-  const keys = list.map((record) =>
-    safeStableJsonStringify({
-      selector: normalizeSelectorForCacheKey((record as any)?.selector ?? null),
-      classification: normalizeClassificationForCacheKey((record as any)?.classification ?? null),
-    }),
-  );
+  const keys = list.map((record) => {
+    const selectorKey = selectorKeyForCacheKey((record as any)?.selector ?? null);
+    const normalized = normalizeClassificationForCacheKey((record as any)?.classification ?? null);
+    if (normalized && typeof normalized === "object" && !Array.isArray(normalized)) {
+      const obj = normalized as any;
+      const level = typeof obj.level === "string" ? obj.level : null;
+      const labels = Array.isArray(obj.labels) ? obj.labels : [];
+      // Stable, compact representation (no object key ordering issues).
+      return JSON.stringify([selectorKey, level, labels]);
+    }
+    return JSON.stringify([selectorKey, normalized]);
+  });
   // Ensure deterministic ordering even if the backing classification store does not
   // guarantee record order.
   keys.sort((a, b) => a.localeCompare(b));
