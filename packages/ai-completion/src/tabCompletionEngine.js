@@ -403,7 +403,9 @@ export class TabCompletionEngine {
         if (isTable) confidence = clamp01(confidence + 0.2);
         if (
           !isTable &&
-          (candidate.reason === "contiguous_above_current_cell" || candidate.reason === "contiguous_down_from_start")
+          (candidate.reason === "contiguous_above_current_cell" ||
+            candidate.reason === "contiguous_below_current_cell" ||
+            candidate.reason === "contiguous_down_from_start")
         ) {
           confidence = clamp01(confidence - 0.1);
         }

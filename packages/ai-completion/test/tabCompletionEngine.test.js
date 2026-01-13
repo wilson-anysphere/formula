@@ -753,6 +753,30 @@ test("Typing =VLOOKUP(A1, A suggests a 2D table range when adjacent columns form
   );
 });
 
+test("VLOOKUP table-range bias prefers a 2D range when the formula is above the table block", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  // A2:D11 (rows 2..11) contain a dense numeric table.
+  for (let r = 2; r <= 11; r++) {
+    values[`A${r}`] = r;
+    values[`B${r}`] = r * 10;
+    values[`C${r}`] = r * 100;
+    values[`D${r}`] = r * 1000;
+  }
+
+  const currentInput = "=VLOOKUP(A1, A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on A1 (0-based row 0), above the table.
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.equal(suggestions[0]?.text, "=VLOOKUP(A1, A2:D11");
+});
+
 test("Typing =FILTER(A suggests a 2D table range when adjacent columns form a table", async () => {
   const engine = new TabCompletionEngine();
 
