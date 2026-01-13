@@ -171,6 +171,57 @@ jobs:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
+      # Fail fast (before any platform builds start) if maintainers require code signing or if
+      # signing secrets are partially configured. This avoids wasting build time and uploading
+      # a partial set of GitHub Release assets.
+      - name: "Preflight: verify macOS code signing secrets (base64 + PKCS#12)"
+        if: secrets.APPLE_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1'
+        shell: bash
+        env:
+          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: bash scripts/ci/verify-codesign-secrets.sh macos
+
+      - name: "Preflight: verify Windows code signing secrets (base64 + PKCS#12)"
+        if: secrets.WINDOWS_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1'
+        shell: bash
+        env:
+          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: bash scripts/ci/verify-codesign-secrets.sh windows
+
+      - name: "Preflight: require macOS notarization creds when FORMULA_REQUIRE_CODESIGN=1"
+        if: vars.FORMULA_REQUIRE_CODESIGN == '1'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if ((${#missing[@]} > 0)); then
+            echo "" >&2
+            echo "Code signing is required (FORMULA_REQUIRE_CODESIGN=1) but macOS notarization/signing secrets are missing:" >&2
+            for m in "${missing[@]}"; do
+              echo "  - ${m}" >&2
+            done
+            echo "" >&2
+            echo "Set these in GitHub: Settings → Secrets and variables → Actions → New repository secret." >&2
+            echo "See docs/release.md (\"Code signing\")." >&2
+            exit 1
+          fi
+
   build:
     name: Build (${{ matrix.label }})
     needs: validate-version
@@ -224,24 +275,6 @@ jobs:
           # Pin the pnpm patch version for deterministic tagged-release builds.
           # Keep this in sync with the root package.json `packageManager` field.
           version: 9.0.0
-
-      - name: "Preflight: verify macOS code signing secrets (base64 + PKCS#12)"
-        if: runner.os == 'macOS' && (secrets.APPLE_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
-        shell: bash
-        env:
-          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: bash scripts/ci/verify-codesign-secrets.sh macos
-
-      - name: "Preflight: verify Windows code signing secrets (base64 + PKCS#12)"
-        if: runner.os == 'Windows' && (secrets.WINDOWS_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
-        shell: bash
-        env:
-          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: bash scripts/ci/verify-codesign-secrets.sh windows
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
