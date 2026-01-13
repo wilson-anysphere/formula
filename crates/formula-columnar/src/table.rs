@@ -2689,6 +2689,19 @@ pub struct TableScan<'a> {
     table: &'a ColumnarTable,
 }
 
+fn canonical_f64_bits(v: f64) -> u64 {
+    // Keep float grouping/equality consistent with `formula-columnar`'s `GROUP BY` implementation:
+    // - Canonicalize `-0.0` to `0.0`
+    // - Canonicalize NaNs so they compare/group together
+    if v == 0.0 {
+        0.0f64.to_bits()
+    } else if v.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        v.to_bits()
+    }
+}
+
 impl<'a> TableScan<'a> {
     pub fn stats(&self, col: usize) -> Option<&'a ColumnStats> {
         self.table.columns.get(col).map(|c| &c.stats)
@@ -2845,6 +2858,274 @@ impl<'a> TableScan<'a> {
             }
         }
         out
+    }
+
+    /// Filter rows where `col == value` for a numeric (float) column.
+    ///
+    /// This operates directly on encoded chunks (no per-row `Value` allocations) and respects
+    /// nullability (nulls are excluded).
+    pub fn filter_eq_number(&self, col: usize, value: f64) -> Vec<usize> {
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        if column.schema.column_type != ColumnType::Number {
+            return Vec::new();
+        }
+
+        let target = canonical_f64_bits(value);
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Float(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            if let Some(validity) = &c.validity {
+                for (i, v) in c.values.iter().enumerate() {
+                    if !validity.get(i) {
+                        continue;
+                    }
+                    if canonical_f64_bits(*v) == target {
+                        out.push(base + i);
+                    }
+                }
+            } else {
+                for (i, v) in c.values.iter().enumerate() {
+                    if canonical_f64_bits(*v) == target {
+                        out.push(base + i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Filter rows where `col IN (values...)` for a numeric (float) column.
+    ///
+    /// This operates directly on encoded chunks (no per-row `Value` allocations) and respects
+    /// nullability (nulls are excluded).
+    pub fn filter_in_number(&self, col: usize, values: &[f64]) -> Vec<usize> {
+        if values.is_empty() {
+            return Vec::new();
+        }
+
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        if column.schema.column_type != ColumnType::Number {
+            return Vec::new();
+        }
+
+        use std::collections::HashSet;
+        let mut targets: HashSet<u64> = HashSet::with_capacity(values.len());
+        for v in values {
+            targets.insert(canonical_f64_bits(*v));
+        }
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Float(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            if let Some(validity) = &c.validity {
+                for (i, v) in c.values.iter().enumerate() {
+                    if !validity.get(i) {
+                        continue;
+                    }
+                    if targets.contains(&canonical_f64_bits(*v)) {
+                        out.push(base + i);
+                    }
+                }
+            } else {
+                for (i, v) in c.values.iter().enumerate() {
+                    if targets.contains(&canonical_f64_bits(*v)) {
+                        out.push(base + i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Filter rows where `col == value` for an int-backed logical column
+    /// (`DateTime`/`Currency`/`Percentage`).
+    pub fn filter_eq_i64(&self, col: usize, value: i64) -> Vec<usize> {
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        match column.schema.column_type {
+            ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {}
+            _ => return Vec::new(),
+        }
+
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Int(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            let decoded = c.decode_i64();
+            if let Some(validity) = &c.validity {
+                for (i, v) in decoded.iter().enumerate() {
+                    if !validity.get(i) {
+                        continue;
+                    }
+                    if *v == value {
+                        out.push(base + i);
+                    }
+                }
+            } else {
+                for (i, v) in decoded.iter().enumerate() {
+                    if *v == value {
+                        out.push(base + i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Filter rows where `col IN (values...)` for an int-backed logical column
+    /// (`DateTime`/`Currency`/`Percentage`).
+    pub fn filter_in_i64(&self, col: usize, values: &[i64]) -> Vec<usize> {
+        if values.is_empty() {
+            return Vec::new();
+        }
+
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        match column.schema.column_type {
+            ColumnType::DateTime | ColumnType::Currency { .. } | ColumnType::Percentage { .. } => {}
+            _ => return Vec::new(),
+        }
+
+        use std::collections::HashSet;
+        let targets: HashSet<i64> = values.iter().copied().collect();
+        if targets.is_empty() {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Int(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            let decoded = c.decode_i64();
+            if let Some(validity) = &c.validity {
+                for (i, v) in decoded.iter().enumerate() {
+                    if !validity.get(i) {
+                        continue;
+                    }
+                    if targets.contains(v) {
+                        out.push(base + i);
+                    }
+                }
+            } else {
+                for (i, v) in decoded.iter().enumerate() {
+                    if targets.contains(v) {
+                        out.push(base + i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Filter rows where `col == value` for a boolean column.
+    pub fn filter_eq_bool(&self, col: usize, value: bool) -> Vec<usize> {
+        let Some(column) = self.table.columns.get(col) else {
+            return Vec::new();
+        };
+        if column.schema.column_type != ColumnType::Boolean {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+            let EncodedChunk::Bool(c) = chunk else {
+                continue;
+            };
+            let base = chunk_idx * self.table.options.page_size_rows;
+            if let Some(validity) = &c.validity {
+                for i in 0..c.len {
+                    if !validity.get(i) {
+                        continue;
+                    }
+                    let byte = c.data[i / 8];
+                    let bit = i % 8;
+                    let v = ((byte >> bit) & 1) == 1;
+                    if v == value {
+                        out.push(base + i);
+                    }
+                }
+            } else {
+                for i in 0..c.len {
+                    let byte = c.data[i / 8];
+                    let bit = i % 8;
+                    let v = ((byte >> bit) & 1) == 1;
+                    if v == value {
+                        out.push(base + i);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Filter rows where `col IN (values...)` for a boolean column.
+    pub fn filter_in_bool(&self, col: usize, values: &[bool]) -> Vec<usize> {
+        if values.is_empty() {
+            return Vec::new();
+        }
+
+        let mut want_true = false;
+        let mut want_false = false;
+        for v in values {
+            if *v {
+                want_true = true;
+            } else {
+                want_false = true;
+            }
+        }
+
+        if want_true && want_false {
+            // Both true and false are accepted: return all non-null rows.
+            let Some(column) = self.table.columns.get(col) else {
+                return Vec::new();
+            };
+            if column.schema.column_type != ColumnType::Boolean {
+                return Vec::new();
+            }
+
+            let mut out = Vec::new();
+            for (chunk_idx, chunk) in column.chunks.iter().enumerate() {
+                let EncodedChunk::Bool(c) = chunk else {
+                    continue;
+                };
+                let base = chunk_idx * self.table.options.page_size_rows;
+                if let Some(validity) = &c.validity {
+                    for i in 0..c.len {
+                        if validity.get(i) {
+                            out.push(base + i);
+                        }
+                    }
+                } else {
+                    out.extend((0..c.len).map(|i| base + i));
+                }
+            }
+            return out;
+        }
+
+        if want_true {
+            self.filter_eq_bool(col, true)
+        } else {
+            self.filter_eq_bool(col, false)
+        }
     }
 }
 
@@ -3509,5 +3790,70 @@ mod tests {
 
         let rows = table.scan().filter_eq_string(1, "C");
         assert_eq!(rows, vec![2, 3, 6, 7, 10, 11]);
+    }
+
+    #[test]
+    fn scan_filter_number_handles_nulls_and_canonicalization() {
+        let schema = vec![ColumnSchema {
+            name: "n".to_owned(),
+            column_type: ColumnType::Number,
+        }];
+        let options = TableOptions {
+            page_size_rows: 4,
+            cache: PageCacheConfig { max_entries: 2 },
+        };
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+
+        let rows = [
+            Value::Number(0.0),
+            Value::Number(-0.0),
+            Value::Number(f64::NAN),
+            Value::Null,
+            Value::Number(1.0),
+            Value::Number(f64::NAN),
+        ];
+        for v in rows {
+            builder.append_row(&[v]);
+        }
+        let table = builder.finalize();
+
+        // -0.0 and 0.0 are canonicalized together, and nulls are excluded.
+        assert_eq!(table.scan().filter_eq_number(0, -0.0), vec![0, 1]);
+        assert_eq!(table.scan().filter_eq_number(0, 0.0), vec![0, 1]);
+
+        // All NaNs are canonicalized together.
+        assert_eq!(table.scan().filter_eq_number(0, f64::NAN), vec![2, 5]);
+
+        assert_eq!(
+            table.scan().filter_in_number(0, &[0.0, f64::NAN]),
+            vec![0, 1, 2, 5]
+        );
+    }
+
+    #[test]
+    fn scan_filter_i64_handles_nulls_for_int_backed_columns() {
+        let schema = vec![ColumnSchema {
+            name: "dt".to_owned(),
+            column_type: ColumnType::DateTime,
+        }];
+        let options = TableOptions {
+            page_size_rows: 4,
+            cache: PageCacheConfig { max_entries: 2 },
+        };
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        let rows = [
+            Value::DateTime(10),
+            Value::Null,
+            Value::DateTime(11),
+            Value::DateTime(10),
+            Value::DateTime(12),
+        ];
+        for v in rows {
+            builder.append_row(&[v]);
+        }
+        let table = builder.finalize();
+
+        assert_eq!(table.scan().filter_eq_i64(0, 10), vec![0, 3]);
+        assert_eq!(table.scan().filter_in_i64(0, &[11, 10]), vec![0, 2, 3]);
     }
 }

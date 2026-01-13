@@ -779,8 +779,47 @@ impl TableBackend for ColumnarTableBackend {
     }
 
     fn filter_eq(&self, idx: usize, value: &Value) -> Option<Vec<usize>> {
+        if idx >= self.table.column_count() {
+            return None;
+        }
+
+        let column_type = self.table.schema().get(idx)?.column_type;
+
+        fn safe_i64_key(v: f64) -> Option<i64> {
+            // DAX stores numeric values as `f64`. For int-backed columnar logical types we only
+            // use the i64 scan acceleration when the value is a "safe integer", so that the fast
+            // path matches the fallback semantics (`i64 as f64` conversion) for typical keys.
+            const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
+            if !v.is_finite() {
+                return None;
+            }
+            if v.fract() != 0.0 {
+                return None;
+            }
+            if v.abs() > MAX_SAFE_INT {
+                return None;
+            }
+            Some(v as i64)
+        }
+
         match value {
             Value::Text(s) => Some(self.table.scan().filter_eq_string(idx, s.as_ref())),
+            Value::Number(n) => match column_type {
+                formula_columnar::ColumnType::Number => Some(self.table.scan().filter_eq_number(idx, n.0)),
+                formula_columnar::ColumnType::DateTime
+                | formula_columnar::ColumnType::Currency { .. }
+                | formula_columnar::ColumnType::Percentage { .. } => {
+                    let Some(v) = safe_i64_key(n.0) else {
+                        return self.filter_in(idx, std::slice::from_ref(value));
+                    };
+                    Some(self.table.scan().filter_eq_i64(idx, v))
+                }
+                _ => self.filter_in(idx, std::slice::from_ref(value)),
+            },
+            Value::Boolean(b) => match column_type {
+                formula_columnar::ColumnType::Boolean => Some(self.table.scan().filter_eq_bool(idx, *b)),
+                _ => self.filter_in(idx, std::slice::from_ref(value)),
+            },
             _ => self.filter_in(idx, std::slice::from_ref(value)),
         }
     }
@@ -918,6 +957,8 @@ impl TableBackend for ColumnarTableBackend {
             return None;
         }
 
+        let column_type = self.table.schema().get(idx)?.column_type;
+
         if values.iter().all(|v| matches!(v, Value::Text(_))) {
             let strs: Vec<&str> = values
                 .iter()
@@ -927,6 +968,53 @@ impl TableBackend for ColumnarTableBackend {
                 })
                 .collect();
             return Some(self.table.scan().filter_in_string(idx, &strs));
+        }
+
+        if values.iter().all(|v| matches!(v, Value::Number(_))) {
+            let nums: Vec<f64> = values
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Number(n) => Some(n.0),
+                    _ => None,
+                })
+                .collect();
+
+            match column_type {
+                formula_columnar::ColumnType::Number => {
+                    return Some(self.table.scan().filter_in_number(idx, &nums));
+                }
+                formula_columnar::ColumnType::DateTime
+                | formula_columnar::ColumnType::Currency { .. }
+                | formula_columnar::ColumnType::Percentage { .. } => {
+                    const MAX_SAFE_INT: f64 = 9_007_199_254_740_992.0; // 2^53
+                    let mut ints = Vec::with_capacity(nums.len());
+                    for v in &nums {
+                        if !v.is_finite() || v.fract() != 0.0 || v.abs() > MAX_SAFE_INT {
+                            ints.clear();
+                            break;
+                        }
+                        ints.push(*v as i64);
+                    }
+
+                    if !ints.is_empty() {
+                        return Some(self.table.scan().filter_in_i64(idx, &ints));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if values.iter().all(|v| matches!(v, Value::Boolean(_))) {
+            let bools: Vec<bool> = values
+                .iter()
+                .filter_map(|v| match v {
+                    Value::Boolean(b) => Some(*b),
+                    _ => None,
+                })
+                .collect();
+            if column_type == formula_columnar::ColumnType::Boolean {
+                return Some(self.table.scan().filter_in_bool(idx, &bools));
+            }
         }
 
         use std::collections::HashSet;
