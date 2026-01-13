@@ -24,6 +24,10 @@ import {
 import { fromBase64, toBase64 } from "../src/store/binaryStorage.js";
 import type { VectorRecord, VectorSearchResult } from "../src/store/inMemoryVectorStore.js";
 import type { WorkbookSearchResult } from "../src/retrieval/rankResults.js";
+import {
+  dedupeOverlappingResults as dedupeOverlappingResultsLegacy,
+  rerankWorkbookResults as rerankWorkbookResultsLegacy,
+} from "../src/retrieval/ranking.js";
 import type { Rect } from "../src/workbook/rect.js";
 
 // This file is intentionally not executed. It's a compilation target for the
@@ -218,6 +222,11 @@ async function smoke() {
   const reranked = rerankWorkbookResults("hello", results);
   const deduped = dedupeOverlappingResults(reranked);
   void deduped;
+
+  // Backwards-compatible wrappers (object-shaped params).
+  const rerankedLegacy = rerankWorkbookResultsLegacy({ queryText: "hello", results });
+  const dedupedLegacy = dedupeOverlappingResultsLegacy({ results: rerankedLegacy, overlapRatio: 0.8 });
+  void dedupedLegacy;
 }
 
 void smoke;
