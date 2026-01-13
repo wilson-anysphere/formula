@@ -104,9 +104,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.autoSum.sum",
   "home.editing.fill.down",
   "home.editing.fill.right",
-  "home.editing.findSelect.find",
-  "home.editing.findSelect.replace",
-  "home.editing.findSelect.goTo",
 
   // --- Comments ---------------------------------------------------------------
   "review.comments.newComment",
