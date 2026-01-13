@@ -130,6 +130,8 @@ describe("parseShapeRenderSpec", () => {
       labelColor: "#00FF00",
       labelFontFamily: "Calibri",
       labelBold: true,
+      labelAlign: "center",
+      labelVAlign: "top",
     });
     expect(spec?.labelFontSizePx).toBeCloseTo(18.666, 2);
   });

@@ -83,6 +83,10 @@ export interface ShapeRenderSpec {
   labelFontFamily?: string;
   /** Best-effort label bold flag. */
   labelBold?: boolean;
+  /** Best-effort horizontal text alignment from `<a:pPr algn="…">`. */
+  labelAlign?: "left" | "center" | "right";
+  /** Best-effort vertical text alignment from `<a:bodyPr anchor="…">`. */
+  labelVAlign?: "top" | "middle" | "bottom";
 }
 
 const DRAWINGML_NAMESPACES = {
@@ -462,11 +466,23 @@ function parseLabelStyle(root: XmlElementLike): {
   fontSizePx?: number;
   fontFamily?: string;
   bold?: boolean;
+  align?: "left" | "center" | "right";
+  vAlign?: "top" | "middle" | "bottom";
 } {
   const txBody = findFirstDescendantByLocalName(root, "txBody");
   if (!txBody) return {};
   const p = findFirstDescendantByLocalName(txBody, "p");
   if (!p) return {};
+
+  const bodyPr = findFirstDescendantByLocalName(txBody, "bodyPr");
+  const anchor = bodyPr ? getAttribute(bodyPr, "anchor")?.trim() : null;
+  const vAlign: "top" | "middle" | "bottom" | undefined =
+    anchor === "ctr" ? "middle" : anchor === "b" ? "bottom" : anchor === "t" ? "top" : undefined;
+
+  const pPr = findFirstDescendantByLocalName(p, "pPr");
+  const algn = pPr ? getAttribute(pPr, "algn")?.trim() : null;
+  const align: "left" | "center" | "right" | undefined =
+    algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "l" ? "left" : undefined;
 
   const defRPr = findFirstDescendantByLocalName(p, "defRPr");
   const firstRun = findFirstDescendantByLocalName(p, "r");
@@ -477,11 +493,20 @@ function parseLabelStyle(root: XmlElementLike): {
   const fontFamily = parseTypeface(runPr) ?? parseTypeface(defRPr);
   const bold = parseBold(runPr) ?? parseBold(defRPr);
 
-  const style: { color?: string; fontSizePx?: number; fontFamily?: string; bold?: boolean } = {};
+  const style: {
+    color?: string;
+    fontSizePx?: number;
+    fontFamily?: string;
+    bold?: boolean;
+    align?: "left" | "center" | "right";
+    vAlign?: "top" | "middle" | "bottom";
+  } = {};
   if (color) style.color = color;
   if (typeof fontSizePx === "number" && Number.isFinite(fontSizePx)) style.fontSizePx = fontSizePx;
   if (fontFamily) style.fontFamily = fontFamily;
   if (typeof bold === "boolean") style.bold = bold;
+  if (align) style.align = align;
+  if (vAlign) style.vAlign = vAlign;
   return style;
 }
 
@@ -534,6 +559,8 @@ export function parseShapeRenderSpec(rawXml: string): ShapeRenderSpec | null {
   if (typeof labelStyle?.fontSizePx === "number") spec.labelFontSizePx = labelStyle.fontSizePx;
   if (labelStyle?.fontFamily) spec.labelFontFamily = labelStyle.fontFamily;
   if (typeof labelStyle?.bold === "boolean") spec.labelBold = labelStyle.bold;
+  if (labelStyle?.align) spec.labelAlign = labelStyle.align;
+  if (labelStyle?.vAlign) spec.labelVAlign = labelStyle.vAlign;
 
   return cacheResult(rawXml, spec);
 }

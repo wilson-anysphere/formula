@@ -160,4 +160,40 @@ describe("DrawingOverlay shapes", () => {
     ).toBe(true);
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
+
+  it("positions label text using txBody alignment (center/middle)", async () => {
+    const { ctx, calls } = createStubCanvasContext();
+    const canvas = createStubCanvas(ctx);
+
+    const xml = `
+      <xdr:sp>
+        <xdr:txBody>
+          <a:bodyPr anchor="ctr"/>
+          <a:lstStyle/>
+          <a:p>
+            <a:pPr algn="ctr">
+              <a:defRPr sz="1200"/>
+            </a:pPr>
+            <a:r><a:t>Centered</a:t></a:r>
+          </a:p>
+        </xdr:txBody>
+        <xdr:spPr>
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    const overlay = new DrawingOverlay(canvas, images, geom);
+    await overlay.render([createShapeObject(xml)], viewport);
+
+    expect(
+      calls.some(
+        (call) =>
+          call.method === "fillText" &&
+          call.args[0] === "Centered" &&
+          call.args[1] === 15 &&
+          call.args[2] === 12,
+      ),
+    ).toBe(true);
+  });
 });

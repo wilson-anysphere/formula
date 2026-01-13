@@ -459,9 +459,16 @@ function drawShape(
     const family = spec.labelFontFamily?.trim() ? spec.labelFontFamily : "sans-serif";
     const weight = spec.labelBold ? "bold " : "";
     ctx.font = `${weight}${size}px ${family}`;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    ctx.fillText(spec.label, rect.x + 4, rect.y + 4);
+    const align = spec.labelAlign ?? "left";
+    const vAlign = spec.labelVAlign ?? "top";
+    ctx.textAlign = align;
+    ctx.textBaseline = vAlign === "middle" ? "middle" : vAlign;
+    const padding = 4;
+    const xText =
+      align === "center" ? rect.x + rect.width / 2 : align === "right" ? rect.x + rect.width - padding : rect.x + padding;
+    const yText =
+      vAlign === "middle" ? rect.y + rect.height / 2 : vAlign === "bottom" ? rect.y + rect.height - padding : rect.y + padding;
+    ctx.fillText(spec.label, xText, yText);
   }
 }
 
