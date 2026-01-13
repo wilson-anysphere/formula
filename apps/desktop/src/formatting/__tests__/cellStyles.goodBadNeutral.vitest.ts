@@ -9,9 +9,9 @@ import {
 
 describe("cell styles: good/bad/neutral", () => {
   it.each([
-    ["good", "#FFC6EFCE", "#FF006100"],
-    ["bad", "#FFFFC7CE", "#FF9C0006"],
-    ["neutral", "#FFFFEB9C", "#FF9C6500"],
+    ["good", "FFC6EFCE", "FF006100"],
+    ["bad", "FFFFC7CE", "FF9C0006"],
+    ["neutral", "FFFFEB9C", "FF9C6500"],
   ] satisfies Array<[GoodBadNeutralCellStyleId, string, string]>)(
     "applies %s preset fill + font color",
     (presetId, expectedFillColor, expectedFontColor) => {
