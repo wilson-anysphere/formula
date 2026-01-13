@@ -116,6 +116,21 @@ fn assert_relationship_exists(xml: &str, rel_type: &str, target: &str) {
     );
 }
 
+fn assert_content_type_override_exists(xml: &str, part_name: &str, content_type: &str) {
+    let doc = Document::parse(xml).expect("parse [Content_Types].xml");
+    let found = doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Override")
+        .any(|n| {
+            n.attribute("PartName") == Some(part_name)
+                && n.attribute("ContentType") == Some(content_type)
+        });
+    assert!(
+        found,
+        "expected Override PartName={part_name} ContentType={content_type} in:\n{xml}"
+    );
+}
+
 #[test]
 fn apply_preserved_drawing_parts_preserves_chart_style_and_color_parts_and_rels() {
     // 1) Generate a baseline workbook that contains a chart.
@@ -185,5 +200,17 @@ fn apply_preserved_drawing_parts_preserves_chart_style_and_color_parts_and_rels(
         REL_TYPE_CHART_COLOR_STYLE,
         "colors1.xml",
     );
-}
 
+    let content_types_xml = std::str::from_utf8(merged_pkg.part("[Content_Types].xml").unwrap())
+        .expect("[Content_Types].xml should be utf-8");
+    assert_content_type_override_exists(
+        content_types_xml,
+        "/xl/charts/style1.xml",
+        CT_CHART_STYLE,
+    );
+    assert_content_type_override_exists(
+        content_types_xml,
+        "/xl/charts/colors1.xml",
+        CT_CHART_COLOR_STYLE,
+    );
+}
