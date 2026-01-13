@@ -327,6 +327,7 @@ CI guardrail (tagged releases when secrets are configured):
 - The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
   - `xcrun stapler validate` (requires a stapled notarization ticket)
   - `spctl --assess` (Gatekeeper evaluation)
+  - See `scripts/validate-macos-bundle.sh` (also checks basic bundle metadata like the `formula://` URL scheme).
 
 #### Hardened runtime entitlements (WKWebView / WASM)
 
@@ -396,9 +397,15 @@ then revert the change—do not commit it).
    ```
 
 4. Launch the app and sanity-check runtime behavior:
-   - The window should render (no blank WebView).
-   - Network features work (e.g. updater check / HTTPS fetches).
-   - Cross-origin isolation still works in the packaged app (see `pnpm -C apps/desktop check:coi`).
+    - The window should render (no blank WebView).
+    - Network features work (e.g. updater check / HTTPS fetches).
+    - Cross-origin isolation still works in the packaged app (see `pnpm -C apps/desktop check:coi`).
+
+For CI-style bundle verification (DMG mount + Info.plist sanity + optional codesign/notarization checks), you can also run:
+
+```bash
+bash scripts/validate-macos-bundle.sh
+```
 
 #### Troubleshooting: blank window / crashes in a signed build
 

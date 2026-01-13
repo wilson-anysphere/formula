@@ -15,7 +15,7 @@
 #
 # Signing behavior:
 #   - If APPLE_CERTIFICATE is set, run codesign + spctl verification.
-#   - If APPLE_ID and APPLE_PASSWORD are set, also validate stapling.
+#   - If APPLE_ID and APPLE_PASSWORD are set, also validate stapling (notarization ticket).
 #
 set -euo pipefail
 
@@ -23,12 +23,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 die() {
-  printf 'error: %s\n' "$*" >&2
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    # GitHub Actions log annotation.
+    printf '::error::validate-macos-bundle: %s\n' "$*" >&2
+  else
+    printf 'error: %s\n' "$*" >&2
+  fi
   exit 1
 }
 
 warn() {
-  printf 'warn: %s\n' "$*" >&2
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf '::warning::validate-macos-bundle: %s\n' "$*" >&2
+  else
+    printf 'warn: %s\n' "$*" >&2
+  fi
 }
 
 usage() {
@@ -152,10 +161,26 @@ PY
   fi
 }
 
+validate_app_bundle() {
+  local app_path="$1"
+
+  [ -d "$app_path" ] || die "expected .app directory but not found: $app_path"
+
+  local plist_path="${app_path}/Contents/Info.plist"
+  [ -f "$plist_path" ] || die "missing Contents/Info.plist in app bundle: $app_path"
+
+  validate_plist_url_scheme "$plist_path" "$EXPECTED_URL_SCHEME"
+  echo "bundle: Info.plist OK (URL scheme '${EXPECTED_URL_SCHEME}')"
+
+  validate_codesign "$app_path"
+  validate_app_notarization "$app_path"
+}
+
 CURRENT_DMG=""
 CURRENT_MOUNT_DEV=""
 CURRENT_MOUNT_POINT=""
 CURRENT_TMP_FILES=()
+CURRENT_TMP_DIRS=()
 cleanup() {
   local restore_errexit=0
   case "$-" in
@@ -174,6 +199,11 @@ cleanup() {
   if [ "${#CURRENT_TMP_FILES[@]}" -gt 0 ]; then
     rm -f "${CURRENT_TMP_FILES[@]}" >/dev/null 2>&1 || true
     CURRENT_TMP_FILES=()
+  fi
+
+  if [ "${#CURRENT_TMP_DIRS[@]}" -gt 0 ]; then
+    rm -rf "${CURRENT_TMP_DIRS[@]}" >/dev/null 2>&1 || true
+    CURRENT_TMP_DIRS=()
   fi
 
   if [ "$restore_errexit" -eq 1 ]; then
@@ -258,6 +288,36 @@ find_app_in_mount() {
 ${listing}"
 }
 
+find_app_in_dir() {
+  local search_root="$1"
+  local expected_bundle="$2"
+
+  if [ -d "${search_root}/${expected_bundle}" ]; then
+    echo "${search_root}/${expected_bundle}"
+    return 0
+  fi
+
+  local apps=()
+  while IFS= read -r -d '' path; do
+    apps+=("$path")
+  done < <(find "$search_root" -maxdepth 3 -type d -name "*.app" -print0 2>/dev/null || true)
+
+  if [ "${#apps[@]}" -eq 1 ]; then
+    warn "expected ${expected_bundle} but found ${apps[0]##*/}; using it"
+    echo "${apps[0]}"
+    return 0
+  fi
+
+  if [ "${#apps[@]}" -eq 0 ]; then
+    die "no .app bundles found under ${search_root} (expected ${expected_bundle})"
+  fi
+
+  local listing
+  listing="$(printf '%s\n' "${apps[@]}" | sed "s|^${search_root}/||" | sort)"
+  die "expected ${expected_bundle} under ${search_root}, but found multiple .app bundles:
+${listing}"
+}
+
 validate_codesign() {
   local app_path="$1"
   if [ -z "${APPLE_CERTIFICATE:-}" ]; then
@@ -279,8 +339,8 @@ validate_codesign() {
   fi
 }
 
-validate_notarization() {
-  local dmg_path="$1"
+validate_app_notarization() {
+  local app_path="$1"
   if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ]; then
     echo "notarization: skipping stapler validation (APPLE_ID/APPLE_PASSWORD not set)"
     return 0
@@ -288,9 +348,30 @@ validate_notarization() {
 
   command -v xcrun >/dev/null || die "xcrun not found (required when notarization env is set)"
 
-  echo "notarization: validating stapled ticket..."
+  echo "notarization: validating stapled ticket (app)..."
+  if ! xcrun stapler validate "$app_path"; then
+    die "stapler validation failed. Ensure notarization succeeded and the ticket was stapled to the app bundle."
+  fi
+}
+
+validate_dmg_notarization() {
+  local dmg_path="$1"
+  if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_PASSWORD:-}" ]; then
+    echo "notarization: skipping stapler validation (APPLE_ID/APPLE_PASSWORD not set)"
+    return 0
+  fi
+
+  command -v xcrun >/dev/null || die "xcrun not found (required when notarization env is set)"
+  command -v spctl >/dev/null || die "spctl not found (required when notarization env is set)"
+
+  echo "notarization: validating stapled ticket (dmg)..."
   if ! xcrun stapler validate "$dmg_path"; then
     die "stapler validation failed. Ensure notarization succeeded and the ticket was stapled to the DMG."
+  fi
+
+  echo "notarization: Gatekeeper assessment (dmg)..."
+  if ! spctl -a -vv --type open "$dmg_path"; then
+    die "Gatekeeper (spctl) rejected the DMG. This often indicates missing/invalid notarization."
   fi
 }
 
@@ -308,17 +389,34 @@ validate_dmg() {
   app_path="$(find_app_in_mount "$CURRENT_MOUNT_POINT" "$EXPECTED_APP_BUNDLE")"
   echo "bundle: found app: $app_path"
 
-  local plist_path="${app_path}/Contents/Info.plist"
-  [ -f "$plist_path" ] || die "missing Contents/Info.plist in app bundle: $app_path"
-
-  validate_plist_url_scheme "$plist_path" "$EXPECTED_URL_SCHEME"
-  echo "bundle: Info.plist OK (URL scheme '${EXPECTED_URL_SCHEME}')"
-
-  validate_codesign "$app_path"
-  validate_notarization "$dmg"
+  validate_app_bundle "$app_path"
+  validate_dmg_notarization "$dmg"
 
   # Cleanly detach between DMGs to avoid piling up mounted images. The EXIT trap
   # is a safety net for failures.
+  cleanup
+}
+
+validate_app_tarball() {
+  local archive="$1"
+  [ -f "$archive" ] || die "app archive not found: $archive"
+
+  local extract_dir
+  extract_dir="$(mktemp -d -t formula-app-archive)"
+  CURRENT_TMP_DIRS+=("$extract_dir")
+
+  echo "bundle: validating updater archive: $archive"
+  if ! tar -xzf "$archive" -C "$extract_dir"; then
+    die "failed to extract app archive: $archive"
+  fi
+
+  local app_path
+  app_path="$(find_app_in_dir "$extract_dir" "$EXPECTED_APP_BUNDLE")"
+  echo "bundle: extracted app: $app_path"
+
+  validate_app_bundle "$app_path"
+
+  # Clean up extracted bundles between archives to keep disk usage low. The EXIT trap is a safety net.
   cleanup
 }
 
@@ -374,6 +472,10 @@ main() {
   local dmg
   for dmg in "${dmgs[@]}"; do
     validate_dmg "$dmg"
+  done
+
+  for archive in "${app_tars[@]}"; do
+    validate_app_tarball "$archive"
   done
 
   echo "bundle: macOS bundle validation passed."
