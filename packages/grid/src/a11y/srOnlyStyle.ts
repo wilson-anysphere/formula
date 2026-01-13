@@ -1,4 +1,4 @@
-export const SR_ONLY_STYLE: Record<string, string> = {
+export const SR_ONLY_STYLE = Object.freeze({
   position: "absolute",
   width: "1px",
   height: "1px",
@@ -8,9 +8,7 @@ export const SR_ONLY_STYLE: Record<string, string> = {
   clip: "rect(0px, 0px, 0px, 0px)",
   whiteSpace: "nowrap",
   border: "0px"
-};
-
-Object.freeze(SR_ONLY_STYLE);
+} as const);
 
 export function applySrOnlyStyle(el: HTMLElement): void {
   for (const [key, value] of Object.entries(SR_ONLY_STYLE)) {
