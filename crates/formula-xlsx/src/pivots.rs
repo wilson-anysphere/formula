@@ -15,6 +15,7 @@ pub mod preserve;
 pub mod refresh;
 pub mod slicers;
 pub mod table_definition;
+pub mod ux_graph;
 
 pub use cache_definition::{PivotCacheDefinition, PivotCacheField, PivotCacheSourceType};
 pub use cache_records::{PivotCacheRecordsReader, PivotCacheValue};
@@ -23,6 +24,7 @@ pub use preserve::{preserve_pivot_parts_from_reader, PreservedPivotParts, Relati
 pub use table_definition::{
     PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTableStyleInfo,
 };
+pub use ux_graph::XlsxPivotUxGraph;
 
 pub type PivotTablePart = PivotTableDefinition;
 

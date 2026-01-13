@@ -101,6 +101,7 @@ pub use pivots::{
         timeline_selection_to_row_filter, PivotSlicerParts, SlicerDefinition, SlicerSelectionState,
         TimelineDefinition, TimelineSelectionState,
     },
+    ux_graph::XlsxPivotUxGraph,
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
     PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
     PivotTablePart, PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
