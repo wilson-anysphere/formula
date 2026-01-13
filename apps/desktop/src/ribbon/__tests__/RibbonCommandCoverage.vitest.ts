@@ -193,6 +193,15 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
     });
     const missing = idsToCheck.filter((id) => commandRegistry.getCommand(id) == null);
 
-    expect(missing, `Missing CommandRegistry registrations for:\n${missing.map((id) => `- ${id}`).join("\n")}`).toEqual([]);
+    expect(
+      missing,
+      [
+        "Missing CommandRegistry registrations for:",
+        ...missing.map((id) => `- ${id}`),
+        "",
+        "If an id is intentionally unimplemented (placeholder UI), add it to",
+        "`INTENTIONALLY_UNIMPLEMENTED_RIBBON_COMMAND_IDS` in this test.",
+      ].join("\n"),
+    ).toEqual([]);
   });
 });
