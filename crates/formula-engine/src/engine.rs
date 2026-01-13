@@ -6973,7 +6973,6 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
             if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
                 return bytecode::Value::Error(bytecode::ErrorKind::Spill);
             }
-
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return bytecode::Value::Error(bytecode::ErrorKind::Spill);

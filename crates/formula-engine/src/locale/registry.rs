@@ -1,12 +1,13 @@
 use crate::LocaleConfig;
+use crate::value::casefold;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 #[derive(Debug)]
 struct FunctionTranslationMaps {
-    canon_to_loc: HashMap<&'static str, &'static str>,
-    loc_to_canon: HashMap<&'static str, &'static str>,
+    canon_to_loc: HashMap<String, &'static str>,
+    loc_to_canon: HashMap<String, &'static str>,
 }
 
 /// Translation table for Excel function identifiers.
@@ -37,8 +38,8 @@ impl FunctionTranslations {
             let mut loc_to_canon = HashMap::new();
             // Track the exact line that introduced each key so we can produce actionable
             // diagnostics if the TSV contains duplicate entries.
-            let mut canon_line: HashMap<&'static str, (usize, &'static str)> = HashMap::new();
-            let mut loc_line: HashMap<&'static str, (usize, &'static str)> = HashMap::new();
+            let mut canon_line: HashMap<String, (usize, &'static str)> = HashMap::new();
+            let mut loc_line: HashMap<String, (usize, &'static str)> = HashMap::new();
 
             for (idx, raw_line) in self.data_tsv.lines().enumerate() {
                 let line_no = idx + 1;
@@ -60,22 +61,25 @@ impl FunctionTranslations {
                     );
                 }
 
-                if let Some((prev_no, prev_line)) = canon_line.get(canon) {
+                let canon_key = casefold(canon);
+                let loc_key = casefold(loc);
+
+                if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
                     panic!(
-                        "duplicate canonical function translation key {canon:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                        "duplicate canonical function translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
                     );
                 }
-                if let Some((prev_no, prev_line)) = loc_line.get(loc) {
+                if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
                     panic!(
-                        "duplicate localized function translation key {loc:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                        "duplicate localized function translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
                     );
                 }
 
-                canon_line.insert(canon, (line_no, line));
-                loc_line.insert(loc, (line_no, line));
+                canon_line.insert(canon_key.clone(), (line_no, line));
+                loc_line.insert(loc_key.clone(), (line_no, line));
 
-                canon_to_loc.insert(canon, loc);
-                loc_to_canon.insert(loc, canon);
+                canon_to_loc.insert(canon_key, loc);
+                loc_to_canon.insert(loc_key, canon);
             }
 
             FunctionTranslationMaps {
@@ -85,12 +89,12 @@ impl FunctionTranslations {
         })
     }
 
-    fn localized_to_canonical(&self, localized_upper: &str) -> Option<&'static str> {
-        self.maps().loc_to_canon.get(localized_upper).copied()
+    fn localized_to_canonical(&self, localized_key: &str) -> Option<&'static str> {
+        self.maps().loc_to_canon.get(localized_key).copied()
     }
 
-    fn canonical_to_localized(&self, canonical_upper: &str) -> Option<&'static str> {
-        self.maps().canon_to_loc.get(canonical_upper).copied()
+    fn canonical_to_localized(&self, canonical_key: &str) -> Option<&'static str> {
+        self.maps().canon_to_loc.get(canonical_key).copied()
     }
 }
 

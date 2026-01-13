@@ -1918,10 +1918,14 @@ fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Err(e) => return Value::Error(e),
         },
     };
+
     // Preserve field strings exactly (including leading/trailing whitespace) so bracketed field
     // selectors like `A1.[" Price "]` behave consistently with the AST evaluator and can address
     // fields whose keys include whitespace.
     let field_key = field.as_str();
+    if field_key.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
 
     match base_val {
         Value::Error(e) => Value::Error(e),

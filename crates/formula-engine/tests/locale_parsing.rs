@@ -13,6 +13,25 @@ fn canonicalize_and_localize_round_trip_for_de_de() {
 }
 
 #[test]
+fn canonicalize_and_localize_unicode_case_insensitive_function_names_for_de_de() {
+    // German translation uses non-ASCII letters (Ä); ensure we do Unicode-aware case-folding.
+    for localized in [
+        "=zählenwenn(1;\">0\")",
+        "=Zählenwenn(1;\">0\")",
+        "=ZÄHLENWENN(1;\">0\")",
+    ] {
+        let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();
+        assert_eq!(canonical, "=COUNTIF(1,\">0\")");
+    }
+
+    // Reverse translation should use the spelling from `src/locale/data/de-DE.tsv`.
+    assert_eq!(
+        locale::localize_formula("=countif(1,\">0\")", &locale::DE_DE).unwrap(),
+        "=ZÄHLENWENN(1;\">0\")"
+    );
+}
+
+#[test]
 fn canonicalize_supports_thousands_and_leading_decimal_in_de_de() {
     let canonical = locale::canonicalize_formula("=SUMME(1.234,56;,5)", &locale::DE_DE).unwrap();
     assert_eq!(canonical, "=SUM(1234.56,.5)");
