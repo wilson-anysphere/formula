@@ -392,11 +392,10 @@ async function main() {
   const missingTargets = [];
   /** @type {Array<{ target: string; message: string }>} */
   const invalidTargets = [];
+  /** @type {Array<{ target: string; url: string; assetName: string }>} */
+  const validatedTargets = [];
 
   if (platforms && typeof platforms === "object" && !Array.isArray(platforms)) {
-    /** @type {Array<{ target: string; url: string; assetName: string }>} */
-    const validatedTargets = [];
-
     // Validate *every* platform entry, not just the required ones. If the manifest contains
     // stale/invalid targets we want to catch them too.
     for (const [target, entry] of Object.entries(platforms)) {
@@ -565,12 +564,31 @@ async function main() {
 
   if (errors.length > 0) {
     const available = Array.from(assetNames).sort();
+    const platformDebugLines =
+      platforms && typeof platforms === "object" && !Array.isArray(platforms)
+        ? [
+            `Manifest platforms (${Object.keys(platforms).length}):`,
+            ...validatedTargets
+              .slice()
+              .sort((a, b) => a.target.localeCompare(b.target))
+              .map(
+                (t) =>
+                  `  - ${t.target} → ${t.assetName}${assetNames.has(t.assetName) ? "" : " (missing asset)"}`,
+              ),
+            ...invalidTargets
+              .slice()
+              .sort((a, b) => a.target.localeCompare(b.target))
+              .map((t) => `  - ${t.target} → INVALID (${t.message})`),
+            "",
+          ]
+        : [];
     fatal(
       [
         `Updater manifest validation failed for release ${tag}.`,
         "",
         ...errors.map((e) => `- ${e}`),
         "",
+        ...platformDebugLines,
         `Release assets (${available.length}):`,
         ...available.map((name) => `  - ${name}`),
         "",
