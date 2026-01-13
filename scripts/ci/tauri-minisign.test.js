@@ -70,6 +70,28 @@ test("parses supported signature formats (raw, minisign payload, minisign text)"
   }
 });
 
+test("parses pubkey formats (raw Ed25519 bytes, minisign payload bytes)", () => {
+  // Raw 32-byte Ed25519 public key (base64 encoded).
+  {
+    const raw = Buffer.alloc(32, 9);
+    const parsed = parseTauriUpdaterPubkey(raw.toString("base64"));
+    assert.equal(parsed.format, "raw");
+    assert.equal(parsed.keyId, null);
+    assert.deepEqual(parsed.publicKeyBytes, raw);
+  }
+
+  // Minisign payload (42 bytes: "Ed" + keyid_le + pubkey), base64 encoded.
+  {
+    const keyIdLe = Buffer.from("0102030405060708", "hex");
+    const pubkey = Buffer.alloc(32, 3);
+    const payload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, pubkey]);
+    const parsed = parseTauriUpdaterPubkey(payload.toString("base64"));
+    assert.equal(parsed.format, "minisign");
+    assert.equal(parsed.keyId, "0807060504030201");
+    assert.deepEqual(parsed.publicKeyBytes, pubkey);
+  }
+});
+
 test("end-to-end verify works with minisign pubkey + multiple signature formats", () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
   const message = Buffer.from("formula updater manifest", "utf8");
@@ -116,4 +138,3 @@ test("end-to-end verify works with minisign pubkey + multiple signature formats"
     assert.equal(ok, true, `expected signature verification to succeed for case: ${name}`);
   }
 });
-

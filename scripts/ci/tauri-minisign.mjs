@@ -116,6 +116,8 @@ export function parseMinisignPublicKeyPayload(payloadBase64) {
  * Parses the `plugins.updater.pubkey` value from `tauri.conf.json`.
  *
  * - If the base64 decodes to 32 bytes, it's treated as a raw Ed25519 public key.
+ * - If the base64 decodes to 42 bytes and starts with `b"Ed"`, it's treated as a raw minisign
+ *   public key payload (`b"Ed" + keyid_le(8) + pubkey(32)`).
  * - Otherwise it is treated as base64 of a minisign public key file (2-line text block).
  *
  * @param {string} pubkeyBase64
@@ -125,6 +127,15 @@ export function parseTauriUpdaterPubkey(pubkeyBase64) {
   const decoded = decodeBase64("updater pubkey", pubkeyBase64);
   if (decoded.length === 32) {
     return { publicKeyBytes: decoded, keyId: null, format: "raw" };
+  }
+
+  if (decoded.length === 42 && decoded[0] === 0x45 && decoded[1] === 0x64) {
+    const keyIdLe = decoded.subarray(2, 10);
+    const pubkey = decoded.subarray(10);
+    if (pubkey.length !== 32) {
+      throw new Error(`minisign public key payload has ${pubkey.length} pubkey bytes (expected 32).`);
+    }
+    return { publicKeyBytes: Buffer.from(pubkey), keyId: formatKeyId(keyIdLe), format: "minisign" };
   }
 
   const text = decoded.toString("utf8").trim();
