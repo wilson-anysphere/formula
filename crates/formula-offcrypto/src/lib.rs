@@ -3039,9 +3039,15 @@ fn verify_agile_integrity(
     );
     let expected_hmac_raw = aes_cbc_decrypt(&info.encrypted_hmac_value, secret_key, &iv_value)?;
 
-    let hmac_key = hmac_key_raw.get(..hash_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
-        context: "decrypted HMAC key is truncated",
-    })?;
+    // Excel-compatible producers typically use an HMAC key whose length matches the hash output,
+    // but HMAC itself accepts any key size. Be tolerant of producers that use a shorter key.
+    let key_len = std::cmp::min(hash_len, hmac_key_raw.len());
+    if key_len == 0 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "decrypted HMAC key is empty",
+        });
+    }
+    let hmac_key = &hmac_key_raw[..key_len];
     let expected_hmac =
         expected_hmac_raw
             .get(..hash_len)
@@ -3050,7 +3056,7 @@ fn verify_agile_integrity(
             })?;
 
     // MS-OFFCRYPTO dataIntegrity HMAC is computed over the full EncryptedPackage stream (including
-    // the 8-byte original size header).
+    // the 8-byte original size header and any alignment padding bytes stored in the stream).
     let actual_hmac = match info.key_data_hash_algorithm {
         HashAlgorithm::Md5 => {
             let mut mac = <Hmac<md5::Md5> as Mac>::new_from_slice(hmac_key)
@@ -3357,8 +3363,10 @@ pub fn decrypt_agile_ooxml_from_bytes(
     // 2) Derive secret key (also validates the password via verifier hashes).
     let secret_key = agile_secret_key(&info, password)?;
 
-    // 3) Decrypt `EncryptedPackage`.
+    // 3) Read `EncryptedPackage`.
     let encrypted_package = read_ole_stream(&raw_ole, "EncryptedPackage")?;
+
+    // 4) Decrypt `EncryptedPackage`.
     let decrypted = agile_decrypt_package(&info, &secret_key, &encrypted_package)?;
 
     // Sanity check: decrypted OOXML packages are ZIP/OPC containers.

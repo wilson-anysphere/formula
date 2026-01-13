@@ -64,11 +64,16 @@ fn decrypt_agile_roundtrip_matches_plain_zip() {
     let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
     let encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
 
+    // Ensure we validate `dataIntegrity` (HMAC over EncryptedPackage stream bytes).
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
     let decrypted = decrypt_encrypted_package(
         &encryption_info,
         &encrypted_package,
         password,
-        DecryptOptions::default(),
+        options,
     )
     .expect("decrypt agile package");
     assert_eq!(decrypted, plain_zip);
@@ -90,6 +95,36 @@ fn decrypt_agile_wrong_password_is_invalid_password() {
     )
     .expect_err("wrong password should fail");
     assert_eq!(err, OffcryptoError::InvalidPassword);
+}
+
+#[test]
+fn decrypt_agile_tampered_ciphertext_fails_integrity() {
+    let password = "correct horse battery staple";
+    let plain_zip = build_tiny_zip();
+    let encrypted_cfb = encrypt_zip_with_password_agile(&plain_zip, password);
+    let encryption_info = extract_stream_bytes(&encrypted_cfb, "/EncryptionInfo");
+    let mut encrypted_package = extract_stream_bytes(&encrypted_cfb, "/EncryptedPackage");
+
+    // Flip a byte in the ciphertext (after the 8-byte length header). Integrity verification
+    // should fail before decryption is attempted.
+    assert!(
+        encrypted_package.len() > 8,
+        "EncryptedPackage stream is unexpectedly small"
+    );
+    encrypted_package[8] ^= 0x55;
+
+    let options = DecryptOptions {
+        verify_integrity: true,
+        ..DecryptOptions::default()
+    };
+    let err = decrypt_encrypted_package(
+        &encryption_info,
+        &encrypted_package,
+        password,
+        options,
+    )
+    .expect_err("tampered EncryptedPackage should fail integrity");
+    assert_eq!(err, OffcryptoError::IntegrityCheckFailed);
 }
 
 fn aes128_ecb_encrypt_in_place(key: &[u8], buf: &mut [u8]) {

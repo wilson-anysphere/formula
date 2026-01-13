@@ -22,11 +22,8 @@ zeroize = "1.8"
 
 [dev-dependencies]
 hex = "0.4"
-ms-offcrypto-writer = "1.0.7"
-rand = "0.9"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-# `rand` depends on `getrandom`, which requires the `wasm_js` feature to provide a
-# `crypto.getRandomValues` backend on `wasm32-unknown-unknown`.
-getrandom = { version = "0.3", features = ["wasm_js"] }
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+ms-offcrypto-writer = "1.0.7"
+rand = "0.9"
