@@ -1257,7 +1257,10 @@ jobs:
       - name: Validate desktop release artifacts
         env:
           FORMULA_HAS_TAURI_UPDATER_KEY: ${{ secrets.TAURI_PRIVATE_KEY != '' }}
-          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '' }}
+          # `latest.json` is only generated/uploaded when we publish to a GitHub Release.
+          # In dry-run (workflow_dispatch upload=false) we still validate installer artifacts exist,
+          # but we skip enforcing updater signatures/manifest files.
+          FORMULA_REQUIRE_TAURI_UPDATER_SIGNATURES: ${{ needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '') }}
         run: node scripts/ci/check-desktop-release-artifacts.mjs
 
       - name: Smoke test Linux .deb install in clean Ubuntu container
@@ -1641,8 +1644,10 @@ jobs:
   checksums:
     name: Generate SHA256SUMS.txt
     needs:
+      - validate-version
       - validate-updater-manifest
       - verify-release-assets
+    if: needs.validate-version.outputs.upload == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -1656,7 +1661,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          gh release download "${{ github.ref_name }}" \
+          gh release download "${{ needs.validate-version.outputs.release_tag }}" \
             --repo "${{ github.repository }}" \
             --dir release-assets
 
@@ -1668,6 +1673,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt \
+          gh release upload "${{ needs.validate-version.outputs.release_tag }}" SHA256SUMS.txt \
             --repo "${{ github.repository }}" \
             --clobber
