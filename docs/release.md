@@ -531,6 +531,21 @@ dumpbin /headers apps/desktop\src-tauri\target\aarch64-pc-windows-msvc\release\f
 
 Expected output includes `machine (AA64)`.
 
+Sanity-check (optional): verify the produced MSI targets ARM64 (Template Summary contains `ARM64`):
+
+```powershell
+$installer = New-Object -ComObject WindowsInstaller.Installer
+Get-ChildItem apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\msi\*.msi | ForEach-Object {
+  $db = $installer.OpenDatabase($_.FullName, 0)
+  $summary = $db.SummaryInformation(0)
+  $template = $summary.Property(7)
+  Write-Host "$($_.Name): template=$template"
+  if ($template -notmatch '(?i)arm64') {
+    throw "Expected MSI Template Summary to include ARM64 for $($_.FullName), got: $template"
+  }
+}
+```
+
 GitHub-hosted runner images do not always include this workload by default. The release workflow
 checks for a complete ARM64 MSVC + SDK toolchain:
 
