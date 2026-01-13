@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "check:no-node": "node scripts/check-no-node.mjs",
+    "check:bundle-size": "node scripts/bundle-size-check.mjs",
     "predev": "pnpm -w build:wasm",
     "prebuild": "pnpm -w build:wasm",
     "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",

@@ -197,6 +197,14 @@ jobs:
       - name: Build desktop (Vite)
         run: pnpm build:desktop
 
+      - name: Check desktop bundle size budgets
+        run: pnpm -C apps/desktop check:bundle-size
+        env:
+          # Budgets are interpreted as KiB (1024 bytes). Adjust intentionally when
+          # landing changes that affect the initial load footprint.
+          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "3600"
+          FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: "3200"
+
       - name: Smoke-check WASM assets
         run: pnpm smoke:wasm
 
