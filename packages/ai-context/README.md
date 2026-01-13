@@ -425,6 +425,61 @@ try {
 }
 ```
 
+### Structured classifications: record + selector shape (important!)
+
+When you pass structured classifications via `dlp.classificationRecords` (or a `classificationStore`), each record is:
+
+```ts
+type ClassificationRecord = {
+  selector: {
+    scope: "document" | "sheet" | "range" | "column" | "cell";
+    documentId: string;
+    sheetId?: string;
+    // range:
+    range?: { start: { row: number; col: number }; end: { row: number; col: number } };
+    // cell:
+    row?: number;
+    col?: number;
+    // column:
+    columnIndex?: number;
+  };
+  classification: { level: "Public" | "Internal" | "Confidential" | "Restricted"; labels?: string[] };
+};
+```
+
+Key gotchas:
+
+- **Row/col are 0-based**.
+  - A1 `A1` is `{ row: 0, col: 0 }`.
+  - Ranges are inclusive: `{ start: {row:0,col:0}, end: {row:9,col:3} }` covers the first 10 rows and 4 columns.
+- `sheetId` should match whatever your app uses as the structured-DLP sheet identifier.
+  - In many hosts this is the user-facing sheet name.
+  - In some hosts (including parts of Formula desktop), there is a stable internal sheet id that can differ from the display name; in that case, provide a `sheetNameResolver` so DLP selectors still match.
+
+Example `classificationRecords`:
+
+```js
+const classificationRecords = [
+  {
+    selector: { scope: "document", documentId: "doc-123" },
+    classification: { level: "Confidential", labels: ["finance"] },
+  },
+  {
+    selector: {
+      scope: "range",
+      documentId: "doc-123",
+      sheetId: "Sheet1",
+      range: { start: { row: 0, col: 0 }, end: { row: 99, col: 3 } }, // A1:D100
+    },
+    classification: { level: "Restricted", labels: ["pii"] },
+  },
+  {
+    selector: { scope: "cell", documentId: "doc-123", sheetId: "Sheet1", row: 1, col: 1 }, // B2
+    classification: { level: "Restricted", labels: ["pii:ssn"] },
+  },
+];
+```
+
 ---
 
 ## Token budgeting (how it works, how to tune it)
