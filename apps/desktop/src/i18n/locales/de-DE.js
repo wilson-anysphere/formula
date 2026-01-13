@@ -54,6 +54,7 @@ export const deDE = {
   "versionHistory.checkpoint": "Kontrollpunkt",
   "versionHistory.autoSave": "Auto-Speichern",
   "versionHistory.restore": "Wiederhergestellt",
+  "collab.retry": "Erneut versuchen",
   "panels.versionHistory.title": "Versionsverlauf",
   "versionHistory.panel.loading": "Versionsverlauf wird geladen…",
   "versionHistory.panel.unavailableWithMessage": "Versionsverlauf ist nicht verfügbar: {message}",

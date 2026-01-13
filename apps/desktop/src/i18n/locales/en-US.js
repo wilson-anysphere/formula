@@ -119,6 +119,7 @@ export const enUS = {
   "print.pageSetup.margins.top": "Top",
   "print.pageSetup.margins.bottom": "Bottom",
   "print.pageSetup.close": "Close",
+  "collab.retry": "Retry",
   "branchManager.title": "Branches",
   "branchManager.current": "Current",
   "branchManager.compressionFallbackWarning":

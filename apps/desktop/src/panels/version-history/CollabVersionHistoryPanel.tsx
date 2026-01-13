@@ -56,7 +56,7 @@ export function CollabVersionHistoryPanel({
           setCollabVersioning(null);
         }}
       >
-        Retry
+        {t("collab.retry")}
       </button>
     </div>
   ) : null;

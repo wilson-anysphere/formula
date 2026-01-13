@@ -114,7 +114,7 @@ export function CollabBranchManagerPanel({
           setMergeSource(null);
         }}
       >
-        Retry
+        {t("collab.retry")}
       </button>
     </div>
   ) : null;
