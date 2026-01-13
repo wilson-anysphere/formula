@@ -3,6 +3,7 @@ use std::io::{Cursor, Write};
 
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
+use formula_model::drawings::DrawingObjectKind;
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, Comment, CommentKind, ErrorValue, Hyperlink, HyperlinkTarget, Outline,
@@ -70,6 +71,9 @@ const WORKSHEET_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet";
 const WORKSHEET_CONTENT_TYPE: &str =
     "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml";
+const DRAWING_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+const DRAWING_CONTENT_TYPE: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
 
 #[derive(Debug)]
 struct SheetStructurePlan {
@@ -96,6 +100,19 @@ fn sheet_part_number(path: &str) -> Option<u32> {
 
 fn next_sheet_part_number<'a>(paths: impl Iterator<Item = &'a str>) -> u32 {
     paths.filter_map(sheet_part_number).max().unwrap_or(0) + 1
+}
+
+fn drawing_part_number(path: &str) -> Option<u32> {
+    let file = path.rsplit('/').next()?;
+    if !file.starts_with("drawing") || !file.ends_with(".xml") {
+        return None;
+    }
+    let digits = file.strip_prefix("drawing")?.strip_suffix(".xml")?;
+    digits.parse::<u32>().ok()
+}
+
+fn next_drawing_part_number<'a>(paths: impl Iterator<Item = &'a str>) -> u32 {
+    paths.filter_map(drawing_part_number).max().unwrap_or(0) + 1
 }
 
 fn local_name(name: &[u8]) -> &[u8] {
@@ -703,7 +720,9 @@ fn build_parts(
         write_workbook_xml(doc, workbook_orig, &sheet_plan.sheets)?,
     );
 
-    for sheet_meta in &sheet_plan.sheets {
+    let mut next_drawing_part = next_drawing_part_number(parts.keys().map(|p| p.as_str()));
+
+    for (sheet_index, sheet_meta) in sheet_plan.sheets.iter().enumerate() {
         let sheet = doc.workbook.sheet(sheet_meta.worksheet_id).ok_or_else(|| {
             WriteError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -848,6 +867,36 @@ fn build_parts(
             &sheet_plan.cell_meta_sheet_ids,
             changed_formula_cells,
         )?;
+        let has_drawings = !sheet.drawings.is_empty();
+        // Best-effort: only rewrite drawing-related parts when the worksheet model references new
+        // media that does not already exist in the package, or when the source sheet has no
+        // drawing relationship.
+        //
+        // This is important for chart-heavy fixtures where a no-op round-trip is expected to
+        // preserve `xl/drawings/*` and `.rels` parts byte-for-byte.
+        let existing_drawing_target = if has_drawings {
+            match orig_rels {
+                Some(rels_bytes) => relationship_target_by_type(rels_bytes, DRAWING_REL_TYPE)?,
+                None => None,
+            }
+        } else {
+            None
+        };
+        let existing_drawing_part_path = existing_drawing_target
+            .as_deref()
+            .map(|target| resolve_target(&sheet_meta.path, target));
+        let has_existing_drawing_part = existing_drawing_part_path
+            .as_deref()
+            .is_some_and(|path| parts.contains_key(path));
+        let missing_drawing_media = has_drawings
+            && sheet.drawings.iter().any(|object| match &object.kind {
+                DrawingObjectKind::Image { image_id } => {
+                    !parts.contains_key(&format!("xl/media/{}", image_id.as_str()))
+                }
+                _ => false,
+            });
+        let drawings_need_emit =
+            has_drawings && (!has_existing_drawing_part || missing_drawing_media);
         if orig.is_some()
             && !tab_color_changed
             && !merges_changed
@@ -857,6 +906,7 @@ fn build_parts(
             && !outline_cols_changed
             && !autofilter_changed
             && !sheet_protection_changed
+            && !drawings_need_emit
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -890,7 +940,7 @@ fn build_parts(
                 crate::update_worksheet_relationships(rels_xml, &current_hyperlinks)?;
             match updated_rels {
                 Some(xml) => {
-                    parts.insert(rels_part, xml.into_bytes());
+                    parts.insert(rels_part.clone(), xml.into_bytes());
                 }
                 None => {
                     parts.remove(&rels_part);
@@ -902,6 +952,111 @@ fn build_parts(
                 &sheet_xml,
                 sheet.auto_filter.as_ref(),
             )?;
+        }
+
+        if drawings_need_emit {
+            // When possible, preserve an existing sheet->drawing relationship (stable `rId*` and
+            // target path) by only rewriting the drawing part itself. Only synthesize a new
+            // relationship when the sheet didn't have one.
+            let existing_sheet_drawing_rel = match parts.get(&rels_part) {
+                Some(bytes) => relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE)?,
+                None => None,
+            };
+
+            let (drawing_rel_id, drawing_part_path) = match existing_sheet_drawing_rel {
+                Some((rid, target)) => (Some(rid), resolve_target(&sheet_meta.path, &target)),
+                None => {
+                    let n = next_drawing_part;
+                    next_drawing_part += 1;
+                    (None, format!("xl/drawings/drawing{n}.xml"))
+                }
+            };
+
+            let _drawing_rel_id = match drawing_rel_id {
+                Some(id) => {
+                    // Ensure the worksheet XML has a `<drawing r:id="..."/>` pointer.
+                    if worksheet_drawing_rel_id(&sheet_xml)?.as_deref() != Some(id.as_str()) {
+                        sheet_xml = update_worksheet_drawing_xml(&sheet_xml, &id)?;
+                    }
+                    id
+                }
+                None => {
+                    // Create a new worksheet relationship entry for the drawing part.
+                    let rels_xml = parts
+                        .get(&rels_part)
+                        .and_then(|bytes| std::str::from_utf8(bytes).ok());
+                    let mut rels = rels_xml
+                        .map(crate::relationships::Relationships::from_xml)
+                        .transpose()?
+                        .unwrap_or_default();
+
+                    let sheet_dir = sheet_meta
+                        .path
+                        .rsplit_once('/')
+                        .map(|(dir, _)| dir)
+                        .unwrap_or("");
+                    let drawing_target = relative_target(sheet_dir, &drawing_part_path);
+
+                    let drawing_rel_id = rels.next_r_id();
+                    rels.push(crate::relationships::Relationship {
+                        id: drawing_rel_id.clone(),
+                        type_: DRAWING_REL_TYPE.to_string(),
+                        target: drawing_target,
+                        target_mode: None,
+                    });
+                    parts.insert(rels_part.clone(), rels.to_xml());
+
+                    sheet_xml = update_worksheet_drawing_xml(&sheet_xml, &drawing_rel_id)?;
+                    drawing_rel_id
+                }
+            };
+
+            // Emit/update the drawing part + its relationships.
+            let drawing_rels_path = crate::drawings::DrawingPart::rels_path_for(&drawing_part_path);
+            let existing_drawing_rels_xml = parts
+                .get(&drawing_rels_path)
+                .and_then(|bytes| std::str::from_utf8(bytes).ok());
+            let mut drawing_part = crate::drawings::DrawingPart::from_objects(
+                sheet_index,
+                drawing_part_path.clone(),
+                sheet.drawings.clone(),
+                existing_drawing_rels_xml,
+            )?;
+            drawing_part.write_into_parts(&mut parts, &doc.workbook)?;
+
+            ensure_content_types_override(
+                &mut parts,
+                &format!("/{drawing_part_path}"),
+                DRAWING_CONTENT_TYPE,
+            )?;
+            for object in &sheet.drawings {
+                let DrawingObjectKind::Image { image_id } = &object.kind else {
+                    continue;
+                };
+                let Some((_, ext)) = image_id.as_str().rsplit_once('.') else {
+                    continue;
+                };
+                ensure_content_types_default(
+                    &mut parts,
+                    ext,
+                    crate::drawings::content_type_for_extension(ext),
+                )?;
+            }
+        } else if has_drawings && existing_drawing_target.is_some() {
+            // We have an existing drawing relationship/part in the source package. Avoid touching
+            // any `.rels` / `xl/drawings/*` parts unless we need to add new media. Still ensure the
+            // `<drawing>` pointer is present in case other worksheet edits dropped it.
+            if worksheet_drawing_rel_id(&sheet_xml)?.is_none() {
+                if let Some((rid, _)) = parts
+                    .get(&rels_part)
+                    .and_then(|bytes| {
+                        relationship_id_and_target_by_type(bytes, DRAWING_REL_TYPE).ok()
+                    })
+                    .flatten()
+                {
+                    sheet_xml = update_worksheet_drawing_xml(&sheet_xml, &rid)?;
+                }
+            }
         }
 
         parts.insert(sheet_meta.path.clone(), sheet_xml.into_bytes());
@@ -1926,6 +2081,116 @@ fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> Result<String, WriteE
 
     String::from_utf8(writer.into_inner())
         .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+}
+
+fn worksheet_drawing_rel_id(sheet_xml: &str) -> Result<Option<String>, WriteError> {
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"drawing" => {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
+                        return Ok(Some(attr.unescape_value()?.into_owned()));
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(None)
+}
+
+fn insert_drawing_before_tag(name: &[u8]) -> bool {
+    matches!(
+        name,
+        // Elements that come after <drawing> in the SpreadsheetML schema.
+        b"drawingHF"
+            | b"picture"
+            | b"oleObjects"
+            | b"controls"
+            | b"webPublishItems"
+            | b"tableParts"
+            | b"extLst"
+    )
+}
+
+fn update_worksheet_drawing_xml(
+    sheet_xml: &str,
+    drawing_rel_id: &str,
+) -> Result<String, WriteError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
+    let drawing_tag = prefixed_tag(worksheet_prefix.as_deref(), "drawing");
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"drawing" => {
+                replaced = true;
+                write_drawing_block(&mut writer, drawing_rel_id, &drawing_tag)?;
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"drawing" => {
+                replaced = true;
+                write_drawing_block(&mut writer, drawing_rel_id, &drawing_tag)?;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if !replaced && insert_drawing_before_tag(e.local_name().as_ref()) =>
+            {
+                write_drawing_block(&mut writer, drawing_rel_id, &drawing_tag)?;
+                replaced = true;
+                writer.write_event(event.to_owned())?;
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
+                if !replaced {
+                    write_drawing_block(&mut writer, drawing_rel_id, &drawing_tag)?;
+                    replaced = true;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
+}
+
+fn write_drawing_block<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    drawing_rel_id: &str,
+    drawing_tag: &str,
+) -> Result<(), WriteError> {
+    let mut elem = quick_xml::events::BytesStart::new(drawing_tag);
+    // Declare the `r:` prefix locally so we can always emit `r:id`.
+    elem.push_attribute(("xmlns:r", crate::xml::OFFICE_RELATIONSHIPS_NS));
+    elem.push_attribute(("r:id", drawing_rel_id));
+    writer.write_event(Event::Empty(elem))?;
+    Ok(())
 }
 
 fn assign_hyperlink_rel_ids(hyperlinks: &[Hyperlink], rels_xml: Option<&str>) -> Vec<Hyperlink> {
@@ -6069,6 +6334,47 @@ fn relationship_target_by_type(
                 }
                 if type_.as_deref() == Some(rel_type) {
                     return Ok(target);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(None)
+}
+
+fn relationship_id_and_target_by_type(
+    rels_xml: &[u8],
+    rel_type: &str,
+) -> Result<Option<(String, String)>, WriteError> {
+    let mut reader = Reader::from_reader(rels_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                let mut id = None;
+                let mut type_ = None;
+                let mut target = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let key = local_name(attr.key.as_ref());
+                    if key.eq_ignore_ascii_case(b"Id") {
+                        id = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Type") {
+                        type_ = Some(attr.unescape_value()?.into_owned());
+                    } else if key.eq_ignore_ascii_case(b"Target") {
+                        target = Some(attr.unescape_value()?.into_owned());
+                    }
+                }
+                if type_.as_deref() == Some(rel_type) {
+                    if let (Some(id), Some(target)) = (id, target) {
+                        return Ok(Some((id, target)));
+                    }
+                    return Ok(None);
                 }
             }
             Event::Eof => break,

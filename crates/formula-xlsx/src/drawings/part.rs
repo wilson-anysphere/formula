@@ -40,6 +40,11 @@ pub struct DrawingPart {
 }
 
 impl DrawingPart {
+    /// Compute the `.rels` part path for a drawing part (e.g. `xl/drawings/_rels/drawing1.xml.rels`).
+    pub fn rels_path_for(drawing_path: &str) -> String {
+        drawing_rels_path(drawing_path)
+    }
+
     pub fn new_empty(sheet_index: usize, path: String, rels_path: String) -> Self {
         Self {
             sheet_index,
@@ -49,6 +54,105 @@ impl DrawingPart {
             relationships: Relationships::default(),
             root_xmlns: BTreeMap::new(),
         }
+    }
+
+    /// Construct a [`DrawingPart`] from an in-memory object list.
+    ///
+    /// This is primarily used by the `XlsxDocument` writer, which stores DrawingML objects on the
+    /// worksheet model (`Worksheet.drawings`) and needs to (re)emit the corresponding
+    /// `xl/drawings/drawingN.xml` parts when saving.
+    ///
+    /// Relationship ID stability:
+    /// - Existing image `r:embed` relationship IDs are preserved when present in
+    ///   `DrawingObject.preserved["xlsx.embed_rel_id"]`.
+    /// - New image relationships are allocated via [`Relationships::next_r_id`].
+    /// - If `existing_rels_xml` is provided, non-image relationships (e.g. chart references) are
+    ///   preserved verbatim where possible.
+    pub fn from_objects(
+        sheet_index: usize,
+        path: String,
+        objects: Vec<DrawingObject>,
+        existing_rels_xml: Option<&str>,
+    ) -> Result<Self> {
+        let rels_path = drawing_rels_path(&path);
+        let mut relationships = existing_rels_xml
+            .map(Relationships::from_xml)
+            .transpose()?
+            .unwrap_or_default();
+
+        let mut objects = objects;
+
+        // First, ensure that all explicitly-preserved embed relationship IDs exist in the
+        // relationship table. This prevents `next_r_id()` from accidentally reusing a preserved
+        // ID for another image.
+        for object in objects.iter_mut() {
+            let DrawingObjectKind::Image { image_id } = &object.kind else {
+                continue;
+            };
+
+            let Some(embed_rel_id) = object.preserved.get("xlsx.embed_rel_id").cloned() else {
+                continue;
+            };
+
+            if relationships.get(&embed_rel_id).is_none() {
+                relationships.push(Relationship {
+                    id: embed_rel_id.clone(),
+                    type_: REL_TYPE_IMAGE.to_string(),
+                    target: format!("../media/{}", image_id.as_str()),
+                    target_mode: None,
+                });
+            }
+
+            // If we have an embed relationship id but no preserved pic XML (e.g. objects created
+            // programmatically without using `insert_image_object`), synthesize a minimal `<pic>`
+            // block that references the preserved relationship id.
+            object
+                .preserved
+                .entry("xlsx.pic_xml".to_string())
+                .or_insert_with(|| build_pic_xml(object.id.0, &embed_rel_id, object.size));
+        }
+
+        // Next, allocate relationships for any image objects that are missing preserved IDs.
+        for object in objects.iter_mut() {
+            let DrawingObjectKind::Image { image_id } = &object.kind else {
+                continue;
+            };
+
+            let embed_rel_id = object
+                .preserved
+                .get("xlsx.embed_rel_id")
+                .cloned()
+                .unwrap_or_else(|| {
+                    let id = relationships.next_r_id();
+                    object
+                        .preserved
+                        .insert("xlsx.embed_rel_id".to_string(), id.clone());
+                    id
+                });
+
+            if relationships.get(&embed_rel_id).is_none() {
+                relationships.push(Relationship {
+                    id: embed_rel_id.clone(),
+                    type_: REL_TYPE_IMAGE.to_string(),
+                    target: format!("../media/{}", image_id.as_str()),
+                    target_mode: None,
+                });
+            }
+
+            object
+                .preserved
+                .entry("xlsx.pic_xml".to_string())
+                .or_insert_with(|| build_pic_xml(object.id.0, &embed_rel_id, object.size));
+        }
+
+        Ok(Self {
+            sheet_index,
+            path,
+            rels_path,
+            objects,
+            relationships,
+            root_xmlns: BTreeMap::new(),
+        })
     }
 
     pub fn parse_from_parts(
