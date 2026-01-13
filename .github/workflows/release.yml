@@ -8,6 +8,16 @@ on:
 permissions:
   contents: write
 
+# Prevent multiple runs for the same tag from racing while uploading GitHub Release
+# assets (including Tauri updater manifests like `latest.json`). Without this,
+# manual re-runs or tag updates can overlap and clobber/partially overwrite the
+# release asset set.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Queue (don't cancel) subsequent runs so each tag's release assets are written
+  # atomically by a single workflow run.
+  cancel-in-progress: false
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
