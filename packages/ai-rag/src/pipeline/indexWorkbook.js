@@ -25,6 +25,8 @@ export function approximateTokenCount(text) {
  *   vectorStore: any,
  *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
+ *   maxColumnsForSchema?: number,
+ *   maxColumnsForRows?: number,
  *   tokenCount?: (text: string) => number,
  *   embedBatchSize?: number,
  *   onProgress?: (info: { phase: 'chunk'|'hash'|'embed'|'upsert'|'delete', processed: number, total?: number }) => void,
@@ -47,6 +49,8 @@ export async function indexWorkbook(params) {
       ? rawEmbedderName
       : "unknown-embedder";
   const sampleRows = params.sampleRows ?? 5;
+  const maxColumnsForSchema = params.maxColumnsForSchema;
+  const maxColumnsForRows = params.maxColumnsForRows;
   const tokenCount = params.tokenCount ?? approximateTokenCount;
   const chunks = chunkWorkbook(workbook, { signal });
   throwIfAborted(signal);
@@ -72,7 +76,7 @@ export async function indexWorkbook(params) {
   let processedChunks = 0;
   for (const chunk of chunks) {
     throwIfAborted(signal);
-    const originalText = chunkToText(chunk, { sampleRows });
+    const originalText = chunkToText(chunk, { sampleRows, maxColumnsForSchema, maxColumnsForRows });
 
     /** @type {{ id: string, text: string, metadata: any }} */
     let record = {

@@ -22,6 +22,39 @@ test("chunkToText renders labeled sample rows when a header row is detected", ()
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText includes formulas in labeled sample rows for header tables", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Region" }, { v: "Revenue" }],
+      [{ v: "North" }, { f: "=B2*2", v: 200 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Revenue\(=B2\*2\)=200/);
+});
+
+test("chunkToText falls back to Column<N> when a header cell is empty", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "" }, { v: "Name" }],
+      [{ v: 123 }, { v: "Alice" }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Column1=123/);
+  assert.match(text, /Name=Alice/);
+});
+
 test("chunkToText caps wide tables with an explicit truncation indicator", () => {
   const colCount = 25;
   const headers = Array.from({ length: colCount }, (_, i) => ({ v: `H${i + 1}` }));
@@ -54,4 +87,3 @@ test("chunkToText includes A1-like cell addresses for formulaRegion samples", ()
   assert.match(text, /E1:=SUM\(B2:B3\)/);
   assert.match(text, /E2:=B2\/C2/);
 });
-

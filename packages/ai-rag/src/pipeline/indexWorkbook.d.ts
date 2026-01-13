@@ -13,6 +13,8 @@ export function indexWorkbook(params: {
    */
   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> };
   sampleRows?: number;
+  maxColumnsForSchema?: number;
+  maxColumnsForRows?: number;
   /**
    * Custom token estimator used to populate `metadata.tokenCount` for each chunk.
    *
