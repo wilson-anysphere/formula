@@ -404,6 +404,167 @@ test(
   }
 );
 
+test(
+  "SqliteVectorStore repairs v2 DBs missing metadata_hash column",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const tmpRoot = path.join(__dirname, ".tmp");
+    await mkdir(tmpRoot, { recursive: true });
+    const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-migrate-metadata-hash-"));
+    const filePath = path.join(tmpDir, "vectors.sqlite");
+
+    try {
+      // Create a database that claims to be v2 (schema_version=2) but is missing the
+      // `metadata_hash` column. This can happen when older v2 builds persisted a DB
+      // before that column was added.
+      function locateSqlJsFile(file, prefix = "") {
+        try {
+          if (typeof import.meta.resolve === "function") {
+            const resolved = import.meta.resolve(`sql.js/dist/${file}`);
+            if (resolved) {
+              if (resolved.startsWith("file://")) {
+                let pathname = decodeURIComponent(new URL(resolved).pathname);
+                if (/^\/[A-Za-z]:\//.test(pathname)) pathname = pathname.slice(1);
+                return pathname;
+              }
+              return resolved;
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return prefix ? `${prefix}${file}` : file;
+      }
+
+      const sqlJsModuleName = "sql" + ".js";
+      const sqlMod = await import(sqlJsModuleName);
+      const initSqlJs = sqlMod.default ?? sqlMod;
+      const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
+      const db = new SQL.Database();
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS vector_store_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        INSERT INTO vector_store_meta (key, value) VALUES ('dimension', '3');
+        INSERT INTO vector_store_meta (key, value) VALUES ('schema_version', '2');
+
+        CREATE TABLE IF NOT EXISTS vectors (
+          id TEXT PRIMARY KEY,
+          workbook_id TEXT,
+          vector BLOB NOT NULL,
+          sheet_name TEXT,
+          kind TEXT,
+          title TEXT,
+          r0 INTEGER,
+          c0 INTEGER,
+          r1 INTEGER,
+          c1 INTEGER,
+          content_hash TEXT,
+          token_count INTEGER,
+          text TEXT,
+          metadata_json TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_vectors_workbook_id ON vectors(workbook_id);
+      `);
+
+      function float32ToBlob(vec) {
+        const v = vec instanceof Float32Array ? vec : Float32Array.from(vec);
+        return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+      }
+
+      function normalizeL2(vec) {
+        const v = vec instanceof Float32Array ? new Float32Array(vec) : Float32Array.from(vec);
+        let sum = 0;
+        for (let i = 0; i < v.length; i += 1) sum += v[i] * v[i];
+        const len = Math.sqrt(sum);
+        if (len > 0) {
+          for (let i = 0; i < v.length; i += 1) v[i] /= len;
+        }
+        return v;
+      }
+
+      const insert = db.prepare(`
+        INSERT INTO vectors (
+          id,
+          workbook_id,
+          vector,
+          sheet_name,
+          kind,
+          title,
+          r0,
+          c0,
+          r1,
+          c1,
+          content_hash,
+          token_count,
+          text,
+          metadata_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      `);
+      insert.run([
+        "a",
+        "wb",
+        float32ToBlob(normalizeL2([1, 0, 0])),
+        "Sheet1",
+        "table",
+        "T1",
+        0,
+        0,
+        1,
+        1,
+        "hash-a",
+        5,
+        "hello",
+        JSON.stringify({ label: "A", metadataHash: "meta-a" }),
+      ]);
+      insert.free();
+
+      const data = db.export();
+      db.close();
+      await writeFile(filePath, data);
+
+      const store = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: false });
+
+      const hashes = await store.listContentHashes({ workbookId: "wb" });
+      assert.equal(hashes.length, 1);
+      assert.equal(hashes[0].id, "a");
+      assert.equal(hashes[0].contentHash, "hash-a");
+      assert.equal(hashes[0].metadataHash, "meta-a");
+
+      const rec = await store.get("a");
+      assert.ok(rec);
+      assert.equal(rec.metadata.metadataHash, "meta-a");
+
+      // The repair migration should populate the new column and strip metadataHash from metadata_json.
+      const migratedStmt = store._db.prepare(
+        "SELECT metadata_hash, metadata_json FROM vectors WHERE id = ?;"
+      );
+      migratedStmt.bind(["a"]);
+      assert.ok(migratedStmt.step());
+      const migratedRow = migratedStmt.get();
+      migratedStmt.free();
+      assert.equal(migratedRow[0], "meta-a");
+      assert.deepEqual(JSON.parse(migratedRow[1]), { label: "A" });
+
+      await store.close();
+
+      // Ensure the repaired schema persists and can be reopened.
+      const store2 = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: false });
+      const hashes2 = await store2.listContentHashes({ workbookId: "wb" });
+      assert.equal(hashes2.length, 1);
+      assert.equal(hashes2[0].metadataHash, "meta-a");
+      await store2.close();
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
 test("SqliteVectorStore.list respects AbortSignal", { skip: !sqlJsAvailable }, async () => {
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
