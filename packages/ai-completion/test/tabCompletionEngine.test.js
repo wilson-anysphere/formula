@@ -567,6 +567,98 @@ test("Typing =COUNTIF(A suggests a range but does not auto-close parens", async 
   );
 });
 
+test("Typing =SUMIFS(A suggests a range but does not auto-close parens (needs more args)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUMIFS(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUMIFS(A1:A10"),
+    `Expected a SUMIFS range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("SUMIFS repeating criteria_range suggestions do not auto-close parens (criteria2 still required)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = '=SUMIFS(A1:A10, A1:A10, ">5", A';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=SUMIFS(A1:A10, A1:A10, ">5", A1:A10'),
+    `Expected a SUMIFS criteria_range2 suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =FILTER(A suggests a range but does not auto-close parens (needs more args)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=FILTER(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FILTER(A1:A10"),
+    `Expected a FILTER range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =TEXTJOIN(\",\",TRUE,A suggests a range and auto-closes (min args satisfied)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = '=TEXTJOIN(",", TRUE, A';
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === '=TEXTJOIN(",", TRUE, A1:A10)'),
+    `Expected a TEXTJOIN range suggestion with closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =MAX(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

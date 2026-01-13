@@ -271,8 +271,8 @@ export class TabCompletionEngine {
     const cursor = clampCursor(input, context.cursorPosition);
     const cellRef = normalizeCellRef(context.cellRef);
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
-    const minArgs = fnSpec?.minArgs;
     const argIndex = parsed.argIndex ?? 0;
+    const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
     const rangeCandidates = suggestRanges({
       currentArgText: parsed.currentArg.text,
@@ -290,8 +290,6 @@ export class TabCompletionEngine {
       // auto-close them when the function could be syntactically complete. This
       // matches the common "type =SUM(A<tab>" workflow without producing invalid
       // suggestions for functions that require additional arguments (e.g. VLOOKUP).
-      const functionCouldBeComplete =
-        !Number.isInteger(minArgs) || (Number.isInteger(argIndex) && argIndex + 1 >= minArgs);
       if (cursor === input.length && functionCouldBeComplete) {
         newText = closeUnbalancedParens(newText);
       }
@@ -328,10 +326,8 @@ export class TabCompletionEngine {
     const cellRef = normalizeCellRef(context.cellRef);
 
     const fnSpec = parsed.functionName ? this.functionRegistry.getFunction(parsed.functionName) : undefined;
-    const minArgs = fnSpec?.minArgs;
     const argIndex = parsed.argIndex ?? 0;
-    const functionCouldBeComplete =
-      !Number.isInteger(minArgs) || (Number.isInteger(argIndex) && argIndex + 1 >= minArgs);
+    const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
     const spanStart = parsed.currentArg?.start ?? cursor;
     const spanEnd = parsed.currentArg?.end ?? cursor;
@@ -543,6 +539,36 @@ function closeUnbalancedParens(input) {
     else if (ch === ")") balance = Math.max(0, balance - 1);
   }
   return balance > 0 ? input + ")".repeat(balance) : input;
+}
+
+/**
+ * Returns true when the formula could be syntactically complete after providing the given arg.
+ *
+ * For most functions we only need to know whether `minArgs` is satisfied. However, some functions
+ * accept repeating *groups* of args where entering an early arg in the group implies additional
+ * required args must follow (e.g. SUMIFS(..., criteria_range2, criteria2)).
+ *
+ * @param {any} fnSpec
+ * @param {number} argIndex
+ */
+function functionCouldBeCompleteAfterArg(fnSpec, argIndex) {
+  const minArgs = fnSpec?.minArgs;
+  if (!Number.isInteger(minArgs)) return true;
+  if (!Number.isInteger(argIndex) || argIndex + 1 < minArgs) return false;
+
+  const args = Array.isArray(fnSpec?.args) ? fnSpec.args : [];
+  if (args.length === 0) return true;
+
+  const repeatingStart = args.findIndex((a) => a?.repeating);
+  if (repeatingStart < 0) return true;
+  if (argIndex < repeatingStart) return true;
+
+  const group = args.slice(repeatingStart);
+  if (group.length <= 1) return true;
+
+  const within = (argIndex - repeatingStart) % group.length;
+  const requiredAfter = group.slice(within + 1).some((spec) => !spec?.optional);
+  return !requiredAfter;
 }
 
 function applyNameCase(name, typedPrefix) {

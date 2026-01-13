@@ -65,7 +65,9 @@ export class CursorTabCompletionClient {
           : null;
       if (controller.signal.aborted) return "";
 
-      const headers = { ...(authHeaders ?? {}), "Content-Type": "application/json" };
+      // Use lowercase so tests (and any header-inspecting consumers) can treat this as a plain
+      // record without worrying about case. Fetch treats header keys as case-insensitive.
+      const headers = { ...(authHeaders ?? {}), "content-type": "application/json" };
 
       const res = await this.fetchImpl(this.endpointUrl, {
         method: "POST",

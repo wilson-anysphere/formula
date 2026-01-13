@@ -139,7 +139,21 @@ export class FunctionRegistry {
     const fn = this.getFunction(functionName);
     if (!fn) return undefined;
     if (!Number.isInteger(argIndex) || argIndex < 0) return undefined;
-    const spec = fn.args[argIndex] ?? fn.args.find(a => a.repeating);
+    if (!Array.isArray(fn.args) || fn.args.length === 0) return undefined;
+
+    const direct = fn.args[argIndex];
+    if (direct) return direct.type;
+
+    // Support repeating "groups" of arguments (e.g. SUMIFS(range1, crit1, range2, crit2, ...)).
+    // The first arg with `repeating:true` marks the start of a group that repeats to `maxArgs`.
+    const repeatingStart = fn.args.findIndex((a) => a.repeating);
+    if (repeatingStart < 0) return undefined;
+
+    const groupLen = fn.args.length - repeatingStart;
+    if (groupLen <= 0) return undefined;
+
+    const offset = (argIndex - repeatingStart) % groupLen;
+    const spec = fn.args[repeatingStart + offset];
     return spec?.type;
   }
 
@@ -160,6 +174,24 @@ const CURATED_FUNCTIONS = [
     description: "Adds all the numbers in a range of cells.",
     args: [
       { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "SUMIF",
+    description: "Adds the cells specified by a given condition or criteria.",
+    args: [
+      { name: "range", type: "range" },
+      { name: "criteria", type: "value" },
+      { name: "sum_range", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "SUMIFS",
+    description: "Adds the cells in a range that meet multiple criteria.",
+    args: [
+      { name: "sum_range", type: "range" },
+      { name: "criteria_range1", type: "range", repeating: true },
+      { name: "criteria1", type: "value" },
     ],
   },
   {
@@ -192,10 +224,36 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "COUNTIFS",
+    description: "Counts the number of cells that meet multiple criteria.",
+    args: [
+      { name: "criteria_range1", type: "range", repeating: true },
+      { name: "criteria1", type: "value" },
+    ],
+  },
+  {
     name: "AVERAGE",
     description: "Returns the average (arithmetic mean) of the arguments.",
     args: [
       { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "AVERAGEIF",
+    description: "Returns the average of cells that meet a given condition or criteria.",
+    args: [
+      { name: "range", type: "range" },
+      { name: "criteria", type: "value" },
+      { name: "average_range", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "AVERAGEIFS",
+    description: "Returns the average of cells that meet multiple criteria.",
+    args: [
+      { name: "average_range", type: "range" },
+      { name: "criteria_range1", type: "range", repeating: true },
+      { name: "criteria1", type: "value" },
     ],
   },
   {
@@ -206,6 +264,15 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "MAXIFS",
+    description: "Returns the maximum value among cells specified by a given set of conditions or criteria.",
+    args: [
+      { name: "max_range", type: "range" },
+      { name: "criteria_range1", type: "range", repeating: true },
+      { name: "criteria1", type: "value" },
+    ],
+  },
+  {
     name: "MIN",
     description: "Returns the smallest value in a set of values.",
     args: [
@@ -213,11 +280,29 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "MINIFS",
+    description: "Returns the minimum value among cells specified by a given set of conditions or criteria.",
+    args: [
+      { name: "min_range", type: "range" },
+      { name: "criteria_range1", type: "range", repeating: true },
+      { name: "criteria1", type: "value" },
+    ],
+  },
+  {
     name: "SUMPRODUCT",
     description: "Returns the sum of the products of corresponding array components.",
     args: [
       { name: "array1", type: "range" },
-      { name: "array2", type: "range" },
+      { name: "array2", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "LOOKUP",
+    description: "Looks up a value either from a one-row or one-column range or from an array.",
+    args: [
+      { name: "lookup_value", type: "value" },
+      { name: "lookup_vector", type: "range" },
+      { name: "result_vector", type: "range", optional: true },
     ],
   },
   {
@@ -305,6 +390,16 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "XMATCH",
+    description: "Returns the relative position of an item in an array or range.",
+    args: [
+      { name: "lookup_value", type: "value" },
+      { name: "lookup_array", type: "range" },
+      { name: "match_mode", type: "number", optional: true },
+      { name: "search_mode", type: "number", optional: true },
+    ],
+  },
+  {
     name: "IF",
     description: "Checks whether a condition is met, and returns one value if TRUE, and another value if FALSE.",
     args: [
@@ -328,10 +423,56 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "TEXTJOIN",
+    description: "Combines text from multiple ranges and/or strings, and includes a delimiter between each value.",
+    args: [
+      { name: "delimiter", type: "string" },
+      { name: "ignore_empty", type: "boolean" },
+      { name: "text1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "TRANSPOSE",
     description: "Returns the transpose of an array or range.",
     args: [
       { name: "array", type: "range" },
+    ],
+  },
+  {
+    name: "FILTER",
+    description: "Filters a range of data based on criteria you define.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "include", type: "range" },
+      { name: "if_empty", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "SORT",
+    description: "Sorts the contents of a range or array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "sort_index", type: "number", optional: true },
+      { name: "sort_order", type: "number", optional: true },
+      { name: "by_col", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "SORTBY",
+    description: "Sorts the contents of a range or array based on the values in a corresponding range or array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "by_array1", type: "range", repeating: true },
+      { name: "sort_order1", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "UNIQUE",
+    description: "Returns a list of unique values in a list or range.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "by_col", type: "boolean", optional: true },
+      { name: "exactly_once", type: "boolean", optional: true },
     ],
   },
   {

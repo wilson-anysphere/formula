@@ -35,3 +35,25 @@ test("FunctionRegistry falls back to curated defaults when catalog is missing/in
     "Expected catalog-only functions to be absent when catalog is invalid"
   );
 });
+
+test("FunctionRegistry uses curated range metadata for common multi-range functions", () => {
+  const registry = new FunctionRegistry();
+
+  // SUMIFS(sum_range, criteria_range1, criteria1, [criteria_range2, criteria2], ...)
+  assert.ok(registry.isRangeArg("SUMIFS", 0), "Expected SUMIFS arg1 to be a range");
+  assert.ok(registry.isRangeArg("SUMIFS", 1), "Expected SUMIFS arg2 to be a range");
+  assert.equal(registry.isRangeArg("SUMIFS", 2), false, "Expected SUMIFS arg3 to be a value");
+  assert.ok(registry.isRangeArg("SUMIFS", 3), "Expected SUMIFS arg4 (criteria_range2) to be a range");
+  assert.equal(registry.isRangeArg("SUMIFS", 4), false, "Expected SUMIFS arg5 (criteria2) to be a value");
+
+  // _xlfn aliases should preserve the curated signatures.
+  assert.ok(registry.isRangeArg("_xlfn.SUMIFS", 0), "Expected _xlfn.SUMIFS arg1 to be a range");
+  assert.ok(registry.isRangeArg("_xlfn.FILTER", 0), "Expected _xlfn.FILTER arg1 to be a range");
+  assert.ok(registry.isRangeArg("_xlfn.FILTER", 1), "Expected _xlfn.FILTER arg2 to be a range");
+
+  // TEXTJOIN(delimiter, ignore_empty, text1, [text2], ...)
+  assert.equal(registry.isRangeArg("TEXTJOIN", 0), false, "Expected TEXTJOIN delimiter not to be a range");
+  assert.equal(registry.isRangeArg("TEXTJOIN", 1), false, "Expected TEXTJOIN ignore_empty not to be a range");
+  assert.ok(registry.isRangeArg("TEXTJOIN", 2), "Expected TEXTJOIN text1 to be a range");
+  assert.ok(registry.isRangeArg("TEXTJOIN", 3), "Expected TEXTJOIN text2 to be a range (varargs)");
+});
