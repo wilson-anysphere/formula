@@ -17,13 +17,15 @@ export interface ToolCallLog {
    * Full tool result payload.
    *
    * Note: This may be omitted by higher-level integrations (e.g. `packages/ai-tools`
-   * audited runs) to keep audit storage bounded.
+   * audited runs) to keep audit storage bounded, and may also be dropped by
+   * `BoundedAIAuditStore` when enforcing per-entry size caps.
    */
   result?: unknown;
   /**
    * Compact summary of the tool result (bounded).
    *
-   * Intended for audit stores with strict size limits (e.g. LocalStorage).
+   * Intended for audit stores with strict size limits (e.g. LocalStorage), and
+   * as the preferred payload when `BoundedAIAuditStore` compacts oversized entries.
    */
   audit_result_summary?: unknown;
   /**
