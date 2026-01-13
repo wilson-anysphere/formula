@@ -120,7 +120,7 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
-import { registerWorkbenchFileCommands } from "./commands/registerWorkbenchFileCommands.js";
+import { registerWorkbenchFileCommands, WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -7719,6 +7719,10 @@ registerWorkbenchFileCommands({
         showToast(`Failed to save workbook: ${String(err)}`, "error");
       });
     },
+    setAutoSaveEnabled: (enabled?: boolean) => {
+      const nextEnabled = typeof enabled === "boolean" ? enabled : !autoSaveEnabled;
+      void setAutoSaveEnabledFromUi(nextEnabled);
+    },
     print: () => {
       const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
       if (!invokeAvailable) {
@@ -8330,53 +8334,39 @@ async function handleRibbonExportPdf(): Promise<void> {
 mountRibbon(ribbonReactRoot, {
   fileActions: {
     newWorkbook: () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
-        return;
-      }
-      void handleNewWorkbook().catch((err) => {
-        console.error("Failed to create workbook:", err);
-        showToast(`Failed to create workbook: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     openWorkbook: () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
-        return;
-      }
-      void promptOpenWorkbook().catch((err) => {
-        console.error("Failed to open workbook:", err);
-        showToast(`Failed to open workbook: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     saveWorkbook: () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
-        return;
-      }
-      void handleSave().catch((err) => {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     saveWorkbookAs: () => {
-      if (!tauriBackend) {
-        showDesktopOnlyToast("Save As is available in the desktop app.");
-        return;
-      }
-      void handleSaveAs().catch((err) => {
-        console.error("Failed to save workbook:", err);
-        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     toggleAutoSave: (enabled) => {
-      void setAutoSaveEnabledFromUi(enabled);
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, enabled).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
     },
     versionHistory: () => {
-      toggleDockPanel(PanelIds.VERSION_HISTORY);
+      void commandRegistry.executeCommand("view.togglePanel.versionHistory").catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
     },
     branchManager: () => {
-      toggleDockPanel(PanelIds.BRANCH_MANAGER);
+      void commandRegistry.executeCommand("view.togglePanel.branchManager").catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
     },
     pageSetup: () => {
       void handleRibbonPageSetup().catch((err) => {
@@ -8385,52 +8375,32 @@ mountRibbon(ribbonReactRoot, {
       });
     },
     printPreview: () => {
-      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-      if (!invokeAvailable) {
-        showDesktopOnlyToast("Print Preview is available in the desktop app.");
-        return;
-      }
-      void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
-        console.error("Failed to open print preview:", err);
-        showToast(`Failed to open print preview: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     print: () => {
-      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-      if (!invokeAvailable) {
-        showDesktopOnlyToast("Print is available in the desktop app.");
-        return;
-      }
-      void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
-        console.error("Failed to print:", err);
-        showToast(`Failed to print: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     closeWindow: () => {
-      if (!handleCloseRequestForRibbon) {
-        showDesktopOnlyToast("Closing windows is available in the desktop app.");
-        return;
-      }
-      void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
-        console.error("Failed to close window:", err);
-        showToast(`Failed to close window: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     quit: () => {
-      if (!handleCloseRequestForRibbon) {
-        showDesktopOnlyToast("Quitting is available in the desktop app.");
-        return;
-      }
-      void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
-        console.error("Failed to quit app:", err);
-        showToast(`Failed to quit app: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
   },
   onToggle: (commandId, pressed) => {
     switch (commandId) {
       case "file.save.autoSave": {
-        void setAutoSaveEnabledFromUi(pressed);
+        void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, pressed).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
         app.focus();
         return;
       }
@@ -9074,66 +9044,38 @@ mountRibbon(ribbonReactRoot, {
     switch (commandId) {
       case "file.new.new":
       case "file.new.blankWorkbook": {
-        if (!tauriBackend) {
-          showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
-          return;
-        }
-        void handleNewWorkbook().catch((err) => {
-          console.error("Failed to create workbook:", err);
-          showToast(`Failed to create workbook: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.newWorkbook);
         return;
       }
 
       case "file.open.open": {
-        if (!tauriBackend) {
-          showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
-          return;
-        }
-        void promptOpenWorkbook().catch((err) => {
-          console.error("Failed to open workbook:", err);
-          showToast(`Failed to open workbook: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.openWorkbook);
         return;
       }
 
       case "file.save.save": {
-        if (!tauriBackend) {
-          showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
-          return;
-        }
-        void handleSave().catch((err) => {
-          console.error("Failed to save workbook:", err);
-          showToast(`Failed to save workbook: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook);
         return;
       }
 
       case "file.save.autoSave": {
-        void setAutoSaveEnabledFromUi(!autoSaveEnabled);
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled);
         return;
       }
 
       case "file.info.manageWorkbook.versions": {
-        toggleDockPanel(PanelIds.VERSION_HISTORY);
+        executeBuiltinCommand("view.togglePanel.versionHistory");
         return;
       }
       case "file.info.manageWorkbook.branches": {
-        toggleDockPanel(PanelIds.BRANCH_MANAGER);
+        executeBuiltinCommand("view.togglePanel.branchManager");
         return;
       }
 
       case "file.save.saveAs":
       case "file.save.saveAs.copy":
       case "file.save.saveAs.download": {
-        if (!tauriBackend) {
-          showDesktopOnlyToast("Save As is available in the desktop app.");
-          return;
-        }
-        void handleSaveAs().catch((err) => {
-          console.error("Failed to save workbook:", err);
-          showToast(`Failed to save workbook: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
         return;
       }
 
@@ -9181,28 +9123,12 @@ mountRibbon(ribbonReactRoot, {
       }
 
       case "file.print.print": {
-        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-        if (!invokeAvailable) {
-          showDesktopOnlyToast("Print is available in the desktop app.");
-          return;
-        }
-        void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
-          console.error("Failed to print:", err);
-          showToast(`Failed to print: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.print);
         return;
       }
 
       case "file.print.printPreview": {
-        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-        if (!invokeAvailable) {
-          showDesktopOnlyToast("Print Preview is available in the desktop app.");
-          return;
-        }
-        void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
-          console.error("Failed to open print preview:", err);
-          showToast(`Failed to open print preview: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.printPreview);
         return;
       }
 
@@ -9216,22 +9142,7 @@ mountRibbon(ribbonReactRoot, {
       }
 
       case "file.options.close": {
-        if (handleCloseRequestForRibbon) {
-          void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
-            console.error("Failed to close window:", err);
-            showToast(`Failed to close window: ${String(err)}`, "error");
-          });
-          return;
-        }
-
-        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
-        if (!invokeAvailable) {
-          showDesktopOnlyToast("Closing windows is available in the desktop app.");
-        }
-        void hideTauriWindow().catch((err) => {
-          console.error("Failed to close window:", err);
-          showToast(`Failed to close window: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook);
         return;
       }
 

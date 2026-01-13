@@ -13,6 +13,7 @@ describe("registerWorkbenchFileCommands", () => {
       openWorkbook: vi.fn(),
       saveWorkbook: vi.fn(),
       saveWorkbookAs: vi.fn(),
+      setAutoSaveEnabled: vi.fn(),
       print: vi.fn(),
       printPreview: vi.fn(),
       closeWorkbook: vi.fn(),
@@ -36,6 +37,9 @@ describe("registerWorkbenchFileCommands", () => {
 
     await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs);
     expect(handlers.saveWorkbookAs).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled, true);
+    expect(handlers.setAutoSaveEnabled).toHaveBeenCalledWith(true);
 
     await commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print);
     expect(handlers.print).toHaveBeenCalledTimes(1);

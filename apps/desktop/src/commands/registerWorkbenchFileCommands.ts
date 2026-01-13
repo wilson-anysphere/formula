@@ -6,6 +6,13 @@ export const WORKBENCH_FILE_COMMANDS = {
   openWorkbook: "workbench.openWorkbook",
   saveWorkbook: "workbench.saveWorkbook",
   saveWorkbookAs: "workbench.saveWorkbookAs",
+  /**
+   * Set AutoSave enabled state. Accepts an optional boolean argument:
+   * - `true` to enable
+   * - `false` to disable
+   * - `undefined` to toggle (useful for command palette / keyboard wiring)
+   */
+  setAutoSaveEnabled: "workbench.setAutoSaveEnabled",
   print: "workbench.print",
   printPreview: "workbench.printPreview",
   closeWorkbook: "workbench.closeWorkbook",
@@ -17,6 +24,7 @@ export type WorkbenchFileCommandHandlers = {
   openWorkbook: () => void | Promise<void>;
   saveWorkbook: () => void | Promise<void>;
   saveWorkbookAs: () => void | Promise<void>;
+  setAutoSaveEnabled: (enabled?: boolean) => void | Promise<void>;
   print: () => void | Promise<void>;
   printPreview: () => void | Promise<void>;
   closeWorkbook: () => void | Promise<void>;
@@ -76,6 +84,18 @@ export function registerWorkbenchFileCommands(params: {
       icon: null,
       description: t("commandDescription.workbench.saveWorkbookAs"),
       keywords: ["save", "save as", "workbook", "file"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled,
+    t("command.workbench.setAutoSaveEnabled"),
+    (enabled?: boolean) => handlers.setAutoSaveEnabled(enabled),
+    {
+      category,
+      icon: null,
+      description: t("commandDescription.workbench.setAutoSaveEnabled"),
+      keywords: ["autosave", "auto save", "save", "cloud"],
     },
   );
 
