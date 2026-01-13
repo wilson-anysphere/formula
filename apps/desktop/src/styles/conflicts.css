@@ -26,6 +26,9 @@
   bottom: var(--conflict-ui-inset);
   /* `pointer-events: none` is inherited from the overlay container; re-enable so the UI is interactive. */
   pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--conflict-ui-gap-xs);
 }
 
 .conflict-ui-toast-root {
@@ -34,6 +37,48 @@
 
 .structural-conflict-ui-toast-root {
   right: var(--conflict-ui-inset);
+}
+
+.conflict-ui-toast-root > div,
+.structural-conflict-ui-toast-root > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--conflict-ui-gap-sm);
+  min-width: 240px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 8px 10px;
+  background: var(--dialog-bg);
+  border: 1px solid var(--dialog-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-surface);
+}
+
+.conflict-ui-toast-root > div > button,
+.structural-conflict-ui-toast-root > div > button {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.conflict-ui-toast-root > div > button:hover,
+.structural-conflict-ui-toast-root > div > button:hover {
+  background: var(--bg-hover);
+}
+
+.conflict-ui-toast-root > div > button:focus-visible,
+.structural-conflict-ui-toast-root > div > button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .conflict-ui-dialog-root,
@@ -81,8 +126,84 @@
   font-weight: 700;
 }
 
+.conflict-ui-dialog-root h2,
+.structural-conflict-ui-dialog-root h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.conflict-ui-dialog-root pre,
+.structural-conflict-ui-dialog-root pre {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  overflow: auto;
+}
+
+.conflict-ui-dialog-root button,
+.structural-conflict-ui-dialog-root button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.conflict-ui-dialog-root button:hover,
+.structural-conflict-ui-dialog-root button:hover {
+  background: var(--bg-hover);
+}
+
+.conflict-ui-dialog-root button:focus-visible,
+.structural-conflict-ui-dialog-root button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.conflict-ui-dialog-root textarea,
+.conflict-ui-dialog-root input,
+.structural-conflict-ui-dialog-root textarea,
+.structural-conflict-ui-dialog-root input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.conflict-ui-dialog-root textarea:focus,
+.conflict-ui-dialog-root input:focus,
+.structural-conflict-ui-dialog-root textarea:focus,
+.structural-conflict-ui-dialog-root input:focus {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
 .conflict-dialog__manual-editor {
   margin-top: var(--conflict-ui-gap);
+  display: flex;
+  flex-direction: column;
+  gap: var(--conflict-ui-gap-xs);
 }
 
 .conflict-dialog__manual-label {
