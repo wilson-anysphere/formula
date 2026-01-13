@@ -50,32 +50,40 @@ jobs:
 
             let corpusRunId = null;
             let excelRunId = null;
+            let shouldGenerate = false;
 
             if (triggeredName === "corpus") {
               corpusRunId = context.payload.workflow_run.id;
               excelRunId = await findCompletedRunId("excel-compat.yml");
+              // If Excel didn't run for this commit, there is no calc metric to report. Avoid
+              // emitting a partial scorecard for corpus-only runs.
+              shouldGenerate = !!excelRunId;
             } else if (triggeredName === "Excel Compatibility (Oracle)") {
               excelRunId = context.payload.workflow_run.id;
               corpusRunId = await findCompletedRunId("corpus.yml");
+              // Always generate after the Excel workflow; corpus metrics are optional and will be
+              // marked missing when the corpus workflow did not run for this commit.
+              shouldGenerate = true;
             } else {
               // Unexpected; fall back to searching both.
               corpusRunId = await findCompletedRunId("corpus.yml");
               excelRunId = await findCompletedRunId("excel-compat.yml");
+              shouldGenerate = !!excelRunId;
             }
 
             core.setOutput("sha", sha);
             core.setOutput("corpus_run_id", corpusRunId || "");
             core.setOutput("excel_run_id", excelRunId || "");
-            core.setOutput("ready", corpusRunId && excelRunId ? "true" : "false");
+            core.setOutput("generate", shouldGenerate ? "true" : "false");
 
-            if (!corpusRunId || !excelRunId) {
+            if (!shouldGenerate) {
               core.notice(
-                `Related workflow runs not ready yet for sha ${sha}: corpus=${corpusRunId} excel=${excelRunId}`
+                `Not generating scorecard yet for sha ${sha}: corpus=${corpusRunId} excel=${excelRunId}`
               );
             }
 
       - name: Download corpus summary artifact
-        if: ${{ steps.runs.outputs.ready == 'true' }}
+        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.corpus_run_id != '' }}
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -85,7 +93,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Download excel-oracle artifacts
-        if: ${{ steps.runs.outputs.ready == 'true' }}
+        if: ${{ steps.runs.outputs.generate == 'true' && steps.runs.outputs.excel_run_id != '' }}
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -95,7 +103,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Generate unified scorecard
-        if: ${{ steps.runs.outputs.ready == 'true' }}
+        if: ${{ steps.runs.outputs.generate == 'true' }}
         env:
           # Prefer rendering the commit we are summarizing, not the workflow_run runner checkout SHA.
           GITHUB_SHA: ${{ steps.runs.outputs.sha }}
@@ -112,7 +120,7 @@ jobs:
           fi
 
       - name: Upload unified scorecard
-        if: ${{ steps.runs.outputs.ready == 'true' }}
+        if: ${{ steps.runs.outputs.generate == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: compat-scorecard

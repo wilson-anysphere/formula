@@ -365,7 +365,14 @@ def main() -> int:
     lines.append("## Inputs")
     lines.append("")
     if corpus:
-        extra = f" (timestamp: `{corpus.timestamp}`)" if corpus.timestamp else ""
+        corpus_meta_parts: list[str] = []
+        if corpus.timestamp:
+            corpus_meta_parts.append(f"timestamp: `{corpus.timestamp}`")
+        if corpus.commit:
+            corpus_meta_parts.append(f"commit: `{corpus.commit}`")
+        if corpus.run_url:
+            corpus_meta_parts.append(f"run: {corpus.run_url}")
+        extra = f" ({', '.join(corpus_meta_parts)})" if corpus_meta_parts else ""
         lines.append(f"- Corpus summary: `{_fmt_path(repo_root, corpus.path)}`{extra}")
     else:
         lines.append("- Corpus summary: **MISSING**")
