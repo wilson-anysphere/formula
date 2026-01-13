@@ -1428,8 +1428,7 @@ const CURATED_FUNCTIONS = [
     name: "MAP",
     description: "Maps a LAMBDA to one or more arrays and returns an array of results.",
     args: [
-      { name: "array1", type: "range" },
-      { name: "array2", type: "range", optional: true },
+      { name: "array", type: "range" },
       { name: "lambda", type: "value" },
     ],
   },
