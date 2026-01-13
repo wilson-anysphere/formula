@@ -70,23 +70,33 @@ fn win_err(context: &str, err: windows::core::Error) -> ClipboardError {
 }
 
 fn is_retryable_open_clipboard_error(err: &windows::core::Error) -> bool {
-    // Per Win32 docs, `OpenClipboard` commonly fails with `ERROR_ACCESS_DENIED` when another process
-    // is holding the clipboard lock. The windows crate reports this as an HRESULT.
+    // Per Win32 docs, `OpenClipboard` commonly fails when another process is holding the clipboard
+    // lock. The windows crate reports these as HRESULTs (typically `HRESULT_FROM_WIN32`).
+    //
+    // In practice we most commonly see:
+    // - `ERROR_ACCESS_DENIED` (5) -> 0x80070005
+    // - `ERROR_BUSY` (170)        -> 0x800700AA
+    //
+    // Some producers/layers may surface OLE clipboard HRESULTs; treat `CLIPBRD_E_CANT_OPEN` as
+    // retryable as well since it often indicates the clipboard is temporarily unavailable.
     const E_ACCESSDENIED: windows::core::HRESULT = windows::core::HRESULT(0x80070005u32 as i32);
     const E_BUSY: windows::core::HRESULT = windows::core::HRESULT(0x800700AAu32 as i32);
+    const CLIPBRD_E_CANT_OPEN: windows::core::HRESULT =
+        windows::core::HRESULT(0x800401D0u32 as i32);
+
     let code = err.code();
-    code == E_ACCESSDENIED || code == E_BUSY
+    code == E_ACCESSDENIED || code == E_BUSY || code == CLIPBRD_E_CANT_OPEN
 }
 
-fn get_open_clipboard_lock_holder() -> Option<(HWND, u32)> {
+fn get_open_clipboard_lock_holder() -> Option<(HWND, u32, u32)> {
     unsafe {
         let hwnd = GetOpenClipboardWindow();
         if hwnd.0 == 0 {
             return None;
         }
         let mut pid = 0u32;
-        let _tid = GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        Some((hwnd, pid))
+        let tid = GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        Some((hwnd, pid, tid))
     }
 }
 
@@ -98,7 +108,7 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     let max_total_sleep = total_delay(OPEN_CLIPBOARD_RETRY_DELAYS);
     let mut attempts = 0usize;
     let mut slept = Duration::from_millis(0);
-    let mut lock_holder = None::<(HWND, u32)>;
+    let mut lock_holder = None::<(HWND, u32, u32)>;
 
     retry_with_delays_if(
         || {
@@ -123,7 +133,12 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
         let last_hresult = err.code().0 as u32;
         let retriable = is_retryable_open_clipboard_error(&err);
         let lock_holder_ctx = lock_holder
-            .map(|(hwnd, pid)| format!("open_clipboard_window=0x{:X}, open_clipboard_pid={pid}", hwnd.0 as usize))
+            .map(|(hwnd, pid, tid)| {
+                format!(
+                    "open_clipboard_window=0x{:X}, open_clipboard_pid={pid}, open_clipboard_tid={tid}",
+                    hwnd.0 as usize
+                )
+            })
             .unwrap_or_else(|| "open_clipboard_window=None".to_string());
         win_err(
             &format!(
