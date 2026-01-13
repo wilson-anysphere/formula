@@ -140,6 +140,7 @@ import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
 import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
+import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
 import { registerDataQueriesCommands } from "./commands/registerDataQueriesCommands.js";
@@ -8087,9 +8088,8 @@ mountRibbon(ribbonReactRoot, {
       });
     },
     pageSetup: () => {
-      void handleRibbonPageSetup().catch((err) => {
-        console.error("Failed to open page setup:", err);
-        showToast(`Failed to open page setup: ${String(err)}`, "error");
+      void commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     printPreview: () => {
@@ -8293,10 +8293,7 @@ function handleRibbonCommand(commandId: string): void {
       case "file.export.createPdf":
       case "file.export.export.pdf":
       case "file.export.changeFileType.pdf": {
-        void handleRibbonExportPdf().catch((err) => {
-          console.error("Failed to export PDF:", err);
-          showToast(`Failed to export PDF: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.exportPdf);
         return;
       }
 
@@ -8326,10 +8323,7 @@ function handleRibbonCommand(commandId: string): void {
       }
 
       case "file.print.pageSetup": {
-        void handleRibbonPageSetup().catch((err) => {
-          console.error("Failed to open page setup:", err);
-          showToast(`Failed to open page setup: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
         return;
       }
 
@@ -8345,10 +8339,7 @@ function handleRibbonCommand(commandId: string): void {
 
       case "file.print.pageSetup.printTitles":
       case "file.print.pageSetup.margins": {
-        void handleRibbonPageSetup().catch((err) => {
-          console.error("Failed to open page setup:", err);
-          showToast(`Failed to open page setup: ${String(err)}`, "error");
-        });
+        executeBuiltinCommand(PAGE_LAYOUT_COMMANDS.pageSetupDialog);
         return;
       }
 
