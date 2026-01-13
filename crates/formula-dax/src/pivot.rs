@@ -223,6 +223,12 @@ enum PlannedExpr {
         left: Box<PlannedExpr>,
         right: Box<PlannedExpr>,
     },
+    Not(Box<PlannedExpr>),
+    If {
+        cond: Box<PlannedExpr>,
+        then_expr: Box<PlannedExpr>,
+        else_expr: Option<Box<PlannedExpr>>,
+    },
     Divide {
         numerator: Box<PlannedExpr>,
         denominator: Box<PlannedExpr>,
@@ -231,25 +237,119 @@ enum PlannedExpr {
     Coalesce(Vec<PlannedExpr>),
 }
 
+fn coerce_number_planned(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(n) => Some(n.0),
+        Value::Boolean(b) => Some(if *b { 1.0 } else { 0.0 }),
+        Value::Blank => Some(0.0),
+        Value::Text(_) => None,
+    }
+}
+
+fn compare_values_planned(op: &BinaryOp, left: &Value, right: &Value) -> Option<bool> {
+    let cmp = match (left, right) {
+        // Text comparisons (BLANK coerces to empty string).
+        (Value::Text(l), Value::Text(r)) => Some(l.as_ref().cmp(r.as_ref())),
+        (Value::Text(l), Value::Blank) => Some(l.as_ref().cmp("")),
+        (Value::Blank, Value::Text(r)) => Some("".cmp(r.as_ref())),
+        (Value::Text(_), _) | (_, Value::Text(_)) => return None,
+        // Numeric comparisons (BLANK coerces to 0, TRUE/FALSE to 1/0).
+        _ => {
+            let l = coerce_number_planned(left)?;
+            let r = coerce_number_planned(right)?;
+            Some(l.partial_cmp(&r)?)
+        }
+    }?;
+
+    Some(match op {
+        BinaryOp::Equals => cmp == Ordering::Equal,
+        BinaryOp::NotEquals => cmp != Ordering::Equal,
+        BinaryOp::Less => cmp == Ordering::Less,
+        BinaryOp::LessEquals => cmp != Ordering::Greater,
+        BinaryOp::Greater => cmp == Ordering::Greater,
+        BinaryOp::GreaterEquals => cmp != Ordering::Less,
+        _ => return None,
+    })
+}
+
 fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
     match expr {
         PlannedExpr::Const(v) => v.clone(),
         PlannedExpr::AggRef(idx) => agg_values.get(*idx).cloned().unwrap_or(Value::Blank),
         PlannedExpr::Negate(inner) => {
             let v = eval_planned(inner, agg_values);
-            Value::from(-v.as_f64().unwrap_or(0.0))
+            let Some(n) = coerce_number_planned(&v) else {
+                return Value::Blank;
+            };
+            Value::from(-n)
         }
         PlannedExpr::Binary { op, left, right } => {
-            let l = eval_planned(left, agg_values).as_f64().unwrap_or(0.0);
-            let r = eval_planned(right, agg_values).as_f64().unwrap_or(0.0);
-            let out = match op {
-                BinaryOp::Add => l + r,
-                BinaryOp::Subtract => l - r,
-                BinaryOp::Multiply => l * r,
-                BinaryOp::Divide => l / r,
-                _ => return Value::Blank,
+            let l = eval_planned(left, agg_values);
+            let r = eval_planned(right, agg_values);
+            match op {
+                BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                    let Some(l) = coerce_number_planned(&l) else {
+                        return Value::Blank;
+                    };
+                    let Some(r) = coerce_number_planned(&r) else {
+                        return Value::Blank;
+                    };
+                    let out = match op {
+                        BinaryOp::Add => l + r,
+                        BinaryOp::Subtract => l - r,
+                        BinaryOp::Multiply => l * r,
+                        BinaryOp::Divide => l / r,
+                        _ => unreachable!(),
+                    };
+                    Value::from(out)
+                }
+                BinaryOp::Equals
+                | BinaryOp::NotEquals
+                | BinaryOp::Less
+                | BinaryOp::LessEquals
+                | BinaryOp::Greater
+                | BinaryOp::GreaterEquals => compare_values_planned(op, &l, &r)
+                    .map(Value::from)
+                    .unwrap_or(Value::Blank),
+                BinaryOp::And | BinaryOp::Or => {
+                    let Ok(l) = l.truthy() else {
+                        return Value::Blank;
+                    };
+                    let Ok(r) = r.truthy() else {
+                        return Value::Blank;
+                    };
+                    Value::from(match op {
+                        BinaryOp::And => l && r,
+                        BinaryOp::Or => l || r,
+                        _ => unreachable!(),
+                    })
+                }
+            }
+        }
+        PlannedExpr::Not(inner) => {
+            let value = eval_planned(inner, agg_values);
+            let Ok(b) = value.truthy() else {
+                return Value::Blank;
             };
-            Value::from(out)
+            Value::from(!b)
+        }
+        PlannedExpr::If {
+            cond,
+            then_expr,
+            else_expr,
+        } => {
+            let cond = eval_planned(cond, agg_values);
+            let Ok(cond) = cond.truthy() else {
+                return Value::Blank;
+            };
+            if cond {
+                eval_planned(then_expr, agg_values)
+            } else {
+                else_expr
+                    .as_ref()
+                    .map(|expr| eval_planned(expr, agg_values))
+                    .unwrap_or(Value::Blank)
+            }
         }
         PlannedExpr::Divide {
             numerator,
@@ -258,14 +358,18 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
         } => {
             let num = eval_planned(numerator, agg_values);
             let denom = eval_planned(denominator, agg_values);
-            let denom = denom.as_f64().unwrap_or(0.0);
+            let Some(denom) = coerce_number_planned(&denom) else {
+                return Value::Blank;
+            };
             if denom == 0.0 {
                 alternate
                     .as_ref()
                     .map(|alt| eval_planned(alt, agg_values))
                     .unwrap_or(Value::Blank)
             } else {
-                let num = num.as_f64().unwrap_or(0.0);
+                let Some(num) = coerce_number_planned(&num) else {
+                    return Value::Blank;
+                };
                 Value::from(num / denom)
             }
         }
@@ -345,7 +449,18 @@ fn plan_pivot_expr(
             }
         },
         Expr::BinaryOp { op, left, right } => match op {
-            BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Equals
+            | BinaryOp::NotEquals
+            | BinaryOp::Less
+            | BinaryOp::LessEquals
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEquals
+            | BinaryOp::And
+            | BinaryOp::Or => {
                 let Some(left) = plan_pivot_expr(
                     model,
                     base_table,
@@ -376,12 +491,62 @@ fn plan_pivot_expr(
                     right: Box::new(right),
                 }))
             }
-            _ => Ok(None),
         },
         Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
             "BLANK" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::Blank))),
             "TRUE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(true)))),
             "FALSE" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::from(false)))),
+            "IF" => {
+                if args.len() < 2 || args.len() > 3 {
+                    return Ok(None);
+                }
+                let Some(cond) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    &args[0],
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let Some(then_expr) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    &args[1],
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let else_expr = if args.len() == 3 {
+                    let Some(expr) = plan_pivot_expr(
+                        model,
+                        base_table,
+                        base_table_name,
+                        &args[2],
+                        depth + 1,
+                        agg_specs,
+                        agg_map,
+                    )?
+                    else {
+                        return Ok(None);
+                    };
+                    Some(Box::new(expr))
+                } else {
+                    None
+                };
+                Ok(Some(PlannedExpr::If {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(then_expr),
+                    else_expr,
+                }))
+            }
             "COALESCE" => {
                 if args.is_empty() {
                     return Ok(None);
@@ -403,6 +568,63 @@ fn plan_pivot_expr(
                     planned_args.push(planned);
                 }
                 Ok(Some(PlannedExpr::Coalesce(planned_args)))
+            }
+            "NOT" => {
+                let [arg] = args.as_slice() else {
+                    return Ok(None);
+                };
+                let Some(inner) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    arg,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(PlannedExpr::Not(Box::new(inner))))
+            }
+            "AND" | "OR" => {
+                let [left, right] = args.as_slice() else {
+                    return Ok(None);
+                };
+                let Some(left) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    left,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let Some(right) = plan_pivot_expr(
+                    model,
+                    base_table,
+                    base_table_name,
+                    right,
+                    depth + 1,
+                    agg_specs,
+                    agg_map,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let op = match name.to_ascii_uppercase().as_str() {
+                    "AND" => BinaryOp::And,
+                    "OR" => BinaryOp::Or,
+                    _ => unreachable!(),
+                };
+                Ok(Some(PlannedExpr::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }))
             }
             "DIVIDE" => {
                 if args.len() < 2 || args.len() > 3 {
@@ -1106,5 +1328,55 @@ mod tests {
             fast_elapsed,
             scan_elapsed.as_secs_f64() / fast_elapsed.as_secs_f64()
         );
+    }
+
+    #[test]
+    fn pivot_columnar_group_by_plans_if_and_comparisons() {
+        let rows = 10_000usize;
+        let schema = vec![
+            ColumnSchema {
+                name: "Group".to_string(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "Amount".to_string(),
+                column_type: ColumnType::Number,
+            },
+        ];
+        let options = TableOptions {
+            page_size_rows: 1024,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        let groups = ["A", "B", "C", "D"];
+        for i in 0..rows {
+            builder.append_row(&[
+                formula_columnar::Value::String(Arc::<str>::from(groups[i % groups.len()])),
+                formula_columnar::Value::Number((i % 100) as f64),
+            ]);
+        }
+
+        let mut model = DataModel::new();
+        model
+            .add_table(crate::Table::from_columnar("Fact", builder.finalize()))
+            .unwrap();
+        model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+        // Force both true and false branches to occur, and include logical ops in the condition.
+        model
+            .add_measure(
+                "Big Total",
+                "IF([Total] > 123000 && [Total] < 126000, [Total], BLANK())",
+            )
+            .unwrap();
+
+        let measures = vec![PivotMeasure::new("Big Total", "[Big Total]").unwrap()];
+        let group_by = vec![GroupByColumn::new("Fact", "Group")];
+        let filter = FilterContext::empty();
+
+        let fast = pivot_columnar_group_by(&model, "Fact", &group_by, &measures, &filter)
+            .unwrap()
+            .expect("expected planned columnar pivot to be available");
+        let scan = pivot_row_scan(&model, "Fact", &group_by, &measures, &filter).unwrap();
+        assert_eq!(fast, scan);
     }
 }
