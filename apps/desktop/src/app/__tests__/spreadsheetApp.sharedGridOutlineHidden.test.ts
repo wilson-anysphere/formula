@@ -186,7 +186,8 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
-      const outline = (app as any).outline as any;
+      const sheetId = (app as any).sheetId as string;
+      const outline = (app as any).getOutlineForSheet(sheetId) as any;
       // Hide row 2 and col B (0-based index 1) via the user-hidden flag.
       outline.rows.entryMut(2).hidden.user = true;
       outline.cols.entryMut(2).hidden.user = true;
@@ -196,7 +197,6 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       expect(provider.isColHidden(1)).toBe(true);
 
       const documentController = (app as any).document;
-      const sheetId = (app as any).sheetId;
 
       // Make Ctrl+ArrowDown/Right want to stop on the hidden row/col if hidden indices weren't skipped.
       // Keep the sheet's used range large (it is seeded to D5) so jump-to-edge has room to scan.
