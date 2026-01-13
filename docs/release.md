@@ -94,8 +94,9 @@ node scripts/ci/check-windows-timestamp-url.mjs
 # Ensures Windows installers support manual rollback (downgrades) from the Releases page.
 node scripts/ci/check-windows-allow-downgrades.mjs
 
-# Ensures the Tauri updater signing secrets are present for tagged releases.
-# (CI reads these from GitHub Actions secrets; locally requires env vars to be set.)
+# Ensures the Tauri updater signing secrets are present for *uploading* release assets (tag pushes
+# and `workflow_dispatch` runs with `upload=true`). (CI reads these from GitHub Actions secrets;
+# locally requires env vars to be set.)
 TAURI_PRIVATE_KEY=... TAURI_KEY_PASSWORD=... node scripts/ci/check-tauri-updater-secrets.mjs
 # If your private key is unencrypted, the password can be empty/unset:
 TAURI_PRIVATE_KEY=... node scripts/ci/check-tauri-updater-secrets.mjs
