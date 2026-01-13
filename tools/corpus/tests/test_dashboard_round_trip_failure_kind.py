@@ -163,6 +163,35 @@ class DashboardRoundTripFailureKindTests(unittest.TestCase):
         summary = _compute_summary(reports)
         self.assertEqual(summary["failures_by_round_trip_failure_kind"], {"round_trip_styles": 1})
 
+    def test_dashboard_buckets_shared_strings(self) -> None:
+        reports = [
+            {
+                "display_name": "shared_strings.xlsx",
+                "failure_category": "round_trip_diff",
+                "result": {"open_ok": True, "round_trip_ok": False, "diff_critical_count": 1},
+                "steps": {
+                    "diff": {
+                        "details": {
+                            "parts_with_diffs": [
+                                {
+                                    "part": "xl/sharedStrings.xml",
+                                    "group": "shared_strings",
+                                    "critical": 1,
+                                    "warning": 0,
+                                    "info": 0,
+                                    "total": 1,
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        ]
+        summary = _compute_summary(reports)
+        self.assertEqual(
+            summary["failures_by_round_trip_failure_kind"], {"round_trip_shared_strings": 1}
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

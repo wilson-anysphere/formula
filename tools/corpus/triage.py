@@ -383,6 +383,12 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
             return "round_trip_styles"
         if any(g.startswith("worksheet") for g in failure_groups):
             return "round_trip_worksheets"
+        if "shared_strings" in failure_groups:
+            return "round_trip_shared_strings"
+        if "media" in failure_groups:
+            return "round_trip_media"
+        if "doc_props" in failure_groups:
+            return "round_trip_doc_props"
         return "round_trip_other"
 
     failure_parts = {p.casefold() for p in _extract_failure_diff_parts(report)}
@@ -400,6 +406,15 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
 
     if any(p.startswith("xl/worksheets/") for p in failure_parts):
         return "round_trip_worksheets"
+
+    if "xl/sharedstrings.xml" in failure_parts:
+        return "round_trip_shared_strings"
+
+    if any(p.startswith("xl/media/") for p in failure_parts):
+        return "round_trip_media"
+
+    if any(p.startswith("docprops/") for p in failure_parts):
+        return "round_trip_doc_props"
 
     return "round_trip_other"
 
