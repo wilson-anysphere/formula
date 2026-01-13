@@ -57,7 +57,7 @@ In this mode, the sync server calls an API internal endpoint during WebSocket up
 The API verifies the token signature + audience, revalidates the token against current DB state, and returns an
 introspection-style response:
 
-- `active: true` with `{ userId, orgId, role }` for valid tokens
+- `active: true` with `{ userId, orgId, role, sessionId?, rangeRestrictions? }` for valid tokens
 - `active: false` with a string `reason` for invalid/revoked tokens
 
 Revalidation checks include:
@@ -70,7 +70,11 @@ Revalidation checks include:
 - org MFA enforcement (`org_settings.require_mfa`) for session-issued tokens
 - role clamping: the token `role` is treated as an upper bound and clamped to the current DB role (demotions take effect without forcing token refresh)
 
-The sync server then uses the returned `{ userId, orgId, role }` as the authoritative `AuthContext`.
+The sync server then uses the returned `{ userId, orgId, role, sessionId?, rangeRestrictions? }` as the
+authoritative `AuthContext`.
+
+If `rangeRestrictions` are present and `SYNC_SERVER_ENFORCE_RANGE_RESTRICTIONS=1`, the sync server will
+enforce per-cell edit permissions server-side (same schema as the JWT `rangeRestrictions` claim).
 
 **Pros**
 
