@@ -242,6 +242,31 @@ export class SqliteVectorStore {
   }
 
   /**
+   * Compact the underlying SQLite database to reclaim space after large deletions.
+   *
+   * SQLite does not release free pages back to the database file until `VACUUM`
+   * is run (unless `auto_vacuum` is enabled). Since sql.js stores the database in
+   * memory and persists via `db.export()`, calling `VACUUM` can substantially
+   * reduce the exported/persisted byte size after deleting many rows.
+   *
+   * Note:
+   * - When `autoSave` is enabled (default), this will persist the compacted DB
+   *   via the configured BinaryStorage.
+   * - When `autoSave` is disabled, the compaction will only be persisted on the
+   *   next `close()` (consistent with `upsert()` / `delete()`).
+   */
+  async compact() {
+    // `VACUUM` cannot run inside a transaction. All of our public methods free
+    // prepared statements and close transactions before returning, so we can
+    // safely run it directly here.
+    this._db.run("VACUUM;");
+    // Re-register custom SQL functions just in case SQLite/sql.js resets them.
+    // (sql.js definitely drops them after `export()`; VACUUM may or may not.)
+    this._registerFunctions();
+    if (this._autoSave) await this._persist();
+  }
+
+  /**
    * @param {string} id
    */
   async get(id) {

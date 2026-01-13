@@ -10,6 +10,7 @@ export class SqliteVectorStore {
 
   upsert(records: Array<{ id: string; vector: ArrayLike<number>; metadata: any }>): Promise<void>;
   delete(ids: string[]): Promise<void>;
+  compact(): Promise<void>;
   get(id: string): Promise<{ id: string; vector: Float32Array; metadata: any } | null>;
   list(opts?: {
     filter?: (metadata: any, id: string) => boolean;
