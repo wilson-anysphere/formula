@@ -607,7 +607,7 @@ Deep-link scheme config/registration:
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
 
-Recommended redirect URIs (used by the desktop Power Query UI):
+Recommended redirect URIs (used by the desktop Power Query UI; see `apps/desktop/src/panels/data-queries/DataQueriesPanelContainer.tsx`):
 
 - Deep link: `formula://oauth/callback`
 - Loopback example (choose an unused port): `http://127.0.0.1:4242/oauth/callback`
