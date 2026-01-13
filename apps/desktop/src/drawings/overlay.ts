@@ -1,7 +1,7 @@
 import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
+import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { resolveCssVar } from "../theme/cssVars.js";
-import { graphicFramePlaceholderLabel, isGraphicFrame } from "./shapeRenderer";
 import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
@@ -217,6 +217,28 @@ export class DrawingOverlay {
         }
       }
 
+      if (obj.kind.type === "shape") {
+        let rendered = false;
+        let spec: ShapeRenderSpec | null = null;
+        try {
+          const rawXml = obj.kind.rawXml ?? obj.kind.raw_xml;
+          spec = typeof rawXml === "string" ? parseShapeRenderSpec(rawXml) : null;
+        } catch {
+          spec = null;
+        }
+        if (spec) {
+          withClip(() => {
+            try {
+              drawShape(ctx, screenRect, spec!, colors);
+              rendered = true;
+            } catch {
+              rendered = false;
+            }
+          });
+        }
+        if (rendered) continue;
+      }
+
       // Placeholder rendering for shapes/charts/unknown.
       withClip(() => {
         ctx.save();
@@ -325,6 +347,82 @@ function drawSelection(
   }
   ctx.restore();
 }
+
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  spec: ShapeRenderSpec,
+  colors: ReturnType<typeof resolveOverlayColorTokens>,
+): void {
+  // Clip to the anchored bounds; this matches the chart rendering behaviour and
+  // avoids accidental overdraw if we misinterpret a shape transform.
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  ctx.clip();
+
+  const strokeWidthPx = spec.stroke ? emuToPx(spec.stroke.widthEmu) : 0;
+  const inset = strokeWidthPx > 0 ? strokeWidthPx / 2 : 0;
+  const x = rect.x + inset;
+  const y = rect.y + inset;
+  const w = Math.max(0, rect.width - inset * 2);
+  const h = Math.max(0, rect.height - inset * 2);
+
+  ctx.beginPath();
+  switch (spec.geometry.type) {
+    case "rect":
+      ctx.rect(x, y, w, h);
+      break;
+    case "roundRect": {
+      const radius = Math.min(w, h) * 0.2;
+      roundRectPath(ctx, x, y, w, h, radius);
+      break;
+    }
+    case "ellipse":
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      break;
+    case "line":
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + w, y + h);
+      break;
+  }
+
+  if (spec.geometry.type !== "line" && spec.fill.type === "solid") {
+    ctx.fillStyle = spec.fill.color;
+    ctx.fill();
+  }
+
+  if (spec.stroke && strokeWidthPx > 0) {
+    ctx.strokeStyle = spec.stroke.color;
+    ctx.lineWidth = strokeWidthPx;
+    ctx.setLineDash([]);
+    ctx.stroke();
+  }
+
+  if (spec.label) {
+    ctx.fillStyle = colors.placeholderLabel;
+    ctx.globalAlpha = 0.8;
+    ctx.font = "12px sans-serif";
+    ctx.fillText(spec.label, rect.x + 4, rect.y + 14);
+  }
+}
+
+function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + width, y, x + width, y + height, r);
+  ctx.arcTo(x + width, y + height, x, y + height, r);
+  ctx.arcTo(x, y + height, x, y, r);
+  ctx.arcTo(x, y, x + width, y, r);
+  ctx.closePath();
+}
+
 type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
 
 function resolveAnchorPane(

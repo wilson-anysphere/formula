@@ -29,9 +29,9 @@ export type Anchor =
 
 export type DrawingObjectKind =
   | { type: "image"; imageId: string }
-  | { type: "shape"; label?: string; rawXml?: string }
-  | { type: "chart"; chartId?: string; label?: string; rawXml?: string }
-  | { type: "unknown"; label?: string; rawXml?: string };
+  | { type: "shape"; label?: string; rawXml?: string; raw_xml?: string }
+  | { type: "chart"; chartId?: string; label?: string; rawXml?: string; raw_xml?: string }
+  | { type: "unknown"; label?: string; rawXml?: string; raw_xml?: string };
 
 export interface DrawingObject {
   id: number;
