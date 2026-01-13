@@ -65,6 +65,27 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
           const afterClearA2 = await engine.getCell("A2", "Sheet1");
           const afterClearJson = await engine.toJson();
 
+          // Verify Goal Seek over the WASM worker API surface.
+          await engine.newWorkbook();
+          await engine.setCell("A1", 1, "Sheet1");
+          await engine.setCell("B1", "=A1*A1", "Sheet1");
+          await engine.recalculate();
+
+          const goalSeek = (engine as any).goalSeek;
+          if (typeof goalSeek !== "function") {
+            throw new Error("engine.goalSeek is not available");
+          }
+          const goalSeekResult = await goalSeek({
+            sheet: "Sheet1",
+            targetCell: "B1",
+            targetValue: 25,
+            changingCell: "A1",
+            tolerance: 1e-9,
+          });
+          await engine.recalculate();
+          const goalSeekA1 = await engine.getCell("A1", "Sheet1");
+          const goalSeekB1 = await engine.getCell("B1", "Sheet1");
+
           return {
             ok: true as const,
             basicA1,
@@ -75,7 +96,10 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
             beforeClearJson,
             afterClearA1,
             afterClearA2,
-            afterClearJson
+            afterClearJson,
+            goalSeekResult,
+            goalSeekA1,
+            goalSeekB1,
           };
         } finally {
           engine.terminate();
@@ -113,4 +137,9 @@ test("can load real .xlsx bytes in the WASM worker engine and recalculate formul
   const afterClear = JSON.parse(result.afterClearJson);
   expect(afterClear.sheets.Sheet1.cells).not.toHaveProperty("A1");
   expect(afterClear.sheets.Sheet1.cells).toHaveProperty("A2", "=A1*2");
+
+  expect(result.goalSeekResult.success).toBe(true);
+  expect(Math.abs(result.goalSeekResult.solution - 5)).toBeLessThan(1e-6);
+  expect(Math.abs(result.goalSeekA1.value - 5)).toBeLessThan(1e-6);
+  expect(Math.abs(result.goalSeekB1.value - 25)).toBeLessThan(1e-6);
 });
