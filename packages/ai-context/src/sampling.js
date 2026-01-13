@@ -163,7 +163,7 @@ function heapReplaceMin(heap, item) {
  *
  * Implementation: Efraimidis–Spirakis "A-Res" weighted reservoir sampling.
  *
- * @param {Array<[string, number[]]>} stratumEntries
+ * @param {Array<[string, number]>} stratumEntries
  * @param {number} sampleSize
  * @param {() => number} rng
  * @returns {string[]}
@@ -175,8 +175,7 @@ function sampleStrataWithoutReplacement(stratumEntries, sampleSize, rng) {
   /** @type {HeapItem[]} */
   const heap = [];
 
-  for (const [key, indices] of stratumEntries) {
-    const weight = indices.length;
+  for (const [key, weight] of stratumEntries) {
     if (weight <= 0) continue;
     // rng() is in [0, 1). Convert to (0, 1] to avoid generating `Infinity` in log-based variants.
     const u = 1 - rng();
@@ -208,13 +207,11 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
   if (rows.length === 0) return [];
   if (sampleSize >= rows.length) return rows.slice();
 
-  /** @type {Map<string, number[]>} */
+  /** @type {Map<string, number>} */
   const strata = new Map();
   for (let i = 0; i < rows.length; i++) {
     const key = getStratum(rows[i]);
-    const bucket = strata.get(key);
-    if (bucket) bucket.push(i);
-    else strata.set(key, [i]);
+    strata.set(key, (strata.get(key) ?? 0) + 1);
   }
 
   const stratumEntries = [...strata.entries()];
@@ -233,10 +230,10 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
 
     const totalRemainderPopulation = rows.length - stratumEntries.length;
     if (remaining > 0 && totalRemainderPopulation > 0) {
-      const shares = stratumEntries.map(([key, indices]) => {
-        const available = Math.max(indices.length - 1, 0);
+      const shares = stratumEntries.map(([key, count]) => {
+        const available = Math.max(count - 1, 0);
         const exact = (available / totalRemainderPopulation) * remaining;
-        return { key, available, exact, floor: Math.floor(exact), frac: exact - Math.floor(exact) };
+        return { key, count, available, exact, floor: Math.floor(exact), frac: exact - Math.floor(exact) };
       });
 
       let allocated = 0;
@@ -251,14 +248,14 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
       for (const share of shares) {
         if (remaining <= 0) break;
         const current = allocation.get(share.key) ?? 0;
-        if (current >= share.available + 1) continue;
+        if (current >= share.count) continue;
         allocation.set(share.key, current + 1);
         remaining--;
       }
 
       // Any remaining samples are distributed randomly to strata that still have capacity.
       while (remaining > 0) {
-        const candidates = shares.filter((s) => (allocation.get(s.key) ?? 0) < s.available + 1);
+        const candidates = shares.filter((s) => (allocation.get(s.key) ?? 0) < s.count);
         if (candidates.length === 0) break;
         const pick = candidates[Math.floor(rng() * candidates.length)];
         allocation.set(pick.key, (allocation.get(pick.key) ?? 0) + 1);
@@ -267,13 +264,34 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
     }
   }
 
+  /** @type {Map<string, { k: number, seen: number, reservoir: number[] }>} */
+  const reservoirs = new Map();
+  for (const [key, k] of allocation.entries()) {
+    if (k > 0) reservoirs.set(key, { k, seen: 0, reservoir: [] });
+  }
+
+  // Second pass: per-stratum reservoir sampling of global row indices.
+  for (let i = 0; i < rows.length; i++) {
+    const key = getStratum(rows[i]);
+    const state = reservoirs.get(key);
+    if (!state) continue;
+
+    const seen = state.seen;
+    if (seen < state.k) {
+      state.reservoir.push(i);
+      state.seen = seen + 1;
+      continue;
+    }
+
+    const j = Math.floor(rng() * (seen + 1));
+    if (j < state.k) state.reservoir[j] = i;
+    state.seen = seen + 1;
+  }
+
   /** @type {number[]} */
   const sampledIndices = [];
-  for (const [key, indices] of stratumEntries) {
-    const n = allocation.get(key) ?? 0;
-    if (n <= 0) continue;
-    const chosen = randomSampleIndices(indices.length, Math.min(n, indices.length), rng);
-    for (const pos of chosen) sampledIndices.push(indices[pos]);
+  for (const state of reservoirs.values()) {
+    for (const idx of state.reservoir) sampledIndices.push(idx);
   }
 
   sampledIndices.sort((a, b) => a - b);
