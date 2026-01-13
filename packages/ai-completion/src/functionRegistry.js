@@ -256,6 +256,13 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "AVERAGEA",
+    description: "Returns the average of its arguments, including numbers, text, and logical values.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "AVERAGEIF",
     description: "Returns the average of cells that meet a given condition or criteria.",
     args: [
@@ -281,10 +288,87 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "STDEV.S",
+    description: "Estimates standard deviation based on a sample.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "STDEV.P",
+    description: "Calculates standard deviation based on the entire population.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "STDEVA",
+    description: "Estimates standard deviation based on a sample, including logical values and text.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "STDEVP",
+    description: "Calculates standard deviation based on the entire population (legacy).",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "STDEVPA",
+    description: "Calculates standard deviation based on the entire population, including logical values and text.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VAR.S",
+    description: "Estimates variance based on a sample.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VAR.P",
+    description: "Calculates variance based on the entire population.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VARA",
+    description: "Estimates variance based on a sample, including logical values and text.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VARP",
+    description: "Calculates variance based on the entire population (legacy).",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VARPA",
+    description: "Calculates variance based on the entire population, including logical values and text.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "MAX",
     description: "Returns the largest value in a set of values.",
     args: [
       { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MAXA",
+    description: "Returns the largest value in a list of arguments, including numbers, text, and logical values.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
     ],
   },
   {
@@ -301,6 +385,13 @@ const CURATED_FUNCTIONS = [
     description: "Returns the smallest value in a set of values.",
     args: [
       { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "MINA",
+    description: "Returns the smallest value in a list of arguments, including numbers, text, and logical values.",
+    args: [
+      { name: "value1", type: "range", repeating: true },
     ],
   },
   {
@@ -386,11 +477,35 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "PEARSON",
+    description: "Returns the Pearson product moment correlation coefficient.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
     name: "FREQUENCY",
     description: "Calculates how often values occur within a range of values and returns a vertical array of numbers.",
     args: [
       { name: "data_array", type: "range" },
       { name: "bins_array", type: "range" },
+    ],
+  },
+  {
+    name: "RSQ",
+    description: "Returns the square of the Pearson product moment correlation coefficient.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "STEYX",
+    description: "Returns the standard error of the predicted y-value for each x in the regression.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
     ],
   },
   {
@@ -416,6 +531,25 @@ const CURATED_FUNCTIONS = [
       { name: "x", type: "number" },
       { name: "known_ys", type: "range" },
       { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "FORECAST",
+    description: "Returns a value along a linear trend (legacy).",
+    args: [
+      { name: "x", type: "number" },
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "LOGEST",
+    description: "Returns the statistics for an exponential curve fit.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range", optional: true },
+      { name: "const", type: "boolean", optional: true },
+      { name: "stats", type: "boolean", optional: true },
     ],
   },
   {
@@ -457,12 +591,61 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "SUMSQ",
+    description: "Returns the sum of the squares of the arguments.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "SUMX2MY2",
+    description: "Returns the sum of the difference of squares of corresponding values in two arrays.",
+    args: [
+      { name: "array_x", type: "range" },
+      { name: "array_y", type: "range" },
+    ],
+  },
+  {
+    name: "SUMX2PY2",
+    description: "Returns the sum of the sum of squares of corresponding values in two arrays.",
+    args: [
+      { name: "array_x", type: "range" },
+      { name: "array_y", type: "range" },
+    ],
+  },
+  {
+    name: "SUMXMY2",
+    description: "Returns the sum of squares of differences of corresponding values in two arrays.",
+    args: [
+      { name: "array_x", type: "range" },
+      { name: "array_y", type: "range" },
+    ],
+  },
+  {
+    name: "PRODUCT",
+    description: "Multiplies all the numbers given as arguments and returns the product.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "LOOKUP",
     description: "Looks up a value either from a one-row or one-column range or from an array.",
     args: [
       { name: "lookup_value", type: "value" },
       { name: "lookup_vector", type: "range" },
       { name: "result_vector", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "OFFSET",
+    description: "Returns a reference offset from a given reference.",
+    args: [
+      { name: "reference", type: "range" },
+      { name: "rows", type: "number" },
+      { name: "cols", type: "number" },
+      { name: "height", type: "number", optional: true },
+      { name: "width", type: "number", optional: true },
     ],
   },
   {

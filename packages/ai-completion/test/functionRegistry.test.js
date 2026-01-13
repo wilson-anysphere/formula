@@ -81,4 +81,18 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("HSTACK", 0), "Expected HSTACK array1 to be a range");
   assert.ok(registry.isRangeArg("HSTACK", 1), "Expected HSTACK array2 to be a range (varargs)");
   assert.ok(registry.isRangeArg("_xlfn.HSTACK", 0), "Expected _xlfn.HSTACK array1 to be a range");
+
+  // Dot-name functions should also work with _xlfn aliases.
+  assert.ok(
+    registry.isRangeArg("_xlfn.FORECAST.LINEAR", 1),
+    "Expected _xlfn.FORECAST.LINEAR known_ys to be a range"
+  );
+
+  // OFFSET(reference, rows, cols, ...)
+  assert.ok(registry.isRangeArg("OFFSET", 0), "Expected OFFSET reference to be a range");
+  assert.ok(registry.isRangeArg("_xlfn.OFFSET", 0), "Expected _xlfn.OFFSET reference to be a range");
+
+  // Common stats varargs: STDEV.S / VAR.S
+  assert.ok(registry.isRangeArg("STDEV.S", 0), "Expected STDEV.S arg1 to be a range");
+  assert.ok(registry.isRangeArg("VAR.S", 0), "Expected VAR.S arg1 to be a range");
 });
