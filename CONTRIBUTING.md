@@ -10,6 +10,7 @@ This repository is early-stage and evolving quickly. Please open an issue before
 
 - Node.js (>= 22 recommended; matches CI/release)
 - `pnpm` (see `packageManager` in the root `package.json`)
+- Rust toolchain (install via rustup; pinned in `rust-toolchain.toml`)
 
 ### Install
 
