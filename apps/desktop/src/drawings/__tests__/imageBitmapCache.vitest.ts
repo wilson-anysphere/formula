@@ -75,8 +75,16 @@ describe("ImageBitmapCache", () => {
     expect((bitmapC as any).close).not.toHaveBeenCalled();
 
     // Re-requesting `b` should trigger a new decode.
-    await cache.get(b);
+    const bitmapB2 = await cache.get(b);
     expect(createImageBitmapMock).toHaveBeenCalledTimes(4);
+
+    // Clearing should close remaining cached bitmaps, without double-closing the
+    // already-evicted bitmap.
+    cache.clear();
+    expect((bitmapB as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapC as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapB2 as any).close).toHaveBeenCalledTimes(1);
   });
 
   it("does not repopulate the cache from a stale in-flight decode after invalidate()", async () => {
