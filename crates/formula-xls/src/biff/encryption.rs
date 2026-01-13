@@ -45,6 +45,17 @@ const BIFF8_ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
 
+// BIFF record ids used by the legacy XOR obfuscation scheme that are either not encrypted or
+// partially encrypted even when they appear after `FILEPASS`.
+//
+// See [MS-XLS] 2.2.10 "Encryption (Password to Open)".
+const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_INTERFACEHDR: u16 = 0x00E1;
+const RECORD_RRDINFO: u16 = 0x0138;
+const RECORD_RRDHEAD: u16 = 0x0139;
+const RECORD_USREXCL: u16 = 0x0194;
+const RECORD_FILELOCK: u16 = 0x0195;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BiffEncryption {
     /// BIFF5 XOR obfuscation. FILEPASS payload is `key` + `verifier`.
@@ -94,16 +105,43 @@ pub(crate) fn parse_filepass_record(
 ) -> Result<BiffEncryption, DecryptError> {
     match biff_version {
         BiffVersion::Biff5 => {
-            // BIFF5 FILEPASS is XOR obfuscation: 4 bytes (key + verifier).
-            if data.len() < 4 {
-                return Err(DecryptError::InvalidFilePass(format!(
-                    "BIFF5 FILEPASS too short: expected 4 bytes, got {}",
-                    data.len()
-                )));
+            // BIFF5 FILEPASS is typically XOR obfuscation: 4 bytes (key + verifier).
+            //
+            // Some writers (notably LibreOffice when saving "Excel 5.0/95 Workbook") emit a BIFF8-
+            // style FILEPASS payload that starts with `wEncryptionType` followed by the XOR
+            // key/verifier (6 bytes total). Accept both forms.
+            match data.len() {
+                n if n < 4 => Err(DecryptError::InvalidFilePass(format!(
+                    "BIFF5 FILEPASS too short: expected at least 4 bytes, got {n}",
+                ))),
+                4 => {
+                    let key = read_u16(data, 0, "key")?;
+                    let verifier = read_u16(data, 2, "verifier")?;
+                    Ok(BiffEncryption::Biff5Xor { key, verifier })
+                }
+                n => {
+                    // BIFF8-style header: wEncryptionType + key + verifier.
+                    let encryption_type = read_u16(data, 0, "wEncryptionType")?;
+                    match encryption_type {
+                        BIFF8_ENCRYPTION_TYPE_XOR => {
+                            if n < 6 {
+                                return Err(DecryptError::InvalidFilePass(format!(
+                                    "BIFF5 XOR FILEPASS too short: expected at least 6 bytes, got {n}"
+                                )));
+                            }
+                            let key = read_u16(data, 2, "key")?;
+                            let verifier = read_u16(data, 4, "verifier")?;
+                            Ok(BiffEncryption::Biff5Xor { key, verifier })
+                        }
+                        BIFF8_ENCRYPTION_TYPE_RC4 => Err(DecryptError::UnsupportedEncryption(
+                            "BIFF5 RC4 encryption is not supported".to_string(),
+                        )),
+                        _ => Err(DecryptError::UnsupportedEncryption(format!(
+                            "BIFF5 FILEPASS has unsupported wEncryptionType=0x{encryption_type:04X}"
+                        ))),
+                    }
+                }
             }
-            let key = read_u16(data, 0, "key")?;
-            let verifier = read_u16(data, 2, "verifier")?;
-            Ok(BiffEncryption::Biff5Xor { key, verifier })
         }
         BiffVersion::Biff8 => {
             let encryption_type = read_u16(data, 0, "wEncryptionType")?;
@@ -440,8 +478,21 @@ fn decrypt_biff_xor_obfuscation(
     key: u16,
     verifier: u16,
 ) -> Result<(), DecryptError> {
-    // FILEPASS stores a legacy XOR password verifier using the same 16-bit hash as worksheet/workbook
-    // protection.
+    // First, try to validate/decrypt using the real Excel XOR obfuscation scheme as described in
+    // MS-OFFCRYPTO/MS-XLS:
+    // - Verify the password by recomputing the FILEPASS `key` + `verifier` fields.
+    // - If those fields match, decrypt record payload bytes using the derived 16-byte XOR array.
+    //
+    // Some of our existing tiny BIFF8 XOR fixtures are generated deterministically for tests using
+    // a simplified XOR scheme (to avoid depending on large binary blobs). That legacy format is
+    // still supported as a fallback when the FILEPASS fields do not match the spec algorithm.
+    if let Some(xor_array) = xor_array_method1_for_password(password, key, verifier) {
+        return decrypt_payloads_after_filepass_xor_method1(workbook_stream, encrypted_start, &xor_array);
+    }
+
+    // Fallback: simplified XOR scheme used by deterministic in-repo fixtures.
+    // This uses the legacy worksheet/workbook protection password hash as a verifier and applies
+    // a repeating XOR keystream across record payload bytes.
     let expected = xor::xor_password_verifier(password);
     if expected != verifier {
         return Err(DecryptError::WrongPassword);
@@ -449,6 +500,252 @@ fn decrypt_biff_xor_obfuscation(
 
     let xor_array = derive_xor_array(password);
     apply_xor_obfuscation_in_place(workbook_stream, encrypted_start, key, &xor_array)
+}
+
+// -------------------------------------------------------------------------------------------------
+// XOR obfuscation (MS-OFFCRYPTO/MS-XLS) implementation ("Method 1")
+// -------------------------------------------------------------------------------------------------
+
+fn xor_password_byte_candidates(password: &str) -> Vec<Vec<u8>> {
+    use encoding_rs::WINDOWS_1252;
+
+    let mut out = Vec::new();
+
+    // 1) Windows-1252 encoding (common Excel default on Windows).
+    {
+        let (cow, _, _) = WINDOWS_1252.encode(password);
+        let mut bytes = cow.into_owned();
+        bytes.truncate(15);
+        out.push(bytes);
+    }
+
+    // 2) MS-OFFCRYPTO 2.3.7.4 "method 2": copy low byte unless zero, else high byte.
+    {
+        let mut bytes = Vec::new();
+        for ch in password.encode_utf16() {
+            if bytes.len() >= 15 {
+                break;
+            }
+            let lo = (ch & 0x00FF) as u8;
+            let hi = (ch >> 8) as u8;
+            bytes.push(if lo != 0 { lo } else { hi });
+        }
+        out.push(bytes);
+    }
+
+    out
+}
+
+// [MS-OFFCRYPTO] 2.3.7.2 (CreateXorArray_Method1) constants.
+const XOR_PAD_ARRAY: [u8; 15] = [
+    0xBB, 0xFF, 0xFF, 0xBA, 0xFF, 0xFF, 0xB9, 0x80, 0x00, 0xBE, 0x0F, 0x00, 0xBF, 0x0F, 0x00,
+];
+
+const XOR_INITIAL_CODE: [u16; 15] = [
+    0xE1F0, 0x1D0F, 0xCC9C, 0x84C0, 0x110C, 0x0E10, 0xF1CE, 0x313E, 0x1872, 0xE139, 0xD40F,
+    0x84F9, 0x280C, 0xA96A, 0x4EC3,
+];
+
+const XOR_MATRIX: [u16; 105] = [
+    0xAEFC, 0x4DD9, 0x9BB2, 0x2745, 0x4E8A, 0x9D14, 0x2A09, 0x7B61, 0xF6C2, 0xFDA5, 0xEB6B,
+    0xC6F7, 0x9DCF, 0x2BBF, 0x4563, 0x8AC6, 0x05AD, 0x0B5A, 0x16B4, 0x2D68, 0x5AD0, 0x0375,
+    0x06EA, 0x0DD4, 0x1BA8, 0x3750, 0x6EA0, 0xDD40, 0xD849, 0xA0B3, 0x5147, 0xA28E, 0x553D,
+    0xAA7A, 0x44D5, 0x6F45, 0xDE8A, 0xAD35, 0x4A4B, 0x9496, 0x390D, 0x721A, 0xEB23, 0xC667,
+    0x9CEF, 0x29FF, 0x53FE, 0xA7FC, 0x5FD9, 0x47D3, 0x8FA6, 0x0F6D, 0x1EDA, 0x3DB4, 0x7B68,
+    0xF6D0, 0xB861, 0x60E3, 0xC1C6, 0x93AD, 0x377B, 0x6EF6, 0xDDEC, 0x45A0, 0x8B40, 0x06A1,
+    0x0D42, 0x1A84, 0x3508, 0x6A10, 0xAA51, 0x4483, 0x8906, 0x022D, 0x045A, 0x08B4, 0x1168,
+    0x76B4, 0xED68, 0xCAF1, 0x85C3, 0x1BA7, 0x374E, 0x6E9C, 0x3730, 0x6E60, 0xDCC0, 0xA9A1,
+    0x4363, 0x86C6, 0x1DAD, 0x3331, 0x6662, 0xCCC4, 0x89A9, 0x0373, 0x06E6, 0x0DCC, 0x1021,
+    0x2042, 0x4084, 0x8108, 0x1231, 0x2462, 0x48C4,
+];
+
+fn xor_ror(byte1: u8, byte2: u8) -> u8 {
+    (byte1 ^ byte2).rotate_right(1)
+}
+
+fn create_password_verifier_method1(password: &[u8]) -> u16 {
+    let mut verifier: u16 = 0;
+    let mut password_array = Vec::<u8>::with_capacity(password.len().saturating_add(1));
+    password_array.push(password.len() as u8);
+    password_array.extend_from_slice(password);
+
+    for &b in password_array.iter().rev() {
+        let intermediate1 = if (verifier & 0x4000) == 0 { 0u16 } else { 1u16 };
+        let intermediate2 = verifier.wrapping_mul(2) & 0x7FFF;
+        let intermediate3 = intermediate1 | intermediate2;
+        verifier = intermediate3 ^ (b as u16);
+    }
+
+    verifier ^ 0xCE4B
+}
+
+fn create_xor_key_method1(password: &[u8]) -> u16 {
+    if password.is_empty() || password.len() > 15 {
+        return 0;
+    }
+
+    let mut xor_key = XOR_INITIAL_CODE[password.len() - 1];
+    let mut current_element: i32 = 0x68;
+
+    for &byte in password.iter().rev() {
+        let mut ch = byte;
+        for _ in 0..7 {
+            if (ch & 0x40) != 0 {
+                if current_element < 0 || current_element as usize >= XOR_MATRIX.len() {
+                    return xor_key;
+                }
+                xor_key ^= XOR_MATRIX[current_element as usize];
+            }
+            ch = ch.wrapping_mul(2);
+            current_element -= 1;
+        }
+    }
+
+    xor_key
+}
+
+fn create_xor_array_method1(password: &[u8], xor_key: u16) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    let mut index = password.len();
+
+    let key_high = (xor_key >> 8) as u8;
+    let key_low = (xor_key & 0x00FF) as u8;
+
+    if index % 2 == 1 {
+        if index < out.len() {
+            out[index] = xor_ror(XOR_PAD_ARRAY[0], key_high);
+        }
+
+        index = index.saturating_sub(1);
+
+        if !password.is_empty() && index < out.len() {
+            let password_last = password[password.len() - 1];
+            out[index] = xor_ror(password_last, key_low);
+        }
+    }
+
+    while index > 0 {
+        index = index.saturating_sub(1);
+        if index < password.len() {
+            out[index] = xor_ror(password[index], key_high);
+        }
+
+        index = index.saturating_sub(1);
+        if index < password.len() {
+            out[index] = xor_ror(password[index], key_low);
+        }
+    }
+
+    let mut out_index: i32 = 15;
+    let mut pad_index: i32 = 15i32 - (password.len() as i32);
+    while pad_index > 0 {
+        if out_index < 0 {
+            break;
+        }
+
+        let pi = pad_index as usize;
+        if pi < XOR_PAD_ARRAY.len() {
+            out[out_index as usize] = xor_ror(XOR_PAD_ARRAY[pi], key_high);
+        }
+        out_index -= 1;
+        pad_index -= 1;
+
+        if out_index < 0 {
+            break;
+        }
+
+        let pi = pad_index.max(0) as usize;
+        if pi < XOR_PAD_ARRAY.len() {
+            out[out_index as usize] = xor_ror(XOR_PAD_ARRAY[pi], key_low);
+        }
+        out_index -= 1;
+        pad_index -= 1;
+    }
+
+    out
+}
+
+fn xor_array_method1_for_password(password: &str, stored_key: u16, stored_verifier: u16) -> Option<[u8; 16]> {
+    for candidate in xor_password_byte_candidates(password) {
+        if candidate.is_empty() || candidate.len() > 15 {
+            continue;
+        }
+        let key = create_xor_key_method1(&candidate);
+        let verifier = create_password_verifier_method1(&candidate);
+        if key == stored_key && verifier == stored_verifier {
+            return Some(create_xor_array_method1(&candidate, key));
+        }
+    }
+    None
+}
+
+fn decrypt_payloads_after_filepass_xor_method1(
+    workbook_stream: &mut [u8],
+    start_offset: usize,
+    xor_array: &[u8; 16],
+) -> Result<(), DecryptError> {
+    let mut offset = start_offset;
+    while offset < workbook_stream.len() {
+        let remaining = workbook_stream.len().saturating_sub(offset);
+        if remaining < 4 {
+            // Some writers include trailing padding bytes after the final EOF record. Those bytes
+            // are not part of any record header/payload and should be ignored.
+            break;
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+
+        let data_start = offset
+            .checked_add(4)
+            .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record offset overflow".to_string()))?;
+        let data_end = data_start
+            .checked_add(len)
+            .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record length overflow".to_string()))?;
+        if data_end > workbook_stream.len() {
+            return Err(DecryptError::InvalidFilePass(format!(
+                "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream while decrypting XOR (len={}, end={data_end})",
+                workbook_stream.len()
+            )));
+        }
+
+        // Per [MS-XLS] 2.2.10, some record payloads are not encrypted even in an encrypted BIFF
+        // record stream.
+        let mut decrypt_from = 0usize;
+        let skip_entire_payload = matches!(
+            record_id,
+            // BOF (both BIFF5 0x0009 and BIFF8 0x0809 ids) + FILEPASS
+            records::RECORD_BOF_BIFF8
+                | records::RECORD_BOF_BIFF5
+                | records::RECORD_FILEPASS
+                | RECORD_INTERFACEHDR
+                | RECORD_FILELOCK
+                | RECORD_USREXCL
+                | RECORD_RRDINFO
+                | RECORD_RRDHEAD
+        );
+
+        if !skip_entire_payload {
+            if record_id == RECORD_BOUNDSHEET {
+                // BoundSheet.lbPlyPos MUST NOT be encrypted.
+                decrypt_from = 4.min(len);
+            }
+
+            let payload = &mut workbook_stream[data_start..data_end];
+            for i in decrypt_from..payload.len() {
+                let abs_pos = data_start + i;
+                let mut value = payload[i];
+                value ^= xor_array[abs_pos % 16];
+                value = value.rotate_right(5);
+                payload[i] = value;
+            }
+        }
+
+        offset = data_end;
+    }
+
+    Ok(())
 }
 
 /// Parsed BIFF8 RC4 FILEPASS payload for legacy "Standard Encryption".

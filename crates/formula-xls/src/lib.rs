@@ -391,11 +391,12 @@ fn import_xls_path_with_biff_reader(
         biff_version = Some(detected_biff_version);
         biff_codepage = Some(codepage);
 
-        match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
+        match biff::parse_biff_workbook_globals(
+            workbook_stream,
+            detected_biff_version,
+            codepage,
+        ) {
             Ok(globals) => {
-                if globals.is_encrypted {
-                    return Err(ImportError::EncryptedWorkbook);
-                }
                 biff_globals = Some(globals);
             }
             Err(err) => push_import_warning(

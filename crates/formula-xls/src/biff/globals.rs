@@ -876,15 +876,14 @@ pub(crate) fn parse_biff_workbook_globals(
             // FILEPASS [MS-XLS 2.4.105]
             //
             // This record indicates the workbook is encrypted/password-protected. We do not
-            // attempt to parse encryption details; callers should treat the workbook stream as
-            // unreadable without a password and abort import.
+            // attempt to parse encryption details here; encryption is handled by the workbook-stream
+            // reader before globals parsing.
+            //
+            // When the caller has already decrypted the stream (e.g. legacy XOR obfuscation), the
+            // `FILEPASS` record remains present but subsequent records are now readable, so we do
+            // not stop scanning.
             records::RECORD_FILEPASS if starts_with_bof => {
                 out.is_encrypted = true;
-                // Stop scanning: subsequent records are encrypted and may decode to nonsense.
-                // Treat this as an intentional early-termination so we don't emit a misleading
-                // "missing EOF" warning.
-                saw_eof = true;
-                break;
             }
             // PROTECT [MS-XLS 2.4.203] (workbook globals: lock structure)
             RECORD_PROTECT => {

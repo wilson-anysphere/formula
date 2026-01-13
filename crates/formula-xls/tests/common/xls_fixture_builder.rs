@@ -1505,8 +1505,8 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // WINDOW2 is required by some consumers; keep defaults.
     push_record(&mut sheet, RECORD_WINDOW2, &window2());
 
-    // WSBOOL controls scaling mode (`fFitToPage`); enable fit-to-page so `SETUP.iFitWidth/Height`
-    // apply.
+    // WSBOOL controls scaling mode (`fFitToPage`). Enable fit-to-page so
+    // `SETUP.iFitWidth/iFitHeight` are used instead of percent scaling.
     let wsbool: u16 = 0x0C01 | WSBOOL_OPTION_FIT_TO_PAGE;
     push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
 
