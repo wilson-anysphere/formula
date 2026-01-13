@@ -66,6 +66,11 @@
   background: var(--bg-hover);
 }
 
+.query-editor-container__toolbar select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .query-editor-container__toolbar select:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
@@ -75,6 +80,24 @@
   .query-editor-container__toolbar select:focus {
     border-color: var(--selection-border);
     box-shadow: 0 0 0 2px var(--selection-bg);
+  }
+
+  .query-editor-container__toolbar button:focus,
+  .query-editor__sidebar-actions button:focus,
+  .query-editor-steps__button:focus,
+  .query-editor-add-step__menu-trigger:focus,
+  .query-editor-add-step__ai-button:focus,
+  .query-editor-add-step__suggestion:focus {
+    outline: none;
+    border-color: var(--selection-border);
+    box-shadow: 0 0 0 2px var(--selection-bg);
+  }
+
+  .query-editor-add-step__menu-item:focus {
+    outline: none;
+    background: var(--selection-bg);
+    border-color: var(--selection-border);
+    color: var(--selection-text);
   }
 }
 
@@ -547,6 +570,7 @@
   padding: 6px;
   font-size: 12px;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 /* Responsive layout: when docked panels are narrow, stack the sidebar above the
