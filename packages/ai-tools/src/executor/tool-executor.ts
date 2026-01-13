@@ -1440,6 +1440,11 @@ export class ToolExecutor {
       }
     }
 
+    if (values && values.length > 1 && (requested.has("median") || requested.has("quartiles"))) {
+      // Sort once in-place so median/quartiles don't need to allocate extra copies.
+      values.sort((a, b) => a - b);
+    }
+
     const stats: Record<string, number | null> = {};
     for (const measure of measures) {
       switch (measure) {
@@ -1453,7 +1458,7 @@ export class ToolExecutor {
           stats.count = count;
           break;
         case "median":
-          stats.median = values && values.length ? median(values) : null;
+          stats.median = values && values.length ? quantileSorted(values, 0.5) : null;
           break;
         case "mode":
           stats.mode = values && values.length ? mode(values) : null;
@@ -1485,10 +1490,9 @@ export class ToolExecutor {
             stats.q3 = null;
             break;
           }
-          const sorted = [...values].sort((a, b) => a - b);
-          stats.q1 = quantileSorted(sorted, 0.25);
-          stats.q2 = quantileSorted(sorted, 0.5);
-          stats.q3 = quantileSorted(sorted, 0.75);
+          stats.q1 = quantileSorted(values, 0.25);
+          stats.q2 = quantileSorted(values, 0.5);
+          stats.q3 = quantileSorted(values, 0.75);
           break;
         }
         case "correlation": {
