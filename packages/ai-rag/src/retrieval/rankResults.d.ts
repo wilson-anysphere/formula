@@ -2,6 +2,7 @@ export type WorkbookSearchResult = {
   id: string;
   score: number;
   metadata?: {
+    workbookId?: string;
     kind?: "table" | "namedRange" | "dataRegion" | "formulaRegion" | string;
     title?: string;
     sheetName?: string;
@@ -31,4 +32,3 @@ export function dedupeOverlappingResults<T extends WorkbookSearchResult>(
     overlapRatioThreshold?: number;
   },
 ): T[];
-
