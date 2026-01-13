@@ -22,6 +22,7 @@
 //! column index. When we detect these patterns, we re-decode formulas directly from the BIFF
 //! worksheet stream and override calamine’s string output.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use formula_model::{CellRef, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
@@ -83,6 +84,8 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
     }
 
     let mut recovered: HashMap<CellRef, String> = HashMap::new();
+    let mut shrfmla_analysis_by_base: HashMap<CellRef, Option<rgce::Biff8SharedFormulaRgceAnalysis>> =
+        HashMap::new();
     let mut decoded_arrays: HashMap<CellRef, String> = HashMap::new();
     let mut applied_arrays: HashSet<CellRef> = HashSet::new();
 
@@ -93,8 +96,42 @@ pub(crate) fn recover_ptgexp_formulas_from_shrfmla_and_array(
             .get(&base)
             .filter(|def| range_contains(def.range, cell))
         {
-            let base_coord = rgce::CellCoord::new(cell.row, cell.col);
-            let decoded = rgce::decode_biff8_rgce_with_base(&def.rgce, ctx, Some(base_coord));
+            let base_cell = rgce::CellCoord::new(base.row, base.col);
+            let target_cell = rgce::CellCoord::new(cell.row, cell.col);
+
+            let analysis = shrfmla_analysis_by_base
+                .entry(base)
+                .or_insert_with(|| rgce::analyze_biff8_shared_formula_rgce(&def.rgce).ok());
+
+            let delta_is_zero = cell == base;
+            let needs_materialization = analysis
+                .as_ref()
+                .is_some_and(|analysis| {
+                    !analysis.has_refn_or_arean
+                        || (!delta_is_zero && analysis.has_abs_refs_with_relative_flags)
+                })
+                // Best-effort fallback: if analysis failed or was inconclusive, attempt
+                // materialization for follower cells (delta != 0) and fall back on failure.
+                || (analysis.is_none() && !delta_is_zero);
+
+            let rgce_to_decode: Cow<'_, [u8]> = if needs_materialization {
+                match rgce::materialize_biff8_shared_formula_rgce(&def.rgce, base_cell, target_cell)
+                {
+                    Ok(v) => Cow::Owned(v),
+                    Err(err) => {
+                        warnings.push(format!(
+                            "failed to materialize shared formula at {} (base {}): {err}",
+                            cell.to_a1(),
+                            base.to_a1()
+                        ));
+                        Cow::Borrowed(&def.rgce)
+                    }
+                }
+            } else {
+                Cow::Borrowed(&def.rgce)
+            };
+
+            let decoded = rgce::decode_biff8_rgce_with_base(&rgce_to_decode, ctx, Some(target_cell));
             for w in decoded.warnings {
                 warnings.push(format!(
                     "failed to fully decode shared formula at {} (base {}): {w}",
