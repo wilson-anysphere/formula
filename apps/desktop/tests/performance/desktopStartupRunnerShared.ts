@@ -184,6 +184,9 @@ export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptio
   const env = mergeEnvParts([
     process.env,
     {
+      // Keep perf benchmarks stable/quiet by disabling the automatic startup update check
+      // (which can add nondeterministic network/CPU activity).
+      FORMULA_DISABLE_STARTUP_UPDATE_CHECK: '1',
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
       // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
