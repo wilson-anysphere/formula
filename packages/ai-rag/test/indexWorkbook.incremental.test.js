@@ -60,19 +60,19 @@ test("indexWorkbook re-embeds all chunks when embedder identity changes", async 
   const workbook = makeWorkbook();
   const store = new InMemoryVectorStore({ dimension: 128 });
 
-  const embedderV1 = new HashEmbedder({ dimension: 128 });
-  assert.equal(embedderV1.name, "hash:v1:128");
-  const first = await indexWorkbook({ workbook, vectorStore: store, embedder: embedderV1 });
+  const embedderV2 = new HashEmbedder({ dimension: 128 });
+  assert.equal(embedderV2.name, "hash:v2:128");
+  const first = await indexWorkbook({ workbook, vectorStore: store, embedder: embedderV2 });
   assert.ok(first.totalChunks > 0);
   assert.equal(first.upserted, first.totalChunks);
 
-  class HashEmbedderV2 extends HashEmbedder {
+  class HashEmbedderV3 extends HashEmbedder {
     get name() {
-      return "hash:v2:128";
+      return "hash:v3:128";
     }
   }
-  const embedderV2 = new HashEmbedderV2({ dimension: 128 });
-  const second = await indexWorkbook({ workbook, vectorStore: store, embedder: embedderV2 });
+  const embedderV3 = new HashEmbedderV3({ dimension: 128 });
+  const second = await indexWorkbook({ workbook, vectorStore: store, embedder: embedderV3 });
   assert.equal(second.upserted, second.totalChunks);
   assert.equal(second.skipped, 0);
   assert.equal(second.deleted, 0);
