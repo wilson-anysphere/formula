@@ -15,6 +15,28 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
+## Bundle size budgets (CI guard)
+
+CI runs a lightweight bundle size check after the desktop Vite build to prevent accidental
+dependency additions that bloat the desktop initial load.
+
+Locally:
+
+```bash
+pnpm -C apps/desktop build
+pnpm -C apps/desktop check:bundle-size
+```
+
+The check prints a markdown summary and (optionally) enforces budgets via env vars (KiB = 1024 bytes):
+
+- `FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB` – total JS in `apps/desktop/dist/**/*.js`
+- `FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB` – entry JS referenced by `apps/desktop/dist/index.html` `<script>` tags
+
+Optional:
+
+- `FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY=1` – report budget violations but exit 0
+- `FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP=1` – skip gzip computation (faster)
+
 ## Rust binary size analysis (desktop shell)
 
 To inspect which Rust **crates/symbols** dominate the `formula-desktop` release binary (useful for bundle-size
