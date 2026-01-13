@@ -509,7 +509,13 @@ fn parse_excel_bool(value: &str) -> Option<bool> {
     if trimmed.eq_ignore_ascii_case("true") {
         return Some(true);
     }
+    if trimmed.eq_ignore_ascii_case("yes") {
+        return Some(true);
+    }
     if trimmed.eq_ignore_ascii_case("false") {
+        return Some(false);
+    }
+    if trimmed.eq_ignore_ascii_case("no") {
         return Some(false);
     }
     None
@@ -609,6 +615,7 @@ fn read_slicer_cache_item_text<R: std::io::BufRead>(
             Event::End(end) => {
                 if local_name(end.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
                     if depth == 0 {
+                        buf.clear();
                         break;
                     }
                     depth -= 1;
@@ -630,7 +637,10 @@ fn read_slicer_cache_item_text<R: std::io::BufRead>(
                     }
                 }
             }
-            Event::Eof => break,
+            Event::Eof => {
+                buf.clear();
+                break;
+            }
             _ => {}
         }
         buf.clear();
@@ -643,43 +653,67 @@ fn parse_slicer_cache_item(
     start: &quick_xml::events::BytesStart<'_>,
     fallback_text: Option<&str>,
 ) -> Result<(String, bool, bool), XlsxError> {
-    let mut key = None;
+    let mut key_n = None;
+    let mut key_name = None;
+    let mut key_item_name = None;
+    let mut key_caption = None;
+    let mut key_unique_name = None;
+    let mut key_v = None;
     let mut index_key = None;
     let mut selected = None;
+    let mut saw_selection_attr = false;
 
     for attr in start.attributes().with_checks(false) {
         let attr = attr?;
         let attr_key = local_name(attr.key.as_ref());
         let value = attr.unescape_value()?.into_owned();
 
-        if attr_key.eq_ignore_ascii_case(b"n")
-            || attr_key.eq_ignore_ascii_case(b"name")
-            || attr_key.eq_ignore_ascii_case(b"itemName")
-            || attr_key.eq_ignore_ascii_case(b"caption")
-            || attr_key.eq_ignore_ascii_case(b"uniqueName")
-            || attr_key.eq_ignore_ascii_case(b"v")
+        if attr_key.eq_ignore_ascii_case(b"n") && key_n.is_none() && !value.is_empty() {
+            key_n = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"name") && key_name.is_none() && !value.is_empty()
         {
-            if key.is_none() && !value.is_empty() {
-                key = Some(value);
-            }
+            key_name = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"itemName")
+            && key_item_name.is_none()
+            && !value.is_empty()
+        {
+            key_item_name = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"caption") && key_caption.is_none() && !value.is_empty()
+        {
+            key_caption = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"uniqueName")
+            && key_unique_name.is_none()
+            && !value.is_empty()
+        {
+            key_unique_name = Some(value);
+        } else if attr_key.eq_ignore_ascii_case(b"v") && key_v.is_none() && !value.is_empty() {
+            key_v = Some(value);
         } else if attr_key.eq_ignore_ascii_case(b"x") && !value.is_empty() {
             index_key = Some(value);
         } else if attr_key.eq_ignore_ascii_case(b"s") || attr_key.eq_ignore_ascii_case(b"selected")
         {
-            selected = parse_excel_bool(&value);
+            saw_selection_attr = true;
+            if selected.is_none() {
+                selected = parse_excel_bool(&value);
+            }
         }
     }
 
-    let mut key = key.or(index_key).unwrap_or_default();
+    let mut key = key_n
+        .or(key_name)
+        .or(key_item_name)
+        .or(key_caption)
+        .or(key_unique_name)
+        .or(key_v)
+        .or(index_key)
+        .unwrap_or_default();
     if key.is_empty() {
         if let Some(value) = fallback_text {
-            let value = value.trim();
-            if !value.is_empty() {
+            if !value.trim().is_empty() {
                 key = value.to_string();
             }
         }
     }
-    let saw_selection_attr = selected.is_some();
     let selected = selected.unwrap_or(true);
 
     Ok((key, selected, saw_selection_attr))
@@ -744,6 +778,42 @@ mod slicer_cache_selection_tests {
 
         let selected = selection.selected_items.expect("explicit selection");
         let expected: HashSet<String> = ["East".to_string()].into_iter().collect();
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn parse_slicer_cache_selection_item_name_attribute() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache>
+  <slicerCacheItems>
+    <slicerCacheItem itemName="East" s="1"/>
+    <slicerCacheItem itemName="West" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let selection = parse_slicer_cache_selection(xml).expect("parse selection");
+        assert_eq!(selection.available_items, vec!["East", "West"]);
+
+        let selected = selection.selected_items.expect("explicit selection");
+        let expected: HashSet<String> = ["East".to_string()].into_iter().collect();
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn parse_slicer_cache_selection_prefers_n_over_caption_regardless_of_attr_order() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache>
+  <slicerCacheItems>
+    <slicerCacheItem caption="CaptionFirst" n="NameSecond" s="1"/>
+    <slicerCacheItem caption="OtherCaption" n="OtherName" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let selection = parse_slicer_cache_selection(xml).expect("parse selection");
+        assert_eq!(selection.available_items, vec!["NameSecond", "OtherName"]);
+
+        let selected = selection.selected_items.expect("explicit selection");
+        let expected: HashSet<String> = ["NameSecond".to_string()].into_iter().collect();
         assert_eq!(selected, expected);
     }
 }
