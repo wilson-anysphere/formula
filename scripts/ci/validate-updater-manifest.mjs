@@ -137,6 +137,18 @@ async function fetchAllReleaseAssets({ repo, releaseId, token }) {
 }
 
 /**
+ * @param {any[]} assets
+ */
+function indexAssetsByName(assets) {
+  const map = new Map(
+    assets
+      .filter((a) => a && typeof a.name === "string")
+      .map((a) => /** @type {[string, any]} */ ([a.name, a])),
+  );
+  return { map, names: new Set(map.keys()) };
+}
+
+/**
  * Download a GitHub Release asset via the GitHub API (supports draft releases).
  *
  * @param {{ asset: any; fileName: string; token: string }}
@@ -296,6 +308,8 @@ async function main() {
   let release;
   /** @type {any[] | undefined} */
   let assets;
+  /** @type {number | undefined} */
+  let releaseId;
 
   /**
    * Linux release requirements:
@@ -314,7 +328,7 @@ async function main() {
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     try {
       release = await fetchRelease({ repo, tag, token });
-      const releaseId = /** @type {number} */ (release?.id);
+      releaseId = /** @type {number} */ (release?.id);
       if (!releaseId) {
         throw new Error(`Release payload missing id.`);
       }
@@ -361,13 +375,11 @@ async function main() {
   if (!release || !assets) {
     fatal(`Failed to fetch release info for tag ${tag}.`);
   }
+  if (!releaseId) {
+    fatal(`Failed to determine release id for tag ${tag}.`);
+  }
 
-  const assetByName = new Map(
-    assets
-      .filter((a) => a && typeof a.name === "string")
-      .map((a) => /** @type {[string, any]} */ ([a.name, a])),
-  );
-  const assetNames = new Set(assetByName.keys());
+  let { map: assetByName, names: assetNames } = indexAssetsByName(assets);
 
   const latestAsset = assetByName.get("latest.json");
   const latestSigAsset = assetByName.get("latest.json.sig");
@@ -550,6 +562,32 @@ async function main() {
         url: /** @type {any} */ (entry).url,
         assetName,
       });
+    }
+
+    // GitHub release assets can be eventually consistent right after upload. If the manifest
+    // references an asset we can't see yet, re-fetch the asset list a few times before failing.
+    if (missingAssets.length > 0) {
+      const refreshDelaysMs = [2000, 4000, 8000];
+      for (const delay of refreshDelaysMs) {
+        await sleep(delay);
+        try {
+          assets = await fetchAllReleaseAssets({ repo, releaseId, token });
+          ({ map: assetByName, names: assetNames } = indexAssetsByName(assets));
+        } catch {
+          // Ignore transient API errors; we'll fall back to the last-seen asset list.
+        }
+
+        const refreshedMissing = validatedTargets
+          .filter((t) => !assetNames.has(t.assetName))
+          .map((t) => ({ target: t.target, url: t.url, assetName: t.assetName }));
+
+        missingAssets.length = 0;
+        missingAssets.push(...refreshedMissing);
+
+        if (missingAssets.length === 0) {
+          break;
+        }
+      }
     }
 
     // Ensure platform URLs are unique (prevents collisions where multiple targets point at the same asset).
