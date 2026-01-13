@@ -6,6 +6,8 @@ use crate::{DaxEngine, DataModel, Value};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 
 /// A group-by column used by the pivot engine.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1592,12 +1594,14 @@ pub fn pivot(
     filter: &FilterContext,
 ) -> DaxResult<PivotResult> {
     if let Some(result) = pivot_columnar_group_by(model, base_table, group_by, measures, filter)? {
+        maybe_trace_pivot_path(PivotPath::ColumnarGroupBy);
         return Ok(result);
     }
 
     if let Some(result) =
         pivot_columnar_groups_with_measure_eval(model, base_table, group_by, measures, filter)?
     {
+        maybe_trace_pivot_path(PivotPath::ColumnarGroupsWithMeasureEval);
         return Ok(result);
     }
 
@@ -1609,9 +1613,11 @@ pub fn pivot(
 
     if let Some(result) = pivot_planned_row_group_by(model, base_table, group_by, measures, filter)?
     {
+        maybe_trace_pivot_path(PivotPath::PlannedRowGroupBy);
         return Ok(result);
     }
 
+    maybe_trace_pivot_path(PivotPath::RowScan);
     pivot_row_scan(model, base_table, group_by, measures, filter)
 }
 
@@ -1754,6 +1760,43 @@ pub fn pivot_crosstab_with_options(
     }
 
     Ok(PivotResultGrid { data })
+}
+
+#[derive(Clone, Copy)]
+enum PivotPath {
+    ColumnarGroupBy = 1 << 0,
+    ColumnarGroupsWithMeasureEval = 1 << 1,
+    PlannedRowGroupBy = 1 << 2,
+    RowScan = 1 << 3,
+}
+
+impl PivotPath {
+    fn label(self) -> &'static str {
+        match self {
+            PivotPath::ColumnarGroupBy => "columnar_group_by",
+            PivotPath::ColumnarGroupsWithMeasureEval => "columnar_groups_with_measure_eval",
+            PivotPath::PlannedRowGroupBy => "planned_row_group_by",
+            PivotPath::RowScan => "row_scan",
+        }
+    }
+}
+
+fn pivot_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("FORMULA_DAX_PIVOT_TRACE").is_some())
+}
+
+fn maybe_trace_pivot_path(path: PivotPath) {
+    if !pivot_trace_enabled() {
+        return;
+    }
+
+    static EMITTED: AtomicU8 = AtomicU8::new(0);
+    let bit = path as u8;
+    let prev = EMITTED.fetch_or(bit, AtomicOrdering::Relaxed);
+    if prev & bit == 0 {
+        eprintln!("formula-dax pivot path: {}", path.label());
+    }
 }
 
 #[cfg(test)]

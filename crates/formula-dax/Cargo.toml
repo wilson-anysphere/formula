@@ -15,3 +15,11 @@ criterion = "0.5"
 [[bench]]
 name = "columnar_vs_vec"
 harness = false
+
+[[bench]]
+name = "pivot_star_schema"
+harness = false
+
+[[bench]]
+name = "relationship_propagation"
+harness = false
