@@ -13018,6 +13018,35 @@ export class SpreadsheetApp {
     // Hard cap on the number of cell reads we allow for preview. This keeps the formula bar
     // responsive even when the argument expression references a large range.
     const MAX_CELL_READS = 5_000;
+    const knownSheets =
+      typeof this.document.getSheetIds === "function"
+        ? (this.document.getSheetIds() as string[]).filter((s) => typeof s === "string" && s.length > 0)
+        : [];
+    const sheetExistsCache = new Map<string, boolean>();
+    const sheetExists = (id: string): boolean => {
+      const key = String(id ?? "").trim();
+      if (!key) return false;
+      const lower = key.toLowerCase();
+      // The current sheet is always "known" for preview purposes, even if the DocumentController
+      // hasn't materialized it yet (e.g. very early startup or in minimal unit tests).
+      if (lower === sheetId.toLowerCase()) return true;
+      const cached = sheetExistsCache.get(lower);
+      if (cached !== undefined) return cached;
+      let exists = false;
+      try {
+        // Prefer `getSheetMeta` because it checks both materialized sheets and
+        // sheet metadata entries without creating sheets.
+        if (typeof (this.document as any).getSheetMeta === "function") {
+          exists = Boolean((this.document as any).getSheetMeta(key));
+        } else {
+          exists = knownSheets.some((s) => s.toLowerCase() === lower);
+        }
+      } catch {
+        exists = false;
+      }
+      sheetExistsCache.set(lower, exists);
+      return exists;
+    };
 
     // Resolve named ranges (and allow undefined names to fall back to `#NAME?`).
     const resolveNameToReference = (name: string): string | null => {
@@ -13176,7 +13205,15 @@ export class SpreadsheetApp {
 
     const resolveSheetId = (token: string): string | null => {
       const resolved = this.resolveSheetIdByName(token);
-      if (resolved) return resolved;
+      if (resolved) {
+        // Avoid creating phantom sheets during preview evaluation. Some callers (e.g. tab completion
+        // schema providers) may surface sheets that are not yet materialized in the DocumentController;
+        // treating them as missing keeps preview evaluation side-effect free.
+        if (!sheetExists(resolved)) return null;
+        // Preserve the current sheet id casing when possible.
+        if (resolved.toLowerCase() === sheetId.toLowerCase()) return sheetId;
+        return resolved;
+      }
 
       // `DocumentController` materializes sheets lazily; if the user refers to the current sheet
       // before it has been created, allow it through.
@@ -13186,7 +13223,7 @@ export class SpreadsheetApp {
         if (quoted) return quoted[1]!.replace(/''/g, "'").trim();
         return t;
       })();
-      if (unquoted && unquoted.toLowerCase() === sheetId.toLowerCase()) return sheetId;
+      if (unquoted && unquoted.toLowerCase() === sheetId.toLowerCase() && sheetExists(sheetId)) return sheetId;
       return null;
     };
 
@@ -13215,7 +13252,16 @@ export class SpreadsheetApp {
       if (stack.has(key)) return "#REF!";
 
       stack.add(key);
-      const state = this.document.getCell(targetSheet, normalizedAddr) as { value: unknown; formula: string | null };
+      if (!sheetExists(targetSheet)) {
+        stack.delete(key);
+        return "#REF!";
+      }
+
+      // Use `peekCell` when available to avoid materializing sheets during preview evaluation.
+      const state =
+        typeof (this.document as any).peekCell === "function"
+          ? ((this.document as any).peekCell(targetSheet, normalizedAddr) as { value: unknown; formula: string | null })
+          : (this.document.getCell(targetSheet, normalizedAddr) as { value: unknown; formula: string | null });
       let value: SpreadsheetValue;
       if (state?.formula) {
         value = evaluateFormula(state.formula, getCellValue, {
