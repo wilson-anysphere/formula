@@ -4,7 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as nativeDialogs from "./nativeDialogs";
 
 describe("tauri/nativeDialogs", () => {
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
+
   afterEach(() => {
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as any).__TAURI__;
+    }
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -47,6 +55,26 @@ describe("tauri/nativeDialogs", () => {
     await nativeDialogs.alert("Failed to open workbook", { title: "Formula" });
     expect(tauriMessage).toHaveBeenCalledWith("Failed to open workbook", { title: "Formula" });
     expect(windowAlert).not.toHaveBeenCalled();
+  });
+
+  it("treats a throwing __TAURI__ getter as an unavailable API and falls back safely", async () => {
+    const windowConfirm = vi.fn(() => true);
+    const windowAlert = vi.fn(() => undefined);
+
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      get() {
+        throw new Error("Blocked __TAURI__");
+      },
+    });
+    vi.stubGlobal("window", { confirm: windowConfirm, alert: windowAlert });
+
+    const ok = await nativeDialogs.confirm("Discard?");
+    expect(ok).toBe(true);
+    expect(windowConfirm).toHaveBeenCalledWith("Discard?");
+
+    await nativeDialogs.alert("Something went wrong");
+    expect(windowAlert).toHaveBeenCalledWith("Something went wrong");
   });
 
   it("falls back to window.confirm/alert when Tauri dialog APIs are unavailable", async () => {
