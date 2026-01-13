@@ -22,11 +22,23 @@ export async function insertImageFromFile(
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType };
   opts.images.set(image);
 
+  const nextZOrder = (() => {
+    // Use max-zOrder so inserts remain on top even if prior objects were re-ordered or deleted.
+    let max = -1;
+    for (const obj of opts.objects) {
+      if (typeof obj.zOrder === "number" && Number.isFinite(obj.zOrder)) {
+        max = Math.max(max, obj.zOrder);
+      }
+    }
+    return max + 1;
+  })();
+
   const object: DrawingObject = {
     id: createDrawingObjectId(),
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
-    zOrder: opts.objects.length,
+    zOrder: nextZOrder,
+    size: opts.anchor.type === "oneCell" || opts.anchor.type === "absolute" ? opts.anchor.size : undefined,
   };
 
   return { objects: [...opts.objects, object], image };
@@ -50,11 +62,22 @@ export function insertImageFromBytes(
   const image: ImageEntry = { id: opts.imageId, bytes, mimeType: opts.mimeType };
   opts.images.set(image);
 
+  const nextZOrder = (() => {
+    let max = -1;
+    for (const obj of opts.objects) {
+      if (typeof obj.zOrder === "number" && Number.isFinite(obj.zOrder)) {
+        max = Math.max(max, obj.zOrder);
+      }
+    }
+    return max + 1;
+  })();
+
   const object: DrawingObject = {
     id: createDrawingObjectId(),
     kind: { type: "image", imageId: image.id },
     anchor: opts.anchor,
-    zOrder: opts.objects.length,
+    zOrder: nextZOrder,
+    size: opts.anchor.type === "oneCell" || opts.anchor.type === "absolute" ? opts.anchor.size : undefined,
   };
 
   return { objects: [...opts.objects, object], image };
@@ -166,6 +189,10 @@ function guessMimeType(name: string): string {
       return "image/gif";
     case "bmp":
       return "image/bmp";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
     default:
       return "application/octet-stream";
   }
