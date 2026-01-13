@@ -82,6 +82,37 @@ describe("serializeToolResultForModel", () => {
     expect(payload.data.truncated).toBe(true);
   });
 
+  it("filter_range preserves tool-provided truncated flag even when matching_rows fits preview limit", () => {
+    const toolCall = {
+      id: "call-2b",
+      name: "filter_range",
+      arguments: { range: "Sheet1!A1:D50" }
+    };
+
+    const result = {
+      tool: "filter_range",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      data: {
+        range: "Sheet1!A1:D50",
+        matching_rows: Array.from({ length: 50 }, (_, i) => i + 1),
+        count: 50,
+        truncated: true
+      }
+    };
+
+    const maxChars = 5_000;
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars });
+    expect(serialized.length).toBeLessThanOrEqual(maxChars);
+
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("filter_range");
+    expect(payload.ok).toBe(true);
+    expect(payload.data.matching_rows).toHaveLength(50);
+    expect(payload.data.count).toBe(50);
+    expect(payload.data.truncated).toBe(true);
+  });
+
   it("detect_anomalies truncates large anomaly lists and reports method + counts within budget", () => {
     const anomalies = Array.from({ length: 1_000 }, (_, i) => ({
       cell: `Sheet1!A${i + 1}`,

@@ -128,25 +128,30 @@ function serializeFilterRange(params) {
   const range = typeof data?.range === "string" ? data.range : safeRangeFromCall(params.toolCall);
   const rows = Array.isArray(data?.matching_rows) ? data.matching_rows : null;
   const count = typeof data?.count === "number" ? data.count : rows ? rows.length : undefined;
- 
+  const toolTruncated = typeof data?.truncated === "boolean" ? data.truncated : false;
+  
   const attempts = [200, 100, 50, 20];
   for (const limit of attempts) {
     const list = rows ? rows.slice(0, limit) : undefined;
-    const truncated = rows ? rows.length > limit : false;
- 
+    const previewCount = list ? list.length : 0;
+    const truncated =
+      toolTruncated ||
+      (rows ? rows.length > previewCount : false) ||
+      (typeof count === "number" ? count > previewCount : false);
+  
     const payload = {
       ...base,
       data: {
         ...(range ? { range } : {}),
         ...(typeof count === "number" ? { count } : {}),
         ...(list ? { matching_rows: list } : {}),
-        ...(rows ? { truncated } : {})
+        ...(rows || toolTruncated ? { truncated } : {})
       }
     };
     const json = safeJsonStringify(payload);
     if (json.length <= params.maxChars) return json;
   }
- 
+  
   return finalizeJson(
     safeJsonStringify({
       tool: base.tool,
