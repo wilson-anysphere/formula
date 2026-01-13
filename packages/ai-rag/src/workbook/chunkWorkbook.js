@@ -165,6 +165,8 @@ const MAX_UINT32 = 2 ** 32 - 1;
 const HAS_BIGINT = typeof BigInt === "function";
 const BIGINT_SHIFT_32 = HAS_BIGINT ? BigInt(32) : null;
 const BIGINT_MASK_32 = HAS_BIGINT ? BigInt(MAX_UINT32) : null;
+const BIGINT_ONE = HAS_BIGINT ? BigInt(1) : null;
+const BIGINT_ROW_STEP = HAS_BIGINT ? (BigInt(1) << /** @type {bigint} */ (BIGINT_SHIFT_32)) : null;
 
 /**
  * @param {number} row
@@ -259,37 +261,21 @@ function detectRegions(sheet, predicate, opts) {
     if (coords.size === 0)
       return { components: [], truncated: false, boundsRect: null };
 
-    /** @type {Set<CoordKey>} */
-    const visited = new Set();
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    for (const startKey of coords) {
+    while (coords.size) {
       throwIfAborted(signal);
-      if (visited.has(startKey)) continue;
-      visited.add(startKey);
+      const startIter = coords.values();
+      const startKey = startIter.next().value;
+      if (startKey == null) break;
+      coords.delete(startKey);
       const stack = [startKey];
 
-      let startRow = 0;
-      let startCol = 0;
-      if (typeof startKey === "number") {
-        startRow = Math.floor(startKey / PACK_COL_FACTOR);
-        startCol = startKey - startRow * PACK_COL_FACTOR;
-      } else if (typeof startKey === "bigint") {
-        const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
-        const mask = /** @type {bigint} */ (BIGINT_MASK_32);
-        startRow = Number(startKey >> shift);
-        startCol = Number(startKey & mask);
-      } else {
-        const idx = startKey.indexOf(",");
-        startRow = Number(startKey.slice(0, idx));
-        startCol = Number(startKey.slice(idx + 1));
-      }
-
-      let r0 = startRow;
-      let r1 = startRow;
-      let c0 = startCol;
-      let c1 = startCol;
+      let r0 = Number.POSITIVE_INFINITY;
+      let r1 = Number.NEGATIVE_INFINITY;
+      let c0 = Number.POSITIVE_INFINITY;
+      let c1 = Number.NEGATIVE_INFINITY;
       let count = 0;
 
       while (stack.length) {
@@ -297,21 +283,84 @@ function detectRegions(sheet, predicate, opts) {
         const curKey = stack.pop();
         if (curKey == null) continue;
         count += 1;
-        let r = 0;
-        let c = 0;
         if (typeof curKey === "number") {
-          r = Math.floor(curKey / PACK_COL_FACTOR);
-          c = curKey - r * PACK_COL_FACTOR;
-        } else if (typeof curKey === "bigint") {
+          const r = (curKey / PACK_COL_FACTOR) | 0;
+          const c = curKey - r * PACK_COL_FACTOR;
+          r0 = Math.min(r0, r);
+          r1 = Math.max(r1, r);
+          c0 = Math.min(c0, c);
+          c1 = Math.max(c1, c);
+
+          if (r > 0) {
+            const nk = curKey - PACK_COL_FACTOR;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (r < MAX_SAFE_PACKED_ROW) {
+            const nk = curKey + PACK_COL_FACTOR;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r + 1, c);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c > 0) {
+            const nk = curKey - 1;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c + 1 < PACK_COL_FACTOR) {
+            const nk = curKey + 1;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r, c + 1);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          continue;
+        }
+
+        if (typeof curKey === "bigint") {
           const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
           const mask = /** @type {bigint} */ (BIGINT_MASK_32);
-          r = Number(curKey >> shift);
-          c = Number(curKey & mask);
-        } else {
-          const idx = curKey.indexOf(",");
-          r = Number(curKey.slice(0, idx));
-          c = Number(curKey.slice(idx + 1));
+          const rowStep = /** @type {bigint} */ (BIGINT_ROW_STEP);
+          const one = /** @type {bigint} */ (BIGINT_ONE);
+          const r = Number(curKey >> shift);
+          const c = Number(curKey & mask);
+          r0 = Math.min(r0, r);
+          r1 = Math.max(r1, r);
+          c0 = Math.min(c0, c);
+          c1 = Math.max(c1, c);
+
+          if (r > 0) {
+            const nk = curKey - rowStep;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          {
+            const nk = curKey + rowStep;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c > 0) {
+            const nk = curKey - one;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c < MAX_UINT32) {
+            const nk = curKey + one;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r, c + 1);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          continue;
         }
+
+        const idx = curKey.indexOf(",");
+        const r = Number(curKey.slice(0, idx));
+        const c = Number(curKey.slice(idx + 1));
         r0 = Math.min(r0, r);
         r1 = Math.max(r1, r);
         c0 = Math.min(c0, c);
@@ -319,34 +368,22 @@ function detectRegions(sheet, predicate, opts) {
 
         if (r > 0) {
           const nk = packCoordKey(r - 1, c);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         {
           const nk = packCoordKey(r + 1, c);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         if (c > 0) {
           const nk = packCoordKey(r, c - 1);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         {
           const nk = packCoordKey(r, c + 1);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
       }
 
@@ -445,37 +482,21 @@ function detectRegions(sheet, predicate, opts) {
     if (coords.size === 0)
       return { components: [], truncated: false, boundsRect: null };
 
-    /** @type {Set<CoordKey>} */
-    const visited = new Set();
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    for (const startKey of coords) {
+    while (coords.size) {
       throwIfAborted(signal);
-      if (visited.has(startKey)) continue;
-      visited.add(startKey);
+      const startIter = coords.values();
+      const startKey = startIter.next().value;
+      if (startKey == null) break;
+      coords.delete(startKey);
       const stack = [startKey];
 
-      let startRow = 0;
-      let startCol = 0;
-      if (typeof startKey === "number") {
-        startRow = Math.floor(startKey / PACK_COL_FACTOR);
-        startCol = startKey - startRow * PACK_COL_FACTOR;
-      } else if (typeof startKey === "bigint") {
-        const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
-        const mask = /** @type {bigint} */ (BIGINT_MASK_32);
-        startRow = Number(startKey >> shift);
-        startCol = Number(startKey & mask);
-      } else {
-        const idx = startKey.indexOf(",");
-        startRow = Number(startKey.slice(0, idx));
-        startCol = Number(startKey.slice(idx + 1));
-      }
-
-      let r0 = startRow;
-      let r1 = startRow;
-      let c0 = startCol;
-      let c1 = startCol;
+      let r0 = Number.POSITIVE_INFINITY;
+      let r1 = Number.NEGATIVE_INFINITY;
+      let c0 = Number.POSITIVE_INFINITY;
+      let c1 = Number.NEGATIVE_INFINITY;
       let count = 0;
 
       while (stack.length) {
@@ -483,21 +504,84 @@ function detectRegions(sheet, predicate, opts) {
         const curKey = stack.pop();
         if (curKey == null) continue;
         count += 1;
-        let r = 0;
-        let c = 0;
         if (typeof curKey === "number") {
-          r = Math.floor(curKey / PACK_COL_FACTOR);
-          c = curKey - r * PACK_COL_FACTOR;
-        } else if (typeof curKey === "bigint") {
+          const r = (curKey / PACK_COL_FACTOR) | 0;
+          const c = curKey - r * PACK_COL_FACTOR;
+          r0 = Math.min(r0, r);
+          r1 = Math.max(r1, r);
+          c0 = Math.min(c0, c);
+          c1 = Math.max(c1, c);
+
+          if (r > 0) {
+            const nk = curKey - PACK_COL_FACTOR;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (r < MAX_SAFE_PACKED_ROW) {
+            const nk = curKey + PACK_COL_FACTOR;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r + 1, c);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c > 0) {
+            const nk = curKey - 1;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c + 1 < PACK_COL_FACTOR) {
+            const nk = curKey + 1;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r, c + 1);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          continue;
+        }
+
+        if (typeof curKey === "bigint") {
           const shift = /** @type {bigint} */ (BIGINT_SHIFT_32);
           const mask = /** @type {bigint} */ (BIGINT_MASK_32);
-          r = Number(curKey >> shift);
-          c = Number(curKey & mask);
-        } else {
-          const idx = curKey.indexOf(",");
-          r = Number(curKey.slice(0, idx));
-          c = Number(curKey.slice(idx + 1));
+          const rowStep = /** @type {bigint} */ (BIGINT_ROW_STEP);
+          const one = /** @type {bigint} */ (BIGINT_ONE);
+          const r = Number(curKey >> shift);
+          const c = Number(curKey & mask);
+          r0 = Math.min(r0, r);
+          r1 = Math.max(r1, r);
+          c0 = Math.min(c0, c);
+          c1 = Math.max(c1, c);
+
+          if (r > 0) {
+            const nk = curKey - rowStep;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          {
+            const nk = curKey + rowStep;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c > 0) {
+            const nk = curKey - one;
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          if (c < MAX_UINT32) {
+            const nk = curKey + one;
+            if (coords.delete(nk)) stack.push(nk);
+          } else {
+            const nk = packCoordKey(r, c + 1);
+            if (coords.delete(nk)) stack.push(nk);
+          }
+
+          continue;
         }
+
+        const idx = curKey.indexOf(",");
+        const r = Number(curKey.slice(0, idx));
+        const c = Number(curKey.slice(idx + 1));
         r0 = Math.min(r0, r);
         r1 = Math.max(r1, r);
         c0 = Math.min(c0, c);
@@ -505,34 +589,22 @@ function detectRegions(sheet, predicate, opts) {
 
         if (r > 0) {
           const nk = packCoordKey(r - 1, c);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         {
           const nk = packCoordKey(r + 1, c);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         if (c > 0) {
           const nk = packCoordKey(r, c - 1);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
 
         {
           const nk = packCoordKey(r, c + 1);
-          if (coords.has(nk) && !visited.has(nk)) {
-            visited.add(nk);
-            stack.push(nk);
-          }
+          if (coords.delete(nk)) stack.push(nk);
         }
       }
 
