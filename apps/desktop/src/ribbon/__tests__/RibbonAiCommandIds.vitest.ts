@@ -54,7 +54,15 @@ describe("Ribbon AI buttons", () => {
     });
     expect(onCommand).toHaveBeenCalledWith("ai.inlineEdit");
 
+    const legacyAiButton = container.querySelector<HTMLButtonElement>('[data-testid="open-ai-panel"]');
+    expect(legacyAiButton).toBeInstanceOf(HTMLButtonElement);
+    expect(legacyAiButton?.getAttribute("data-command-id")).toBe("view.togglePanel.aiChat");
+
+    act(() => {
+      legacyAiButton?.click();
+    });
+    expect(onCommand).toHaveBeenCalledWith("view.togglePanel.aiChat");
+
     act(() => root.unmount());
   });
 });
-
