@@ -1,3 +1,8 @@
+/// Minimal locale information used by [`format_number`] for "plain number" rendering.
+///
+/// This is intentionally lightweight and independent from the richer [`crate::Locale`] used by the
+/// full Excel format-code engine. `NumberLocale` only carries the decimal/thousands separators
+/// needed by the UI/formula bar when no explicit number format code is available.
 #[derive(Debug)]
 pub struct NumberLocale {
     pub id: &'static str,
@@ -11,8 +16,38 @@ pub static EN_US: NumberLocale = NumberLocale {
     thousands_separator: Some(','),
 };
 
+/// British English uses the same separators as `en-US`.
+pub static EN_GB: NumberLocale = NumberLocale {
+    id: "en-GB",
+    decimal_separator: '.',
+    thousands_separator: Some(','),
+};
+
 pub static DE_DE: NumberLocale = NumberLocale {
     id: "de-DE",
+    decimal_separator: ',',
+    thousands_separator: Some('.'),
+};
+
+/// French (France).
+///
+/// We use U+00A0 NO-BREAK SPACE as the thousands separator. Some environments prefer U+202F
+/// NARROW NO-BREAK SPACE; if we ever need to distinguish, we can add a separate entry, but U+00A0
+/// is widely supported and matches `crate::Locale::fr_fr()`.
+pub static FR_FR: NumberLocale = NumberLocale {
+    id: "fr-FR",
+    decimal_separator: ',',
+    thousands_separator: Some('\u{00A0}'),
+};
+
+pub static ES_ES: NumberLocale = NumberLocale {
+    id: "es-ES",
+    decimal_separator: ',',
+    thousands_separator: Some('.'),
+};
+
+pub static IT_IT: NumberLocale = NumberLocale {
+    id: "it-IT",
     decimal_separator: ',',
     thousands_separator: Some('.'),
 };
@@ -20,7 +55,11 @@ pub static DE_DE: NumberLocale = NumberLocale {
 pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
     match id {
         "en-US" => Some(&EN_US),
+        "en-GB" => Some(&EN_GB),
         "de-DE" => Some(&DE_DE),
+        "fr-FR" => Some(&FR_FR),
+        "es-ES" => Some(&ES_ES),
+        "it-IT" => Some(&IT_IT),
         _ => None,
     }
 }
