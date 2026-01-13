@@ -32,6 +32,7 @@ jobs:
       NODE_VERSION: 22
       PNPM_VERSION: 9.0.0
       WASM_PACK_VERSION: 0.13.1
+      TAURI_CLI_VERSION: 2.9.5
 
     steps:
       - name: Checkout
@@ -156,7 +157,10 @@ jobs:
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Install tauri-cli (installs the `cargo tauri` subcommand)
-        run: cargo install tauri-cli --locked
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked --force
+
+      - name: Print Tauri CLI version
+        run: cargo tauri --version
 
       - name: Setup MSVC cross-compilation environment (amd64 → arm64)
         uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
