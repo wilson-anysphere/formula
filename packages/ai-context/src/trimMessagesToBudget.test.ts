@@ -74,6 +74,33 @@ describe("trimMessagesToBudget", () => {
     expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(300);
   });
 
+  it("replaces existing generated summary messages when summaryRole is assistant", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "assistant", content: `${CONTEXT_SUMMARY_MARKER}\nOld summary` },
+      ...Array.from({ length: 8 }, (_, i) => ({ role: "user", content: `user-${i}-` + "y".repeat(60) })),
+      { role: "assistant", content: "final" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 300,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 2,
+      summaryMaxTokens: 80,
+      summaryRole: "assistant"
+    });
+
+    const summaryMessages = trimmed.filter(
+      (m) => m.role === "assistant" && typeof m.content === "string" && m.content.startsWith(CONTEXT_SUMMARY_MARKER)
+    );
+    expect(summaryMessages).toHaveLength(1);
+    expect(estimator.estimateMessagesTokens(trimmed)).toBeLessThanOrEqual(300);
+  });
+
   it("respects AbortSignal (already aborted)", async () => {
     const abortController = new AbortController();
     abortController.abort();

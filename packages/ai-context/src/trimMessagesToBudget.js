@@ -13,7 +13,7 @@ function isGeneratedSummaryMessage(message) {
   return (
     message &&
     typeof message === "object" &&
-    message.role === "system" &&
+    (message.role === "system" || message.role === "assistant") &&
     typeof message.content === "string" &&
     message.content.startsWith(CONTEXT_SUMMARY_MARKER)
   );
