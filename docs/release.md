@@ -317,6 +317,10 @@ you must build a **signed** app (e.g. use the CI-produced artifacts, or temporar
 `bundle.macOS.signingIdentity` to your explicit `Developer ID Application: … (TEAMID)` identity and
 then revert the change—do not commit it).
 
+Practical note: the “blank WebView” failure mode tends to show up specifically under the **hardened
+runtime**. An unsigned local dev build may appear fine even when the hardened-runtime entitlements
+are wrong, so prefer testing with the CI-signed artifact when in doubt.
+
 1. Build the production bundles:
 
    ```bash
