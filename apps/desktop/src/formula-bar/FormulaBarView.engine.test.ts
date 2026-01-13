@@ -351,4 +351,29 @@ describe("FormulaBarView WASM editor tooling integration", () => {
 
     host.remove();
   });
+
+  it("does not invoke engine tooling for non-formula text", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const engine = {
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
+      parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
+    } as unknown as EngineClient;
+
+    const view = new FormulaBarView(host, { onCommit: () => {} }, { getWasmEngine: () => engine, getLocaleId: () => "en-US" });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    view.textarea.value = "hello";
+    view.textarea.setSelectionRange(5, 5);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await flushTooling();
+
+    expect(engine.lexFormulaPartial).not.toHaveBeenCalled();
+    expect(engine.parseFormulaPartial).not.toHaveBeenCalled();
+
+    host.remove();
+  });
 });
