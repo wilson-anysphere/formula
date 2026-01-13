@@ -14,6 +14,8 @@ parquet = ["dep:formula-columnar"]
 vba = ["formula-xlsx/vba"]
 
 [dependencies]
+aes = "0.8"
+cbc = "0.1"
 cfb = "0.10"
 encoding_rs = "0.8"
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
@@ -28,6 +30,7 @@ formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 tempfile = "3.10"
 thiserror = "1.0"
+sha1 = "0.10"
 zip = { version = "2.1", default-features = false }
 
 [dev-dependencies]
