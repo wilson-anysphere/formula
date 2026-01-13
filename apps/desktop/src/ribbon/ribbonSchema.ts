@@ -444,9 +444,9 @@ export const defaultRibbonSchema: RibbonSchema = {
               iconId: "find",
               kind: "dropdown",
               menuItems: [
-                { id: "home.editing.findSelect.find", label: "Find", ariaLabel: "Find", iconId: "find", testId: "ribbon-find" },
-                { id: "home.editing.findSelect.replace", label: "Replace", ariaLabel: "Replace", iconId: "replace", testId: "ribbon-replace" },
-                { id: "home.editing.findSelect.goTo", label: "Go To", ariaLabel: "Go To", iconId: "goTo", testId: "ribbon-goto" },
+                { id: "edit.find", label: "Find", ariaLabel: "Find", iconId: "find", testId: "ribbon-find" },
+                { id: "edit.replace", label: "Replace", ariaLabel: "Replace", iconId: "replace", testId: "ribbon-replace" },
+                { id: "navigation.goTo", label: "Go To", ariaLabel: "Go To", iconId: "goTo", testId: "ribbon-goto" },
               ],
             },
           ],

@@ -9536,14 +9536,14 @@ mountRibbon(ribbonReactRoot, {
         executeBuiltinCommand("edit.fillRight");
         app.focus();
         return;
-      case "home.editing.findSelect.find":
-        showDialogAndFocus(findDialog);
+      case "edit.find":
+        executeBuiltinCommand("edit.find");
         return;
-      case "home.editing.findSelect.replace":
-        showDialogAndFocus(replaceDialog);
+      case "edit.replace":
+        executeBuiltinCommand("edit.replace");
         return;
-      case "home.editing.findSelect.goTo":
-        showDialogAndFocus(goToDialog);
+      case "navigation.goTo":
+        executeBuiltinCommand("navigation.goTo");
         return;
       case "pageLayout.pageSetup.pageSetupDialog":
         void handleRibbonPageSetup();
