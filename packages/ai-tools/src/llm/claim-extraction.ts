@@ -36,7 +36,7 @@ export interface ExtractVerifiableClaimsParams {
   assistantText: string;
   userText?: string;
   attachments?: unknown[] | null;
-  toolCalls?: Array<{ name: string; parameters?: unknown }>;
+  toolCalls?: Array<{ name: string; parameters?: unknown; arguments?: unknown }>;
 }
 
 const SHEET_NAME_PATTERN = "(?:'(?:[^']|'')+'|[A-Za-z0-9_.-]+)";
@@ -302,7 +302,7 @@ function overlaps(a: { start: number; end: number }, b: { start: number; end: nu
 
 function resolveMissingReferences(
   claims: ExtractedSpreadsheetClaim[],
-  context: { userText?: string; attachments?: unknown[] | null; toolCalls?: Array<{ name: string; parameters?: unknown }> }
+  context: { userText?: string; attachments?: unknown[] | null; toolCalls?: Array<{ name: string; parameters?: unknown; arguments?: unknown }> }
 ): ExtractedSpreadsheetClaim[] {
   const primaryRef = resolvePrimaryReference(context);
   if (!primaryRef) return claims;
@@ -317,7 +317,7 @@ function resolveMissingReferences(
 function resolvePrimaryReference(context: {
   userText?: string;
   attachments?: unknown[] | null;
-  toolCalls?: Array<{ name: string; parameters?: unknown }>;
+  toolCalls?: Array<{ name: string; parameters?: unknown; arguments?: unknown }>;
 }): string | null {
   const userRefs = uniqueInOrder([
     ...extractA1ReferencesFromText(String(context.userText ?? "")),
@@ -346,12 +346,13 @@ function extractA1ReferencesFromAttachments(attachments: unknown[] | null | unde
   return out;
 }
 
-function extractA1ReferencesFromToolCalls(toolCalls: Array<{ name: string; parameters?: unknown }> | null | undefined): string[] {
+function extractA1ReferencesFromToolCalls(
+  toolCalls: Array<{ name: string; parameters?: unknown; arguments?: unknown }> | null | undefined
+): string[] {
   if (!Array.isArray(toolCalls)) return [];
   const out: string[] = [];
   for (const call of toolCalls) {
-    const name = typeof call?.name === "string" ? call.name : "";
-    const params = call?.parameters;
+    const params = call?.parameters ?? call?.arguments;
     if (!params || typeof params !== "object" || Array.isArray(params)) continue;
     const obj = params as Record<string, unknown>;
 

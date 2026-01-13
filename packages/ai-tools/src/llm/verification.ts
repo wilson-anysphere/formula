@@ -84,7 +84,7 @@ export interface VerifyAssistantClaimsParams {
   assistantText: string;
   userText?: string;
   attachments?: unknown[] | null;
-  toolCalls?: Array<{ name: string; parameters?: unknown }>;
+  toolCalls?: Array<{ name: string; parameters?: unknown; arguments?: unknown }>;
   toolExecutor: { tools?: Array<{ name: string }>; execute: (call: any) => Promise<any> };
   maxClaims?: number;
 }

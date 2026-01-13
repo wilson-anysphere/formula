@@ -116,6 +116,34 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("attaches the pivot source_range when tool calls use `arguments` (LLM ToolCall shape)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Average is 2.",
+      userText: "",
+      toolCalls: [
+        {
+          name: "create_pivot_table",
+          arguments: {
+            source_range: "Sheet1!A1:A3",
+            destination: "Sheet1!C1",
+            rows: ["X"],
+            values: [{ field: "Y", aggregation: "sum" }]
+          }
+        }
+      ]
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet1!A1:A3",
+        expected: 2,
+        source: "Average is 2"
+      }
+    ]);
+  });
+
   it("attaches the pivot sourceRange (camelCase) when the assistant omits the range", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Average is 2.",
@@ -152,6 +180,33 @@ describe("extractVerifiableClaims", () => {
         {
           name: "create_chart",
           parameters: {
+            chart_type: "bar",
+            data_range: "Sheet1!B1:B3",
+            position: "Sheet1!D1"
+          }
+        }
+      ]
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet1!B1:B3",
+        expected: 2,
+        source: "Average is 2"
+      }
+    ]);
+  });
+
+  it("attaches the chart data_range when tool calls use `arguments` (LLM ToolCall shape)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Average is 2.",
+      userText: "",
+      toolCalls: [
+        {
+          name: "create_chart",
+          arguments: {
             chart_type: "bar",
             data_range: "Sheet1!B1:B3",
             position: "Sheet1!D1"
