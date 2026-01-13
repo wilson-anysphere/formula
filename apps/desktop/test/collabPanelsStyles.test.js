@@ -21,7 +21,7 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
   const mergeBranch = fs.readFileSync(mergeBranchPath, "utf8");
   const css = fs.readFileSync(cssPath, "utf8");
 
-  // Avoid React inline styles in the collab panels.
+  // Avoid React inline styles in the collab panels (and their renderer mount point).
   for (const [fileName, source] of [
     ["panelBodyRenderer.tsx", renderer],
     ["CollabVersionHistoryPanel.tsx", versionHistory],
@@ -32,17 +32,15 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     assert.equal(
       /\bstyle\s*=/.test(source),
       false,
-      `${fileName} should not use React inline styles; collab panels should use workspace.css classes instead`,
+      `${fileName} should not use inline styles; use workspace.css classes instead`,
+    );
+    assert.equal(
+      /\.style\./.test(source),
+      false,
+      `${fileName} should not assign DOM inline styles; use workspace.css classes instead`,
     );
   }
 
-  // Sanity-check that the React markup actually uses the shared classes.
-  for (const className of ["collab-panel__message", "collab-panel__message--error"]) {
-    assert.ok(
-      renderer.includes(className) || versionHistory.includes(className) || collabBranchManager.includes(className),
-      `Expected collab panels to render className="${className}"`,
-    );
-  }
   assert.ok(
     renderer.includes("CollabVersionHistoryPanel"),
     "Expected panelBodyRenderer.tsx to reference the CollabVersionHistoryPanel component",
@@ -51,9 +49,16 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     renderer.includes("CollabBranchManagerPanel"),
     "Expected panelBodyRenderer.tsx to reference the CollabBranchManagerPanel component",
   );
-  assert.ok(versionHistory.includes("collab-version-history"), 'Expected CollabVersionHistoryPanel.tsx to render className="collab-version-history"');
-  assert.ok(branchManager.includes("branch-manager"), 'Expected BranchManagerPanel.tsx to render className="branch-manager"');
-  assert.ok(mergeBranch.includes("branch-merge"), 'Expected MergeBranchPanel.tsx to render className="branch-merge"');
+
+  // Sanity-check that the React markup actually uses the shared classes.
+  for (const className of ["collab-panel__message", "collab-panel__message--error", "collab-version-history"]) {
+    assert.ok(versionHistory.includes(className), `Expected CollabVersionHistoryPanel to render className="${className}"`);
+  }
+  for (const className of ["collab-panel__message", "collab-panel__message--error", "collab-branch-manager"]) {
+    assert.ok(collabBranchManager.includes(className), `Expected CollabBranchManagerPanel to render className="${className}"`);
+  }
+  assert.ok(branchManager.includes("branch-manager"), 'Expected BranchManagerPanel to render className="branch-manager"');
+  assert.ok(mergeBranch.includes("branch-merge"), 'Expected MergeBranchPanel to render className="branch-merge"');
 
   const requiredSelectors = [
     // Shared message styling (loading/errors).
@@ -63,6 +68,7 @@ test("Collab Version History / Branch Manager panels are class-driven + styled v
     ".collab-version-history",
     ".collab-version-history__item",
     // Branch/merge UI.
+    ".collab-branch-manager",
     ".branch-manager",
     ".branch-merge",
   ];

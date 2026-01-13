@@ -613,7 +613,10 @@ class FormulaBarFunctionAutocompleteController {
     };
     const onCompositionEnd = () => {
       this.#isComposing = false;
-      // Wait a microtask so the final composition text is present in `.value`.
+      // Ensure the dropdown can respond to the next keydown immediately (e.g. ArrowDown),
+      // while still scheduling a microtask update to catch cases where the final composition
+      // text is applied after this callback.
+      this.update();
       queueMicrotask(() => this.update());
     };
     this.#textarea.addEventListener("input", updateNow);

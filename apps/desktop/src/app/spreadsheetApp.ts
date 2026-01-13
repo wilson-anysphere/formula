@@ -3721,6 +3721,8 @@ export class SpreadsheetApp {
             }
             return;
           }
+          this.formulaRangePreviewHoverRange = range;
+          this.formulaRangePreviewHoverText = refText;
           this.updateFormulaRangePreviewTooltip(range, refText);
         },
         onReferenceHighlights: (highlights) => {
@@ -7626,6 +7628,30 @@ export class SpreadsheetApp {
     if (!this.sharedGrid && this.drawingInteractionController == null) {
       this.renderSelection();
     }
+  }
+
+  /**
+   * Test-only helper: force the in-memory drawings cache to resync from the DocumentController.
+   *
+   * Some tests mutate the DocumentController drawings list directly and need a synchronous way to
+   * update SpreadsheetApp's memoized drawing/hit-test state.
+   */
+  syncSheetDrawings(): void {
+    if (this.disposed) return;
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    // Prime the cache from the document.
+    void this.listDrawingObjectsForSheet();
+
+    // Keep legacy scroll state aligned before rendering in shared-grid mode.
+    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+    if (this.sharedGrid) {
+      const scroll = this.sharedGrid.getScroll();
+      this.scrollX = scroll.x;
+      this.scrollY = scroll.y;
+    }
+    this.renderDrawings(sharedViewport);
   }
 
   /**
@@ -18004,7 +18030,7 @@ export class SpreadsheetApp {
                 startAnchor: hit.anchor,
               };
           try {
-            this.root.setPointerCapture(e.pointerId);
+            this.root.setPointerCapture?.(e.pointerId);
           } catch {
             // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
           }
@@ -18706,7 +18732,7 @@ export class SpreadsheetApp {
       finalObjects[targetIndex] = after;
       this.drawingGesture = null;
       try {
-        this.root.releasePointerCapture(e.pointerId);
+        this.root.releasePointerCapture?.(e.pointerId);
       } catch {
         // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
       }
@@ -19204,7 +19230,7 @@ export class SpreadsheetApp {
         this.dragAutoScrollRaf = null;
 
         try {
-          this.root.releasePointerCapture(state.pointerId);
+          this.root.releasePointerCapture?.(state.pointerId);
         } catch {
           // ignore
         }

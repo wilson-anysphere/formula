@@ -76,12 +76,13 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
 
   return (
     <div className="solver-dialog">
-      <h2>{t("panels.solver.title")}</h2>
+      <h2 className="solver-dialog__title">{t("panels.solver.title")}</h2>
 
-      <section>
-        <label>
-          {t("solver.dialog.solvingMethod")}
+      <section className="solver-dialog__section">
+        <label className="solver-dialog__field">
+          <span className="solver-dialog__label">{t("solver.dialog.solvingMethod")}</span>
           <select
+            className="solver-dialog__select"
             value={method}
             onChange={(e) => setMethod(e.target.value as SolveMethod)}
           >
@@ -92,19 +93,21 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         </label>
       </section>
 
-      <section>
-        <h3>{t("solver.dialog.objective.title")}</h3>
-        <label>
-          {t("solver.dialog.objective.setObjective")}
+      <section className="solver-dialog__section">
+        <h3 className="solver-dialog__section-title">{t("solver.dialog.objective.title")}</h3>
+        <label className="solver-dialog__field">
+          <span className="solver-dialog__label">{t("solver.dialog.objective.setObjective")}</span>
           <input
+            className="solver-dialog__input solver-dialog__input--mono"
             value={objectiveRef}
             onChange={(e) => setObjectiveRef(e.target.value)}
           />
         </label>
 
-        <label>
-          {t("solver.dialog.objective.to")}
+        <label className="solver-dialog__field">
+          <span className="solver-dialog__label">{t("solver.dialog.objective.to")}</span>
           <select
+            className="solver-dialog__select"
             value={objectiveKind}
             onChange={(e) => setObjectiveKind(e.target.value as ObjectiveKind)}
           >
@@ -115,18 +118,20 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         </label>
 
         {canTarget && (
-          <div style={{ display: "flex", gap: 12 }}>
-            <label>
-              {t("solver.dialog.objective.value")}
+          <div className="solver-dialog__row">
+            <label className="solver-dialog__field">
+              <span className="solver-dialog__label">{t("solver.dialog.objective.value")}</span>
               <input
+                className="solver-dialog__input"
                 type="number"
                 value={targetValue}
                 onChange={(e) => setTargetValue(Number(e.target.value))}
               />
             </label>
-            <label>
-              {t("solver.dialog.objective.tolerance")}
+            <label className="solver-dialog__field">
+              <span className="solver-dialog__label">{t("solver.dialog.objective.tolerance")}</span>
               <input
+                className="solver-dialog__input"
                 type="number"
                 value={targetTolerance}
                 onChange={(e) => setTargetTolerance(Number(e.target.value))}
@@ -136,19 +141,21 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         )}
       </section>
 
-      <section>
-        <h3>{t("solver.dialog.variables.title")}</h3>
+      <section className="solver-dialog__section">
+        <h3 className="solver-dialog__section-title">{t("solver.dialog.variables.title")}</h3>
 
         <button
           type="button"
+          className="solver__button"
           onClick={() => setVariables((v) => [...v, DEFAULT_VARIABLE])}
         >
           {t("solver.dialog.variables.addVariable")}
         </button>
 
         {variables.map((v, idx) => (
-          <div key={idx} style={{ display: "grid", gap: 8, gridTemplateColumns: "2fr 1fr 1fr 1fr" }}>
+          <div key={idx} className="solver-dialog__variable-row">
             <input
+              className="solver-dialog__input solver-dialog__input--mono"
               value={v.ref}
               onChange={(e) =>
                 setVariables((vars) =>
@@ -157,6 +164,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               }
             />
             <select
+              className="solver-dialog__select"
               value={v.type}
               onChange={(e) =>
                 setVariables((vars) =>
@@ -171,6 +179,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               <option value="binary">{t("solver.dialog.variables.type.binary")}</option>
             </select>
             <input
+              className="solver-dialog__input"
               type="number"
               placeholder={t("solver.dialog.variables.lower")}
               value={v.lower ?? ""}
@@ -185,6 +194,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               }
             />
             <input
+              className="solver-dialog__input"
               type="number"
               placeholder={t("solver.dialog.variables.upper")}
               value={v.upper ?? ""}
@@ -202,19 +212,21 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         ))}
       </section>
 
-      <section>
-        <h3>{t("solver.dialog.constraints.title")}</h3>
+      <section className="solver-dialog__section">
+        <h3 className="solver-dialog__section-title">{t("solver.dialog.constraints.title")}</h3>
 
         <button
           type="button"
+          className="solver__button"
           onClick={() => setConstraints((c) => [...c, DEFAULT_CONSTRAINT])}
         >
           {t("solver.dialog.constraints.addConstraint")}
         </button>
 
         {constraints.map((c, idx) => (
-          <div key={idx} style={{ display: "grid", gap: 8, gridTemplateColumns: "2fr 1fr 1fr" }}>
+          <div key={idx} className="solver-dialog__constraint-row">
             <input
+              className="solver-dialog__input solver-dialog__input--mono"
               value={c.ref}
               onChange={(e) =>
                 setConstraints((cons) =>
@@ -223,6 +235,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               }
             />
             <select
+              className="solver-dialog__select"
               value={c.relation}
               onChange={(e) =>
                 setConstraints((cons) =>
@@ -237,6 +250,7 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
               <option value="=">=</option>
             </select>
             <input
+              className="solver-dialog__input"
               type="number"
               value={c.rhs}
               onChange={(e) =>
@@ -251,11 +265,11 @@ export function SolverDialog({ initial, onCancel, onRun }: Props) {
         ))}
       </section>
 
-      <footer style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-        <button type="button" onClick={onCancel}>
+      <footer className="solver-dialog__footer">
+        <button type="button" className="solver__button" onClick={onCancel}>
           {t("solver.dialog.cancel")}
         </button>
-        <button type="button" onClick={() => onRun(config)}>
+        <button type="button" className="solver__button solver__button--primary" onClick={() => onRun(config)}>
           {t("solver.dialog.solve")}
         </button>
       </footer>

@@ -40,16 +40,14 @@ function createStubCanvas(ctx: CanvasRenderingContext2D): HTMLCanvasElement {
   return canvas as HTMLCanvasElement;
 }
 
-function createShapeObject(raw_xml: string, opts?: { widthPx?: number; heightPx?: number }): DrawingObject {
-  const widthPx = opts?.widthPx ?? 20;
-  const heightPx = opts?.heightPx ?? 10;
+function createShapeObject(raw_xml: string, size: { width: number; height: number } = { width: 20, height: 10 }): DrawingObject {
   return {
     id: 1,
     kind: { type: "shape", raw_xml },
     anchor: {
       type: "absolute",
       pos: { xEmu: pxToEmu(5), yEmu: pxToEmu(7) },
-      size: { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) },
+      size: { cx: pxToEmu(size.width), cy: pxToEmu(size.height) },
     },
     zOrder: 0,
   };
@@ -214,15 +212,22 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    overlay.render([createShapeObject(xml)], viewport);
+    const bounds = { x: 5, y: 7, width: 60, height: 40 };
+    overlay.render([createShapeObject(xml, { width: bounds.width, height: bounds.height })], viewport);
 
-    const call = calls.find((c) => c.method === "fillText" && c.args[0] === "Centered");
-    expect(call).toBeTruthy();
+    const textCall = calls.find((call) => call.method === "fillText" && call.args[0] === "Centered");
+    expect(textCall).toBeTruthy();
+    const x = textCall!.args[1] as number;
+    const y = textCall!.args[2] as number;
 
-    // Text is rendered with a left baseline and centered as a block inside the shape bounds.
-    // When the text is larger than the shape, the origin can be outside the shape and is
-    // clipped by the overlay.
-    expect(Number(call!.args[1])).toBe(-17);
-    expect(Number(call!.args[2])).toBeCloseTo(2.4, 3);
+    // Center alignment is computed manually by the overlay (textAlign remains "left") so
+    // we expect `fillText` at the top-left origin of the centered block.
+    const expectedTextWidth = (ctx as any).measureText("Centered").width as number;
+    const expectedTextHeight = (12 * 96) / 72 * 1.2; // `sz="1200"` => 12pt, lineHeight = fontPx * 1.2
+    const expectedX = bounds.x + bounds.width / 2 - expectedTextWidth / 2;
+    const expectedY = bounds.y + bounds.height / 2 - expectedTextHeight / 2;
+
+    expect(x).toBeCloseTo(expectedX, 6);
+    expect(y).toBeCloseTo(expectedY, 6);
   });
 });

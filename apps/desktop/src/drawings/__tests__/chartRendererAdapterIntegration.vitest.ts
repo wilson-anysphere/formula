@@ -78,19 +78,16 @@ function createNoopSurfaceContext(): CanvasRenderingContext2D {
     },
   });
 
-  const ctx: any = new Proxy(
-    target,
-    {
-      get(target, prop) {
-        if (prop in target) return (target as any)[prop];
-        return noop;
-      },
-      set(target, prop, value) {
-        (target as any)[prop] = value;
-        return true;
-      },
+  const ctx: any = new Proxy(target, {
+    get(target, prop) {
+      if (prop in target) return (target as any)[prop];
+      return noop;
     },
-  );
+    set(target, prop, value) {
+      (target as any)[prop] = value;
+      return true;
+    },
+  });
   return ctx as CanvasRenderingContext2D;
 }
 

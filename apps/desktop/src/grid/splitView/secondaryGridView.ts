@@ -806,6 +806,7 @@ export class SecondaryGridView {
     } else {
       this.document.setRowHeight(sheetId, docRow, baseSize, { label, source });
     }
+    this.drawingsOverlay.invalidateSpatialIndex();
     void this.renderDrawings();
   }
 

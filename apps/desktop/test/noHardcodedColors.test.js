@@ -203,6 +203,9 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     if (rel === "charts/scene/color.ts") return false;
     if (rel === "charts/scene/demo.ts") return false;
     if (rel.includes("/demo/")) return false;
+    // DrawingML parsers may emit/document literal hex colors derived from document
+    // payloads (not theme/UI tokens).
+    if (rel === "drawings/shapeRenderer.ts") return false;
     if (rel.includes("/__tests__/")) return false;
     // Vitest entrypoints live under `src/` with a `.vitest.*` suffix; treat them like other tests.
     // These files are not part of the shipped UI bundle and frequently contain hardcoded color
@@ -229,7 +232,7 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   //
   // This list is intentionally *not* exhaustive; it's meant to catch high-signal offenders
   // while avoiding matching unrelated strings (e.g. "Red" as a UI label).
-  const allowedColorKeywords = new Set(["transparent", "currentcolor", "inherit"]);
+  const allowedColorKeywords = new Set(["transparent", "currentcolor", "inherit", "initial", "unset", "revert"]);
   const disallowedNamedColors = [
     "crimson",
     "red",

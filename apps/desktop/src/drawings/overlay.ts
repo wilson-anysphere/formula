@@ -764,7 +764,8 @@ export class DrawingOverlay {
         if (obj.kind.type !== "image") continue;
 
         const rect = this.spatialIndex.getRect(obj.id) ?? anchorToRectPx(obj.anchor, this.geom, zoom);
-        // Zero-size drawings are invisible and do not need bitmap decoding.
+        // Zero-size drawings are invisible and do not need bitmap decoding. Avoid starting an image
+        // decode (`createImageBitmap`) when there is no renderable area.
         if (rect.width <= 0 || rect.height <= 0) continue;
         const anchor = obj.anchor;
         let scrollX = scrollXBase;

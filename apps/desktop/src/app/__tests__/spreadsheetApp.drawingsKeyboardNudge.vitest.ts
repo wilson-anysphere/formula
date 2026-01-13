@@ -120,7 +120,9 @@ describe("SpreadsheetApp drawings keyboard nudging", () => {
       (globalThis as any).PointerEvent = class PointerEvent extends MouseEvent {
         pointerId: number;
         constructor(type: string, init: any = {}) {
-          super(type, init);
+          // Real pointer events bubble; match that behavior so SpreadsheetApp's root-level
+          // pointer listeners see these synthetic events.
+          super(type, { bubbles: true, cancelable: true, ...init });
           this.pointerId = Number(init.pointerId ?? 0);
         }
       };

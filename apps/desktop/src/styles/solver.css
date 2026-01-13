@@ -25,6 +25,7 @@
   color: var(--text-primary);
 }
 
+.solver__button,
 .solver-panel__configure-button {
   flex: 0 0 auto;
   padding: var(--space-3) calc(var(--space-4) + var(--space-1));
@@ -40,24 +41,201 @@
     color var(--motion-duration-fast) var(--motion-ease);
 }
 
+.solver__button:hover,
 .solver-panel__configure-button:hover {
   background: var(--bg-hover);
 }
 
+.solver__button:active,
 .solver-panel__configure-button:active {
   background: var(--bg-active);
 }
 
+.solver__button:focus-visible,
 .solver-panel__configure-button:focus-visible {
   outline: var(--space-1) solid var(--selection-border);
   outline-offset: var(--space-1);
 }
 
+.solver__button:disabled,
 .solver-panel__configure-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
+.solver__button--primary {
+  background: var(--accent);
+  border-color: var(--accent-border);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.solver__button--primary:hover {
+  background: var(--accent);
+}
+
+.solver__button--primary:active {
+  background: var(--accent);
+}
+
 .solver-panel__error {
   color: var(--error);
+}
+
+.solver-dialog,
+.solver-progress,
+.solver-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-primary);
+}
+
+.solver-dialog {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+}
+
+.solver-dialog__title {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+}
+
+.solver-dialog__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.solver-dialog__section-title {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.solver-dialog__field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.solver-dialog__label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.solver-dialog__input,
+.solver-dialog__select {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.solver-dialog__input:focus,
+.solver-dialog__select:focus {
+  outline: none;
+}
+
+.solver-dialog__input:focus-visible,
+.solver-dialog__select:focus-visible {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+@supports not selector(:focus-visible) {
+  .solver-dialog__input:focus,
+  .solver-dialog__select:focus {
+    border-color: var(--selection-border);
+    box-shadow: 0 0 0 2px var(--selection-bg);
+  }
+}
+
+.solver-dialog__input--mono {
+  font:
+    12px/16px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.solver-dialog__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.solver-dialog__row .solver-dialog__field {
+  flex: 1 1 180px;
+}
+
+.solver-dialog__variable-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  min-width: 0;
+  align-items: end;
+}
+
+.solver-dialog__constraint-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 2fr 1fr 1fr;
+  min-width: 0;
+  align-items: end;
+}
+
+.solver-dialog__footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.solver-progress dl,
+.solver-results dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.solver-progress dt,
+.solver-results dt {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.solver-progress dd,
+.solver-results dd {
+  margin: 0;
+}
+
+.solver-results__actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }

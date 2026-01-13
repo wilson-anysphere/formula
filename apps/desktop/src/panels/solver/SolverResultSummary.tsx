@@ -26,11 +26,11 @@ export function SolverResultSummary({ outcome, onKeep, onRestore }: Props) {
         <dd>{outcome.maxConstraintViolation}</dd>
       </dl>
 
-      <div style={{ display: "flex", gap: 12 }}>
-        <button type="button" onClick={onKeep}>
+      <div className="solver-results__actions">
+        <button type="button" className="solver__button solver__button--primary" onClick={onKeep}>
           {t("solver.results.keepSolution")}
         </button>
-        <button type="button" onClick={onRestore}>
+        <button type="button" className="solver__button" onClick={onRestore}>
           {t("solver.results.restoreOriginalValues")}
         </button>
       </div>

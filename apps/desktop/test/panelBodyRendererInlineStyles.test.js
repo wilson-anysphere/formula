@@ -100,7 +100,6 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     false,
     "CollabBranchManagerPanel should not use React inline styles; use CSS classes in workspace.css instead",
   );
-
   const reactMountSection = extractSection(source, "function renderReactPanel", "function renderDomPanel");
   assert.equal(
     /\.style\./.test(reactMountSection),

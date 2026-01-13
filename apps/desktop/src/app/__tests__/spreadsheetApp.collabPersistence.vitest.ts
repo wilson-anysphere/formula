@@ -119,6 +119,7 @@ function createMockCollabSession(): any {
     origin,
     localOrigins: new Set([origin]),
     presence: null,
+    onPermissionsChanged: vi.fn(() => () => {}),
     setPermissions: vi.fn(),
     // Match the real CollabSession API so SpreadsheetApp doesn't need to monkeypatch `setPermissions`
     // during tests (which would break vi.fn assertions).

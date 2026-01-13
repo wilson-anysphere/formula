@@ -28,7 +28,7 @@ export function SolverProgressView({ progress, onCancel }: Props) {
         <p>{t("solver.progress.starting")}</p>
       )}
 
-      <button type="button" onClick={onCancel}>
+      <button type="button" className="solver__button" onClick={onCancel}>
         {t("solver.progress.cancel")}
       </button>
     </div>

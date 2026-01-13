@@ -171,6 +171,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
     } as any;
 
     // Register the same command catalog as the desktop shell (`apps/desktop/src/main.ts`).
+    const applyFormattingToSelection = () => {};
     registerDesktopCommands({
       commandRegistry,
       app: {} as any,
@@ -178,7 +179,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       formatPainter: { isArmed: () => false, arm: () => {}, disarm: () => {}, onCancel: null },
       themeController: { setThemePreference: () => {} } as any,
       refreshRibbonUiState: () => {},
-      applyFormattingToSelection: () => {},
+      applyFormattingToSelection,
       getActiveCellNumberFormat: () => null,
       getActiveCellIndentLevel: () => 0,
       openFormatCells: () => {},
