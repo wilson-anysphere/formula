@@ -205,9 +205,7 @@ Operationally, this means:
 
 These are useful integrations when composing more complex setups:
 
-- `BoundedAIAuditStore` – wraps another store and enforces an upper bound on the serialized size of each entry
-  (defaults to `200_000` characters). Oversized entries are compacted by truncating `input`/tool payloads and dropping
-  full tool `result` blobs. Helpful for LocalStorage/IndexedDB environments where quota failures are common.
+- `BoundedAIAuditStore` – per-entry size cap wrapper (see above).
 - `CompositeAIAuditStore` – fans out `logEntry(...)` writes to multiple stores (mode `"best_effort"` by default, or `"all"`),
   while delegating reads to the first configured store.
 
@@ -307,6 +305,44 @@ await recorder.finalize();
 ```
 
 ### Choosing a store (browser vs Node)
+
+#### Convenience: `createDefaultAIAuditStore`
+
+`createDefaultAIAuditStore(...)` picks a sensible backend for the current runtime:
+
+- Browser-like runtimes: prefer `IndexedDbAIAuditStore` (when available), then fall back to `LocalStorageAIAuditStore`, then `MemoryAIAuditStore`.
+- Node runtimes: default to `MemoryAIAuditStore` (opt into sqlite explicitly).
+
+It also wraps the chosen store in `BoundedAIAuditStore` by default (pass `bounded: false` to disable).
+
+Browser example:
+
+```ts
+import { createDefaultAIAuditStore } from "@formula/ai-audit/browser";
+
+const store = await createDefaultAIAuditStore({
+  retention: {
+    max_entries: 10_000,
+    max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
+  },
+  // bounded: { max_entry_chars: 200_000 }, // optional override
+});
+```
+
+Node example (opt into sqlite):
+
+```ts
+import { createDefaultAIAuditStore, NodeFileBinaryStorage } from "@formula/ai-audit/node";
+
+const store = await createDefaultAIAuditStore({
+  prefer: "sqlite",
+  sqlite_storage: new NodeFileBinaryStorage("./ai-audit.sqlite"),
+  retention: {
+    max_entries: 50_000,
+    max_age_ms: 90 * 24 * 60 * 60 * 1000, // 90 days
+  },
+});
+```
 
 #### Browser / webview
 
