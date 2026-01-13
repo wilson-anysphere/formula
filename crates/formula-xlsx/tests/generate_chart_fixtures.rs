@@ -84,6 +84,52 @@ fn write_combo_chart_fixture(path: &Path) {
     workbook.save(path).unwrap();
 }
 
+fn write_stock_chart_fixture(path: &Path) {
+    if path.exists() {
+        return;
+    }
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+
+    worksheet.write_string(0, 0, "Date").unwrap();
+    worksheet.write_string(0, 1, "Open").unwrap();
+    worksheet.write_string(0, 2, "High").unwrap();
+    worksheet.write_string(0, 3, "Low").unwrap();
+    worksheet.write_string(0, 4, "Close").unwrap();
+
+    let dates = ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04"];
+    let open = [10.0, 11.0, 12.0, 11.5];
+    let high = [12.0, 13.0, 13.5, 12.5];
+    let low = [9.0, 10.5, 11.0, 10.8];
+    let close = [11.0, 12.5, 11.5, 12.0];
+
+    for i in 0..dates.len() {
+        let row = (i + 1) as u32;
+        worksheet.write_string(row, 0, dates[i]).unwrap();
+        worksheet.write_number(row, 1, open[i]).unwrap();
+        worksheet.write_number(row, 2, high[i]).unwrap();
+        worksheet.write_number(row, 3, low[i]).unwrap();
+        worksheet.write_number(row, 4, close[i]).unwrap();
+    }
+
+    let mut chart = Chart::new(ChartType::Stock);
+    chart.title().set_name("Stock (OHLC)");
+
+    // Stock charts in Excel are typically composed of multiple series (Open,
+    // High, Low, Close) that share the same date categories.
+    for col_letter in ["B", "C", "D", "E"] {
+        let values_range = format!("Sheet1!${col_letter}$2:${col_letter}$5");
+        let series = chart.add_series();
+        series
+            .set_categories("Sheet1!$A$2:$A$5")
+            .set_values(&values_range);
+    }
+
+    worksheet.insert_chart(1, 6, &chart).unwrap();
+    workbook.save(path).unwrap();
+}
+
 /// Generates small chart fixtures under `fixtures/charts/xlsx/`.
 ///
 /// This test is ignored by default because it writes files to the repository.
@@ -107,4 +153,6 @@ fn generate_chart_fixtures() {
     // keep around as parsing regressions, even if we don't fully model them yet.
     write_chart_fixture(&root.join("bar-horizontal.xlsx"), ChartType::Bar);
     write_chart_fixture(&root.join("radar.xlsx"), ChartType::Radar);
+
+    write_stock_chart_fixture(&root.join("stock.xlsx"));
 }
