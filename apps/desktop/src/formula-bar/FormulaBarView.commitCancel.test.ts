@@ -493,8 +493,8 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(true);
     expect(view.textarea.value).toBe("=SUM()");
     // Cursor should be inside parens so typing immediately adds arguments.
-    expect(view.textarea.selectionStart).toBe(5);
-    expect(view.textarea.selectionEnd).toBe(5);
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
     expect(document.activeElement).toBe(view.textarea);
     expect(picker.hidden).toBe(true);
 
