@@ -7,19 +7,26 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.join(__dirname, "..");
 
-test("Accent hover styles should not use filter: brightness(...)", () => {
+test("Desktop CSS should not use brightness() filters (use tokens instead)", () => {
+  const stylesDir = path.join(desktopRoot, "src", "styles");
+  const styleTargets = fs
+    .readdirSync(stylesDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".css"))
+    .map((entry) => path.join(stylesDir, entry.name));
+
   const targets = [
-    path.join(desktopRoot, "src", "styles", "ribbon.css"),
-    path.join(desktopRoot, "src", "styles", "ui.css"),
-    path.join(desktopRoot, "src", "styles", "sort-filter.css"),
+    ...styleTargets,
+    // Accent-driven titlebar hover styling is still token-based but lives outside src/styles.
     path.join(desktopRoot, "src", "titlebar", "titlebar.css"),
   ];
 
-  for (const target of targets) {
+  const uniqueTargets = [...new Set(targets)];
+
+  for (const target of uniqueTargets) {
     const css = fs.readFileSync(target, "utf8");
     assert.ok(
-      !/filter\s*:\s*brightness\(/i.test(css),
-      `Expected ${path.relative(desktopRoot, target)} to avoid filter: brightness(...) (use tokens instead)`,
+      !/\bbrightness\s*\(/i.test(css),
+      `Expected ${path.relative(desktopRoot, target)} to avoid brightness(...) (use tokens instead)`,
     );
   }
 });
