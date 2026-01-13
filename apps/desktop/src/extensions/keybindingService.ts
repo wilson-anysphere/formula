@@ -1,6 +1,7 @@
 import type { CommandRegistry } from "./commandRegistry.js";
 import type { ContextKeyService } from "./contextKeys.js";
 import {
+  buildCommandKeybindingAriaIndex,
   buildCommandKeybindingDisplayIndex,
   matchesKeybinding,
   parseKeybinding,
@@ -203,6 +204,8 @@ export class KeybindingService {
 
   // Shared `commandId -> [displayKeybinding]` index for UI (palette, menus).
   private readonly commandKeybindingDisplayIndex = new Map<string, string[]>();
+  // Shared `commandId -> [ariaKeyShortcuts]` index for accessibility metadata.
+  private readonly commandKeybindingAriaIndex = new Map<string, string[]>();
 
   private removeListener: (() => void) | null = null;
 
@@ -308,6 +311,10 @@ export class KeybindingService {
 
   getCommandKeybindingDisplayIndex(): Map<string, string[]> {
     return this.commandKeybindingDisplayIndex;
+  }
+
+  getCommandKeybindingAriaIndex(): Map<string, string[]> {
+    return this.commandKeybindingAriaIndex;
   }
 
   /**
@@ -469,10 +476,21 @@ export class KeybindingService {
       contributed: this.extensionKeybindings,
     });
 
+    const nextAria = buildCommandKeybindingAriaIndex({
+      platform: this.platform,
+      builtin: this.builtinKeybindings,
+      contributed: this.extensionKeybindings,
+    });
+
     // Preserve identity so UI surfaces can hold onto a stable map reference.
     this.commandKeybindingDisplayIndex.clear();
     for (const [commandId, bindings] of next.entries()) {
       this.commandKeybindingDisplayIndex.set(commandId, bindings);
+    }
+
+    this.commandKeybindingAriaIndex.clear();
+    for (const [commandId, bindings] of nextAria.entries()) {
+      this.commandKeybindingAriaIndex.set(commandId, bindings);
     }
   }
 

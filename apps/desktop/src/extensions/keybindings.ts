@@ -268,6 +268,73 @@ export function formatKeybindingForDisplay(binding: ParsedKeybinding, platform: 
   return parts.join("+");
 }
 
+function formatKeyTokenForAria(keyToken: string): string {
+  // ParsedKeybinding keys are normalized via `normalizeKeyToken` (lower-case + aliases).
+  // `aria-keyshortcuts` expects values in terms of `KeyboardEvent.key` names.
+  //
+  // See: https://w3c.github.io/aria/#aria-keyshortcuts
+  switch (keyToken) {
+    case "arrowup":
+      return "ArrowUp";
+    case "arrowdown":
+      return "ArrowDown";
+    case "arrowleft":
+      return "ArrowLeft";
+    case "arrowright":
+      return "ArrowRight";
+    case "escape":
+      return "Escape";
+    case "enter":
+      return "Enter";
+    case "backspace":
+      return "Backspace";
+    case "delete":
+      return "Delete";
+    case "space":
+      return "Space";
+    case "tab":
+      return "Tab";
+    case "pageup":
+      return "PageUp";
+    case "pagedown":
+      return "PageDown";
+    case "home":
+      return "Home";
+    case "end":
+      return "End";
+    case "contextmenu":
+      return "ContextMenu";
+    default:
+      break;
+  }
+
+  // Preserve punctuation (/, ., etc) as-is.
+  if (keyToken.length === 1) return keyToken.toUpperCase();
+
+  // F-keys are common and should be upper-cased (f1 -> F1).
+  if (/^f\d{1,2}$/.test(keyToken)) return keyToken.toUpperCase();
+
+  // Default: title-case the first character (pageup -> Pageup). Prefer a predictable
+  // output over overfitting for every possible key token.
+  return keyToken.slice(0, 1).toUpperCase() + keyToken.slice(1);
+}
+
+/**
+ * Renders a parsed keybinding as an ARIA `aria-keyshortcuts` string.
+ *
+ * This is for accessibility metadata only; it does not affect keybinding dispatch.
+ */
+export function formatKeybindingForAria(binding: ParsedKeybinding): string {
+  const parts: string[] = [];
+  // Use ARIA modifier names.
+  if (binding.ctrl) parts.push("Control");
+  if (binding.alt) parts.push("Alt");
+  if (binding.shift) parts.push("Shift");
+  if (binding.meta) parts.push("Meta");
+  parts.push(formatKeyTokenForAria(binding.key));
+  return parts.join("+");
+}
+
 export type KeybindingContribution = {
   command: string;
   key: string;
@@ -308,5 +375,41 @@ export function buildCommandKeybindingDisplayIndex(params: {
 }
 
 export function getPrimaryCommandKeybindingDisplay(commandId: string, index: Map<string, string[]>): string | null {
+  return index.get(String(commandId))?.[0] ?? null;
+}
+
+/**
+ * Builds a `commandId -> [ariaKeyShortcuts...]` index (primary binding first).
+ *
+ * Intended for accessibility metadata (e.g. `aria-keyshortcuts` attributes).
+ */
+export function buildCommandKeybindingAriaIndex(params: {
+  platform: "mac" | "other";
+  contributed: KeybindingContribution[];
+  builtin?: KeybindingContribution[];
+}): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+
+  const add = (kb: KeybindingContribution) => {
+    const binding = params.platform === "mac" && kb.mac ? kb.mac : kb.key;
+    const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
+    if (!parsed) return;
+    const aria = formatKeybindingForAria(parsed);
+
+    const existing = index.get(parsed.command);
+    if (!existing) {
+      index.set(parsed.command, [aria]);
+      return;
+    }
+    if (!existing.includes(aria)) existing.push(aria);
+  };
+
+  for (const kb of params.builtin ?? []) add(kb);
+  for (const kb of params.contributed) add(kb);
+
+  return index;
+}
+
+export function getPrimaryCommandKeybindingAria(commandId: string, index: Map<string, string[]>): string | null {
   return index.get(String(commandId))?.[0] ?? null;
 }

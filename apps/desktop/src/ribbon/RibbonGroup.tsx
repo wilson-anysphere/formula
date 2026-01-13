@@ -9,10 +9,19 @@ export interface RibbonGroupProps {
   labelById?: Record<string, string>;
   disabledById?: Record<string, boolean>;
   shortcutById?: Record<string, string>;
+  ariaKeyShortcutsById?: Record<string, string>;
   onActivateButton?: (button: RibbonButtonDefinition) => void;
 }
 
-export function RibbonGroup({ group, pressedById, labelById, disabledById, shortcutById, onActivateButton }: RibbonGroupProps) {
+export function RibbonGroup({
+  group,
+  pressedById,
+  labelById,
+  disabledById,
+  shortcutById,
+  ariaKeyShortcutsById,
+  onActivateButton,
+}: RibbonGroupProps) {
   return (
     <section className="ribbon-group" role="group" aria-label={group.label}>
       <div className="ribbon-group__content">
@@ -25,6 +34,8 @@ export function RibbonGroup({ group, pressedById, labelById, disabledById, short
             disabledOverride={disabledById?.[button.id]}
             shortcutOverride={shortcutById?.[button.id]}
             shortcutById={shortcutById}
+            ariaKeyShortcutsOverride={ariaKeyShortcutsById?.[button.id]}
+            ariaKeyShortcutsById={ariaKeyShortcutsById}
             onActivate={onActivateButton}
           />
         ))}

@@ -3,6 +3,7 @@ export type RibbonUiState = {
   labelById: Record<string, string>;
   disabledById: Record<string, boolean>;
   shortcutById: Record<string, string>;
+  ariaKeyShortcutsById: Record<string, string>;
 };
 
 type Listener = () => void;
@@ -12,6 +13,7 @@ let ribbonUiState: RibbonUiState = {
   labelById: Object.create(null),
   disabledById: Object.create(null),
   shortcutById: Object.create(null),
+  ariaKeyShortcutsById: Object.create(null),
 };
 
 const listeners = new Set<Listener>();
@@ -41,7 +43,8 @@ function shallowEqualRibbonUiState(a: RibbonUiState, b: RibbonUiState): boolean 
     shallowEqualRecord(a.pressedById, b.pressedById) &&
     shallowEqualRecord(a.labelById, b.labelById) &&
     shallowEqualRecord(a.disabledById, b.disabledById) &&
-    shallowEqualRecord(a.shortcutById, b.shortcutById)
+    shallowEqualRecord(a.shortcutById, b.shortcutById) &&
+    shallowEqualRecord(a.ariaKeyShortcutsById, b.ariaKeyShortcutsById)
   );
 }
 

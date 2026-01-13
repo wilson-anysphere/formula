@@ -38,7 +38,7 @@ import { createRibbonActionsFromCommands, mountRibbon } from "./ribbon/index.js"
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
-import { deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
+import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -2053,6 +2053,7 @@ window.addEventListener("unload", () => {
 let ribbonFormatStateUpdateScheduled = false;
 let ribbonFormatStateUpdateRequested = false;
 let ribbonShortcutById: Record<string, string> = Object.create(null);
+let ribbonAriaKeyShortcutsById: Record<string, string> = Object.create(null);
 
 function scheduleRibbonSelectionFormatStateUpdate(): void {
   ribbonFormatStateUpdateRequested = true;
@@ -2258,6 +2259,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       labelById,
       disabledById,
       shortcutById: ribbonShortcutById,
+      shortcutById: ribbonShortcutById,
+      ariaKeyShortcutsById: ribbonAriaKeyShortcutsById,
     });
   });
 }
@@ -5231,14 +5234,19 @@ if (
   });
   keybindingService.setBuiltinKeybindings(builtinKeybindingHints);
   const commandKeybindingDisplayIndex = keybindingService.getCommandKeybindingDisplayIndex();
+  const commandKeybindingAriaIndex = keybindingService.getCommandKeybindingAriaIndex();
 
   const updateRibbonShortcuts = () => {
     ribbonShortcutById = deriveRibbonShortcutById(commandKeybindingDisplayIndex);
+    ribbonAriaKeyShortcutsById = deriveRibbonAriaKeyShortcutsById(commandKeybindingAriaIndex);
     // Preserve current pressed/label/disabled state while updating shortcut hints.
-    setRibbonUiState({ ...getRibbonUiStateSnapshot(), shortcutById: ribbonShortcutById });
+    setRibbonUiState({
+      ...getRibbonUiStateSnapshot(),
+      shortcutById: ribbonShortcutById,
+      ariaKeyShortcutsById: ribbonAriaKeyShortcutsById,
+    });
   };
   updateRibbonShortcuts();
-
   // Split dispatch across phases:
   // - Capture: built-in keybindings only (needed for some global shortcuts).
   // - Bubble: extension keybindings only, so SpreadsheetApp can `preventDefault()` first for

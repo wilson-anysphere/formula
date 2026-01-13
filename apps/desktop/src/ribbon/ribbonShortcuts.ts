@@ -1,4 +1,4 @@
-import { getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js";
+import { getPrimaryCommandKeybindingAria, getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js";
 
 /**
  * Mapping from ribbon command ids (as defined in `ribbonSchema.ts`) to command ids
@@ -61,4 +61,24 @@ export function deriveRibbonShortcutById(commandKeybindingDisplayIndex: Map<stri
   }
 
   return shortcutById;
+}
+
+export function deriveRibbonAriaKeyShortcutsById(commandKeybindingAriaIndex: Map<string, string[]>): Record<string, string> {
+  const ariaKeyShortcutsById: Record<string, string> = Object.create(null);
+
+  // First, include the command ids from the KeybindingService index verbatim.
+  // Many ribbon buttons use built-in command ids directly.
+  for (const [commandId, bindings] of commandKeybindingAriaIndex.entries()) {
+    const aria = bindings?.[0];
+    if (!aria) continue;
+    ariaKeyShortcutsById[commandId] = aria;
+  }
+
+  for (const [ribbonId, keybindingCommandId] of Object.entries(KEYBINDING_COMMAND_BY_RIBBON_ID)) {
+    const aria = getPrimaryCommandKeybindingAria(keybindingCommandId, commandKeybindingAriaIndex);
+    if (!aria) continue;
+    ariaKeyShortcutsById[ribbonId] = aria;
+  }
+
+  return ariaKeyShortcutsById;
 }

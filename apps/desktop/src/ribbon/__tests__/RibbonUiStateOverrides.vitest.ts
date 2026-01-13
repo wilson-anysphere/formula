@@ -13,6 +13,7 @@ afterEach(() => {
       labelById: Object.create(null),
       disabledById: Object.create(null),
       shortcutById: Object.create(null),
+      ariaKeyShortcutsById: Object.create(null),
     });
   });
   document.body.innerHTML = "";
@@ -43,6 +44,7 @@ describe("Ribbon UI state overrides", () => {
         labelById: Object.create(null),
         disabledById: Object.create(null),
         shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
       });
     });
 
@@ -64,6 +66,7 @@ describe("Ribbon UI state overrides", () => {
         labelById: { "home.number.numberFormat": "Percent" },
         disabledById: Object.create(null),
         shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
       });
     });
 
@@ -84,11 +87,44 @@ describe("Ribbon UI state overrides", () => {
         labelById: Object.create(null),
         disabledById: Object.create(null),
         shortcutById: { "clipboard.copy": "Ctrl+C" },
+        ariaKeyShortcutsById: Object.create(null),
       });
     });
 
     expect(copy?.getAttribute("aria-label")).toBe("Copy");
     expect(copy?.getAttribute("title")).toBe("Copy (Ctrl+C)");
+    act(() => root.unmount());
+  });
+
+  it("sets aria-keyshortcuts when ariaKeyShortcuts overrides change", () => {
+    const { container, root } = renderRibbon();
+    const paste = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.paste"]');
+    expect(paste).toBeInstanceOf(HTMLButtonElement);
+    expect(paste?.getAttribute("aria-keyshortcuts")).toBeNull();
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: Object.create(null),
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: {
+          "clipboard.paste": "Control+V",
+          "clipboard.pasteSpecial.values": "Alt+V",
+        },
+      });
+    });
+
+    expect(paste?.getAttribute("aria-keyshortcuts")).toBe("Control+V");
+
+    act(() => {
+      paste?.click();
+    });
+
+    const menuItem = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.pasteSpecial.values"]');
+    expect(menuItem).toBeInstanceOf(HTMLButtonElement);
+    expect(menuItem?.getAttribute("aria-keyshortcuts")).toBe("Alt+V");
+
     act(() => root.unmount());
   });
 });

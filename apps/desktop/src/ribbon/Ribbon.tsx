@@ -698,6 +698,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   labelById={uiState.labelById}
                   disabledById={uiState.disabledById}
                   shortcutById={uiState.shortcutById}
+                  ariaKeyShortcutsById={uiState.ariaKeyShortcutsById}
                   onActivateButton={activateButton}
                 />
               ))}

@@ -18,6 +18,16 @@ export interface RibbonButtonProps {
    * Optional lookup table for dropdown menu items (keyed by menu item `id`).
    */
   shortcutById?: Record<string, string>;
+  /**
+   * Optional `aria-keyshortcuts` override for the top-level ribbon control.
+   *
+   * This is plumbed through `RibbonGroup` from `RibbonUiState.ariaKeyShortcutsById`.
+   */
+  ariaKeyShortcutsOverride?: string;
+  /**
+   * Optional lookup table for dropdown menu items (keyed by menu item `id`).
+   */
+  ariaKeyShortcutsById?: Record<string, string>;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -75,6 +85,8 @@ export const RibbonButton = React.memo(function RibbonButton({
   disabledOverride,
   shortcutOverride,
   shortcutById,
+  ariaKeyShortcutsOverride,
+  ariaKeyShortcutsById,
   onActivate,
 }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
@@ -95,6 +107,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
   const shortcut = shortcutOverride ?? shortcutById?.[button.id];
   const title = formatTooltipTitle(button.ariaLabel, shortcut);
+  const ariaKeyShortcuts = ariaKeyShortcutsOverride ?? ariaKeyShortcutsById?.[button.id];
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
@@ -180,6 +193,7 @@ export const RibbonButton = React.memo(function RibbonButton({
       aria-haspopup={ariaHaspopup}
       aria-expanded={hasMenu ? menuOpen : undefined}
       aria-controls={hasMenu && menuOpen ? menuId : undefined}
+      aria-keyshortcuts={ariaKeyShortcuts || undefined}
       disabled={disabled}
       data-testid={button.testId}
       data-command-id={button.id}
@@ -283,6 +297,7 @@ export const RibbonButton = React.memo(function RibbonButton({
           {button.menuItems?.map((item) => {
             const itemShortcut = shortcutById?.[item.id];
             const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
+            const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
 
             return (
               <button
@@ -291,6 +306,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                 role="menuitem"
                 className="ribbon-dropdown__menuitem"
                 aria-label={item.ariaLabel}
+                aria-keyshortcuts={itemAriaKeyShortcuts || undefined}
                 title={itemTitle}
                 data-shortcut={itemShortcut || undefined}
                 tabIndex={-1}
