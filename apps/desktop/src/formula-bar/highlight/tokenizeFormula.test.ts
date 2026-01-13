@@ -128,5 +128,10 @@ describe("tokenizeFormula", () => {
     const dataTokens = tokenizeFormula(data);
     const dataRefs = dataTokens.filter((t) => t.type === "reference");
     expect(dataRefs.map((t) => t.text)).toEqual(["Table1[[#Data],[Amount]]"]);
+
+    const totals = "=SUM(Table1[[#Totals],[Amount]])";
+    const totalsTokens = tokenizeFormula(totals);
+    const totalsRefs = totalsTokens.filter((t) => t.type === "reference");
+    expect(totalsRefs.map((t) => t.text)).toEqual(["Table1[[#Totals],[Amount]]"]);
   });
 });

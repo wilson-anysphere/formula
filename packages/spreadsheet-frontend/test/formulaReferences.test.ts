@@ -245,6 +245,12 @@ describe("extractFormulaReferences", () => {
     expect(dataRefs).toHaveLength(1);
     expect(dataRefs[0]?.text).toBe("Table1[[#Data],[Amount]]");
     expect(dataRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 3, endCol: 1 });
+
+    const totalsInput = "=SUM(Table1[[#Totals],[Amount]])";
+    const { references: totalsRefs } = extractFormulaReferences(totalsInput, 0, 0, { tables });
+    expect(totalsRefs).toHaveLength(1);
+    expect(totalsRefs[0]?.text).toBe("Table1[[#Totals],[Amount]]");
+    expect(totalsRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 3, startCol: 1, endRow: 3, endCol: 1 });
   });
 
   it("extracts structured table specifiers like #All/#Headers/#Data", () => {
@@ -279,6 +285,11 @@ describe("extractFormulaReferences", () => {
     const { references: headerRefs } = extractFormulaReferences(headersInput, 0, 0, { tables });
     expect(headerRefs).toHaveLength(1);
     expect(headerRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 });
+
+    const totalsInput = "=SUM(Table1[#Totals])";
+    const { references: totalsRefs } = extractFormulaReferences(totalsInput, 0, 0, { tables });
+    expect(totalsRefs).toHaveLength(1);
+    expect(totalsRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 3, startCol: 0, endRow: 3, endCol: 1 });
 
     const dataInput = "=SUM(Table1[#Data])";
     const { references: dataRefs } = extractFormulaReferences(dataInput, 0, 0, { tables });

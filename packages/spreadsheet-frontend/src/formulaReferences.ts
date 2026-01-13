@@ -291,6 +291,10 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
       return { sheet, startRow: baseStartRow, endRow: baseStartRow, startCol: baseStartCol, endCol: baseEndCol };
     }
 
+    if (maybeSpecifier === "#totals") {
+      return { sheet, startRow: baseEndRow, endRow: baseEndRow, startCol: baseStartCol, endCol: baseEndCol };
+    }
+
     if (maybeSpecifier === "#data") {
       let refStartRow = baseStartRow;
       const refEndRow = baseEndRow;
