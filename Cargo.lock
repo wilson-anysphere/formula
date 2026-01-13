@@ -2447,6 +2447,7 @@ dependencies = [
  "formula-format",
  "formula-fs",
  "formula-model",
+ "formula-office-crypto",
  "formula-vba",
  "hmac",
  "insta",

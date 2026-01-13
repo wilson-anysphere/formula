@@ -49,6 +49,8 @@ mod path;
 pub mod pivots;
 mod preserve;
 pub mod print;
+#[cfg(not(target_arch = "wasm32"))]
+mod office_crypto;
 mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
@@ -160,7 +162,8 @@ pub use styles::*;
 pub use workbook::ChartExtractionError;
 #[cfg(not(target_arch = "wasm32"))]
 pub use writer::{
-    write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError,
+    write_workbook, write_workbook_to_writer, write_workbook_to_writer_encrypted,
+    write_workbook_to_writer_with_kind, XlsxWriteError,
 };
 pub use xml::XmlDomError;
 

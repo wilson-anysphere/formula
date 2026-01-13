@@ -1118,6 +1118,13 @@ impl XlsxPackage {
         Ok(buf)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn write_to_encrypted_ole_bytes(&self, password: &str) -> Result<Vec<u8>, XlsxError> {
+        let zip_bytes = self.write_to_bytes()?;
+        crate::office_crypto::encrypt_package_to_ole(&zip_bytes, password)
+            .map_err(|err| XlsxError::Invalid(format!("office encryption error: {err}")))
+    }
+
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<(), XlsxError> {
         let mut parts = self.parts.clone();
         if parts.contains_key("xl/vbaProject.bin") || parts.contains_key("/xl/vbaProject.bin") {

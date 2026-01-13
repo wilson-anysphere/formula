@@ -10,7 +10,7 @@ use formula_model::{
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
-use std::io::{Seek, Write};
+use std::io::{Cursor, Seek, Write};
 use std::path::Path;
 use thiserror::Error;
 use zip::ZipWriter;
@@ -180,6 +180,22 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     }
 
     let _writer = zip.finish()?;
+    Ok(())
+}
+
+pub fn write_workbook_to_writer_encrypted<W: Write>(
+    workbook: &Workbook,
+    mut writer: W,
+    kind: WorkbookKind,
+    password: &str,
+) -> Result<(), XlsxWriteError> {
+    let mut cursor = Cursor::new(Vec::new());
+    write_workbook_to_writer_with_kind(workbook, &mut cursor, kind)?;
+    let zip_bytes = cursor.into_inner();
+
+    let ole_bytes = crate::office_crypto::encrypt_package_to_ole(&zip_bytes, password)
+        .map_err(|err| XlsxWriteError::Invalid(format!("office encryption error: {err}")))?;
+    writer.write_all(&ole_bytes)?;
     Ok(())
 }
 
