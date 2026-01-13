@@ -20,9 +20,7 @@ use std::collections::HashMap;
 
 use formula_model::CellRef;
 
-use super::{records, rgce};
-
-const RECORD_FORMULA: u16 = 0x0006;
+use super::{records, rgce, worksheet_formulas};
 
 // BIFF8 limits.
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64; // 0..=65535
@@ -50,7 +48,7 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
     sheet_offset: usize,
     ctx: &rgce::RgceDecodeContext<'_>,
 ) -> Result<PtgExpFallbackResult, String> {
-    let allows_continuation = |id: u16| id == RECORD_FORMULA;
+    let allows_continuation = |id: u16| id == worksheet_formulas::RECORD_FORMULA;
     let mut iter = records::LogicalBiffRecordIter::from_offset(
         workbook_stream,
         sheet_offset,
@@ -78,17 +76,23 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         if record.record_id == records::RECORD_EOF {
             break;
         }
-        if record.record_id != RECORD_FORMULA {
+        if record.record_id != worksheet_formulas::RECORD_FORMULA {
             continue;
         }
 
-        let Some((row, col, rgce)) = parse_formula_record_rgce(record.data.as_ref()) else {
-            warnings.push(format!(
-                "truncated FORMULA record at offset {} in worksheet stream",
-                record.offset
-            ));
-            continue;
+        let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                warnings.push(format!(
+                    "failed to parse FORMULA record at offset {} in worksheet stream: {err}",
+                    record.offset
+                ));
+                continue;
+            }
         };
+        let row = parsed.row as u32;
+        let col = parsed.col as u32;
+        let rgce = parsed.rgce;
 
         rgce_by_cell.insert((row, col), rgce.clone());
 
@@ -157,24 +161,6 @@ pub(crate) fn recover_ptgexp_formulas_from_base_cell(
         formulas: recovered,
         warnings,
     })
-}
-
-fn parse_formula_record_rgce(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
-    // BIFF8 FORMULA record [MS-XLS 2.4.127]:
-    //   [rw: u16][col: u16][ixfe: u16]
-    //   [val: 8 bytes]
-    //   [grbit: u16][chn: u32]
-    //   [cce: u16][rgce: cce bytes]
-    if data.len() < 22 {
-        return None;
-    }
-    let row = u16::from_le_bytes([data[0], data[1]]) as u32;
-    let col = u16::from_le_bytes([data[2], data[3]]) as u32;
-    let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
-    let start = 22usize;
-    let end = start.checked_add(cce)?;
-    let rgce = data.get(start..end)?.to_vec();
-    Some((row, col, rgce))
 }
 
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
@@ -249,6 +235,26 @@ fn materialize_biff8_rgce(
                 out.push(ptg);
                 out.extend_from_slice(base.get(i..i + len)?);
                 i += len;
+            }
+
+            // PtgExtend / PtgExtendV / PtgExtendA (ptg=0x18 variants).
+            //
+            // Structured references (tables) use an `etpg` subtype byte (`0x19` = PtgList) followed
+            // by a fixed 12-byte payload. Other (unsupported) subtypes appear in the wild with an
+            // opaque 5-byte payload; copy them verbatim so the rgce stream stays aligned.
+            0x18 | 0x38 | 0x58 | 0x78 => {
+                let etpg = *base.get(i)?;
+                out.push(ptg);
+                out.push(etpg);
+                i += 1;
+
+                if etpg == 0x19 {
+                    out.extend_from_slice(base.get(i..i + 12)?);
+                    i += 12;
+                } else {
+                    out.extend_from_slice(base.get(i..i + 4)?);
+                    i += 4;
+                }
             }
 
             // PtgAttr: [grbit: u8][wAttr: u16] (+ optional jump table for tAttrChoose)
