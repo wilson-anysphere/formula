@@ -98,7 +98,7 @@ describe("ai-context TS entrypoint", () => {
         "const ragIndex = new RagIndex();",
         "const { schema: indexedSchema, chunkCount } = await ragIndex.indexSheet(",
         '  { name: "Sheet1", origin: { row: 0, col: 0 }, values: [[1]] },',
-        "  { maxChunkRows: 10 },",
+        "  { maxChunkRows: 10, splitRegions: true, chunkRowOverlap: 0, maxChunksPerRegion: 10 },",
         ");",
         "indexedSchema.dataRegions[0]?.range satisfies string;",
         "chunkCount satisfies number;",
