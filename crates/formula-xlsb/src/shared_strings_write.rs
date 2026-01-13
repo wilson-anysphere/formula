@@ -26,7 +26,7 @@ struct RecordRange {
 ///
 /// All existing records (including unknown ones) are copied byte-for-byte, except for the first
 /// 8 bytes of the `BrtSST` payload which are updated to reflect the new counts.
-pub(crate) struct SharedStringsWriter {
+pub struct SharedStringsWriter {
     bytes: Vec<u8>,
     records: Vec<RecordRange>,
     sst_record_idx: usize,
@@ -45,7 +45,7 @@ pub(crate) struct SharedStringsWriter {
 }
 
 impl SharedStringsWriter {
-    pub(crate) fn new(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn new(bytes: Vec<u8>) -> Result<Self, Error> {
         let mut cursor = Cursor::new(&bytes);
         let mut records = Vec::new();
 
@@ -148,7 +148,7 @@ impl SharedStringsWriter {
     }
 
     /// Intern a plain shared string and return its `isst` index.
-    pub(crate) fn intern_plain(&mut self, s: &str) -> Result<u32, Error> {
+    pub fn intern_plain(&mut self, s: &str) -> Result<u32, Error> {
         if let Some(&idx) = self.plain_to_index.get(s) {
             return Ok(idx);
         }
@@ -171,7 +171,7 @@ impl SharedStringsWriter {
     }
 
     /// Adjust the `BrtSST` total reference count (`cstTotal`) by a signed delta.
-    pub(crate) fn note_total_ref_delta(&mut self, delta: i64) -> Result<(), Error> {
+    pub fn note_total_ref_delta(&mut self, delta: i64) -> Result<(), Error> {
         if delta == 0 {
             return Ok(());
         }
@@ -201,7 +201,7 @@ impl SharedStringsWriter {
         Ok(())
     }
 
-    pub(crate) fn into_bytes(self) -> Result<Vec<u8>, Error> {
+    pub fn into_bytes(self) -> Result<Vec<u8>, Error> {
         if self.appended_plain.is_empty()
             && self.sst_total_count == self.original_sst_total_count
             && self.sst_unique_count == self.original_sst_unique_count
@@ -269,7 +269,9 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     let cch = u32::from_le_bytes(payload[1..5].try_into().ok()?) as usize;
     let byte_len = cch.checked_mul(2)?;
     let expected_len = 1usize.checked_add(4)?.checked_add(byte_len)?;
-    if payload.len() != expected_len {
+    // Some writers include benign trailing bytes after the UTF-16 text even when `flags==0`.
+    // Be tolerant and only require that the declared UTF-16 bytes are present.
+    if payload.len() < expected_len {
         return None;
     }
 

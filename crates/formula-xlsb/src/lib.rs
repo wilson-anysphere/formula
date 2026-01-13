@@ -25,6 +25,7 @@ pub use parser::{
 };
 pub use patch::{patch_sheet_bin, patch_sheet_bin_streaming, CellEdit};
 pub use shared_strings::SharedString;
+pub use shared_strings_write::SharedStringsWriter;
 pub use strings::{OpaqueRichText, ParsedXlsbString};
 pub use styles::{StyleInfo, Styles};
 
