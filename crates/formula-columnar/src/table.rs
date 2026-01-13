@@ -136,13 +136,19 @@ pub struct ColumnarTable {
     cache: Arc<Mutex<LruCache<CacheKey, Arc<DecodedChunk>>>>,
 }
 
-/// Errors returned by [`ColumnarTable::with_appended_column`].
+/// Errors returned by [`ColumnarTable`] column append APIs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ColumnAppendError {
-    /// The provided `values` vector did not have exactly one entry per table row.
+    /// The provided values did not have exactly one entry per table row.
     LengthMismatch { expected: usize, actual: usize },
     /// A column with the provided name already exists in the table schema.
     DuplicateColumn { name: String },
+    /// The encoded column chunks are not aligned to the table page size.
+    PageAlignmentMismatch {
+        chunk_index: usize,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 impl fmt::Display for ColumnAppendError {
@@ -154,6 +160,15 @@ impl fmt::Display for ColumnAppendError {
                 expected, actual
             ),
             Self::DuplicateColumn { name } => write!(f, "duplicate column name: {}", name),
+            Self::PageAlignmentMismatch {
+                chunk_index,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "encoded column chunk {} has length {} (expected {})",
+                chunk_index, actual, expected
+            ),
         }
     }
 }
@@ -302,6 +317,108 @@ impl ColumnarTable {
             options,
             cache: Arc::new(Mutex::new(LruCache::new(options.cache.max_entries))),
         }
+    }
+
+    /// Consume the table and return its encoded columns (chunks/stats/dictionary) without cloning.
+    pub fn into_encoded_columns(self) -> Vec<EncodedColumn> {
+        self.columns
+            .into_iter()
+            .map(|col| {
+                let Column {
+                    schema,
+                    chunks,
+                    mut stats,
+                    dictionary,
+                    distinct: _,
+                } = col;
+                let chunks = Arc::try_unwrap(chunks).unwrap_or_else(|shared| (*shared).clone());
+                // Ensure the embedded stats remain consistent with the schema.
+                stats.column_type = schema.column_type;
+                EncodedColumn {
+                    schema,
+                    chunks,
+                    stats,
+                    dictionary,
+                }
+            })
+            .collect()
+    }
+
+    /// Append a pre-encoded column (already chunked/encoded) to the table.
+    pub fn with_appended_encoded_column(
+        mut self,
+        mut column: EncodedColumn,
+    ) -> Result<Self, ColumnAppendError> {
+        let new_name = column.schema.name.as_str();
+        if self
+            .schema()
+            .iter()
+            .any(|existing| existing.name.as_str() == new_name)
+        {
+            return Err(ColumnAppendError::DuplicateColumn {
+                name: column.schema.name,
+            });
+        }
+
+        let expected_len = self.row_count();
+        let actual_len: usize = column.chunks.iter().map(|c| c.len()).sum();
+        if actual_len != expected_len {
+            return Err(ColumnAppendError::LengthMismatch {
+                expected: expected_len,
+                actual: actual_len,
+            });
+        }
+
+        let page_size = self.options.page_size_rows;
+        if page_size > 0 && !column.chunks.is_empty() {
+            let last_idx = column.chunks.len().saturating_sub(1);
+            for (idx, chunk) in column.chunks.iter().enumerate() {
+                let len = chunk.len();
+                let is_last = idx == last_idx;
+                if !is_last {
+                    if len != page_size {
+                        return Err(ColumnAppendError::PageAlignmentMismatch {
+                            chunk_index: idx,
+                            expected: page_size,
+                            actual: len,
+                        });
+                    }
+                } else {
+                    // The last chunk may be smaller than the page size, but must be non-empty when
+                    // the table itself has at least one row.
+                    if len > page_size || (len == 0 && expected_len > 0) {
+                        return Err(ColumnAppendError::PageAlignmentMismatch {
+                            chunk_index: idx,
+                            expected: page_size,
+                            actual: len,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Keep the stats column type consistent with the schema.
+        column.stats.column_type = column.schema.column_type;
+
+        let EncodedColumn {
+            schema,
+            chunks,
+            stats,
+            dictionary,
+        } = column;
+
+        // `ColumnarTable` stores a schema copy and an internal per-column schema.
+        // Avoid re-encoding/cloning the encoded payload; the schema clone is small.
+        self.schema.push(schema.clone());
+        self.columns.push(Column {
+            schema,
+            chunks: Arc::new(chunks),
+            stats,
+            dictionary,
+            distinct: None,
+        });
+
+        Ok(self)
     }
 
     pub fn get_cell(&self, row: usize, col: usize) -> Value {
