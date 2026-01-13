@@ -1333,6 +1333,82 @@ export class ContextManager {
         schemaLines.push(`- Named range ${name} (range="${rangeA1}")`);
       }
 
+      // Fallback: if the workbook doesn't supply explicit tables/named ranges, reuse the
+      // already-indexed (and DLP-redacted) chunk metadata stored in the vector store.
+      //
+      // This improves chat quality by still providing a schema-first outline even when
+      // retrieval is sparse or empty (e.g. query doesn't match anything).
+      if (schemaLines.length === 0) {
+        try {
+          throwIfAborted(signal);
+          const stored = await awaitWithAbort(
+            vectorStore.list({ workbookId: params.workbook.id, includeVector: false, signal }),
+            signal
+          );
+          /** @type {Array<{ id: string, metadata?: any }>} */
+          const records = Array.isArray(stored) ? stored : [];
+ 
+          /**
+           * @param {string} text
+           */
+          const extractColumnsLine = (text) => {
+            const lines = String(text ?? "").split("\n");
+            for (const line of lines) {
+              if (line.startsWith("COLUMNS:")) return line.replace(/^COLUMNS:\s*/, "");
+            }
+            return "";
+          };
+ 
+          const candidates = records
+            .map((r) => r?.metadata ?? {})
+            .filter((m) => m && typeof m === "object")
+            .filter((m) => m.workbookId === params.workbook.id)
+            .filter((m) => m.kind === "table" || m.kind === "namedRange" || m.kind === "dataRegion")
+            .sort((a, b) => {
+              const sheetCmp = String(a.sheetName ?? "").localeCompare(String(b.sheetName ?? ""));
+              if (sheetCmp) return sheetCmp;
+              const kindCmp = String(a.kind ?? "").localeCompare(String(b.kind ?? ""));
+              if (kindCmp) return kindCmp;
+              const ar = a.rect ?? {};
+              const br = b.rect ?? {};
+              const coordCmp =
+                (Number(ar.r0 ?? 0) - Number(br.r0 ?? 0)) ||
+                (Number(ar.c0 ?? 0) - Number(br.c0 ?? 0)) ||
+                (Number(ar.r1 ?? 0) - Number(br.r1 ?? 0)) ||
+                (Number(ar.c1 ?? 0) - Number(br.c1 ?? 0));
+              if (coordCmp) return coordCmp;
+              return String(a.title ?? "").localeCompare(String(b.title ?? ""));
+            })
+            .slice(0, maxTables);
+ 
+          for (const meta of candidates) {
+            throwIfAborted(signal);
+            const kind = String(meta.kind ?? "");
+            const title = String(meta.title ?? "");
+            const sheetName = String(meta.sheetName ?? "");
+            const rect = meta.rect ?? {};
+            const r0 = rect.r0;
+            const c0 = rect.c0;
+            const r1 = rect.r1;
+            const c1 = rect.c1;
+            if (!sheetName || ![r0, c0, r1, c1].every((n) => Number.isInteger(n) && n >= 0)) continue;
+            const rangeA1 = rangeToA1({ sheetName, startRow: r0, startCol: c0, endRow: r1, endCol: c1 });
+ 
+            const storedText = typeof meta.text === "string" ? meta.text : "";
+            const columns = extractColumnsLine(storedText);
+            const isRedacted = /\[REDACTED\]/.test(storedText);
+ 
+            const label = kind === "table" ? "Table" : kind === "namedRange" ? "Named range" : "Data region";
+            const nameSuffix = kind === "dataRegion" ? "" : title ? ` ${title}` : "";
+            const detail = columns ? columns : isRedacted ? "[REDACTED]" : "";
+            if (!detail) continue;
+            schemaLines.push(`- ${label}${nameSuffix} (range="${rangeA1}"): ${detail}`);
+          }
+        } catch {
+          // Best-effort; if the vector store cannot list records, continue without a schema section.
+        }
+      }
+ 
       const workbookSchemaText = schemaLines.length ? this.redactor(`Workbook schema (schema-first):\n${schemaLines.join("\n")}`) : "";
 
       const sections = [

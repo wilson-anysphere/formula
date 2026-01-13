@@ -37,6 +37,12 @@ test("integration: buildWorkbookContextFromSpreadsheetApi retrieves relevant chu
     query: "revenue by region",
   });
 
+  assert.match(out.promptContext, /## workbook_schema/i);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+  assert.match(schemaSection, /Region\s*\(string\)/i);
+  assert.match(schemaSection, /Revenue\s*\(number\)/i);
+
   assert.match(out.promptContext, /DATA REGION/i);
   assert.match(out.promptContext, /Region/);
   assert.match(out.promptContext, /Revenue/);
