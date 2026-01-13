@@ -58,4 +58,39 @@ describe("FormulaBarView reference token click selection toggle", () => {
 
     host.remove();
   });
+
+  it("supports the same click-to-select / click-again-to-edit toggle for named ranges", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    // Enable named-range extraction so identifier tokens can participate in the same UX.
+    view.model.setNameResolver((name) => {
+      if (name !== "Sales") return null;
+      return { startRow: 0, startCol: 0, endRow: 9, endCol: 0 };
+    });
+
+    view.textarea.value = "=Sales+B1";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(6);
+
+    view.textarea.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("select"));
+    view.textarea.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(view.textarea.selectionStart).toBe(3);
+    expect(view.textarea.selectionEnd).toBe(3);
+
+    host.remove();
+  });
 });
