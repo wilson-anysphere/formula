@@ -168,6 +168,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("=1+2");
     expect(view.model.activeCell.input).toBe("=1+2");
+    expect(document.activeElement).not.toBe(view.textarea);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
     expect(cancel.disabled).toBe(true);
@@ -253,6 +254,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("original");
     expect(view.model.activeCell.input).toBe("original");
+    expect(document.activeElement).not.toBe(view.textarea);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("original");
     expect(cancel.hidden).toBe(true);
@@ -286,6 +288,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("start");
     expect(view.model.activeCell.input).toBe("start");
+    expect(document.activeElement).not.toBe(view.textarea);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(view.textarea.value).toBe("start");
     expect(cancel.hidden).toBe(true);
@@ -306,6 +309,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.isEditing).toBe(false);
     expect(view.model.draft).toBe("commit-me");
     expect(view.model.activeCell.input).toBe("commit-me");
+    expect(document.activeElement).not.toBe(view.textarea);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(false);
     expect(cancel.hidden).toBe(true);
     expect(cancel.disabled).toBe(true);
