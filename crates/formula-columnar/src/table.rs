@@ -351,6 +351,22 @@ impl ColumnarTable {
     }
 
     /// Append a pre-encoded column (already chunked/encoded) to the table.
+    ///
+    /// This is useful when the caller already has an [`EncodedColumn`] payload and wants to build a
+    /// new columnar snapshot without rewriting the existing encoded data. Common use cases include:
+    /// - **Persisted / incremental models**: a storage layer can load encoded columns from disk and
+    ///   append additional derived columns.
+    /// - **Calculated column materialization**: a query engine can compute values, encode them into
+    ///   chunks, and then append the encoded result to the underlying [`ColumnarTable`].
+    ///
+    /// Notes:
+    /// - Existing columns are *reused as-is*: they are not decoded, re-encoded, or rewritten.
+    /// - The decoded-page cache is preserved so cached pages for existing columns remain valid.
+    /// - The appended column must match `row_count()` and respect the table's page size alignment
+    ///   (see [`TableOptions`]).
+    ///
+    /// Returns [`ColumnAppendError`] if a column with the same name already exists, if the encoded
+    /// length does not match `row_count()`, or if the chunks are not page-aligned.
     pub fn with_appended_encoded_column(
         mut self,
         mut column: EncodedColumn,
