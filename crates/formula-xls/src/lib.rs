@@ -787,7 +787,6 @@ fn import_xls_path_with_biff_reader(
             biff_rgce_supbooks = supbook_table.supbooks;
         }
     }
-
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let source_sheet_name = sheet_meta.name.clone();
         let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
@@ -4365,7 +4364,9 @@ fn import_biff8_shared_formulas(
             };
 
             if should_set {
-                sheet.set_formula(anchor_cell, Some(decoded.text));
+                if let Some(normalized) = normalize_formula_text(&decoded.text) {
+                    sheet.set_formula(anchor_cell, Some(normalized));
+                }
             }
         }
     }

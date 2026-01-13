@@ -141,6 +141,147 @@ pub(crate) fn parse_filepass_record(
     }
 }
 
+fn find_filepass_record(workbook_stream: &[u8]) -> Result<Option<(usize, usize)>, DecryptError> {
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)
+        .map_err(DecryptError::InvalidFilePass)?;
+
+    // Require a valid BIFF workbook stream (must start with BOF) to avoid accidentally treating
+    // arbitrary byte buffers as encrypted just because they contain the FILEPASS record id.
+    let first = match iter.next() {
+        Some(Ok(record)) => record,
+        Some(Err(err)) => return Err(DecryptError::InvalidFilePass(err)),
+        None => {
+            return Err(DecryptError::InvalidFilePass(
+                "empty workbook stream".to_string(),
+            ))
+        }
+    };
+    if !records::is_bof_record(first.record_id) {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "workbook stream does not start with BOF (found 0x{:04X})",
+            first.record_id
+        )));
+    }
+
+    while let Some(next) = iter.next() {
+        let record = next.map_err(DecryptError::InvalidFilePass)?;
+
+        // The FILEPASS record only appears in the workbook globals substream. Stop scanning
+        // once we hit the next substream (BOF) or EOF.
+        if record.offset != 0 && records::is_bof_record(record.record_id) {
+            break;
+        }
+        if record.record_id == records::RECORD_EOF {
+            break;
+        }
+
+        if record.record_id != records::RECORD_FILEPASS {
+            continue;
+        }
+
+        return Ok(Some((record.offset, record.data.len())));
+    }
+
+    Ok(None)
+}
+
+#[cfg(test)]
+fn apply_cipher_after_offset<F>(
+    workbook_stream: &mut [u8],
+    start_offset: usize,
+    mut cipher: F,
+) -> Result<(), DecryptError>
+where
+    F: FnMut(u32, usize, &mut [u8]) -> Result<(), DecryptError>,
+{
+    if start_offset > workbook_stream.len() {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "encrypted start offset {start_offset} out of bounds (len={})",
+            workbook_stream.len()
+        )));
+    }
+
+    // Collect record boundaries using the physical iterator (borrowed immutably) so we can
+    // decrypt record payloads in-place without fighting Rust's borrow checker.
+    let records: Vec<(usize, usize)> = {
+        let mut iter = records::BiffRecordIter::from_offset(&*workbook_stream, start_offset)
+            .map_err(DecryptError::InvalidFilePass)?;
+        let mut out = Vec::new();
+        while let Some(next) = iter.next() {
+            let record = next.map_err(DecryptError::InvalidFilePass)?;
+            out.push((record.offset, record.data.len()));
+        }
+        out
+    };
+
+    // Position within the encrypted byte stream, counting only record payload bytes (not headers).
+    let mut encrypted_pos: usize = 0;
+
+    for (record_offset, payload_len) in records {
+        let data_start = record_offset
+            .checked_add(4)
+            .ok_or_else(|| DecryptError::InvalidFilePass("record offset overflow".to_string()))?;
+
+        let mut local = 0usize;
+        while local < payload_len {
+            let block_index = (encrypted_pos / RC4_BLOCK_SIZE) as u32;
+            let block_offset = encrypted_pos % RC4_BLOCK_SIZE;
+            let remaining_in_block = RC4_BLOCK_SIZE - block_offset;
+            let remaining_in_record = payload_len - local;
+            let chunk_len = remaining_in_block.min(remaining_in_record);
+
+            let start = data_start
+                .checked_add(local)
+                .ok_or_else(|| DecryptError::InvalidFilePass("record offset overflow".to_string()))?;
+            let end = start.checked_add(chunk_len).ok_or_else(|| {
+                DecryptError::InvalidFilePass("record length overflow".to_string())
+            })?;
+            let chunk = workbook_stream.get_mut(start..end).ok_or_else(|| {
+                DecryptError::InvalidFilePass("record payload out of bounds".to_string())
+            })?;
+
+            cipher(block_index, block_offset, chunk)?;
+
+            encrypted_pos = encrypted_pos.saturating_add(chunk_len);
+            local = local.saturating_add(chunk_len);
+        }
+
+        // `local` must advance exactly to the payload end.
+        debug_assert_eq!(local, payload_len);
+    }
+
+    Ok(())
+}
+
+/// Test-only helper: decrypt a workbook stream using a caller-provided "cipher" implementation.
+///
+/// This exists to fuzz/property-test the decryptor's record-walking / block-counter logic without
+/// needing a real BIFF crypto implementation.
+#[cfg(test)]
+pub(crate) fn decrypt_workbook_stream_with_cipher<F>(
+    workbook_stream: &mut [u8],
+    password: &str,
+    cipher: F,
+) -> Result<(), DecryptError>
+where
+    F: FnMut(u32, usize, &mut [u8]) -> Result<(), DecryptError>,
+{
+    let Some((filepass_offset, filepass_len)) = find_filepass_record(&*workbook_stream)? else {
+        return Err(DecryptError::NoFilePass);
+    };
+
+    if password.is_empty() {
+        return Err(DecryptError::PasswordRequired);
+    }
+
+    let encrypted_start = filepass_offset
+        .checked_add(4)
+        .and_then(|v| v.checked_add(filepass_len))
+        .ok_or_else(|| DecryptError::InvalidFilePass("FILEPASS offset overflow".to_string()))?;
+
+    apply_cipher_after_offset(workbook_stream, encrypted_start, cipher)
+}
+
 /// Decrypt an in-memory BIFF workbook stream using the provided password.
 ///
 /// This function:
@@ -1527,3 +1668,6 @@ mod tests {
         assert_eq!(decrypted, plain);
     }
 }
+
+#[cfg(test)]
+mod tests_proptest;
