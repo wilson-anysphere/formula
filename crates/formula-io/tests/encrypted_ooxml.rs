@@ -1,9 +1,14 @@
 use std::io::Cursor;
+use std::path::PathBuf;
 
 use formula_io::{
     detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model, Error,
     WorkbookEncryptionKind,
 };
+
+fn fixture_path(rel: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
+}
 
 fn encrypted_ooxml_bytes() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -70,6 +75,27 @@ fn detects_encrypted_ooxml_xlsx_container_for_model_loader() {
         assert!(
             matches!(err, Error::EncryptedWorkbook { .. }),
             "expected Error::EncryptedWorkbook, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn encrypted_ooxml_fixtures_require_password() {
+    for rel in ["encrypted/ooxml/agile.xlsx", "encrypted/ooxml/standard.xlsx"] {
+        let path = fixture_path(rel);
+
+        let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("encrypted") || msg.contains("password"),
+            "expected error message to mention encryption/password protection, got: {msg}"
+        );
+
+        let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+        let msg = err.to_string().to_lowercase();
+        assert!(
+            msg.contains("encrypted") || msg.contains("password"),
+            "expected error message to mention encryption/password protection, got: {msg}"
         );
     }
 }
