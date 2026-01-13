@@ -2,16 +2,36 @@ use std::collections::HashMap;
 
 use formula_model::{
     indexed_color_argb, Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color,
-    DateSystem, Fill, FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor,
-    VerticalAlignment, WorkbookProtection, WorkbookWindow, WorkbookWindowState,
+    DateSystem, Fill, FillPattern, Font, HorizontalAlignment, Protection, SheetVisibility, Style,
+    TabColor, VerticalAlignment, WorkbookProtection, WorkbookWindow, WorkbookWindowState,
 };
 
 use super::{externsheet, records, strings, BiffVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BoundSheetType {
+    Worksheet,
+    MacroSheet,
+    Chart,
+    VisualBasicModule,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundSheetInfo {
     pub(crate) name: String,
     pub(crate) offset: usize,
+    /// Sheet visibility state (raw BIFF `hsState` value).
+    pub(crate) hs_state: u8,
+    /// Best-effort mapping of [`BoundSheetInfo::hs_state`] into a model visibility enum.
+    ///
+    /// Unknown values are preserved in [`BoundSheetInfo::hs_state`] and mapped to `None`.
+    pub(crate) sheet_visibility: Option<SheetVisibility>,
+    /// Sheet type (raw BIFF `dt` value).
+    pub(crate) dt: u8,
+    /// Best-effort mapping of [`BoundSheetInfo::dt`] into a simplified sheet type enum.
+    ///
+    /// Unknown values are preserved in [`BoundSheetInfo::dt`] and mapped to `None`.
+    pub(crate) sheet_type: Option<BoundSheetType>,
 }
 
 // Record ids used by workbook-global parsing.
@@ -74,6 +94,29 @@ fn strip_embedded_nuls(s: &mut String) {
     }
 }
 
+fn hs_state_to_sheet_visibility(hs_state: u8) -> Option<SheetVisibility> {
+    // BoundSheet8.hsState [MS-XLS 2.4.28]
+    // 0x00 = visible, 0x01 = hidden, 0x02 = very hidden.
+    match hs_state {
+        0x00 => Some(SheetVisibility::Visible),
+        0x01 => Some(SheetVisibility::Hidden),
+        0x02 => Some(SheetVisibility::VeryHidden),
+        _ => None,
+    }
+}
+
+fn dt_to_sheet_type(dt: u8) -> Option<BoundSheetType> {
+    // BoundSheet8.dt [MS-XLS 2.4.28]
+    // 0x00 = worksheet (or dialog sheet), 0x01 = macro sheet, 0x02 = chart, 0x06 = VB module.
+    match dt {
+        0x00 => Some(BoundSheetType::Worksheet),
+        0x01 => Some(BoundSheetType::MacroSheet),
+        0x02 => Some(BoundSheetType::Chart),
+        0x06 => Some(BoundSheetType::VisualBasicModule),
+        _ => None,
+    }
+}
+
 /// Scan the workbook-global BIFF substream for a `CODEPAGE` record.
 ///
 /// The result is used to decode 8-bit (ANSI) strings such as BIFF5 short strings and BIFF8
@@ -126,6 +169,8 @@ pub(crate) fn parse_biff_bound_sheets(
                     record.data[2],
                     record.data[3],
                 ]) as usize;
+                let hs_state = record.data[4];
+                let dt = record.data[5];
                 let Ok((mut name, _)) =
                     strings::parse_biff_short_string(&record.data[6..], biff, codepage)
                 else {
@@ -135,6 +180,10 @@ pub(crate) fn parse_biff_bound_sheets(
                 out.push(BoundSheetInfo {
                     name,
                     offset: sheet_offset,
+                    hs_state,
+                    sheet_visibility: hs_state_to_sheet_visibility(hs_state),
+                    dt,
+                    sheet_type: dt_to_sheet_type(dt),
                 });
             }
             // EOF terminates the workbook global substream.
@@ -1632,7 +1681,11 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "A".to_string(),
-                offset: 0x1234
+                offset: 0x1234,
+                hs_state: 0,
+                sheet_visibility: Some(SheetVisibility::Visible),
+                dt: 0,
+                sheet_type: Some(BoundSheetType::Worksheet),
             }]
         );
     }
@@ -1658,7 +1711,44 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "AB".to_string(),
-                offset: 0x1234
+                offset: 0x1234,
+                hs_state: 0,
+                sheet_visibility: Some(SheetVisibility::Visible),
+                dt: 0,
+                sheet_type: Some(BoundSheetType::Worksheet),
+            }]
+        );
+    }
+
+    #[test]
+    fn boundsheet_parses_visibility_and_type() {
+        // BoundSheet8 with:
+        // - hsState = 0x02 (very hidden)
+        // - dt = 0x02 (chart sheet)
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.push(0x02); // hsState
+        bs_payload.push(0x02); // dt
+        bs_payload.push(1); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.push(b'A');
+
+        let stream = [
+            record(RECORD_BOUNDSHEET, &bs_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "A".to_string(),
+                offset: 0x1234,
+                hs_state: 0x02,
+                sheet_visibility: Some(SheetVisibility::VeryHidden),
+                dt: 0x02,
+                sheet_type: Some(BoundSheetType::Chart),
             }]
         );
     }
@@ -1707,7 +1797,11 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "Ђ".to_string(),
-                offset: 0x1234
+                offset: 0x1234,
+                hs_state: 0,
+                sheet_visibility: Some(SheetVisibility::Visible),
+                dt: 0,
+                sheet_type: Some(BoundSheetType::Worksheet),
             }]
         );
     }
@@ -1733,7 +1827,11 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "£".to_string(),
-                offset: 0x1234
+                offset: 0x1234,
+                hs_state: 0,
+                sheet_visibility: Some(SheetVisibility::Visible),
+                dt: 0,
+                sheet_type: Some(BoundSheetType::Worksheet),
             }]
         );
     }
@@ -1796,7 +1894,11 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "Ђ".to_string(),
-                offset: 0x1234
+                offset: 0x1234,
+                hs_state: 0,
+                sheet_visibility: Some(SheetVisibility::Visible),
+                dt: 0,
+                sheet_type: Some(BoundSheetType::Worksheet),
             }]
         );
     }

@@ -613,7 +613,11 @@ fn import_xls_path_with_biff_reader(
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
 
-        sheet.visibility = sheet_visible_to_visibility(sheet_meta.visible);
+        let calamine_visibility = sheet_visible_to_visibility(sheet_meta.visible);
+        let biff_visibility = biff_idx
+            .and_then(|idx| biff_sheets.as_ref().and_then(|v| v.get(idx)))
+            .and_then(|info| info.sheet_visibility);
+        sheet.visibility = biff_visibility.unwrap_or(calamine_visibility);
         sheet.tab_color = biff_idx
             .and_then(|idx| sheet_tab_colors.as_ref().and_then(|v| v.get(idx)).cloned())
             .flatten();

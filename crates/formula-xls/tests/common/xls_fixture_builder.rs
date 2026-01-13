@@ -104,6 +104,24 @@ pub fn build_encrypted_filepass_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing visible, hidden, and very hidden sheets.
+///
+/// This is used to validate that sheet visibility can be recovered from BIFF `BoundSheet8`
+/// (`hsState`) metadata.
+pub fn build_sheet_visibility_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_sheet_visibility_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that forces sheet-name sanitization via truncation and includes a
 /// cross-sheet formula referencing the original (over-long) name.
 ///
@@ -2284,6 +2302,72 @@ fn build_autofilter_sheet_stream_with_dimensions(
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+fn build_sheet_visibility_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + 1 default cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Three worksheets with differing BoundSheet `hsState` values.
+    let bs_visible_start = globals.len();
+    let mut bs_visible = Vec::<u8>::new();
+    bs_visible.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    bs_visible.push(0x00); // hsState = visible
+    bs_visible.push(0x00); // dt = worksheet
+    write_short_unicode_string(&mut bs_visible, "Visible");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &bs_visible);
+    let bs_visible_offset_pos = bs_visible_start + 4;
+
+    let bs_hidden_start = globals.len();
+    let mut bs_hidden = Vec::<u8>::new();
+    bs_hidden.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    bs_hidden.push(0x01); // hsState = hidden
+    bs_hidden.push(0x00); // dt = worksheet
+    write_short_unicode_string(&mut bs_hidden, "Hidden");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &bs_hidden);
+    let bs_hidden_offset_pos = bs_hidden_start + 4;
+
+    let bs_very_hidden_start = globals.len();
+    let mut bs_very_hidden = Vec::<u8>::new();
+    bs_very_hidden.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    bs_very_hidden.push(0x02); // hsState = very hidden
+    bs_very_hidden.push(0x00); // dt = worksheet
+    write_short_unicode_string(&mut bs_very_hidden, "VeryHidden");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &bs_very_hidden);
+    let bs_very_hidden_offset_pos = bs_very_hidden_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet1_offset = globals.len();
+    let sheet1 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
+    let sheet3_offset = sheet2_offset + sheet2.len();
+    let sheet3 = build_autofilter_sheet_stream_with_dimensions(xf_cell, 1, 1);
+
+    // Patch BoundSheet offsets.
+    globals[bs_visible_offset_pos..bs_visible_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[bs_hidden_offset_pos..bs_hidden_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+    globals[bs_very_hidden_offset_pos..bs_very_hidden_offset_pos + 4]
+        .copy_from_slice(&(sheet3_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+    globals.extend_from_slice(&sheet3);
+    globals
 }
 
 fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
