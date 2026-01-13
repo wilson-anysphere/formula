@@ -231,6 +231,33 @@ describe("SpreadsheetApp formatting keyboard shortcuts", () => {
     root.remove();
   });
 
+  it("Ctrl+5 toggles strikethrough (Digit5 code fallback)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } }); // A1
+
+    // Example: on AZERTY layouts, `Digit5` may report `event.key === "("` without Shift.
+    const event = new KeyboardEvent("keydown", { key: "(", code: "Digit5", ctrlKey: true, cancelable: true });
+    root.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+
+    const cell = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    const style = doc.styleTable.get(cell.styleId) as any;
+    expect(style.font?.strike).toBe(true);
+
+    app.destroy();
+    root.remove();
+  });
+
   it.each([
     ["Ctrl/Cmd+Shift+$ applies currency format", { key: "$", code: "Digit4", preset: "$#,##0.00" }],
     ["Ctrl/Cmd+Shift+% applies percent format", { key: "%", code: "Digit5", preset: "0%" }],

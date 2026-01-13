@@ -11934,7 +11934,7 @@ export class SpreadsheetApp {
       // Cmd+I is reserved for toggling the AI sidebar. Only bind italic to Ctrl+I.
       if (!e.shiftKey && keyLower === "i" && e.ctrlKey && !e.metaKey) return { kind: "italic" };
       // Excel: Ctrl+5 toggles strikethrough.
-      if (!e.shiftKey && keyLower === "5" && e.ctrlKey && !e.metaKey) return { kind: "strikethrough" };
+      if (!e.shiftKey && e.ctrlKey && !e.metaKey && (keyLower === "5" || e.code === "Digit5")) return { kind: "strikethrough" };
 
       // Number formats.
       if (primary && e.shiftKey && (e.key === "$" || e.code === "Digit4"))
