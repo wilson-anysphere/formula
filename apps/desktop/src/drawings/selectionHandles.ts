@@ -6,7 +6,6 @@ import type { DrawingTransform, Rect } from "./types";
  * consistent on-screen size across zoom levels.
  */
 export const RESIZE_HANDLE_SIZE_PX = 8;
-export const RESIZE_HANDLE_HIT_SIZE_PX = 10;
 
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
@@ -80,7 +79,9 @@ export function hitTestResizeHandle(
   y: number,
   transform?: DrawingTransform,
 ): ResizeHandle | null {
-  const size = RESIZE_HANDLE_HIT_SIZE_PX;
+  // Keep the interactive hit target in sync with the rendered handle square so
+  // the visible geometry matches the resize affordance.
+  const size = RESIZE_HANDLE_SIZE_PX;
   const half = size / 2;
   if (!hasNonIdentityTransform(transform)) {
     const x1 = bounds.x;
