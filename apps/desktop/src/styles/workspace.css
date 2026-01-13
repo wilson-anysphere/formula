@@ -573,8 +573,8 @@
 .collab-version-history__compare-summary {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .collab-version-history__compare-summary-label {
@@ -631,7 +631,7 @@
 }
 
 .collab-version-history__compare-controls {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .collab-version-history__compare-control {
@@ -1058,8 +1058,8 @@
 }
 
 .branch-merge__manual-cell-editor {
-  margin-top: 10px;
-  padding: 10px;
+  margin-top: 8px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-primary);
