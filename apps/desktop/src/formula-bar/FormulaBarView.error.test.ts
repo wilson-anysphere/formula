@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
+import { FORMULA_REFERENCE_PALETTE } from "@formula/spreadsheet-frontend";
 
 describe("FormulaBarView error panel", () => {
   it("only shows the error button when the active cell has an error explanation", () => {
@@ -70,5 +71,40 @@ describe("FormulaBarView error panel", () => {
 
     host.remove();
   });
-});
 
+  it("resolves named ranges when showing referenced ranges from the error panel", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let lastHighlights: any[] = [];
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onReferenceHighlights: (highlights) => {
+        lastHighlights = highlights;
+      },
+    });
+
+    view.model.setNameResolver((name) =>
+      name === "SalesData" ? { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 } : null
+    );
+    view.setActiveCell({ address: "A1", input: "=SUM(SalesData)", value: "#DIV/0!" });
+
+    const errorButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-button"]')!;
+    errorButton.click();
+
+    const showRanges = host.querySelector<HTMLButtonElement>('[data-testid="formula-error-show-ranges"]')!;
+    showRanges.click();
+
+    expect(lastHighlights).toEqual([
+      {
+        range: { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+        color: FORMULA_REFERENCE_PALETTE[0],
+        text: "SalesData",
+        index: 0,
+        active: false,
+      },
+    ]);
+
+    host.remove();
+  });
+});

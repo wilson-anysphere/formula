@@ -6,6 +6,7 @@ import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
   toggleA1AbsoluteAtCursor,
+  type ExtractFormulaReferencesOptions,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
 import type { EngineClient, FormulaParseOptions } from "@formula/engine";
@@ -1803,7 +1804,10 @@ export class FormulaBarView {
     if (this.#errorPanelReferenceHighlights) {
       this.#errorPanelReferenceHighlights = null;
     } else {
-      this.#errorPanelReferenceHighlights = computeReferenceHighlights(this.model.draft);
+      this.#errorPanelReferenceHighlights = computeReferenceHighlights(
+        this.model.draft,
+        this.model.extractFormulaReferencesOptions()
+      );
       if (this.#errorPanelReferenceHighlights.length === 0) {
         this.#errorPanelReferenceHighlights = null;
       }
@@ -1906,9 +1910,12 @@ function formatArgumentPreviewValue(value: unknown): string {
   return String(value);
 }
 
-function computeReferenceHighlights(text: string): FormulaReferenceHighlight[] {
+function computeReferenceHighlights(
+  text: string,
+  opts: ExtractFormulaReferencesOptions | null
+): FormulaReferenceHighlight[] {
   if (!text.trim().startsWith("=")) return [];
-  const { references } = extractFormulaReferences(text);
+  const { references } = extractFormulaReferences(text, undefined, undefined, opts ?? undefined);
   if (references.length === 0) return [];
   const { colored } = assignFormulaReferenceColors(references, null);
   return colored.map((ref) => ({

@@ -116,6 +116,10 @@ export class FormulaBarModel {
     }
   }
 
+  extractFormulaReferencesOptions(): ExtractFormulaReferencesOptions | null {
+    return this.#extractFormulaReferencesOptions;
+  }
+
   /**
    * Best-effort named-range resolver for view-mode hover previews.
    *
