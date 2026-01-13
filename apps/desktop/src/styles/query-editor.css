@@ -194,6 +194,7 @@
   border-inline-end: 1px solid var(--panel-border);
   padding: 12px;
   overflow: auto;
+  scrollbar-gutter: stable;
   min-width: 0;
   background: var(--panel-bg);
 }
@@ -285,6 +286,7 @@
 
 .query-editor__preview {
   overflow: auto;
+  scrollbar-gutter: stable;
   background: var(--bg-primary);
 }
 
