@@ -230,4 +230,39 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
+
+  it("respects KeyboardEvent.isComposing even without compositionstart", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const enterWithIsComposing = new KeyboardEvent("keydown", {
+      key: "Enter",
+      cancelable: true,
+      // Some environments set `isComposing` on key events even if composition events
+      // are not observed by the app. Ensure we respect it.
+      isComposing: true,
+    });
+    view.textarea.dispatchEvent(enterWithIsComposing);
+
+    expect(enterWithIsComposing.defaultPrevented).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+
+    const enterAfter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(enterAfter);
+
+    expect(enterAfter.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+
+    host.remove();
+  });
 });
