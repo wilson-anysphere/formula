@@ -354,3 +354,10 @@ jobs:
             tools/corpus/out/private/summary.json
             tools/corpus/out/private/summary.md
           if-no-files-found: ignore
+      - name: Upload corpus private trend (stable path)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-private-trend
+          path: tools/corpus/out/private/trend.json
+          if-no-files-found: ignore
