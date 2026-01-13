@@ -843,7 +843,7 @@ are attached:
 
    ```bash
    # Option A: from the .app.tar.gz
-   app_tgz="$(ls Formula*.app.tar.gz | head -n 1)"
+   app_tgz="$(ls *.app.tar.gz | head -n 1)"
    tar -xzf "$app_tgz"
    lipo -info "Formula.app/Contents/MacOS/formula-desktop"
 
@@ -853,7 +853,7 @@ are attached:
    If you only have a `.dmg`, mount it and inspect the `.app` inside:
 
    ```bash
-   dmg="$(ls Formula*.dmg | head -n 1)"
+   dmg="$(ls *.dmg | head -n 1)"
    mnt="$(mktemp -d)"
    hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
    lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
@@ -889,8 +889,8 @@ are attached:
 
    ```bash
    # Dependency metadata (ensure the runtime deps are present)
-   deb="$(ls Formula*.deb | head -n 1)"
-   rpm="$(ls Formula*.rpm | head -n 1)"
+   deb="$(ls *.deb | head -n 1)"
+   rpm="$(ls *.rpm | head -n 1)"
 
    dpkg -I "$deb"
    rpm -qpR "$rpm"
