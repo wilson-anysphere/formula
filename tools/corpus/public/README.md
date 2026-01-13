@@ -36,3 +36,9 @@ By default the command refuses to overwrite existing fixtures/expectations; re-r
 
 Note: the command runs corpus triage (same as `python -m tools.corpus.triage`), which builds/executes a small Rust
 helper binary. A Rust toolchain is required locally.
+
+Tip: you can reduce triage report size by lowering the diff entry cap:
+
+```bash
+python -m tools.corpus.promote_public --input ... --diff-limit 10
+```

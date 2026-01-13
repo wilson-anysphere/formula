@@ -71,6 +71,8 @@ class PromotePublicCLITests(unittest.TestCase):
                     str(public_dir),
                     "--triage-out",
                     str(triage_out),
+                    "--diff-limit",
+                    "10",
                 ]
 
                 rc = _run(argv)

@@ -236,6 +236,12 @@ def main() -> int:
         default=Path("tools/corpus/out/promote-public"),
         help="Directory for writing the generated triage report (gitignored).",
     )
+    parser.add_argument(
+        "--diff-limit",
+        type=int,
+        default=25,
+        help="Maximum number of diff entries to include in the triage report (privacy-safe).",
+    )
     args = parser.parse_args()
 
     try:
@@ -293,7 +299,10 @@ def main() -> int:
 
     # 1) Run triage against the exact bytes we intend to publish.
     try:
-        report = _run_public_triage(WorkbookInput(display_name=display_name, data=workbook_bytes))
+        report = _run_public_triage(
+            WorkbookInput(display_name=display_name, data=workbook_bytes),
+            diff_limit=args.diff_limit,
+        )
     except Exception as e:  # noqa: BLE001
         print(f"Triage failed: {e}")
         return 1
