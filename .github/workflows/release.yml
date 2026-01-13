@@ -263,8 +263,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            rpm \
-            patchelf
+            patchelf \
+            squashfs-tools \
+            fakeroot \
+            rpm
 
           # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
