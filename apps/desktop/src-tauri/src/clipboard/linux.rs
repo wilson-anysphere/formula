@@ -321,7 +321,8 @@ mod gtk_backend {
             //
             // By default we skip this fallback on Wayland to avoid changing semantics where
             // PRIMARY may not exist or behave differently, but users can override via:
-            // `FORMULA_CLIPBOARD_PRIMARY_SELECTION=0|1` (see `clipboard_fallback`).
+            // `FORMULA_CLIPBOARD_PRIMARY_SELECTION=0/false/no` to disable or `=1/true/yes` to force-enable
+            // (see `clipboard_fallback`).
             let has_usable_data = clipboard_fallback::has_usable_clipboard_data(
                 content.text.as_deref(),
                 content.html.as_deref(),
