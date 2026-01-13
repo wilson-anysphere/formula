@@ -7461,8 +7461,20 @@ export class SpreadsheetApp {
     const activeCell = this.selection.active;
     const activeA1 = cellToA1(activeCell);
     this.status.activeCell.textContent = activeA1;
-    const selectionRangeText =
-      this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
+    const selectionRangeText = (() => {
+      const ranges = this.selection.ranges;
+      if (ranges.length !== 1) return `${ranges.length} ranges`;
+      const range = ranges[0];
+      if (!range) return `${ranges.length} ranges`;
+      // Excel-like name box formatting for full-row/column selections.
+      if (this.selection.type === "column") {
+        return `${colToName(range.startCol)}:${colToName(range.endCol)}`;
+      }
+      if (this.selection.type === "row") {
+        return `${range.startRow + 1}:${range.endRow + 1}`;
+      }
+      return rangeToA1(range);
+    })();
     this.status.selectionRange.textContent = selectionRangeText;
 
     // `getCellDisplayValue` internally recomputes the computed value. We need the computed value

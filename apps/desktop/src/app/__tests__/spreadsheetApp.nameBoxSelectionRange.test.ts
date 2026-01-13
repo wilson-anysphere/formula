@@ -244,4 +244,64 @@ describe("SpreadsheetApp formula bar name box selection range", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("formats full-column selection like Excel (A:A)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const limits = (app as any).limits as { maxRows: number; maxCols: number };
+
+    app.selectRange(
+      {
+        range: { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: 0 }, // Column A
+      },
+      { scrollIntoView: false, focus: false },
+    );
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+    expect(address!.value).toBe("A:A");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("formats full-row selection like Excel (1:1)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const limits = (app as any).limits as { maxRows: number; maxCols: number };
+
+    app.selectRange(
+      {
+        range: { startRow: 0, endRow: 0, startCol: 0, endCol: limits.maxCols - 1 }, // Row 1
+      },
+      { scrollIntoView: false, focus: false },
+    );
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+    expect(address!.value).toBe("1:1");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
