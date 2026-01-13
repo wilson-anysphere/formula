@@ -18,8 +18,8 @@ export type EncryptedCellPayload = EncryptedCellPayloadV1;
 export interface CellPlaintext {
   value: unknown;
   formula: string | null;
-  // Formatting is handled by other tasks; include it in the encrypted payload so we
-  // can later move format storage under the same encryption envelope.
+  // Optional per-cell formatting payload. `@formula/collab-session` and the desktop
+  // binder can opt into encrypting this field via `encryption.encryptFormat`.
   format?: unknown;
 }
 
@@ -159,4 +159,3 @@ export function utf8Decode(bytes: Uint8Array): string {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("utf8");
   throw new Error("No UTF-8 decoder available (TextDecoder missing)");
 }
-

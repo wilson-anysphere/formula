@@ -178,6 +178,10 @@ const session = createCollabSession({
     },
     // Optional: force encryption for some cells even if a key exists.
     // shouldEncryptCell: (cell) => boolean
+    //
+    // Optional: encrypt per-cell formatting (`format`) alongside value/formula.
+    // Defaults to false for backwards compatibility (format remains plaintext).
+    // encryptFormat: true,
   },
 });
 ```
@@ -193,8 +197,11 @@ Desktop dev/testing toggle:
 Notes:
 
 - Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
-  - The encryption codec supports an optional `format` field, but the current session + binder implementations only encrypt `value`/`formula`.
-    Cell formatting remains stored separately under the shared `format` key.
+  - The encryption codec supports an optional `format` field.
+  - By default (`encryption.encryptFormat` unset/false), `@formula/collab-session` + the desktop binder only encrypt `value`/`formula` and leave per-cell formatting stored separately under the shared plaintext `format` key (legacy behavior).
+  - When `encryption.encryptFormat=true`, per-cell formatting is included in the encrypted plaintext and the plaintext `format` key is removed from the Yjs cell map (as well as the legacy `style` alias key, if present). This prevents the sync server and unauthorized collaborators from learning cell-specific formatting metadata.
+    - Backwards compatibility: encrypted documents created by older clients may have plaintext `format` (and/or no `format` inside the encrypted payload). For confidentiality, `encryptFormat=true` does **not** fall back to using plaintext `format` when `enc` is present; such cells render with default per-cell style until rewritten by a client that re-encrypts them with `encryptFormat=true`.
+    - Note: sheet/row/col formatting defaults and compressed `formatRunsByCol` range-run formatting are stored outside the per-cell map and are not currently encrypted by this flag.
 - When `enc` is present, plaintext `value`/`formula` fields are omitted.
 - If a collaborator does not have the right key, `@formula/collab-session` and the desktop binder will surface a masked value and **refuse plaintext writes** into that cell.
 
