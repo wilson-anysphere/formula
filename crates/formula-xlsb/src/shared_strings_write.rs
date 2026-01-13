@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{self, Cursor};
+use std::io::{self, Cursor, Read, Write};
 
 use crate::biff12_varint;
 use crate::parser::{biff12, Error};
@@ -177,14 +177,12 @@ impl SharedStringsWriter {
         }
 
         let current = self.sst_total_count as i64;
-        let updated = current
-            .checked_add(delta)
-            .ok_or_else(|| {
-                Error::Io(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "sharedStrings totalCount overflow",
-                ))
-            })?;
+        let updated = current.checked_add(delta).ok_or_else(|| {
+            Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sharedStrings totalCount overflow",
+            ))
+        })?;
         if updated < 0 || updated > u32::MAX as i64 {
             return Err(Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -254,6 +252,123 @@ impl SharedStringsWriter {
     }
 }
 
+/// Streaming shared strings patcher for `xl/sharedStrings.bin`.
+///
+/// This is a lower-level alternative to [`SharedStringsWriter`] that does not require
+/// materializing the entire part in memory. Existing records (including record ID/length varint
+/// bytes) are copied byte-for-byte, except:
+/// - the first 8 bytes of the `BrtSST` payload (`[totalCount:u32][uniqueCount:u32]`) are patched,
+/// - new plain `BrtSI` records are inserted after the existing stream, before `BrtSSTEnd`.
+///
+/// `base_si_count` is the number of existing `BrtSI` records present in the original table
+/// (i.e. the expected `uniqueCount`). Callers can compute this from the parsed shared strings
+/// table without scanning the binary part.
+pub struct SharedStringsWriterStreaming;
+
+#[derive(Debug)]
+struct RawVarint {
+    buf: [u8; 4],
+    len: u8,
+}
+
+impl RawVarint {
+    fn as_slice(&self) -> &[u8] {
+        &self.buf[..self.len as usize]
+    }
+}
+
+#[derive(Debug)]
+struct RawRecordHeader {
+    id: u32,
+    id_raw: RawVarint,
+    len: u32,
+    len_raw: RawVarint,
+}
+
+impl SharedStringsWriterStreaming {
+    /// Patch a shared string table record stream.
+    ///
+    /// Returns `Ok(true)` when the output differs from the input stream, and `Ok(false)` when
+    /// the output is byte-identical.
+    pub fn patch<R: Read, W: Write>(
+        mut input: R,
+        mut output: W,
+        new_plain_strings: &[String],
+        base_si_count: u32,
+        total_ref_delta: i64,
+    ) -> Result<bool, Error> {
+        if new_plain_strings.is_empty() && total_ref_delta == 0 {
+            // Fast path: byte-for-byte passthrough (also preserves non-canonical varint headers).
+            io::copy(&mut input, &mut output).map_err(map_io_error)?;
+            return Ok(false);
+        }
+
+        let updated_unique_count = base_si_count
+            .checked_add(u32::try_from(new_plain_strings.len()).map_err(|_| Error::UnexpectedEof)?)
+            .ok_or(Error::UnexpectedEof)?;
+
+        let mut seen_sst = false;
+        let mut seen_sst_end = false;
+
+        while let Some(header) = read_record_header(&mut input)? {
+            match header.id {
+                biff12::SST => {
+                    seen_sst = true;
+                    write_raw_header(&mut output, &header)?;
+
+                    let len = header.len as usize;
+                    if len < 8 {
+                        return Err(Error::UnexpectedEof);
+                    }
+
+                    // BrtSST payload prefix: [totalCount:u32][uniqueCount:u32]
+                    let mut prefix = [0u8; 8];
+                    input.read_exact(&mut prefix).map_err(map_io_error)?;
+
+                    let original_total =
+                        u32::from_le_bytes(prefix[0..4].try_into().expect("u32 bytes"));
+                    let updated_total = apply_total_ref_delta(original_total, total_ref_delta)?;
+
+                    prefix[0..4].copy_from_slice(&updated_total.to_le_bytes());
+                    prefix[4..8].copy_from_slice(&updated_unique_count.to_le_bytes());
+
+                    output.write_all(&prefix).map_err(map_io_error)?;
+                    copy_exact(&mut input, &mut output, len.saturating_sub(prefix.len()))?;
+                }
+                biff12::SST_END => {
+                    // Insert new `BrtSI` records immediately before `BrtSSTEnd`.
+                    if !seen_sst_end {
+                        write_appended_si_records(&mut output, new_plain_strings)?;
+                    }
+                    seen_sst_end = true;
+
+                    write_raw_header(&mut output, &header)?;
+                    copy_exact(&mut input, &mut output, header.len as usize)?;
+                }
+                _ => {
+                    write_raw_header(&mut output, &header)?;
+                    copy_exact(&mut input, &mut output, header.len as usize)?;
+                }
+            }
+        }
+
+        if !seen_sst {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid sharedStrings.bin: missing BrtSST record",
+            )));
+        }
+        if !seen_sst_end {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid sharedStrings.bin: missing BrtSSTEnd record",
+            )));
+        }
+
+        Ok(true)
+    }
+}
+
 fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     // BrtSI payload:
     //   [flags: u8][text: XLWideString]
@@ -318,14 +433,14 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     Some(text)
 }
 
-fn write_appended_si_records(out: &mut Vec<u8>, strings: &[String]) -> Result<(), Error> {
+fn write_appended_si_records(out: &mut impl Write, strings: &[String]) -> Result<(), Error> {
     for s in strings {
         write_plain_si_record(out, s)?;
     }
     Ok(())
 }
 
-fn write_plain_si_record(out: &mut Vec<u8>, s: &str) -> Result<(), Error> {
+fn write_plain_si_record(out: &mut impl Write, s: &str) -> Result<(), Error> {
     // BrtSI payload: [flags: u8][text: XLWideString]
     // XLWideString: [cch: u32][utf16 chars...]
     let cch = s.encode_utf16().count();
@@ -343,10 +458,130 @@ fn write_plain_si_record(out: &mut Vec<u8>, s: &str) -> Result<(), Error> {
 
     biff12_varint::write_record_id(out, biff12::SI).map_err(map_io_error)?;
     biff12_varint::write_record_len(out, payload_len).map_err(map_io_error)?;
-    out.push(0u8);
-    out.extend_from_slice(&cch.to_le_bytes());
+    out.write_all(&[0u8]).map_err(map_io_error)?;
+    out.write_all(&cch.to_le_bytes()).map_err(map_io_error)?;
     for unit in s.encode_utf16() {
-        out.extend_from_slice(&unit.to_le_bytes());
+        out.write_all(&unit.to_le_bytes()).map_err(map_io_error)?;
+    }
+    Ok(())
+}
+
+fn apply_total_ref_delta(original: u32, delta: i64) -> Result<u32, Error> {
+    if delta == 0 {
+        return Ok(original);
+    }
+
+    let current = original as i64;
+    let updated = current.checked_add(delta).ok_or_else(|| {
+        Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "sharedStrings totalCount overflow",
+        ))
+    })?;
+    if updated < 0 || updated > u32::MAX as i64 {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "sharedStrings totalCount out of range",
+        )));
+    }
+    Ok(updated as u32)
+}
+
+fn read_record_header<R: Read>(r: &mut R) -> Result<Option<RawRecordHeader>, Error> {
+    let Some((id, id_raw)) = read_record_id_raw(r)? else {
+        return Ok(None);
+    };
+    let (len, len_raw) = read_record_len_raw(r)?;
+    Ok(Some(RawRecordHeader {
+        id,
+        id_raw,
+        len,
+        len_raw,
+    }))
+}
+
+fn read_record_id_raw<R: Read>(r: &mut R) -> Result<Option<(u32, RawVarint)>, Error> {
+    let mut v: u32 = 0;
+    let mut raw = RawVarint {
+        buf: [0u8; 4],
+        len: 0,
+    };
+
+    for i in 0..4 {
+        let mut buf = [0u8; 1];
+        let n = r.read(&mut buf).map_err(map_io_error)?;
+        if n == 0 {
+            if i == 0 {
+                return Ok(None);
+            }
+            return Err(Error::UnexpectedEof);
+        }
+
+        let byte = buf[0];
+        raw.buf[i] = byte;
+        raw.len = raw.len.saturating_add(1);
+        v |= ((byte & 0x7F) as u32) << (7 * i);
+        if byte & 0x80 == 0 {
+            return Ok(Some((v, raw)));
+        }
+    }
+
+    Err(Error::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid BIFF12 record id (more than 4 bytes)",
+    )))
+}
+
+fn read_record_len_raw<R: Read>(r: &mut R) -> Result<(u32, RawVarint), Error> {
+    let mut v: u32 = 0;
+    let mut raw = RawVarint {
+        buf: [0u8; 4],
+        len: 0,
+    };
+
+    for i in 0..4 {
+        let mut buf = [0u8; 1];
+        let n = r.read(&mut buf).map_err(map_io_error)?;
+        if n == 0 {
+            return Err(Error::UnexpectedEof);
+        }
+
+        let byte = buf[0];
+        raw.buf[i] = byte;
+        raw.len = raw.len.saturating_add(1);
+        v |= ((byte & 0x7F) as u32) << (7 * i);
+        if byte & 0x80 == 0 {
+            return Ok((v, raw));
+        }
+    }
+
+    Err(Error::Io(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "invalid BIFF12 record length (more than 4 bytes)",
+    )))
+}
+
+fn write_raw_header<W: Write>(w: &mut W, header: &RawRecordHeader) -> Result<(), Error> {
+    w.write_all(header.id_raw.as_slice())
+        .map_err(map_io_error)?;
+    w.write_all(header.len_raw.as_slice())
+        .map_err(map_io_error)?;
+    Ok(())
+}
+
+fn copy_exact<R: Read, W: Write>(
+    input: &mut R,
+    output: &mut W,
+    mut len: usize,
+) -> Result<(), Error> {
+    let mut buf = [0u8; 16 * 1024];
+    while len > 0 {
+        let chunk_len = buf.len().min(len);
+        input
+            .read_exact(&mut buf[..chunk_len])
+            .map_err(map_io_error)?;
+        output.write_all(&buf[..chunk_len]).map_err(map_io_error)?;
+        len = len.saturating_sub(chunk_len);
     }
     Ok(())
 }

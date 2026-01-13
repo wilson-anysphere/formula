@@ -7,7 +7,7 @@ use crate::parser::{
 use crate::patch::{
     patch_sheet_bin, patch_sheet_bin_streaming, value_edit_is_noop_inline_string, CellEdit,
 };
-use crate::shared_strings_write::SharedStringsWriter;
+use crate::shared_strings_write::{SharedStringsWriter, SharedStringsWriterStreaming};
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
@@ -714,21 +714,6 @@ impl XlsbWorkbook {
             return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
         };
 
-        let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
-            Some(bytes) => bytes.clone(),
-            None => {
-                let mut zip = self.open_zip()?;
-                match read_zip_entry(&mut zip, shared_strings_part)? {
-                    Some(bytes) => bytes,
-                    None => {
-                        // Shared strings part went missing; fall back to the generic streaming
-                        // patcher, which may emit inline strings.
-                        return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
-                    }
-                }
-            }
-        };
-
         let targets: HashSet<(u32, u32)> = edits.iter().map(|e| (e.row, e.col)).collect();
         let cell_records = if targets.is_empty() {
             HashMap::new()
@@ -740,7 +725,24 @@ impl XlsbWorkbook {
             sheet_cell_records_streaming(&mut entry, &targets)?
         };
 
-        let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
+        // Build a mapping of *plain* shared strings to their indices. We only reuse plain
+        // `BrtSI` entries (flags=0) to avoid unintentionally applying rich/phonetic formatting to
+        // newly edited cells.
+        let base_si_count =
+            u32::try_from(self.shared_strings_table.len()).map_err(|_| ParseError::UnexpectedEof)?;
+        let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
+        existing_plain_to_index.reserve(self.shared_strings_table.len());
+        for (idx, si) in self.shared_strings_table.iter().enumerate() {
+            if si.raw_si.is_none() {
+                existing_plain_to_index
+                    .entry(si.plain_text())
+                    .or_insert(idx as u32);
+            }
+        }
+
+        let mut new_plain_to_index: HashMap<String, u32> = HashMap::new();
+        let mut appended_plain: Vec<String> = Vec::new();
+        appended_plain.reserve(edits.len());
 
         let mut updated_edits = edits.to_vec();
         for edit in &mut updated_edits {
@@ -791,7 +793,20 @@ impl XlsbWorkbook {
                 }
             }
 
-            edit.shared_string_index = Some(sst.intern_plain(text)?);
+            if let Some(&idx) = existing_plain_to_index.get(text.as_str()) {
+                edit.shared_string_index = Some(idx);
+            } else if let Some(&idx) = new_plain_to_index.get(text.as_str()) {
+                edit.shared_string_index = Some(idx);
+            } else {
+                let idx = base_si_count
+                    .checked_add(
+                        u32::try_from(appended_plain.len()).map_err(|_| ParseError::UnexpectedEof)?,
+                    )
+                    .ok_or(ParseError::UnexpectedEof)?;
+                appended_plain.push(text.clone());
+                new_plain_to_index.insert(text.clone(), idx);
+                edit.shared_string_index = Some(idx);
+            }
         }
 
         let total_ref_delta: i64 = updated_edits
@@ -813,18 +828,58 @@ impl XlsbWorkbook {
                 }
             })
             .sum();
-        sst.note_total_ref_delta(total_ref_delta)?;
 
-        let updated_shared_strings_bytes = sst.into_bytes()?;
+        // If we don't need to change the shared string table, avoid streaming it through the
+        // patcher entirely.
+        if appended_plain.is_empty() && total_ref_delta == 0 {
+            return self.save_with_part_overrides_streaming(
+                dest,
+                &HashMap::new(),
+                &sheet_part,
+                |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
+            );
+        }
 
-        self.save_with_part_overrides_streaming(
+        // If the shared strings part is missing from the source package, fall back to the generic
+        // streaming patcher (which may convert edited text cells to inline strings).
+        if !self.preserved_parts.contains_key(shared_strings_part) {
+            let mut zip = self.open_zip()?;
+            match zip.by_name(shared_strings_part) {
+                Ok(_) => {}
+                Err(zip::result::ZipError::FileNotFound) => {
+                    return self.save_with_cell_edits_streaming(dest, sheet_index, edits);
+                }
+                Err(e) => return Err(e.into()),
+            };
+        }
+
+        // Stream both the worksheet and the shared string table to avoid materializing
+        // `xl/sharedStrings.bin` in memory when only a few strings are appended.
+        let stream_parts =
+            BTreeSet::from([sheet_part.clone(), shared_strings_part.to_string()]);
+        self.save_with_part_overrides_streaming_multi(
             dest,
-            &HashMap::from([(
-                shared_strings_part.to_string(),
-                updated_shared_strings_bytes,
-            )]),
-            &sheet_part,
-            |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
+            &HashMap::new(),
+            &stream_parts,
+            |part_name, input, output| {
+                if part_name == sheet_part.as_str() {
+                    patch_sheet_bin_streaming(input, output, &updated_edits)
+                } else if part_name == shared_strings_part {
+                    SharedStringsWriterStreaming::patch(
+                        input,
+                        output,
+                        &appended_plain,
+                        base_si_count,
+                        total_ref_delta,
+                    )
+                    .map_err(ParseError::from)
+                } else {
+                    Err(ParseError::Io(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("unexpected streamed part: {part_name}"),
+                    )))
+                }
+            },
         )
     }
 
@@ -885,20 +940,29 @@ impl XlsbWorkbook {
             return self.save_with_cell_edits_streaming_multi(dest, edits_by_sheet);
         };
 
-        // Read sharedStrings.bin once up front so we can intern new strings across all sheets.
+        // We need a ZIP handle to stream worksheet parts while discovering existing cell record
+        // types. Note that we do *not* need to read `xl/sharedStrings.bin` into memory: we can
+        // intern against the parsed table and patch the binary part as a stream during the output
+        // ZIP write.
         let mut zip = self.open_zip()?;
-        let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
-            Some(bytes) => bytes.clone(),
-            None => match read_zip_entry(&mut zip, shared_strings_part)? {
-                Some(bytes) => bytes,
-                None => {
-                    // Shared strings part went missing; fall back to the generic patcher.
-                    return self.save_with_cell_edits_streaming_multi(dest, edits_by_sheet);
-                }
-            },
-        };
 
-        let mut sst = SharedStringsWriter::new(shared_strings_bytes)?;
+        let base_si_count =
+            u32::try_from(self.shared_strings_table.len()).map_err(|_| ParseError::UnexpectedEof)?;
+        let mut existing_plain_to_index: HashMap<&str, u32> = HashMap::new();
+        existing_plain_to_index.reserve(self.shared_strings_table.len());
+        for (idx, si) in self.shared_strings_table.iter().enumerate() {
+            if si.raw_si.is_none() {
+                existing_plain_to_index
+                    .entry(si.plain_text())
+                    .or_insert(idx as u32);
+            }
+        }
+
+        let mut new_plain_to_index: HashMap<String, u32> = HashMap::new();
+
+        let total_possible_appends: usize = edits_by_sheet.values().map(|v| v.len()).sum();
+        let mut appended_plain: Vec<String> = Vec::new();
+        appended_plain.reserve(total_possible_appends);
 
         let mut updated_edits_by_part: BTreeMap<String, Vec<CellEdit>> = BTreeMap::new();
         let mut total_ref_delta: i64 = 0;
@@ -972,7 +1036,21 @@ impl XlsbWorkbook {
                     }
                 }
 
-                edit.shared_string_index = Some(sst.intern_plain(text)?);
+                if let Some(&idx) = existing_plain_to_index.get(text.as_str()) {
+                    edit.shared_string_index = Some(idx);
+                } else if let Some(&idx) = new_plain_to_index.get(text.as_str()) {
+                    edit.shared_string_index = Some(idx);
+                } else {
+                    let idx = base_si_count
+                        .checked_add(
+                            u32::try_from(appended_plain.len())
+                                .map_err(|_| ParseError::UnexpectedEof)?,
+                        )
+                        .ok_or(ParseError::UnexpectedEof)?;
+                    appended_plain.push(text.clone());
+                    new_plain_to_index.insert(text.clone(), idx);
+                    edit.shared_string_index = Some(idx);
+                }
             }
 
             let sheet_delta: i64 = updated_edits
@@ -1005,28 +1083,50 @@ impl XlsbWorkbook {
             return self.save_as(dest);
         }
 
-        sst.note_total_ref_delta(total_ref_delta)?;
-        let updated_shared_strings_bytes = sst.into_bytes()?;
+        let needs_sst_patch = !appended_plain.is_empty() || total_ref_delta != 0;
 
-        let mut overrides = HashMap::new();
-        overrides.insert(
-            shared_strings_part.to_string(),
-            updated_shared_strings_bytes,
-        );
+        // If the shared strings part is missing from the source package, fall back to the generic
+        // streaming patcher.
+        if needs_sst_patch && !self.preserved_parts.contains_key(shared_strings_part) {
+            match zip.by_name(shared_strings_part) {
+                Ok(_) => {}
+                Err(zip::result::ZipError::FileNotFound) => {
+                    return self.save_with_cell_edits_streaming_multi(dest, edits_by_sheet);
+                }
+                Err(e) => return Err(e.into()),
+            };
+        }
 
-        let stream_parts: BTreeSet<String> = updated_edits_by_part.keys().cloned().collect();
+        // Stream updated worksheet parts, and stream the shared string table only when we need to
+        // patch counts / append strings.
+        let mut stream_parts: BTreeSet<String> = updated_edits_by_part.keys().cloned().collect();
+        if needs_sst_patch {
+            stream_parts.insert(shared_strings_part.to_string());
+        }
+
         self.save_with_part_overrides_streaming_multi(
             dest,
-            &overrides,
+            &HashMap::new(),
             &stream_parts,
             |part_name, input, output| {
-                let edits = updated_edits_by_part.get(part_name).ok_or_else(|| {
-                    ParseError::Io(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("missing worksheet edits for streamed part: {part_name}"),
-                    ))
-                })?;
-                patch_sheet_bin_streaming(input, output, edits)
+                if part_name == shared_strings_part {
+                    SharedStringsWriterStreaming::patch(
+                        input,
+                        output,
+                        &appended_plain,
+                        base_si_count,
+                        total_ref_delta,
+                    )
+                    .map_err(ParseError::from)
+                } else {
+                    let edits = updated_edits_by_part.get(part_name).ok_or_else(|| {
+                        ParseError::Io(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("missing worksheet edits for streamed part: {part_name}"),
+                        ))
+                    })?;
+                    patch_sheet_bin_streaming(input, output, edits)
+                }
             },
         )
     }
