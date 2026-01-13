@@ -175,7 +175,12 @@ export interface Viewport {
   width: number;
   height: number;
   dpr: number;
-  /** Grid zoom factor. Defaults to 1. */
+  /**
+   * Sheet zoom factor (1 = 100%).
+   *
+   * When provided, drawing and interaction code uses this to map between
+   * screen-space pixels and document-space EMUs.
+   */
   zoom?: number;
   /**
    * Frozen pane counts in *sheet-space* (i.e. they do not include any synthetic
@@ -203,14 +208,6 @@ export interface Viewport {
    */
   headerOffsetX?: number;
   headerOffsetY?: number;
-  /**
-   * Optional zoom factor applied to the viewport.
-   *
-   * Pointer interactions often operate in screen-space pixels, while drawing
-   * anchors are stored in document-space units; callers can use this to
-   * translate between the two.
-   */
-  zoom?: number;
 }
 
 export interface ChartRenderer {

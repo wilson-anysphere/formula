@@ -193,15 +193,15 @@ export class DrawingInteractionController {
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
 
-      const zoom = this.callbacks.getViewport().zoom ?? 1;
-      const dx = (x - this.resizing.startX) / zoom;
-      const dy = (y - this.resizing.startY) / zoom;
+      const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
+      const dx = x - this.resizing.startX;
+      const dy = y - this.resizing.startY;
 
       const next = this.resizing.startObjects.map((obj) => {
         if (obj.id !== this.resizing!.id) return obj;
         return {
           ...obj,
-          anchor: resizeAnchor(obj.anchor, this.resizing!.handle, dx, dy, this.geom, obj.transform),
+          anchor: resizeAnchor(obj.anchor, this.resizing!.handle, dx, dy, this.geom, obj.transform, zoom),
         };
       });
       this.callbacks.setObjects(next);
@@ -214,15 +214,15 @@ export class DrawingInteractionController {
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
       const { x, y } = this.getLocalPoint(e, rect);
 
-      const zoom = this.callbacks.getViewport().zoom ?? 1;
-      const dx = (x - this.dragging.startX) / zoom;
-      const dy = (y - this.dragging.startY) / zoom;
+      const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
+      const dx = x - this.dragging.startX;
+      const dy = y - this.dragging.startY;
 
       const next = this.dragging.startObjects.map((obj) => {
         if (obj.id !== this.dragging!.id) return obj;
         return {
           ...obj,
-          anchor: shiftAnchor(obj.anchor, dx, dy, this.geom),
+          anchor: shiftAnchor(obj.anchor, dx, dy, this.geom, zoom),
         };
       });
       this.callbacks.setObjects(next);
@@ -252,11 +252,12 @@ export class DrawingInteractionController {
     const currentObj = objects.find((o) => o.id === active.id);
 
     if (startObj && currentObj) {
+      const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
       // Compute deltas/sizes in EMU directly so we preserve exact DrawingML units
       // (avoids float drift from px<->emu round-trips).
-      const startPos = anchorTopLeftEmu(startObj.anchor, this.geom);
-      const endPos = anchorTopLeftEmu(currentObj.anchor, this.geom);
-      const endSize = anchorSizeEmu(currentObj.anchor, this.geom);
+      const startPos = anchorTopLeftEmu(startObj.anchor, this.geom, zoom);
+      const endPos = anchorTopLeftEmu(currentObj.anchor, this.geom, zoom);
+      const endSize = anchorSizeEmu(currentObj.anchor, this.geom, zoom);
 
       const dxEmu = endPos.xEmu - startPos.xEmu;
       const dyEmu = endPos.yEmu - startPos.yEmu;
@@ -347,33 +348,40 @@ export class DrawingInteractionController {
   }
 }
 
+function sanitizeZoom(zoom: number | undefined): number {
+  return typeof zoom === "number" && Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
 function anchorTopLeftEmu(
   anchor: DrawingObject["anchor"],
   geom: GridGeometry,
+  zoom: number,
 ): { xEmu: number; yEmu: number } {
+  const z = sanitizeZoom(zoom);
   switch (anchor.type) {
     case "absolute":
       return { xEmu: anchor.pos.xEmu, yEmu: anchor.pos.yEmu };
     case "oneCell": {
       const origin = geom.cellOriginPx(anchor.from.cell);
       return {
-        xEmu: pxToEmu(origin.x) + anchor.from.offset.xEmu,
-        yEmu: pxToEmu(origin.y) + anchor.from.offset.yEmu,
+        xEmu: pxToEmu(origin.x / z) + anchor.from.offset.xEmu,
+        yEmu: pxToEmu(origin.y / z) + anchor.from.offset.yEmu,
       };
     }
     case "twoCell": {
       const fromOrigin = geom.cellOriginPx(anchor.from.cell);
       const toOrigin = geom.cellOriginPx(anchor.to.cell);
-      const x1 = pxToEmu(fromOrigin.x) + anchor.from.offset.xEmu;
-      const y1 = pxToEmu(fromOrigin.y) + anchor.from.offset.yEmu;
-      const x2 = pxToEmu(toOrigin.x) + anchor.to.offset.xEmu;
-      const y2 = pxToEmu(toOrigin.y) + anchor.to.offset.yEmu;
+      const x1 = pxToEmu(fromOrigin.x / z) + anchor.from.offset.xEmu;
+      const y1 = pxToEmu(fromOrigin.y / z) + anchor.from.offset.yEmu;
+      const x2 = pxToEmu(toOrigin.x / z) + anchor.to.offset.xEmu;
+      const y2 = pxToEmu(toOrigin.y / z) + anchor.to.offset.yEmu;
       return { xEmu: Math.min(x1, x2), yEmu: Math.min(y1, y2) };
     }
   }
 }
 
-function anchorSizeEmu(anchor: DrawingObject["anchor"], geom: GridGeometry): { cxEmu: number; cyEmu: number } {
+function anchorSizeEmu(anchor: DrawingObject["anchor"], geom: GridGeometry, zoom: number): { cxEmu: number; cyEmu: number } {
+  const z = sanitizeZoom(zoom);
   switch (anchor.type) {
     case "absolute":
       return { cxEmu: anchor.size.cx, cyEmu: anchor.size.cy };
@@ -382,10 +390,10 @@ function anchorSizeEmu(anchor: DrawingObject["anchor"], geom: GridGeometry): { c
     case "twoCell": {
       const fromOrigin = geom.cellOriginPx(anchor.from.cell);
       const toOrigin = geom.cellOriginPx(anchor.to.cell);
-      const x1 = pxToEmu(fromOrigin.x) + anchor.from.offset.xEmu;
-      const y1 = pxToEmu(fromOrigin.y) + anchor.from.offset.yEmu;
-      const x2 = pxToEmu(toOrigin.x) + anchor.to.offset.xEmu;
-      const y2 = pxToEmu(toOrigin.y) + anchor.to.offset.yEmu;
+      const x1 = pxToEmu(fromOrigin.x / z) + anchor.from.offset.xEmu;
+      const y1 = pxToEmu(fromOrigin.y / z) + anchor.from.offset.yEmu;
+      const x2 = pxToEmu(toOrigin.x / z) + anchor.to.offset.xEmu;
+      const y2 = pxToEmu(toOrigin.y / z) + anchor.to.offset.yEmu;
       return { cxEmu: Math.abs(x2 - x1), cyEmu: Math.abs(y2 - y1) };
     }
   }
@@ -476,25 +484,27 @@ export function shiftAnchor(
   dxPx: number,
   dyPx: number,
   geom: GridGeometry,
+  zoom: number = 1,
 ): DrawingObject["anchor"] {
+  const z = sanitizeZoom(zoom);
   switch (anchor.type) {
     case "oneCell":
       return {
         ...anchor,
-        from: shiftAnchorPoint(anchor.from, dxPx, dyPx, geom),
+        from: shiftAnchorPoint(anchor.from, dxPx, dyPx, geom, z),
       };
     case "twoCell":
       return {
         ...anchor,
-        from: shiftAnchorPoint(anchor.from, dxPx, dyPx, geom),
-        to: shiftAnchorPoint(anchor.to, dxPx, dyPx, geom),
+        from: shiftAnchorPoint(anchor.from, dxPx, dyPx, geom, z),
+        to: shiftAnchorPoint(anchor.to, dxPx, dyPx, geom, z),
       };
     case "absolute":
       return {
         ...anchor,
         pos: {
-          xEmu: anchor.pos.xEmu + pxToEmu(dxPx),
-          yEmu: anchor.pos.yEmu + pxToEmu(dyPx),
+          xEmu: anchor.pos.xEmu + pxToEmu(dxPx / z),
+          yEmu: anchor.pos.yEmu + pxToEmu(dyPx / z),
         },
       };
   }
@@ -507,7 +517,9 @@ export function resizeAnchor(
   dyPx: number,
   geom: GridGeometry,
   transform?: DrawingTransform,
+  zoom: number = 1,
 ): DrawingObject["anchor"] {
+  const z = sanitizeZoom(zoom);
   const rect =
     anchor.type === "absolute"
       ? {
@@ -651,25 +663,25 @@ export function resizeAnchor(
   switch (anchor.type) {
     case "oneCell": {
       const start = anchorPointToSheetPx(anchor.from, geom);
-      const nextFrom = shiftAnchorPoint(anchor.from, left - start.x, top - start.y, geom);
+      const nextFrom = shiftAnchorPoint(anchor.from, left - start.x, top - start.y, geom, z);
       return {
         ...anchor,
         from: nextFrom,
-        size: { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) },
+        size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
       };
     }
     case "absolute": {
       return {
         ...anchor,
-        pos: { xEmu: pxToEmu(left), yEmu: pxToEmu(top) },
-        size: { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) },
+        pos: { xEmu: pxToEmu(left / z), yEmu: pxToEmu(top / z) },
+        size: { cx: pxToEmu(widthPx / z), cy: pxToEmu(heightPx / z) },
       };
     }
     case "twoCell": {
       const startFrom = anchorPointToSheetPx(anchor.from, geom);
       const startTo = anchorPointToSheetPx(anchor.to, geom);
-      const nextFrom = shiftAnchorPoint(anchor.from, left - startFrom.x, top - startFrom.y, geom);
-      const nextTo = shiftAnchorPoint(anchor.to, right - startTo.x, bottom - startTo.y, geom);
+      const nextFrom = shiftAnchorPoint(anchor.from, left - startFrom.x, top - startFrom.y, geom, z);
+      const nextTo = shiftAnchorPoint(anchor.to, right - startTo.x, bottom - startTo.y, geom, z);
       return { ...anchor, from: nextFrom, to: nextTo };
     }
   }
@@ -692,11 +704,13 @@ export function shiftAnchorPoint(
   dxPx: number,
   dyPx: number,
   geom: GridGeometry,
+  zoom: number = 1,
 ): AnchorPoint {
-  let row = point.cell.row;
-  let col = point.cell.col;
-  let xPx = emuToPx(point.offset.xEmu) + dxPx;
-  let yPx = emuToPx(point.offset.yEmu) + dyPx;
+  const z = sanitizeZoom(zoom);
+  let row = Number.isFinite(point.cell.row) ? Math.max(0, Math.trunc(point.cell.row)) : 0;
+  let col = Number.isFinite(point.cell.col) ? Math.max(0, Math.trunc(point.cell.col)) : 0;
+  let xPx = (Number.isFinite(point.offset.xEmu) ? emuToPx(point.offset.xEmu) : 0) + dxPx / z;
+  let yPx = (Number.isFinite(point.offset.yEmu) ? emuToPx(point.offset.yEmu) : 0) + dyPx / z;
 
   // Normalize X across column boundaries.
   for (let i = 0; i < MAX_CELL_STEPS && xPx < 0; i++) {
@@ -706,7 +720,7 @@ export function shiftAnchorPoint(
       break;
     }
     col -= 1;
-    const w = geom.cellSizePx({ row, col }).width;
+    const w = geom.cellSizePx({ row, col }).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -714,7 +728,7 @@ export function shiftAnchorPoint(
     xPx += w;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const w = geom.cellSizePx({ row, col }).width;
+    const w = geom.cellSizePx({ row, col }).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -732,7 +746,7 @@ export function shiftAnchorPoint(
       break;
     }
     row -= 1;
-    const h = geom.cellSizePx({ row, col }).height;
+    const h = geom.cellSizePx({ row, col }).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
@@ -740,7 +754,7 @@ export function shiftAnchorPoint(
     yPx += h;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const h = geom.cellSizePx({ row, col }).height;
+    const h = geom.cellSizePx({ row, col }).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
@@ -752,7 +766,7 @@ export function shiftAnchorPoint(
 
   // Best-effort clamp to avoid tiny float drift.
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const w = geom.cellSizePx({ row, col }).width;
+    const w = geom.cellSizePx({ row, col }).width / z;
     if (w <= 0) {
       xPx = 0;
       break;
@@ -763,7 +777,7 @@ export function shiftAnchorPoint(
     col += 1;
   }
   for (let i = 0; i < MAX_CELL_STEPS; i++) {
-    const h = geom.cellSizePx({ row, col }).height;
+    const h = geom.cellSizePx({ row, col }).height / z;
     if (h <= 0) {
       yPx = 0;
       break;
