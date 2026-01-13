@@ -197,6 +197,10 @@ persistence.
   - `InMemoryBinaryStorage` (default; no persistence)
   - `LocalStorageBinaryStorage` (base64-encodes the DB into LocalStorage)
   - `NodeFileBinaryStorage` (writes the DB to a file on disk in Node)
+- Persistence knobs:
+  - `auto_persist?: boolean` (default: `true`) – automatically persist after `logEntry()`
+  - `auto_persist_interval_ms?: number` – debounce interval for persistence when `auto_persist` is enabled
+  - When `auto_persist=false`, callers must call `flush()` (or `close()`) to durably save pending writes.
 - Retention knobs (write-time enforcement):
   - `retention.max_entries?: number`
   - `retention.max_age_ms?: number`
