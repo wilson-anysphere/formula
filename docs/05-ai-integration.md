@@ -113,6 +113,11 @@ entrypoint in the WASM engine:
 const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
 ```
 
+**Code entrypoints:**
+- Engine client API: [`packages/engine/src/client.ts`](../packages/engine/src/client.ts) (`parseFormulaPartial`, `setLocale`)
+- Types for parse options/results: [`packages/engine/src/protocol.ts`](../packages/engine/src/protocol.ts) (`FormulaParseOptions`, `FormulaPartialParseResult`)
+- WASM implementation: [`crates/formula-wasm/src/lib.rs`](../crates/formula-wasm/src/lib.rs)
+
 - **Why it matters:** Excel-style formulas are locale-sensitive.
   - **Argument/list separators** vary (e.g. `,` vs `;`), which changes how `argIndex` is computed.
   - **Localized function names** may be accepted/shown (e.g. `SUM` vs a localized equivalent), which impacts function-name
@@ -333,6 +338,16 @@ Implementation notes (actual):
 - Desktop wrapper that builds per-message workbook context + budgets tokens: [`apps/desktop/src/ai/context/WorkbookContextBuilder.ts`](../apps/desktop/src/ai/context/WorkbookContextBuilder.ts)
 - Desktop RAG service (persistent local index; deterministic hash embeddings): [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts)
 
+### Prompt context shape (actual)
+
+Context is ultimately fed to the model as a **bounded** markdown-ish string composed of multiple `## <section>` blocks
+(packed to a token budget). The exact keys are defined in `packages/ai-context/src/contextManager.js` and currently include:
+- `workbook_summary` (sheet list, tables, named ranges)
+- `workbook_schema` (schema-first view of tables/columns/types)
+- `attachments` (explicit user-provided ranges/charts/etc)
+- `retrieved` (RAG chunks pulled from the workbook index)
+- optional `dlp` notes when retrieved chunks are redacted
+
 ### The Context Problem
 
 A 1M-row spreadsheet could exceed 100M tokens if naively serialized. We need intelligent context selection.
@@ -481,66 +496,25 @@ For semantic search within large datasets:
 > quality. Hash embeddings are lower quality than modern ML embeddings, but work well enough for basic semantic-ish
 > retrieval.
 
+**Code entrypoints:**
+- Desktop RAG service wrapper: [`apps/desktop/src/ai/rag/ragService.ts`](../apps/desktop/src/ai/rag/ragService.ts) (`createDesktopRagService`)
+- Embeddings: [`packages/ai-rag/src/embedding/hashEmbedder.js`](../packages/ai-rag/src/embedding/hashEmbedder.js) (`HashEmbedder`)
+- Workbook chunking/text extraction: [`packages/ai-rag/src/workbook/chunkWorkbook.js`](../packages/ai-rag/src/workbook/chunkWorkbook.js),
+  [`packages/ai-rag/src/workbook/chunkToText.js`](../packages/ai-rag/src/workbook/chunkToText.js)
+- Indexing pipeline: [`packages/ai-rag/src/pipeline/indexWorkbook.js`](../packages/ai-rag/src/pipeline/indexWorkbook.js)
+- Retrieval: [`packages/ai-rag/src/retrieval/searchWorkbookRag.js`](../packages/ai-rag/src/retrieval/searchWorkbookRag.js)
+- Vector stores: [`packages/ai-rag/src/store/sqliteVectorStore.js`](../packages/ai-rag/src/store/sqliteVectorStore.js) (browser) and
+  [`packages/ai-rag/src/store/inMemoryVectorStore.js`](../packages/ai-rag/src/store/inMemoryVectorStore.js) (tests)
+
 ```typescript
-class CellRAG {
-  private vectorStore: VectorStore;
-  private embedder: Embedder;
-  
-  async indexSheet(sheet: Sheet): Promise<void> {
-    const chunks = this.chunkSheet(sheet);
-    
-    for (const chunk of chunks) {
-      const text = this.chunkToText(chunk);
-      const embedding = await this.embedder.embed(text);
-      
-      await this.vectorStore.add({
-        id: `${sheet.id}-${chunk.range}`,
-        embedding,
-        metadata: {
-          sheetId: sheet.id,
-          range: chunk.range,
-          preview: text.slice(0, 200)
-        }
-      });
-    }
-  }
-  
-  async findRelevant(query: string, topK: number = 5): Promise<RetrievedChunk[]> {
-    const queryEmbedding = await this.embedder.embed(query);
-    const results = await this.vectorStore.search(queryEmbedding, topK);
-    
-    return results.map(r => ({
-      range: r.metadata.range,
-      preview: r.metadata.preview,
-      score: r.score
-    }));
-  }
-  
-  private chunkSheet(sheet: Sheet): Chunk[] {
-    const chunks: Chunk[] = [];
-    
-    // Chunk by tables
-    for (const table of sheet.tables) {
-      chunks.push({
-        type: "table",
-        range: table.range,
-        data: this.getTableData(table)
-      });
-    }
-    
-    // Chunk remaining data regions
-    const regions = this.findDataRegions(sheet);
-    for (const region of regions) {
-      chunks.push({
-        type: "region",
-        range: region.range,
-        data: this.getRegionData(region)
-      });
-    }
-    
-    return chunks;
-  }
-}
+// Desktop: build workbook RAG context for a user query (schema + retrieved chunks).
+const rag = createDesktopRagService({ documentController, workbookId });
+const workbookContext = await rag.buildWorkbookContextFromSpreadsheetApi({
+  spreadsheet,
+  workbookId,
+  query,
+  dlp,
+});
 ```
 
 ---
