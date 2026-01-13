@@ -5,13 +5,28 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DESKTOP_ROOT = path.join(__dirname, "..");
 
 function readDesktopFile(...segments) {
-  return fs.readFileSync(path.join(__dirname, "..", ...segments), "utf8");
+  return fs.readFileSync(path.join(DESKTOP_ROOT, ...segments), "utf8");
 }
 
 function extractTransitionDeclarations(css) {
   return [...css.matchAll(/transition\s*:\s*([\s\S]*?);/g)].map((match) => match[1]?.trim() ?? "");
+}
+
+function collectCssFiles(dirPath) {
+  /** @type {string[]} */
+  const out = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectCssFiles(fullPath));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".css")) out.push(fullPath);
+  }
+  return out;
 }
 
 test("Reduced motion overrides set motion tokens to 0ms", () => {
@@ -30,42 +45,42 @@ test("Reduced motion overrides set motion tokens to 0ms", () => {
   );
 });
 
-test("Core UI surfaces use motion tokens for transitions (so reduced motion disables animation)", () => {
-  const files = [
-    ["src", "styles", "ribbon.css"],
-    ["src", "styles", "dialogs.css"],
-    ["src", "styles", "context-menu.css"],
-    ["src", "styles", "ui.css"],
-  ];
+test("Desktop CSS transitions use motion tokens (so reduced motion disables animation)", () => {
+  const srcRoot = path.join(DESKTOP_ROOT, "src");
+  const files = collectCssFiles(srcRoot);
+  assert.ok(files.length > 0, "Expected to find CSS files under apps/desktop/src");
 
-  for (const relPath of files) {
-    const css = readDesktopFile(...relPath);
+  for (const filePath of files) {
+    const css = fs.readFileSync(filePath, "utf8");
+    const relPath = path.relative(DESKTOP_ROOT, filePath);
+    const isTokens = path.basename(filePath) === "tokens.css";
 
     assert.equal(
       /\banimation\s*:/.test(css) || /@keyframes\b/.test(css),
       false,
-      `Unexpected CSS animations in ${relPath.join("/")}; animations must be gated behind reduced-motion`,
+      `Unexpected CSS animations in ${relPath}; animations must be gated behind reduced-motion`,
     );
 
     for (const transition of extractTransitionDeclarations(css)) {
+      if (!transition || transition.toLowerCase() === "none") continue;
       assert.match(
         transition,
         /var\(--motion-duration(?:-fast)?\)/,
-        `Expected transition declarations in ${relPath.join("/")} to use --motion-duration tokens`,
+        `Expected transition declarations in ${relPath} to use --motion-duration tokens`,
       );
       assert.match(
         transition,
         /var\(--motion-ease\)/,
-        `Expected transition declarations in ${relPath.join("/")} to use --motion-ease token`,
+        `Expected transition declarations in ${relPath} to use --motion-ease token`,
       );
     }
 
     // Guard against accidentally hardcoding durations in leaf CSS files (token definitions live in tokens.css).
-    if (!relPath.includes("tokens.css")) {
+    if (!isTokens) {
       assert.equal(
         /\b\d+(?:\.\d+)?(?:ms|s)\b/.test(css),
         false,
-        `Expected ${relPath.join("/")} to avoid hard-coded time values; use motion tokens instead`,
+        `Expected ${relPath} to avoid hard-coded time values; use motion tokens instead`,
       );
     }
   }
