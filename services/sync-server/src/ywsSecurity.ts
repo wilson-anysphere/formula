@@ -500,7 +500,8 @@ export function installYwsSecurity(
   let loggedReservedRootViolation = false;
 
   const rangeRestrictions =
-    auth?.tokenType === "jwt" && Array.isArray(auth.rangeRestrictions)
+    (auth?.tokenType === "jwt" || auth?.tokenType === "introspect") &&
+    Array.isArray(auth.rangeRestrictions)
       ? auth.rangeRestrictions
       : null;
 

@@ -210,6 +210,7 @@ async function introspectTokenWithRetry(
   orgId: string;
   role: SyncRole;
   sessionId?: string | null;
+  rangeRestrictions?: unknown[];
 }> {
   const url = new URL("/internal/sync/introspect", auth.url).toString();
 
@@ -287,6 +288,7 @@ async function introspectTokenWithRetry(
       const orgId = body.orgId;
       const role = body.role;
       const sessionId = body.sessionId;
+      const rangeRestrictions = body.rangeRestrictions;
 
       if (typeof userId !== "string" || userId.length === 0) {
         throw new AuthError("Authentication service unavailable", 503);
@@ -308,11 +310,26 @@ async function introspectTokenWithRetry(
         throw new AuthError("Authentication service unavailable", 503);
       }
 
+      if (rangeRestrictions !== undefined) {
+        if (!Array.isArray(rangeRestrictions)) {
+          throw new AuthError("Authentication service unavailable", 503);
+        }
+        for (const entry of rangeRestrictions) {
+          try {
+            normalizeRestriction(entry);
+          } catch {
+            throw new AuthError("Authentication service unavailable", 503);
+          }
+        }
+      }
+
       return {
         userId,
         orgId,
         role,
         sessionId: sessionId === undefined ? undefined : sessionId,
+        rangeRestrictions:
+          rangeRestrictions === undefined ? undefined : (rangeRestrictions as unknown[]),
       };
     } catch (err) {
       if (err instanceof AuthError) {
@@ -392,6 +409,10 @@ export async function authenticateRequest(
 
       if (result.sessionId !== undefined) {
         ctx.sessionId = result.sessionId;
+      }
+
+      if (result.rangeRestrictions !== undefined) {
+        ctx.rangeRestrictions = result.rangeRestrictions;
       }
 
       if (cache && tokenHash) {
