@@ -141,6 +141,38 @@ test("diffDocumentWorkbookSnapshots reports sheet metadata changes (visibility/t
   ]);
 });
 
+test("diffDocumentWorkbookSnapshots reads frozen panes from nested sheet.view", () => {
+  const beforeSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        view: { frozenRows: 0, frozenCols: 1 },
+        cells: [],
+      },
+    ],
+  });
+
+  const afterSnapshot = encodeSnapshot({
+    schemaVersion: 1,
+    sheets: [
+      {
+        id: "sheet1",
+        name: "Sheet1",
+        view: { frozenRows: 4, frozenCols: 2 },
+        cells: [],
+      },
+    ],
+  });
+
+  const diff = diffDocumentWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "view.frozenCols", before: 1, after: 2 },
+    { id: "sheet1", field: "view.frozenRows", before: 0, after: 4 },
+  ]);
+});
+
 test("diffDocumentWorkbookSnapshots reports formatOnly edits when default formats change (layered formats)", () => {
   const beforeSnapshot = encodeSnapshot({
     schemaVersion: 1,
