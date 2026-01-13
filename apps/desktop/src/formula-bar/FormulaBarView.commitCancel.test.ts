@@ -199,6 +199,33 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not commit twice if Enter is pressed multiple times", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "once";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const first = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+
+    const second = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(false);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("once", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("does not commit on Alt+Enter (reserved for newline/indent)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -221,6 +248,35 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(cancel.disabled).toBe(false);
     expect(commit.hidden).toBe(false);
     expect(commit.disabled).toBe(false);
+
+    host.remove();
+  });
+
+  it("does not cancel twice if Escape is pressed multiple times", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+
+    view.setActiveCell({ address: "A1", input: "original", value: null });
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const first = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+
+    const second = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(second);
+    expect(second.defaultPrevented).toBe(false);
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
 
     host.remove();
   });
