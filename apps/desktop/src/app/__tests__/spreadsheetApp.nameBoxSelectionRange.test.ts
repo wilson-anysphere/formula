@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetApp } from "../spreadsheetApp";
+import { buildSelection } from "../../selection/selection";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -200,6 +201,44 @@ describe("SpreadsheetApp formula bar name box selection range", () => {
     // Esc should revert to the latest selection display value.
     address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(address!.value).toBe("A1:B3");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("shows a stable label for multi-range selections", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    // Legacy grid mode doesn't expose a public multi-range selection API, but the
+    // underlying selection model supports it (and status/formula bar should render it).
+    (app as any).selection = buildSelection(
+      {
+        ranges: [
+          { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, // A1
+          { startRow: 2, endRow: 2, startCol: 2, endCol: 2 }, // C3
+        ],
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+    (app as any).updateStatus();
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+    expect(address!.value).toBe("2 ranges");
 
     app.destroy();
     root.remove();
