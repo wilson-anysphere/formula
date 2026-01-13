@@ -81,6 +81,18 @@ export type SyncServerConfig = {
   persistence: {
     backend: "leveldb" | "file";
     compactAfterUpdates: number;
+    /**
+     * Maximum number of pending persistence write tasks allowed per document.
+     *
+     * `0` disables the limit (unbounded).
+     */
+    maxQueueDepthPerDoc: number;
+    /**
+     * Maximum number of pending persistence write tasks allowed across all documents.
+     *
+     * `0` disables the limit (unbounded).
+     */
+    maxQueueDepthTotal: number;
     leveldbDocNameHashing: boolean;
     encryption:
       | {
@@ -276,6 +288,15 @@ export function loadConfigFromEnv(): SyncServerConfig {
     200
   );
 
+  const maxQueueDepthPerDoc = Math.max(
+    0,
+    envInt(process.env.SYNC_SERVER_PERSISTENCE_MAX_QUEUE_DEPTH_PER_DOC, 0)
+  );
+  const maxQueueDepthTotal = Math.max(
+    0,
+    envInt(process.env.SYNC_SERVER_PERSISTENCE_MAX_QUEUE_DEPTH_TOTAL, 0)
+  );
+
   const encryptionEnv = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION ?? "off";
   const encryptionKeyBase64 = process.env.SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64;
   const encryptionMode =
@@ -451,6 +472,8 @@ export function loadConfigFromEnv(): SyncServerConfig {
     persistence: {
       backend,
       compactAfterUpdates,
+      maxQueueDepthPerDoc,
+      maxQueueDepthTotal,
       leveldbDocNameHashing,
       encryption,
     },

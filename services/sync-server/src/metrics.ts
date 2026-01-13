@@ -371,6 +371,15 @@ function createFallbackMetrics(): SyncServerMetrics {
     labelNames: ["backend", "encryption"],
   });
 
+  const persistenceOverloadTotal = createCounter<"scope">({
+    name: "sync_server_persistence_overload_total",
+    help:
+      "Total persistence overload events triggered by write queue backpressure (close code 1013).",
+    labelNames: ["scope"],
+  });
+  persistenceOverloadTotal.inc({ scope: "doc" }, 0);
+  persistenceOverloadTotal.inc({ scope: "total" }, 0);
+
   const introspectionRequestDurationMs = createGauge<"path" | "result">({
     name: "sync_server_introspection_request_duration_ms",
     help: "Last observed sync token introspection duration in milliseconds.",
@@ -419,6 +428,7 @@ function createFallbackMetrics(): SyncServerMetrics {
     processHeapTotalBytes,
     eventLoopDelayMs,
     persistenceInfo,
+    persistenceOverloadTotal,
     setPersistenceInfo,
     introspectionRequestDurationMs,
     metricsText: async () => await registry.metrics(),
@@ -474,6 +484,7 @@ export type SyncServerMetrics = {
   eventLoopDelayMs: Gauge<string>;
 
   persistenceInfo: Gauge<"backend" | "encryption">;
+  persistenceOverloadTotal: Counter<"scope">;
   setPersistenceInfo: (params: {
     backend: "file" | "leveldb";
     encryptionEnabled: boolean;
@@ -688,6 +699,16 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     registers: [registry],
   });
 
+  const persistenceOverloadTotal = new promClient.Counter({
+    name: "sync_server_persistence_overload_total",
+    help:
+      "Total persistence overload events triggered by write queue backpressure (close code 1013).",
+    labelNames: ["scope"],
+    registers: [registry],
+  });
+  persistenceOverloadTotal.inc({ scope: "doc" }, 0);
+  persistenceOverloadTotal.inc({ scope: "total" }, 0);
+
   const introspectionRequestDurationMs = new promClient.Gauge({
     name: "sync_server_introspection_request_duration_ms",
     help: "Last observed sync token introspection duration in milliseconds.",
@@ -740,6 +761,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     processHeapTotalBytes,
     eventLoopDelayMs,
     persistenceInfo,
+    persistenceOverloadTotal,
     setPersistenceInfo,
     introspectionRequestDurationMs,
     metricsText: async () => await registry.metrics(),

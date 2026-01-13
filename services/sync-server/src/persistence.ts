@@ -24,6 +24,27 @@ type PendingQueue = Promise<void>;
 
 const persistenceOrigin = Symbol("formula.sync-server.persistence");
 
+export type PersistenceOverloadScope = "doc" | "total";
+
+export type FilePersistenceOptions = {
+  /**
+   * Maximum number of pending persistence tasks per document.
+   *
+   * `0` disables the limit (unbounded).
+   */
+  maxQueueDepthPerDoc?: number;
+  /**
+   * Maximum number of pending persistence tasks across all documents.
+   *
+   * `0` disables the limit (unbounded).
+   */
+  maxQueueDepthTotal?: number;
+  /**
+   * Callback invoked when persistence backpressure disables a document.
+   */
+  onOverload?: (docName: string, scope: PersistenceOverloadScope) => void;
+};
+
 type EncryptionConfig =
   | { mode: "off" }
   | {
@@ -83,19 +104,32 @@ export async function migrateLegacyPlaintextFilesToEncryptedFormat(opts: {
 
 export class FilePersistence {
   private queues = new Map<string, PendingQueue>();
+  private pendingCountsByDoc = new Map<string, number>();
+  private pendingTotal = 0;
   private updateCounts = new Map<string, number>();
   private compactTimers = new Map<string, NodeJS.Timeout>();
   private readonly shouldPersist: (docName: string) => boolean;
   private readonly disabledDocs = new Set<string>();
+  private readonly maxQueueDepthPerDoc: number;
+  private readonly maxQueueDepthTotal: number;
+  private readonly onOverload?: FilePersistenceOptions["onOverload"];
 
   constructor(
     private readonly dir: string,
     private readonly logger: Logger,
     private readonly compactAfterUpdates: number,
     private readonly encryption: EncryptionConfig = { mode: "off" },
-    shouldPersist?: (docName: string) => boolean
+    shouldPersist?: (docName: string) => boolean,
+    opts: FilePersistenceOptions = {}
   ) {
     this.shouldPersist = shouldPersist ?? (() => true);
+    this.maxQueueDepthPerDoc = Math.max(0, opts.maxQueueDepthPerDoc ?? 0);
+    this.maxQueueDepthTotal = Math.max(0, opts.maxQueueDepthTotal ?? 0);
+    this.onOverload = opts.onOverload;
+  }
+
+  isDocDisabled(docName: string): boolean {
+    return this.disabledDocs.has(docName);
   }
 
   private docHashForDoc(docName: string): string {
@@ -106,7 +140,45 @@ export class FilePersistence {
     return path.join(this.dir, `${docHash}.yjs`);
   }
 
-  private enqueue(docName: string, task: () => Promise<void>): Promise<void> {
+  private triggerOverload(docName: string, scope: PersistenceOverloadScope) {
+    if (this.disabledDocs.has(docName)) return;
+    this.disabledDocs.add(docName);
+    const timer = this.compactTimers.get(docName);
+    if (timer) clearTimeout(timer);
+    this.compactTimers.delete(docName);
+    this.logger.warn({ docName, scope }, "persistence_queue_overloaded");
+    try {
+      this.onOverload?.(docName, scope);
+    } catch (err) {
+      this.logger.warn({ docName, err }, "persistence_overload_callback_failed");
+    }
+  }
+
+  private enqueue(
+    docName: string,
+    task: () => Promise<void>,
+    opts: { bypassLimits?: boolean } = {}
+  ): Promise<void> {
+    if (!opts.bypassLimits) {
+      const pendingForDoc = this.pendingCountsByDoc.get(docName) ?? 0;
+      if (this.maxQueueDepthPerDoc > 0 && pendingForDoc >= this.maxQueueDepthPerDoc) {
+        this.triggerOverload(docName, "doc");
+        return Promise.resolve();
+      }
+      if (this.maxQueueDepthTotal > 0 && this.pendingTotal >= this.maxQueueDepthTotal) {
+        this.triggerOverload(docName, "total");
+        return Promise.resolve();
+      }
+
+      this.pendingCountsByDoc.set(docName, pendingForDoc + 1);
+      this.pendingTotal += 1;
+    } else {
+      // Still track depth for observability, but never reject bypassed tasks.
+      const pendingForDoc = this.pendingCountsByDoc.get(docName) ?? 0;
+      this.pendingCountsByDoc.set(docName, pendingForDoc + 1);
+      this.pendingTotal += 1;
+    }
+
     const prev = this.queues.get(docName) ?? Promise.resolve();
     const next = prev
       .catch(() => {
@@ -115,6 +187,13 @@ export class FilePersistence {
       .then(task);
     this.queues.set(docName, next);
     void next.finally(() => {
+      this.pendingTotal = Math.max(0, this.pendingTotal - 1);
+      const remaining = (this.pendingCountsByDoc.get(docName) ?? 1) - 1;
+      if (remaining <= 0) {
+        this.pendingCountsByDoc.delete(docName);
+      } else {
+        this.pendingCountsByDoc.set(docName, remaining);
+      }
       if (this.queues.get(docName) === next) {
         this.queues.delete(docName);
       }
@@ -381,7 +460,7 @@ export class FilePersistence {
     const filePath = this.filePathForDocHash(docHash);
     await this.enqueue(docName, async () => {
       await fs.rm(filePath, { force: true });
-    });
+    }, { bypassLimits: true });
 
     // Reset per-document bookkeeping so future docs start from a clean slate.
     this.queues.delete(docName);
