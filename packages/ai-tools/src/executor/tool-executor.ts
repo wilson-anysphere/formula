@@ -987,8 +987,9 @@ export class ToolExecutor {
       case "iqr": {
         const multiplier = params.threshold ?? 1.5;
         const sorted = [...entries].sort((a, b) => a.value - b.value);
-        const q1 = quantile(sorted.map((e) => e.value), 0.25);
-        const q3 = quantile(sorted.map((e) => e.value), 0.75);
+        const sortedValues = sorted.map((e) => e.value);
+        const q1 = quantileSorted(sortedValues, 0.25);
+        const q3 = quantileSorted(sortedValues, 0.75);
         const iqr = q3 - q1;
         const low = q1 - multiplier * iqr;
         const high = q3 + multiplier * iqr;
@@ -1140,9 +1141,9 @@ export class ToolExecutor {
             break;
           }
           const sorted = [...values].sort((a, b) => a - b);
-          stats.q1 = quantile(sorted, 0.25);
-          stats.q2 = quantile(sorted, 0.5);
-          stats.q3 = quantile(sorted, 0.75);
+          stats.q1 = quantileSorted(sorted, 0.25);
+          stats.q2 = quantileSorted(sorted, 0.5);
+          stats.q3 = quantileSorted(sorted, 0.75);
           break;
         }
         case "correlation": {
@@ -2274,17 +2275,22 @@ function toNumber(cell: CellData): number | null {
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
-  return quantile(sorted, 0.5);
+  return quantileSorted(sorted, 0.5);
 }
 
-function quantile(sortedValues: number[], q: number): number {
-  if (sortedValues.length === 0) return NaN;
-  const sorted = [...sortedValues].sort((a, b) => a - b);
+function quantileSorted(sorted: number[], q: number): number {
+  if (sorted.length === 0) return NaN;
   const pos = (sorted.length - 1) * q;
   const base = Math.floor(pos);
   const rest = pos - base;
   if (sorted[base + 1] === undefined) return sorted[base]!;
   return sorted[base]! + rest * (sorted[base + 1]! - sorted[base]!);
+}
+
+function quantile(values: number[], q: number): number {
+  if (values.length === 0) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  return quantileSorted(sorted, q);
 }
 
 function mode(values: number[]): number | null {
