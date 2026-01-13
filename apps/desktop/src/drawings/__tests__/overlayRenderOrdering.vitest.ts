@@ -58,6 +58,11 @@ describe("DrawingOverlay render ordering", () => {
     const { ctx, calls } = createStubCanvasContext();
     const canvas = createStubCanvas(ctx);
 
+    // The overlay can optionally cancel in-flight renders via AbortController. Disable it so this test
+    // explicitly exercises the monotonic render sequence guard (the behavior we rely on in all
+    // environments, including those without AbortController support).
+    vi.stubGlobal("AbortController", undefined as unknown as typeof AbortController);
+
     const imagesById = new Map<string, ImageEntry>([
       ["a", { id: "a", bytes: new Uint8Array([1]), mimeType: "image/a" }],
       ["b", { id: "b", bytes: new Uint8Array([2]), mimeType: "image/b" }],
@@ -105,4 +110,3 @@ describe("DrawingOverlay render ordering", () => {
     expect(drawBitmaps.slice(lastBIndex + 1)).not.toContain(bitmapA);
   });
 });
-
