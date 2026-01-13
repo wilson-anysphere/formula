@@ -6,8 +6,8 @@
  * - Ensures the manifest contains updater entries for all expected targets.
  * - Ensures each updater entry references an asset that exists on the GitHub Release.
  * - Ensures each target references the correct *self-updatable* artifact type:
- *   - macOS: `.app.tar.gz` updater archive
- *   - Windows: `.msi` (Windows Installer)
+ *   - macOS: `.app.tar.gz` (preferred) or `.tar.gz` updater archive
+ *   - Windows: `.msi` and/or `.exe` (depending on updater strategy)
  *   - Linux: `.AppImage`
  * - Ensures all platform URLs are unique (no two targets colliding on the same asset URL).
  *
@@ -78,24 +78,30 @@ const EXPECTED_PLATFORMS = [
     key: "darwin-universal",
     label: "macOS (universal)",
     expectedAsset: {
-      description: `macOS updater archive (*.app.tar.gz)`,
-      matches: (assetName) => assetName.endsWith(".app.tar.gz"),
+      description: `macOS updater archive (*.app.tar.gz preferred; allow *.tar.gz)`,
+      matches: (assetName) => assetName.endsWith(".tar.gz"),
     },
   },
   {
     key: "windows-x86_64",
     label: "Windows (x64)",
     expectedAsset: {
-      description: `Windows updater installer (*.msi)`,
-      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+      description: `Windows updater installer (*.msi or *.exe)`,
+      matches: (assetName) => {
+        const lower = assetName.toLowerCase();
+        return lower.endsWith(".msi") || lower.endsWith(".exe");
+      },
     },
   },
   {
     key: "windows-aarch64",
     label: "Windows (ARM64)",
     expectedAsset: {
-      description: `Windows updater installer (*.msi)`,
-      matches: (assetName) => assetName.toLowerCase().endsWith(".msi"),
+      description: `Windows updater installer (*.msi or *.exe)`,
+      matches: (assetName) => {
+        const lower = assetName.toLowerCase();
+        return lower.endsWith(".msi") || lower.endsWith(".exe");
+      },
     },
   },
   {

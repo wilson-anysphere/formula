@@ -32,9 +32,9 @@ The table below documents what each platform key should point to in `latest.json
 
 | OS / Arch | Build target (Tauri `--target`) | `latest.json` platform key | Updater asset type (`platforms[key].url`) |
 | --- | --- | --- | --- |
-| macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-universal` | `*.app.tar.gz` (updater archive; **not** the `.dmg`) |
-| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (Windows Installer; updater runs this) |
-| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (Windows Installer; updater runs this) |
+| macOS universal (Intel + Apple Silicon) | `universal-apple-darwin` | `darwin-universal` | `*.app.tar.gz` (preferred) or `*.tar.gz` (updater archive; **not** the `.dmg`) |
+| Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` and/or `*.exe` (depending on updater strategy) |
+| Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` and/or `*.exe` (depending on updater strategy) |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `linux-x86_64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
 
 ### Notes

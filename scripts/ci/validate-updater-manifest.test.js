@@ -99,3 +99,29 @@ test("passes with distinct URLs and correct per-platform updater artifact types"
   assert.deepEqual(result.missingAssets, []);
   assert.equal(result.validatedTargets.length, 4);
 });
+
+test("accepts a macOS updater archive ending with .tar.gz (not .app.tar.gz)", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["darwin-universal"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula_universal.tar.gz";
+  assetNames.delete("Formula.app.tar.gz");
+  assetNames.add("Formula_universal.tar.gz");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.deepEqual(result.errors, []);
+});
+
+test("accepts Windows updater installers ending with .exe (NSIS strategy)", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["windows-x86_64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x64.exe";
+  platforms["windows-aarch64"].url =
+    "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_arm64.exe";
+  assetNames.delete("Formula_0.1.0_x64.msi");
+  assetNames.delete("Formula_0.1.0_arm64.msi");
+  assetNames.add("Formula_0.1.0_x64.exe");
+  assetNames.add("Formula_0.1.0_arm64.exe");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.deepEqual(result.errors, []);
+});
