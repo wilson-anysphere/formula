@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import io
 import json
@@ -47,6 +48,17 @@ class StepResult:
     duration_ms: int | None = None
     error: str | None = None
     details: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class LeakScanFailure:
+    """Returned by triage workers when --leak-scan detects suspicious plaintext.
+
+    We intentionally do not include the matched plaintext, only safe metadata (sha256 of match).
+    """
+
+    display_name: str
+    findings: list[dict[str, str]]
 
 
 def _now_ms() -> float:
@@ -698,10 +710,171 @@ def _compare_expectations(
     return regressions, improvements
 
 
+def _triage_one_path(
+    path_str: str,
+    *,
+    rust_exe: str,
+    diff_ignore: tuple[str, ...],
+    diff_limit: int,
+    recalc: bool,
+    render_smoke: bool,
+    leak_scan: bool,
+    fernet_key: str | None,
+) -> dict[str, Any] | LeakScanFailure:
+    """Worker entrypoint for triaging a single workbook path.
+
+    Note: Keep this function top-level and pickleable; it may run in a ProcessPoolExecutor.
+    """
+
+    path = Path(path_str)
+    try:
+        wb = read_workbook_input(path, fernet_key=fernet_key)
+        if leak_scan:
+            scan = scan_xlsx_bytes_for_leaks(wb.data)
+            if not scan.ok:
+                return LeakScanFailure(
+                    display_name=wb.display_name,
+                    findings=[
+                        {
+                            "kind": f.kind,
+                            "part_name": f.part_name,
+                            "match_sha256": f.match_sha256,
+                        }
+                        for f in scan.findings[:25]
+                    ],
+                )
+
+        return triage_workbook(
+            wb,
+            rust_exe=Path(rust_exe),
+            diff_ignore=set(diff_ignore),
+            diff_limit=diff_limit,
+            recalc=recalc,
+            render_smoke=render_smoke,
+        )
+    except Exception as e:  # noqa: BLE001
+        return {
+            "display_name": path.name,
+            "timestamp": utc_now_iso(),
+            "commit": github_commit_sha(),
+            "run_url": github_run_url(),
+            "steps": {"load": asdict(_step_failed(_now_ms(), e))},
+            "result": {"open_ok": False},
+            "failure_category": "triage_error",
+        }
+
+
+def _report_id_for_report(report: dict[str, Any], *, path: Path) -> str:
+    """Stable report ID (used for indexing and file naming).
+
+    Prefer the workbook content SHA from the report itself, but fall back to hashing the on-disk
+    bytes (e.g. for unreadable/encrypted inputs that failed before hashing).
+    """
+
+    sha = report.get("sha256")
+    if isinstance(sha, str) and sha:
+        return sha[:16]
+    return sha256_hex(path.read_bytes())[:16]
+
+
+def _report_filename_for_path(
+    report: dict[str, Any], *, path: Path, corpus_dir: Path
+) -> str:
+    """Deterministic, non-colliding report filename for a workbook path."""
+
+    report_id = _report_id_for_report(report, path=path)
+    try:
+        rel = path.relative_to(corpus_dir).as_posix()
+    except Exception:  # noqa: BLE001
+        rel = path.name
+    path_hash = sha256_hex(rel.encode("utf-8"))[:8]
+    return f"{report_id}-{path_hash}.json"
+
+
+def _triage_paths(
+    paths: list[Path],
+    *,
+    rust_exe: str,
+    diff_ignore: set[str],
+    diff_limit: int,
+    recalc: bool,
+    render_smoke: bool,
+    leak_scan: bool,
+    fernet_key: str | None,
+    jobs: int,
+    executor_cls: type[concurrent.futures.Executor] | None = None,
+) -> list[dict[str, Any]] | LeakScanFailure:
+    """Run triage over a list of workbook paths, possibly in parallel.
+
+    Returns either:
+    - ordered list of reports (matching `paths` ordering), or
+    - a LeakScanFailure (fail-fast signal for --leak-scan).
+    """
+
+    if jobs < 1:
+        jobs = 1
+
+    reports_by_index: list[dict[str, Any] | None] = [None] * len(paths)
+    diff_ignore_tuple = tuple(sorted({p for p in diff_ignore if p}))
+
+    if jobs == 1 or len(paths) <= 1:
+        for idx, path in enumerate(paths):
+            res = _triage_one_path(
+                str(path),
+                rust_exe=rust_exe,
+                diff_ignore=diff_ignore_tuple,
+                diff_limit=diff_limit,
+                recalc=recalc,
+                render_smoke=render_smoke,
+                leak_scan=leak_scan,
+                fernet_key=fernet_key,
+            )
+            if isinstance(res, LeakScanFailure):
+                return res
+            reports_by_index[idx] = res
+        return [r for r in reports_by_index if r is not None]
+
+    executor_cls = executor_cls or concurrent.futures.ProcessPoolExecutor
+    done = 0
+    with executor_cls(max_workers=jobs) as executor:
+        future_to_index: dict[concurrent.futures.Future[dict[str, Any] | LeakScanFailure], int] = {}
+        for idx, path in enumerate(paths):
+            fut = executor.submit(
+                _triage_one_path,
+                str(path),
+                rust_exe=rust_exe,
+                diff_ignore=diff_ignore_tuple,
+                diff_limit=diff_limit,
+                recalc=recalc,
+                render_smoke=render_smoke,
+                leak_scan=leak_scan,
+                fernet_key=fernet_key,
+            )
+            future_to_index[fut] = idx
+
+        for fut in concurrent.futures.as_completed(future_to_index):
+            idx = future_to_index[fut]
+            res = fut.result()
+            if isinstance(res, LeakScanFailure):
+                return res
+            reports_by_index[idx] = res
+            done += 1
+            # Keep logs readable: one progress line per workbook (printed by parent only).
+            print(f"[{done}/{len(paths)}] triaged {res.get('display_name', paths[idx].name)}")
+
+    return [r for r in reports_by_index if r is not None]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run corpus workbook triage.")
     parser.add_argument("--corpus-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Number of parallel triage workers to use (default: 1).",
+    )
     parser.add_argument(
         "--leak-scan",
         action="store_true",
@@ -741,6 +914,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.jobs < 1:
+        parser.error("--jobs must be >= 1")
+
     rust_exe = _build_rust_helper()
     diff_ignore = set(DEFAULT_DIFF_IGNORE) | {p for p in args.diff_ignore if p}
 
@@ -749,39 +925,36 @@ def main() -> int:
     ensure_dir(reports_dir)
 
     fernet_key = os.environ.get(args.fernet_key_env)
-    reports: list[dict[str, Any]] = []
-    for path in iter_workbook_paths(args.corpus_dir):
-        try:
-            wb = read_workbook_input(path, fernet_key=fernet_key)
-            if args.leak_scan:
-                scan = scan_xlsx_bytes_for_leaks(wb.data)
-                if not scan.ok:
-                    print(f"LEAKS DETECTED in {path.name} ({len(scan.findings)} findings)")
-                    for f in scan.findings[:25]:
-                        print(f"  {f.kind} in {f.part_name} sha256={f.match_sha256[:16]}")
-                    return 1
-            report = triage_workbook(
-                wb,
-                rust_exe=rust_exe,
-                diff_ignore=diff_ignore,
-                diff_limit=args.diff_limit,
-                recalc=args.recalc,
-                render_smoke=args.render_smoke,
-            )
-        except Exception as e:  # noqa: BLE001
-            report = {
-                "display_name": path.name,
-                "timestamp": utc_now_iso(),
-                "commit": github_commit_sha(),
-                "run_url": github_run_url(),
-                "steps": {"load": asdict(_step_failed(_now_ms(), e))},
-                "result": {"open_ok": False},
-                "failure_category": "triage_error",
-            }
+    paths = list(iter_workbook_paths(args.corpus_dir))
+    triage_out = _triage_paths(
+        paths,
+        rust_exe=str(rust_exe),
+        diff_ignore=diff_ignore,
+        diff_limit=args.diff_limit,
+        recalc=args.recalc,
+        render_smoke=args.render_smoke,
+        leak_scan=args.leak_scan,
+        fernet_key=fernet_key,
+        jobs=args.jobs,
+    )
 
-        reports.append(report)
-        report_id = (report.get("sha256") or sha256_hex(path.read_bytes()))[:16]
-        write_json(reports_dir / f"{report_id}.json", report)
+    if isinstance(triage_out, LeakScanFailure):
+        print(
+            f"LEAKS DETECTED in {triage_out.display_name} ({len(triage_out.findings)} findings)"
+        )
+        for f in triage_out.findings:
+            print(f"  {f['kind']} in {f['part_name']} sha256={f['match_sha256'][:16]}")
+        return 1
+
+    reports = triage_out
+    report_index_entries: list[dict[str, str]] = []
+    for path, report in zip(paths, reports, strict=True):
+        report_id = _report_id_for_report(report, path=path)
+        filename = _report_filename_for_path(report, path=path, corpus_dir=args.corpus_dir)
+        write_json(reports_dir / filename, report)
+        report_index_entries.append(
+            {"id": report_id, "display_name": report.get("display_name", path.name), "file": filename}
+        )
 
     index = {
         "timestamp": utc_now_iso(),
@@ -789,10 +962,7 @@ def main() -> int:
         "run_url": github_run_url(),
         "corpus_dir": str(args.corpus_dir),
         "report_count": len(reports),
-        "reports": [
-            {"id": r.get("sha256", "")[:16], "display_name": r.get("display_name")}
-            for r in reports
-        ],
+        "reports": report_index_entries,
     }
     write_json(args.out_dir / "index.json", index)
 
