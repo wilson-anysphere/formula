@@ -8,7 +8,7 @@ export { BranchService } from "./BranchService.js";
 export { YjsBranchStore } from "./store/YjsBranchStore.js";
 
 // Yjs adapters.
-export { yjsDocToDocumentState, applyDocumentStateToYjsDoc } from "./yjs/index.js";
+export { yjsDocToDocumentState, applyDocumentStateToYjsDoc, rowColToA1, a1ToRowCol } from "./yjs/index.js";
 export { branchStateFromYjsDoc, applyBranchStateToYjsDoc } from "./yjs/branchStateAdapter.js";
 
 // Pure helpers (safe in browser/Vite bundles). These are optional conveniences for

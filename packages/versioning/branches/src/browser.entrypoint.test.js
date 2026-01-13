@@ -8,6 +8,8 @@ test("branches browser entrypoint exports the browser-safe surface (no SQLiteBra
   assert.equal(typeof browser.YjsBranchStore, "function");
   assert.equal(typeof browser.yjsDocToDocumentState, "function");
   assert.equal(typeof browser.applyDocumentStateToYjsDoc, "function");
+  assert.equal(typeof browser.rowColToA1, "function");
+  assert.equal(typeof browser.a1ToRowCol, "function");
 
   // Pure helpers (safe).
   assert.equal(typeof browser.mergeDocumentStates, "function");
@@ -17,4 +19,3 @@ test("branches browser entrypoint exports the browser-safe surface (no SQLiteBra
   // Node-only store must never be exported from the browser entrypoint.
   assert.equal("SQLiteBranchStore" in browser, false);
 });
-
