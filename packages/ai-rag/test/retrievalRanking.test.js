@@ -4,6 +4,7 @@ import test from "node:test";
 import { HashEmbedder } from "../src/embedding/hashEmbedder.js";
 import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
 import { indexWorkbook } from "../src/pipeline/indexWorkbook.js";
+import { searchWorkbookRag } from "../src/retrieval/searchWorkbookRag.js";
 
 function makeWorkbook() {
   return {
@@ -40,9 +41,15 @@ test('query "revenue by region" ranks the revenue table above unrelated tables',
 
   await indexWorkbook({ workbook, vectorStore: store, embedder });
 
-  const [qVec] = await embedder.embedTexts(["revenue by region"]);
-  const results = await store.query(qVec, 2, {
-    filter: (m) => m.workbookId === workbook.id,
+  const results = await searchWorkbookRag({
+    queryText: "revenue by region",
+    workbookId: workbook.id,
+    topK: 2,
+    vectorStore: store,
+    embedder,
+    // Keep this test focused on vector similarity ranking.
+    rerank: false,
+    dedupe: false,
   });
 
   assert.equal(results[0].metadata.title, "RevenueByRegion");
