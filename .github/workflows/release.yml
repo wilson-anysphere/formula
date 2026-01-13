@@ -611,7 +611,7 @@ jobs:
         # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` (or `false`) as a GitHub Actions variable to
         # only run this step on Linux (useful if a hosted-runner regression makes the check flaky on
         # macOS/Windows while keeping at least one COI signal before publishing).
-        if: runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS || '1') == '1'
+        if: runner.os == 'Linux' || (vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0' && vars.FORMULA_COI_CHECK_ALL_PLATFORMS != 'false')
         run: pnpm -C apps/desktop check:coi
 
       - name: Cache pinned Tauri CLI binary (cargo-tauri)
