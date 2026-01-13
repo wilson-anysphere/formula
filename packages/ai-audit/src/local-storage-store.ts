@@ -10,30 +10,47 @@ export interface LocalStorageAIAuditStoreOptions {
    * Cap the number of stored entries (oldest dropped). Defaults to 1000.
    */
   max_entries?: number;
+  /**
+   * Maximum age in milliseconds. Entries older than (now - max_age_ms) are dropped
+   * at write-time and opportunistically on reads.
+   *
+   * If unset, age-based retention is disabled.
+   */
+  max_age_ms?: number;
 }
 
 export class LocalStorageAIAuditStore implements AIAuditStore {
   readonly key: string;
   readonly maxEntries: number;
+  readonly maxAgeMs?: number;
   private readonly memoryFallback: AIAuditEntry[] = [];
   private localStorageUnavailable: boolean = false;
 
   constructor(options: LocalStorageAIAuditStoreOptions = {}) {
     this.key = options.key ?? "formula_ai_audit_log_entries";
     this.maxEntries = options.max_entries ?? 1000;
+    this.maxAgeMs = options.max_age_ms;
   }
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
-    const entries = this.loadEntries();
+    const nowMs = Date.now();
+    let entries = this.loadEntries();
     entries.push(cloneAuditEntry(entry));
     entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+    entries = this.enforceAgeRetention(entries, nowMs);
     while (entries.length > this.maxEntries) entries.shift();
     this.saveEntries(entries);
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
     const { session_id, workbook_id, mode, limit } = filters;
-    const entries = this.loadEntries();
+    const nowMs = Date.now();
+    const loaded = this.loadEntries();
+    const entries = this.enforceAgeRetention(loaded, nowMs);
+    if (entries.length !== loaded.length) {
+      // Best-effort: persist purged entries so old data doesn't resurface if the app never logs again.
+      this.saveEntries(entries);
+    }
     let filtered = session_id ? entries.filter((entry) => entry.session_id === session_id) : entries.slice();
     if (workbook_id) {
       filtered = filtered.filter((entry) => matchesWorkbookFilter(entry, workbook_id));
@@ -44,6 +61,14 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     }
     filtered.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
     return typeof limit === "number" ? filtered.slice(0, limit) : filtered;
+  }
+
+  private enforceAgeRetention(entries: AIAuditEntry[], nowMs: number): AIAuditEntry[] {
+    const maxAgeMs = this.maxAgeMs;
+    if (!(typeof maxAgeMs === "number" && Number.isFinite(maxAgeMs) && maxAgeMs > 0)) return entries;
+    const cutoff = nowMs - maxAgeMs;
+    if (!Number.isFinite(cutoff)) return entries;
+    return entries.filter((entry) => entry.timestamp_ms >= cutoff);
   }
 
   private loadEntries(): AIAuditEntry[] {

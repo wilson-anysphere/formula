@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
@@ -30,6 +30,18 @@ class MemoryLocalStorage implements Storage {
   setItem(key: string, value: string): void {
     this.#data.set(key, value);
   }
+}
+
+function makeEntry(params: { id: string; session_id: string; timestamp_ms: number }): AIAuditEntry {
+  return {
+    id: params.id,
+    timestamp_ms: params.timestamp_ms,
+    session_id: params.session_id,
+    mode: "chat",
+    input: { prompt: "hello" },
+    model: "unit-test-model",
+    tool_calls: [],
+  };
 }
 
 describe("workbook_id filtering (legacy fallback)", () => {
@@ -80,3 +92,99 @@ describe("workbook_id filtering (legacy fallback)", () => {
   });
 });
 
+describe("LocalStorageAIAuditStore age-based retention", () => {
+  it("drops expired entries on logEntry()", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00.000Z"));
+
+    try {
+      const key = "audit_test_age_retention_log";
+      const store = new LocalStorageAIAuditStore({ key, max_age_ms: 1000 });
+
+      await store.logEntry(makeEntry({ id: "old", session_id: "s1", timestamp_ms: Date.now() }));
+
+      // Advance beyond max_age_ms and write a new entry. The previous entry should be purged on write.
+      vi.setSystemTime(Date.now() + 1500);
+      await store.logEntry(makeEntry({ id: "new", session_id: "s1", timestamp_ms: Date.now() }));
+
+      const raw = (globalThis as any).localStorage.getItem(key);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw!) as AIAuditEntry[];
+      expect(parsed.map((e) => e.id)).toEqual(["new"]);
+    } finally {
+      vi.useRealTimers();
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+
+  it("drops expired entries on listEntries() (best-effort purge)", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00.000Z"));
+
+    try {
+      const key = "audit_test_age_retention_list";
+      const store = new LocalStorageAIAuditStore({ key, max_age_ms: 1000 });
+
+      await store.logEntry(makeEntry({ id: "old", session_id: "s1", timestamp_ms: Date.now() }));
+
+      // Advance beyond max_age_ms and only read. listEntries() should purge the expired entry.
+      vi.setSystemTime(Date.now() + 1500);
+      const results = await store.listEntries({ session_id: "s1" });
+      expect(results).toEqual([]);
+
+      const raw = (globalThis as any).localStorage.getItem(key);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw!) as AIAuditEntry[];
+      expect(parsed).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+
+  it("applies retention to the in-memory fallback when localStorage is unavailable", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: undefined, configurable: true, writable: true });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-01T00:00:00.000Z"));
+
+    try {
+      const store = new LocalStorageAIAuditStore({ key: "audit_test_age_retention_memory", max_age_ms: 1000 });
+
+      await store.logEntry(makeEntry({ id: "old", session_id: "s1", timestamp_ms: Date.now() }));
+
+      // Advance beyond max_age_ms then list; the entry should be purged from the in-memory store.
+      vi.setSystemTime(Date.now() + 1500);
+      expect(await store.listEntries({ session_id: "s1" })).toEqual([]);
+
+      // If listEntries() only filtered without purging, rewinding time could make the entry "unexpired" again.
+      vi.setSystemTime(new Date("2024-01-01T00:00:00.500Z"));
+      expect(await store.listEntries({ session_id: "s1" })).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+});
