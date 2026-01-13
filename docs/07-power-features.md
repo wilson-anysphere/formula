@@ -8,6 +8,11 @@ Power features are what make Excel indispensable to professionals: Pivot Tables,
 
 ## Pivot Tables
 
+Implementation ownership + cross-crate data flow is defined in
+[ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
+The TypeScript shapes below are conceptual (product/UX-oriented) and are not the
+canonical persisted schema.
+
 ### Architecture
 
 ```typescript
