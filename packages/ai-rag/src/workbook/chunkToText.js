@@ -13,6 +13,10 @@ function formatScalar(value) {
     // Date#toString locale/timezone output).
     return value.toISOString();
   }
+  if (typeof value === "bigint") {
+    // BigInts can be extremely long; reuse the string truncation path.
+    return formatScalar(String(value));
+  }
   if (value instanceof Error) {
     const message = typeof value.message === "string" ? value.message.trim() : "";
     const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "Error";

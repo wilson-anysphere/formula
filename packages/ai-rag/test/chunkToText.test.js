@@ -73,6 +73,21 @@ test("chunkToText formats Date values as ISO strings", () => {
   assert.match(text, /Date=2024-01-02T03:04:05\.000Z/);
 });
 
+test("chunkToText truncates BigInt values via the string formatting path", () => {
+  const big = BigInt("1".repeat(100));
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Big" }], [{ v: big }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Big=1{57}\.\.\./);
+  assert.doesNotMatch(text, /1{80}/);
+});
+
 test("chunkToText formats object cell values via JSON for stable output", () => {
   const chunk = {
     kind: "table",
