@@ -140,6 +140,10 @@ mod tests {
             0x3D, 0x7D, 0x0B, 0x04, 0x2E, 0xCF, 0x02, 0xA7, 0xBC, 0xE1, 0x26, 0xA1, 0xE2,
             0x20, 0xE2, 0xC8,
         ];
+        let expected_key_block1: [u8; 16] = [
+            0xF8, 0x06, 0xD7, 0x4E, 0x99, 0x94, 0x8E, 0xE8, 0xD3, 0x68, 0xD6, 0x1C, 0xEA,
+            0xAA, 0x7C, 0x36,
+        ];
 
         let encrypted_verifier: [u8; 16] = [
             0xBB, 0xFF, 0x8B, 0x22, 0x0E, 0x9A, 0x35, 0x3E, 0x6E, 0xC5, 0xE1, 0x4A, 0x40,
@@ -162,6 +166,12 @@ mod tests {
         let derived_key =
             derive_biff8_cryptoapi_key(CALG_SHA1, password, &salt, spin_count, 0, key_len);
         assert_eq!(derived_key, expected_key, "derived_key mismatch");
+        let derived_key_block1 =
+            derive_biff8_cryptoapi_key(CALG_SHA1, password, &salt, spin_count, 1, key_len);
+        assert_eq!(
+            derived_key_block1, expected_key_block1,
+            "derived_key(block=1) mismatch"
+        );
 
         let (verifier, verifier_hash) = decrypt_biff8_cryptoapi_verifier(
             password,

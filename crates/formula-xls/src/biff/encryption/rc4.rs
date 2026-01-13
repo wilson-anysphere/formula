@@ -148,6 +148,7 @@ mod tests {
         let key_len = 5usize;
 
         let expected_key: [u8; 5] = [0x50, 0x0A, 0xE2, 0x80, 0xEE];
+        let expected_key_block1: [u8; 5] = [0x8E, 0xE6, 0xCF, 0x4E, 0x3C];
 
         let encrypted_verifier: [u8; 16] = [
             0x3A, 0xAE, 0x87, 0x68, 0x86, 0xB8, 0x19, 0xF4, 0x34, 0x28, 0x11, 0x4A, 0x4F,
@@ -169,6 +170,11 @@ mod tests {
 
         let derived_key = derive_biff8_rc4_key(password, &salt, 0, key_len);
         assert_eq!(derived_key, expected_key, "derived_key mismatch");
+        let derived_key_block1 = derive_biff8_rc4_key(password, &salt, 1, key_len);
+        assert_eq!(
+            derived_key_block1, expected_key_block1,
+            "derived_key(block=1) mismatch"
+        );
 
         let (verifier, verifier_hash) = decrypt_biff8_rc4_verifier(
             password,
