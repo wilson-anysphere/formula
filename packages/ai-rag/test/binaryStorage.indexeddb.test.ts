@@ -166,6 +166,34 @@ test("IndexedDBBinaryStorage remove deletes persisted bytes", async () => {
   expect(await listKeys(dbName, "binary")).not.toContain(storage.key);
 });
 
+test("IndexedDBBinaryStorage clears corrupted records on load", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-corrupt");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-corrupt",
+  });
+
+  // Write an invalid value directly into IndexedDB to simulate storage corruption.
+  const req = fakeIndexedDB.open(dbName, 1);
+  req.onupgradeneeded = () => {
+    const db = req.result;
+    if (!db.objectStoreNames.contains("binary")) db.createObjectStore("binary");
+  };
+  const db = await requestToPromise(req);
+  try {
+    const tx = db.transaction("binary", "readwrite");
+    tx.objectStore("binary").put("not-bytes", storage.key);
+    await transactionToPromise(tx);
+  } finally {
+    db.close();
+  }
+
+  expect(await listKeys(dbName, "binary")).toContain(storage.key);
+  await expect(storage.load()).resolves.toBeNull();
+  expect(await listKeys(dbName, "binary")).not.toContain(storage.key);
+});
+
 test("IndexedDBBinaryStorage retries opening after a transient open failure", async () => {
   const dbName = uniqueDbName("ai-rag-idb-retry");
   const storage = new IndexedDBBinaryStorage({

@@ -397,7 +397,18 @@ export class IndexedDBBinaryStorage {
     try {
       const value = await idbTransaction(db, this.storeName, "readonly", (store) => store.get(this.key));
       if (value == null) return null;
-      return await normalizeBinary(value);
+      try {
+        return await normalizeBinary(value);
+      } catch {
+        // Corrupted IndexedDB record (unexpected type / shape). Clear it so future
+        // loads don't repeatedly fail and callers can recover by re-indexing.
+        try {
+          await idbWrite(db, this.storeName, (store) => store.delete(this.key));
+        } catch {
+          // ignore
+        }
+        return null;
+      }
     } catch {
       return null;
     }
