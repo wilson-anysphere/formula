@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import type { SyncRole } from "./auth.js";
-import type { SyncServerMetrics } from "./metrics.js";
+import type { IntrospectionRequestResult, SyncServerMetrics } from "./metrics.js";
 
 export type SyncTokenIntrospectionResult = {
   active: boolean;
@@ -86,7 +86,7 @@ export function createSyncTokenIntrospectionClient(config: {
   maxConcurrent?: number;
   metrics?: Pick<
     SyncServerMetrics,
-    "introspectionOverCapacityTotal" | "introspectionRequestsTotal"
+    "introspectionOverCapacityTotal" | "introspectionRequestsTotal" | "introspectionRequestDurationMs"
   >;
 }): SyncTokenIntrospectionClient {
   const cache = new Map<
@@ -112,7 +112,7 @@ export function createSyncTokenIntrospectionClient(config: {
     // and sensitive) in the cache map keys.
     sha256Hex(`${params.token}\n${params.docId}\n${params.clientIp ?? ""}`);
 
-  const introspect: SyncTokenIntrospectionClient["introspect"] = async (params) => {
+  const introspectInner: SyncTokenIntrospectionClient["introspect"] = async (params) => {
     const key = cacheKey(params);
     const now = Date.now();
 
@@ -229,6 +229,29 @@ export function createSyncTokenIntrospectionClient(config: {
     } catch (err) {
       cache.delete(key);
       throw err;
+    }
+  };
+
+  const introspect: SyncTokenIntrospectionClient["introspect"] = async (params) => {
+    const startHr = process.hrtime.bigint();
+    let metricResult: IntrospectionRequestResult = "error";
+    try {
+      const value = await introspectInner(params);
+      metricResult = value.active ? "ok" : "inactive";
+      return value;
+    } catch (err) {
+      metricResult = "error";
+      throw err;
+    } finally {
+      const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+      try {
+        metrics?.introspectionRequestDurationMs.set(
+          { path: "jwt_revalidation", result: metricResult },
+          durationMs
+        );
+      } catch {
+        // ignore
+      }
     }
   };
 

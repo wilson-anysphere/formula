@@ -371,6 +371,17 @@ function createFallbackMetrics(): SyncServerMetrics {
     labelNames: ["backend", "encryption"],
   });
 
+  const introspectionRequestDurationMs = createGauge<"path" | "result">({
+    name: "sync_server_introspection_request_duration_ms",
+    help: "Last observed sync token introspection duration in milliseconds.",
+    labelNames: ["path", "result"],
+  });
+  for (const path of ["auth_mode", "jwt_revalidation"] as const) {
+    for (const result of ["ok", "inactive", "error"] as const) {
+      introspectionRequestDurationMs.set({ path, result }, 0);
+    }
+  }
+
   const setPersistenceInfo: SyncServerMetrics["setPersistenceInfo"] = (params) => {
     persistenceInfo.reset();
     persistenceInfo.set(
@@ -409,6 +420,7 @@ function createFallbackMetrics(): SyncServerMetrics {
     eventLoopDelayMs,
     persistenceInfo,
     setPersistenceInfo,
+    introspectionRequestDurationMs,
     metricsText: async () => await registry.metrics(),
   };
 }
@@ -425,6 +437,9 @@ export type WsConnectionRejectionReason =
   | "origin_not_allowed";
 
 export type RetentionSweepKind = "leveldb" | "tombstone";
+
+export type IntrospectionRequestPath = "auth_mode" | "jwt_revalidation";
+export type IntrospectionRequestResult = "ok" | "inactive" | "error";
 
 export type SyncServerMetrics = {
   registry: Registry;
@@ -463,6 +478,8 @@ export type SyncServerMetrics = {
     backend: "file" | "leveldb";
     encryptionEnabled: boolean;
   }) => void;
+
+  introspectionRequestDurationMs: Gauge<"path" | "result">;
 
   metricsText: () => Promise<string>;
 };
@@ -671,6 +688,18 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     registers: [registry],
   });
 
+  const introspectionRequestDurationMs = new promClient.Gauge({
+    name: "sync_server_introspection_request_duration_ms",
+    help: "Last observed sync token introspection duration in milliseconds.",
+    labelNames: ["path", "result"],
+    registers: [registry],
+  });
+  for (const path of ["auth_mode", "jwt_revalidation"] as const) {
+    for (const result of ["ok", "inactive", "error"] as const) {
+      introspectionRequestDurationMs.set({ path, result }, 0);
+    }
+  }
+
   const setPersistenceInfo = (params: {
     backend: "file" | "leveldb";
     encryptionEnabled: boolean;
@@ -712,6 +741,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     eventLoopDelayMs,
     persistenceInfo,
     setPersistenceInfo,
+    introspectionRequestDurationMs,
     metricsText: async () => await registry.metrics(),
   };
 }

@@ -6,6 +6,10 @@ import { normalizeRestriction } from "../../../packages/collab/permissions/index
 
 import type { AuthMode } from "./config.js";
 import { statusCodeForIntrospectionReason } from "./introspection-reasons.js";
+import type {
+  IntrospectionRequestResult,
+  SyncServerMetrics,
+} from "./metrics.js";
 
 export type SyncRole = "owner" | "admin" | "editor" | "commenter" | "viewer";
 
@@ -359,6 +363,7 @@ export async function authenticateRequest(
     introspectCache?: IntrospectCache | null;
     clientIp?: string | null;
     userAgent?: string | null;
+    metrics?: Pick<SyncServerMetrics, "introspectionRequestDurationMs">;
   } = {}
 ): Promise<AuthContext> {
   if (!token) throw new AuthError("Missing token", 401);
@@ -395,10 +400,33 @@ export async function authenticateRequest(
     }
 
     try {
-      const result = await introspectTokenWithRetry(auth, token, docName, {
-        clientIp: options.clientIp ?? null,
-        userAgent: options.userAgent ?? null,
-      });
+      let metricResult: IntrospectionRequestResult = "error";
+      const startHr = process.hrtime.bigint();
+      const result = await (async () => {
+        try {
+          const value = await introspectTokenWithRetry(auth, token, docName, {
+            clientIp: options.clientIp ?? null,
+            userAgent: options.userAgent ?? null,
+          });
+          metricResult = "ok";
+          return value;
+        } catch (err) {
+          const inactive =
+            err instanceof AuthError && (err.statusCode === 401 || err.statusCode === 403);
+          metricResult = inactive ? "inactive" : "error";
+          throw err;
+        } finally {
+          const durationMs = Number(process.hrtime.bigint() - startHr) / 1e6;
+          try {
+            options.metrics?.introspectionRequestDurationMs.set(
+              { path: "auth_mode", result: metricResult },
+              durationMs
+            );
+          } catch {
+            // ignore
+          }
+        }
+      })();
       const ctx: AuthContext = {
         userId: result.userId,
         tokenType: "introspect",

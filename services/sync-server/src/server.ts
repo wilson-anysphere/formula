@@ -1630,6 +1630,7 @@ export function createSyncServer(
             introspectCache,
             clientIp: ip,
             userAgent,
+            metrics,
           });
         } catch (err) {
           if (err instanceof AuthError) {

@@ -262,4 +262,16 @@ test("auth:introspect enforces roles and caches introspection results", async (t
     assert.ok(typeof call.clientIp === "string" && call.clientIp.length > 0);
     assert.notEqual(call.clientIp, "unknown");
   }
+
+  const metricsRes = await fetch(`${server.getHttpUrl()}/metrics`);
+  assert.equal(metricsRes.status, 200);
+  const metricsText = await metricsRes.text();
+  const match = metricsText.match(
+    /sync_server_introspection_request_duration_ms\{(?=[^}]*path="auth_mode")(?=[^}]*result="ok")[^}]*\}\s+([0-9eE+\-.]+)/
+  );
+  assert.ok(
+    match,
+    `Expected sync_server_introspection_request_duration_ms{path="auth_mode",result="ok"} in /metrics:\n${metricsText}`
+  );
+  assert.ok(Number(match[1]) > 0);
 });

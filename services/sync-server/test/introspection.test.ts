@@ -293,4 +293,16 @@ test("sync-server rejects connections when introspection marks token inactive", 
     assert.ok(typeof call.clientIp === "string" && call.clientIp.length > 0);
     assert.notEqual(call.clientIp, "unknown");
   }
+
+  const metricsRes = await fetch(`${syncServer.httpUrl}/metrics`);
+  assert.equal(metricsRes.status, 200);
+  const metricsText = await metricsRes.text();
+  const match = metricsText.match(
+    /sync_server_introspection_request_duration_ms\{(?=[^}]*path="jwt_revalidation")(?=[^}]*result="ok")[^}]*\}\s+([0-9eE+\-.]+)/
+  );
+  assert.ok(
+    match,
+    `Expected sync_server_introspection_request_duration_ms{path="jwt_revalidation",result="ok"} in /metrics:\n${metricsText}`
+  );
+  assert.ok(Number(match[1]) > 0);
 });
