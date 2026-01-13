@@ -25,8 +25,11 @@ import {
   classifyText,
   extractWorkbookSchema,
   summarizeWorkbookSchema,
-  parseA1Range,
   trimMessagesToBudget,
+  extractSheetSchema,
+  summarizeSheetSchema,
+  summarizeRegion,
+  parseA1Range,
   RagIndex,
   isLikelyHeaderRow,
   headSampleRows,
@@ -113,6 +116,14 @@ type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true 
    WorkbookSchema extends { id: string; sheets: Array<{ name: string }>; tables: unknown[]; namedRanges: unknown[] } ? true : false
  >;
  type _SummarizeWorkbook_Return = Assert<ReturnType<typeof summarizeWorkbookSchema> extends string ? true : false>;
+ 
+ // --- Sheet schema summarization ---
+ type SheetSummary = ReturnType<typeof summarizeSheetSchema>;
+ type _SummarizeSheet_NotAny = Assert<IsAny<SheetSummary> extends false ? true : false>;
+ type _SummarizeSheet_Return = Assert<SheetSummary extends string ? true : false>;
+ type RegionSummary = ReturnType<typeof summarizeRegion>;
+ type _SummarizeRegion_NotAny = Assert<IsAny<RegionSummary> extends false ? true : false>;
+ type _SummarizeRegion_Return = Assert<RegionSummary extends string ? true : false>;
 
 // Basic runtime sanity checks (also ensures the compiler doesn't tree-shake the imports).
 void EXCEL_MAX_ROWS;
@@ -149,6 +160,9 @@ const wbSchema = extractWorkbookSchema({
 });
 wbSchema.tables[0]?.rangeA1;
 void summarizeWorkbookSchema(wbSchema);
+const sheetSchema = extractSheetSchema({ name: "Sheet1", values: [["Header", "Value"], ["A", 1]] });
+void summarizeSheetSchema(sheetSchema, { maxNamedRanges: 1, includeNamedRanges: false });
+void summarizeRegion((sheetSchema.tables[0] ?? sheetSchema.dataRegions[0])!);
 const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
 const ref: RegionRef = { type: "table", index: 0 };
 scoreRegionForQuery(ref, schema, "revenue");
