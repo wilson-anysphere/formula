@@ -209,19 +209,21 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         },
     );
 
-    for sheet in sheets {
+    for (sheet_index, sheet) in sheets.into_iter().enumerate() {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
-        let ws = workbook
-            .sheet_mut(ws_id)
-            .expect("sheet just inserted must exist");
-        ws.xlsx_sheet_id = Some(sheet.sheet_id);
-        ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
-        ws.visibility = match sheet.state.as_deref() {
-            Some("hidden") => SheetVisibility::Hidden,
-            Some("veryHidden") => SheetVisibility::VeryHidden,
-            _ => SheetVisibility::Visible,
-        };
+        {
+            let ws = workbook
+                .sheet_mut(ws_id)
+                .expect("sheet just inserted must exist");
+            ws.xlsx_sheet_id = Some(sheet.sheet_id);
+            ws.xlsx_rel_id = Some(sheet.relationship_id.clone());
+            ws.visibility = match sheet.state.as_deref() {
+                Some("hidden") => SheetVisibility::Hidden,
+                Some("veryHidden") => SheetVisibility::VeryHidden,
+                _ => SheetVisibility::Visible,
+            };
+        }
 
         let sheet_xml = read_zip_part_optional(archive, &sheet.path)?.ok_or(
             ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
@@ -231,11 +233,42 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         let sheet_xml_str = std::str::from_utf8(&sheet_xml)?;
 
         // Optional metadata: best-effort.
-        ws.tab_color = parse_sheet_tab_color(sheet_xml_str).unwrap_or(None);
+        let tab_color = parse_sheet_tab_color(sheet_xml_str).unwrap_or(None);
 
         // Conditional formatting: best-effort. This is parsed via a streaming extractor so we
         // don't DOM-parse the entire worksheet XML.
-        if let Ok(parsed) = parse_worksheet_conditional_formatting_streaming(sheet_xml_str) {
+        let parsed_conditional_formatting =
+            parse_worksheet_conditional_formatting_streaming(sheet_xml_str).ok();
+
+        // Merged cells (must be parsed before cell content so we don't treat interior
+        // cells as value-bearing).
+        let merged_cells = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str).ok();
+
+        // Worksheet relationships are needed to resolve drawings, external hyperlink targets, and
+        // table parts.
+        let rels_part = rels_for_part(&sheet.path);
+        let rels_xml_bytes = read_zip_part_optional(archive, &rels_part)?;
+        let rels_xml = rels_xml_bytes
+            .as_deref()
+            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+
+        // Floating drawings (images, shapes, charts) anchored to the sheet.
+        let drawing_objects = load_sheet_drawings_from_archive(
+            sheet_index,
+            &sheet.path,
+            &sheet_xml,
+            rels_xml_bytes.as_deref(),
+            archive,
+            &mut workbook,
+        );
+
+        let ws = workbook
+            .sheet_mut(ws_id)
+            .expect("sheet just inserted must exist");
+
+        ws.tab_color = tab_color;
+
+        if let Some(parsed) = parsed_conditional_formatting {
             if !parsed.rules.is_empty() {
                 ws.conditional_formatting_rules = parsed.rules;
                 let dxfs = conditional_formatting_dxfs
@@ -244,20 +277,13 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             }
         }
 
-        // Merged cells (must be parsed before cell content so we don't treat interior
-        // cells as value-bearing).
-        if let Ok(merges) = crate::merge_cells::read_merge_cells_from_worksheet_xml(sheet_xml_str) {
+        if let Some(merges) = merged_cells {
             for range in merges {
                 let _ = ws.merged_regions.add(range);
             }
         }
 
-        // Worksheet relationships are needed to resolve external hyperlink targets and table parts.
-        let rels_part = rels_for_part(&sheet.path);
-        let rels_xml_bytes = read_zip_part_optional(archive, &rels_part)?;
-        let rels_xml = rels_xml_bytes
-            .as_deref()
-            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+        ws.drawings.extend(drawing_objects);
 
         ws.hyperlinks = parse_worksheet_hyperlinks(sheet_xml_str, rels_xml).unwrap_or_default();
 
@@ -523,6 +549,71 @@ fn attach_tables_from_part_getter<'a, F>(
         table.part_path = Some(target);
         worksheet.tables.push(table);
     }
+}
+
+fn load_sheet_drawings_from_archive<R: Read + Seek>(
+    sheet_index: usize,
+    sheet_part: &str,
+    sheet_xml: &[u8],
+    sheet_rels_xml: Option<&[u8]>,
+    archive: &mut ZipArchive<R>,
+    workbook: &mut Workbook,
+) -> Vec<DrawingObject> {
+    let drawing_rel_ids = match parse_sheet_drawing_part_ids(sheet_xml) {
+        Ok(ids) => ids,
+        Err(_) => Vec::new(),
+    };
+    if drawing_rel_ids.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(rels_xml) = sheet_rels_xml else {
+        return Vec::new();
+    };
+
+    let relationships = match crate::openxml::parse_relationships(rels_xml) {
+        Ok(rels) => rels,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut rels_by_id: HashMap<String, crate::openxml::Relationship> =
+        HashMap::with_capacity(relationships.len());
+    for rel in relationships {
+        rels_by_id.insert(rel.id.clone(), rel);
+    }
+
+    let mut objects = Vec::new();
+    let mut seen_drawing_parts: HashSet<String> = HashSet::new();
+
+    for rel_id in drawing_rel_ids {
+        let Some(rel) = rels_by_id.get(&rel_id) else {
+            continue;
+        };
+        if rel.type_uri != REL_TYPE_DRAWING {
+            continue;
+        }
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        let drawing_part = resolve_target(sheet_part, &rel.target);
+        if !seen_drawing_parts.insert(drawing_part.clone()) {
+            continue;
+        }
+
+        let parsed =
+            match DrawingPart::parse_from_archive(sheet_index, &drawing_part, archive, workbook) {
+                Ok(part) => part,
+                Err(_) => continue,
+            };
+        objects.extend(parsed.objects);
+    }
+
+    objects
 }
 
 fn load_sheet_drawings_from_parts(

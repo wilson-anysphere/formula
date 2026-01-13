@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{Read, Seek};
 
 use formula_model::drawings::{
     Anchor, AnchorPoint, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize, ImageData,
@@ -8,7 +9,9 @@ use roxmltree::{Document, Node};
 
 use crate::path::resolve_target;
 use crate::relationships::{Relationship, Relationships};
+use crate::zip_util::open_zip_part;
 use crate::XlsxError;
+use zip::ZipArchive;
 
 type Result<T> = std::result::Result<T, XlsxError>;
 
@@ -226,6 +229,197 @@ impl DrawingPart {
         })
     }
 
+    /// Streaming-friendly parser that reads only the required drawing parts from a ZIP archive.
+    ///
+    /// This is best-effort: missing relationship parts or media payloads will result in fewer
+    /// objects/images being materialized, but should not prevent parsing the rest of the drawing.
+    pub fn parse_from_archive<R: Read + Seek>(
+        sheet_index: usize,
+        path: &str,
+        archive: &mut ZipArchive<R>,
+        workbook: &mut formula_model::Workbook,
+    ) -> Result<Self> {
+        let rels_path = drawing_rels_path(path);
+        let relationships = match read_zip_part_optional(archive, &rels_path)? {
+            Some(bytes) => std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|xml| Relationships::from_xml(xml).ok())
+                .unwrap_or_default(),
+            None => Relationships::default(),
+        };
+
+        let drawing_bytes = read_zip_part_optional(archive, path)?
+            .ok_or_else(|| XlsxError::MissingPart(path.to_string()))?;
+        let drawing_xml = std::str::from_utf8(&drawing_bytes)
+            .map_err(|e| XlsxError::Invalid(format!("drawing xml not utf-8: {e}")))?;
+
+        let doc = Document::parse(drawing_xml)?;
+        let root_xmlns = extract_root_xmlns(doc.root_element());
+        let mut objects = Vec::new();
+
+        for (z, anchor_node) in doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .enumerate()
+        {
+            let anchor_tag = anchor_node.tag_name().name();
+            if anchor_tag != "oneCellAnchor"
+                && anchor_tag != "twoCellAnchor"
+                && anchor_tag != "absoluteAnchor"
+            {
+                continue;
+            }
+
+            let anchor = match parse_anchor(&anchor_node) {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            let anchor_preserved = parse_anchor_preserved(&anchor_node, drawing_xml);
+
+            if let Some(pic) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "pic")
+            {
+                if let Ok((id, pic_xml, embed)) = parse_pic(&pic, drawing_xml) {
+                    if let Ok(image_id) = resolve_image_id_from_archive(
+                        &relationships,
+                        &embed,
+                        path,
+                        archive,
+                        workbook,
+                    ) {
+                        let mut preserved = anchor_preserved.clone();
+                        preserved.insert("xlsx.embed_rel_id".to_string(), embed.clone());
+                        preserved.insert("xlsx.pic_xml".to_string(), pic_xml);
+
+                        let size =
+                            extract_size_from_transform(&pic).or_else(|| size_from_anchor(anchor));
+
+                        objects.push(DrawingObject {
+                            id,
+                            kind: DrawingObjectKind::Image { image_id },
+                            anchor,
+                            z_order: z as i32,
+                            size,
+                            preserved,
+                        });
+                        continue;
+                    }
+                }
+                // Fall back to preserving the full anchor subtree when we can't resolve the image.
+            }
+
+            if let Some(sp) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "sp")
+            {
+                if let Ok((id, sp_xml)) = parse_named_node(&sp, drawing_xml, "cNvPr") {
+                    let size =
+                        extract_size_from_transform(&sp).or_else(|| size_from_anchor(anchor));
+                    objects.push(DrawingObject {
+                        id,
+                        kind: DrawingObjectKind::Shape { raw_xml: sp_xml },
+                        anchor,
+                        z_order: z as i32,
+                        size,
+                        preserved: anchor_preserved.clone(),
+                    });
+                    continue;
+                }
+                // Fall back to preserving the full anchor subtree when we can't parse the shape.
+            }
+
+            if let Some(frame) = anchor_node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
+            {
+                if let Ok((id, frame_xml)) = parse_named_node(&frame, drawing_xml, "cNvPr") {
+                    let chart_node = frame
+                        .descendants()
+                        .find(|n| n.is_element() && n.tag_name().name() == "chart");
+
+                    let graphic_data_is_chart = frame
+                        .descendants()
+                        .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
+                        .and_then(|n| n.attribute("uri"))
+                        .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
+
+                    let size =
+                        extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
+
+                    if chart_node.is_some() || graphic_data_is_chart {
+                        if let Some(chart_rel_id) = chart_node
+                            .and_then(|n| {
+                                n.attribute((REL_NS, "id"))
+                                    .or_else(|| n.attribute("r:id"))
+                                    .or_else(|| n.attribute("id"))
+                            })
+                            .map(|s| s.to_string())
+                        {
+                            objects.push(DrawingObject {
+                                id,
+                                kind: DrawingObjectKind::ChartPlaceholder {
+                                    rel_id: chart_rel_id,
+                                    raw_xml: frame_xml,
+                                },
+                                anchor,
+                                z_order: z as i32,
+                                size,
+                                preserved: anchor_preserved.clone(),
+                            });
+                        } else {
+                            let raw_anchor =
+                                slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                            objects.push(DrawingObject {
+                                id,
+                                kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                                anchor,
+                                z_order: z as i32,
+                                size,
+                                preserved: anchor_preserved.clone(),
+                            });
+                        }
+                    } else {
+                        let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                        objects.push(DrawingObject {
+                            id,
+                            kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                            anchor,
+                            z_order: z as i32,
+                            size,
+                            preserved: anchor_preserved.clone(),
+                        });
+                    }
+                    continue;
+                }
+                // Fall back to preserving the full anchor subtree when we can't parse the frame.
+            }
+
+            // Unknown anchor type: preserve the entire anchor subtree.
+            let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+            objects.push(DrawingObject {
+                id: DrawingObjectId((z + 1) as u32),
+                kind: DrawingObjectKind::Unknown {
+                    raw_xml: raw_anchor,
+                },
+                anchor,
+                z_order: z as i32,
+                size: None,
+                preserved: anchor_preserved,
+            });
+        }
+
+        Ok(Self {
+            sheet_index,
+            path: path.to_string(),
+            rels_path,
+            objects,
+            relationships,
+            root_xmlns,
+        })
+    }
+
     pub fn create_new(sheet_index: usize) -> Result<(Self, String)> {
         // Default new part names. Callers may rename by updating `path`/`rels_path`.
         let path = format!("xl/drawings/drawing{}.xml", sheet_index + 1);
@@ -406,6 +600,73 @@ fn escape_xml_attr(out: &mut String, value: &str) {
             _ => out.push(ch),
         }
     }
+}
+
+fn read_zip_part_optional<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>> {
+    match open_zip_part(archive, name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn resolve_image_id_from_archive<R: Read + Seek>(
+    relationships: &Relationships,
+    embed_rel_id: &str,
+    drawing_path: &str,
+    archive: &mut ZipArchive<R>,
+    workbook: &mut formula_model::Workbook,
+) -> Result<ImageId> {
+    let rel = relationships.get(embed_rel_id).ok_or_else(|| {
+        XlsxError::Invalid(format!(
+            "drawing references missing image relationship {embed_rel_id}"
+        ))
+    })?;
+    if rel
+        .target_mode
+        .as_deref()
+        .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+    {
+        return Err(XlsxError::Invalid(format!(
+            "image relationship {embed_rel_id} is external"
+        )));
+    }
+
+    let target_path = resolve_target(drawing_path, &rel.target);
+    let file_name = target_path
+        .strip_prefix("xl/media/")
+        .unwrap_or(&target_path)
+        .to_string();
+    let image_id = ImageId::new(file_name);
+
+    if workbook.images.get(&image_id).is_none() {
+        // Best-effort: if the media part is missing, still return the image id.
+        if let Some(bytes) = read_zip_part_optional(archive, &target_path)? {
+            let ext = image_id
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, ext)| ext)
+                .unwrap_or("");
+            workbook.images.insert(
+                image_id.clone(),
+                ImageData {
+                    bytes,
+                    content_type: Some(content_type_for_extension(ext).to_string()),
+                },
+            );
+        }
+    }
+    Ok(image_id)
 }
 
 pub fn load_media_parts(workbook: &mut formula_model::Workbook, parts: &BTreeMap<String, Vec<u8>>) {
