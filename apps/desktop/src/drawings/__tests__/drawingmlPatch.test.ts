@@ -44,6 +44,13 @@ describe("DrawingML patch helpers", () => {
     const out = patchXfrmOff(input, 10, 20);
     expect(out).toContain(`<a:off x="10" y="20"/>`);
   });
+
+  it("patchXfrmOff does not touch namespaced attributes (guardrail)", () => {
+    const input = `<a:xfrm><a:off r:x="99" r:y="88"/><a:ext cx="3" cy="4"/></a:xfrm>`;
+    const out = patchXfrmOff(input, 10, 20);
+    // No-op because there is no plain `x=`/`y=` attribute to patch.
+    expect(out).toBe(input);
+  });
 });
 
 describe("duplicateDrawingObject", () => {
