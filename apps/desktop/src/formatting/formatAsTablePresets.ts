@@ -1,5 +1,5 @@
 import type { DocumentController } from "../document/documentController.js";
-import type { CellRange } from "./toolbar.js";
+import { applyOutsideBorders, type CellRange } from "./toolbar.js";
 
 export type FormatAsTablePresetId = "light" | "medium" | "dark";
 
@@ -123,26 +123,17 @@ export function applyFormatAsTablePreset(doc: DocumentController, sheetId: strin
 
 function applyTableBorders(doc: DocumentController, sheetId: string, table: CellRange, preset: FormatAsTablePreset): boolean {
   const style = preset.borders.style;
-  const outlineEdge = { style, color: preset.borders.outlineColor };
   const innerEdge = { style, color: preset.borders.innerHorizontalColor };
   const label = "Format as Table";
   let applied = true;
 
-  const applyBorder = (target: CellRange, patch: Record<string, any>) => {
-    const ok = doc.setRangeFormat(sheetId, target, patch, { label });
-    if (ok === false) applied = false;
-  };
+  const okOutline = applyOutsideBorders(doc, sheetId, table, { style, color: preset.borders.outlineColor });
+  if (okOutline === false) applied = false;
 
   const startRow = table.start.row;
   const endRow = table.end.row;
   const startCol = table.start.col;
   const endCol = table.end.col;
-
-  // Outline border (thin box).
-  applyBorder({ start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } }, { border: { top: outlineEdge } });
-  applyBorder({ start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } }, { border: { bottom: outlineEdge } });
-  applyBorder({ start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } }, { border: { left: outlineEdge } });
-  applyBorder({ start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } }, { border: { right: outlineEdge } });
 
   // Interior horizontal separators for readability.
   if (endRow > startRow) {
@@ -150,7 +141,8 @@ function applyTableBorders(doc: DocumentController, sheetId: string, table: Cell
       start: { row: startRow, col: startCol },
       end: { row: endRow - 1, col: endCol },
     };
-    applyBorder(interiorRows, { border: { bottom: innerEdge } });
+    const okInner = doc.setRangeFormat(sheetId, interiorRows, { border: { bottom: innerEdge } }, { label });
+    if (okInner === false) applied = false;
   }
 
   return applied;

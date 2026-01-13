@@ -40,6 +40,13 @@ export function applyAllBorders(
   options?: { style?: string; color?: string },
 ): boolean;
 
+export function applyOutsideBorders(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { style?: string; color?: string },
+): boolean;
+
 export function setHorizontalAlign(
   doc: DocumentController,
   sheetId: string,
