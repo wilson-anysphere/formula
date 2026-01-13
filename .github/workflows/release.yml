@@ -55,6 +55,8 @@ env:
   # Keep release builds on the same Node.js major as CI (see ci.yml) to avoid
   # "works in CI, breaks in release" drift.
   NODE_VERSION: 22
+  # Keep in sync with apps/desktop/scripts/ensure-pyodide-assets.mjs
+  PYODIDE_VERSION: "0.25.1"
   # Pin wasm-pack for reproducible tagged releases (avoid `cargo install wasm-pack`
   # pulling newer incompatible versions). Keep this in sync with ci.yml/perf.yml.
   WASM_PACK_VERSION: 0.13.1
@@ -623,6 +625,14 @@ jobs:
           # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
           sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64
+
+      - name: Cache Pyodide assets
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: apps/desktop/public/pyodide/
+          key: pyodide-v${{ env.PYODIDE_VERSION }}-${{ runner.os }}
+          restore-keys: |
+            pyodide-v${{ env.PYODIDE_VERSION }}-
 
       - name: Install JS dependencies
         # Prefer cached pnpm store entries to reduce network flakiness on reruns.
