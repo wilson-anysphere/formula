@@ -1,0 +1,161 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { DrawingOverlay } from "../../drawings/overlay";
+import { SpreadsheetApp } from "../spreadsheetApp";
+
+function createInMemoryLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+    setItem: (key: string, value: string) => {
+      store.set(String(key), String(value));
+    },
+    removeItem: (key: string) => {
+      store.delete(String(key));
+    },
+    clear: () => {
+      store.clear();
+    },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  } as Storage;
+}
+
+function createMockCanvasContext(): CanvasRenderingContext2D {
+  const noop = () => {};
+  const gradient = { addColorStop: noop } as any;
+  const context = new Proxy(
+    {
+      canvas: document.createElement("canvas"),
+      measureText: (text: string) => ({ width: text.length * 8 }),
+      createLinearGradient: () => gradient,
+      createPattern: () => null,
+      getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
+      putImageData: noop,
+    },
+    {
+      get(target, prop) {
+        if (prop in target) return (target as any)[prop];
+        return noop;
+      },
+      set(target, prop, value) {
+        (target as any)[prop] = value;
+        return true;
+      },
+    },
+  );
+  return context as any;
+}
+
+function createRoot(): HTMLElement {
+  const root = document.createElement("div");
+  root.tabIndex = 0;
+  root.getBoundingClientRect = () =>
+    ({
+      width: 800,
+      height: 600,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 600,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    }) as any;
+  document.body.appendChild(root);
+  return root;
+}
+
+describe("SpreadsheetApp drawing overlay (legacy grid)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  beforeEach(() => {
+    document.body.innerHTML = "";
+
+    const storage = createInMemoryLocalStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+    storage.clear();
+
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      configurable: true,
+      value: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      },
+    });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+
+    Object.defineProperty(window, "devicePixelRatio", { configurable: true, value: 2 });
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value: () => createMockCanvasContext(),
+    });
+
+    (globalThis as any).ResizeObserver = class {
+      observe() {}
+      disconnect() {}
+    };
+  });
+
+  it("mounts between the base + content canvases and resizes with DPR", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
+    try {
+      const resizeSpy = vi.spyOn(DrawingOverlay.prototype, "resize");
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+      expect(app.getGridMode()).toBe("legacy");
+
+      const drawingCanvas = root.querySelector<HTMLCanvasElement>('[data-testid="drawing-layer-canvas"]');
+      expect(drawingCanvas).not.toBeNull();
+
+      const gridCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--base");
+      const contentCanvas = root.querySelector<HTMLCanvasElement>("canvas.grid-canvas--content");
+      expect(gridCanvas).not.toBeNull();
+      expect(contentCanvas).not.toBeNull();
+
+      const children = Array.from(root.children);
+      const gridIdx = children.indexOf(gridCanvas!);
+      const drawingIdx = children.indexOf(drawingCanvas!);
+      const contentIdx = children.indexOf(contentCanvas!);
+      expect(gridIdx).toBeGreaterThanOrEqual(0);
+      expect(drawingIdx).toBeGreaterThan(gridIdx);
+      expect(drawingIdx).toBeLessThan(contentIdx);
+
+      expect(resizeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          width: 800 - 48,
+          height: 600 - 24,
+          dpr: 2,
+        }),
+      );
+      expect(drawingCanvas!.width).toBe((800 - 48) * 2);
+      expect(drawingCanvas!.height).toBe((600 - 24) * 2);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+});
+
