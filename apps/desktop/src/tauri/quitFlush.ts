@@ -29,8 +29,12 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return promise;
 
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let didTimeout = false;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
-    timeoutId = setTimeout(() => reject(new QuitFlushTimeoutError(message)), timeoutMs);
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      reject(new QuitFlushTimeoutError(message));
+    }, timeoutMs);
     // Avoid keeping Node test processes alive due to a quit-timeout timer.
     (timeoutId as any).unref?.();
   });
@@ -39,6 +43,11 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
     return await Promise.race([promise, timeoutPromise]);
   } finally {
     if (timeoutId != null) clearTimeout(timeoutId);
+    if (didTimeout) {
+      // If the underlying operation continues in the background and later rejects,
+      // ensure it doesn't surface as an unhandled rejection.
+      promise.catch(() => {});
+    }
   }
 }
 
@@ -107,7 +116,11 @@ export async function flushCollabLocalPersistenceBestEffort(options: {
   }
 
   try {
-    await withTimeout(Promise.resolve().then(() => session.flushLocalPersistence()), flushTimeoutMs, "Timed out flushing collab persistence");
+    await withTimeout(
+      Promise.resolve().then(() => session.flushLocalPersistence()),
+      flushTimeoutMs,
+      "Timed out flushing collab persistence",
+    );
   } catch (err) {
     try {
       // Avoid printing any potentially sensitive state (tokens, cell contents). We log only
@@ -119,4 +132,3 @@ export async function flushCollabLocalPersistenceBestEffort(options: {
     }
   }
 }
-

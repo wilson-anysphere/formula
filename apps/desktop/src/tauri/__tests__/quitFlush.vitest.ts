@@ -68,5 +68,43 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toMatch(/Timed out flushing collab persistence/i);
   });
-});
 
+  it("does not emit an unhandled rejection if flushLocalPersistence rejects after the timeout", async () => {
+    vi.useFakeTimers();
+
+    const flushLocalPersistence = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          setTimeout(() => reject(new Error("late failure")), 100);
+        }),
+    );
+    const warn = vi.fn();
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const promise = flushCollabLocalPersistenceBestEffort({
+        session: { flushLocalPersistence },
+        logger: { warn },
+        flushTimeoutMs: 50,
+        idleTimeoutMs: 0,
+      });
+
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(promise).resolves.toBeUndefined();
+
+      // Let the underlying promise reject after we've already timed out.
+      await vi.advanceTimersByTimeAsync(100);
+      // Allow Node a turn to emit any unhandled rejection events.
+      await Promise.resolve();
+
+      expect(unhandled).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+});
