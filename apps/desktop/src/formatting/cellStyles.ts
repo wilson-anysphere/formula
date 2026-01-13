@@ -17,29 +17,30 @@ export type CellStylePreset = {
 
 export const GOOD_BAD_NEUTRAL_CELL_STYLE_PRESETS: Record<GoodBadNeutralCellStyleId, CellStylePreset> = {
   // These colors match Excel's commonly used "Good, Bad, and Neutral" palette.
-  // (#AARRGGBB format)
+  // Stored as OOXML-style ARGB strings (AARRGGBB) so they round-trip with workbook formatting
+  // without hardcoding CSS hex colors (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
   good: {
     id: "good",
     label: "Good",
     description: "Green fill, dark text",
-    fillColor: "#FFC6EFCE",
-    fontColor: "#FF006100",
+    fillColor: "FFC6EFCE",
+    fontColor: "FF006100",
     bold: true,
   },
   bad: {
     id: "bad",
     label: "Bad",
     description: "Red fill",
-    fillColor: "#FFFFC7CE",
-    fontColor: "#FF9C0006",
+    fillColor: "FFFFC7CE",
+    fontColor: "FF9C0006",
     bold: true,
   },
   neutral: {
     id: "neutral",
     label: "Neutral",
     description: "Yellow/gray fill",
-    fillColor: "#FFFFEB9C",
-    fontColor: "#FF9C6500",
+    fillColor: "FFFFEB9C",
+    fontColor: "FF9C6500",
     bold: true,
   },
 };
@@ -80,4 +81,3 @@ export function applyGoodBadNeutralCellStyle(
   }
   return applied;
 }
-
