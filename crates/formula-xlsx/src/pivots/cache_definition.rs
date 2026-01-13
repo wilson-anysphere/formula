@@ -7,7 +7,9 @@ use quick_xml::Reader;
 use crate::openxml::resolve_relationship_target;
 use crate::{XlsxDocument, XlsxError, XlsxPackage};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+use super::cache_records::PivotCacheValue;
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PivotCacheDefinition {
     pub record_count: Option<u64>,
     pub refresh_on_load: Option<bool>,
@@ -35,7 +37,7 @@ impl Default for PivotCacheSourceType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PivotCacheField {
     pub name: String,
     pub caption: Option<String>,
@@ -49,6 +51,45 @@ pub struct PivotCacheField {
     pub hierarchy: Option<u32>,
     pub level: Option<u32>,
     pub mapping_count: Option<u32>,
+    /// Shared item table for this cache field, as found in the cache definition's
+    /// `<sharedItems>` element.
+    ///
+    /// When present, pivot cache records can encode values as `<x v="..."/>`
+    /// indices into this list.
+    pub shared_items: Option<Vec<PivotCacheValue>>,
+}
+
+impl PivotCacheDefinition {
+    /// Resolve a pivot cache record value against this cache definition.
+    ///
+    /// Excel can store record values as an `<x v="..."/>` shared item index instead of an inline
+    /// typed value (`<s>`, `<n>`, etc.). In that case this helper looks up the corresponding item
+    /// from `cache_fields[field_idx].shared_items` and returns a clone of it.
+    ///
+    /// Resolution rules:
+    /// - If `value` is not [`PivotCacheValue::Index`], it is returned unchanged (no allocation).
+    /// - If the index is out of range, the cache field is missing, or the cache field has no
+    ///   `shared_items`, this returns [`PivotCacheValue::Missing`].
+    #[inline]
+    pub fn resolve_record_value(&self, field_idx: usize, value: PivotCacheValue) -> PivotCacheValue {
+        let PivotCacheValue::Index(shared_idx) = value else {
+            return value;
+        };
+
+        let Some(field) = self.cache_fields.get(field_idx) else {
+            return PivotCacheValue::Missing;
+        };
+        let Some(shared_items) = field.shared_items.as_ref() else {
+            return PivotCacheValue::Missing;
+        };
+        let Ok(shared_idx) = usize::try_from(shared_idx) else {
+            return PivotCacheValue::Missing;
+        };
+        shared_items
+            .get(shared_idx)
+            .cloned()
+            .unwrap_or(PivotCacheValue::Missing)
+    }
 }
 
 impl XlsxPackage {
@@ -495,5 +536,59 @@ mod tests {
         assert_eq!(def.cache_source_type, PivotCacheSourceType::Worksheet);
         assert_eq!(def.worksheet_source_sheet.as_deref(), Some("Sheet 1"));
         assert_eq!(def.worksheet_source_ref.as_deref(), Some("A1:C5"));
+    }
+
+    #[test]
+    fn resolves_record_value_valid_shared_item_index() {
+        let def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Field1".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::String("A".to_string()),
+                    PivotCacheValue::Number(42.0),
+                ]),
+                ..PivotCacheField::default()
+            }],
+            ..PivotCacheDefinition::default()
+        };
+
+        assert_eq!(
+            def.resolve_record_value(0, PivotCacheValue::Index(1)),
+            PivotCacheValue::Number(42.0)
+        );
+    }
+
+    #[test]
+    fn resolves_record_value_out_of_range_shared_item_index() {
+        let def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Field1".to_string(),
+                shared_items: Some(vec![PivotCacheValue::String("A".to_string())]),
+                ..PivotCacheField::default()
+            }],
+            ..PivotCacheDefinition::default()
+        };
+
+        assert_eq!(
+            def.resolve_record_value(0, PivotCacheValue::Index(5)),
+            PivotCacheValue::Missing
+        );
+    }
+
+    #[test]
+    fn resolves_record_value_when_cache_field_has_no_shared_items() {
+        let def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Field1".to_string(),
+                shared_items: None,
+                ..PivotCacheField::default()
+            }],
+            ..PivotCacheDefinition::default()
+        };
+
+        assert_eq!(
+            def.resolve_record_value(0, PivotCacheValue::Index(0)),
+            PivotCacheValue::Missing
+        );
     }
 }
