@@ -100,7 +100,7 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     // Manual page breaks are stored in dedicated worksheet records. Delegate to the existing
     // page-break parser so we share the same semantics as the rest of the importer.
-    match super::parse_biff_sheet_manual_page_breaks(workbook_stream, start) {
+    match super::sheet::parse_biff_sheet_manual_page_breaks(workbook_stream, start) {
         Ok(mut breaks) => {
             out.manual_page_breaks = breaks.manual_page_breaks;
             out.warnings.extend(breaks.warnings.drain(..));
