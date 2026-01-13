@@ -93,6 +93,7 @@ import {
   getTauriDialogOrThrow,
   getTauriEventApiOrThrow,
   getTauriWindowHandleOrThrow,
+  hasTauri,
   hasTauriWindowApi,
   hasTauriWindowHandleApi,
 } from "./tauri/api";
@@ -354,7 +355,7 @@ function installExternalLinkInterceptor(): void {
 
       // Only intercept when running under Tauri. In web builds, let the browser handle
       // normal navigation/new-tab behavior.
-      const isTauri = Boolean((globalThis as any).__TAURI__);
+      const isTauri = hasTauri();
       if (!isTauri) return;
 
       // Prevent the webview from navigating away; open through the OS instead.
@@ -1858,7 +1859,7 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     // If the environment exposes a Clipboard API (or we're running under Tauri), prefer the shared
     // provider so native clipboard fallbacks work consistently.
-    const canUseProvider = Boolean((globalThis as any).__TAURI__) || Boolean(globalThis.navigator?.clipboard);
+    const canUseProvider = hasTauri() || Boolean(globalThis.navigator?.clipboard);
     if (canUseProvider) {
       const provider = await getClipboardProvider();
       await provider.write({ text: value });
