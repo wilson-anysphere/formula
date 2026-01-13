@@ -150,7 +150,7 @@ export function chunkToText(chunk, opts) {
         headers.push(headerNames?.[c] ?? `Column${c + 1}`);
         types.push(inferColumnType(cells, c, 0));
       }
-      const extra = formatExtraColumns(sampledColCount, schemaColCount);
+      const extra = formatExtraColumns(fullColCount, schemaColCount);
       if (extra) headers.push(extra);
       lines.push(`COLUMNS: ${headers.map((h, i) => (types[i] ? `${h} (${types[i]})` : h)).join(" | ")}`);
     } else {
@@ -159,7 +159,7 @@ export function chunkToText(chunk, opts) {
         const type = inferColumnType(cells, c, -1);
         parts.push(`Column${c + 1} (${type})`);
       }
-      const extra = formatExtraColumns(sampledColCount, schemaColCount);
+      const extra = formatExtraColumns(fullColCount, schemaColCount);
       if (extra) parts.push(extra);
       lines.push(`COLUMNS: ${parts.join(" | ")}`);
     }
@@ -197,7 +197,7 @@ export function chunkToText(chunk, opts) {
           else row.push(formatScalar(cell.v));
         }
       }
-      const extra = formatExtraColumns(sampledColCount, rowColCount);
+      const extra = formatExtraColumns(fullColCount, rowColCount);
       if (extra) row.push(extra);
       rows.push(row.join(" | "));
     }

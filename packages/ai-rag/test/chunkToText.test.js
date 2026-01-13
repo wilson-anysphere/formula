@@ -92,6 +92,24 @@ test("chunkToText caps wide tables with an explicit truncation indicator", () =>
   assert.ok(!text.includes("V25"), "should not list all row values");
 });
 
+test("chunkToText uses the full range width when reporting truncated column counts", () => {
+  const sampledCols = 50;
+  const fullCols = 100;
+  const headers = Array.from({ length: sampledCols }, (_, i) => ({ v: `H${i + 1}` }));
+  const row = Array.from({ length: sampledCols }, (_, i) => ({ v: `V${i + 1}` }));
+
+  const chunk = {
+    kind: "table",
+    title: "Wide (truncated sample)",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: fullCols - 1 },
+    cells: [headers, row],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1, maxColumnsForSchema: 5, maxColumnsForRows: 5 });
+  assert.ok(text.includes("… (+95 more columns)"), "expected truncation to reflect full range width");
+});
+
 test("chunkToText includes A1-like cell addresses for formulaRegion samples", () => {
   const chunk = {
     kind: "formulaRegion",
