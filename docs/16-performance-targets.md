@@ -71,13 +71,27 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Offline duration | Unlimited | Time can work offline |
 
 ### AI
-
+ 
 | Metric | Target | Measurement Method |
 |--------|--------|-------------------|
 | Tab completion | <100ms | Time from keystroke to suggestion |
 | Inline assist | <2s | Time from Cmd/Ctrl+K to result |
 | Chat response | <5s | Time from Enter to first token |
 | Formula explanation | <3s | Time from request to explanation |
+
+#### Tab-completion latency guardrail
+
+We enforce the tab-completion latency budget with a lightweight micro-benchmark for the JS
+`TabCompletionEngine`:
+
+```bash
+pnpm bench:tab-completion
+# or:
+node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --ci
+```
+
+This benchmark prints p50/p95 per scenario and exits non-zero in CI if p95 exceeds the budget
+(default: 100ms). It is also run in CI as `tab-completion-latency-guard`.
 
 ---
 
