@@ -54,6 +54,10 @@ pub enum Error {
         version_minor: u16,
     },
     #[error(
+        "unsupported encrypted workbook `{path}`: decrypted workbook kind `{kind}` is not supported"
+    )]
+    UnsupportedEncryptedWorkbookKind { path: PathBuf, kind: &'static str },
+    #[error(
         "password required: workbook `{path}` is password-protected/encrypted (legacy `.xls` encryption); supply a password via `open_workbook_with_password(..)` / `open_workbook_model_with_password(..)`"
     )]
     EncryptedWorkbook { path: PathBuf },
@@ -944,6 +948,45 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
     }
 }
 
+fn open_workbook_from_decrypted_ooxml_zip_bytes(
+    path: &Path,
+    decrypted_bytes: Vec<u8>,
+) -> Result<Workbook, Error> {
+    if sniff_ooxml_zip_workbook_kind(&decrypted_bytes) == Some(WorkbookFormat::Xlsb) {
+        return Err(Error::UnsupportedEncryptedWorkbookKind {
+            path: path.to_path_buf(),
+            kind: "xlsb",
+        });
+    }
+
+    let package = xlsx::XlsxPackage::from_bytes(&decrypted_bytes).map_err(|source| {
+        Error::OpenXlsx {
+            path: path.to_path_buf(),
+            source,
+        }
+    })?;
+    Ok(Workbook::Xlsx(package))
+}
+
+fn open_workbook_model_from_decrypted_ooxml_zip_bytes(
+    path: &Path,
+    decrypted_bytes: Vec<u8>,
+) -> Result<formula_model::Workbook, Error> {
+    if sniff_ooxml_zip_workbook_kind(&decrypted_bytes) == Some(WorkbookFormat::Xlsb) {
+        return Err(Error::UnsupportedEncryptedWorkbookKind {
+            path: path.to_path_buf(),
+            kind: "xlsb",
+        });
+    }
+
+    xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes)).map_err(|source| {
+        Error::OpenXlsx {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
 /// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`], optionally
 /// providing a password for encrypted workbooks.
 ///
@@ -965,44 +1008,18 @@ pub fn open_workbook_model_with_password(
     #[cfg(feature = "encrypted-workbooks")]
     {
         if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-            if zip_contains_workbook_bin(&bytes) {
-                let wb = xlsb::XlsbWorkbook::open_from_vec_with_options(
-                    bytes,
-                    xlsb::OpenOptions {
-                        preserve_unknown_parts: false,
-                        preserve_parsed_parts: false,
-                        preserve_worksheets: false,
-                        decode_formulas: true,
-                        ..Default::default()
-                    },
-                )
-                .map_err(|source| Error::OpenXlsb {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-                return xlsb_to_model_workbook(&wb).map_err(|source| Error::OpenXlsb {
-                    path: path.to_path_buf(),
-                    source,
-                });
-            }
-            return xlsx::read_workbook_from_reader(std::io::Cursor::new(bytes)).map_err(
-                |source| Error::OpenXlsx {
-                    path: path.to_path_buf(),
-                    source,
-                },
-            );
+            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
         }
     }
 
     if let Some(package_bytes) =
         maybe_read_plaintext_ooxml_package_from_encrypted_ole(path, password)?
     {
-        return xlsx::read_workbook_from_reader(std::io::Cursor::new(package_bytes)).map_err(
-            |source| Error::OpenXlsx {
-                path: path.to_path_buf(),
-                source,
-            },
-        );
+        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, package_bytes);
+    }
+
+    if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
+        return Err(err);
     }
 
     // If no password was provided, preserve the existing open path for non-encrypted files.
@@ -1131,39 +1148,18 @@ pub fn open_workbook_with_password(
     #[cfg(feature = "encrypted-workbooks")]
     {
         if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-            if zip_contains_workbook_bin(&bytes) {
-                let wb = xlsb::XlsbWorkbook::open_from_vec(bytes)
-                    .map_err(|source| Error::OpenXlsb {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                return Ok(Workbook::Xlsb(wb));
-            }
-            let package = xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
-                path: path.to_path_buf(),
-                source,
-            })?;
-            return Ok(Workbook::Xlsx(package));
+            return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
         }
     }
 
     if let Some(package_bytes) =
         maybe_read_plaintext_ooxml_package_from_encrypted_ole(path, password)?
     {
-        #[cfg(feature = "encrypted-workbooks")]
-        {
-            if zip_contains_workbook_bin(&package_bytes) {
-                return Err(Error::EncryptedWorkbook {
-                    path: path.to_path_buf(),
-                });
-            }
-        }
-        let package =
-            xlsx::XlsxPackage::from_bytes(&package_bytes).map_err(|source| Error::OpenXlsx {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        return Ok(Workbook::Xlsx(package));
+        return open_workbook_from_decrypted_ooxml_zip_bytes(path, package_bytes);
+    }
+
+    if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
+        return Err(err);
     }
 
     // If no password was provided, preserve the existing open path for non-encrypted files.
@@ -1777,25 +1773,45 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     Ok(Some(decrypted))
 }
 
-#[cfg(feature = "encrypted-workbooks")]
-fn zip_contains_workbook_bin(bytes: &[u8]) -> bool {
-    use std::io::Cursor;
+fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookFormat> {
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(decrypted_bytes)).ok()?;
 
-    let Ok(zip) = zip::ZipArchive::new(Cursor::new(bytes)) else {
-        return false;
-    };
-    for name in zip.file_names() {
+    let mut has_workbook_bin = false;
+    let mut has_workbook_xml = false;
+    let mut has_vba_project = false;
+
+    for name in archive.file_names() {
         let mut normalized = name.trim_start_matches('/');
         let replaced;
         if normalized.contains('\\') {
             replaced = normalized.replace('\\', "/");
             normalized = &replaced;
         }
+
         if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
-            return true;
+            has_workbook_bin = true;
+        } else if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
+            has_workbook_xml = true;
+        } else if normalized.eq_ignore_ascii_case("xl/vbaProject.bin") {
+            has_vba_project = true;
+        }
+
+        if has_workbook_bin || (has_workbook_xml && has_vba_project) {
+            break;
         }
     }
-    false
+
+    if has_workbook_bin {
+        return Some(WorkbookFormat::Xlsb);
+    }
+    if has_workbook_xml {
+        return Some(if has_vba_project {
+            WorkbookFormat::Xlsm
+        } else {
+            WorkbookFormat::Xlsx
+        });
+    }
+    None
 }
 
 fn maybe_extract_ooxml_package_bytes(encrypted_package: &[u8]) -> Option<&[u8]> {

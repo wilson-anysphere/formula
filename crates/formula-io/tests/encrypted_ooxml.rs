@@ -10,7 +10,11 @@ fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
 }
 
-fn encrypted_ooxml_bytes_with_stream_names(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
+fn encrypted_ooxml_bytes_with_stream_names_and_encrypted_package(
+    encryption_info: &str,
+    encrypted_package: &str,
+    encrypted_package_bytes: &[u8],
+) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
@@ -25,9 +29,31 @@ fn encrypted_ooxml_bytes_with_stream_names(encryption_info: &str, encrypted_pack
             .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
             .expect("write EncryptionInfo header");
     }
-    ole.create_stream(encrypted_package)
-        .unwrap_or_else(|_| panic!("create {encrypted_package} stream"));
+    {
+        let mut stream = ole
+            .create_stream(encrypted_package)
+            .unwrap_or_else(|_| panic!("create {encrypted_package} stream"));
+        stream
+            .write_all(encrypted_package_bytes)
+            .expect("write EncryptedPackage bytes");
+    }
     ole.into_inner().into_inner()
+}
+
+fn encrypted_ooxml_bytes_with_stream_names(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
+    encrypted_ooxml_bytes_with_stream_names_and_encrypted_package(encryption_info, encrypted_package, &[])
+}
+
+fn encrypted_ooxml_bytes_with_encrypted_package(encrypted_package: &[u8]) -> Vec<u8> {
+    encrypted_ooxml_bytes_with_stream_names_and_encrypted_package(
+        "EncryptionInfo",
+        "EncryptedPackage",
+        encrypted_package,
+    )
+}
+
+fn encrypted_ooxml_bytes() -> Vec<u8> {
+    encrypted_ooxml_bytes_with_encrypted_package(&[])
 }
 
 #[test]
@@ -212,5 +238,47 @@ fn errors_on_unsupported_encryption_version() {
     assert!(
         msg.contains("9.9"),
         "expected error message to include encryption version, got: {msg}"
+    );
+}
+
+#[test]
+fn encrypted_ooxml_plaintext_xlsb_payload_is_reported_as_unsupported_kind() {
+    // Construct a minimal OPC/ZIP payload that looks like an XLSB workbook (contains
+    // `xl/workbook.bin`) and wrap it in a synthetic OLE `EncryptedPackage` container.
+    let zip_bytes = {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("xl/workbook.bin", options)
+            .expect("start workbook.bin");
+        zip.write_all(b"not a real xlsb").expect("write workbook.bin");
+        zip.finish().expect("finish zip").into_inner()
+    };
+
+    let bytes = encrypted_ooxml_bytes_with_encrypted_package(&zip_bytes);
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("encrypted.xlsb");
+    std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+    let err = open_workbook_with_password(&path, Some("dummy"))
+        .expect_err("expected xlsb encrypted workbook to error");
+    assert!(
+        matches!(
+            err,
+            Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }
+        ),
+        "expected Error::UnsupportedEncryptedWorkbookKind(xlsb), got {err:?}"
+    );
+
+    let err = open_workbook_model_with_password(&path, Some("dummy"))
+        .expect_err("expected xlsb encrypted workbook model open to error");
+    assert!(
+        matches!(
+            err,
+            Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }
+        ),
+        "expected Error::UnsupportedEncryptedWorkbookKind(xlsb), got {err:?}"
     );
 }
