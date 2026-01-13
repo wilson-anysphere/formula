@@ -273,13 +273,16 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed.columnName.toLowerCase());
   if (columnIndex < 0) return null;
 
-  const col = startCol! + columnIndex;
-  const minCol = Math.min(startCol!, endCol!);
-  const maxCol = Math.max(startCol!, endCol!);
-  if (col < minCol || col > maxCol) return null;
+  const baseStartCol = Math.min(startCol!, endCol!);
+  const baseEndCol = Math.max(startCol!, endCol!);
+  const col = baseStartCol + columnIndex;
+  if (col < baseStartCol || col > baseEndCol) return null;
 
-  let refStartRow = startRow!;
-  const refEndRow = endRow!;
+  const baseStartRow = Math.min(startRow!, endRow!);
+  const baseEndRow = Math.max(startRow!, endRow!);
+
+  let refStartRow = baseStartRow;
+  const refEndRow = baseEndRow;
   if (!parsed.includeHeader && refEndRow > refStartRow) {
     // Exclude header row when the table has at least one data row.
     refStartRow = refStartRow + 1;

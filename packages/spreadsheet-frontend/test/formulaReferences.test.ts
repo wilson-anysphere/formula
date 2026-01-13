@@ -222,6 +222,50 @@ describe("extractFormulaReferences", () => {
     const { activeIndex: outside } = extractFormulaReferences(input, input.length, input.length, { tables });
     expect(outside).toBe(null);
   });
+
+  it("resolves structured refs even when table coordinates are reversed", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Same table as A1:B4, but with reversed start/end coordinates.
+          startRow: 3,
+          startCol: 1,
+          endRow: 0,
+          endCol: 0,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = "=SUM(Table1[Amount])";
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(1);
+    expect(references[0]?.range).toEqual({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 3, endCol: 1 });
+  });
+
+  it("does not extract structured refs inside string literals", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const input = '=SUM("Table1[Amount]")';
+    const { references } = extractFormulaReferences(input, 0, 0, { tables });
+    expect(references).toHaveLength(0);
+  });
 });
 
 describe("assignFormulaReferenceColors", () => {
