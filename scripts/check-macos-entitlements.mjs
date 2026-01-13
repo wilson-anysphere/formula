@@ -185,6 +185,14 @@ function main() {
     return;
   }
 
+  if (!xml.includes("<plist") || !xml.includes("<dict")) {
+    errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
+      `File does not look like a plist (<plist>/<dict> tags not found).`,
+      `Expected an XML plist file containing the macOS code signing entitlements.`,
+    ]);
+    return;
+  }
+
   // Hardened Runtime + WKWebView (wry) commonly require these two entitlements
   // for JavaScript/WASM execution in signed/notarized builds.
   //
