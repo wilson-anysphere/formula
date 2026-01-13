@@ -114,7 +114,7 @@
   pointer-events: auto;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -128,8 +128,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--panel-border);
 }
 
@@ -148,7 +148,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -161,7 +161,7 @@
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 4px 8px;
+  padding: 3px 8px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -198,14 +198,14 @@
 
 .dock-panel__controls {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-left: auto;
   flex-shrink: 0;
 }
 
 .dock-panel__control {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -620,7 +620,7 @@
   margin: 0;
   padding: 8px;
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   max-height: 240px;
   overflow: auto;
 }
@@ -632,11 +632,11 @@
 
 #toast-root {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   z-index: 100;
   pointer-events: none;
 }
@@ -645,14 +645,14 @@
   pointer-events: auto;
   min-width: 240px;
   max-width: min(520px, calc(100vw - 32px));
-  padding: 10px 12px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--panel-border);
   background: var(--panel-bg);
   color: var(--text-primary);
   box-shadow: var(--dialog-shadow);
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .toast[data-type="error"] {
