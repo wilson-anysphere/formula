@@ -2,6 +2,7 @@ import React from "react";
 
 import type { QueryStep } from "@formula/power-query";
 import { t } from "../../../i18n/index.js";
+import { formatQueryOperationLabel } from "../operationLabels";
 
 export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; onSelect: (idx: number) => void }) {
   return (
@@ -19,7 +20,9 @@ export function StepsList(props: { steps: QueryStep[]; selectedIndex: number; on
                   : "query-editor-steps__button"
               }
             >
-              {step.name}
+              {typeof step.name === "string" && step.name.trim() && step.name !== step.operation.type
+                ? step.name
+                : formatQueryOperationLabel(step.operation)}
             </button>
           </li>
         ))}
