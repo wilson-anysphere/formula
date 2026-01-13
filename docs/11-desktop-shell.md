@@ -317,6 +317,7 @@ Tagged builds are expected to produce:
 - **Linux:** `.AppImage` + `.deb` + `.rpm`
 
 Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release.
+For the exact `latest.json.platforms` key names (multi-arch), see `docs/desktop-updater-target-mapping.md`.
 
 ### `plugins.updater`
 
