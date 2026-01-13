@@ -47,6 +47,8 @@ node scripts/check-updater-config.mjs
 # Ensures the Tauri updater signing secrets are present for tagged releases.
 # (CI reads these from GitHub Actions secrets; locally requires env vars to be set.)
 TAURI_PRIVATE_KEY=... TAURI_KEY_PASSWORD=... node scripts/ci/check-tauri-updater-secrets.mjs
+# If your private key is unencrypted, the password can be empty/unset:
+TAURI_PRIVATE_KEY=... node scripts/ci/check-tauri-updater-secrets.mjs
 
 # Ensures macOS hardened-runtime entitlements include the WKWebView JIT keys
 # required for JavaScript/WebAssembly to run in signed/notarized builds.
@@ -97,9 +99,9 @@ This repo already includes the updater **public key** in `apps/desktop/src-tauri
 
 ### Store the private key in GitHub Actions
 
-Add the following repository secrets (required for release signing):
+Add the following repository secrets (required for updater signing; password optional):
 
-- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate`
+- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate` (PEM or base64)
 - `TAURI_KEY_PASSWORD` – optional; only needed if the private key was generated with a password
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
