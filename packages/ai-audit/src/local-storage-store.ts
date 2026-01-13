@@ -51,7 +51,21 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
-    const { session_id, workbook_id, mode, limit, before_timestamp_ms, after_timestamp_ms, cursor } = filters;
+    const { session_id, workbook_id, mode } = filters;
+    const after_timestamp_ms =
+      typeof filters.after_timestamp_ms === "number" && Number.isFinite(filters.after_timestamp_ms)
+        ? filters.after_timestamp_ms
+        : undefined;
+    const before_timestamp_ms =
+      typeof filters.before_timestamp_ms === "number" && Number.isFinite(filters.before_timestamp_ms)
+        ? filters.before_timestamp_ms
+        : undefined;
+    const cursor =
+      filters.cursor && typeof filters.cursor.before_timestamp_ms === "number" && Number.isFinite(filters.cursor.before_timestamp_ms)
+        ? filters.cursor
+        : undefined;
+    const limit =
+      typeof filters.limit === "number" && Number.isFinite(filters.limit) ? Math.max(0, Math.trunc(filters.limit)) : undefined;
     const nowMs = Date.now();
     const loaded = this.loadEntries();
     const entries = this.enforceAgeRetention(loaded, nowMs);

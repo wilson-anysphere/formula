@@ -161,6 +161,19 @@ export class SqliteAIAuditStore implements AIAuditStore {
     const params: any[] = [];
     let sql = "SELECT * FROM ai_audit_log";
     const where: string[] = [];
+    const after_timestamp_ms =
+      typeof filters.after_timestamp_ms === "number" && Number.isFinite(filters.after_timestamp_ms)
+        ? filters.after_timestamp_ms
+        : undefined;
+    const before_timestamp_ms =
+      typeof filters.before_timestamp_ms === "number" && Number.isFinite(filters.before_timestamp_ms)
+        ? filters.before_timestamp_ms
+        : undefined;
+    const cursor =
+      filters.cursor && typeof filters.cursor.before_timestamp_ms === "number" && Number.isFinite(filters.cursor.before_timestamp_ms)
+        ? filters.cursor
+        : undefined;
+    const limit = typeof filters.limit === "number" && Number.isFinite(filters.limit) ? Math.max(0, Math.trunc(filters.limit)) : undefined;
     if (filters.session_id) {
       where.push("session_id = ?");
       params.push(filters.session_id);
@@ -179,16 +192,15 @@ export class SqliteAIAuditStore implements AIAuditStore {
         params.push(...modes);
       }
     }
-    if (typeof filters.after_timestamp_ms === "number") {
+    if (typeof after_timestamp_ms === "number") {
       where.push("timestamp_ms >= ?");
-      params.push(filters.after_timestamp_ms);
+      params.push(after_timestamp_ms);
     }
-    if (typeof filters.before_timestamp_ms === "number") {
+    if (typeof before_timestamp_ms === "number") {
       where.push("timestamp_ms < ?");
-      params.push(filters.before_timestamp_ms);
+      params.push(before_timestamp_ms);
     }
-    if (filters.cursor) {
-      const cursor = filters.cursor;
+    if (cursor) {
       if (cursor.before_id) {
         where.push("(timestamp_ms < ? OR (timestamp_ms = ? AND id < ?))");
         params.push(cursor.before_timestamp_ms, cursor.before_timestamp_ms, cursor.before_id);
@@ -201,9 +213,9 @@ export class SqliteAIAuditStore implements AIAuditStore {
       sql += ` WHERE ${where.join(" AND ")}`;
     }
     sql += " ORDER BY timestamp_ms DESC, id DESC";
-    if (typeof filters.limit === "number") {
+    if (typeof limit === "number") {
       sql += " LIMIT ?";
-      params.push(filters.limit);
+      params.push(limit);
     }
 
     const stmt = this.db.prepare(sql);
