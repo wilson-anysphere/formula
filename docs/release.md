@@ -63,6 +63,11 @@ Note: the workflow intentionally pins `tauri-apps/tauri-action` to a specific `v
 implicit breakage when the floating `@v0` tag advances. To upgrade, bump the pinned version in
 `.github/workflows/release.yml` (and verify a tagged build in CI).
 
+CI note: the workflow also validates that the uploaded Tauri updater manifest (`latest.json` +
+`latest.json.sig`) contains entries for every expected OS/architecture target. This catches a common
+parallel-build failure mode where the last finishing job overwrites `latest.json` and ships an
+incomplete updater manifest.
+
 ## 2) Tauri updater keys (required for auto-update)
 
 Tauri's updater verifies update artifacts using an Ed25519 signature.
