@@ -440,6 +440,15 @@ Expected outputs:
 - `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/msi/*.msi`
 - `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe`
 
+Sanity-check (optional): verify the built desktop executable is actually ARM64 (AA64):
+
+```powershell
+dumpbin /headers apps/desktop\src-tauri\target\aarch64-pc-windows-msvc\release\formula-desktop.exe `
+  | Select-String -Pattern 'machine' -CaseSensitive:$false
+```
+
+Expected output includes `machine (AA64)`.
+
 GitHub-hosted runner images do not always include this workload by default. The release workflow
 checks for a complete ARM64 MSVC + SDK toolchain:
 
