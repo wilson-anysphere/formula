@@ -308,4 +308,76 @@ describe("drawings selection handles", () => {
       expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle));
     }
   });
+
+  it("does not show resize/move cursors for a selected object outside its frozen quadrant", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = {
+      style: { cursor: "" },
+      addEventListener: (type: string, cb: (e: any) => void) => listeners.set(type, cb),
+      removeEventListener: (type: string) => listeners.delete(type),
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+    };
+
+    const CELL = 10;
+    const geom: GridGeometry = {
+      cellOriginPx: (cell) => ({ x: cell.col * CELL, y: cell.row * CELL }),
+      cellSizePx: () => ({ width: CELL, height: CELL }),
+    };
+
+    // Very small frozen quadrant so the object bounds extend past it.
+    const viewport: Viewport = {
+      scrollX: 0,
+      scrollY: 0,
+      width: 500,
+      height: 500,
+      dpr: 1,
+      frozenRows: 1,
+      frozenCols: 1,
+      frozenWidthPx: CELL,
+      frozenHeightPx: CELL,
+    };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown")!;
+    const pointerUp = listeners.get("pointerup")!;
+    const pointerMove = listeners.get("pointermove")!;
+
+    // Select the object by clicking in the visible frozen top-left quadrant.
+    pointerDown({ offsetX: 5, offsetY: 5, pointerId: 1 });
+    pointerUp({ offsetX: 5, offsetY: 5, pointerId: 1 });
+
+    // Hover where the top-right handle would have been if the object wasn't clipped; this point is
+    // in the top-right quadrant, so no resize cursor should be shown.
+    pointerMove({ offsetX: 80, offsetY: 0, pointerId: 1 });
+    expect(canvas.style.cursor).toBe("default");
+
+    // The point is also inside the object's *unclipped* rect, so ensure we don't incorrectly show
+    // the move cursor either (cursor remains default).
+    pointerMove({ offsetX: 40, offsetY: 5, pointerId: 1 });
+    expect(canvas.style.cursor).toBe("default");
+  });
 });
