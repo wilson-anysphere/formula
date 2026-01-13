@@ -424,6 +424,27 @@ test("SqliteVectorStore.list respects AbortSignal", { skip: !sqlJsAvailable }, a
 });
 
 test(
+  "SqliteVectorStore ensures covering index for workbook hash scans exists",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+    try {
+      const stmt = store._db.prepare("PRAGMA index_list(vectors);");
+      /** @type {string[]} */
+      const names = [];
+      while (stmt.step()) {
+        const row = stmt.get();
+        names.push(String(row[1]));
+      }
+      stmt.free();
+      assert.ok(names.includes("idx_vectors_workbook_hashes"));
+    } finally {
+      await store.close();
+    }
+  }
+);
+
+test(
   "SqliteVectorStore.listContentHashes does not parse metadata_json",
   { skip: !sqlJsAvailable },
   async () => {
