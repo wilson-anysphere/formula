@@ -13,6 +13,7 @@ import {
 } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
+import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";
@@ -41,6 +42,7 @@ export function registerDesktopCommands(params: {
   refreshRibbonUiState?: (() => void) | null;
   applyFormattingToSelection: ApplyFormattingToSelection;
   getActiveCellNumberFormat: () => string | null;
+  getActiveCellIndentLevel: () => number;
   openFormatCells: () => void | Promise<void>;
   showQuickPick: <T>(items: QuickPickItem<T>[], options?: { placeHolder?: string }) => Promise<T | null>;
   findReplace: FindReplaceCommandHandlers;
@@ -64,6 +66,7 @@ export function registerDesktopCommands(params: {
     refreshRibbonUiState = null,
     applyFormattingToSelection,
     getActiveCellNumberFormat,
+    getActiveCellIndentLevel,
     openFormatCells,
     showQuickPick,
     findReplace,
@@ -109,6 +112,13 @@ export function registerDesktopCommands(params: {
   }
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
+
+  registerFormatAlignmentCommands({
+    commandRegistry,
+    applyFormattingToSelection,
+    activeCellIndentLevel: getActiveCellIndentLevel,
+    openAlignmentDialog: () => void openFormatCells(),
+  });
 
   if (pageLayoutHandlers) {
     registerPageLayoutCommands({ commandRegistry, handlers: pageLayoutHandlers });

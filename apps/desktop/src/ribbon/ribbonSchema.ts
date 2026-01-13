@@ -130,7 +130,6 @@ export interface RibbonActions {
   fileActions?: RibbonFileActions;
 }
 
-
 export const defaultRibbonSchema: RibbonSchema = {
   tabs: [
     fileTab,
@@ -145,3 +144,4 @@ export const defaultRibbonSchema: RibbonSchema = {
     helpTab,
   ],
 };
+

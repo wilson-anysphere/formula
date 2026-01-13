@@ -33,6 +33,7 @@ describe("registerDesktopCommands", () => {
       layoutController: { layout: {} as any, openPanel: vi.fn(), closePanel: vi.fn() } as any,
       applyFormattingToSelection,
       getActiveCellNumberFormat: () => "0.00",
+      getActiveCellIndentLevel: () => 0,
       openFormatCells,
       showQuickPick: async () => null,
       findReplace: { openFind, openReplace, openGoTo },

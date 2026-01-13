@@ -2078,9 +2078,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "format.toggleUnderline": formatState.underline,
       "format.toggleStrikethrough": formatState.strikethrough,
       "format.toggleWrapText": formatState.wrapText,
-      "home.alignment.alignLeft": formatState.align === "left",
-      "home.alignment.center": formatState.align === "center",
-      "home.alignment.alignRight": formatState.align === "right",
+      "format.alignLeft": formatState.align === "left",
+      "format.alignCenter": formatState.align === "center",
+      "format.alignRight": formatState.align === "right",
       // AutoSave is only supported in the desktop/Tauri runtime.
       "file.save.autoSave": autoSaveEnabled && isTauriInvokeAvailable(),
       "view.toggleShowFormulas": app.getShowFormulas(),
@@ -2187,15 +2187,15 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.clearFormatting": true,
             [FORMAT_PAINTER_COMMAND_ID]: true,
             "format.toggleWrapText": true,
-            "home.alignment.topAlign": true,
-            "home.alignment.middleAlign": true,
-            "home.alignment.bottomAlign": true,
-            "home.alignment.alignLeft": true,
-            "home.alignment.center": true,
-            "home.alignment.alignRight": true,
+            "format.alignTop": true,
+            "format.alignMiddle": true,
+            "format.alignBottom": true,
+            "format.alignLeft": true,
+            "format.alignCenter": true,
+            "format.alignRight": true,
             "home.alignment.orientation": true,
-            "home.alignment.increaseIndent": true,
-            "home.alignment.decreaseIndent": true,
+            "format.increaseIndent": true,
+            "format.decreaseIndent": true,
             "home.number.numberFormat": true,
             "home.number.moreFormats": true,
             "format.numberFormat.percent": true,
@@ -7325,6 +7325,7 @@ registerDesktopCommands({
   refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
   applyFormattingToSelection,
   getActiveCellNumberFormat: activeCellNumberFormat,
+  getActiveCellIndentLevel: activeCellIndentLevel,
   openFormatCells,
   showQuickPick,
   findReplace: {
@@ -8554,133 +8555,6 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand("format.fontSize.decrease");
         return;
       }
-
-      case "home.alignment.alignLeft":
-        applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
-        return;
-      case "home.alignment.topAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.middleAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.bottomAlign":
-        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.center":
-        applyFormattingToSelection("Align center", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "center"));
-        return;
-      case "home.alignment.alignRight":
-        applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
-        return;
-
-      case "home.alignment.increaseIndent": {
-        const current = activeCellIndentLevel();
-        const next = Math.min(250, current + 1);
-        if (next === current) return;
-        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-
-      case "home.alignment.decreaseIndent": {
-        const current = activeCellIndentLevel();
-        const next = Math.max(0, current - 1);
-        if (next === current) return;
-        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      }
-
-      case "home.alignment.orientation.angleCounterclockwise":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.angleClockwise":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.verticalText":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.rotateUp":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.rotateDown":
-        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
-        return;
-      case "home.alignment.orientation.formatCellAlignment":
-        executeBuiltinCommand("format.openFormatCells");
-        return;
-
       case "format.openFormatCells":
       case "home.number.formatCells": // legacy ribbon schema id
       case "home.number.moreFormats.formatCells": // legacy ribbon schema id

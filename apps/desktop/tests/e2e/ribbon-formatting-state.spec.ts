@@ -58,8 +58,8 @@ test.describe("ribbon formatting state", () => {
     await expect(bold).toHaveAttribute("aria-pressed", "true");
 
     // Alignment buttons (not toggles) should still show a pressed style.
-    const alignLeft = ribbon.locator('button[data-command-id="home.alignment.alignLeft"]');
-    const alignCenter = ribbon.locator('button[data-command-id="home.alignment.center"]');
+    const alignLeft = ribbon.locator('button[data-command-id="format.alignLeft"]');
+    const alignCenter = ribbon.locator('button[data-command-id="format.alignCenter"]');
     await expect(alignLeft).toHaveClass(/is-pressed/);
     await expect(alignCenter).not.toHaveClass(/is-pressed/);
 
