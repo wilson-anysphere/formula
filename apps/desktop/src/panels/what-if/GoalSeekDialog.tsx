@@ -18,6 +18,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   const [progress, setProgress] = useState<GoalSeekProgress | null>(null);
   const [result, setResult] = useState<GoalSeekResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<"targetValue" | null>(null);
 
   const parsedTargetValue = useMemo(() => Number(targetValue), [targetValue]);
   const reactInstanceId = React.useId();
@@ -34,11 +35,13 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
 
   async function run() {
     setError(null);
+    setInvalidField(null);
     setResult(null);
     setProgress(null);
 
     if (!Number.isFinite(parsedTargetValue)) {
       setError(t("whatIf.goalSeek.error.targetMustBeNumber"));
+      setInvalidField("targetValue");
       return;
     }
 
@@ -106,9 +109,17 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
             <input
               className="what-if__input"
               value={targetValue}
-              onChange={(e) => setTargetValue(e.target.value)}
+              onChange={(e) => {
+                setTargetValue(e.target.value);
+                if (invalidField === "targetValue") {
+                  setInvalidField(null);
+                  setError(null);
+                }
+              }}
               disabled={running}
               inputMode="decimal"
+              aria-invalid={invalidField === "targetValue"}
+              aria-describedby={invalidField === "targetValue" ? errorId : undefined}
             />
           </label>
 

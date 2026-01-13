@@ -122,20 +122,16 @@
 .what-if__input:focus,
 .what-if__select:focus {
   outline: none;
-}
-
-.what-if__input:focus-visible,
-.what-if__select:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
-@supports not selector(:focus-visible) {
-  .what-if__input:focus,
-  .what-if__select:focus {
-    border-color: var(--selection-border);
-    box-shadow: 0 0 0 2px var(--selection-bg);
-  }
+/* Inputs should always show a focus ring (mouse + keyboard), matching other desktop form controls. */
+.what-if__input:disabled,
+.what-if__select:disabled {
+  opacity: 0.6;
+  cursor: default;
+  background: var(--bg-secondary);
 }
 
 .what-if__input--mono {

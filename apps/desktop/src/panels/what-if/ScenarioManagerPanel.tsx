@@ -30,6 +30,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
   const [resultCells, setResultCells] = useState("B1");
   const [report, setReport] = useState<SummaryReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<"resultCells" | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -71,6 +72,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
 
   async function generateReport() {
     setError(null);
+    setInvalidField(null);
     setReport(null);
 
     const cells = resultCells
@@ -80,6 +82,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
 
     if (cells.length === 0) {
       setError(t("whatIf.scenario.error.enterResultCell"));
+      setInvalidField("resultCells");
       return;
     }
 
@@ -153,9 +156,16 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
         <input
           className="what-if__input what-if__input--mono"
           value={resultCells}
-          onChange={(e) => setResultCells(e.target.value)}
+          onChange={(e) => {
+            setResultCells(e.target.value);
+            if (invalidField === "resultCells") {
+              setInvalidField(null);
+              setError(null);
+            }
+          }}
           spellCheck={false}
           autoCapitalize="off"
+          aria-invalid={invalidField === "resultCells"}
         />
       </label>
 

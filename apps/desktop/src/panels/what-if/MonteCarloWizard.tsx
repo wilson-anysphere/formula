@@ -29,6 +29,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
   const [progress, setProgress] = useState<SimulationProgress | null>(null);
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [invalidField, setInvalidField] = useState<"iterations" | "outputCells" | null>(null);
 
   const parsedIterations = useMemo(() => Number(iterations), [iterations]);
   const parsedSeed = useMemo(() => Number(seed), [seed]);
@@ -39,11 +40,13 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
 
   async function run() {
     setError(null);
+    setInvalidField(null);
     setResult(null);
     setProgress(null);
 
     if (!Number.isFinite(parsedIterations) || parsedIterations <= 0) {
       setError(t("whatIf.monteCarlo.error.iterationsPositive"));
+      setInvalidField("iterations");
       return;
     }
 
@@ -54,6 +57,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
 
     if (outputs.length === 0) {
       setError(t("whatIf.monteCarlo.error.enterOutputCell"));
+      setInvalidField("outputCells");
       return;
     }
 
@@ -94,9 +98,16 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
           <input
             className="what-if__input"
             value={iterations}
-            onChange={(e) => setIterations(e.target.value)}
+            onChange={(e) => {
+              setIterations(e.target.value);
+              if (invalidField === "iterations") {
+                setInvalidField(null);
+                setError(null);
+              }
+            }}
             disabled={running}
             inputMode="numeric"
+            aria-invalid={invalidField === "iterations"}
           />
         </label>
 
@@ -110,10 +121,17 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
           <input
             className="what-if__input what-if__input--mono"
             value={outputCells}
-            onChange={(e) => setOutputCells(e.target.value)}
+            onChange={(e) => {
+              setOutputCells(e.target.value);
+              if (invalidField === "outputCells") {
+                setInvalidField(null);
+                setError(null);
+              }
+            }}
             disabled={running}
             spellCheck={false}
             autoCapitalize="off"
+            aria-invalid={invalidField === "outputCells"}
           />
         </label>
       </div>
@@ -185,6 +203,8 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                   }}
                   disabled={running}
                   aria-label={t("whatIf.monteCarlo.inputs.distributionJsonAriaLabel")}
+                  spellCheck={false}
+                  autoCapitalize="off"
                 />
               </div>
 
