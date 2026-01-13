@@ -33,6 +33,7 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader as XmlReader;
 use sha1::{Digest as _, Sha1};
 use sha2::{Sha256, Sha384, Sha512};
+use thiserror::Error;
 use zeroize::Zeroizing;
 
 const ITER_COUNT: u32 = 50_000;
@@ -75,6 +76,9 @@ pub struct DecryptOptions {
     ///
     /// When enabled, corrupted/tampered ciphertext is detected before attempting to decrypt large
     /// payloads.
+    ///
+    /// Defaults to `false` because integrity verification requires hashing the entire encrypted
+    /// payload.
     pub verify_integrity: bool,
     pub limits: DecryptLimits,
 }
@@ -82,7 +86,7 @@ pub struct DecryptOptions {
 impl Default for DecryptOptions {
     fn default() -> Self {
         Self {
-            verify_integrity: true,
+            verify_integrity: false,
             limits: DecryptLimits::default(),
         }
     }
@@ -326,7 +330,6 @@ impl HashAlgorithm {
             HashAlgorithm::Sha512 => 64,
         }
     }
-
     pub(crate) fn digest_into(self, data: &[u8], out: &mut [u8]) {
         debug_assert!(out.len() >= self.digest_len());
         match self {
@@ -454,171 +457,94 @@ pub struct EncryptedPackageHeader {
 }
 
 /// Errors returned by this crate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum OffcryptoError {
     /// Not enough bytes to parse the requested structure.
+    #[error("truncated data while reading {context}")]
     Truncated { context: &'static str },
     /// Input bytes were structurally invalid.
+    #[error("invalid format: {context}")]
     InvalidFormat { context: &'static str },
     /// CSPName was not valid UTF-16LE.
+    #[error("invalid UTF-16LE CSPName")]
     InvalidCspNameUtf16,
     /// The encrypted streams are structurally invalid.
+    #[error("invalid structure: {0}")]
     InvalidStructure(String),
     /// Standard encryption uses an algorithm not supported by the current implementation.
+    #[error("unsupported algorithm: {0}")]
     UnsupportedAlgorithm(String),
     /// The stream contents are structurally invalid (e.g. missing required attributes).
+    #[error("invalid EncryptionInfo: {context}")]
     InvalidEncryptionInfo { context: &'static str },
     /// The decrypted package size from the `EncryptedPackage` header does not fit into a `Vec<u8>`.
+    #[error("EncryptedPackage reported invalid original size {total_size}")]
     EncryptedPackageSizeOverflow { total_size: u64 },
     /// Failed to reserve memory for the decrypted output buffer.
+    #[error("failed to allocate decrypted package buffer of size {total_size}")]
     EncryptedPackageAllocationFailed { total_size: u64 },
     /// `EncryptedPackage` declared plaintext size is not plausible for the available ciphertext.
     ///
     /// For AES-based Office encryption, ciphertext is padded to the AES block size (16 bytes), so
     /// the ciphertext length must be at least `ceil(total_size / 16) * 16`.
-    EncryptedPackageSizeMismatch {
-        total_size: u64,
-        ciphertext_len: usize,
-    },
+    #[error(
+        "EncryptedPackage declared original size {total_size} exceeds ciphertext length {ciphertext_len}"
+    )]
+    EncryptedPackageSizeMismatch { total_size: u64, ciphertext_len: usize },
     /// The `EncryptionInfo` version is not supported by the current parser.
+    #[error("unsupported EncryptionInfo version {major}.{minor}")]
     UnsupportedVersion { major: u16, minor: u16 },
     /// The encryption schema is known but not supported by the selected decryption mode.
-    ///
-    /// For example: attempting to decrypt an Agile-encrypted OOXML package using a Standard-only
-    /// decryptor.
+    #[error("unsupported encryption type {encryption_type:?}")]
     UnsupportedEncryption { encryption_type: EncryptionType },
     /// Standard external encryption (`fExternal`) is not supported.
+    #[error("unsupported external Standard encryption")]
     UnsupportedExternalEncryption,
     /// Standard encryption without the CryptoAPI flag (`fCryptoAPI`) is not supported.
+    #[error("unsupported Standard encryption: CryptoAPI flag (fCryptoAPI) not set")]
     UnsupportedNonCryptoApiStandardEncryption,
     /// Standard `EncryptionHeader.Flags` does not match the declared algorithm.
+    #[error(
+        "invalid Standard EncryptionHeader flags for algId: flags=0x{flags:08x}, algId=0x{alg_id:08x}"
+    )]
     InvalidFlags { flags: u32, alg_id: u32 },
     /// Agile `EncryptionInfo` does not include a password key encryptor.
     ///
     /// Agile encryption can specify multiple `<keyEncryptor>` entries under `<keyEncryptors>`
     /// (password, certificate, etc). Formula currently supports only password-based decryption.
+    #[error("unsupported key encryptor")]
     UnsupportedKeyEncryptor { available: Vec<String> },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
+    #[error("ciphertext length must be a multiple of 16 bytes (got {len})")]
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
+    #[error("invalid AES key length {len}; expected 16, 24, or 32 bytes")]
     InvalidKeyLength { len: usize },
     /// Standard encryption keySize must be a multiple of 8 bits.
+    #[error("standard encryption keySize must be a multiple of 8 bits, got {key_size_bits}")]
     InvalidKeySizeBits { key_size_bits: u32 },
     /// The requested key size is larger than the 40-byte derivation output.
+    #[error(
+        "keySize ({key_size_bits} bits) requires {required_bytes} bytes, but the SHA1-based derivation output is only {available_bytes} bytes"
+    )]
     DerivedKeyTooLong {
         key_size_bits: u32,
         required_bytes: usize,
         available_bytes: usize,
     },
     /// Decrypted verifier hash is too short.
+    #[error("encrypted verifier hash must be at least 20 bytes after decryption, got {len}")]
     InvalidVerifierHashLength { len: usize },
     /// Password/key did not pass verifier check.
+    #[error("invalid password or key")]
     InvalidPassword,
     /// Agile ciphertext integrity check (HMAC) failed.
+    #[error("integrity check failed")]
     IntegrityCheckFailed,
     /// Agile `spinCount` is larger than allowed by the configured decryption limits.
+    #[error("Agile spinCount too large: {spin_count} (max {max})")]
     SpinCountTooLarge { spin_count: u32, max: u32 },
 }
-
-impl fmt::Display for OffcryptoError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OffcryptoError::Truncated { context } => {
-                write!(f, "truncated data while reading {context}")
-            }
-            OffcryptoError::InvalidFormat { context } => write!(f, "invalid format: {context}"),
-            OffcryptoError::InvalidCspNameUtf16 => write!(f, "invalid UTF-16LE CSPName"),
-            OffcryptoError::InvalidStructure(msg) => write!(f, "invalid structure: {msg}"),
-            OffcryptoError::UnsupportedAlgorithm(msg) => write!(f, "unsupported algorithm: {msg}"),
-            OffcryptoError::InvalidEncryptionInfo { context } => {
-                write!(f, "invalid EncryptionInfo: {context}")
-            }
-            OffcryptoError::EncryptedPackageSizeOverflow { total_size } => write!(
-                f,
-                "EncryptedPackage reported invalid original size {total_size}"
-            ),
-            OffcryptoError::EncryptedPackageAllocationFailed { total_size } => {
-                write!(f, "failed to allocate decrypted package buffer of size {total_size}")
-            }
-            OffcryptoError::EncryptedPackageSizeMismatch {
-                total_size,
-                ciphertext_len,
-            } => write!(
-                f,
-                "EncryptedPackage declared original size {total_size} exceeds ciphertext length {ciphertext_len}"
-            ),
-            OffcryptoError::UnsupportedVersion { major, minor } => {
-                write!(f, "unsupported EncryptionInfo version {major}.{minor}")
-            }
-            OffcryptoError::UnsupportedEncryption { encryption_type } => {
-                write!(f, "unsupported encryption type {encryption_type:?}")
-            }
-            OffcryptoError::UnsupportedExternalEncryption => {
-                write!(f, "unsupported external Standard encryption")
-            }
-            OffcryptoError::UnsupportedNonCryptoApiStandardEncryption => {
-                write!(
-                    f,
-                    "unsupported Standard encryption: CryptoAPI flag (fCryptoAPI) not set"
-                )
-            }
-            OffcryptoError::InvalidFlags { flags, alg_id } => write!(
-                f,
-                "invalid Standard EncryptionHeader flags for algId: flags=0x{flags:08x}, algId=0x{alg_id:08x}"
-            ),
-            OffcryptoError::UnsupportedKeyEncryptor { available } => {
-                if available.is_empty() {
-                    write!(
-                        f,
-                        "unsupported key encryptor: password keyEncryptor is not present"
-                    )
-                } else {
-                    write!(
-                        f,
-                        "unsupported key encryptor: password keyEncryptor is not present (available: {})",
-                        available.join(", ")
-                    )
-                }
-            }
-            OffcryptoError::InvalidCiphertextLength { len } => write!(
-                f,
-                "ciphertext length must be a multiple of 16 bytes for AES-ECB, got {len}"
-            ),
-            OffcryptoError::InvalidKeyLength { len } => write!(
-                f,
-                "invalid AES key length {len}; expected 16, 24, or 32 bytes"
-            ),
-            OffcryptoError::InvalidKeySizeBits { key_size_bits } => write!(
-                f,
-                "standard encryption keySize must be a multiple of 8 bits, got {key_size_bits}"
-            ),
-            OffcryptoError::DerivedKeyTooLong {
-                key_size_bits,
-                required_bytes,
-                available_bytes,
-            } => write!(
-                f,
-                "keySize ({key_size_bits} bits) requires {required_bytes} bytes, but the SHA1-based derivation output is only {available_bytes} bytes"
-            ),
-            OffcryptoError::InvalidVerifierHashLength { len } => write!(
-                f,
-                "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
-            ),
-            OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
-            OffcryptoError::IntegrityCheckFailed => write!(f, "integrity check failed"),
-            OffcryptoError::SpinCountTooLarge { spin_count, max } => {
-                write!(f, "Agile spinCount too large: {spin_count} (max {max})")
-            }
-        }
-    }
-}
-
-impl std::error::Error for OffcryptoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
-
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -890,19 +816,9 @@ pub fn decrypt_standard_only(
 ) -> Result<Vec<u8>, OffcryptoError> {
     let info = parse_encryption_info(encryption_info)?;
     match info {
-        EncryptionInfo::Standard {
-            header, verifier, ..
-        } => {
+        EncryptionInfo::Standard { header, verifier, .. } => {
             let info = StandardEncryptionInfo { header, verifier };
-            // Derived keys are sensitive; keep them in a `Zeroizing` buffer so failed password
-            // attempts don't leave key material lingering in heap allocations.
-            let key = Zeroizing::new(standard_derive_key(&info, password)?);
-            standard_verify_key(&info, key.as_slice())?;
-
-            encrypted_package::decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
-                pt.copy_from_slice(ct);
-                aes_ecb_decrypt_in_place(key.as_slice(), pt)
-            })
+            decrypt_standard_encrypted_package_with_password(&info, encrypted_package, password)
         }
         EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryption {
             encryption_type: EncryptionType::Agile,
@@ -2481,6 +2397,90 @@ pub fn standard_verify_key(
     }
 }
 
+fn looks_like_zip_container(bytes: &[u8]) -> bool {
+    // Minimal check for an OOXML ZIP/OPC container:
+    // - Must begin with a local file header signature `PK\x03\x04`.
+    // - Must contain a plausible End of Central Directory record at the end (`PK\x05\x06`),
+    //   with an in-bounds central directory offset that points at a central directory header
+    //   (`PK\x01\x02`).
+    //
+    // This is intentionally lightweight: it avoids pulling in a ZIP parser dependency while
+    // still preventing false positives when trying multiple Standard decryption variants.
+    if bytes.len() < 4 || &bytes[..4] != b"PK\x03\x04" {
+        return false;
+    }
+
+    // EOCD is at least 22 bytes and may be followed by up to 65535 bytes of comment.
+    const EOCD_MIN_LEN: usize = 22;
+    if bytes.len() < EOCD_MIN_LEN {
+        return false;
+    }
+
+    let search_start = bytes.len().saturating_sub(66_000);
+    let search_end = bytes.len().saturating_sub(4);
+
+    for i in (search_start..search_end).rev() {
+        if &bytes[i..i + 4] != b"PK\x05\x06" {
+            continue;
+        }
+
+        let eocd = match bytes.get(i..i + EOCD_MIN_LEN) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        let cd_size = u32::from_le_bytes(eocd[12..16].try_into().expect("slice length checked"))
+            as usize;
+        let cd_offset =
+            u32::from_le_bytes(eocd[16..20].try_into().expect("slice length checked")) as usize;
+        let comment_len =
+            u16::from_le_bytes(eocd[20..22].try_into().expect("slice length checked")) as usize;
+
+        // Ensure the EOCD record (plus comment) ends at EOF.
+        if i + EOCD_MIN_LEN + comment_len != bytes.len() {
+            continue;
+        }
+
+        // Ensure the central directory is in-bounds and ends before the EOCD record.
+        let cd_end = match cd_offset.checked_add(cd_size) {
+            Some(v) => v,
+            None => continue,
+        };
+        if cd_end > i {
+            continue;
+        }
+
+        // Ensure the central directory begins with a file header signature.
+        if bytes.get(cd_offset..cd_offset + 4) != Some(b"PK\x01\x02") {
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+
+fn decrypt_standard_encrypted_package_with_password(
+    info: &StandardEncryptionInfo,
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+    validate_standard_encrypted_package_stream(encrypted_package)?;
+
+    let key = standard_derive_key(info, password)?;
+    standard_verify_key(info, &key)?;
+
+    let out = encrypted_package::decrypt_standard_encrypted_package(&key, encrypted_package)?;
+
+    if looks_like_zip_container(&out) {
+        Ok(out)
+    } else {
+        Err(OffcryptoError::InvalidPassword)
+    }
+}
+
 const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
 const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
 const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
@@ -3284,7 +3284,6 @@ pub fn decrypt_agile_ooxml_from_bytes(
             "decrypted package does not look like a ZIP (missing PK signature)".to_string(),
         ));
     }
-
     Ok(decrypted)
 }
 

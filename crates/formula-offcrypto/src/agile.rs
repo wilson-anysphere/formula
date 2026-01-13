@@ -271,12 +271,6 @@ mod tests {
     use aes::Aes128;
     use cbc::Encryptor;
     use cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
-    use std::sync::Mutex;
-
-    // These tests assert exact call counts on a shared atomic counter. Protect them from running
-    // concurrently with each other (Rust tests execute in parallel by default), otherwise the
-    // counter resets can race and make the assertions flaky.
-    static ITERATED_HASH_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn zero_pad_to_aes_block(mut bytes: Vec<u8>) -> Vec<u8> {
         let rem = bytes.len() % 16;
@@ -346,8 +340,6 @@ mod tests {
 
     #[test]
     fn agile_secret_key_from_password_computes_iterated_hash_once() {
-        let _guard = ITERATED_HASH_TEST_LOCK.lock().expect("lock test mutex");
-
         let password = "password";
         let salt = vec![0x11u8; 16];
         let spin_count = 1000;
@@ -402,8 +394,6 @@ mod tests {
 
     #[test]
     fn agile_secret_key_from_password_rejects_spin_count_over_limit_without_hashing() {
-        let _guard = ITERATED_HASH_TEST_LOCK.lock().expect("lock test mutex");
-
         let password = "password";
         let salt = vec![0x11u8; 16];
         let spin_count = u32::MAX;

@@ -3,7 +3,7 @@ name = "formula-offcrypto"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Microsoft Office encryption (MS-OFFCRYPTO) helpers for Formula."
+description = "Pure-Rust OOXML (MS-OFFCRYPTO) EncryptedPackage decryption."
 
 [dependencies]
 aes = "0.8"
@@ -16,11 +16,11 @@ md-5 = "0.10"
 quick-xml = "0.37"
 sha1 = "0.10"
 sha2 = "0.10"
+thiserror = "1"
 subtle = "2.6"
 zeroize = "1.8"
 
 [dev-dependencies]
-cfb = "0.10"
 hex = "0.4"
 ms-offcrypto-writer = "1.0.7"
 rand = "0.9"
