@@ -22,7 +22,8 @@ pub use cache_records::{PivotCacheRecordsReader, PivotCacheValue};
 pub use graph::{PivotTableInstance, XlsxPivotGraph};
 pub use preserve::{preserve_pivot_parts_from_reader, PreservedPivotParts, RelationshipStub};
 pub use table_definition::{
-    PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTablePageField,
+    PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTableFieldItem,
+    PivotTablePageField,
     PivotTableStyleInfo,
 };
 pub use ux_graph::XlsxPivotUxGraph;

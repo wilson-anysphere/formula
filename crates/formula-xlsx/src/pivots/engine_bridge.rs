@@ -8,9 +8,11 @@ use formula_engine::pivot::{
     AggregationType, FilterField, GrandTotals, Layout, PivotConfig, PivotField, PivotValue,
     ShowAsType, SubtotalPosition, ValueField,
 };
+use formula_engine::pivot::{PivotKeyPart, SortOrder};
+use std::collections::HashSet;
 
 use super::cache_records::pivot_cache_datetime_to_naive_date;
-use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition};
+use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition, PivotTableFieldItem};
 
 /// Convert a parsed pivot cache (definition + record iterator) into a pivot-engine
 /// source range.
@@ -88,15 +90,13 @@ pub fn pivot_table_to_engine_config(
     let row_fields = table
         .row_fields
         .iter()
-        .filter_map(|idx| cache_def.cache_fields.get(*idx as usize))
-        .map(|f| PivotField::new(f.name.clone()))
+        .filter_map(|idx| pivot_table_field_to_engine(table, cache_def, *idx))
         .collect::<Vec<_>>();
 
     let column_fields = table
         .col_fields
         .iter()
-        .filter_map(|idx| cache_def.cache_fields.get(*idx as usize))
-        .map(|f| PivotField::new(f.name.clone()))
+        .filter_map(|idx| pivot_table_field_to_engine(table, cache_def, *idx))
         .collect::<Vec<_>>();
 
     let value_fields = table
@@ -187,6 +187,57 @@ pub fn pivot_table_to_engine_config(
     }
 }
 
+fn pivot_table_field_to_engine(
+    table: &PivotTableDefinition,
+    cache_def: &PivotCacheDefinition,
+    field_idx: u32,
+) -> Option<PivotField> {
+    let cache_field = cache_def.cache_fields.get(field_idx as usize)?;
+
+    let mut field = PivotField::new(cache_field.name.clone());
+    let table_field = table.pivot_fields.get(field_idx as usize);
+
+    if let Some(table_field) = table_field {
+        if let Some(sort_type) = table_field.sort_type.as_deref() {
+            match sort_type.to_ascii_lowercase().as_str() {
+                "descending" => field.sort_order = SortOrder::Descending,
+                "manual" => field.sort_order = SortOrder::Manual,
+                // Default: keep engine default (ascending).
+                _ => {}
+            }
+        }
+
+        if field.sort_order == SortOrder::Manual {
+            field.manual_sort = table_field
+                .manual_sort_items
+                .as_ref()
+                .and_then(|items| {
+                    let mut out: Vec<PivotKeyPart> = items
+                        .iter()
+                        .filter_map(|item| match item {
+                            PivotTableFieldItem::Name(name) => {
+                                Some(PivotKeyPart::Text(name.clone()))
+                            }
+                            // Mapping `item@x` indices requires parsing the cache field's shared items.
+                            // Until that metadata is available, skip indices.
+                            PivotTableFieldItem::Index(_) => None,
+                        })
+                        .collect();
+                    if out.is_empty() {
+                        None
+                    } else {
+                        // De-dupe while preserving order (Excel seems to treat duplicates as no-ops).
+                        let mut seen: HashSet<PivotKeyPart> = HashSet::new();
+                        out.retain(|p| seen.insert(p.clone()));
+                        Some(out)
+                    }
+                });
+        }
+    }
+
+    Some(field)
+}
+
 fn map_subtotal(subtotal: Option<&str>) -> AggregationType {
     let Some(subtotal) = subtotal else {
         return AggregationType::Sum;
@@ -249,7 +300,6 @@ mod tests {
     use super::*;
 
     use crate::pivots::PivotCacheField;
-
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -385,6 +435,72 @@ mod tests {
                     allowed: None
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn maps_descending_sort_type_into_engine_field() {
+        let table_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField axis="axisRow" sortType="descending"/>
+  </pivotFields>
+  <rowFields count="1"><field x="0"/></rowFields>
+</pivotTableDefinition>"#;
+
+        let table = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", table_xml)
+            .expect("parse pivot table definition");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.row_fields.len(), 1);
+        assert_eq!(cfg.row_fields[0].sort_order, SortOrder::Descending);
+    }
+
+    #[test]
+    fn maps_named_manual_sort_items_into_engine_field() {
+        let table_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField axis="axisRow" sortType="manual">
+      <items count="3">
+        <item n="B"/>
+        <item n="A"/>
+        <item n="C"/>
+      </items>
+    </pivotField>
+  </pivotFields>
+  <rowFields count="1"><field x="0"/></rowFields>
+</pivotTableDefinition>"#;
+
+        let table = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", table_xml)
+            .expect("parse pivot table definition");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.row_fields.len(), 1);
+        assert_eq!(cfg.row_fields[0].sort_order, SortOrder::Manual);
+        assert_eq!(
+            cfg.row_fields[0].manual_sort.as_deref(),
+            Some(&[
+                PivotKeyPart::Text("B".to_string()),
+                PivotKeyPart::Text("A".to_string()),
+                PivotKeyPart::Text("C".to_string()),
+            ][..])
         );
     }
 }

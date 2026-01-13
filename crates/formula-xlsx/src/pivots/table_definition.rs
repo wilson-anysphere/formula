@@ -106,16 +106,17 @@ impl PivotTableDefinition {
         let mut buf = Vec::new();
         let mut parsed_root = false;
         let mut context: Option<FieldContext> = None;
+        let mut pivot_field_idx: Option<usize> = None;
 
         loop {
             match reader.read_event_into(&mut buf)? {
                 Event::Start(start) => {
                     parse_start_element(&mut def, &start, &mut parsed_root)?;
-                    handle_start_element(&mut def, &start, &mut context, true)?;
+                    handle_start_element(&mut def, &start, &mut context, &mut pivot_field_idx, true)?;
                 }
                 Event::Empty(start) => {
                     parse_start_element(&mut def, &start, &mut parsed_root)?;
-                    handle_start_element(&mut def, &start, &mut context, false)?;
+                    handle_start_element(&mut def, &start, &mut context, &mut pivot_field_idx, false)?;
                 }
                 Event::End(end) => {
                     let name = end.name();
@@ -126,6 +127,8 @@ impl PivotTableDefinition {
                         || tag.eq_ignore_ascii_case(b"dataFields")
                     {
                         context = None;
+                    } else if tag.eq_ignore_ascii_case(b"pivotField") {
+                        pivot_field_idx = None;
                     }
                 }
                 Event::Eof => break,
@@ -190,10 +193,29 @@ pub struct PivotTableField {
     pub axis: Option<String>,
     pub show_all: Option<bool>,
     pub default_subtotal: Option<bool>,
+    /// `pivotField@sortType` (if present).
+    ///
+    /// Common values include `ascending`, `descending`, and `manual`.
+    pub sort_type: Option<String>,
+    /// Best-effort representation of manual pivot item ordering, typically sourced from
+    /// `<pivotField><items><item .../></items></pivotField>`.
+    ///
+    /// Note: Excel's schema usually encodes items as indices (`item@x`) into the cache field's
+    /// shared items list; some producers may also emit names.
+    pub manual_sort_items: Option<Vec<PivotTableFieldItem>>,
     /// Explicit subtotal flags such as `sumSubtotal`, `countSubtotal`, etc.
     ///
     /// Keys are stored exactly as they appear in the XML (minus any namespace prefix).
     pub subtotals: BTreeMap<String, bool>,
+}
+
+/// Best-effort representation of an `<item>` entry inside `<pivotField><items>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PivotTableFieldItem {
+    /// Shared-item index (`item@x`).
+    Index(u32),
+    /// Producer-specific item label (`item@n` / `item@name`).
+    Name(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -244,6 +266,7 @@ fn handle_start_element(
     def: &mut PivotTableDefinition,
     start: &quick_xml::events::BytesStart<'_>,
     context: &mut Option<FieldContext>,
+    pivot_field_idx: &mut Option<usize>,
     open_container: bool,
 ) -> Result<(), XlsxError> {
     let name = start.name();
@@ -281,6 +304,22 @@ fn handle_start_element(
                 field.show_all = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"defaultSubtotal") {
                 field.default_subtotal = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"sortType") {
+                field.sort_type = Some(value);
+            } else if key.eq_ignore_ascii_case(b"sortOrder") {
+                // Non-standard producers sometimes emit `sortOrder` instead of `sortType`.
+                field.sort_type.get_or_insert(value);
+            } else if key.eq_ignore_ascii_case(b"sortAscending") {
+                // Another non-standard alias; map to the canonical sort type strings.
+                if field.sort_type.is_none() {
+                    if let Some(v) = parse_bool(&value) {
+                        field.sort_type = Some(if v {
+                            "ascending".to_string()
+                        } else {
+                            "descending".to_string()
+                        });
+                    }
+                }
             } else if key.len() >= b"Subtotal".len()
                 && key[key.len() - b"Subtotal".len()..].eq_ignore_ascii_case(b"Subtotal")
                 && !key.eq_ignore_ascii_case(b"defaultSubtotal")
@@ -293,6 +332,53 @@ fn handle_start_element(
             }
         }
         def.pivot_fields.push(field);
+        if open_container {
+            *pivot_field_idx = def.pivot_fields.len().checked_sub(1);
+        } else {
+            *pivot_field_idx = None;
+        }
+        return Ok(());
+    }
+
+    // Manual sort order is commonly represented as a sequence of `<item>` entries in the pivot
+    // field's `<items>` container. We record these in the order they appear.
+    if tag.eq_ignore_ascii_case(b"item") {
+        let Some(field_idx) = *pivot_field_idx else {
+            return Ok(());
+        };
+        let Some(field) = def.pivot_fields.get_mut(field_idx) else {
+            return Ok(());
+        };
+
+        let mut item_index: Option<u32> = None;
+        let mut item_name: Option<String> = None;
+
+        for attr in start.attributes().with_checks(false) {
+            let attr = attr?;
+            let key = local_name(attr.key.as_ref());
+            let value = attr.unescape_value()?.into_owned();
+
+            if key.eq_ignore_ascii_case(b"x") {
+                item_index = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"n") || key.eq_ignore_ascii_case(b"name") {
+                item_name = Some(value);
+            }
+        }
+
+        let item = if let Some(name) = item_name {
+            Some(PivotTableFieldItem::Name(name))
+        } else if let Some(idx) = item_index {
+            Some(PivotTableFieldItem::Index(idx))
+        } else {
+            None
+        };
+
+        if let Some(item) = item {
+            field
+                .manual_sort_items
+                .get_or_insert_with(Vec::new)
+                .push(item);
+        }
         return Ok(());
     }
 
@@ -662,5 +748,82 @@ mod tests {
 
         assert_eq!(parsed.location_range(), None);
         assert_eq!(parsed.location_top_left(), None);
+    }
+
+    #[test]
+    fn parses_pivot_field_sort_type() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="2">
+    <pivotField axis="axisRow" sortType="ascending"/>
+    <pivotField axis="axisRow" sortType="descending"/>
+  </pivotFields>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.pivot_fields.len(), 2);
+        assert_eq!(parsed.pivot_fields[0].sort_type.as_deref(), Some("ascending"));
+        assert_eq!(parsed.pivot_fields[1].sort_type.as_deref(), Some("descending"));
+    }
+
+    #[test]
+    fn parses_manual_sort_items_from_pivot_field_items() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField axis="axisRow" sortType="manual">
+      <items count="3">
+        <item x="2"/>
+        <item x="0"/>
+        <item x="1"/>
+      </items>
+    </pivotField>
+  </pivotFields>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.pivot_fields.len(), 1);
+        assert_eq!(parsed.pivot_fields[0].sort_type.as_deref(), Some("manual"));
+        assert_eq!(
+            parsed.pivot_fields[0].manual_sort_items.as_deref(),
+            Some(&[
+                PivotTableFieldItem::Index(2),
+                PivotTableFieldItem::Index(0),
+                PivotTableFieldItem::Index(1)
+            ][..])
+        );
+    }
+
+    #[test]
+    fn parses_manual_sort_items_by_name_when_present() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField axis="axisRow" sortType="manual">
+      <items count="3">
+        <item n="B"/>
+        <item n="A"/>
+        <item n="C"/>
+      </items>
+    </pivotField>
+  </pivotFields>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(parsed.pivot_fields.len(), 1);
+        assert_eq!(
+            parsed.pivot_fields[0].manual_sort_items.as_deref(),
+            Some(&[
+                PivotTableFieldItem::Name("B".to_string()),
+                PivotTableFieldItem::Name("A".to_string()),
+                PivotTableFieldItem::Name("C".to_string()),
+            ][..])
+        );
     }
 }

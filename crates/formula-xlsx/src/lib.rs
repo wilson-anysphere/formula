@@ -106,8 +106,8 @@ pub use pivots::{
     ux_graph::XlsxPivotUxGraph,
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
     PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
-    PivotTablePageField, PivotTablePart, PivotTableStyleInfo, PreservedPivotParts, RelationshipStub,
-    XlsxPivots,
+    PivotTableFieldItem, PivotTablePageField, PivotTablePart, PivotTableStyleInfo,
+    PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use read::load_from_path;
