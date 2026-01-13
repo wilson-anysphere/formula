@@ -24,7 +24,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+      - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         shell: bash
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
