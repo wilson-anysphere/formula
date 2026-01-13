@@ -34,9 +34,17 @@ export function CollabBranchManagerPanel({
     </div>
   ) : null;
 
+  const localPresenceId = session.presence?.localPresence?.id;
+  const sessionPermissions = (session as any)?.permissions as { role?: unknown; userId?: unknown } | null | undefined;
+  const permissionsRole = sessionPermissions?.role;
+  const permissionsUserId = sessionPermissions?.userId;
+
   const actor = useMemo<BranchActor>(() => {
-    const userId = session.presence?.localPresence?.id ?? "desktop";
-    const roleMaybe = (session as any)?.permissions?.role;
+    const userId =
+      (typeof permissionsUserId === "string" && permissionsUserId.length > 0 ? permissionsUserId : null) ??
+      localPresenceId ??
+      "desktop";
+    const roleMaybe = permissionsRole;
     const role: BranchActor["role"] =
       roleMaybe === "owner" ||
       roleMaybe === "admin" ||
@@ -46,7 +54,7 @@ export function CollabBranchManagerPanel({
         ? roleMaybe
         : "owner";
     return { userId, role };
-  }, [session]);
+  }, [localPresenceId, permissionsRole, permissionsUserId]);
   const docId = session.doc.guid;
 
   const { store, storeWarning } = useMemo(() => {

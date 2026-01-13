@@ -159,10 +159,14 @@ describe("ImageBitmapCache", () => {
       resolveB = res;
     });
 
-    const createImageBitmapMock = vi.fn()
+    const createImageBitmapMock = vi
+      .fn()
       .mockImplementationOnce(() => pA)
       .mockImplementationOnce(() => pB)
-      .mockImplementationOnce(() => Promise.resolve(bitmapB2));
+      .mockImplementationOnce(() => Promise.resolve(bitmapB2))
+      // Subsequent decodes should return a promise so `cache.get()` never tries to
+      // attach handlers to `undefined` when we re-request after eviction.
+      .mockImplementation(() => Promise.resolve({ close: vi.fn() } as unknown as ImageBitmap));
     vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
 
     const cache = new ImageBitmapCache({ maxEntries: 1 });

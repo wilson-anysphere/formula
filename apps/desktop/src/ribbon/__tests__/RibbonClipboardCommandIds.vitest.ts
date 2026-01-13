@@ -108,7 +108,7 @@ describe("Ribbon clipboard command ids", () => {
       pasteSpecial?.click();
       await Promise.resolve();
     });
-    const pasteSpecialDialog = getMenuItems(container).find((item) => menuItemLabel(item) === "Paste Special…");
+    const pasteSpecialDialog = getMenuItems(container).find((item) => item.dataset.commandId === "clipboard.pasteSpecial");
     expect(pasteSpecialDialog).toBeInstanceOf(HTMLButtonElement);
     expect(pasteSpecialDialog?.dataset.commandId).toBe("clipboard.pasteSpecial");
 

@@ -23,7 +23,6 @@ import { CollabBranchManagerPanel } from "./branch-manager/CollabBranchManagerPa
 import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.ts";
 import { verifyExtensionPackageV2Desktop } from "./marketplace/verifyExtensionPackageV2Desktop.ts";
 import { t } from "../i18n/index.js";
-
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
