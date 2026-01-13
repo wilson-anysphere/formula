@@ -366,6 +366,11 @@ export interface SpreadsheetAppStatusElements {
   selectionRange: HTMLElement;
   activeValue: HTMLElement;
   /**
+   * Optional status-bar element that is shown when the current collaboration session
+   * is read-only (viewer/commenter).
+   */
+  readOnlyIndicator?: HTMLElement;
+  /**
    * Optional status-bar element for Excel-like quick stats (sum of numeric values in selection).
    */
   selectionSum?: HTMLElement;
@@ -775,6 +780,9 @@ export class SpreadsheetApp {
   private sharedHoverCellCommentIndexVersion = -1;
 
   private collabSession: CollabSession | null = null;
+  private readOnly = false;
+  private readOnlyRole: string | null = null;
+  private collabPermissionsUnsubscribe: (() => void) | null = null;
   private collabBinder: { destroy: () => void } | null = null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
@@ -1054,11 +1062,11 @@ export class SpreadsheetApp {
           },
         },
         // Enable structural conflict monitoring (move/delete-vs-edit/content/format) in collab mode.
-        cellConflicts: {
-          localUserId: sessionPermissions.userId,
-          onConflict: (conflict: any) => {
-            if (this.structuralConflictUi) {
-              this.structuralConflictUi.addConflict(conflict);
+         cellConflicts: {
+           localUserId: sessionPermissions.userId,
+           onConflict: (conflict: any) => {
+             if (this.structuralConflictUi) {
+               this.structuralConflictUi.addConflict(conflict);
             } else {
               // Conflicts can be detected before the UI overlay is mounted (e.g. from persisted
               // structural op logs). Queue them until the conflict UI overlay is mounted.
@@ -1067,7 +1075,30 @@ export class SpreadsheetApp {
           },
         },
       });
+
       encryptionMetadata = this.collabSession.metadata;
+
+      // Track permissions changes so the desktop UI can immediately reflect read-only mode
+      // (viewer/commenter) and avoid local-only edits.
+      const sessionForPermissions = this.collabSession;
+      const onPermissionsChanged = (sessionForPermissions as any).onPermissionsChanged;
+      if (typeof onPermissionsChanged === "function") {
+        this.collabPermissionsUnsubscribe = onPermissionsChanged.call(sessionForPermissions, () => this.syncReadOnlyState());
+      } else {
+        // Backwards-compat / test stubs: if the session doesn't expose a subscription API,
+        // wrap `setPermissions` as a best-effort signal.
+        const originalSetPermissions =
+          typeof (sessionForPermissions as any).setPermissions === "function"
+            ? (sessionForPermissions as any).setPermissions.bind(sessionForPermissions)
+            : null;
+        if (originalSetPermissions) {
+          (sessionForPermissions as any).setPermissions = (permissions: any) => {
+            originalSetPermissions(permissions);
+            this.syncReadOnlyState();
+          };
+        }
+      }
+
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
       // (used by some conflict resolution + versioning flows) and ensure downstream
       // conflict UX can attribute local edits correctly.
@@ -1080,19 +1111,19 @@ export class SpreadsheetApp {
         const message = err instanceof Error ? err.message : String(err);
         console.warn("Failed to apply collab permissions from token; falling back to defaults.", message);
 
-        const fallbackPermissions = { ...sessionPermissions, rangeRestrictions: [] };
-        try {
-          // Fallback policy: keep the derived role/userId (if present) but drop all range
-          // restrictions when they fail validation. Server-side access control is still enforced
-          // by the sync server; this only prevents desktop startup from being DoS'd by a bad URL.
-          this.collabSession.setPermissions(fallbackPermissions);
-        } catch (fallbackErr) {
-          const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          console.warn("Failed to apply fallback collab permissions; continuing with viewer access.", fallbackMessage);
-          // Last-resort safe default (should never happen).
-          this.collabSession.setPermissions({ role: "viewer", rangeRestrictions: [], userId: sessionPermissions.userId });
-        }
-      }
+         const fallbackPermissions = { ...sessionPermissions, rangeRestrictions: [] };
+         try {
+           // Fallback policy: keep the derived role/userId (if present) but drop all range
+           // restrictions when they fail validation. Server-side access control is still enforced
+           // by the sync server; this only prevents desktop startup from being DoS'd by a bad URL.
+           this.collabSession.setPermissions(fallbackPermissions);
+         } catch (fallbackErr) {
+           const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+           console.warn("Failed to apply fallback collab permissions; continuing with viewer access.", fallbackMessage);
+           // Last-resort safe default (should never happen).
+           this.collabSession.setPermissions({ role: "viewer", rangeRestrictions: [], userId: sessionPermissions.userId });
+         }
+       }
 
       this.sheetViewBinder = bindSheetViewToCollabSession({
         session: this.collabSession,
@@ -1532,28 +1563,29 @@ export class SpreadsheetApp {
               this.syncSelectionFromSharedGrid();
               this.updateStatus();
           },
-          onSelectionRangeChange: () => {
-            if (this.sharedGridSelectionSyncInProgress) return;
-            this.syncSelectionFromSharedGrid();
-            this.updateStatus();
-          },
-          onRequestCellEdit: (request) => {
-            this.openEditorFromSharedGrid(request);
-          },
-            onAxisSizeChange: (change) => {
-              this.onSharedGridAxisSizeChange(change);
-            },
+           onSelectionRangeChange: () => {
+             if (this.sharedGridSelectionSyncInProgress) return;
+             this.syncSelectionFromSharedGrid();
+             this.updateStatus();
+           },
+           onRequestCellEdit: (request) => {
+             if (this.isReadOnly()) return;
+             this.openEditorFromSharedGrid(request);
+           },
+             onAxisSizeChange: (change) => {
+               this.onSharedGridAxisSizeChange(change);
+             },
             onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
             onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
             onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
-            onFillCommit: ({ sourceRange, targetRange, mode }) => {
-              // Fill operations should never mutate the sheet while the user is actively editing text
-              // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
+             onFillCommit: ({ sourceRange, targetRange, mode }) => {
+               // Fill operations should never mutate the sheet while the user is actively editing text
+               // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
               //
               // Note: DesktopSharedGrid will still expand the selection to the dragged target range
               // after this callback runs. Revert the selection on the next microtask so the UI
               // reflects that no fill occurred.
-              if (this.isEditing()) {
+              if (this.isReadOnly() || this.isEditing()) {
                 const selectionSnapshot = {
                   ranges: this.selection.ranges.map((r) => ({ ...r })),
                   active: { ...this.selection.active },
@@ -2115,6 +2147,7 @@ export class SpreadsheetApp {
         opts.formulaBar,
         {
         onBeginEdit: () => {
+          if (this.isReadOnly()) return;
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
           this.updateEditState();
@@ -2313,6 +2346,10 @@ export class SpreadsheetApp {
         },
       });
     }
+
+    // Apply initial read-only UI state now that optional UI surfaces (formula bar)
+    // may be mounted.
+    this.syncReadOnlyState();
 
     if (this.gridMode === "legacy") {
       // Precompute row/col visibility + mappings before any initial render work.
@@ -2545,12 +2582,82 @@ export class SpreadsheetApp {
     window.dispatchEvent(new CustomEvent("formula:zoom-changed"));
   }
 
+  private dispatchReadOnlyChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("formula:read-only-changed", { detail: { readOnly: this.readOnly, role: this.readOnlyRole } }));
+  }
+
+  private syncReadOnlyState(): void {
+    const session = this.collabSession;
+    const nextReadOnly = (() => {
+      if (!session) return false;
+      const fn = (session as any).isReadOnly;
+      if (typeof fn !== "function") return false;
+      try {
+        return Boolean(fn.call(session));
+      } catch {
+        return false;
+      }
+    })();
+    const nextRole = (() => {
+      if (!session) return null;
+      // `getPermissions` is the preferred API, but some tests stub CollabSession and may omit it.
+      const perms = (session as any).getPermissions?.();
+      const role = typeof perms?.role === "string" ? String(perms.role) : null;
+      return role;
+    })();
+
+    if (nextReadOnly === this.readOnly && nextRole === this.readOnlyRole) return;
+    this.readOnly = nextReadOnly;
+    this.readOnlyRole = nextRole;
+
+    // If permissions flipped to read-only mid-edit, cancel any active edit surfaces so the UI
+    // doesn't appear to accept local-only changes.
+    if (nextReadOnly) {
+      if (this.editor.isOpen()) {
+        try {
+          this.editor.cancel();
+        } catch {
+          // ignore
+        }
+      }
+      if (this.formulaBar?.isEditing()) {
+        try {
+          this.formulaBar.cancelEdit();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    const indicator = this.status.readOnlyIndicator;
+    if (indicator) {
+      if (nextReadOnly) {
+        indicator.hidden = false;
+        indicator.textContent = nextRole ? `Read-only (${nextRole})` : "Read-only";
+      } else {
+        indicator.hidden = true;
+        indicator.textContent = "";
+      }
+    }
+
+    try {
+      this.formulaBar?.setReadOnly(nextReadOnly, { role: nextRole });
+    } catch {
+      // ignore formula bar wiring failures (eg. missing DOM in tests)
+    }
+
+    this.dispatchReadOnlyChanged();
+  }
+
   destroy(): void {
     this.disposed = true;
     this.sheetViewBinder?.destroy();
     this.sheetViewBinder = null;
     this.domAbort.abort();
     this.setCollabUndoService(null);
+    this.collabPermissionsUnsubscribe?.();
+    this.collabPermissionsUnsubscribe = null;
     this.collabSelectionUnsubscribe?.();
     this.collabSelectionUnsubscribe = null;
     this.collabPresenceUnsubscribe?.();
@@ -2874,6 +2981,7 @@ export class SpreadsheetApp {
 
   cut(): void {
     if (this.inlineEditController.isOpen()) return;
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -2898,6 +3006,7 @@ export class SpreadsheetApp {
 
   paste(): void {
     if (this.inlineEditController.isOpen()) return;
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -2922,6 +3031,7 @@ export class SpreadsheetApp {
 
   clearSelection(): void {
     if (this.inlineEditController.isOpen()) return;
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
@@ -2932,10 +3042,12 @@ export class SpreadsheetApp {
   }
 
   async clipboardCut(): Promise<void> {
+    if (this.isReadOnly()) return;
     await this.cutSelectionToClipboard();
   }
 
   async clipboardPaste(): Promise<void> {
+    if (this.isReadOnly()) return;
     await this.pasteClipboardToSelection();
   }
 
@@ -2943,6 +3055,7 @@ export class SpreadsheetApp {
     mode: "all" | "values" | "formulas" | "formats" = "all",
     options: { transpose?: boolean } = {}
   ): Promise<void> {
+    if (this.isReadOnly()) return;
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return;
 
     const normalized: "all" | "values" | "formulas" | "formats" =
@@ -3265,6 +3378,21 @@ export class SpreadsheetApp {
 
   getCollabSession(): CollabSession | null {
     return this.collabSession;
+  }
+
+  /**
+   * Returns true when the current collaboration session is read-only (viewer/commenter).
+   *
+   * Non-collab/local workbooks are always editable.
+   */
+  isReadOnly(): boolean {
+    const session = this.collabSession;
+    if (!session) return false;
+    try {
+      return Boolean(session.isReadOnly());
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -4375,11 +4503,13 @@ export class SpreadsheetApp {
   }
 
   fillDown(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.applyFillShortcut("down");
   }
 
   fillRight(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.applyFillShortcut("right");
   }
@@ -4399,6 +4529,7 @@ export class SpreadsheetApp {
   }
 
   insertDate(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
@@ -4406,6 +4537,7 @@ export class SpreadsheetApp {
   }
 
   insertTime(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("time");
     this.refresh();
@@ -4413,6 +4545,7 @@ export class SpreadsheetApp {
   }
 
   autoSum(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.autoSumSelection();
     this.refresh();
@@ -4420,6 +4553,7 @@ export class SpreadsheetApp {
   }
 
   openCellEditorAtActiveCell(): void {
+    if (this.isReadOnly()) return;
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
@@ -4531,6 +4665,7 @@ export class SpreadsheetApp {
 
   private openEditorFromSharedGrid(request: { row: number; col: number; initialKey?: string }): void {
     if (!this.sharedGrid) return;
+    if (this.isReadOnly()) return;
     if (this.editor.isOpen()) return;
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
@@ -4554,7 +4689,7 @@ export class SpreadsheetApp {
     //
     // Note: DesktopSharedGrid updates the renderer sizes interactively during the drag, so when we
     // no-op the document mutation we must also restore the renderer to its previous size.
-    if (this.isEditing()) {
+    if (this.isReadOnly() || this.isEditing()) {
       const renderer = this.sharedGrid.renderer;
       const EPS = 1e-6;
       if (change.kind === "col") {
@@ -4573,6 +4708,8 @@ export class SpreadsheetApp {
       this.sharedGrid.scrollBy(0, 0);
 
       // Restore focus to the active editing surface so the user can continue typing.
+      // In read-only mode there should be no active editor, but keep the defensive
+      // focus restore logic so this stays resilient to mid-session permission changes.
       if (this.editor.isOpen()) {
         try {
           (this.editor.element as any).focus?.({ preventScroll: true });
@@ -8470,6 +8607,7 @@ export class SpreadsheetApp {
 
     const fillHandle = this.getFillHandleRect();
     if (
+      !this.isReadOnly() &&
       fillHandle &&
       x >= fillHandle.x &&
       x <= fillHandle.x + fillHandle.width &&
@@ -8641,6 +8779,7 @@ export class SpreadsheetApp {
 
     const fillHandle = this.getFillHandleRect();
     const overFillHandle =
+      !this.isReadOnly() &&
       fillHandle &&
       x >= fillHandle.x &&
       x <= fillHandle.x + fillHandle.width &&
@@ -8781,6 +8920,7 @@ export class SpreadsheetApp {
   }
 
   private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): boolean {
+    if (this.isReadOnly()) return false;
     if (this.isEditing()) return false;
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
@@ -9297,6 +9437,7 @@ export class SpreadsheetApp {
       // In-cell editing should never start while the formula bar is actively editing (range selection mode).
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
+      if (this.isReadOnly()) return;
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
       if (!bounds) return;
@@ -9329,6 +9470,7 @@ export class SpreadsheetApp {
       // Inline edit (Cmd/Ctrl+K) should not trigger while the formula bar is actively editing.
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
+      if (this.isReadOnly()) return;
       this.inlineEditController.open();
       this.updateEditState();
       return;
@@ -9567,6 +9709,7 @@ export class SpreadsheetApp {
         return;
       }
       e.preventDefault();
+      if (this.isReadOnly()) return;
       const cell = this.selection.active;
       const bounds = this.getCellRect(cell);
       if (!bounds) return;
@@ -9858,6 +10001,7 @@ export class SpreadsheetApp {
 
   cutToClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    if (this.isReadOnly()) return Promise.resolve();
     const promise = this.cutSelectionToClipboard();
     this.idle.track(promise);
     return promise.finally(() => {
@@ -9867,6 +10011,7 @@ export class SpreadsheetApp {
 
   pasteFromClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
+    if (this.isReadOnly()) return Promise.resolve();
     const promise = this.pasteClipboardToSelection();
     this.idle.track(promise);
     return promise.finally(() => {
@@ -9915,6 +10060,11 @@ export class SpreadsheetApp {
     })();
 
     if (!action) return false;
+
+    if (this.isReadOnly()) {
+      e.preventDefault();
+      return true;
+    }
 
     e.preventDefault();
 
@@ -10048,12 +10198,14 @@ export class SpreadsheetApp {
 
     if (key === "x") {
       e.preventDefault();
+      if (this.isReadOnly()) return true;
       this.idle.track(this.cutSelectionToClipboard());
       return true;
     }
 
     if (key === "v") {
       e.preventDefault();
+      if (this.isReadOnly()) return true;
       this.idle.track(this.pasteClipboardToSelection());
       return true;
     }
@@ -10321,6 +10473,7 @@ export class SpreadsheetApp {
   async pasteClipboardToSelection(
     options: { mode?: "all" | "values" | "formulas" | "formats"; transpose?: boolean } = {}
   ): Promise<void> {
+    if (this.isReadOnly()) return;
     try {
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
@@ -10624,6 +10777,7 @@ export class SpreadsheetApp {
   }
 
   private async cutSelectionToClipboard(): Promise<void> {
+    if (this.isReadOnly()) return;
     try {
       const range = this.getClipboardCopyRange();
       const rowCount = Math.max(0, range.endRow - range.startRow + 1);
@@ -11216,6 +11370,8 @@ export class SpreadsheetApp {
   }
 
   private applyEdit(sheetId: string, cell: CellCoord, rawValue: string): void {
+    if (this.isReadOnly()) return;
+
     // In collab/permissioned contexts, `DocumentController.canEditCell` may filter out
     // user edits entirely. Without a UX signal this can look like the UI "snapped back".
     const canEditCell = (this.document as any)?.canEditCell;
@@ -11287,6 +11443,10 @@ export class SpreadsheetApp {
   }
 
   private commitFormulaBar(text: string, commit: FormulaBarCommit): void {
+    if (this.isReadOnly()) {
+      this.cancelFormulaBar();
+      return;
+    }
     const target = this.formulaEditCell ?? { sheetId: this.sheetId, cell: { ...this.selection.active } };
     this.applyEdit(target.sheetId, target.cell, text);
 
@@ -11512,6 +11672,7 @@ export class SpreadsheetApp {
    * (command palette, context menus, extensions) can invoke it via `CommandRegistry`.
    */
   clearSelectionContents(): void {
+    if (this.isReadOnly()) return;
     if (this.isEditing()) return;
     this.clearSelectionContentsInternal();
     this.refresh();

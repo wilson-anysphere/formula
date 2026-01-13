@@ -181,6 +181,7 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
+  #readOnly = false;
   #isComposing = false;
 
   #scheduledRender:
@@ -804,6 +805,29 @@ export class FormulaBarView {
     this.#render({ preserveTextareaValue: true });
   }
 
+  setReadOnly(readOnly: boolean, opts: { role?: string | null } = {}): void {
+    const next = Boolean(readOnly);
+    if (next === this.#readOnly && this.textarea.readOnly === next) return;
+    this.#readOnly = next;
+    this.root.classList.toggle("formula-bar--read-only", next);
+    // `readOnly` (not `disabled`) keeps the textarea focusable/selectable for copy.
+    this.textarea.readOnly = next;
+    this.textarea.setAttribute("aria-readonly", next ? "true" : "false");
+    const suffix = opts.role ? ` (${String(opts.role)})` : "";
+    this.textarea.title = next ? `Read-only${suffix}` : "";
+
+    // If permissions flipped while editing, exit edit mode so we never show commit/cancel
+    // controls that would no-op.
+    if (next && this.model.isEditing) {
+      this.model.cancel();
+      this.#hoverOverride = null;
+      this.#selectedReferenceIndex = null;
+    }
+
+    this.#render({ preserveTextareaValue: false });
+    this.#emitOverlays();
+  }
+
   setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
     this.model.setAiSuggestion(suggestion);
     this.#render({ preserveTextareaValue: true });
@@ -867,6 +891,7 @@ export class FormulaBarView {
   }
 
   beginRangeSelection(range: RangeAddress, sheetId?: string): void {
+    if (this.#readOnly) return;
     this.model.beginEdit();
     this.model.beginRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
@@ -877,6 +902,7 @@ export class FormulaBarView {
   }
 
   updateRangeSelection(range: RangeAddress, sheetId?: string): void {
+    if (this.#readOnly) return;
     this.model.updateRangeSelection(range, sheetId);
     this.#selectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
@@ -890,6 +916,7 @@ export class FormulaBarView {
   }
 
   #beginEditFromFocus(): void {
+    if (this.#readOnly) return;
     if (this.model.isEditing) return;
     this.#errorPanelReferenceHighlights = null;
     this.model.beginEdit();

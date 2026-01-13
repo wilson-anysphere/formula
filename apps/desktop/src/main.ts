@@ -1101,6 +1101,7 @@ const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cel
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
 const collabStatus = document.querySelector<HTMLElement>('[data-testid="collab-status"]');
+const readOnlyIndicator = document.querySelector<HTMLElement>('[data-testid="read-only-indicator"]');
 const selectionSum = document.querySelector<HTMLElement>('[data-testid="selection-sum"]');
 const selectionAverage = document.querySelector<HTMLElement>('[data-testid="selection-avg"]');
 const selectionCount = document.querySelector<HTMLElement>('[data-testid="selection-count"]');
@@ -1165,7 +1166,7 @@ const legacyGridLimits = (() => {
 })();
 const app = new SpreadsheetApp(
   gridRoot,
-  { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },
+  { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount, readOnlyIndicator },
   {
     formulaBar: formulaBarRoot,
     workbookId,
@@ -1331,6 +1332,7 @@ function applyFormattingToSelection(
   // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user
   // is actively editing (cell editor / formula bar / inline edit).
   if (app.isEditing()) return;
+  if (app.isReadOnly?.() === true) return;
 
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
@@ -1444,6 +1446,10 @@ function armFormatPainter(): void {
     } catch {
       // ignore (toast root missing in non-UI test environments)
     }
+    return;
+  }
+
+  if (app.isReadOnly?.() === true) {
     return;
   }
 
@@ -2062,6 +2068,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const ranges = app.getSelectionRanges();
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
     const isEditing = isSpreadsheetEditing();
+    const isReadOnly = app.isReadOnly?.() === true;
     const perfStats = app.getGridPerfStats() as any;
     const perfStatsSupported = perfStats != null;
     const perfStatsEnabled = Boolean(perfStats?.enabled);
@@ -2165,17 +2172,18 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const outlineDisabled = app.getGridMode() === "shared";
     const canComment = app.getCollabSession()?.canComment() ?? true;
     const disabledById = {
-      ...(isEditing
-          ? {
-              // Formatting commands are disabled while editing (Excel-style behavior).
-              "format.toggleBold": true,
-              "format.toggleItalic": true,
-              "format.toggleUnderline": true,
-              "format.toggleStrikethrough": true,
-              "home.font.fontName": true,
-              "home.font.fontSize": true,
-              "home.font.increaseFont": true,
-              "home.font.decreaseFont": true,
+      ...(isEditing || isReadOnly
+        ? {
+            // Formatting commands are disabled while editing (Excel-style behavior), and in
+            // read-only collab sessions (viewer/commenter) to avoid local-only mutations.
+            "format.toggleBold": true,
+            "format.toggleItalic": true,
+            "format.toggleUnderline": true,
+            "format.toggleStrikethrough": true,
+            "home.font.fontName": true,
+            "home.font.fontSize": true,
+            "home.font.increaseFont": true,
+            "home.font.decreaseFont": true,
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
@@ -2184,25 +2192,37 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.toggleWrapText": true,
             "home.alignment.topAlign": true,
             "home.alignment.middleAlign": true,
-              "home.alignment.bottomAlign": true,
-              "home.alignment.alignLeft": true,
-              "home.alignment.center": true,
-              "home.alignment.alignRight": true,
-              "home.alignment.orientation": true,
-              "home.alignment.increaseIndent": true,
-              "home.alignment.decreaseIndent": true,
-              "home.number.numberFormat": true,
-              "home.number.moreFormats": true,
-              "format.numberFormat.percent": true,
-              "format.numberFormat.accounting": true,
-              "format.numberFormat.shortDate": true,
-              "format.numberFormat.commaStyle": true,
-              "format.numberFormat.increaseDecimal": true,
-              "format.numberFormat.decreaseDecimal": true,
-              "format.openFormatCells": true,
-            }
-          : null),
+            "home.alignment.bottomAlign": true,
+            "home.alignment.alignLeft": true,
+            "home.alignment.center": true,
+            "home.alignment.alignRight": true,
+            "home.alignment.orientation": true,
+            "home.alignment.increaseIndent": true,
+            "home.alignment.decreaseIndent": true,
+            "home.number.numberFormat": true,
+            "home.number.moreFormats": true,
+            "format.numberFormat.percent": true,
+            "format.numberFormat.accounting": true,
+            "format.numberFormat.shortDate": true,
+            "format.numberFormat.commaStyle": true,
+            "format.numberFormat.increaseDecimal": true,
+            "format.numberFormat.decreaseDecimal": true,
+            "format.openFormatCells": true,
+          }
+        : null),
       "comments.addComment": isEditing || !canComment,
+      ...(isReadOnly
+        ? {
+            // Editing clipboard actions are disabled in read-only mode.
+            "clipboard.cut": true,
+            "clipboard.paste": true,
+            "clipboard.pasteSpecial": true,
+            "clipboard.pasteSpecial.values": true,
+            "clipboard.pasteSpecial.formulas": true,
+            "clipboard.pasteSpecial.formats": true,
+            "clipboard.pasteSpecial.transpose": true,
+          }
+        : null),
       ...(printExportAvailable
         ? null
         : {
@@ -2250,6 +2270,7 @@ app.subscribeSelection((selection) => {
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
+window.addEventListener("formula:read-only-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 scheduleRibbonSelectionFormatStateUpdate();
 
 window.addEventListener("keydown", (e) => {
@@ -4372,6 +4393,7 @@ if (
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
       commentsPanelVisible: app.isCommentsPanelVisible(),
       cellHasComment: app.activeCellHasComment(),
+      "spreadsheet.isReadOnly": app.isReadOnly?.() === true,
       gridArea: currentGridArea,
       isRowHeader: currentGridArea === "rowHeader",
       isColHeader: currentGridArea === "colHeader",
@@ -4389,6 +4411,7 @@ if (
   app.getDocument().on("change", () => updateContextKeys());
   window.addEventListener("formula:comments-panel-visibility-changed", () => updateContextKeys());
   window.addEventListener("formula:comments-changed", () => updateContextKeys());
+  window.addEventListener("formula:read-only-changed", () => updateContextKeys());
   window.addEventListener("formula:sheet-metadata-changed", () => updateContextKeys());
 
   type ExtensionSelectionChangedEvent = {

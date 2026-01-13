@@ -369,6 +369,16 @@ dialog.print-preview-dialog::backdrop {
   white-space: nowrap;
 }
 
+.statusbar-readonly {
+  padding: 2px 8px;
+  border: 1px solid var(--warning);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--warning);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .statusbar code {
   font-family: var(--font-mono);
   color: var(--text-primary);

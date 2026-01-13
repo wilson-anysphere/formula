@@ -626,6 +626,7 @@ export class CollabSession {
   private readonly localPersistenceBindBeforeLoad: boolean;
 
   private permissions: SessionPermissions | null = null;
+  private readonly permissionsListeners = new Set<(permissions: SessionPermissions | null) => void>();
   private readonly defaultSheetId: string;
   private readonly encryption:
     | {
@@ -1700,6 +1701,26 @@ export class CollabSession {
       role: permissions.role,
       rangeRestrictions: normalizedRestrictions,
       userId: permissions.userId ?? null,
+    };
+    const snapshot = this.getPermissions();
+    for (const listener of [...this.permissionsListeners]) {
+      try {
+        listener(snapshot);
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  onPermissionsChanged(listener: (permissions: SessionPermissions | null) => void): () => void {
+    this.permissionsListeners.add(listener);
+    try {
+      listener(this.getPermissions());
+    } catch {
+      // ignore listener errors
+    }
+    return () => {
+      this.permissionsListeners.delete(listener);
     };
   }
 

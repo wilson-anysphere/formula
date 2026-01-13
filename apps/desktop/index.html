@@ -30,13 +30,14 @@
         </div>
       </div>
       <div id="sheet-tabs" class="sheet-bar" data-testid="sheet-tabs"></div>
-      <div class="statusbar">
-        <div class="statusbar__main">
-          <div class="statusbar-mode" data-testid="status-mode">Ready</div>
-          <div class="statusbar__spacer"></div>
-          <div class="statusbar__item" data-testid="selection-sum">Sum: 0</div>
-          <div class="statusbar__item" data-testid="selection-avg">Avg: 0</div>
-          <div class="statusbar__item" data-testid="selection-count">Count: 0</div>
+        <div class="statusbar">
+          <div class="statusbar__main">
+            <div class="statusbar-mode" data-testid="status-mode">Ready</div>
+            <div class="statusbar-readonly" data-testid="read-only-indicator" hidden></div>
+            <div class="statusbar__spacer"></div>
+            <div class="statusbar__item" data-testid="selection-sum">Sum: 0</div>
+            <div class="statusbar__item" data-testid="selection-avg">Avg: 0</div>
+            <div class="statusbar__item" data-testid="selection-count">Count: 0</div>
           <select data-testid="zoom-control" aria-label="Zoom">
             <option value="25">25%</option>
             <option value="50">50%</option>
