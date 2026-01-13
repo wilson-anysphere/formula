@@ -1482,10 +1482,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     push_warning_bounded(
                         &mut props.warnings,
                         format!(
-                        "malformed WSBOOL record at offset {}: expected >=2 bytes, got {}",
-                        record.offset,
-                        data.len()
-                    ),
+                            "malformed WSBOOL record at offset {}: expected >=2 bytes, got {}",
+                            record.offset,
+                            data.len()
+                        ),
                     );
                     continue;
                 }
@@ -2175,6 +2175,9 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
         }
 
         let ansi_len = u32::from_le_bytes([input[16], input[17], input[18], input[19]]) as usize;
+        if ansi_len > MAX_HLINK_UTF16_BYTES {
+            return Err("implausible file moniker ANSI path length".to_string());
+        }
         let mut pos = 20usize;
 
         // ANSI path (8-bit, NUL terminated within the declared byte length).
@@ -2418,11 +2421,6 @@ fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usiz
     }
 
     if candidates.is_empty() {
-        // If we rejected one or both interpretations for being implausibly large, surface that
-        // rather than a generic "truncated" error.
-        if !len_as_bytes_ok || !len_as_chars_ok {
-            return Err("implausible UTF-16 string length".to_string());
-        }
         return Err("truncated UTF-16 string".to_string());
     }
 
@@ -2546,6 +2544,31 @@ mod tests {
         assert!(
             err.contains("implausible"),
             "expected implausible-length error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn utf16_prefixed_string_reports_truncated_when_only_bytes_interpretation_is_plausible() {
+        // `len` fits within the byte cap but exceeds the char->bytes cap, so only the byte-length
+        // interpretation is considered. Since the buffer is too small, we should report truncation
+        // rather than "implausible length".
+        let len = MAX_HLINK_UTF16_CHARS + 2;
+        let err = parse_utf16_prefixed_string(&[], len).unwrap_err();
+        assert!(
+            err.contains("truncated"),
+            "expected truncated error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn file_moniker_rejects_implausible_ansi_path_length() {
+        let mut input = Vec::new();
+        input.extend_from_slice(&CLSID_FILE_MONIKER);
+        input.extend_from_slice(&((MAX_HLINK_UTF16_BYTES + 1) as u32).to_le_bytes());
+        let err = parse_hyperlink_moniker(&input, 1252).unwrap_err();
+        assert!(
+            err.contains("implausible file moniker ANSI path length"),
+            "expected implausible ANSI length error, got {err:?}"
         );
     }
 
