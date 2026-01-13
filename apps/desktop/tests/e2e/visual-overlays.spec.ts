@@ -53,7 +53,7 @@ async function openFormatCellsDialog(page: Page): Promise<Locator> {
   await ribbonRoot.getByRole("tab", { name: "Home", exact: true }).click();
 
   await ribbonRoot.locator('[data-command-id="home.number.moreFormats"]').click();
-  await page.locator('[role="menuitem"][data-command-id="home.number.moreFormats.formatCells"]').click();
+  await page.locator('[role="menuitem"][data-command-id="format.openFormatCells"]').click();
 
   const dialog = page.getByTestId("format-cells-dialog");
   await expect(dialog).toBeVisible();
@@ -106,4 +106,3 @@ test.describe("visual overlays", () => {
     });
   }
 });
-
