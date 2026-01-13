@@ -575,6 +575,34 @@ jobs:
       - name: Print Tauri CLI version
         run: cargo tauri --version
 
+      - name: Cache Tauri tooling downloads (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Tauri tooling downloads (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/Library/Caches/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Tauri tooling downloads (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          # Tauri's cache directory lives under %LOCALAPPDATA% on Windows.
+          path: ${{ env.LOCALAPPDATA }}/tauri
+          key: tauri-tooling-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            tauri-tooling-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build and upload release assets (macOS universal)
         if: runner.os == 'macOS' && needs.validate-version.outputs.upload == 'true'
         # Pinned for reproducible releases: avoid upstream floating major tags moving and breaking builds.
