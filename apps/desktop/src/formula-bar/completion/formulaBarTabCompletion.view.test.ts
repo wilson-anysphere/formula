@@ -14,7 +14,7 @@ describe("FormulaBarView tab completion (integration)", () => {
     // Preview evaluation intentionally avoids materializing sheets in an empty workbook.
     // Seed a single cell so Sheet1 exists and the evaluator will attempt to read the range.
     doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
-    const getCellSpy = vi.spyOn(doc, "getCell");
+    const getCellSpy = vi.spyOn(doc as any, "peekCell");
 
     const host = document.createElement("div");
     document.body.appendChild(host);

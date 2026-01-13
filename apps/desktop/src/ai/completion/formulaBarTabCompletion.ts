@@ -229,7 +229,13 @@ export class FormulaBarTabCompletionController {
         const targetSheet =
           typeof sheetName === "string" && sheetName.length > 0 ? resolveSheetId(sheetName) : hasCurrentSheet ? sheetId : null;
         if (!targetSheet) return null;
-        const state = this.#document.getCell(targetSheet, { row, col }) as { value: unknown; formula: string | null };
+        // Avoid creating phantom sheets during completion: `DocumentController.getCell()` lazily
+        // materializes sheets on read. Prefer `peekCell()` which returns an empty cell state when
+        // the sheet doesn't exist yet.
+        const state =
+          typeof (this.#document as any).peekCell === "function"
+            ? ((this.#document as any).peekCell(targetSheet, { row, col }) as { value: unknown; formula: string | null })
+            : (this.#document.getCell(targetSheet, { row, col }) as { value: unknown; formula: string | null });
         if (state?.value != null) return state.value;
         if (typeof state?.formula === "string" && state.formula.length > 0) return state.formula;
         return null;
@@ -469,7 +475,10 @@ function createPreviewEvaluator(params: {
       if (stack.has(key)) return "#REF!";
 
       stack.add(key);
-      const state = document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null };
+      const state =
+        typeof (document as any).peekCell === "function"
+          ? ((document as any).peekCell(targetSheet, normalized) as { value: unknown; formula: string | null })
+          : (document.getCell(targetSheet, normalized) as { value: unknown; formula: string | null });
       let value: SpreadsheetValue;
       if (state?.formula) {
         value = evaluateFormula(state.formula, getCellValue, {

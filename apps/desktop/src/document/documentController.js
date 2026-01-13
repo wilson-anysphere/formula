@@ -1920,6 +1920,24 @@ export class DocumentController {
   }
 
   /**
+   * Read a cell without materializing the sheet.
+   *
+   * `DocumentController.getCell()` creates sheets lazily the first time a sheet id is
+   * referenced. Some callers (e.g. tab completion previews) want to probe for values
+   * without mutating workbook structure (and without creating "phantom" sheets).
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {CellState}
+   */
+  peekCell(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet) return emptyCellState();
+    return sheet.getCell(c.row, c.col);
+  }
+
+  /**
    * @param {string} sheetId
    * @returns {number}
    */
