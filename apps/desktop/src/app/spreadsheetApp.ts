@@ -16,8 +16,9 @@ import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../
 import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
-import { DrawingOverlay, pxToEmu, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
+import { DrawingOverlay, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
+import { convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -190,6 +191,92 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+function normalizeImageEntry(id: string, raw: unknown): ImageEntry | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as any;
+  const bytes: unknown = record.bytes;
+  if (!(bytes instanceof Uint8Array)) return undefined;
+  const mimeType: unknown = record.mimeType ?? record.contentType ?? record.content_type;
+  if (typeof mimeType !== "string" || mimeType.trim() === "") return undefined;
+  const entryId = typeof record.id === "string" && record.id.trim() !== "" ? record.id : id;
+  return { id: entryId, bytes, mimeType };
+}
+
+function lookupImageEntry(id: string, images: unknown): ImageEntry | undefined {
+  if (!images) return undefined;
+
+  if (images instanceof Map) {
+    return normalizeImageEntry(id, (images as Map<string, unknown>).get(id));
+  }
+
+  if (typeof images === "object") {
+    return normalizeImageEntry(id, (images as Record<string, unknown>)[id]);
+  }
+
+  return undefined;
+}
+
+/**
+ * ImageStore adapter that reads workbook images from DocumentController (when available).
+ *
+ * This avoids per-frame copying by returning the stored Uint8Array bytes directly and relies
+ * on DrawingOverlay's ImageBitmapCache to dedupe decoding work.
+ */
+class DocumentImageStore implements ImageStore {
+  private readonly fallback = new Map<string, ImageEntry>();
+
+  constructor(private readonly document: DocumentController) {}
+
+  get(id: string): ImageEntry | undefined {
+    const imageId = String(id ?? "");
+    if (!imageId) return undefined;
+
+    const doc = this.document as any;
+
+    // Preferred (Task 148+): direct getter.
+    if (typeof doc.getImage === "function") {
+      try {
+        const entry = normalizeImageEntry(imageId, doc.getImage(imageId));
+        if (entry) return entry;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Map-style getter.
+    if (typeof doc.getImages === "function") {
+      try {
+        const entry = lookupImageEntry(imageId, doc.getImages());
+        if (entry) return entry;
+      } catch {
+        // ignore
+      }
+    }
+
+    // Fallback to a public `images` field if present.
+    const entry = lookupImageEntry(imageId, doc.images);
+    if (entry) return entry;
+
+    return this.fallback.get(imageId);
+  }
+
+  set(entry: ImageEntry): void {
+    if (!entry || typeof entry.id !== "string") return;
+
+    const doc = this.document as any;
+    if (typeof doc.setImage === "function") {
+      try {
+        doc.setImage(entry.id, { bytes: entry.bytes, mimeType: entry.mimeType });
+        return;
+      } catch {
+        // ignore
+      }
+    }
+
+    this.fallback.set(entry.id, entry);
+  }
 }
 
 /**
@@ -594,12 +681,14 @@ export class SpreadsheetApp {
   private wasmSyncPromise: Promise<void> = Promise.resolve();
   private auditingUnsubscribe: (() => void) | null = null;
   private externalRepaintUnsubscribe: (() => void) | null = null;
+  private drawingsUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
   private chartCanvas: HTMLCanvasElement;
   private drawingCanvas: HTMLCanvasElement;
   private drawingOverlay: DrawingOverlay;
   private readonly drawingImages: ImageStore;
+  private drawingObjectsCache: { sheetId: string; objects: DrawingObject[] } | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
   private drawingViewportMemo:
     | {
@@ -1729,13 +1818,7 @@ export class SpreadsheetApp {
       this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
     }
 
-    const drawingImageMap = new Map<string, ImageEntry>();
-    this.drawingImages = {
-      get: (id) => drawingImageMap.get(id),
-      set: (entry) => {
-        drawingImageMap.set(entry.id, entry);
-      },
-    };
+    this.drawingImages = new DocumentImageStore(this.document);
 
     const legacyDrawingGeom: DrawingGridGeometry = {
       cellOriginPx: (cell) => ({
@@ -2066,6 +2149,47 @@ export class SpreadsheetApp {
       // chart refresh so charts reflect remote data edits in real time.
       this.scheduleChartContentRefresh(payload);
     });
+
+    // Drawings/images may update via document-level deltas (Task 148+) without going
+    // through SpreadsheetApp UI actions that call `refresh()`. Listen for drawing/image
+    // change payloads and re-render the active sheet's drawing overlay.
+    const drawingUnsubs: Array<() => void> = [];
+    const invalidateAndRenderDrawings = () => {
+      // Keep memory bounded: only cache the active sheet's objects.
+      this.drawingObjectsCache = null;
+      this.renderDrawings();
+    };
+
+    drawingUnsubs.push(
+      this.document.on("change", (payload: any) => {
+        if (this.disposed) return;
+        if (!this.uiReady) return;
+        if (!this.documentChangeAffectsDrawings(payload)) return;
+        invalidateAndRenderDrawings();
+      }),
+    );
+
+    // Optional dedicated event streams (if/when DocumentController adds them).
+    drawingUnsubs.push(
+      this.document.on("drawings", (payload: any) => {
+        if (this.disposed) return;
+        if (!this.uiReady) return;
+        const sheetId = typeof payload?.sheetId === "string" ? payload.sheetId : null;
+        if (sheetId && sheetId !== this.sheetId) return;
+        invalidateAndRenderDrawings();
+      }),
+    );
+    drawingUnsubs.push(
+      this.document.on("images", () => {
+        if (this.disposed) return;
+        if (!this.uiReady) return;
+        invalidateAndRenderDrawings();
+      }),
+    );
+
+    this.drawingsUnsubscribe = () => {
+      for (const unsub of drawingUnsubs) unsub();
+    };
 
     if (!collabEnabled && typeof window !== "undefined") {
       try {
@@ -2724,6 +2848,8 @@ export class SpreadsheetApp {
     this.auditingUnsubscribe = null;
     this.externalRepaintUnsubscribe?.();
     this.externalRepaintUnsubscribe = null;
+    this.drawingsUnsubscribe?.();
+    this.drawingsUnsubscribe = null;
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
@@ -3788,6 +3914,7 @@ export class SpreadsheetApp {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
+    this.drawingObjectsCache = null;
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
     if (presence) {
@@ -3837,6 +3964,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.drawingObjectsCache = null;
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
@@ -3898,6 +4026,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.drawingObjectsCache = null;
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
@@ -6985,27 +7114,100 @@ export class SpreadsheetApp {
     };
   }
 
+  private documentChangeAffectsDrawings(payload: any): boolean {
+    if (!payload || typeof payload !== "object") return false;
+
+    const source = typeof payload?.source === "string" ? payload.source : "";
+    // Applying a new document snapshot can replace the drawing layer entirely.
+    if (source === "applyState") return true;
+    // Some integrations may publish drawings/images updates with a dedicated source tag.
+    if (source === "drawings" || source === "images") return true;
+
+    const sheetId = this.sheetId;
+    const matchesSheet = (delta: any): boolean => String(delta?.sheetId ?? "") === sheetId;
+    const touchesSheet = (deltas: any): boolean => Array.isArray(deltas) && deltas.some(matchesSheet);
+
+    // Drawing deltas are usually per-sheet.
+    if (
+      touchesSheet(payload?.drawingsDeltas) ||
+      touchesSheet(payload?.drawingDeltas) ||
+      touchesSheet(payload?.sheetDrawingsDeltas) ||
+      touchesSheet(payload?.sheetDrawingDeltas)
+    ) {
+      return true;
+    }
+
+    // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
+    if (Array.isArray(payload?.imagesDeltas) || Array.isArray(payload?.imageDeltas)) return true;
+
+    if (payload?.drawingsChanged === true || payload?.imagesChanged === true) return true;
+
+    return false;
+  }
+
   private listDrawingObjectsForSheet(): DrawingObject[] {
-    // Demo objects until we have a real drawings store.
-    return [
-      {
-        id: 1,
-        kind: { type: "shape", label: "demo" },
-        anchor: {
-          type: "oneCell",
-          from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(8), yEmu: pxToEmu(8) } },
-          size: { cx: pxToEmu(240), cy: pxToEmu(120) },
-        },
-        zOrder: 0,
-      },
-    ];
+    const cached = this.drawingObjectsCache;
+    if (cached && cached.sheetId === this.sheetId) return cached.objects;
+
+    const doc = this.document as any;
+    let raw: unknown = null;
+    if (typeof doc.getSheetDrawings === "function") {
+      try {
+        raw = doc.getSheetDrawings(this.sheetId);
+      } catch {
+        raw = null;
+      }
+    }
+
+    const isUiDrawingObject = (value: unknown): value is DrawingObject => {
+      if (!value || typeof value !== "object") return false;
+      const anyValue = value as any;
+      return (
+        typeof anyValue.id === "number" &&
+        anyValue.kind &&
+        typeof anyValue.kind.type === "string" &&
+        anyValue.anchor &&
+        typeof anyValue.anchor.type === "string"
+      );
+    };
+
+    const objects: DrawingObject[] = (() => {
+      if (raw == null) return [];
+      // Already normalized UI objects.
+      if (Array.isArray(raw)) {
+        if (raw.length === 0) return [];
+        if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
+        // Model objects as a raw array (best-effort).
+        return convertModelWorksheetDrawingsToUiDrawingObjects({ drawings: raw });
+      }
+
+      if (isUiDrawingObject(raw)) return [raw];
+
+      // Formula-model worksheet JSON blob ({ drawings: [...] }).
+      if (typeof raw === "object") {
+        const maybeWorksheet = raw as any;
+        if (Array.isArray(maybeWorksheet.drawings)) {
+          return convertModelWorksheetDrawingsToUiDrawingObjects(maybeWorksheet);
+        }
+        if (Array.isArray(maybeWorksheet.objects)) {
+          const list = maybeWorksheet.objects as unknown[];
+          if (list.every(isUiDrawingObject)) return list as DrawingObject[];
+          return convertModelWorksheetDrawingsToUiDrawingObjects({ drawings: list });
+        }
+      }
+
+      return [];
+    })();
+
+    this.drawingObjectsCache = { sheetId: this.sheetId, objects };
+    return objects;
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
     const viewport = this.syncDrawingOverlayViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
     void this.drawingOverlay.render(objects, viewport).catch(() => {
-      // Best-effort: avoid unhandled rejections from demo overlay rendering.
+      // Best-effort: avoid unhandled rejections from overlay rendering.
     });
   }
 

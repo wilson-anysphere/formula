@@ -215,4 +215,62 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       else process.env.DESKTOP_GRID_MODE = prior;
     }
   });
+
+  it("renders per-sheet drawings + images from DocumentController", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    try {
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue(undefined);
+
+      const root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      const app = new SpreadsheetApp(root, status);
+
+      // Inject a simple workbook drawing layer: one floating image anchored to A1.
+      const imageId = "image1.png";
+      const bytes = new Uint8Array([1, 2, 3]);
+      const doc = (app as any).document as any;
+      doc.getSheetDrawings = () => ({
+        drawings: [
+          {
+            id: 1,
+            kind: { Image: { image_id: imageId } },
+            anchor: {
+              OneCell: {
+                from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
+                ext: { cx: 914400, cy: 914400 },
+              },
+            },
+            z_order: 0,
+          },
+        ],
+      });
+      doc.getImage = (id: string) => (id === imageId ? { bytes, mimeType: "image/png" } : null);
+
+      renderSpy.mockClear();
+
+      // Force a drawing render pass and assert that the overlay receives our object.
+      (app as any).renderDrawings();
+      expect(renderSpy).toHaveBeenCalled();
+      const objects = renderSpy.mock.calls[0]?.[0] as any[];
+      expect(objects).toHaveLength(1);
+      expect(objects[0]).toMatchObject({ kind: { type: "image", imageId } });
+
+      // Ensure the overlay image store is backed by the document's image map.
+      const imageStore = (app as any).drawingImages;
+      expect(imageStore.get(imageId)).toMatchObject({ id: imageId, mimeType: "image/png" });
+      expect(imageStore.get(imageId)?.bytes).toEqual(bytes);
+
+      app.destroy();
+      root.remove();
+    } finally {
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
 });
