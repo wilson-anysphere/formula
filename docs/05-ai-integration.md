@@ -46,6 +46,8 @@ AI integration is not a feature bolted on—it's woven into the fabric of the ap
 **Latency requirement:** <100ms
 **Backend:** Cursor servers with aggressive caching
 
+Implementation details and extension guidance: see [AI Tab Completion](ai-tab-completion.md).
+
 ```typescript
 interface TabCompletion {
   trigger: "typing" | "tab_key";
