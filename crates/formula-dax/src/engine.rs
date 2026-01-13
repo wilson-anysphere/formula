@@ -2634,6 +2634,7 @@ impl DaxEngine {
                             Ok(TableResult {
                                 table: name.clone(),
                                 rows: (0..table_ref.row_count()).collect(),
+                                visible_cols: None,
                             })
                         }
                         Expr::ColumnRef { table, column } => {
@@ -2670,6 +2671,7 @@ impl DaxEngine {
                             Ok(TableResult {
                                 table: table.clone(),
                                 rows,
+                                visible_cols: Some(vec![idx]),
                             })
                         }
                         other => Err(DaxError::Type(format!(
