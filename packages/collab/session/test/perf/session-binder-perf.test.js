@@ -24,6 +24,7 @@
  *   PERF_CELL_UPDATES=50000   # total updates to apply (default: 50000)
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction / DC emit batch (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
+ *   PERF_KEY_ENCODING=canonical|legacy|rxc  # key format for Yjs writes (default: canonical)
  *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
  *
  * Optional CI-style enforcement (disabled unless set):
@@ -220,10 +221,14 @@ perfTest(
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
     const cols = Number.parseInt(process.env.PERF_COLS ?? "100", 10);
+    const keyEncoding = (process.env.PERF_KEY_ENCODING ?? "canonical").trim();
 
     if (!Number.isFinite(totalUpdates) || totalUpdates <= 0) throw new Error("PERF_CELL_UPDATES must be a positive integer");
     if (!Number.isFinite(batchSize) || batchSize <= 0) throw new Error("PERF_BATCH_SIZE must be a positive integer");
     if (!Number.isFinite(cols) || cols <= 0) throw new Error("PERF_COLS must be a positive integer");
+    if (!["canonical", "legacy", "rxc"].includes(keyEncoding)) {
+      throw new Error('PERF_KEY_ENCODING must be one of: "canonical", "legacy", "rxc"');
+    }
 
     const [sessionMod, Y] = await Promise.all([import("../../src/index.ts"), import("yjs")]);
     const { createCollabSession, bindCollabSessionToDocumentController } = sessionMod;
@@ -257,7 +262,12 @@ perfTest(
           for (let j = i; j < end; j += 1) {
             const row = Math.floor(j / cols);
             const col = j % cols;
-            const key = `Sheet1:${row}:${col}`;
+            const key =
+              keyEncoding === "legacy"
+                ? `Sheet1:${row},${col}`
+                : keyEncoding === "rxc"
+                  ? `r${row}c${col}`
+                  : `Sheet1:${row}:${col}`;
             let cell = cells.get(key);
             if (!(cell instanceof Y.Map)) {
               cell = new Y.Map();
@@ -293,7 +303,7 @@ perfTest(
       console.log(
         [
           "",
-          `[session-binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()}`,
+          `[session-binder-perf] updates=${totalUpdates.toLocaleString()} batchSize=${batchSize.toLocaleString()} cols=${cols.toLocaleString()} keyEncoding=${keyEncoding}`,
           `[session-binder-perf] time: write=${writeMs.toFixed(1)}ms apply=${applyMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms`,
           `[session-binder-perf] mem (best-effort): heapUsed start=${formatBytes(startMem.heapUsed)} peak=${formatBytes(peakHeapUsed)} postGC=${formatBytes(postGcMem.heapUsed)}`,
           `[session-binder-perf] mem (best-effort): rss      start=${formatBytes(startMem.rss)} peak=${formatBytes(peakRss)} postGC=${formatBytes(postGcMem.rss)}`,
@@ -309,6 +319,7 @@ perfTest(
             updates: totalUpdates,
             batchSize,
             cols,
+            keyEncoding,
             timingMs: { write: writeMs, apply: applyMs, total: totalMs },
             mem: {
               heapUsed: { start: startMem.heapUsed, peak: peakHeapUsed, postGc: postGcMem.heapUsed },
