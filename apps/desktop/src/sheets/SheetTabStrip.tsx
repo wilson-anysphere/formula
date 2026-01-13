@@ -826,7 +826,6 @@ export function SheetTabStrip({
       (typeof window !== "undefined" &&
         typeof window.matchMedia === "function" &&
         window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-
     el.scrollBy({ left: delta, behavior: reducedMotion ? "auto" : "smooth" });
   };
 
