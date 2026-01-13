@@ -292,6 +292,30 @@ export class SecondaryGridView {
       }
     });
 
+    // CanvasGridRenderer caches decoded ImageBitmaps per imageId. When the underlying
+    // workbook images change (e.g. applyState restore or future backend hydration),
+    // invalidate cached bitmaps so the grid re-resolves.
+    const unsubscribeImages = this.document.on("change", (payload: any) => {
+      const source = typeof payload?.source === "string" ? payload.source : "";
+      if (source === "applyState") {
+        this.grid.renderer.clearImageCache?.();
+        return;
+      }
+
+      const deltas = Array.isArray(payload?.imageDeltas)
+        ? payload.imageDeltas
+        : Array.isArray(payload?.imagesDeltas)
+          ? payload.imagesDeltas
+          : [];
+      if (deltas.length === 0) return;
+      for (const delta of deltas) {
+        const imageId = typeof delta?.imageId === "string" ? delta.imageId : typeof delta?.id === "string" ? delta.id : null;
+        if (!imageId) continue;
+        this.grid.renderer.invalidateImage?.(imageId);
+      }
+    });
+    this.disposeFns.push(() => unsubscribeImages());
+
     // Excel behavior: clicking another cell while editing should commit the edit and move selection.
     // We rely on the editor's blur-to-commit handler above (which fires when DesktopSharedGrid
     // focuses the container during pointer interactions).
