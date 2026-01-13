@@ -1,15 +1,6 @@
 import { isCellEmpty, rangeToA1 } from "./a1.js";
+import { throwIfAborted } from "./abort.js";
 import { inferColumnType, isLikelyHeaderRow } from "./schema.js";
-
-function createAbortError(message = "Aborted") {
-  const err = new Error(message);
-  err.name = "AbortError";
-  return err;
-}
-
-function throwIfAborted(signal) {
-  if (signal?.aborted) throw createAbortError();
-}
 
 /**
  * @typedef {import("./schema.js").InferredType} InferredType
@@ -318,4 +309,3 @@ export function extractWorkbookSchema(workbook, options = {}) {
     namedRanges,
   };
 }
-
