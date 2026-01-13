@@ -26,6 +26,10 @@ proptest! {
         // Keep these fuzz-style tests deterministic in CI so failures are reproducible and don't
         // depend on a random per-run seed.
         rng_seed: proptest::test_runner::RngSeed::Fixed(0),
+        // Avoid writing `proptest-regressions/` files during CI or local runs of this fuzz-style
+        // suite. If a panic is found, we want the minimized input printed in the test failure and
+        // for the fix to land quickly, rather than persisting stateful regression artifacts.
+        failure_persistence: None,
         .. ProptestConfig::default()
     })]
 
