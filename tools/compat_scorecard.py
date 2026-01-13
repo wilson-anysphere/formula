@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -42,6 +43,27 @@ def _github_run_url() -> str | None:
     if server and repo and run_id:
         return f"{server}/{repo}/actions/runs/{run_id}"
     return None
+
+
+def _git_commit_sha(repo_root: Path) -> str | None:
+    """
+    Best-effort local fallback when not running in GitHub Actions.
+
+    This is intentionally optional: if the repo isn't a git checkout (e.g. running against
+    downloaded artifacts), we simply omit the commit field.
+    """
+
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except Exception:
+        return None
+    sha = out.strip()
+    return sha or None
 
 
 def _load_json(path: Path) -> Any:
@@ -103,14 +125,28 @@ def _parse_corpus_summary(path: Path, payload: Any) -> CorpusMetrics:
 
     counts = payload.get("counts")
     rates = payload.get("rates")
-    if not isinstance(counts, dict) or not isinstance(rates, dict):
-        raise SystemExit(f"Corpus summary missing counts/rates objects: {path}")
+    if not isinstance(counts, dict):
+        raise SystemExit(f"Corpus summary missing counts object: {path}")
+    if rates is not None and not isinstance(rates, dict):
+        raise SystemExit(f"Corpus summary rates must be an object when present: {path}")
 
     total = _as_int(counts.get("total"), label="counts.total", path=path)
     open_ok = _as_int(counts.get("open_ok"), label="counts.open_ok", path=path)
     rt_ok = _as_int(counts.get("round_trip_ok"), label="counts.round_trip_ok", path=path)
-    open_rate = _as_float(rates.get("open"), label="rates.open", path=path)
-    rt_rate = _as_float(rates.get("round_trip"), label="rates.round_trip", path=path)
+
+    open_rate_raw = rates.get("open") if isinstance(rates, dict) else None
+    rt_rate_raw = rates.get("round_trip") if isinstance(rates, dict) else None
+
+    open_rate = (
+        _as_float(open_rate_raw, label="rates.open", path=path)
+        if open_rate_raw is not None
+        else (open_ok / total if total else 0.0)
+    )
+    rt_rate = (
+        _as_float(rt_rate_raw, label="rates.round_trip", path=path)
+        if rt_rate_raw is not None
+        else (rt_ok / total if total else 0.0)
+    )
 
     return CorpusMetrics(
         path=path,
@@ -135,7 +171,12 @@ def _parse_oracle_report(path: Path, payload: Any) -> OracleMetrics:
 
     total = _as_int(summary.get("totalCases"), label="summary.totalCases", path=path)
     mismatches = _as_int(summary.get("mismatches"), label="summary.mismatches", path=path)
-    mismatch_rate = _as_float(summary.get("mismatchRate"), label="summary.mismatchRate", path=path)
+    mismatch_rate_raw = summary.get("mismatchRate")
+    mismatch_rate = (
+        _as_float(mismatch_rate_raw, label="summary.mismatchRate", path=path)
+        if mismatch_rate_raw is not None
+        else (mismatches / total if total else 0.0)
+    )
     max_rate_raw = summary.get("maxMismatchRate")
     max_rate = None
     if max_rate_raw is not None:
@@ -303,6 +344,8 @@ def main() -> int:
     calc_passes = (calc_total - calc_mismatches) if calc_total is not None and calc_mismatches is not None else None
 
     commit = _github_commit_sha() or (corpus.commit if corpus else None)
+    if not commit:
+        commit = _git_commit_sha(repo_root)
     run_url = _github_run_url() or (corpus.run_url if corpus else None)
 
     out_md = Path(args.out_md)
