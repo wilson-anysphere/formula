@@ -173,6 +173,7 @@ function processTreeRssKb(rootPid: number): number {
     cwd: repoRoot,
     // `ps -ax` can print many lines on CI runners; bump the buffer for safety.
     maxBuffer: 5 * 1024 * 1024,
+    timeout: 5000,
   });
   if (proc.error) throw proc.error;
   if (proc.status !== 0) {
@@ -236,6 +237,7 @@ function processTreeWorkingSetBytesWindows(rootPid: number): number {
     encoding: "utf8",
     cwd: repoRoot,
     maxBuffer: 1024 * 1024,
+    timeout: 15000,
   });
   if (proc.error) throw proc.error;
   if (proc.status !== 0) {
