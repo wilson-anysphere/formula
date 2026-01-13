@@ -30,6 +30,50 @@ const tauriConfigPath = path.join(repoRoot, tauriConfigRelativePath);
 
 const PLACEHOLDER_PUBKEY = "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY";
 
+// Updater platform key mapping is intentionally strict.
+//
+// Source of truth:
+// - docs/desktop-updater-target-mapping.md
+//
+// If Tauri/tauri-action changes the platform key naming scheme (or which artifact is used for
+// self-update), this script should fail loudly so we update the mapping doc + verification logic
+// together.
+const EXPECTED_PLATFORMS = [
+  {
+    key: "darwin-universal",
+    label: "macOS (universal)",
+    expectedUpdaterAsset: {
+      description: "macOS updater archive (*.app.tar.gz)",
+      matches: (name) => name.endsWith(".app.tar.gz"),
+    },
+  },
+  {
+    key: "windows-x86_64",
+    label: "Windows (x64)",
+    expectedUpdaterAsset: {
+      description: "Windows updater installer (*.msi)",
+      matches: (name) => name.toLowerCase().endsWith(".msi"),
+    },
+  },
+  {
+    key: "windows-aarch64",
+    label: "Windows (ARM64)",
+    expectedUpdaterAsset: {
+      description: "Windows updater installer (*.msi)",
+      matches: (name) => name.toLowerCase().endsWith(".msi"),
+    },
+  },
+  {
+    key: "linux-x86_64",
+    label: "Linux (x86_64)",
+    expectedUpdaterAsset: {
+      description: "Linux updater bundle (*.AppImage)",
+      matches: (name) => name.endsWith(".AppImage"),
+    },
+  },
+];
+const EXPECTED_PLATFORM_KEYS = EXPECTED_PLATFORMS.map((p) => p.key);
+
 /**
  * @param {string} message
  */
@@ -485,20 +529,25 @@ async function main() {
     process.exit(1);
   }
 
-  const groups = groupPlatformKeys(platformKeys);
-
-  // Guard against tauri-action overwrite/merge regressions in matrix builds.
-  const missingPlatformFamilies = [];
-  if (groups.macos.length === 0) missingPlatformFamilies.push("darwin-*");
-  if (groups.windows.length === 0) missingPlatformFamilies.push("windows-*");
-  if (groups.linux.length === 0) missingPlatformFamilies.push("linux-*");
-  if (missingPlatformFamilies.length > 0) {
-    failBlock(`Updater manifest missing platforms`, [
-      `latest.json platforms: ${platformKeys.join(", ")}`,
-      `Expected at least one entry for: ${missingPlatformFamilies.join(", ")}`,
-      `This usually means the manifest was overwritten instead of merged during matrix builds.`,
+  // Enforce stable updater platform key naming (see docs/desktop-updater-target-mapping.md).
+  const expectedKeysSorted = EXPECTED_PLATFORM_KEYS.slice().sort();
+  const expectedKeySet = new Set(EXPECTED_PLATFORM_KEYS);
+  const missingKeys = expectedKeysSorted.filter((k) => !Object.prototype.hasOwnProperty.call(platforms, k));
+  const unexpectedKeys = platformKeys.filter((k) => !expectedKeySet.has(k));
+  if (missingKeys.length > 0 || unexpectedKeys.length > 0) {
+    const formatKeyList = (keys) => keys.map((k) => `    - ${k}`).join("\n");
+    failBlock(`Unexpected latest.json.platforms keys (Tauri updater target identifiers)`, [
+      `Expected (${expectedKeysSorted.length}):\n${formatKeyList(expectedKeysSorted)}`,
+      `Actual (${platformKeys.length}):\n${formatKeyList(platformKeys)}`,
+      ...(missingKeys.length > 0 ? [`Missing (${missingKeys.length}):\n${formatKeyList(missingKeys)}`] : []),
+      ...(unexpectedKeys.length > 0
+        ? [`Unexpected (${unexpectedKeys.length}):\n${formatKeyList(unexpectedKeys)}`]
+        : []),
+      `If you upgraded Tauri/tauri-action, update docs/desktop-updater-target-mapping.md and scripts/verify-tauri-updater-assets.mjs together.`,
     ]);
   }
+
+  const groups = groupPlatformKeys(platformKeys);
 
   console.log(`- Platforms in latest.json: ${platformKeys.join(", ")}`);
 
@@ -517,12 +566,19 @@ async function main() {
     }
 
     const inlineSig = hasInlineSignature(entry);
+    const expectedAssetType = EXPECTED_PLATFORMS.find((p) => p.key === platformKey)?.expectedUpdaterAsset ?? null;
 
     for (const url of urls) {
       const assetName = filenameFromUrl(url);
       if (!assetName) {
         missing.push(`latest.json platforms[${platformKey}] has an unparseable url: ${JSON.stringify(url)}`);
         continue;
+      }
+
+      if (expectedAssetType && !expectedAssetType.matches(assetName)) {
+        missing.push(
+          `Updater asset type mismatch for ${platformKey}: ${assetName} (expected ${expectedAssetType.description})`,
+        );
       }
 
       const assetExists = assetByName.has(assetName);
