@@ -79,34 +79,58 @@ describe("ThemeController (jsdom)", () => {
     controller.stop();
   });
 
-  it("defaults to light and follows matchMedia when the user selects System", () => {
+  it("resolves system theme from matchMedia and updates when preferences change", () => {
     const env = createMatchMediaStub({
       [MEDIA.prefersDark]: false,
       [MEDIA.forcedColors]: false,
       [MEDIA.prefersContrastMore]: false,
     });
 
-    const controller = new ThemeController({ document, env, storage: createMemoryStorage() });
+    const storage = createMemoryStorage();
+    saveAppearanceSettings({ themePreference: "system" }, storage);
+
+    const controller = new ThemeController({ document, env, storage });
     controller.start();
 
-    expect(controller.getThemePreference()).toBe("light");
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-
-    // While using the explicit Light theme preference, system changes should not apply.
-    env.setMatches(MEDIA.prefersDark, true);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-
-    // Selecting System should follow matchMedia.
-    controller.setThemePreference("system");
     expect(controller.getThemePreference()).toBe("system");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    // System preference should follow matchMedia changes.
+    env.setMatches(MEDIA.prefersDark, true);
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
 
-    // High contrast takes precedence over light/dark while following the system.
+    // High contrast takes precedence over light/dark.
     env.setMatches(MEDIA.forcedColors, true);
     expect(document.documentElement.getAttribute("data-theme")).toBe("high-contrast");
 
     env.setMatches(MEDIA.forcedColors, false);
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+
+    controller.stop();
+  });
+
+  it("defaults to light theme when no preference is stored and ignores prefers-color-scheme changes", () => {
+    const env = createMatchMediaStub({
+      // Even if the OS starts in dark mode, first-run should still be light.
+      [MEDIA.prefersDark]: true,
+      [MEDIA.forcedColors]: false,
+      [MEDIA.prefersContrastMore]: false,
+    });
+
+    const controller = new ThemeController({
+      document,
+      env,
+      storage: createMemoryStorage(),
+    });
+    controller.start();
+
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    env.setMatches(MEDIA.prefersDark, false);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    env.setMatches(MEDIA.prefersDark, true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
 
     controller.stop();
   });
