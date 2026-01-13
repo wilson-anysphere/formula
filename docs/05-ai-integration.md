@@ -242,8 +242,8 @@ interface Attachment {
   2. Runs the provider-agnostic tool loop with audit + (optional) claim verification via
      [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts).
   3. Feeds tool results back to the model as **bounded** `role:"tool"` messages using
-     [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)
-     (`serializeToolResultForModel`) to avoid huge `read_range` matrices.
+     `serializeToolResultForModel` (re-exported from [`packages/llm/src/index.js`](../packages/llm/src/index.js) and implemented in
+     [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)) to avoid huge `read_range` matrices.
 
 ### Mode 4: Cell Functions (=AI())
 
@@ -550,6 +550,7 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
 ### Tool loop orchestration + approval gating
 
 - Provider-agnostic tool-calling loop (streaming): [`packages/llm/src/toolCallingStreaming.js`](../packages/llm/src/toolCallingStreaming.js)
+  (`runChatWithToolsStreaming`, re-exported from [`packages/llm/src/index.js`](../packages/llm/src/index.js))
   - Responsible for executing tool calls, appending `role:"tool"` messages, and continuing until the model stops calling tools.
 - Audited wrapper used by desktop surfaces: [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts)
   - Records tool calls/results + token usage and supports optional post-response claim verification.
@@ -559,7 +560,8 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
 ### Tool result bounding + audit compaction
 
 - **Bounded tool results (for model context)**: [`packages/llm/src/toolResultSerialization.js`](../packages/llm/src/toolResultSerialization.js)
-  (`serializeToolResultForModel`) summarizes high-volume tool results (notably `read_range`) before they are appended as
+  (`serializeToolResultForModel`, re-exported from [`packages/llm/src/index.js`](../packages/llm/src/index.js)) summarizes high-volume tool results
+  (notably `read_range`) before they are appended as
   `role: "tool"` messages.
 - **Audit compaction**: [`packages/ai-tools/src/llm/audited-run.ts`](../packages/ai-tools/src/llm/audited-run.ts)
   (`runChatWithToolsAudited*`) stores bounded tool parameters and (by default) stores only `audit_result_summary` rather than full tool results,
@@ -747,7 +749,7 @@ class AIAuditLog {
 
 **Code entrypoints (desktop + shared):**
 - Desktop LLM client wrapper (Cursor-only; no provider selection / API keys): [`apps/desktop/src/ai/llm/desktopLLMClient.ts`](../apps/desktop/src/ai/llm/desktopLLMClient.ts) (`getDesktopLLMClient`, `getDesktopModel`)
-- Shared Cursor-only LLM client:
+- Shared Cursor-only LLM client (exported from [`packages/llm/src/index.js`](../packages/llm/src/index.js)):
   - [`packages/llm/src/createLLMClient.js`](../packages/llm/src/createLLMClient.js) (throws if provider selection is attempted)
   - [`packages/llm/src/cursor.js`](../packages/llm/src/cursor.js) (`CursorLLMClient`; does not read user API keys)
 
