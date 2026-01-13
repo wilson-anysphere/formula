@@ -310,6 +310,10 @@ def _compute_timings(reports: list[dict[str, Any]]) -> dict[str, Any]:
             step_out = steps.get(step)
             if not isinstance(step_out, dict):
                 continue
+            # Timing metrics should reflect successful work only; failures are surfaced separately
+            # via the compatibility counts/gates.
+            if step_out.get("status") != "ok":
+                continue
             duration = step_out.get("duration_ms")
             # JSON booleans are ints in python, so explicitly exclude bools.
             if isinstance(duration, bool):

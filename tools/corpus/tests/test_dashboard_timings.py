@@ -19,6 +19,13 @@ class DashboardTimingTests(unittest.TestCase):
             }
             for d in load_durations
         ]
+        # Failed steps should not contribute to timing percentiles.
+        reports.append(
+            {
+                "display_name": "failed.xlsx",
+                "steps": {"load": {"status": "failed", "duration_ms": 5000}},
+            }
+        )
         # Include a report without steps to ensure it's ignored.
         reports.append({"display_name": "nosteps.xlsx"})
 
