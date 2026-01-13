@@ -576,7 +576,6 @@ fn plan_pivot_expr(
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
-            | BinaryOp::Concat
             | BinaryOp::Equals
             | BinaryOp::NotEquals
             | BinaryOp::Less

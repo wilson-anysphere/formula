@@ -906,6 +906,32 @@ fn isblank_returns_true_only_for_blank() {
 }
 
 #[test]
+fn isblank_enforces_arity() {
+    let model = DataModel::new();
+    let engine = DaxEngine::new();
+
+    let err = engine
+        .evaluate(
+            &model,
+            "ISBLANK()",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("ISBLANK expects 1 argument"));
+
+    let err = engine
+        .evaluate(
+            &model,
+            "ISBLANK(1, 2)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+    assert!(err.to_string().contains("ISBLANK expects 1 argument"));
+}
+
+#[test]
 fn isblank_is_true_for_blank_measures() {
     let mut model = build_model();
     model
