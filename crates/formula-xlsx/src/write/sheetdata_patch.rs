@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use formula_model::rich_text::RichText;
-use formula_model::{CellRef, CellValue, ErrorValue, Worksheet, WorksheetId};
+use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
+use formula_model::{CellRef, CellValue, Color, ErrorValue, Worksheet, WorksheetId};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::{Reader, Writer};
 
@@ -1742,7 +1742,12 @@ fn parse_cell_semantics(
         }
     }
 
-    let value = interpret_cell_value(cell_type.as_deref(), &v_text, &inline_text, shared_strings);
+    let inline_value = if cell_type.as_deref() == Some("inlineStr") {
+        parse_inline_is_cell_value(events)?
+    } else {
+        None
+    };
+    let value = interpret_cell_value(cell_type.as_deref(), &v_text, &inline_value, shared_strings);
     let formula = f_text
         .as_deref()
         .filter(|t| !t.is_empty())
@@ -1819,7 +1824,7 @@ fn extract_is_subtree(events: &[Event<'static>]) -> Option<Vec<Event<'static>>> 
 fn interpret_cell_value(
     t: Option<&str>,
     v_text: &Option<String>,
-    inline_text: &Option<String>,
+    inline_value: &Option<CellValue>,
     shared_strings: &[RichText],
 ) -> CellValue {
     match t {
@@ -1851,8 +1856,9 @@ fn interpret_cell_value(
             CellValue::String(raw)
         }
         Some("inlineStr") => {
-            let raw = inline_text.clone().unwrap_or_default();
-            CellValue::String(raw)
+            inline_value
+                .clone()
+                .unwrap_or_else(|| CellValue::String(String::new()))
         }
         Some(_) | None => {
             if let Some(raw) = v_text.clone() {
@@ -1864,6 +1870,261 @@ fn interpret_cell_value(
             }
         }
     }
+}
+
+fn parse_inline_is_cell_value(events: &[Event<'static>]) -> Result<Option<CellValue>, WriteError> {
+    let mut idx = 0usize;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Empty(e) if super::local_name(e.name().as_ref()) == b"is" => {
+                return Ok(Some(CellValue::String(String::new())));
+            }
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"is" => {
+                let (value, _) = parse_inline_is_at(events, idx)?;
+                return Ok(Some(value));
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    Ok(None)
+}
+
+fn parse_inline_is_at(
+    events: &[Event<'static>],
+    start_idx: usize,
+) -> Result<(CellValue, usize), WriteError> {
+    let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
+    let mut idx = start_idx + 1;
+
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"t" => {
+                let (text, next) = read_text_from_events(events, idx, b"t")?;
+                segments.push((text, RichTextRunStyle::default()));
+                idx = next;
+            }
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"r" => {
+                let ((text, style), next) = parse_inline_r_at(events, idx)?;
+                segments.push((text, style));
+                idx = next;
+            }
+            Event::Start(_) => {
+                // Only treat `<t>` as visible text when it is a direct child of `<is>` or
+                // inside `<is><r>...</r></is>`. Other subtrees (phonetic/ruby runs, extensions)
+                // may contain `<t>` elements that should not be concatenated into the display
+                // string.
+                idx = skip_element(events, idx);
+            }
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"is" => {
+                idx += 1;
+                break;
+            }
+            _ => idx += 1,
+        }
+    }
+
+    if segments.is_empty() {
+        return Ok((CellValue::String(String::new()), idx));
+    }
+
+    if segments.iter().all(|(_, style)| style.is_empty()) {
+        Ok((
+            CellValue::String(segments.into_iter().map(|(text, _)| text).collect()),
+            idx,
+        ))
+    } else {
+        Ok((CellValue::RichText(RichText::from_segments(segments)), idx))
+    }
+}
+
+fn parse_inline_r_at(
+    events: &[Event<'static>],
+    start_idx: usize,
+) -> Result<((String, RichTextRunStyle), usize), WriteError> {
+    let mut style = RichTextRunStyle::default();
+    let mut text = String::new();
+    let mut idx = start_idx + 1;
+
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"rPr" => {
+                let (parsed, next) = parse_inline_rpr_at(events, idx)?;
+                style = parsed;
+                idx = next;
+            }
+            Event::Empty(e) if super::local_name(e.name().as_ref()) == b"rPr" => {
+                // `<rPr/>` with no style tags.
+                style = RichTextRunStyle::default();
+                idx += 1;
+            }
+            Event::Start(e) if super::local_name(e.name().as_ref()) == b"t" => {
+                let (t, next) = read_text_from_events(events, idx, b"t")?;
+                text.push_str(&t);
+                idx = next;
+            }
+            Event::Start(_) => {
+                idx = skip_element(events, idx);
+            }
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"r" => {
+                idx += 1;
+                break;
+            }
+            _ => idx += 1,
+        }
+    }
+
+    Ok(((text, style), idx))
+}
+
+fn parse_inline_rpr_at(
+    events: &[Event<'static>],
+    start_idx: usize,
+) -> Result<(RichTextRunStyle, usize), WriteError> {
+    let mut style = RichTextRunStyle::default();
+    let mut idx = start_idx + 1;
+
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Empty(e) => {
+                parse_inline_rpr_tag(e, &mut style)?;
+                idx += 1;
+            }
+            Event::Start(e) => {
+                parse_inline_rpr_tag(e, &mut style)?;
+                idx = skip_element(events, idx);
+            }
+            Event::End(e) if super::local_name(e.name().as_ref()) == b"rPr" => {
+                idx += 1;
+                break;
+            }
+            _ => idx += 1,
+        }
+    }
+
+    Ok((style, idx))
+}
+
+fn parse_inline_rpr_tag(e: &BytesStart<'_>, style: &mut RichTextRunStyle) -> Result<(), WriteError> {
+    match super::local_name(e.name().as_ref()) {
+        b"b" => style.bold = Some(parse_inline_rpr_bool_val(e)?),
+        b"i" => style.italic = Some(parse_inline_rpr_bool_val(e)?),
+        b"u" => {
+            let val = attr_value(e, b"val")?;
+            if let Some(ul) = Underline::from_ooxml(val.as_deref()) {
+                style.underline = Some(ul);
+            }
+        }
+        b"color" => {
+            if let Some(rgb) = attr_value(e, b"rgb")? {
+                if rgb.len() == 8 {
+                    if let Ok(argb) = u32::from_str_radix(&rgb, 16) {
+                        style.color = Some(Color::new_argb(argb));
+                    }
+                }
+            }
+        }
+        b"rFont" | b"name" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                style.font = Some(val);
+            }
+        }
+        b"sz" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                if let Some(sz) = parse_size_100pt(&val) {
+                    style.size_100pt = Some(sz);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn parse_inline_rpr_bool_val(e: &BytesStart<'_>) -> Result<bool, WriteError> {
+    let Some(val) = attr_value(e, b"val")? else {
+        return Ok(true);
+    };
+    Ok(!(val == "0" || val.eq_ignore_ascii_case("false")))
+}
+
+fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Result<Option<String>, WriteError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if attr.key.as_ref() == key {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_size_100pt(val: &str) -> Option<u16> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+
+    if let Some((int_part, frac_part)) = val.split_once('.') {
+        let int: u16 = int_part.parse().ok()?;
+        let mut frac = frac_part.chars().take(2).collect::<String>();
+        while frac.len() < 2 {
+            frac.push('0');
+        }
+        let frac: u16 = frac.parse().ok()?;
+        int.checked_mul(100)?.checked_add(frac)
+    } else {
+        let int: u16 = val.parse().ok()?;
+        int.checked_mul(100)
+    }
+}
+
+fn read_text_from_events(
+    events: &[Event<'static>],
+    start_idx: usize,
+    end_local: &[u8],
+) -> Result<(String, usize), WriteError> {
+    let mut text = String::new();
+    let mut idx = start_idx + 1;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Text(t) => {
+                text.push_str(&t.unescape()?.into_owned());
+            }
+            Event::CData(c) => {
+                text.push_str(&String::from_utf8_lossy(c.as_ref()));
+            }
+            Event::End(e) if super::local_name(e.name().as_ref()) == end_local => {
+                idx += 1;
+                break;
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    Ok((text, idx))
+}
+
+fn skip_element(events: &[Event<'static>], start_idx: usize) -> usize {
+    if !matches!(events.get(start_idx), Some(Event::Start(_))) {
+        return start_idx + 1;
+    }
+
+    let mut depth = 1usize;
+    let mut idx = start_idx + 1;
+    while idx < events.len() {
+        match &events[idx] {
+            Event::Start(_) => depth += 1,
+            Event::End(_) => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return idx + 1;
+                }
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    events.len()
 }
 
 fn extract_preserved_cell_children(events: &[Event<'static>]) -> Vec<Event<'static>> {

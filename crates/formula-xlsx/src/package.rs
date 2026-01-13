@@ -607,6 +607,9 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
+    // Map a canonicalized lookup key (case/separator-insensitive, percent-decoding `%xx`) back to
+    // the actual ZIP entry name. This lets us preserve the real stored name (including percent
+    // escapes) when relationship targets use a different encoding.
     let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;
@@ -727,6 +730,9 @@ pub fn worksheet_parts_from_reader_limited<R: Read + Seek>(
     let mut zip = zip::ZipArchive::new(reader)?;
 
     let mut part_names: HashSet<String> = HashSet::new();
+    // Map a canonicalized lookup key (case/separator-insensitive, percent-decoding `%xx`) back to
+    // the actual ZIP entry name. This lets us preserve the real stored name (including percent
+    // escapes) when relationship targets use a different encoding.
     let mut part_name_keys: HashMap<Vec<u8>, String> = HashMap::new();
     for i in 0..zip.len() {
         let file = zip.by_index(i)?;

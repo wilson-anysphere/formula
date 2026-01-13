@@ -1132,7 +1132,6 @@ fn sheet_xml(
     };
 
     let conditional_formatting_xml = render_conditional_formatting(sheet, local_to_global_dxf);
-
     let sheet_protection_xml = sheet_protection_xml(sheet);
     let data_validations_xml = sheet_data_validations_xml(sheet);
 

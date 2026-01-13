@@ -111,10 +111,10 @@ fn reader_parses_prefixed_worksheet_elements_and_inline_strings(
         let sheet = &workbook.sheets[0];
 
         assert_eq!(sheet.value(CellRef::from_a1("A1")?), CellValue::Number(42.0));
-        assert_eq!(
-            sheet.value(CellRef::from_a1("B1")?),
-            CellValue::String("Hello World".to_string())
-        );
+        match sheet.value(CellRef::from_a1("B1")?) {
+            CellValue::RichText(rich) => assert_eq!(rich.text, "Hello World"),
+            other => panic!("expected rich text inline string, got {other:?}"),
+        }
         assert_eq!(sheet.value(CellRef::from_a1("C1")?), CellValue::Number(43.0));
         assert_eq!(sheet.formula(CellRef::from_a1("C1")?), Some("A1+1"));
 
@@ -139,4 +139,3 @@ fn reader_parses_prefixed_worksheet_elements_and_inline_strings(
 
     Ok(())
 }
-

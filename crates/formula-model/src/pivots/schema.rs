@@ -49,8 +49,7 @@ impl PivotFieldRef {
         }
     }
 
-    /// Returns the underlying worksheet/pivot-cache field name if this reference is backed by a
-    /// cache field header.
+    /// Returns the cache/worksheet field name if this reference points at a pivot cache field.
     pub fn as_cache_field_name(&self) -> Option<&str> {
         match self {
             PivotFieldRef::CacheFieldName(name) => Some(name.as_str()),

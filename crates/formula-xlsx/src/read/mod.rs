@@ -9,7 +9,8 @@ use std::path::Path;
 use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::drawings::{DrawingObject, ImageData, ImageId};
 use formula_model::pivots::{PivotChartId, PivotChartModel, PivotTableId};
-use formula_model::rich_text::RichText;
+use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
+use formula_model::Color;
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, Comment, CommentKind, DataValidation,
     DataValidationErrorAlert, DataValidationErrorStyle, DataValidationInputMessage,
@@ -18,7 +19,7 @@ use formula_model::{
     WorkbookWindowState,
 };
 use quick_xml::events::attributes::AttrError;
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 use thiserror::Error;
 use zip::ZipArchive;
@@ -2639,7 +2640,7 @@ fn parse_worksheet_into_model(
     let mut current_vm: Option<String> = None;
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
-    let mut current_inline_text: Option<String> = None;
+    let mut current_inline_value: Option<CellValue> = None;
     let mut current_inline_phonetic: Option<String> = None;
     let mut in_v = false;
     let mut in_f = false;
@@ -3016,7 +3017,7 @@ fn parse_worksheet_into_model(
                 current_vm = None;
                 current_formula = None;
                 current_value_text = None;
-                current_inline_text = None;
+                current_inline_value = None;
                 current_inline_phonetic = None;
                 in_v = false;
                 in_f = false;
@@ -3101,7 +3102,7 @@ fn parse_worksheet_into_model(
                             interpret_cell_value(
                                 current_t.as_deref(),
                                 &current_value_text,
-                                &current_inline_text,
+                                &current_inline_value,
                                 shared_strings,
                             )
                         } else {
@@ -3109,7 +3110,7 @@ fn parse_worksheet_into_model(
                                 interpret_cell_value_without_meta(
                                     current_t.as_deref(),
                                     &current_value_text,
-                                    &current_inline_text,
+                                    &current_inline_value,
                                     shared_strings,
                                 ),
                                 None,
@@ -3218,7 +3219,7 @@ fn parse_worksheet_into_model(
                 current_vm = None;
                 current_formula = None;
                 current_value_text = None;
-                current_inline_text = None;
+                current_inline_value = None;
                 current_inline_phonetic = None;
                 in_v = false;
                 in_f = false;
@@ -3292,8 +3293,8 @@ fn parse_worksheet_into_model(
                     && current_t.as_deref() == Some("inlineStr")
                     && e.local_name().as_ref() == b"is" =>
             {
-                let (visible, phonetic) = parse_inline_is_text(&mut reader)?;
-                current_inline_text = Some(visible);
+                let (value, phonetic) = parse_inline_is_value(&mut reader)?;
+                current_inline_value = Some(value);
                 current_inline_phonetic = phonetic;
             }
             Event::Empty(e)
@@ -3302,7 +3303,7 @@ fn parse_worksheet_into_model(
                     && current_t.as_deref() == Some("inlineStr")
                     && e.local_name().as_ref() == b"is" =>
             {
-                current_inline_text = Some(String::new());
+                current_inline_value = Some(CellValue::String(String::new()));
                 current_inline_phonetic = None;
             }
 
@@ -3841,19 +3842,21 @@ fn parse_sheet_drawing_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
     Ok(out)
 }
 
-fn parse_inline_is_text<R: std::io::BufRead>(
+fn parse_inline_is_value<R: std::io::BufRead>(
     reader: &mut Reader<R>,
-) -> Result<(String, Option<String>), ReadError> {
+) -> Result<(CellValue, Option<String>), ReadError> {
     let mut buf = Vec::new();
-    let mut visible = String::new();
+    let mut segments: Vec<(String, RichTextRunStyle)> = Vec::new();
     let mut phonetic: Option<String> = None;
+
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"t" => {
-                visible.push_str(&read_text(reader, b"t")?);
+                let t = read_text(reader, b"t")?;
+                segments.push((t, RichTextRunStyle::default()));
             }
             Event::Start(e) if e.local_name().as_ref() == b"r" => {
-                visible.push_str(&parse_inline_r_text(reader)?);
+                segments.push(parse_inline_r(reader)?);
             }
             Event::Start(e) if e.local_name().as_ref() == b"rPh" => {
                 let run = parse_inline_rph_text(reader)?;
@@ -3863,7 +3866,20 @@ fn parse_inline_is_text<R: std::io::BufRead>(
                 // Presence of `<rPh/>` implies phonetic metadata even if it contains no text.
                 phonetic.get_or_insert_with(String::new);
             }
+            Event::Start(e) if e.local_name().as_ref() == b"phoneticPr" => {
+                // `phoneticPr` carries metadata for the phonetic runs. Preserve its presence so we
+                // can distinguish between "no phonetic" and "phonetic with empty text".
+                phonetic.get_or_insert_with(String::new);
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"phoneticPr" => {
+                phonetic.get_or_insert_with(String::new);
+            }
             Event::Start(e) => {
+                // Only treat `<t>` as visible text when it is a direct child of `<is>` or inside
+                // `<is><r>...</r></is>`. Other subtrees (phonetic/ruby runs, extensions) may contain
+                // `<t>` elements that should not be concatenated into the display string, so skip
+                // them wholesale.
                 reader.read_to_end_into(e.name(), &mut Vec::new())?;
             }
             Event::End(e) if e.local_name().as_ref() == b"is" => break,
@@ -3876,18 +3892,36 @@ fn parse_inline_is_text<R: std::io::BufRead>(
         }
         buf.clear();
     }
-    Ok((visible, phonetic))
+
+    let value = if segments.is_empty() {
+        CellValue::String(String::new())
+    } else if segments.iter().all(|(_, style)| style.is_empty()) {
+        CellValue::String(segments.into_iter().map(|(text, _)| text).collect())
+    } else {
+        CellValue::RichText(RichText::from_segments(segments))
+    };
+
+    Ok((value, phonetic))
 }
 
-fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
+fn parse_inline_r<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+) -> Result<(String, RichTextRunStyle), ReadError> {
     let mut buf = Vec::new();
-    let mut out = String::new();
+    let mut style = RichTextRunStyle::default();
+    let mut text = String::new();
+
     loop {
         match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if e.local_name().as_ref() == b"rPr" => {
+                style = parse_inline_rpr(reader)?;
+            }
             Event::Start(e) if e.local_name().as_ref() == b"t" => {
-                out.push_str(&read_text(reader, b"t")?);
+                text.push_str(&read_text(reader, b"t")?);
             }
             Event::Start(e) => {
+                // Skip any unexpected subtrees to avoid accidentally capturing `<t>` elements
+                // from phonetic/ruby annotations (best-effort).
                 reader.read_to_end_into(e.name(), &mut Vec::new())?;
             }
             Event::End(e) if e.local_name().as_ref() == b"r" => break,
@@ -3900,7 +3934,111 @@ fn parse_inline_r_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<St
         }
         buf.clear();
     }
-    Ok(out)
+
+    Ok((text, style))
+}
+
+fn parse_inline_rpr<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+) -> Result<RichTextRunStyle, ReadError> {
+    let mut buf = Vec::new();
+    let mut style = RichTextRunStyle::default();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Empty(e) => parse_inline_rpr_tag(&e, &mut style)?,
+            Event::Start(e) => {
+                parse_inline_rpr_tag(&e, &mut style)?;
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::End(e) if e.local_name().as_ref() == b"rPr" => break,
+            Event::Eof => {
+                return Err(ReadError::Xlsx(XlsxError::Invalid(
+                    "unexpected EOF while parsing inline string <rPr>".to_string(),
+                )))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(style)
+}
+
+fn parse_inline_rpr_tag(
+    e: &BytesStart<'_>,
+    style: &mut RichTextRunStyle,
+) -> Result<(), ReadError> {
+    match e.local_name().as_ref() {
+        b"b" => style.bold = Some(parse_inline_rpr_bool_val(e)?),
+        b"i" => style.italic = Some(parse_inline_rpr_bool_val(e)?),
+        b"u" => {
+            let val = attr_value(e, b"val")?;
+            if let Some(ul) = Underline::from_ooxml(val.as_deref()) {
+                style.underline = Some(ul);
+            }
+        }
+        b"color" => {
+            if let Some(rgb) = attr_value(e, b"rgb")? {
+                if rgb.len() == 8 {
+                    if let Ok(argb) = u32::from_str_radix(&rgb, 16) {
+                        style.color = Some(Color::new_argb(argb));
+                    }
+                }
+            }
+        }
+        b"rFont" | b"name" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                style.font = Some(val);
+            }
+        }
+        b"sz" => {
+            if let Some(val) = attr_value(e, b"val")? {
+                if let Some(sz) = parse_size_100pt(&val) {
+                    style.size_100pt = Some(sz);
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn parse_inline_rpr_bool_val(e: &BytesStart<'_>) -> Result<bool, ReadError> {
+    let Some(val) = attr_value(e, b"val")? else {
+        return Ok(true);
+    };
+    Ok(!(val == "0" || val.eq_ignore_ascii_case("false")))
+}
+
+fn attr_value(e: &BytesStart<'_>, key: &[u8]) -> Result<Option<String>, ReadError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        if attr.key.as_ref() == key {
+            return Ok(Some(attr.unescape_value()?.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn parse_size_100pt(val: &str) -> Option<u16> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+
+    if let Some((int_part, frac_part)) = val.split_once('.') {
+        let int: u16 = int_part.parse().ok()?;
+        let mut frac = frac_part.chars().take(2).collect::<String>();
+        while frac.len() < 2 {
+            frac.push('0');
+        }
+        let frac: u16 = frac.parse().ok()?;
+        int.checked_mul(100)?.checked_add(frac)
+    } else {
+        let int: u16 = val.parse().ok()?;
+        int.checked_mul(100)
+    }
 }
 
 fn parse_inline_rph_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
@@ -3953,7 +4091,7 @@ fn read_text<R: std::io::BufRead>(
 fn interpret_cell_value(
     t: Option<&str>,
     v_text: &Option<String>,
-    inline_text: &Option<String>,
+    inline_value: &Option<CellValue>,
     shared_strings: &[RichText],
 ) -> (CellValue, Option<CellValueKind>, Option<String>) {
     match t {
@@ -3998,12 +4136,15 @@ fn interpret_cell_value(
             )
         }
         Some("inlineStr") => {
-            let raw = inline_text.clone().unwrap_or_default();
-            (
-                CellValue::String(raw.clone()),
-                Some(CellValueKind::InlineString),
-                Some(raw),
-            )
+            let value = inline_value
+                .clone()
+                .unwrap_or_else(|| CellValue::String(String::new()));
+            let raw = match &value {
+                CellValue::String(s) => s.clone(),
+                CellValue::RichText(rich) => rich.text.clone(),
+                _ => String::new(),
+            };
+            (value, Some(CellValueKind::InlineString), Some(raw))
         }
         Some("n") | None => {
             if let Some(raw) = v_text.clone() {
@@ -4048,7 +4189,7 @@ fn interpret_cell_value(
 fn interpret_cell_value_without_meta(
     t: Option<&str>,
     v_text: &Option<String>,
-    inline_text: &Option<String>,
+    inline_value: &Option<CellValue>,
     shared_strings: &[RichText],
 ) -> CellValue {
     match t {
@@ -4073,7 +4214,9 @@ fn interpret_cell_value_without_meta(
             CellValue::Error(err)
         }
         Some("str") => CellValue::String(v_text.clone().unwrap_or_default()),
-        Some("inlineStr") => CellValue::String(inline_text.clone().unwrap_or_default()),
+        Some("inlineStr") => inline_value
+            .clone()
+            .unwrap_or_else(|| CellValue::String(String::new())),
         Some("n") | None => {
             if let Some(raw) = v_text.as_deref() {
                 raw.parse::<f64>()
