@@ -750,10 +750,144 @@ fn merge_chart_models(
         merged.axes = chart_ex.axes.clone();
     }
 
+    // External workbook links: prefer the classic chartSpace value when present
+    // (that's where Excel usually stores it), otherwise fall back to ChartEx.
+    match (&merged.external_data_rel_id, &chart_ex.external_data_rel_id) {
+        (None, Some(chart_ex_rid)) => {
+            diagnostics.push(ChartDiagnostic {
+                severity: ChartDiagnosticSeverity::Info,
+                message: format!(
+                    "model.external_data_rel_id: using ChartEx {chart_ex_rid:?} (chartSpace was None)",
+                ),
+                part: Some(chart_ex_part.to_string()),
+                xpath: None,
+            });
+            merged.external_data_rel_id = Some(chart_ex_rid.clone());
+        }
+        (Some(chart_space_rid), Some(chart_ex_rid)) if chart_space_rid != chart_ex_rid => {
+            diagnostics.push(ChartDiagnostic {
+                severity: ChartDiagnosticSeverity::Warning,
+                message: format!(
+                    "model.external_data_rel_id: chartSpace {chart_space_rid:?} differs from ChartEx {chart_ex_rid:?}; using chartSpace",
+                ),
+                part: Some(chart_space_part.to_string()),
+                xpath: None,
+            });
+        }
+        _ => {}
+    }
+
+    if merged.external_data_auto_update.is_none() {
+        if let Some(chart_ex_auto) = chart_ex.external_data_auto_update {
+            // Only use ChartEx autoUpdate if the relationship id matches (or if
+            // chartSpace didn't have one and we just copied it from ChartEx).
+            let rel_ids_match = match (&merged.external_data_rel_id, &chart_ex.external_data_rel_id)
+            {
+                (Some(a), Some(b)) => a == b,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if rel_ids_match {
+                diagnostics.push(ChartDiagnostic {
+                    severity: ChartDiagnosticSeverity::Info,
+                    message: format!(
+                        "model.external_data_auto_update: using ChartEx {chart_ex_auto:?} (chartSpace was None)",
+                    ),
+                    part: Some(chart_ex_part.to_string()),
+                    xpath: None,
+                });
+                merged.external_data_auto_update = Some(chart_ex_auto);
+            }
+        }
+    } else if let (Some(chart_space_auto), Some(chart_ex_auto)) = (
+        merged.external_data_auto_update,
+        chart_ex.external_data_auto_update,
+    ) {
+        if chart_space_auto != chart_ex_auto {
+            diagnostics.push(ChartDiagnostic {
+                severity: ChartDiagnosticSeverity::Warning,
+                message: format!(
+                    "model.external_data_auto_update: chartSpace {chart_space_auto:?} differs from ChartEx {chart_ex_auto:?}; using chartSpace",
+                ),
+                part: Some(chart_space_part.to_string()),
+                xpath: None,
+            });
+        }
+    }
+
     // Preserve whichever diagnostics are available from both models.
     merged.diagnostics.extend(chart_ex.diagnostics);
 
     merged
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use formula_model::charts::PlotAreaModel;
+
+    fn minimal_model(rel_id: Option<&str>, auto_update: Option<bool>) -> ChartModel {
+        ChartModel {
+            chart_kind: ChartKind::Unknown {
+                name: "unknown".to_string(),
+            },
+            title: None,
+            legend: None,
+            plot_area: PlotAreaModel::Unknown {
+                name: "unknown".to_string(),
+            },
+            plot_area_layout: None,
+            axes: Vec::new(),
+            series: Vec::new(),
+            style_id: None,
+            rounded_corners: None,
+            disp_blanks_as: None,
+            plot_vis_only: None,
+            style_part: None,
+            colors_part: None,
+            chart_area_style: None,
+            plot_area_style: None,
+            external_data_rel_id: rel_id.map(str::to_string),
+            external_data_auto_update: auto_update,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn merge_chart_models_external_data_falls_back_to_chart_ex() {
+        let chart_space = minimal_model(None, None);
+        let chart_ex = minimal_model(Some("rId9"), Some(true));
+        let mut diagnostics = Vec::new();
+
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        assert_eq!(merged.external_data_rel_id.as_deref(), Some("rId9"));
+        assert_eq!(merged.external_data_auto_update, Some(true));
+    }
+
+    #[test]
+    fn merge_chart_models_external_data_prefers_chart_space_on_conflict() {
+        let chart_space = minimal_model(Some("rId1"), Some(false));
+        let chart_ex = minimal_model(Some("rId2"), Some(true));
+        let mut diagnostics = Vec::new();
+
+        let merged = merge_chart_models(
+            chart_space,
+            chart_ex,
+            "xl/charts/chart1.xml",
+            "xl/charts/chartEx1.xml",
+            &mut diagnostics,
+        );
+
+        assert_eq!(merged.external_data_rel_id.as_deref(), Some("rId1"));
+        assert_eq!(merged.external_data_auto_update, Some(false));
+    }
 }
 
 fn chart_ex_kind_is_specific(kind: &ChartKind) -> bool {
