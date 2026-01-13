@@ -280,9 +280,16 @@ export function extractWorkbookSchema(workbook, options = {}) {
     const sheetName = typeof table?.sheetName === "string" ? table.sheetName : "";
     const rect = normalizeRect(table?.rect);
     if (!name || !sheetName || !rect) continue;
-    const sheet = sheetByName.get(sheetName);
-    if (!sheet) continue;
-    const analysis = analyzeTableRect(sheet, rect, { maxAnalyzeRows, maxAnalyzeCols, signal });
+    const sheet = sheetByName.get(sheetName) ?? null;
+    const analysis = sheet
+      ? analyzeTableRect(sheet, rect, { maxAnalyzeRows, maxAnalyzeCols, signal })
+      : {
+          headers: [],
+          inferredColumnTypes: /** @type {InferredType[]} */ ([]),
+          // Without sheet cell data we cannot run header heuristics; treat every row as data.
+          rowCount: Math.max(0, rect.r1 - rect.r0 + 1),
+          columnCount: Math.max(0, rect.c1 - rect.c0 + 1),
+        };
     tables.push({
       name,
       sheetName,

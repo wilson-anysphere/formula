@@ -263,4 +263,24 @@ describe("extractWorkbookSchema", () => {
     }
     expect(error).toMatchObject({ name: "AbortError" });
   });
+
+  it("includes tables even when sheet cell data is unavailable", () => {
+    const workbook = {
+      id: "wb-missing-sheet",
+      sheets: [{ name: "Other", cells: [[1]] }],
+      tables: [{ name: "T", sheetName: "Missing", rect: { r0: 0, c0: 0, r1: 9, c1: 2 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.tables[0]).toMatchObject({
+      name: "T",
+      sheetName: "Missing",
+      rangeA1: "Missing!A1:C10",
+      rowCount: 10,
+      columnCount: 3,
+    });
+    expect(schema.tables[0].headers).toEqual([]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual([]);
+  });
 });
