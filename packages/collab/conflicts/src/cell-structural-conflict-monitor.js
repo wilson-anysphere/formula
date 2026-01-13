@@ -429,6 +429,12 @@ export class CellStructuralConflictMonitor {
       if (!record || typeof record !== "object") return;
       const createdAt = Number(record.createdAt);
       if (!Number.isFinite(createdAt)) return;
+      // Conservative policy: never age-prune our own records. The per-user
+      // `maxOpRecordsPerUser` cap already bounds local growth, and keeping local
+      // records avoids deleting ops that might still be needed to compare
+      // against late-arriving remote operations (best-effort under offline /
+      // clock-skew scenarios).
+      if (record.userId === this.localUserId) return;
       if (createdAt < cutoff) {
         toDelete.push(String(id));
       }

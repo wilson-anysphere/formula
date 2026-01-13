@@ -159,3 +159,36 @@ test("CellStructuralConflictMonitor still detects recent conflicts when age prun
   docA.destroy();
   docB.destroy();
 });
+
+test("CellStructuralConflictMonitor does not age-prune its own op records (local safety)", () => {
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+  const ops = doc.getMap("cellStructuralOps");
+
+  const now = Date.now();
+  const localId = "op-local-old";
+
+  doc.transact(() => {
+    ops.set(localId, {
+      id: localId,
+      kind: "edit",
+      userId: "local",
+      createdAt: now - 60_000,
+      beforeState: [],
+      afterState: [],
+    });
+  });
+
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "local",
+    onConflict: () => {},
+    maxOpRecordAgeMs: 1_000,
+  });
+
+  assert.equal(ops.has(localId), true);
+
+  monitor.dispose();
+  doc.destroy();
+});
