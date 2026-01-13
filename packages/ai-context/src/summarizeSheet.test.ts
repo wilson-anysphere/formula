@@ -138,4 +138,12 @@ describe("summarizeSheetSchema", () => {
     expect(summary).not.toContain("\nT1 ");
     expect(summary).toContain("T…+2");
   });
+
+  it("supports maxRegions=0 (only emits a truncation marker)", () => {
+    const schema = buildSchema();
+    const summary = summarizeSheetSchema(schema, { maxRegions: 0, includeTables: false });
+    expect(summary).toContain("regions=2");
+    expect(summary).not.toContain("\nR1 ");
+    expect(summary).toContain("R…+2");
+  });
 });
