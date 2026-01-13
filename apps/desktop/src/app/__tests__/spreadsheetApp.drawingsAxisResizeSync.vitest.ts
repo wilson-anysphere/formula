@@ -145,6 +145,11 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
 
+      // DocumentImageStore supports async hydration (IndexedDB) via `getAsync`, which makes
+      // DrawingOverlay.render asynchronous even for placeholder rendering. Disable it so this
+      // unit test can assert immediately on canvas calls without flakiness.
+      (app as any).drawingImages.getAsync = undefined;
+
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
       expect(drawingCanvas).toBeTruthy();
 
@@ -402,7 +407,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
     }
   });
 
-  it("re-renders drawings when shared-grid row heights change", () => {
+  it("re-renders drawings when shared-grid row heights change", async () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -415,6 +420,9 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       const app = new SpreadsheetApp(root, status);
       expect(app.getGridMode()).toBe("shared");
+
+      // Disable async IndexedDB hydration so stroke calls land synchronously for this unit test.
+      (app as any).drawingImages.getAsync = undefined;
 
       const drawingCanvas = (app as any).drawingCanvas as HTMLCanvasElement;
       expect(drawingCanvas).toBeTruthy();
@@ -443,6 +451,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
 
       // Initial render.
       (app as any).renderDrawings();
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const firstStroke = calls!.find((call) => call.method === "strokeRect");
       expect(firstStroke).toBeTruthy();
       const y1 = Number(firstStroke!.args[1]);
@@ -469,6 +478,7 @@ describe("SpreadsheetApp drawings overlay + shared-grid axis resize", () => {
         zoom: renderer.getZoom(),
         source: "resize",
       });
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(renderSpy).toHaveBeenCalled();
       const secondStroke = calls!.find((call) => call.method === "strokeRect");

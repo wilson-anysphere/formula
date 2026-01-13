@@ -312,7 +312,10 @@
 }
 
 .what-if-grid--fit {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  /* Allow the grid to collapse cleanly even in very narrow dock panels.
+     `min(140px, 100%)` prevents the minimum track size from exceeding the container width,
+     avoiding horizontal overflow while still collapsing to fewer columns as space shrinks. */
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   align-items: end;
 }
 
