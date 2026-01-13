@@ -984,15 +984,20 @@ jobs:
             throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
 
-          $bundleCandidates = @(
-            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
-            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
-          )
-          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-          if (-not $bundleDir) {
-            $candidatesJoined = $bundleCandidates -join "`n"
-            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          # We expect Tauri builds in this repo to write bundles to the src-tauri target dir.
+          # Keep this assertion strict so we fail loudly if the output layout changes (or if the
+          # build didn't actually run for the requested target).
+          $expectedBundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"
+          if (-not (Test-Path $expectedBundleDir)) {
+            $fallbackBundleDir = Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle"
+            $msg = "windows-bundle: ERROR expected Tauri bundle dir not found: $expectedBundleDir"
+            if (Test-Path $fallbackBundleDir) {
+              $msg += "`nFound bundle output under workspace target dir instead: $fallbackBundleDir"
+              $msg += "`nThis likely means the build output layout (CARGO_TARGET_DIR) has changed; update the workflow assertions accordingly."
+            }
+            throw $msg
           }
+          $bundleDir = $expectedBundleDir
 
           # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
           #
