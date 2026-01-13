@@ -64,9 +64,13 @@ export function SolverPanel() {
 
   return (
     <div className="solver-panel">
-      <header style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2>{t("panels.solver.title")}</h2>
-        <button type="button" onClick={() => setShowDialog(true)}>
+      <header className="solver-panel__header">
+        <h2 className="solver-panel__title">{t("panels.solver.title")}</h2>
+        <button
+          type="button"
+          className="solver-panel__configure-button"
+          onClick={() => setShowDialog(true)}
+        >
           {t("solver.configure")}
         </button>
       </header>
@@ -88,7 +92,7 @@ export function SolverPanel() {
       )}
 
       {error && (
-        <div style={{ color: "crimson" }}>
+        <div className="solver-panel__error">
           <strong>{t("solver.errorLabel")}</strong> {error}
         </div>
       )}

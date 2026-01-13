@@ -1,0 +1,64 @@
+/*
+  Solver panel UI (src/panels/solver/*).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.solver-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.solver-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.solver-panel__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.solver-panel__configure-button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.solver-panel__configure-button:hover {
+  background: var(--bg-hover);
+}
+
+.solver-panel__configure-button:active {
+  background: var(--bg-active);
+}
+
+.solver-panel__configure-button:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.solver-panel__configure-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.solver-panel__error {
+  color: var(--error);
+}
+

@@ -53,6 +53,19 @@ test("core UI does not hardcode colors outside tokens.css", () => {
   // - a decimal literal that starts with `.`, e.g. `.5`
   const rgbColor = /\brgb(a)?\s*\(\s*(?:\d|\.\d)/gi;
 
+  // Named colors (e.g. `crimson`) bypass theme tokens. Allow only keyword-like values that
+  // don't encode an actual palette color.
+  const namedColorCss = /\bcolor\s*:\s*([a-zA-Z]+)\b(?!\s*\()/g;
+  const namedColorJs = /\bcolor\s*:\s*["']([a-zA-Z]+)["']/g;
+  const allowedNamedColors = new Set([
+    "transparent",
+    "inherit",
+    "currentcolor",
+    "initial",
+    "unset",
+    "revert",
+  ]);
+
   /** @type {{ file: string, match: string }[]} */
   const violations = [];
 
@@ -62,6 +75,24 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     const rgb = content.match(rgbColor);
     if (hex) violations.push({ file, match: hex[0] });
     if (rgb) violations.push({ file, match: "rgb(...)" });
+
+    // Flag named color literals (e.g. `color: "crimson"` / `color: crimson`) while
+    // allowing keyword-like values such as `transparent`.
+    if (file.endsWith(".css")) {
+      for (const match of content.matchAll(namedColorCss)) {
+        const value = match[1]?.toLowerCase();
+        if (!value || allowedNamedColors.has(value)) continue;
+        violations.push({ file, match: `color: ${match[1]}` });
+        break;
+      }
+    } else {
+      for (const match of content.matchAll(namedColorJs)) {
+        const value = match[1]?.toLowerCase();
+        if (!value || allowedNamedColors.has(value)) continue;
+        violations.push({ file, match: `color: "${match[1]}"` });
+        break;
+      }
+    }
   }
 
   assert.deepEqual(
