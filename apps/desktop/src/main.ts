@@ -8750,12 +8750,38 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand(commandId);
         app.focus();
         return;
+      // Legacy ribbon schema ids (Home -> Editing -> Fill).
+      case "home.editing.fill.down":
+        executeBuiltinCommand("edit.fillDown");
+        app.focus();
+        return;
       case "edit.fillRight":
         executeBuiltinCommand(commandId);
         app.focus();
         return;
+      case "home.editing.fill.right":
+        executeBuiltinCommand("edit.fillRight");
+        app.focus();
+        return;
+      case "edit.fillUp":
+      case "home.editing.fill.up":
+        app.fillUp();
+        app.focus();
+        return;
+      case "edit.fillLeft":
+      case "home.editing.fill.left":
+        app.fillLeft();
+        app.focus();
+        return;
       case "edit.find":
+      case "home.editing.findSelect.find":
         executeBuiltinCommand("edit.find");
+        return;
+      case "home.editing.findSelect.replace":
+        executeBuiltinCommand("edit.replace");
+        return;
+      case "home.editing.findSelect.goTo":
+        executeBuiltinCommand("navigation.goTo");
         return;
       case "edit.replace":
         executeBuiltinCommand("edit.replace");

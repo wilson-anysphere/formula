@@ -5214,6 +5214,11 @@ export class SpreadsheetApp {
     this.applyFillShortcut("down");
   }
 
+  fillUp(): void {
+    if (this.isEditing()) return;
+    this.applyFillShortcut("up");
+  }
+
   fillRight(): void {
     if (this.isReadOnly()) {
       const cell = this.selection.active;
@@ -5224,6 +5229,11 @@ export class SpreadsheetApp {
     }
     if (this.isEditing()) return;
     this.applyFillShortcut("right");
+  }
+
+  fillLeft(): void {
+    if (this.isEditing()) return;
+    this.applyFillShortcut("left");
   }
 
   selectCurrentRegion(): void {
@@ -10691,7 +10701,7 @@ export class SpreadsheetApp {
     return true;
   }
 
-  private applyFillShortcut(direction: "down" | "right"): void {
+  private applyFillShortcut(direction: "down" | "right" | "up" | "left"): void {
     const clampInt = (value: number, min: number, max: number): number => {
       const n = Math.trunc(value);
       return Math.min(max, Math.max(min, n));
@@ -10732,19 +10742,64 @@ export class SpreadsheetApp {
         continue;
       }
 
+      if (direction === "up") {
+        if (endRow <= startRow) continue; // height === 1
+
+        const sourceRange: FillEngineRange = {
+          startRow: endRow,
+          endRow: Math.min(endRow + 1, maxRowExclusive),
+          startCol,
+          endCol: Math.min(endCol + 1, maxColExclusive)
+        };
+        const targetRange: FillEngineRange = {
+          startRow,
+          endRow: Math.min(endRow, maxRowExclusive),
+          startCol,
+          endCol: Math.min(endCol + 1, maxColExclusive)
+        };
+
+        if (targetRange.endRow <= targetRange.startRow) continue;
+        if (sourceRange.endCol <= sourceRange.startCol) continue;
+        operations.push({ sourceRange, targetRange });
+        continue;
+      }
+
+      if (direction === "right") {
+        if (endCol <= startCol) continue; // width === 1
+
+        const sourceRange: FillEngineRange = {
+          startRow,
+          endRow: Math.min(endRow + 1, maxRowExclusive),
+          startCol,
+          endCol: Math.min(startCol + 1, maxColExclusive)
+        };
+        const targetRange: FillEngineRange = {
+          startRow,
+          endRow: Math.min(endRow + 1, maxRowExclusive),
+          startCol: Math.min(startCol + 1, maxColExclusive),
+          endCol: Math.min(endCol + 1, maxColExclusive)
+        };
+
+        if (targetRange.endCol <= targetRange.startCol) continue;
+        if (sourceRange.endRow <= sourceRange.startRow) continue;
+        operations.push({ sourceRange, targetRange });
+        continue;
+      }
+
+      // direction === "left"
       if (endCol <= startCol) continue; // width === 1
 
       const sourceRange: FillEngineRange = {
         startRow,
         endRow: Math.min(endRow + 1, maxRowExclusive),
-        startCol,
-        endCol: Math.min(startCol + 1, maxColExclusive)
+        startCol: endCol,
+        endCol: Math.min(endCol + 1, maxColExclusive)
       };
       const targetRange: FillEngineRange = {
         startRow,
         endRow: Math.min(endRow + 1, maxRowExclusive),
-        startCol: Math.min(startCol + 1, maxColExclusive),
-        endCol: Math.min(endCol + 1, maxColExclusive)
+        startCol,
+        endCol: Math.min(endCol, maxColExclusive)
       };
 
       if (targetRange.endCol <= targetRange.startCol) continue;
@@ -10774,7 +10829,18 @@ export class SpreadsheetApp {
       return;
     }
 
-    const label = direction === "down" ? t("command.edit.fillDown") : t("command.edit.fillRight");
+    const label = (() => {
+      switch (direction) {
+        case "down":
+          return t("command.edit.fillDown");
+        case "right":
+          return t("command.edit.fillRight");
+        case "up":
+          return "Fill Up";
+        case "left":
+          return "Fill Left";
+      }
+    })();
 
     const wasm = this.wasmEngine;
 
