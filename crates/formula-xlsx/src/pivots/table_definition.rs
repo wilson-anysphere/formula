@@ -49,6 +49,8 @@ pub struct PivotTableDefinition {
     pub compact: Option<bool>,
     /// `pivotTableDefinition@compactData` (if present).
     pub compact_data: Option<bool>,
+    /// `pivotTableDefinition@subtotalLocation` (if present).
+    pub subtotal_location: Option<String>,
     /// `<pivotFields>` -> `<pivotField>` entries (in order).
     pub pivot_fields: Vec<PivotTableField>,
     /// `<rowFields>` -> `<field x="...">` indices (in order).
@@ -88,6 +90,7 @@ impl PivotTableDefinition {
             outline: None,
             compact: None,
             compact_data: None,
+            subtotal_location: None,
             pivot_fields: Vec::new(),
             row_fields: Vec::new(),
             col_fields: Vec::new(),
@@ -415,6 +418,8 @@ fn parse_start_element(
                 def.compact = parse_bool(&value);
             } else if key.eq_ignore_ascii_case(b"compactData") {
                 def.compact_data = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"subtotalLocation") {
+                def.subtotal_location = Some(value);
             }
         }
         return Ok(());

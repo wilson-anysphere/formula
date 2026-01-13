@@ -5,8 +5,8 @@
 //! into the engine's self-contained pivot types.
 
 use formula_engine::pivot::{
-    AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotValue, SubtotalPosition,
-    ShowAsType, ValueField,
+    AggregationType, FilterField, GrandTotals, Layout, PivotConfig, PivotField, PivotValue,
+    ShowAsType, SubtotalPosition, ValueField,
 };
 
 use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition};
@@ -129,6 +129,19 @@ pub fn pivot_table_to_engine_config(
         })
         .collect::<Vec<_>>();
 
+    let filter_fields = table
+        .page_fields
+        .iter()
+        .filter_map(|idx| {
+            let field_idx = *idx as usize;
+            let source_field = cache_def.cache_fields.get(field_idx)?.name.clone();
+            Some(FilterField {
+                source_field,
+                allowed: None,
+            })
+        })
+        .collect::<Vec<_>>();
+
     // Excel does not render a "Grand Total" column unless there is at least one
     // column field.
     let grand_totals = GrandTotals {
@@ -136,15 +149,27 @@ pub fn pivot_table_to_engine_config(
         columns: table.col_grand_totals && !column_fields.is_empty(),
     };
 
+    let layout = if table.compact == Some(true) {
+        Layout::Compact
+    } else {
+        Layout::Tabular
+    };
+
+    let subtotals = match table.subtotal_location.as_deref() {
+        Some(v) if v.eq_ignore_ascii_case("AtTop") => SubtotalPosition::Top,
+        Some(v) if v.eq_ignore_ascii_case("AtBottom") => SubtotalPosition::Bottom,
+        _ => SubtotalPosition::None,
+    };
+
     PivotConfig {
         row_fields,
         column_fields,
         value_fields,
-        filter_fields: Vec::new(),
+        filter_fields,
         calculated_fields: Vec::new(),
         calculated_items: Vec::new(),
-        layout: Layout::Tabular,
-        subtotals: SubtotalPosition::None,
+        layout,
+        subtotals,
         grand_totals,
     }
 }
@@ -210,7 +235,8 @@ fn aggregation_display_name(agg: AggregationType) -> &'static str {
 mod tests {
     use super::*;
 
-    use crate::pivots::{PivotCacheDefinition, PivotCacheField, PivotTableDefinition};
+    use crate::pivots::PivotCacheField;
+
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -268,5 +294,59 @@ mod tests {
         let cfg = pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(cfg.value_fields.len(), 1);
         assert_eq!(cfg.value_fields[0].base_field.as_deref(), Some("Region"));
+    }
+
+    #[test]
+    fn pivot_table_to_engine_config_maps_layout_subtotals_and_page_fields() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  name="PivotTable1"
+  cacheId="1"
+  compact="1"
+  subtotalLocation="AtTop">
+  <pageFields count="2">
+    <pageField fld="0"/>
+    <pageField fld="2"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![
+                PivotCacheField {
+                    name: "Region".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Product".to_string(),
+                    ..Default::default()
+                },
+                PivotCacheField {
+                    name: "Sales".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+
+        assert_eq!(cfg.layout, Layout::Compact);
+        assert_eq!(cfg.subtotals, SubtotalPosition::Top);
+        assert_eq!(
+            cfg.filter_fields,
+            vec![
+                FilterField {
+                    source_field: "Region".to_string(),
+                    allowed: None
+                },
+                FilterField {
+                    source_field: "Sales".to_string(),
+                    allowed: None
+                }
+            ]
+        );
     }
 }
