@@ -546,15 +546,13 @@ jobs:
             throw "NSIS installation failed: makensis.exe not found on PATH."
           }
 
-      - name: Cache cargo registry + git
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - name: Cache Rust (cargo registry + git)
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
+          # We cache build artifacts separately (see "Cache cargo target") to keep cache sizes
+          # bounded for tagged releases. rust-cache still provides fast restores for the Cargo
+          # registry/git index and respects our CARGO_HOME override above.
+          cache-targets: "false"
 
       - name: Cache cargo target (release build artifacts)
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -603,7 +601,8 @@ jobs:
             patchelf \
             squashfs-tools \
             fakeroot \
-            rpm
+            rpm \
+            rpm2cpio
 
           # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
           # Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
@@ -748,6 +747,10 @@ jobs:
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
 
+      - name: Validate macOS bundle
+        if: runner.os == 'macOS'
+        run: bash scripts/validate-macos-bundle.sh
+
       - name: Verify macOS signed app entitlements (hardened runtime)
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
         if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != ''
@@ -871,6 +874,39 @@ jobs:
           # Optional: set as GitHub Actions variables to enable gating.
           FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
           FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
+      - name: Validate Linux AppImage bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in scripts/validate-linux-appimage.*; do
+            echo "Running $script"
+            case "$script" in
+              *.mjs|*.js) node "$script" ;;
+              *.py) python "$script" ;;
+              *) bash "$script" ;;
+            esac
+          done
+
+      - name: Validate Linux RPM bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in scripts/validate-linux-rpm.*; do
+            echo "Running $script"
+            case "$script" in
+              *.mjs|*.js) node "$script" ;;
+              *.py) python "$script" ;;
+              *) bash "$script" ;;
+            esac
+          done
+
+      - name: Validate Windows bundles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/validate-windows-bundles.ps1
 
       - name: Verify Windows ARM64 binary architecture (AA64)
         if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
@@ -2292,6 +2328,7 @@ jobs:
   checksums:
     name: Generate SHA256SUMS.txt
     needs:
+      - build
       - validate-version
       - validate-updater-manifest
       - verify-release-assets
@@ -2303,18 +2340,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p release-assets
-          gh release download "${{ needs.validate-version.outputs.release_tag }}" \
-            --repo "${{ github.repository }}" \
-            --dir release-assets
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Generate SHA256SUMS.txt
-        run: bash scripts/ci/generate-release-checksums.sh release-assets SHA256SUMS.txt
+      - name: Verify desktop release assets + latest.json and generate SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-desktop-release-assets.mjs --tag "${{ needs.validate-version.outputs.release_tag }}"
 
       - name: Upload SHA256SUMS.txt to the draft release
         env:
