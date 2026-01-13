@@ -545,6 +545,24 @@ impl DaxEngine {
                 };
                 self.eval_min(model, arg, filter)
             }
+            "COUNT" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("COUNT expects 1 argument".into()));
+                };
+                self.eval_count(model, arg, filter)
+            }
+            "COUNTA" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("COUNTA expects 1 argument".into()));
+                };
+                self.eval_counta(model, arg, filter)
+            }
+            "COUNTBLANK" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("COUNTBLANK expects 1 argument".into()));
+                };
+                self.eval_countblank(model, arg, filter)
+            }
             "SUMX" => {
                 let [table_expr, value_expr] = args else {
                     return Err(DaxError::Eval("SUMX expects 2 arguments".into()));
@@ -945,6 +963,146 @@ impl DaxEngine {
             }
         }
         Ok(best.map(Value::from).unwrap_or(Value::Blank))
+    }
+
+    fn eval_count(&self, model: &DataModel, expr: &Expr, filter: &FilterContext) -> DaxResult<Value> {
+        let (table, column) = match expr {
+            Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
+            _ => {
+                return Err(DaxError::Type(
+                    "COUNT currently only supports a column reference".into(),
+                ))
+            }
+        };
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.to_string(),
+                column: column.to_string(),
+            })?;
+
+        if filter.is_empty() {
+            if let (Some(non_blank), Some(is_numeric)) = (
+                table_ref.stats_non_blank_count(idx),
+                column_is_dax_numeric(table_ref, idx),
+            ) {
+                return Ok(Value::from(if is_numeric {
+                    non_blank as i64
+                } else {
+                    0
+                }));
+            }
+        }
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let mut count = 0usize;
+        for row in rows {
+            if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
+                count += 1;
+            }
+        }
+        Ok(Value::from(count as i64))
+    }
+
+    fn eval_counta(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<Value> {
+        let (table, column) = match expr {
+            Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
+            _ => {
+                return Err(DaxError::Type(
+                    "COUNTA currently only supports a column reference".into(),
+                ))
+            }
+        };
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.to_string(),
+                column: column.to_string(),
+            })?;
+
+        if filter.is_empty() {
+            if let Some(non_blank) = table_ref.stats_non_blank_count(idx) {
+                return Ok(Value::from(non_blank as i64));
+            }
+        }
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let mut count = 0usize;
+        for row in rows {
+            if !table_ref
+                .value_by_idx(row, idx)
+                .unwrap_or(Value::Blank)
+                .is_blank()
+            {
+                count += 1;
+            }
+        }
+        Ok(Value::from(count as i64))
+    }
+
+    fn eval_countblank(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<Value> {
+        let (table, column) = match expr {
+            Expr::ColumnRef { table, column } => (table.as_str(), column.as_str()),
+            _ => {
+                return Err(DaxError::Type(
+                    "COUNTBLANK currently only supports a column reference".into(),
+                ))
+            }
+        };
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.to_string(),
+                column: column.to_string(),
+            })?;
+
+        let include_virtual_blank = blank_row_allowed(filter, table)
+            && virtual_blank_row_exists(model, filter, table)?;
+
+        if filter.is_empty() {
+            if let Some(non_blank) = table_ref.stats_non_blank_count(idx) {
+                let mut blanks = table_ref.row_count().saturating_sub(non_blank);
+                if include_virtual_blank {
+                    blanks += 1;
+                }
+                return Ok(Value::from(blanks as i64));
+            }
+        }
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        let mut blanks = 0usize;
+        for row in rows {
+            if table_ref
+                .value_by_idx(row, idx)
+                .unwrap_or(Value::Blank)
+                .is_blank()
+            {
+                blanks += 1;
+            }
+        }
+        if include_virtual_blank {
+            blanks += 1;
+        }
+        Ok(Value::from(blanks as i64))
     }
 
     fn eval_iterator(
@@ -2383,6 +2541,20 @@ fn propagate_filter(
             Ok(changed)
         }
     }
+}
+
+fn column_is_dax_numeric(table: &dyn TableBackend, idx: usize) -> Option<bool> {
+    use formula_columnar::ColumnType;
+
+    let columnar = table.columnar_table()?;
+    let column_type = columnar.schema().get(idx)?.column_type;
+    Some(matches!(
+        column_type,
+        ColumnType::Number
+            | ColumnType::DateTime
+            | ColumnType::Currency { .. }
+            | ColumnType::Percentage { .. }
+    ))
 }
 
 fn coerce_number(value: &Value) -> DaxResult<f64> {

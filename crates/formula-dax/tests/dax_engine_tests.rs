@@ -441,6 +441,176 @@ fn countx_respects_filter_propagation() {
 }
 
 #[test]
+fn count_counta_and_countblank_respect_filter_context() {
+    let mut model = DataModel::new();
+
+    let mut t = Table::new("T", vec!["Group", "Value"]);
+    t.push_row(vec!["A".into(), 1.into()]).unwrap();
+    t.push_row(vec!["A".into(), Value::Blank]).unwrap();
+    t.push_row(vec!["B".into(), 2.into()]).unwrap();
+    t.push_row(vec!["B".into(), Value::Blank]).unwrap();
+    t.push_row(vec!["B".into(), 3.into()]).unwrap();
+    model.add_table(t).unwrap();
+
+    model.add_measure("Count", "COUNT(T[Value])").unwrap();
+    model.add_measure("CountA", "COUNTA(T[Value])").unwrap();
+    model
+        .add_measure("CountBlank", "COUNTBLANK(T[Value])")
+        .unwrap();
+
+    assert_eq!(
+        model.evaluate_measure("Count", &FilterContext::empty()).unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountA", &FilterContext::empty())
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountBlank", &FilterContext::empty())
+            .unwrap(),
+        2.into()
+    );
+
+    let group_a = FilterContext::empty().with_column_equals("T", "Group", "A".into());
+    assert_eq!(model.evaluate_measure("Count", &group_a).unwrap(), 1.into());
+    assert_eq!(model.evaluate_measure("CountA", &group_a).unwrap(), 1.into());
+    assert_eq!(
+        model.evaluate_measure("CountBlank", &group_a).unwrap(),
+        1.into()
+    );
+
+    let group_b = FilterContext::empty().with_column_equals("T", "Group", "B".into());
+    assert_eq!(model.evaluate_measure("Count", &group_b).unwrap(), 2.into());
+    assert_eq!(model.evaluate_measure("CountA", &group_b).unwrap(), 2.into());
+    assert_eq!(
+        model.evaluate_measure("CountBlank", &group_b).unwrap(),
+        1.into()
+    );
+}
+
+#[test]
+fn count_ignores_text_values() {
+    let mut model = DataModel::new();
+
+    let mut t = Table::new("T", vec!["Value"]);
+    t.push_row(vec![1.into()]).unwrap();
+    t.push_row(vec!["oops".into()]).unwrap();
+    t.push_row(vec![Value::Blank]).unwrap();
+    t.push_row(vec![2.into()]).unwrap();
+    t.push_row(vec!["also text".into()]).unwrap();
+    t.push_row(vec![Value::Blank]).unwrap();
+    model.add_table(t).unwrap();
+
+    model.add_measure("Count", "COUNT(T[Value])").unwrap();
+    model.add_measure("CountA", "COUNTA(T[Value])").unwrap();
+    model
+        .add_measure("CountBlank", "COUNTBLANK(T[Value])")
+        .unwrap();
+
+    assert_eq!(
+        model.evaluate_measure("Count", &FilterContext::empty()).unwrap(),
+        2.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountA", &FilterContext::empty())
+            .unwrap(),
+        4.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountBlank", &FilterContext::empty())
+            .unwrap(),
+        2.into()
+    );
+}
+
+#[test]
+fn count_functions_work_for_columnar_tables() {
+    let mut model = DataModel::new();
+
+    let schema = vec![
+        ColumnSchema {
+            name: "Group".to_string(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "Value".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut t = ColumnarTableBuilder::new(schema, options);
+    t.append_row(&[
+        formula_columnar::Value::String(Arc::<str>::from("A")),
+        formula_columnar::Value::Number(1.0),
+    ]);
+    t.append_row(&[
+        formula_columnar::Value::String(Arc::<str>::from("A")),
+        formula_columnar::Value::Null,
+    ]);
+    t.append_row(&[
+        formula_columnar::Value::String(Arc::<str>::from("B")),
+        formula_columnar::Value::Number(2.0),
+    ]);
+    t.append_row(&[
+        formula_columnar::Value::String(Arc::<str>::from("B")),
+        formula_columnar::Value::Null,
+    ]);
+    t.append_row(&[
+        formula_columnar::Value::String(Arc::<str>::from("B")),
+        formula_columnar::Value::Number(3.0),
+    ]);
+    model.add_table(Table::from_columnar("T", t.finalize())).unwrap();
+
+    model.add_measure("Count", "COUNT(T[Value])").unwrap();
+    model.add_measure("CountA", "COUNTA(T[Value])").unwrap();
+    model
+        .add_measure("CountBlank", "COUNTBLANK(T[Value])")
+        .unwrap();
+
+    assert_eq!(
+        model.evaluate_measure("Count", &FilterContext::empty()).unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountA", &FilterContext::empty())
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        model
+            .evaluate_measure("CountBlank", &FilterContext::empty())
+            .unwrap(),
+        2.into()
+    );
+
+    let group_a = FilterContext::empty().with_column_equals("T", "Group", "A".into());
+    assert_eq!(model.evaluate_measure("Count", &group_a).unwrap(), 1.into());
+    assert_eq!(model.evaluate_measure("CountA", &group_a).unwrap(), 1.into());
+    assert_eq!(
+        model.evaluate_measure("CountBlank", &group_a).unwrap(),
+        1.into()
+    );
+
+    let group_b = FilterContext::empty().with_column_equals("T", "Group", "B".into());
+    assert_eq!(model.evaluate_measure("Count", &group_b).unwrap(), 2.into());
+    assert_eq!(model.evaluate_measure("CountA", &group_b).unwrap(), 2.into());
+    assert_eq!(
+        model.evaluate_measure("CountBlank", &group_b).unwrap(),
+        1.into()
+    );
+}
+
+#[test]
 fn maxx_iterates_relatedtable() {
     let mut model = build_model();
     model
