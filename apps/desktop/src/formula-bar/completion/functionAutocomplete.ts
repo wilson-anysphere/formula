@@ -171,13 +171,30 @@ function preserveTypedCasing(typedPrefix: string, canonical: string): string {
   if (!typedPrefix) return canonical;
   if (typedPrefix.length >= canonical.length) return typedPrefix;
 
-  // If the user is consistently typing in one case, match it (common Excel habit).
-  // Otherwise preserve the exact casing they typed and append the canonical tail.
-  if (/[A-Za-z]/.test(typedPrefix)) {
-    if (typedPrefix === typedPrefix.toLowerCase()) return canonical.toLowerCase();
-    if (typedPrefix === typedPrefix.toUpperCase()) return canonical.toUpperCase();
+  // Infer case preference from the *letters* the user typed (ignore digits, dots, underscores).
+  // This yields nicer results for common patterns like:
+  //   "=vlo"  -> "=vlookup("
+  //   "=VLO"  -> "=VLOOKUP("
+  //   "=Vlo"  -> "=Vlookup("
+  const letters = typedPrefix.replaceAll(/[^A-Za-z]/g, "");
+  if (!letters) return typedPrefix + canonical.slice(typedPrefix.length);
+
+  const lower = letters.toLowerCase();
+  const upper = letters.toUpperCase();
+  if (letters === lower) return canonical.toLowerCase();
+  if (letters === upper) return canonical.toUpperCase();
+
+  // Title-ish casing: first letter uppercase, remainder lowercase.
+  if (letters[0] === upper[0] && letters.slice(1) === lower.slice(1)) {
+    const lowered = canonical.toLowerCase();
+    const firstLetterIdx = lowered.search(/[a-z]/);
+    if (firstLetterIdx >= 0) {
+      return lowered.slice(0, firstLetterIdx) + lowered[firstLetterIdx]!.toUpperCase() + lowered.slice(firstLetterIdx + 1);
+    }
+    return lowered;
   }
 
+  // Fallback: preserve the exact prefix the user typed and append the canonical tail.
   return typedPrefix + canonical.slice(typedPrefix.length);
 }
 
