@@ -94,3 +94,25 @@ fn trims_embedded_nuls_in_url_moniker_strings() {
     assert_eq!(link.tooltip.as_deref(), Some("Tooltip"));
     assert!(result.warnings.is_empty(), "warnings={:?}", result.warnings);
 }
+
+#[test]
+fn warns_and_skips_malformed_file_moniker_hyperlinks() {
+    let bytes = xls_fixture_builder::build_malformed_file_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result.workbook.sheet_by_name("FileBad").expect("FileBad missing");
+    assert!(
+        sheet.hyperlinks.is_empty(),
+        "expected malformed hyperlink to be skipped; hyperlinks={:?}",
+        sheet.hyperlinks
+    );
+
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("truncated file moniker ANSI path")),
+        "expected warning about malformed file moniker; warnings={:?}",
+        result.warnings
+    );
+}

@@ -2156,11 +2156,14 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
 
         // ANSI path (8-bit, NUL terminated within the declared byte length).
         let ansi_path = if ansi_len > 0 {
-            if input.len() < pos + ansi_len {
+            let end = pos
+                .checked_add(ansi_len)
+                .ok_or_else(|| "file moniker ANSI length overflow".to_string())?;
+            if input.len() < end {
                 return Err("truncated file moniker ANSI path".to_string());
             }
-            let bytes = &input[pos..pos + ansi_len];
-            pos += ansi_len;
+            let bytes = &input[pos..end];
+            pos = end;
 
             let nul = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
             let path = strings::decode_ansi(codepage, &bytes[..nul]);
@@ -2177,7 +2180,10 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
         // when it looks plausible (otherwise we risk consuming the next HLINK field, e.g. the
         // `location` or `tooltip` string).
         let mut unicode_path: Option<String> = None;
-        if input.len() >= pos + 8 {
+        let Some(unicode_header_end) = pos.checked_add(8) else {
+            return Err("file moniker length overflow".to_string());
+        };
+        if input.len() >= unicode_header_end {
             let end_server = u16::from_le_bytes([input[pos], input[pos + 1]]) as usize;
             // reserved/version (ignored)
             let _reserved = u16::from_le_bytes([input[pos + 2], input[pos + 3]]);
@@ -2188,7 +2194,7 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
                 input[pos + 7],
             ]) as usize;
 
-            let available = input.len().saturating_sub(pos + 8);
+            let available = input.len().saturating_sub(unicode_header_end);
             let end_server_plausible = ansi_len == 0 || end_server <= ansi_len;
             let unicode_len_plausible = unicode_len == 0
                 || (unicode_len <= available && unicode_len % 2 == 0)
@@ -2197,7 +2203,7 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
                     .is_some_and(|byte_len| byte_len <= available);
 
             if end_server_plausible && unicode_len_plausible {
-                pos += 8;
+                pos = unicode_header_end;
 
                 if unicode_len > 0 {
                     let (s, consumed) = parse_utf16_prefixed_string(&input[pos..], unicode_len)?;
