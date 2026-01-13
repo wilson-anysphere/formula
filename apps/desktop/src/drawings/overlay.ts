@@ -136,6 +136,7 @@ export class DrawingOverlay {
   private readonly bitmapCache = new ImageBitmapCache();
   private readonly shapeTextCache = new Map<number, { rawXml: string; parsed: ShapeTextLayout | null }>();
   private selectedId: number | null = null;
+  private renderSeq = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -157,6 +158,9 @@ export class DrawingOverlay {
   }
 
   async render(objects: DrawingObject[], viewport: Viewport): Promise<void> {
+    this.renderSeq += 1;
+    const seq = this.renderSeq;
+
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -167,6 +171,8 @@ export class DrawingOverlay {
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
 
     for (const obj of ordered) {
+      if (seq !== this.renderSeq) return;
+
       const rect = anchorToRectPx(obj.anchor, this.geom);
       const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
       const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
@@ -207,6 +213,7 @@ export class DrawingOverlay {
         const entry = this.images.get(obj.kind.imageId);
         if (!entry) continue;
         const bitmap = await this.bitmapCache.get(entry);
+        if (seq !== this.renderSeq) return;
         withClip(() => {
           ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
         });
@@ -353,6 +360,7 @@ export class DrawingOverlay {
     }
 
     // Selection overlay.
+    if (seq !== this.renderSeq) return;
     if (this.selectedId != null) {
       const selected = objects.find((o) => o.id === this.selectedId);
       if (selected) {
