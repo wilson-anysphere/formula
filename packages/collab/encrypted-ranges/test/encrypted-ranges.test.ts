@@ -103,5 +103,30 @@ describe("@formula/collab-encrypted-ranges", () => {
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 4, col: 2 })).toBe(false);
     expect(policy.shouldEncryptCell({ sheetId: "s1", row: 7, col: 2 })).toBe(false);
   });
-});
 
+  it("policy helper supports legacy map schema (encryptedRanges as Y.Map<id, Y.Map>)", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Map<Y.Map<unknown>>();
+    const r = new Y.Map<unknown>();
+    // Intentionally omit `id` inside the value; use the map key as the id.
+    r.set("sheetId", "s1");
+    r.set("startRow", 0);
+    r.set("startCol", 0);
+    r.set("endRow", 0);
+    r.set("endCol", 0);
+    r.set("keyId", "k1");
+
+    doc.transact(() => {
+      ranges.set("range-1", r);
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe("k1");
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 1 })).toBe(false);
+  });
+});

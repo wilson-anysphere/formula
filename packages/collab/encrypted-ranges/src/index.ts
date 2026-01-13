@@ -172,12 +172,13 @@ function createId(): string {
   return `er_${Math.random().toString(16).slice(2)}_${Date.now()}`;
 }
 
-function yRangeToEncryptedRange(value: unknown): EncryptedRange | null {
+function yRangeToEncryptedRange(value: unknown, fallbackId?: string): EncryptedRange | null {
   const map = getYMap(value);
   const obj = map ? null : value && typeof value === "object" ? (value as any) : null;
   const get = (k: string): unknown => (map ? map.get(k) : obj ? obj[k] : undefined);
 
-  const id = coerceString(get("id"))?.trim() ?? "";
+  const idRaw = coerceString(get("id"))?.trim() ?? "";
+  const id = idRaw || String(fallbackId ?? "").trim();
   if (!id) return null;
 
   const sheetIdRaw = coerceString(get("sheetId"));
@@ -252,8 +253,8 @@ export class EncryptedRangeManager {
 
     const rangesById = new Map<string, EncryptedRange>();
 
-    const addValue = (value: unknown) => {
-      const parsed = yRangeToEncryptedRange(value);
+    const addValue = (value: unknown, fallbackId?: string) => {
+      const parsed = yRangeToEncryptedRange(value, fallbackId);
       if (!parsed) return;
       rangesById.set(parsed.id, parsed);
     };
@@ -264,7 +265,7 @@ export class EncryptedRangeManager {
     } else {
       const map = getYMap(raw);
       if (map) {
-        map.forEach((value) => addValue(value));
+        map.forEach((value, key) => addValue(value, String(key)));
       } else if (Array.isArray(raw)) {
         for (const item of raw) addValue(item);
       }
