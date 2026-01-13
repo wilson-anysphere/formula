@@ -162,6 +162,37 @@ pub const MAX_MACRO_OUTPUT_LINES: usize = 1_000;
 /// response payload.
 pub const MAX_MACRO_OUTPUT_BYTES: usize = 1 * 1024 * 1024; // 1 MiB
 
+pub(crate) fn macro_output_max_lines() -> usize {
+    let default = MAX_MACRO_OUTPUT_LINES;
+    let Some(value) = std::env::var("FORMULA_MACRO_OUTPUT_MAX_LINES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return default;
+    };
+    // Allow relaxing limits only in debug builds; in release we only honor stricter settings.
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}
+
+pub(crate) fn macro_output_max_bytes() -> usize {
+    let default = MAX_MACRO_OUTPUT_BYTES;
+    let Some(value) = std::env::var("FORMULA_MACRO_OUTPUT_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
+}
+
 /// Maximum number of cell updates a single VBA macro execution is allowed to generate.
 ///
 /// Macros can write to many cells and trigger large recalculation fanout (dependent formulas),

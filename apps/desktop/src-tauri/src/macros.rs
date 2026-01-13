@@ -1,7 +1,7 @@
 use crate::file_io::Workbook;
 use crate::resource_limits::{
-    MAX_CELL_FORMULA_BYTES, MAX_CELL_VALUE_STRING_BYTES, MAX_MACRO_OUTPUT_BYTES,
-    MAX_MACRO_OUTPUT_LINES, MAX_MACRO_UPDATES,
+    macro_output_max_bytes, macro_output_max_lines, MAX_CELL_FORMULA_BYTES,
+    MAX_CELL_VALUE_STRING_BYTES, MAX_MACRO_UPDATES,
 };
 use crate::sheet_name::sheet_name_eq_case_insensitive;
 use crate::state::{AppState, CellScalar, CellUpdateData};
@@ -590,13 +590,122 @@ fn dedup_updates(updates: Vec<CellUpdateData>) -> Vec<CellUpdateData> {
     out
 }
 
+const VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL: &str = "[truncated]";
+
+#[derive(Debug)]
+struct MacroOutputBuffer {
+    max_lines: usize,
+    max_bytes: usize,
+    used_bytes: usize,
+    truncated: bool,
+    lines: Vec<String>,
+}
+
+impl MacroOutputBuffer {
+    fn new(max_lines: usize, max_bytes: usize) -> Self {
+        Self {
+            max_lines,
+            max_bytes,
+            used_bytes: 0,
+            truncated: false,
+            lines: Vec::new(),
+        }
+    }
+
+    fn take(&mut self) -> Vec<String> {
+        self.used_bytes = 0;
+        self.truncated = false;
+        std::mem::take(&mut self.lines)
+    }
+
+    fn push(&mut self, message: String) {
+        if self.truncated {
+            return;
+        }
+
+        // Fast-path: accept the message if it fits.
+        if self.lines.len() < self.max_lines && self.used_bytes.saturating_add(message.len()) <= self.max_bytes {
+            self.used_bytes = self.used_bytes.saturating_add(message.len());
+            self.lines.push(message);
+            return;
+        }
+
+        // Otherwise, deterministically stop collecting output and append a truncation sentinel.
+        self.truncated = true;
+        self.ensure_truncation_sentinel();
+    }
+
+    fn ensure_truncation_sentinel(&mut self) {
+        if self.max_lines == 0 || self.max_bytes == 0 {
+            self.lines.clear();
+            self.used_bytes = 0;
+            return;
+        }
+
+        // Ensure the sentinel itself never exceeds the byte budget.
+        let mut sentinel = VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL.to_string();
+        if sentinel.len() > self.max_bytes {
+            sentinel = truncate_utf8_to_bytes(&sentinel, self.max_bytes);
+        }
+        let sentinel_len = sentinel.len();
+
+        // Clamp to the maximum line count before inserting the sentinel.
+        while self.lines.len() > self.max_lines {
+            if let Some(removed) = self.lines.pop() {
+                self.used_bytes = self.used_bytes.saturating_sub(removed.len());
+            }
+        }
+
+        // We insert the sentinel as the last line. If we are already at the line cap we replace
+        // the last line, otherwise we append a new one.
+        let replace_last = self.lines.len() >= self.max_lines && !self.lines.is_empty();
+        if replace_last {
+            if let Some(removed) = self.lines.pop() {
+                self.used_bytes = self.used_bytes.saturating_sub(removed.len());
+            }
+        }
+
+        // Drop existing lines from the end until the sentinel fits within the byte budget.
+        while !self.lines.is_empty()
+            && self.used_bytes.saturating_add(sentinel_len) > self.max_bytes
+        {
+            if let Some(removed) = self.lines.pop() {
+                self.used_bytes = self.used_bytes.saturating_sub(removed.len());
+            }
+        }
+
+        // If the sentinel still doesn't fit, clear everything (this can only happen for extremely
+        // small `max_bytes` values, e.g. via debug env overrides).
+        if self.used_bytes.saturating_add(sentinel_len) > self.max_bytes {
+            self.lines.clear();
+            self.used_bytes = 0;
+        }
+
+        // At this point, adding the sentinel is guaranteed to be within both budgets.
+        if self.lines.len() < self.max_lines {
+            self.lines.push(sentinel);
+            self.used_bytes = self.used_bytes.saturating_add(sentinel_len);
+        }
+    }
+}
+
+fn truncate_utf8_to_bytes(input: &str, max_bytes: usize) -> String {
+    if input.len() <= max_bytes {
+        return input.to_string();
+    }
+
+    let mut end = max_bytes.min(input.len());
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    input[..end].to_string()
+}
+
 struct AppStateSpreadsheet<'a> {
     state: &'a mut AppState,
     active_sheet: usize,
     active_cell: (u32, u32),
-    output: Vec<String>,
-    output_bytes: usize,
-    output_truncated: bool,
+    output: MacroOutputBuffer,
     updates: Vec<CellUpdateData>,
     update_index_by_cell: HashMap<(String, usize, usize), usize>,
     undo_entries_added: usize,
@@ -619,9 +728,7 @@ impl<'a> AppStateSpreadsheet<'a> {
             state,
             active_sheet,
             active_cell: ctx.active_cell,
-            output: Vec::new(),
-            output_bytes: 0,
-            output_truncated: false,
+            output: MacroOutputBuffer::new(macro_output_max_lines(), macro_output_max_bytes()),
             updates: Vec::new(),
             update_index_by_cell: HashMap::new(),
             undo_entries_added: 0,
@@ -697,9 +804,7 @@ impl<'a> AppStateSpreadsheet<'a> {
     }
 
     fn take_output(&mut self) -> Vec<String> {
-        self.output_bytes = 0;
-        self.output_truncated = false;
-        std::mem::take(&mut self.output)
+        self.output.take()
     }
 
     fn take_updates(&mut self) -> Vec<CellUpdateData> {
@@ -969,15 +1074,12 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
     }
 
     fn log(&mut self, message: String) {
-        const TRUNCATED_MARKER: &str = "[truncated]";
         const MESSAGE_TRUNCATED_SUFFIX: &str = "...[truncated]";
         const MAX_LINE_BYTES_HARD: usize = 8 * 1024;
 
-        if self.output_truncated {
-            return;
-        }
-
-        let max_line_bytes = MAX_LINE_BYTES_HARD.min(MAX_MACRO_OUTPUT_BYTES);
+        // Limit a single log message to a bounded size, and ensure we don't retain a huge `String`
+        // capacity even if the content is short.
+        let max_line_bytes = MAX_LINE_BYTES_HARD.min(self.output.max_bytes);
         let mut message = message;
         if message.len() > max_line_bytes {
             let suffix_len = MESSAGE_TRUNCATED_SUFFIX.len();
@@ -991,7 +1093,7 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             // retain allocations larger than `max_line_bytes`.
             let mut truncated = String::with_capacity(max_line_bytes);
             truncated.push_str(&message[..end]);
-            if truncated.len() + suffix_len <= max_line_bytes {
+            if truncated.len().saturating_add(suffix_len) <= max_line_bytes {
                 truncated.push_str(MESSAGE_TRUNCATED_SUFFIX);
             }
             message = truncated;
@@ -1003,57 +1105,7 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             message = message.as_str().to_string();
         }
 
-        let would_exceed_lines = self.output.len() >= MAX_MACRO_OUTPUT_LINES;
-        let would_exceed_bytes =
-            self.output_bytes.saturating_add(message.len()) > MAX_MACRO_OUTPUT_BYTES;
-
-        if !would_exceed_lines && !would_exceed_bytes {
-            self.output_bytes = self.output_bytes.saturating_add(message.len());
-            self.output.push(message);
-            return;
-        }
-
-        // Once we hit a limit, stop capturing further output and append a single marker (or replace
-        // the last line if we're already at the line limit) so truncation is deterministic.
-        self.output_truncated = true;
-
-        if self.output.last().is_some_and(|line| line == TRUNCATED_MARKER) {
-            return;
-        }
-
-        let marker_len = TRUNCATED_MARKER.len();
-        let can_push_marker = self.output.len() < MAX_MACRO_OUTPUT_LINES
-            && self.output_bytes.saturating_add(marker_len) <= MAX_MACRO_OUTPUT_BYTES;
-
-        if can_push_marker {
-            self.output_bytes = self.output_bytes.saturating_add(marker_len);
-            self.output.push(TRUNCATED_MARKER.to_string());
-            return;
-        }
-
-        // Fall back to replacing the last line with the marker to stay within limits.
-        if let Some(last) = self.output.last_mut() {
-            let last_len = last.len();
-            let base_bytes = if self.output_bytes >= last_len {
-                self.output_bytes - last_len
-            } else {
-                0
-            };
-
-            let allowed_marker_bytes = MAX_MACRO_OUTPUT_BYTES.saturating_sub(base_bytes);
-            let marker_bytes = marker_len.min(allowed_marker_bytes);
-
-            let mut marker = TRUNCATED_MARKER.to_string();
-            if marker.len() > marker_bytes {
-                marker.truncate(marker_bytes);
-            }
-
-            self.output_bytes = base_bytes.saturating_add(marker.len());
-            *last = marker;
-        } else if marker_len <= MAX_MACRO_OUTPUT_BYTES && MAX_MACRO_OUTPUT_LINES > 0 {
-            self.output_bytes = marker_len;
-            self.output.push(TRUNCATED_MARKER.to_string());
-        }
+        self.output.push(message);
     }
 
     fn last_used_row_in_column(&self, sheet: usize, col: u32, start_row: u32) -> Option<u32> {
@@ -1264,8 +1316,7 @@ mod tests {
     fn macro_output_is_capped_by_lines_and_bytes() {
         let mut state = empty_state_with_sheet();
 
-        // Use a large literal string so the macro quickly exceeds the byte limit and exercises the
-        // single-line truncation logic.
+        // Use a large literal string so the macro quickly exceeds the byte limit.
         let payload = "x".repeat(16 * 1024);
         let source = format!(
             r#"
@@ -1305,7 +1356,10 @@ End Sub
         );
 
         assert!(
-            outcome.output.last().is_some_and(|s| s == "[truncated]"),
+            outcome
+                .output
+                .last()
+                .is_some_and(|s| s == VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL),
             "expected a single truncation marker at the end, got: {:?}",
             outcome.output.last()
         );
@@ -1454,6 +1508,78 @@ End Sub
         assert_eq!(
             state.get_cell(&sheet_id, 0, 0).unwrap().value,
             CellScalar::Empty
+        );
+    }
+
+    #[test]
+    fn macro_output_truncates_by_line_count() {
+        let mut out = MacroOutputBuffer::new(3, 1024);
+        out.push("a".to_string());
+        out.push("b".to_string());
+        out.push("c".to_string());
+        out.push("d".to_string());
+
+        let lines = out.take();
+        assert_eq!(
+            lines,
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL.to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn macro_output_truncates_by_total_byte_budget() {
+        let msg = "123456789012345".to_string(); // 15 bytes
+        let mut out = MacroOutputBuffer::new(10, 40);
+        out.push(msg.clone());
+        out.push(msg.clone());
+        out.push(msg.clone());
+
+        let lines = out.take();
+        assert_eq!(
+            lines,
+            vec![msg.clone(), VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL.to_string()]
+        );
+        let total: usize = lines.iter().map(|s| s.len()).sum();
+        assert!(total <= 40);
+    }
+
+    #[test]
+    fn truncation_sentinel_appears_at_most_once() {
+        let mut out = MacroOutputBuffer::new(2, 1024);
+        for i in 0..100 {
+            out.push(format!("line {i}"));
+        }
+
+        let lines = out.take();
+        let sentinel_count = lines
+            .iter()
+            .filter(|line| line.as_str() == VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL)
+            .count();
+        assert_eq!(sentinel_count, 1);
+        assert_eq!(
+            lines.last().map(|s| s.as_str()),
+            Some(VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL)
+        );
+    }
+
+    #[test]
+    fn macro_output_handles_empty_and_multibyte_messages_without_panicking() {
+        let mut out = MacroOutputBuffer::new(3, 25);
+        out.push(String::new());
+        out.push("💣".to_string()); // multi-byte UTF-8
+        out.push("a".repeat(100));
+
+        let lines = out.take();
+        let total: usize = lines.iter().map(|s| s.len()).sum();
+        assert!(total <= 25);
+        assert!(lines.len() <= 3);
+        assert_eq!(
+            lines.last().map(|s| s.as_str()),
+            Some(VBA_MACRO_OUTPUT_TRUNCATED_SENTINEL)
         );
     }
 }
