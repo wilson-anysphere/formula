@@ -26,6 +26,8 @@ const PYTHON_PERMISSION_ESCALATION_ERROR: &str =
     "Python permission escalation is not supported yet";
 
 const STDERR_TRUNCATED_MARKER: &str = "\n[stderr truncated]\n";
+const MAX_PYTHON_PROTOCOL_ERROR_LINE_PREFIX_BYTES: usize = 4 * 1024; // 4 KiB
+const PROTOCOL_LINE_TRUNCATED_SUFFIX: &str = "…(truncated)";
 
 // Clamp user-provided limits for native Python execution.
 //
@@ -33,6 +35,19 @@ const STDERR_TRUNCATED_MARKER: &str = "\n[stderr truncated]\n";
 // execution times or unbounded memory. Debug builds allow local developers to loosen these limits.
 const MAX_TIMEOUT_MS: u64 = 60_000;
 const MAX_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
+fn format_protocol_invalid_json_line_error(err: serde_json::Error, line: &str) -> String {
+    let snippet = if line.len() <= MAX_PYTHON_PROTOCOL_ERROR_LINE_PREFIX_BYTES {
+        line.to_string()
+    } else {
+        let mut end = MAX_PYTHON_PROTOCOL_ERROR_LINE_PREFIX_BYTES;
+        while end > 0 && !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}{}", &line[..end], PROTOCOL_LINE_TRUNCATED_SUFFIX)
+    };
+
+    format!("Python runtime protocol error (invalid JSON line): {err}: {snippet}")
+}
 
 fn unsafe_python_permissions_enabled() -> bool {
     // Escape hatch for local development only.
@@ -120,18 +135,26 @@ fn read_stream_lossy_truncated<R: Read>(
         .take((max_bytes as u64).saturating_add(1))
         .read_to_end(&mut buf)?;
     let truncated = buf.len() > max_bytes;
-    if truncated {
+    let marker_bytes = marker.as_bytes();
+    if truncated && max_bytes > 0 {
+        if marker_bytes.is_empty() {
+            buf.truncate(max_bytes);
+        } else if marker_bytes.len() >= max_bytes {
+            buf = marker_bytes[..max_bytes].to_vec();
+        } else {
+            buf.truncate(max_bytes - marker_bytes.len());
+            buf.extend_from_slice(marker_bytes);
+        }
+    } else if max_bytes == 0 {
+        buf.clear();
+    } else if buf.len() > max_bytes {
+        // Defensive: `Take` should ensure this doesn't happen, but keep the buffer bounded.
         buf.truncate(max_bytes);
     }
 
     // Drain the remainder so the subprocess can't block on a full stderr pipe.
     let _ = io::copy(&mut reader, &mut io::sink());
-
-    let mut out = String::from_utf8_lossy(&buf).into_owned();
-    if truncated {
-        out.push_str(marker);
-    }
-    Ok(out)
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
 /// A `BufRead` adaptor similar to `Read::take`, but without losing any buffered bytes.
@@ -924,11 +947,14 @@ pub fn run_python_script(
     let stderr_buf = Arc::new(Mutex::new(String::new()));
     let stderr_buf_clone = stderr_buf.clone();
     let stderr_thread = thread::spawn(move || {
-        let out =
-            read_stream_lossy_truncated(stderr, MAX_PYTHON_STDERR_BYTES, STDERR_TRUNCATED_MARKER)
-                .unwrap_or_default();
+        let out = read_stream_lossy_truncated(
+            stderr,
+            MAX_PYTHON_STDERR_BYTES,
+            STDERR_TRUNCATED_MARKER,
+        )
+        .unwrap_or_default();
         if let Ok(mut guard) = stderr_buf_clone.lock() {
-            guard.push_str(&out);
+            *guard = out;
         }
     });
 
@@ -984,9 +1010,7 @@ pub fn run_python_script(
                 if let Ok(mut child) = child.lock() {
                     let _ = child.kill();
                 }
-                fatal_err = Some(format!(
-                    "Python runtime protocol error (invalid JSON line): {err}: {trimmed}"
-                ));
+                fatal_err = Some(format_protocol_invalid_json_line_error(err, trimmed));
                 break;
             }
         };
@@ -1040,7 +1064,7 @@ pub fn run_python_script(
 
     let stderr_text = stderr_buf
         .lock()
-        .map(|s| s.clone())
+        .map(|mut s| std::mem::take(&mut *s))
         .unwrap_or_else(|_| String::new());
 
     if timed_out.load(Ordering::SeqCst) {
@@ -1101,11 +1125,19 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn stderr_capture_is_bounded_and_appends_truncation_marker() {
-        let input = b"hello world";
-        let out =
-            read_stream_lossy_truncated(Cursor::new(input), 5, STDERR_TRUNCATED_MARKER).unwrap();
-        assert_eq!(out, format!("hello{STDERR_TRUNCATED_MARKER}"));
+    fn python_stderr_capture_is_bounded_and_appends_sentinel() {
+        let input = vec![b'x'; MAX_PYTHON_STDERR_BYTES + 10];
+        let out = read_stream_lossy_truncated(
+            Cursor::new(input),
+            MAX_PYTHON_STDERR_BYTES,
+            STDERR_TRUNCATED_MARKER,
+        )
+        .expect("read should succeed");
+        assert_eq!(out.as_bytes().len(), MAX_PYTHON_STDERR_BYTES);
+        assert!(
+            out.ends_with(STDERR_TRUNCATED_MARKER),
+            "expected sentinel at end of truncated stderr"
+        );
     }
 
     #[test]
@@ -1213,6 +1245,30 @@ mod tests {
             host.take_abort_reason(),
             Some(err.clone()),
             "expected host to mark update limit errors as fatal"
+        );
+    }
+
+    #[test]
+    fn python_protocol_error_message_truncates_long_lines() {
+        let long_line = format!(
+            "not json {}TAIL",
+            "x".repeat(MAX_PYTHON_PROTOCOL_ERROR_LINE_PREFIX_BYTES + 100)
+        );
+        let err = serde_json::from_str::<RunnerMessage>(&long_line)
+            .expect_err("expected invalid JSON to fail parsing");
+        let msg = format_protocol_invalid_json_line_error(err, &long_line);
+        assert!(
+            msg.contains(PROTOCOL_LINE_TRUNCATED_SUFFIX),
+            "expected truncation suffix: {msg}"
+        );
+        assert!(
+            !msg.contains("TAIL"),
+            "expected error message to omit end of line: {msg}"
+        );
+        assert!(
+            msg.len() < MAX_PYTHON_PROTOCOL_ERROR_LINE_PREFIX_BYTES + 512,
+            "expected error message to be bounded, got {} bytes",
+            msg.len()
         );
     }
 
