@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getYArray, getYMap, getYText, isYAbstractType, replaceForeignRootType } from "@formula/collab-yjs-utils";
 
 import type { Comment, CommentAuthor, CommentKind, Reply } from "./types.ts";
 
@@ -22,100 +23,6 @@ export type YCommentsArray = Y.Array<Y.Map<unknown>>;
 export type CommentsRoot =
   | { kind: "map"; map: YCommentsMap }
   | { kind: "array"; array: YCommentsArray };
-
-/**
- * Duck-type helpers to tolerate multiple `yjs` module instances (ESM/CJS).
- *
- * In some environments updates can be applied using a different Yjs build,
- * resulting in roots and nested types that fail `instanceof` checks. Avoid
- * calling `doc.getMap/getArray` in those cases because Yjs performs strict
- * constructor equality checks and can throw.
- */
-function getYMap(value: unknown): Y.Map<any> | null {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
-  // Yjs' deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Map<any>;
-}
-
-function getYArray(value: unknown): Y.Array<any> | null {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // See `getYMap` above for rationale.
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Array<any>;
-}
-
-function isYAbstractType(value: unknown): boolean {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `instanceof` / `constructor.name`;
-  // prefer a structural check instead.
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function isYText(value: unknown): value is Y.Text {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  if (typeof maybe.toString !== "function") return false;
-  if (typeof maybe.toDelta !== "function") return false;
-  if (typeof maybe.applyDelta !== "function") return false;
-  if (typeof maybe.insert !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
-
-function replacePlaceholderRootType<T>(params: { doc: Y.Doc; name: string; existing: any; create: () => T }): T {
-  const { doc, name, existing, create } = params;
-  const t: any = create();
-
-  // Mirror Yjs' `Doc.get()` behavior when turning an `AbstractType` root placeholder
-  // into a concrete type, but support cases where we intentionally choose a
-  // constructor from a different Yjs module instance (ESM vs CJS).
-  t._map = existing?._map;
-  if (t._map instanceof Map) {
-    t._map.forEach((n: any) => {
-      for (; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  t._start = existing?._start;
-  for (let n = t._start; n !== null; n = n.right) {
-    n.parent = t;
-  }
-  t._length = existing?._length;
-
-  doc.share.set(name, t);
-  t._integrate?.(doc as any, null);
-  return t as T;
-}
 
 /**
  * Safely determine whether the `comments` root is a `Y.Map` (current schema) or a
@@ -164,7 +71,7 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
     if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
       return {
         kind: "array",
-        array: replacePlaceholderRootType({
+        array: replaceForeignRootType({
           doc,
           name: "comments",
           existing: placeholder,
@@ -192,7 +99,7 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
 
       const MapCtor = (yValueMap as any).constructor as new () => any;
       if (typeof MapCtor === "function") {
-        const map = replacePlaceholderRootType({
+        const map = replaceForeignRootType({
           doc,
           name: "comments",
           existing: placeholder,
@@ -208,7 +115,7 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
   // the existing placeholder is a foreign `AbstractType` instance, which would
   // throw "different constructor" on local docs.
   if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
-    const map = replacePlaceholderRootType({
+    const map = replaceForeignRootType({
       doc,
       name: "comments",
       existing: placeholder,
@@ -237,9 +144,10 @@ function cloneToLocalYjsValue(value: unknown): unknown {
     return out;
   }
 
-  if (isYText(value)) {
+  const text = getYText(value);
+  if (text) {
     const out = new Y.Text();
-    out.applyDelta(structuredClone(value.toDelta()));
+    out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
 
@@ -991,9 +899,10 @@ function cloneYjsValue(value: any, ctors: DocTypeConstructors): any {
     return out;
   }
 
-  if (isYText(value)) {
+  const text = getYText(value);
+  if (text) {
     const out = new ctors.TextCtor();
-    out.applyDelta(structuredClone(value.toDelta()));
+    out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
 
@@ -1032,8 +941,9 @@ function hasForeignYjsTypes(value: unknown, seen: Set<any> = new Set()): boolean
     return false;
   }
 
-  if (isYText(value)) {
-    return !(value instanceof Y.Text);
+  const text = getYText(value);
+  if (text) {
+    return !(text instanceof Y.Text);
   }
 
   return false;
@@ -1065,10 +975,11 @@ function cloneYjsValueToLocal(value: any, seen: Map<any, any> = new Map()): any 
     return out;
   }
 
-  if (isYText(value)) {
+  const text = getYText(value);
+  if (text) {
     const out = new Y.Text();
     seen.set(value, out);
-    out.applyDelta(structuredClone(value.toDelta()));
+    out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
 

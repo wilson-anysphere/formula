@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getYMap, getYText, yjsValueToJson } from "../yjs-utils/src/index.ts";
 
 import { makeCellKey, normalizeCellKey, parseCellKey } from "../session/src/cell-key.js";
 import { getWorkbookRoots } from "../workbook/src/index.ts";
@@ -24,86 +25,16 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isPlainObject(value) {
-  if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-
-function isYText(value) {
-  if (value instanceof Y.Text) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value;
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.toString !== "function") return false;
-  if (typeof maybe.toDelta !== "function") return false;
-  if (typeof maybe.applyDelta !== "function") return false;
-  if (typeof maybe.insert !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
-
 /**
  * @param {any} value
  * @returns {string | null}
  */
 function coerceString(value) {
-  if (isYText(value)) return value.toString();
+  const text = getYText(value);
+  if (text) return text.toString();
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
-}
-
-/**
- * Convert (potentially nested) Yjs values into plain JS objects.
- *
- * @param {any} value
- * @returns {any}
- */
-function yjsValueToJson(value) {
-  if (isYText(value)) return value.toString();
-
-  if (value && typeof value === "object") {
-    const yArr = getYArray(value);
-    if (yArr) {
-      return yArr.toArray().map((item) => yjsValueToJson(item));
-    }
-
-    const yMap = getYMap(value);
-    if (yMap) {
-      /** @type {Record<string, any>} */
-      const out = {};
-      const keys = Array.from(yMap.keys()).sort();
-      for (const key of keys) out[key] = yjsValueToJson(yMap.get(key));
-      return out;
-    }
-
-    if (Array.isArray(value)) return value.map((item) => yjsValueToJson(item));
-
-    if (isPlainObject(value)) {
-      /** @type {Record<string, any>} */
-      const out = {};
-      const keys = Object.keys(value).sort();
-      for (const key of keys) out[key] = yjsValueToJson(value[key]);
-      return out;
-    }
-
-    // Preserve other objects as-is (clone to avoid accidental mutations).
-    if (!Array.isArray(value)) {
-      try {
-        return structuredClone(value);
-      } catch {
-        // Ignore: fall through.
-      }
-    }
-  }
-
-  return value;
 }
 
 /**
@@ -203,38 +134,6 @@ function sheetViewStateEquals(a, b) {
   };
 
   return axisEquals(a.colWidths, b.colWidths) && axisEquals(a.rowHeights, b.rowHeights);
-}
-
-function getYMap(value) {
-  if (!value || typeof value !== "object") return null;
-  // Tolerate multiple `yjs` module instances (ESM/CJS) and differing constructor
-  // names across builds (e.g. `YMap` vs `_YMap`) by relying on structural checks.
-  //
-  // Note: plain JS Maps also have get/set/delete, so additionally require Yjs'
-  // observeDeep/unobserveDeep APIs.
-  const maybe = value;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYArray(value) {
-  if (!value || typeof value !== "object") return null;
-  if (value instanceof Y.Array) return value;
-  // See `getYMap` above for rationale.
-  const maybe = value;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
 }
 
 function getYMapCell(cellData) {

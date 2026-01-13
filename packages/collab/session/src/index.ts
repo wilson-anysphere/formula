@@ -3,6 +3,14 @@ import { WebsocketProvider } from "y-websocket";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import {
+  getMapRoot,
+  getYArray,
+  getYMap,
+  getYText,
+  isYAbstractType,
+  replaceForeignRootType,
+} from "@formula/collab-yjs-utils";
+import {
   CellConflictMonitor,
   CellStructuralConflictMonitor,
   FormulaConflictMonitor,
@@ -40,133 +48,6 @@ import {
   normalizeCellKey as normalizeCellKeyImpl,
   parseCellKey as parseCellKeyImpl,
 } from "./cell-key.js";
-
-function getYMap(value: unknown): any | null {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // `y-websocket` and pnpm workspaces can load multiple `yjs` module instances
-  // (ESM + CJS). Bundlers can also rename constructors (e.g. `YMap` → `_YMap`),
-  // which makes `instanceof` / `constructor.name` checks unreliable.
-  //
-  // Prefer structural checks and require Yjs' observer APIs so we don't
-  // accidentally treat a plain JS `Map` as a Y.Map.
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYArray(value: unknown): any | null {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // See `getYMap` above for rationale.
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYText(value: unknown): any | null {
-  if (value instanceof Y.Text) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // See `getYMap` above for rationale.
-  if (typeof maybe.toDelta !== "function") return null;
-  if (typeof maybe.applyDelta !== "function") return null;
-  if (typeof maybe.insert !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function isYAbstractType(value: unknown): boolean {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType<T extends Y.AbstractType<any>>(params: {
-  doc: Y.Doc;
-  name: string;
-  existing: any;
-  create: () => T;
-}): T {
-  const { doc, name, existing, create } = params;
-  const t = create();
-
-  // Copy the internal linked-list structures that hold the CRDT content. This mirrors
-  // Yjs' own `Doc.get()` logic when converting a root placeholder (`AbstractType`)
-  // into a concrete type, but also supports the case where the existing root was
-  // created by a different Yjs module instance (e.g. CJS `applyUpdate`).
-  (t as any)._map = existing?._map;
-  (t as any)._start = existing?._start;
-  (t as any)._length = existing?._length;
-
-  // Update parent pointers so future updates can resolve the correct root key via
-  // `findRootTypeKey` when encoding.
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item: any) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t as any);
-  (t as any)._integrate(doc as any, null);
-  return t;
-}
-
-function getMapRoot<T = unknown>(doc: Y.Doc, name: string): Y.Map<T> {
-  const existing = doc.share.get(name);
-  if (!existing) return doc.getMap<T>(name);
-
-  const map = getYMap(existing);
-  if (map) {
-    return map instanceof Y.Map
-      ? (map as Y.Map<T>)
-      : (replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() }) as any);
-  }
-
-  const array = getYArray(existing);
-  if (array) {
-    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Array`);
-  }
-
-  const text = getYText(existing);
-  if (text) {
-    throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Text`);
-  }
-
-  // `instanceof Y.AbstractType` is not sufficient to detect whether the placeholder
-  // root was created by *this* Yjs module instance. In mixed-module environments
-  // (ESM + CJS), we patch foreign prototype chains so foreign types pass
-  // `instanceof` checks (needed by UndoManager). Use constructor identity instead.
-  if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) return doc.getMap<T>(name);
-  if (isYAbstractType(existing)) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
-  }
-
-  throw new Error(`Unsupported Yjs root type for "${name}": ${existing?.constructor?.name ?? typeof existing}`);
-}
 
 function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
   // Yjs root types are schema-defined: you must know whether a key is a Map or

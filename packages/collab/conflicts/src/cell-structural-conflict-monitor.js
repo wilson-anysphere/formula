@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getMapRoot, getYMap } from "@formula/collab-yjs-utils";
 import { cellRefFromKey, numberToCol } from "./cell-ref.js";
  
 /**
@@ -824,7 +825,7 @@ export class CellStructuralConflictMonitor {
     }
  
     let cellMap = /** @type {Y.Map<any> | undefined} */ (this.cells.get(cellKey));
-    if (!isYMap(cellMap)) {
+    if (!getYMap(cellMap)) {
       cellMap = new Y.Map();
       this.cells.set(cellKey, cellMap);
     }
@@ -888,7 +889,7 @@ export class CellStructuralConflictMonitor {
     const existing = this.cells.get(cellKey);
     if (existing === undefined) return;
 
-    let cellMap = isYMap(existing) ? existing : null;
+    let cellMap = getYMap(existing);
     if (!cellMap) {
       cellMap = new Y.Map();
       this.cells.set(cellKey, cellMap);
@@ -1221,11 +1222,12 @@ function normalizeCell(cellData) {
   /** @type {Record<string, unknown> | null} */
   let format = null;
 
-  if (isYMap(cellData)) {
-    value = readYMapValue(cellData, "value") ?? null;
-    formula = readYMapValue(cellData, "formula") ?? null;
-    enc = readYMapValue(cellData, "enc") ?? null;
-    format = (readYMapValue(cellData, "format") ?? readYMapValue(cellData, "style")) ?? null;
+  const map = getYMap(cellData);
+  if (map) {
+    value = readYMapValue(map, "value") ?? null;
+    formula = readYMapValue(map, "formula") ?? null;
+    enc = readYMapValue(map, "enc") ?? null;
+    format = (readYMapValue(map, "format") ?? readYMapValue(map, "style")) ?? null;
   } else if (typeof cellData === "object") {
     value = cellData.value ?? null;
     formula = cellData.formula ?? null;
@@ -1261,98 +1263,6 @@ function normalizeCell(cellData) {
   else if (hasValue) out.value = value;
   if (hasFormat) out.format = format;
   return out;
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-
-  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
-  // also support roots instantiated by a different Yjs module instance (e.g.
-  // CJS `require("yjs")`).
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate(doc, null);
-  return t;
-}
-
-/**
- * Safely access a Map root without relying on `doc.getMap`, which can throw when
- * the root was instantiated by a different Yjs module instance (ESM vs CJS).
- *
- * @param {Y.Doc} doc
- * @param {string} name
- * @returns {Y.Map<any>}
- */
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (!existing) return doc.getMap(name);
-
-  if (isYMap(existing)) {
-    if (existing instanceof Y.Map) return existing;
-    // Only normalize when the doc itself is from the local Yjs module instance.
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-    }
-    return existing;
-  }
-
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-  }
-  if (isYAbstractType(existing)) return doc.getMap(name);
-
-  throw new Error(`Unsupported Yjs root type for "${name}"`);
-}
-
-/**
- * Duck-type Y.Map detection to avoid `instanceof` pitfalls when multiple Yjs
- * module instances are present (e.g. pnpm workspaces + mixed ESM/CJS loaders).
- *
- * @param {any} value
- * @returns {value is Y.Map<any>}
- */
-function isYMap(value) {
-  if (value instanceof Y.Map) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value;
-  // Bundlers can rename constructors (e.g. `YMap` -> `_YMap`) and pnpm workspaces
-  // can load multiple `yjs` module instances (ESM + CJS). Avoid relying on
-  // `constructor.name`; prefer a structural check instead.
-  if (typeof maybe.get !== "function") return false;
-  if (typeof maybe.set !== "function") return false;
-  if (typeof maybe.delete !== "function") return false;
-  if (typeof maybe.keys !== "function") return false;
-  if (typeof maybe.forEach !== "function") return false;
-  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
-  // Yjs' deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
 }
 
 /**

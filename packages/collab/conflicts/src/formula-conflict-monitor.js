@@ -1,88 +1,9 @@
 import * as Y from "yjs";
+import { getMapRoot } from "@formula/collab-yjs-utils";
 import { normalizeFormula } from "../../../versioning/src/formula/normalize.js";
 import { resolveFormulaConflict } from "./formula-conflict-resolver.js";
 import { cellRefFromKey } from "./cell-ref.js";
 import { tryEvaluateFormula } from "./formula-eval.js";
-
-function getYMap(value) {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/keys/forEach; require Yjs observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function isYAbstractType(value) {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = /** @type {any} */ (value);
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
-
-function replaceForeignRootType({ doc, name, existing, create }) {
-  const t = create();
-
-  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
-  // also support roots instantiated by a different Yjs module instance (e.g.
-  // CJS `require("yjs")`).
-  t._map = existing?._map;
-  t._start = existing?._start;
-  t._length = existing?._length;
-
-  const map = existing?._map;
-  if (map instanceof Map) {
-    map.forEach((item) => {
-      for (let n = item; n !== null; n = n.left) {
-        n.parent = t;
-      }
-    });
-  }
-
-  for (let n = existing?._start ?? null; n !== null; n = n.right) {
-    n.parent = t;
-  }
-
-  doc.share.set(name, t);
-  t._integrate(doc, null);
-  return t;
-}
-
-/**
- * Safely access a Map root without relying on `doc.getMap`, which can throw when
- * the root was instantiated by a different Yjs module instance (ESM vs CJS).
- *
- * @param {Y.Doc} doc
- * @param {string} name
- */
-function getMapRoot(doc, name) {
-  const existing = doc.share.get(name);
-  if (!existing) return doc.getMap(name);
-
-  const map = getYMap(existing);
-  if (map) {
-    if (map instanceof Y.Map) return map;
-    if (doc instanceof Y.Doc) {
-      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
-    }
-    return map;
-  }
-
-  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
-    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
-  }
-  if (isYAbstractType(existing)) return doc.getMap(name);
-
-  throw new Error(`Unsupported Yjs root type for "${name}"`);
-}
 
 /**
  * @typedef {object} FormulaConflictBase

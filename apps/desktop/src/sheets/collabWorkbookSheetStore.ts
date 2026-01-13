@@ -1,5 +1,6 @@
 import type { CollabSession } from "@formula/collab-session";
 import * as Y from "yjs";
+import { getYArray, getYMap, getYText, isYAbstractType } from "@formula/collab-yjs-utils";
 
 import type { SheetMeta, SheetVisibility, TabColor } from "./workbookSheetStore";
 import { WorkbookSheetStore } from "./workbookSheetStore";
@@ -7,60 +8,6 @@ import { WorkbookSheetStore } from "./workbookSheetStore";
 type CollabSessionLike = Pick<CollabSession, "sheets" | "transactLocal">;
 
 export type CollabSheetsKeyRef = { value: string };
-
-function getYText(value: unknown): any | null {
-  if (value instanceof Y.Text) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
-  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
-  // structural check instead.
-  if (typeof maybe.toString !== "function") return null;
-  if (typeof maybe.toDelta !== "function") return null;
-  if (typeof maybe.applyDelta !== "function") return null;
-  if (typeof maybe.insert !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYMap(value: unknown): any | null {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
-  // deep observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function getYArray(value: unknown): any | null {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
-}
-
-function isYAbstractType(value: unknown): boolean {
-  if (value instanceof Y.AbstractType) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
-}
 
 function coerceCollabSheetField(value: unknown): string | null {
   if (value == null) return null;

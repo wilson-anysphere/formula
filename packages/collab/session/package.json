@@ -12,6 +12,7 @@
     "test": "pnpm -w test:node collab/session"
   },
   "dependencies": {
+    "@formula/collab-yjs-utils": "workspace:*",
     "@formula/collab-conflicts": "workspace:*",
     "@formula/collab-encryption": "workspace:*",
     "@formula/collab-persistence": "workspace:*",

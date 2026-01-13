@@ -26,6 +26,7 @@
     "@formula/collab-presence": "workspace:*",
     "@formula/collab-session": "workspace:*",
     "@formula/collab-undo": "workspace:*",
+    "@formula/collab-yjs-utils": "workspace:*",
     "@formula/collab-versioning": "workspace:*",
     "@formula/data-io": "workspace:*",
     "@formula/engine": "workspace:*",
