@@ -639,16 +639,122 @@ function transactLocalWithWorkbookPermissions(session: PermissionAwareWorkbookSe
   };
 }
 
+function createPermissionAwareYMapProxy<T>(params: {
+  map: Y.Map<T>;
+  session: PermissionAwareWorkbookSession;
+  /**
+   * Optional cache so we can preserve referential equality when returning nested
+   * Y.Maps (e.g. sheet entries inside the `sheets` array).
+   */
+  cache?: WeakMap<object, Y.Map<T>>;
+  /**
+   * Tracks the proxies created by this helper so we can avoid proxy-wrapping a
+   * proxy (which would otherwise break referential equality and add overhead).
+   */
+  proxySet?: WeakSet<object>;
+}): Y.Map<T> {
+  const { map, session, cache, proxySet } = params;
+  if (proxySet?.has(map as any)) return map;
+  const cached = cache?.get(map as any);
+  if (cached) return cached;
+
+  const proxy = new Proxy(map as any, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      if (prop === "constructor") return value;
+
+      // Guard the primary mutators so callers can't accidentally bypass the
+      // manager APIs by writing through the exposed Y.Map.
+      if (prop === "set" || prop === "delete" || prop === "clear") {
+        return (...args: any[]) => {
+          assertSessionCanMutateWorkbook(session);
+          return Reflect.apply(value, target, args);
+        };
+      }
+
+      return value.bind(target);
+    },
+  }) as Y.Map<T>;
+
+  cache?.set(map as any, proxy);
+  proxySet?.add(proxy as any);
+  return proxy;
+}
+
+function createPermissionAwareYArrayProxy<T>(params: {
+  array: Y.Array<T>;
+  session: PermissionAwareWorkbookSession;
+  /**
+   * Optional wrapper for values returned by read APIs like `get()` / `toArray()`.
+   * Useful for returning permission-guarded nested Y.Maps (e.g. sheet entries).
+   */
+  wrapValue?: (value: unknown) => unknown;
+}): Y.Array<T> {
+  const { array, session, wrapValue } = params;
+
+  return new Proxy(array as any, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      if (prop === "constructor") return value;
+
+      // Guard the primary mutators so callers can't accidentally bypass the
+      // manager APIs by writing through the exposed Y.Array.
+      if (prop === "insert" || prop === "push" || prop === "unshift" || prop === "delete") {
+        return (...args: any[]) => {
+          assertSessionCanMutateWorkbook(session);
+          return Reflect.apply(value, target, args);
+        };
+      }
+
+      if (wrapValue && prop === "get") {
+        return (...args: any[]) => {
+          const out = Reflect.apply(value, target, args);
+          return wrapValue(out) as any;
+        };
+      }
+
+      if (wrapValue && prop === "toArray") {
+        return (...args: any[]) => {
+          const out = Reflect.apply(value, target, args);
+          return Array.isArray(out) ? out.map((v) => wrapValue(v) as any) : out;
+        };
+      }
+
+      return value.bind(target);
+    },
+  }) as Y.Array<T>;
+}
+
 export function createSheetManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): SheetManager {
-  return new SheetManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+  const mgr = new SheetManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+
+  // Also guard the exposed Yjs roots so callers can't bypass the permission-aware
+  // manager methods by mutating `mgr.sheets` directly.
+  const mapCache = new WeakMap<object, Y.Map<unknown>>();
+  const mapProxies = new WeakSet<object>();
+  const wrapSheetEntry = (value: unknown) => {
+    if (mapProxies.has(value as any)) return value;
+    const map = getYMap(value);
+    if (!map) return value;
+    return createPermissionAwareYMapProxy({ map, session, cache: mapCache, proxySet: mapProxies });
+  };
+
+  (mgr as any).sheets = createPermissionAwareYArrayProxy({ array: mgr.sheets, session, wrapValue: wrapSheetEntry });
+  return mgr;
 }
 
 export function createNamedRangeManagerForSessionWithPermissions(
   session: PermissionAwareWorkbookSession
 ): NamedRangeManager {
-  return new NamedRangeManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+  const mgr = new NamedRangeManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+  (mgr as any).namedRanges = createPermissionAwareYMapProxy({ map: mgr.namedRanges as any, session });
+  return mgr;
 }
 
 export function createMetadataManagerForSessionWithPermissions(session: PermissionAwareWorkbookSession): MetadataManager {
-  return new MetadataManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+  const mgr = new MetadataManager({ doc: session.doc, transact: transactLocalWithWorkbookPermissions(session) });
+  (mgr as any).metadata = createPermissionAwareYMapProxy({ map: mgr.metadata as any, session });
+  return mgr;
 }

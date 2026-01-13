@@ -58,11 +58,19 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
 
     const sheetMgr = source.createSheetManagerForSessionWithPermissions(session);
     const beforeIds = sheetMgr.list().map((s) => s.id);
+    const beforeSheet1Name = sheetMgr.list().find((s) => s.id === "Sheet1")?.name ?? null;
 
     expect(() => sheetMgr.addSheet({ id: "s2", name: "Second" })).toThrow(/read-?only/i);
+    // Direct Yjs mutations should also be blocked.
+    expect(() => (sheetMgr.sheets as any).push([new Y.Map()])).toThrow(/read-?only/i);
+
+    const sheet1 = sheetMgr.getById("Sheet1");
+    expect(sheet1).toBeTruthy();
+    expect(() => (sheet1 as any).set("name", "Hacked")).toThrow(/read-?only/i);
 
     // No mutation should have occurred.
     expect(sheetMgr.list().map((s) => s.id)).toEqual(beforeIds);
+    expect(sheetMgr.list().find((s) => s.id === "Sheet1")?.name ?? null).toBe(beforeSheet1Name);
     expect(session.sheets.toArray().some((s: any) => s?.get?.("id") === "s2")).toBe(false);
   });
 
@@ -73,6 +81,7 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
 
     const metadataMgr = source.createMetadataManagerForSessionWithPermissions(session);
     expect(() => metadataMgr.set("foo", "bar")).toThrow(/read-?only/i);
+    expect(() => (metadataMgr.metadata as any).set("foo", "bar")).toThrow(/read-?only/i);
     expect(metadataMgr.get("foo")).toBeUndefined();
     expect(session.metadata.get("foo")).toBeUndefined();
   });
@@ -84,6 +93,7 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
 
     const namedRangeMgr = source.createNamedRangeManagerForSessionWithPermissions(session);
     expect(() => namedRangeMgr.set("MyRange", "A1:B2")).toThrow(/read-?only/i);
+    expect(() => (namedRangeMgr.namedRanges as any).set("MyRange", "A1:B2")).toThrow(/read-?only/i);
     expect(namedRangeMgr.get("MyRange")).toBeUndefined();
     expect(session.namedRanges.get("MyRange")).toBeUndefined();
   });
