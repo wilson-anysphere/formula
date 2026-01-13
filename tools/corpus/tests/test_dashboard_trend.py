@@ -25,6 +25,13 @@ class DashboardTrendTests(unittest.TestCase):
             },
             "rates": {"open": 1.0, "round_trip": 2 / 3, "calculate": 0.5, "render": 0.5},
             "diff_totals": {"critical": 1, "warning": 2, "info": 3},
+            "top_diff_parts_critical": [
+                {"part": "xl/workbook.xml", "count": 3},
+                {"part": "xl/styles.xml", "count": 1},
+            ],
+            "top_diff_parts_total": [{"part": "xl/workbook.xml", "count": 4}],
+            "top_diff_part_groups_critical": [{"group": "worksheet_xml", "count": 5}],
+            "top_diff_part_groups_total": [{"group": "worksheet_xml", "count": 6}],
             "failures_by_category": {"round_trip_diff": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
             "round_trip_size_overhead": {"count": 2, "mean": 1.0, "p50": 1.0, "p90": 1.08},
@@ -72,6 +79,15 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertEqual(entry["diff_totals"]["warning"], 2)
         self.assertEqual(entry["diff_totals"]["info"], 3)
         self.assertEqual(entry["diff_totals"]["total"], 6)
+
+        # Optional diff breakdowns should be preserved (top-N only; small in this fixture).
+        self.assertEqual(
+            entry["top_diff_parts_critical"][0], {"part": "xl/workbook.xml", "count": 3}
+        )
+        self.assertEqual(
+            entry["top_diff_part_groups_total"][0],
+            {"group": "worksheet_xml", "count": 6},
+        )
 
     def test_append_trend_file_appends_and_caps(self) -> None:
         summary = {

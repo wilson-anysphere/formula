@@ -196,6 +196,38 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "size_overhead_samples": int(overhead.get("count") or 0),
     }
 
+    def _top_list(
+        key: str,
+        *,
+        list_key: str,
+        max_entries: int = 5,
+    ) -> None:
+        raw = summary.get(key)
+        if not isinstance(raw, list):
+            return
+        out: list[dict[str, Any]] = []
+        for row in raw:
+            if not isinstance(row, dict):
+                continue
+            name = row.get(list_key)
+            count = row.get("count")
+            if not isinstance(name, str) or not name:
+                continue
+            if isinstance(count, bool) or not isinstance(count, int):
+                continue
+            out.append({list_key: name, "count": int(count)})
+            if len(out) >= max_entries:
+                break
+        if out:
+            entry[key] = out
+
+    # Diff part/group breakdowns: keep only a small top-N in trend entries so the file stays
+    # compact even as the summary expands.
+    _top_list("top_diff_parts_critical", list_key="part")
+    _top_list("top_diff_parts_total", list_key="part")
+    _top_list("top_diff_part_groups_critical", list_key="group")
+    _top_list("top_diff_part_groups_total", list_key="group")
+
     # Perf trend signals (optional; only present when dashboard has timings data).
     for key, step, stat_key in [
         ("load_p50_ms", "load", "p50_ms"),
