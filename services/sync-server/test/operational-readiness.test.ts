@@ -91,6 +91,7 @@ test("exposes Prometheus metrics in text format", async (t) => {
   assert.match(body, /sync_server_process_heap_used_bytes/);
   assert.match(body, /sync_server_process_heap_total_bytes/);
   assert.match(body, /sync_server_event_loop_delay_ms/);
+  assert.match(body, /sync_server_shutdown_draining_current/);
   assert.match(body, /sync_server_persistence_info/);
 
   const health = await fetch(`${server.httpUrl}/healthz`);
@@ -101,11 +102,13 @@ test("exposes Prometheus metrics in text format", async (t) => {
     heapUsedBytes?: unknown;
     heapTotalBytes?: unknown;
     eventLoopDelayMs?: unknown;
+    draining?: unknown;
   };
   assert.equal(typeof healthBody.rssBytes, "number");
   assert.equal(typeof healthBody.heapUsedBytes, "number");
   assert.equal(typeof healthBody.heapTotalBytes, "number");
   assert.equal(typeof healthBody.eventLoopDelayMs, "number");
+  assert.equal(typeof healthBody.draining, "boolean");
 
   const ready = await fetch(`${server.httpUrl}/readyz`);
   assert.equal(ready.status, 200);
