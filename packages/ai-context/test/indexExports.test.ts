@@ -42,6 +42,8 @@ describe("ai-context TS entrypoint", () => {
         "withSchema.chunks[0]?.metadata.regionRange satisfies string;",
         "",
         'void trimMessagesToBudget({ messages: [{ role: "user", content: "hi" }], maxTokens: 128 });',
+        'void trimMessagesToBudget({ messages: [{ role: "user", content: "hi" }], maxTokens: 128, preserveToolCallPairs: true, dropToolMessagesFirst: true });',
+        'void trimMessagesToBudget({ messages: [{ role: "user", content: "hi" }], maxTokens: 128, preserveToolCallPairs: false });',
         "",
         "const cm = new ContextManager();",
         'void cm.buildContext({ sheet: { name: "Sheet1", values: [[1]] }, query: "hi" });',
