@@ -14,6 +14,7 @@ default = ["vba"]
 vba = ["dep:formula-vba"]
 
 [dependencies]
+base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 digest = "0.10"
 formula-engine = { path = "../formula-engine" }
@@ -34,7 +35,6 @@ zip = { version = "2.1", default-features = false, features = ["deflate"] }
 formula-fs = { path = "../formula-fs" }
 
 [dev-dependencies]
-base64 = "0.22"
 cfb = "0.10"
 openssl = "0.10"
 pretty_assertions = "1"
