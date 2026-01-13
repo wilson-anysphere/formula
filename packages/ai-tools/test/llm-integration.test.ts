@@ -105,6 +105,23 @@ describe("llm integration helpers", () => {
     expect(workbook.listSheets()).toEqual(["Sheet2"]);
   });
 
+  it("SpreadsheetLLMToolExecutor forwards include_formula_values to ToolExecutor", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+
+    const executor = new SpreadsheetLLMToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      id: "call-1",
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:A1" },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(result.data?.values).toEqual([[2]]);
+  });
+
   it("does not expose fetch_external_data when host external fetch is disabled", () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new SpreadsheetLLMToolExecutor(workbook);
