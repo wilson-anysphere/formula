@@ -321,6 +321,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     const literalMaxChars = Math.max(this.maxCellChars, MAX_PROMPT_CHARS);
 
     const { selectionClassification, references } = computeSelectionClassification({
+      functionName: fn,
       documentId: this.workbookId,
       args: params.args,
       provenance: alignedProvenance,
@@ -976,6 +977,7 @@ function summarizeReferences(provenance: AiFunctionArgumentProvenance[]): AiCell
 }
 
 function computeSelectionClassification(params: {
+  functionName: string;
   documentId: string;
   defaultSheetId: string;
   args: CellValue[];
@@ -1008,30 +1010,32 @@ function computeSelectionClassification(params: {
     if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
   }
 
-  // 2) Heuristic classification for referenced values (defense-in-depth).
+  // 2) Defense-in-depth heuristic classification for referenced argument values.
   //
-  // If the enterprise classification store is empty/incomplete, we still want to avoid sending
-  // obviously-sensitive patterns (emails, API keys, SSNs, credit cards, etc) to cloud models.
+  // Enterprise classification records may be missing or stale. Scan the *materialized*
+  // referenced values for sensitive patterns (emails, API keys, SSNs, etc.) so DLP
+  // enforcement can still redact/block before sending content to cloud models.
   //
-  // NOTE: We only scan the already-materialized scalar values / sampled range entries passed
-  // into `evaluateAiFunction` (ranges are already bounded by `evaluateFormula`'s sampling).
+  // NOTE: Arrays/ranges are scanned using the same bounded preview+sampling strategy as
+  // prompt compaction to avoid O(N) work on large inputs.
   if (selectionClassification.level !== CLASSIFICATION_LEVEL.RESTRICTED) {
     for (let i = 0; i < params.args.length; i += 1) {
       const prov = params.provenance[i];
       const hasRefs = Boolean((prov?.cells?.length ?? 0) > 0 || (prov?.ranges?.length ?? 0) > 0);
       if (!hasRefs) continue;
-
-      const arg = params.args[i];
-      if (Array.isArray(arg)) {
-        for (const entry of arg as Array<SpreadsheetValue | ProvenanceCellValue>) {
-          const scalar = entry && isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue);
-          selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(scalar as any, params.maxCellChars));
-          if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
-        }
-      } else {
-        selectionClassification = maxClassification(selectionClassification, heuristicClassifyValue(arg, params.maxCellChars));
-      }
-
+      selectionClassification = maxClassification(
+        selectionClassification,
+        heuristicClassifyReferencedValue({
+          functionName: params.functionName,
+          argIndex: i,
+          value: params.args[i]!,
+          provenance: prov,
+          documentId: params.documentId,
+          defaultSheetId: params.defaultSheetId,
+          maxCellChars: params.maxCellChars,
+          sheetNameResolver: params.sheetNameResolver,
+        }),
+      );
       if (selectionClassification.level === CLASSIFICATION_LEVEL.RESTRICTED) break;
     }
   }
@@ -1071,6 +1075,71 @@ function computeSelectionClassification(params: {
   return { selectionClassification: normalizeClassification(selectionClassification), references };
 }
 
+function heuristicClassifyReferencedValue(params: {
+  functionName: string;
+  argIndex: number;
+  value: CellValue;
+  provenance: AiFunctionArgumentProvenance;
+  documentId: string;
+  defaultSheetId: string;
+  maxCellChars: number;
+  sheetNameResolver: SheetNameResolver | null;
+}): any {
+  if (!Array.isArray(params.value)) {
+    return heuristicClassifyValue(params.value, params.maxCellChars);
+  }
+
+  const entries = params.value as Array<SpreadsheetValue | ProvenanceCellValue>;
+  const providedCount = entries.length;
+
+  // Avoid iterating large arrays. Sample the same preview + deterministic random indices
+  // that we might include in the prompt compaction.
+  const rangeCandidate = params.provenance.ranges?.length === 1 ? params.provenance.ranges[0]! : rangeRefFromArray(params.value);
+  const parsedRange = rangeCandidate ? parseProvenanceRef(rangeCandidate, params.defaultSheetId, params.sheetNameResolver) : null;
+  const isRange = Boolean(parsedRange && !parsedRange.isCell);
+  const rangeSheetId = parsedRange?.sheetId ?? null;
+  const rangeA1 = isRange ? rangeToA1(parsedRange!.range) : null;
+  const rangeStableText = rangeA1 && rangeSheetId ? `${rangeSheetId}!${rangeA1}` : rangeA1;
+
+  const seedHex = hashText(
+    `${params.documentId}:${rangeSheetId ?? params.defaultSheetId}:${params.functionName}:${params.argIndex}:${rangeStableText ?? "array"}`,
+  );
+  const rand = mulberry32(seedFromHashHex(seedHex));
+
+  const previewCount = Math.min(MAX_RANGE_PREVIEW_VALUES, providedCount);
+  const previewIndices = new Set<number>();
+  for (let i = 0; i < previewCount; i += 1) previewIndices.add(i);
+
+  const availableForSample = Math.max(0, providedCount - previewCount);
+  const sampleCount = Math.min(MAX_RANGE_SAMPLE_VALUES, availableForSample);
+  const sampleIndices = pickSampleIndices({ total: providedCount, count: sampleCount, rand, exclude: previewIndices });
+
+  const getEntryAt = (index: number): SpreadsheetValue | ProvenanceCellValue | null => {
+    if (index < 0 || index >= providedCount) return null;
+    return (entries[index] ?? null) as any;
+  };
+
+  let classification = { ...DEFAULT_CLASSIFICATION };
+  const visit = (index: number): void => {
+    const entry = getEntryAt(index);
+    if (!entry) return;
+    const raw = isProvenanceCellValue(entry) ? entry.value : (entry as SpreadsheetValue);
+    classification = maxClassification(classification, heuristicClassifyValue(raw as any, params.maxCellChars));
+  };
+
+  for (let i = 0; i < previewCount; i += 1) {
+    visit(i);
+    if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+  }
+
+  for (const idx of sampleIndices) {
+    visit(idx);
+    if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
+  }
+
+  return classification;
+}
+
 function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (Array.isArray(value)) return { ...DEFAULT_CLASSIFICATION };
   const scalar = isProvenanceCellValue(value) ? value.value : (value as SpreadsheetValue);
@@ -1078,10 +1147,11 @@ function heuristicClassifyValue(value: CellValue, maxChars: number): any {
   if (!text) return { ...DEFAULT_CLASSIFICATION };
 
   // Conservative heuristic DLP scanner (defense-in-depth) from `@formula/ai-context`.
-  const heuristic = classifyText(String(text));
-  if (heuristic?.level === "sensitive") {
-    const labels = (heuristic.findings || []).map((f: unknown) => `heuristic:${String(f)}`);
-    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels };
+  const sensitive = classifyText(text);
+  if (sensitive.level === "sensitive") {
+    // Map sensitive findings (emails, API keys, SSNs, etc.) to the most restrictive
+    // spreadsheet classification so cloud processing will be redacted/blocked by policy.
+    return { level: CLASSIFICATION_LEVEL.RESTRICTED, labels: ["heuristic", ...(sensitive.findings ?? [])] };
   }
 
   const lowered = text.toLowerCase();
@@ -1306,7 +1376,6 @@ function compactScalarForPrompt(params: {
       classificationIndex: params.classificationIndex,
       sheetNameResolver: params.sheetNameResolver,
     });
-
     // Defense-in-depth: if the structured classification store is empty/incomplete,
     // still avoid sending obvious sensitive patterns from referenced cells.
     classification = maxClassification(classification, heuristicClassifyValue(params.value as any, params.maxCellChars));
@@ -1449,22 +1518,26 @@ function compactArrayForPrompt(params: {
     return classification;
   };
 
-  const shouldRedactAll =
-    params.shouldRedact &&
+  const canUseProvenanceClassification =
     !range &&
     !hasPerCellRefs &&
-    ((params.provenance.cells?.length ?? 0) > 0 || (params.provenance.ranges?.length ?? 0) > 0) &&
-    (() => {
-      const classification = classificationForProvenance({
-        documentId: params.documentId,
-        defaultSheetId: params.defaultSheetId,
-        provenance: params.provenance,
-        classificationRecords: params.classificationRecords,
-        classificationIndex: params.classificationIndex,
-        sheetNameResolver: params.sheetNameResolver,
-      });
-      return params.maxAllowedRank === null || classificationRank(classification.level) > params.maxAllowedRank;
-    })();
+    ((params.provenance.cells?.length ?? 0) > 0 || (params.provenance.ranges?.length ?? 0) > 0);
+  const provenanceClassification =
+    params.shouldRedact && canUseProvenanceClassification
+      ? classificationForProvenance({
+          documentId: params.documentId,
+          defaultSheetId: params.defaultSheetId,
+          provenance: params.provenance,
+          classificationRecords: params.classificationRecords,
+          classificationIndex: params.classificationIndex,
+          sheetNameResolver: params.sheetNameResolver,
+        })
+      : null;
+
+  const shouldRedactAll =
+    params.shouldRedact &&
+    provenanceClassification !== null &&
+    (params.maxAllowedRank === null || classificationRank(provenanceClassification.level) > params.maxAllowedRank);
 
   const recordNumeric = (n: number): void => {
     if (stats.numericCount === 0) {
@@ -1486,6 +1559,8 @@ function compactArrayForPrompt(params: {
     const cellRef = entry && isProvenanceCellValue(entry) ? String(entry.__cellRef ?? "").trim() : null;
 
     if (params.shouldRedact) {
+      const heuristicClassification = heuristicClassifyValue(raw as any, params.maxCellChars);
+
       if (shouldRedactAll) {
         if (!redactedSeen.has(index)) {
           redactedSeen.add(index);
@@ -1497,7 +1572,7 @@ function compactArrayForPrompt(params: {
       let classification = { ...DEFAULT_CLASSIFICATION };
 
       if (cellRef) {
-        classification = maxClassification(classification, classificationForCellRef(cellRef));
+        classification = classificationForCellRef(cellRef);
       } else if (range && cols && rangeSheetId) {
         // If we can map indices -> cells, enforce per-cell redaction.
         const rowOffset = Math.floor(index / cols);
@@ -1505,20 +1580,17 @@ function compactArrayForPrompt(params: {
         const row = range.start.row + rowOffset;
         const col = range.start.col + colOffset;
 
-        classification = maxClassification(
-          classification,
-          params.classificationIndex
-            ? effectiveCellClassificationFromIndex(params.classificationIndex, { documentId: params.documentId, sheetId: rangeSheetId, row, col })
-            : effectiveCellClassification(
-                { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
-                params.classificationRecords,
-              ),
-        );
+        classification = params.classificationIndex
+          ? effectiveCellClassificationFromIndex(params.classificationIndex, { documentId: params.documentId, sheetId: rangeSheetId, row, col })
+          : effectiveCellClassification(
+              { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
+              params.classificationRecords,
+            );
+      } else if (provenanceClassification) {
+        classification = provenanceClassification;
       }
 
-      // Defense-in-depth: even when structured classifications are missing, redact
-      // obvious sensitive patterns found in the actual values we're about to serialize.
-      classification = maxClassification(classification, heuristicClassifyValue(raw as any, params.maxCellChars));
+      classification = maxClassification(classification, heuristicClassification);
 
       const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
       if (!allowed) {

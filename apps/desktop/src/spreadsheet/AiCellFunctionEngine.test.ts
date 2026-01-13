@@ -839,6 +839,59 @@ describe("AiCellFunctionEngine", () => {
     expect(userMessage).not.toContain("secret payload");
   });
 
+  it("DLP heuristically redacts sensitive patterns in referenced cells without classification records", async () => {
+    const workbookId = "dlp-heuristic-redact-cell";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : null);
+    const pending = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).not.toContain("user@example.com");
+  });
+
+  it("DLP heuristically redacts sensitive patterns within referenced ranges without classification records", async () => {
+    const workbookId = "dlp-heuristic-redact-range";
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      workbookId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : addr === "A2" ? "public payload" : null);
+    const pending = evaluateFormula('=AI("summarize", A1:A2)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const call = llmClient.chat.mock.calls[0]?.[0];
+    const userMessage = call?.messages?.find((m: any) => m.role === "user")?.content ?? "";
+    expect(userMessage).toContain("[REDACTED]");
+    expect(userMessage).toContain("public payload");
+    expect(userMessage).not.toContain("user@example.com");
+  });
+
   it("DLP redacts only disallowed cells within a mixed-classification range", async () => {
     const workbookId = "dlp-redact-range-workbook";
     const llmClient = {
