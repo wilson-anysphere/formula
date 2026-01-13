@@ -75,6 +75,18 @@ pub struct ChartModel {
     /// (`c:chartSpace/c:externalData/c:autoUpdate/@val`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_data_auto_update: Option<bool>,
+    /// Raw XML for the chartSpace extension list (`c:chartSpace/c:extLst`).
+    ///
+    /// Chart extensions are currently treated as opaque blobs for forward
+    /// compatibility and debugging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart_space_ext_lst_xml: Option<String>,
+    /// Raw XML for the chart extension list (`c:chartSpace/c:chart/c:extLst`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chart_ext_lst_xml: Option<String>,
+    /// Raw XML for the plotArea extension list (`c:chartSpace/c:chart/c:plotArea/c:extLst`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plot_area_ext_lst_xml: Option<String>,
     pub diagnostics: Vec<ChartDiagnostic>,
 }
 
@@ -349,6 +361,12 @@ pub struct AxisModel {
     /// Axis title (`c:*Ax/c:title`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<TextModel>,
+    /// Raw XML for the axis extension list (`c:*Ax/c:extLst`).
+    ///
+    /// Axis extensions are currently treated as opaque blobs for forward
+    /// compatibility and debugging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext_lst_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -441,6 +459,12 @@ pub struct SeriesModel {
     /// subplot within the combo plot area.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plot_index: Option<usize>,
+    /// Raw XML for the series extension list (`c:ser/c:extLst`).
+    ///
+    /// Series extensions are currently treated as opaque blobs for forward
+    /// compatibility and debugging.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext_lst_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

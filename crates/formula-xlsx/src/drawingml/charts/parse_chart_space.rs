@@ -51,6 +51,11 @@ pub fn parse_chart_space(
     let chart_space = doc.root_element();
     let style_id = child_attr(chart_space, "style", "val").and_then(|v| v.parse::<u32>().ok());
     let rounded_corners = child_attr(chart_space, "roundedCorners", "val").map(parse_ooxml_bool);
+    let chart_space_ext_lst_xml = chart_space
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .and_then(|n| super::slice_node_xml(&n, xml))
+        .filter(|s| !s.is_empty());
     let chart_area_style = chart_space
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
@@ -89,7 +94,7 @@ pub fn parse_chart_space(
     {
         warn(
             &mut diagnostics,
-            "c:extLst encountered; chart extensions are not yet modeled",
+            "c:extLst encountered; extension blocks were captured as raw XML but are not yet modeled",
         );
     }
 
@@ -99,6 +104,11 @@ pub fn parse_chart_space(
         .ok_or_else(|| {
             ChartSpaceParseError::XmlStructure(format!("{part_name}: missing <c:chart>"))
         })?;
+    let chart_ext_lst_xml = chart_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .and_then(|n| super::slice_node_xml(&n, xml))
+        .filter(|s| !s.is_empty());
 
     let disp_blanks_as = child_attr(chart_node, "dispBlanksAs", "val").map(str::to_string);
     let plot_vis_only = child_attr(chart_node, "plotVisOnly", "val").map(parse_ooxml_bool);
@@ -133,10 +143,18 @@ pub fn parse_chart_space(
             plot_area_style: None,
             external_data_rel_id,
             external_data_auto_update,
+            chart_space_ext_lst_xml,
+            chart_ext_lst_xml,
+            plot_area_ext_lst_xml: None,
             diagnostics,
         });
     };
 
+    let plot_area_ext_lst_xml = plot_area_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .and_then(|n| super::slice_node_xml(&n, xml))
+        .filter(|s| !s.is_empty());
     let plot_area_style = plot_area_node
         .children()
         .filter(|n| n.is_element())
@@ -146,8 +164,8 @@ pub fn parse_chart_space(
 
     let plot_area_layout = parse_layout_manual(plot_area_node);
 
-    let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, &mut diagnostics);
-    let axes = parse_axes(plot_area_node, &mut diagnostics);
+    let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, xml, &mut diagnostics);
+    let axes = parse_axes(plot_area_node, xml, &mut diagnostics);
     warn_on_numeric_categories_with_non_numeric_axis(plot_area_node, &series, &mut diagnostics);
 
     Ok(ChartModel {
@@ -168,12 +186,16 @@ pub fn parse_chart_space(
         plot_area_style,
         external_data_rel_id,
         external_data_auto_update,
+        chart_space_ext_lst_xml,
+        chart_ext_lst_xml,
+        plot_area_ext_lst_xml,
         diagnostics,
     })
 }
 
 fn parse_plot_area_chart(
     plot_area_node: Node<'_, '_>,
+    xml: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> (ChartKind, PlotAreaModel, Vec<SeriesModel>) {
     let chart_elems: Vec<_> = plot_area_node
@@ -219,7 +241,7 @@ fn parse_plot_area_chart(
             .filter(|n| n.is_element())
             .flat_map(|n| flatten_alternate_content(n, is_ser_node))
             .filter(|n| n.tag_name().name() == "ser")
-            .map(|ser| parse_series(ser, diagnostics, None))
+            .map(|ser| parse_series(ser, xml, diagnostics, None))
             .collect();
         return (chart_kind, plot_area, series);
     }
@@ -239,7 +261,7 @@ fn parse_plot_area_chart(
             .flat_map(|n| flatten_alternate_content(n, is_ser_node))
             .filter(|n| n.tag_name().name() == "ser")
         {
-            series.push(parse_series(ser, diagnostics, Some(plot_index)));
+            series.push(parse_series(ser, xml, diagnostics, Some(plot_index)));
         }
         let end = series.len();
 
@@ -444,6 +466,7 @@ fn parse_plot_area_model(
 
 fn parse_series(
     series_node: Node<'_, '_>,
+    xml: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
     plot_index: Option<usize>,
 ) -> SeriesModel {
@@ -513,6 +536,11 @@ fn parse_series(
     let smooth = child_attr(series_node, "smooth", "val").map(parse_ooxml_bool);
     let invert_if_negative =
         child_attr(series_node, "invertIfNegative", "val").map(parse_ooxml_bool);
+    let ext_lst_xml = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .and_then(|n| super::slice_node_xml(&n, xml))
+        .filter(|s| !s.is_empty());
 
     SeriesModel {
         idx,
@@ -531,6 +559,7 @@ fn parse_series(
         data_labels,
         points,
         plot_index,
+        ext_lst_xml,
     }
 }
 
@@ -603,6 +632,7 @@ fn parse_series_point_style(dpt_node: Node<'_, '_>) -> Option<SeriesPointStyle> 
 
 fn parse_axes(
     plot_area_node: Node<'_, '_>,
+    xml: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> Vec<AxisModel> {
     let mut axes = Vec::new();
@@ -615,7 +645,7 @@ fn parse_axes(
     {
         let tag = axis.tag_name().name();
         if tag == "catAx" || tag == "valAx" || tag == "dateAx" || tag == "serAx" {
-            if let Some(axis_model) = parse_axis(axis, diagnostics) {
+            if let Some(axis_model) = parse_axis(axis, xml, diagnostics) {
                 if seen_ids.insert(axis_model.id) {
                     axes.push(axis_model);
                 }
@@ -780,6 +810,7 @@ fn warn_on_numeric_categories_with_non_numeric_axis(
 
 fn parse_axis(
     axis_node: Node<'_, '_>,
+    xml: &str,
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> Option<AxisModel> {
     let id = axis_node
@@ -900,6 +931,11 @@ fn parse_axis(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "title")
         .and_then(|title| parse_axis_title(title, diagnostics, id));
+    let ext_lst_xml = axis_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "extLst")
+        .and_then(|n| super::slice_node_xml(&n, xml))
+        .filter(|s| !s.is_empty());
 
     Some(AxisModel {
         id,
@@ -921,6 +957,7 @@ fn parse_axis(
         major_unit,
         minor_unit,
         title,
+        ext_lst_xml,
     })
 }
 

@@ -126,6 +126,9 @@ pub fn parse_chart_ex(
         plot_area_style: None,
         external_data_rel_id,
         external_data_auto_update,
+        chart_space_ext_lst_xml: None,
+        chart_ext_lst_xml: None,
+        plot_area_ext_lst_xml: None,
         diagnostics,
     })
 }
@@ -256,6 +259,9 @@ fn detect_chart_kind(
     } else {
         hints.join(", ")
     };
+
+    // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
+    // detection for new ChartEx variants.
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
         message: format!(
@@ -611,6 +617,7 @@ fn parse_series(
         data_labels: None,
         points: Vec::new(),
         plot_index: None,
+        ext_lst_xml: None,
     }
 }
 
