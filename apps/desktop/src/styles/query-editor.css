@@ -586,4 +586,14 @@
   .query-editor-container__refresh-policy select {
     flex: 1 1 auto;
   }
+
+  .query-editor-container__engine-warning,
+  .query-editor-container__action-error {
+    padding: 8px;
+  }
+
+  .query-editor__sidebar,
+  .query-editor__schema {
+    padding: 8px;
+  }
 }
