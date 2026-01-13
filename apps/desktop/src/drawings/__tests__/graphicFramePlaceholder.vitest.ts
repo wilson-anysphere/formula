@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DrawingOverlay, pxToEmu, type GridGeometry, type Viewport } from "../overlay";
 import { graphicFramePlaceholderLabel, isGraphicFrame } from "../shapeRenderer";
+import { convertModelDrawingObjectToUiDrawingObject } from "../modelAdapters";
 import type { DrawingObject, ImageStore } from "../types";
 
 // Extracted from `fixtures/xlsx/basic/smartart.xlsx` -> `xl/drawings/drawing1.xml`.
@@ -136,5 +137,33 @@ describe("DrawingOverlay graphicFrame placeholders", () => {
     expect(
       calls.some((call) => call.method === "fillText" && call.args[0] === "SmartArt 1"),
     ).toBe(true);
+  });
+});
+
+describe("drawings/modelAdapters SmartArt", () => {
+  it("converts non-chart graphicFrames (SmartArt) into an unknown kind with a name label", () => {
+    const model = {
+      id: 2,
+      kind: {
+        ChartPlaceholder: {
+          rel_id: "unknown",
+          raw_xml: SMARTART_GRAPHIC_FRAME_XML,
+        },
+      },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 10, cy: 20 },
+        },
+      },
+      z_order: 0,
+    };
+
+    const ui = convertModelDrawingObjectToUiDrawingObject(model);
+    expect(ui.kind.type).toBe("unknown");
+    expect(ui.kind).toMatchObject({
+      rawXml: SMARTART_GRAPHIC_FRAME_XML,
+      label: "SmartArt 1",
+    });
   });
 });

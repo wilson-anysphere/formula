@@ -1,4 +1,5 @@
 import type { Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectKind, EmuSize, ImageEntry, ImageStore } from "./types";
+import { graphicFramePlaceholderLabel } from "./shapeRenderer";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -53,6 +54,29 @@ function readString(value: unknown, context: string): string {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function decodeXmlEntities(value: string): string {
+  // Minimal decode for the most common entities present in DrawingML object names.
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+function extractDrawingObjectName(rawXml: string | undefined): string | undefined {
+  if (!rawXml) return undefined;
+
+  // `cNvPr` is the non-visual properties element used for names/IDs.
+  // Example: `<xdr:cNvPr id="2" name="SmartArt 1"/>`
+  const match =
+    /<\s*(?:[A-Za-z0-9_-]+:)?cNvPr\b[^>]*\bname\s*=\s*"([^"]+)"/.exec(rawXml) ??
+    /<\s*(?:[A-Za-z0-9_-]+:)?cNvPr\b[^>]*\bname\s*=\s*'([^']+)'/.exec(rawXml);
+  const name = match?.[1]?.trim();
+  if (!name) return undefined;
+  return decodeXmlEntities(name);
 }
 
 function parseIdNumber(value: unknown): number | undefined {
@@ -190,17 +214,36 @@ function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
       return { type: "image", imageId };
     }
     case "Shape": {
-      // Preserve a minimal label for debugging/selection UIs. The overlay currently
-      // only cares about `kind.type`.
-      return { type: "shape", label: "shape" };
+      const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
+      const rawXml = readOptionalString(rawXmlValue);
+      const label = extractDrawingObjectName(rawXml);
+      return { type: "shape", rawXml, label };
     }
     case "ChartPlaceholder": {
       const relIdValue = pick(value, ["rel_id", "relId"]);
       const relId = readString(relIdValue, "DrawingObjectKind.ChartPlaceholder.rel_id");
-      return { type: "chart", chartId: relId, label: `Chart (${relId})` };
+      const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
+      const rawXml = readOptionalString(rawXmlValue);
+      const label = extractDrawingObjectName(rawXml);
+
+      // The XLSX parser currently maps all `xdr:graphicFrame` objects to the
+      // ChartPlaceholder variant, but many `graphicFrame` payloads are not charts
+      // (e.g. SmartArt/diagram frames). These have `rel_id = "unknown"`.
+      //
+      // When the rel id is unknown, treat the object as `unknown` so overlay
+      // rendering can use `graphicFramePlaceholderLabel(...)` for a stable label.
+      if (relId.trim() === "" || relId === "unknown") {
+        return { type: "unknown", rawXml, label: label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined };
+      }
+
+      return { type: "chart", chartId: relId, label: label ?? `Chart (${relId})`, rawXml };
     }
     case "Unknown":
-      return { type: "unknown", label: "unknown" };
+      return {
+        type: "unknown",
+        rawXml: readOptionalString(pick(value, ["raw_xml", "rawXml"])),
+        label: extractDrawingObjectName(readOptionalString(pick(value, ["raw_xml", "rawXml"]))),
+      };
     default:
       return { type: "unknown", label: `unsupported:${tag}` };
   }
@@ -318,4 +361,3 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
 
   return store;
 }
-
