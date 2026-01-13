@@ -244,7 +244,7 @@ jobs:
           if (idleMemory?.summary) {
             const m = idleMemory.summary;
             lines.push(
-              `| idleMemory.rss (mb) | ${fmt(m.rssMb?.p50, 1)} | ${fmt(m.rssMb?.p95, 1)} | settleMs=${idleMemory.settleMs ?? "n/a"} |`,
+              `| idleMemory.rss (mb) | ${fmt(m.rssMb?.p50, 1)} | ${fmt(m.rssMb?.p95, 1)} | settleMs=${idleMemory.settleMs ?? "n/a"} kind=${idleMemory.measurement ?? "rss"} |`,
             );
           } else {
             lines.push("| idleMemory | n/a | n/a | missing desktop-memory-metrics.json |");

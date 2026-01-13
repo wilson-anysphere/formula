@@ -548,6 +548,9 @@ async function main(): Promise<void> {
         {
           generatedAt: new Date().toISOString(),
           platform: process.platform,
+          // On Windows we record process-tree Working Set (not true RSS). On Unix we record RSS.
+          // Keeping this explicit in the JSON helps cross-platform comparisons.
+          measurement: process.platform === "win32" ? "working_set" : "rss",
           binPath,
           runs: results.length,
           settleMs,
