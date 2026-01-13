@@ -28,7 +28,7 @@ python -m tools.corpus.promote_public \
 
 This will:
 
-- write `tools/corpus/public/<name>.xlsx.b64`
+- write `tools/corpus/public/<name>.(xlsx|xlsm|xlsb).b64`
 - run triage on it (report written under `tools/corpus/out/promote-public/`)
 - upsert `tools/corpus/public/expectations.json`
 

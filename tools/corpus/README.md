@@ -1,6 +1,7 @@
 # Compatibility corpus tooling (`tools/corpus`)
 
-This directory contains a privacy-safe pipeline for building and triaging a "real-world XLSX zoo".
+This directory contains a privacy-safe pipeline for building and triaging a "real-world spreadsheet zoo"
+(`.xlsx`/`.xlsm`/`.xlsb`).
 
 Most users should start with:
 

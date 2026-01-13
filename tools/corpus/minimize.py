@@ -690,7 +690,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Minimize a round-trip diff by reporting which XLSX parts are responsible."
     )
-    parser.add_argument("--input", type=Path, required=True, help="Workbook path (*.xlsx, *.b64, *.enc)")
+    parser.add_argument(
+        "--input",
+        type=Path,
+        required=True,
+        help="Workbook path (*.xlsx, *.xlsm, *.xlsb, *.b64, *.enc)",
+    )
     parser.add_argument(
         "--out",
         type=Path,
