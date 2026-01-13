@@ -1,4 +1,4 @@
-use formula_model::{ManualPageBreaks, Orientation, PageSetup, PaperSize, Scaling};
+use formula_model::{ManualPageBreaks, Orientation, PageSetup, Scaling};
 
 use super::records;
 
@@ -164,9 +164,15 @@ fn parse_setup_record(page_setup: &mut PageSetup, data: &[u8], offset: usize, wa
     let footer_margin = parse_f64_at(data, 24);
 
     if let Some(code) = paper_size {
-        // A paper size of 0 is treated as "default" by some producers.
-        if code != 0 {
-            page_setup.paper_size = PaperSize { code };
+        // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom paper sizes.
+        // These values do not map cleanly onto OpenXML `ST_PaperSize` numeric codes and are not
+        // representable in the model. Ignore them and keep the default paper size.
+        if code == 0 || code >= 256 {
+            warnings.push(format!(
+                "ignoring custom/invalid paper size code {code} in SETUP record at offset {offset}"
+            ));
+        } else {
+            page_setup.paper_size.code = code;
         }
     }
 

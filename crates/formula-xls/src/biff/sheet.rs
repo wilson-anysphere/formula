@@ -933,7 +933,21 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 if !f_no_pls {
                     setup_fit_width = Some(i_fit_width);
                     setup_fit_height = Some(i_fit_height);
-                    page_setup.paper_size.code = i_paper_size;
+                    // BIFF8 uses `iPaperSize==0` and values >=256 for printer-specific/custom
+                    // paper sizes. These sizes do not map cleanly onto OpenXML `ST_PaperSize`
+                    // numeric codes and are not representable in the model. Ignore these values
+                    // and keep whatever paper size we already have (typically the default).
+                    if i_paper_size == 0 || i_paper_size >= 256 {
+                        push_warning_bounded(
+                            &mut out.warnings,
+                            format!(
+                                "ignoring custom/invalid paper size code {i_paper_size} in SETUP record at offset {}",
+                                record.offset
+                            ),
+                        );
+                    } else {
+                        page_setup.paper_size.code = i_paper_size;
+                    }
                     setup_scale = Some(i_scale);
 
                     page_setup.orientation = if f_no_orient {
