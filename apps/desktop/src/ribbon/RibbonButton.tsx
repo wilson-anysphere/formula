@@ -292,6 +292,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                 className="ribbon-dropdown__menuitem"
                 aria-label={item.ariaLabel}
                 title={itemTitle}
+                data-shortcut={itemShortcut || undefined}
                 tabIndex={-1}
                 disabled={item.disabled}
                 data-testid={item.testId}
@@ -320,11 +321,6 @@ export const RibbonButton = React.memo(function RibbonButton({
                   ) : null;
                 })()}
                 <span className="ribbon-dropdown__label">{item.label}</span>
-                {itemShortcut ? (
-                  <span className="ribbon-dropdown__shortcut" aria-hidden="true">
-                    {itemShortcut}
-                  </span>
-                ) : null}
               </button>
             );
           })}

@@ -507,11 +507,11 @@
   flex: 1;
 }
 
-.ribbon-dropdown__shortcut {
+.ribbon-dropdown__menuitem[data-shortcut]::after {
+  content: attr(data-shortcut);
   flex: 0 0 auto;
   color: var(--text-secondary);
   font-size: 11px;
-  margin-left: 12px;
 }
 
 /* Density modes (responsive + user-collapsed) */

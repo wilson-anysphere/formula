@@ -39,6 +39,12 @@ function getMenuItems(container: HTMLElement): HTMLButtonElement[] {
   return Array.from(menu.querySelectorAll<HTMLButtonElement>(".ribbon-dropdown__menuitem"));
 }
 
+function menuItemLabel(item: HTMLButtonElement): string {
+  // Menu items now may include additional UI (e.g. shortcut hints). The visible label
+  // remains inside `.ribbon-dropdown__label`.
+  return item.querySelector(".ribbon-dropdown__label")?.textContent?.trim() ?? item.textContent?.trim() ?? "";
+}
+
 describe("Ribbon clipboard command ids", () => {
   it("uses canonical CommandRegistry clipboard.* ids in Home → Clipboard", async () => {
     const onCommand = vi.fn();
@@ -67,7 +73,7 @@ describe("Ribbon clipboard command ids", () => {
     });
     expect(getMenuItems(container).length).toBeGreaterThan(0);
 
-    const pasteItem = getMenuItems(container).find((item) => item.textContent?.trim() === "Paste");
+    const pasteItem = getMenuItems(container).find((item) => menuItemLabel(item) === "Paste");
     expect(pasteItem).toBeInstanceOf(HTMLButtonElement);
     expect(pasteItem?.dataset.commandId).toBe("clipboard.paste");
     onCommand.mockClear();
@@ -79,7 +85,7 @@ describe("Ribbon clipboard command ids", () => {
       paste?.click();
       await Promise.resolve();
     });
-    const pasteValues = getMenuItems(container).find((item) => item.textContent?.trim() === "Paste Values");
+    const pasteValues = getMenuItems(container).find((item) => menuItemLabel(item) === "Paste Values");
     expect(pasteValues).toBeInstanceOf(HTMLButtonElement);
     expect(pasteValues?.dataset.commandId).toBe("clipboard.pasteSpecial.values");
 
@@ -101,11 +107,11 @@ describe("Ribbon clipboard command ids", () => {
       pasteSpecial?.click();
       await Promise.resolve();
     });
-    const pasteSpecialDialog = getMenuItems(container).find((item) => item.textContent?.trim() === "Paste Special…");
+    const pasteSpecialDialog = getMenuItems(container).find((item) => menuItemLabel(item) === "Paste Special…");
     expect(pasteSpecialDialog).toBeInstanceOf(HTMLButtonElement);
     expect(pasteSpecialDialog?.dataset.commandId).toBe("clipboard.pasteSpecial");
 
-    const transpose = getMenuItems(container).find((item) => item.textContent?.trim() === "Transpose");
+    const transpose = getMenuItems(container).find((item) => menuItemLabel(item) === "Transpose");
     expect(transpose).toBeInstanceOf(HTMLButtonElement);
     expect(transpose?.dataset.commandId).toBe("clipboard.pasteSpecial.transpose");
 
