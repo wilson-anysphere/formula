@@ -88,6 +88,16 @@ export type CollabVersioningOptions = {
    * Defaults to `true` (matches VersionManager).
    */
   autoStart?: boolean;
+  /**
+   * Additional Yjs root names to exclude from version snapshots/restores.
+   *
+   * CollabVersioning always excludes built-in internal collaboration roots
+   * (e.g. `cellStructuralOps`, `branching:*`, and `versions*` when using
+   * {@link YjsVersionStore}). This option lets callers extend that list (for
+   * example when {@link CollabBranchingWorkflow} is configured with a non-default
+   * branch root name).
+   */
+  excludeRoots?: string[];
 };
 
 /**
@@ -114,14 +124,15 @@ export class CollabVersioning {
     // - Default YjsBranchStore graph roots (`branching:*`)
     //
     // Note: CollabBranchingWorkflow allows configuring the branch root name
-    // (default "branching"). We only exclude the default roots here.
+    // (default "branching"). We only exclude the default roots here; callers
+    // can extend the list via `CollabVersioningOptions.excludeRoots`.
     //
     // Additionally, when version history itself is stored in the Yjs doc
     // (YjsVersionStore), we must exclude those roots from snapshots/restores to
     // avoid recursive snapshots and to prevent restores from rolling back
     // history.
     const storeInDoc = isYjsVersionStore(store);
-    const excludeRoots = [
+    const builtInExcludeRoots = [
       // Always excluded internal collaboration roots.
       "cellStructuralOps",
       "branching:branches",
@@ -130,6 +141,10 @@ export class CollabVersioning {
       // Exclude versioning history roots only when history is stored in-doc.
       ...(storeInDoc ? ["versions", "versionsMeta"] : []),
     ];
+
+    const excludeRoots = Array.from(
+      new Set([...builtInExcludeRoots, ...(Array.isArray(opts.excludeRoots) ? opts.excludeRoots : [])]),
+    );
 
     const doc = createYjsSpreadsheetDocAdapter(opts.session.doc, { excludeRoots });
     this.manager = new VersionManager({

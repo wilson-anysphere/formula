@@ -105,6 +105,63 @@ test("CollabVersioning restoreVersion does not rewind internal collaboration roo
   assert.equal(cellStructuralOps.get("op2"), "after");
 });
 
+test("CollabVersioning restoreVersion supports caller-provided excludeRoots (custom branch rootName)", async (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+
+  // Workbook (user-visible) roots.
+  const metadata = doc.getMap("metadata");
+  const cells = doc.getMap("cells");
+
+  // Internal collaboration/version-control roots with a *custom* branch root name.
+  // These must be excluded via `CollabVersioningOptions.excludeRoots`.
+  const branches = doc.getMap("myBranching:branches");
+  const commits = doc.getMap("myBranching:commits");
+  const branchingMeta = doc.getMap("myBranching:meta");
+
+  // Seed initial workbook state.
+  metadata.set("title", "Before");
+  cells.set("Sheet1:0:0", "alpha");
+
+  // Seed internal state.
+  branches.set("main", "branch-v1");
+  commits.set("c1", "commit-v1");
+  branchingMeta.set("currentBranchName", "main");
+
+  const versioning = createCollabVersioning({
+    // @ts-expect-error - minimal session stub for unit tests
+    session: { doc },
+    autoStart: false,
+    excludeRoots: ["myBranching:branches", "myBranching:commits", "myBranching:meta"],
+  });
+  t.after(() => versioning.destroy());
+
+  const checkpoint = await versioning.createCheckpoint({ name: "checkpoint-1" });
+
+  // Mutate workbook roots.
+  metadata.set("title", "After");
+  cells.set("Sheet1:0:0", "beta");
+
+  // Mutate internal roots in a way that would be visibly "rewound" if restore
+  // incorrectly applied the snapshot to them.
+  branches.set("main", "branch-v2");
+  commits.delete("c1");
+  commits.set("c2", "commit-v2");
+  branchingMeta.set("currentBranchName", "feature");
+
+  await versioning.restoreVersion(checkpoint.id);
+
+  // Workbook state should revert to checkpoint.
+  assert.equal(metadata.get("title"), "Before");
+  assert.equal(cells.get("Sheet1:0:0"), "alpha");
+
+  // Custom branching roots should NOT revert (they should keep post-mutation state).
+  assert.equal(branches.get("main"), "branch-v2");
+  assert.equal(commits.has("c1"), false);
+  assert.equal(commits.get("c2"), "commit-v2");
+  assert.equal(branchingMeta.get("currentBranchName"), "feature");
+});
+
 test("CollabVersioning does not mark dirty for excluded internal root updates", async (t) => {
   const doc = new Y.Doc();
   t.after(() => doc.destroy());
@@ -132,4 +189,3 @@ test("CollabVersioning does not mark dirty for excluded internal root updates", 
   cells.set("Sheet1:0:0", "alpha");
   assert.equal(versioning.manager.dirty, true);
 });
-
