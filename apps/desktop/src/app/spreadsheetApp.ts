@@ -9891,6 +9891,142 @@ export class SpreadsheetApp {
     });
   }
 
+  private isImageReferencedByAnyDrawing(imageId: string): boolean {
+    const id = String(imageId ?? "").trim();
+    if (!id) return false;
+
+    const docAny: any = this.document as any;
+    const getSheetDrawings = typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    if (!getSheetDrawings) return false;
+
+    const sheetIds = (() => {
+      try {
+        const ids = this.document.getSheetIds?.();
+        return Array.isArray(ids) ? ids : [this.sheetId];
+      } catch {
+        return [this.sheetId];
+      }
+    })();
+
+    for (const sheetId of sheetIds) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (!Array.isArray(raw) || raw.length === 0) continue;
+
+      const objects = convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId });
+      for (const obj of objects) {
+        if (obj.kind.type === "image" && obj.kind.imageId === id) return true;
+      }
+    }
+
+    return false;
+  }
+
+  private deleteSelectedDrawing(): void {
+    const drawingId = this.selectedDrawingId;
+    if (drawingId == null) return;
+
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+
+    const sheetId = this.sheetId;
+    const selected = this.listDrawingObjectsForSheet(sheetId).find((obj) => obj.id === drawingId) ?? null;
+    const imageId = selected?.kind.type === "image" ? selected.kind.imageId : null;
+
+    const docAny: any = this.document as any;
+    const deleteDrawing =
+      typeof docAny.deleteDrawing === "function"
+        ? (docAny.deleteDrawing as (sheetId: string, drawingId: string | number, options?: unknown) => void)
+        : null;
+    const getSheetDrawings =
+      typeof docAny.getSheetDrawings === "function" ? (docAny.getSheetDrawings as (sheetId: string) => unknown) : null;
+    const deleteImage =
+      typeof docAny.deleteImage === "function" ? (docAny.deleteImage as (imageId: string, options?: unknown) => void) : null;
+
+    const rawIdsToDelete = new Set<string | number>();
+    if (getSheetDrawings) {
+      let raw: unknown = null;
+      try {
+        raw = getSheetDrawings.call(docAny, sheetId);
+      } catch {
+        raw = null;
+      }
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          if (!entry || typeof entry !== "object") continue;
+          let uiId: number | null = null;
+          try {
+            uiId = convertDocumentSheetDrawingsToUiDrawingObjects([entry], { sheetId })[0]?.id ?? null;
+          } catch {
+            uiId = null;
+          }
+          if (uiId !== drawingId) continue;
+          const rawId = (entry as any).id;
+          if (typeof rawId === "string") {
+            const trimmed = rawId.trim();
+            if (trimmed) rawIdsToDelete.add(trimmed);
+          } else if (typeof rawId === "number" && Number.isFinite(rawId)) {
+            rawIdsToDelete.add(rawId);
+          }
+        }
+      }
+    }
+    if (rawIdsToDelete.size === 0) rawIdsToDelete.add(drawingId);
+
+    let batchStarted = false;
+    try {
+      this.document.beginBatch({ label: "Delete Drawing" });
+      batchStarted = true;
+    } catch {
+      batchStarted = false;
+    }
+
+    if (deleteDrawing) {
+      for (const rawId of rawIdsToDelete) {
+        try {
+          deleteDrawing.call(docAny, sheetId, rawId, { label: "Delete Drawing" });
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (imageId && deleteImage && !this.isImageReferencedByAnyDrawing(imageId)) {
+      try {
+        deleteImage.call(docAny, imageId, { label: "Delete Drawing" });
+      } catch {
+        // ignore
+      }
+      this.drawingOverlay.invalidateImage(imageId);
+    }
+
+    if (batchStarted) {
+      try {
+        this.document.endBatch();
+      } catch {
+        // ignore
+      }
+    }
+
+    this.selectedDrawingId = null;
+    this.drawingOverlay.setSelectedId(null);
+    this.drawingInteractionController?.setSelectedId(null);
+    this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+  }
+
   private renderAuditing(): void {
     if (this.auditingMode === "off") {
       // Avoid clearing the full auditing canvas on every scroll when auditing overlays are disabled.
@@ -12821,6 +12957,14 @@ export class SpreadsheetApp {
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
       this.openInlineAiEdit();
+      return;
+    }
+    if ((e.key === "Backspace" || e.key === "Delete") && this.selectedDrawingId != null) {
+      // Picture deletion should not fire while the formula bar is editing (including
+      // range-selection mode).
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
+      e.preventDefault();
+      this.deleteSelectedDrawing();
       return;
     }
     if (e.key === "Delete") {
