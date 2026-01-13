@@ -81,3 +81,17 @@
 .conflict-dialog__manual-label {
   margin-top: 8px;
 }
+
+.conflict-dialog__formula-diff {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dialog-border);
+}
+
+.conflict-dialog__formula-diff-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
