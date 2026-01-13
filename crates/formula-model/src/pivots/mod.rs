@@ -9,11 +9,8 @@ mod model;
 mod schema;
 pub mod slicers;
 
-pub use model::{
-    FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig, PivotDestination, PivotSource,
-    PivotTableModel, SubtotalPosition,
-};
 pub use schema::{CalculatedField, CalculatedItem};
+pub use model::{PivotCacheId, PivotDestination, PivotSource, PivotTableModel};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;
