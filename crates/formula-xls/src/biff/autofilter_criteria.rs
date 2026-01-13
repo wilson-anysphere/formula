@@ -96,7 +96,13 @@ pub(crate) fn parse_biff_sheet_autofilter_criteria(
     let entry_mode = choose_entry_mode(&raw_entries, autofilter_range);
 
     for record in autofilter_records {
-        match parse_autofilter_record(&record, codepage, autofilter_range, entry_mode) {
+        match parse_autofilter_record(
+            &record,
+            codepage,
+            autofilter_range,
+            entry_mode,
+            &mut out.warnings,
+        ) {
             Ok(Some(col)) => {
                 cols.insert(col.col_id, col);
             }
@@ -158,6 +164,12 @@ enum AutoFilterOp {
     LessThan,
     GreaterThanOrEqual,
     LessThanOrEqual,
+    Contains,
+    DoesNotContain,
+    BeginsWith,
+    EndsWith,
+    DoesNotBeginWith,
+    DoesNotEndWith,
     Unknown(u8),
 }
 
@@ -174,6 +186,17 @@ impl AutoFilterOp {
             6 => AutoFilterOp::LessThan,
             7 => AutoFilterOp::GreaterThanOrEqual,
             8 => AutoFilterOp::LessThanOrEqual,
+            // Best-effort text operators (OOXML `customFilter/@operator` values).
+            //
+            // These have been observed in BIFF8 AutoFilter records produced by some writers. When
+            // present, we preserve them as `OpaqueCustom` criteria so the operator round-trips to
+            // XLSX even if we do not model its semantics directly.
+            9 => AutoFilterOp::Contains,
+            10 => AutoFilterOp::BeginsWith,
+            11 => AutoFilterOp::EndsWith,
+            12 => AutoFilterOp::DoesNotContain,
+            13 => AutoFilterOp::DoesNotBeginWith,
+            14 => AutoFilterOp::DoesNotEndWith,
             other => AutoFilterOp::Unknown(other),
         }
     }
@@ -186,6 +209,12 @@ impl AutoFilterOp {
             AutoFilterOp::GreaterThanOrEqual => Some("greaterThanOrEqual"),
             AutoFilterOp::LessThan => Some("lessThan"),
             AutoFilterOp::LessThanOrEqual => Some("lessThanOrEqual"),
+            AutoFilterOp::Contains => Some("contains"),
+            AutoFilterOp::DoesNotContain => Some("doesNotContain"),
+            AutoFilterOp::BeginsWith => Some("beginsWith"),
+            AutoFilterOp::EndsWith => Some("endsWith"),
+            AutoFilterOp::DoesNotBeginWith => Some("doesNotBeginWith"),
+            AutoFilterOp::DoesNotEndWith => Some("doesNotEndWith"),
             _ => None,
         }
     }
@@ -215,6 +244,7 @@ fn parse_autofilter_record(
     codepage: u16,
     autofilter_range: Range,
     entry_mode: AutoFilterEntryMode,
+    warnings: &mut Vec<String>,
 ) -> Result<Option<FilterColumn>, String> {
     let data = record.data.as_ref();
     if data.len() < 20 {
@@ -323,11 +353,19 @@ fn parse_autofilter_record(
     }
 
     let mut criteria: Vec<FilterCriterion> = Vec::new();
-    if let Some(c) = criterion_from_doper(&doper1) {
-        criteria.push(c);
-    }
-    if let Some(c) = criterion_from_doper(&doper2) {
-        criteria.push(c);
+    for doper in [&doper1, &doper2] {
+        if let AutoFilterOp::Unknown(code) = doper.op {
+            // Unknown/invalid operator codes have been observed in the wild. Only preserve operator
+            // values that are valid in OOXML; otherwise skip and surface a warning for corpus triage.
+            warnings.push(format!(
+                "skipping unknown AUTOFILTER operator code 0x{code:02X} at offset {}",
+                record.offset
+            ));
+            continue;
+        }
+        if let Some(c) = criterion_from_doper(doper) {
+            criteria.push(c);
+        }
     }
 
     // Only emit a FilterColumn when we recovered some criteria or raw XML payload.
@@ -391,15 +429,15 @@ fn parse_doper(bytes: &[u8]) -> ParsedDoper {
     ]);
     let op_byte = *bytes.get(1).unwrap_or(&0);
 
-    let op_code = if op_u16 <= 8 {
+    let op_code = if op_u16 <= 14 {
         let op = op_u16 as u8;
         // If `wOper` is unset but the second byte looks like an operator, fall back.
-        if op == 0 && op_byte != 0 && op_byte <= 8 {
+        if op == 0 && op_byte != 0 && (op_byte <= 14 || op_byte >= 0x80) {
             op_byte
         } else {
             op
         }
-    } else if op_byte <= 8 {
+    } else if op_byte != 0 && (op_byte <= 14 || op_byte >= 0x80) {
         op_byte
     } else {
         0
@@ -492,15 +530,11 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
         return None;
     }
 
-    // Helper to preserve unsupported criteria as opaque custom filter operators.
-    let opaque = |op: AutoFilterOp, value: Option<String>| -> FilterCriterion {
-        FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
-            operator: op
-                .to_ooxml_operator_name()
-                .unwrap_or_else(|| "unknown")
-                .to_string(),
-            value,
-        })
+    // Helper to preserve criteria as opaque custom filters **only when the OOXML operator name is
+    // known**. Unknown operator strings would produce invalid OOXML.
+    let opaque = |op: AutoFilterOp, value: Option<String>| -> Option<FilterCriterion> {
+        let operator = op.to_ooxml_operator_name()?.to_string();
+        Some(FilterCriterion::OpaqueCustom(OpaqueCustomFilter { operator, value }))
     };
 
     match doper.op {
@@ -514,59 +548,66 @@ fn criterion_from_doper(doper: &ParsedDoper) -> Option<FilterCriterion> {
                 } else if *type_known {
                     Some(FilterCriterion::Equals(FilterValue::Text(value.clone())))
                 } else {
-                    Some(opaque(AutoFilterOp::Equal, Some(value.clone())))
+                    opaque(AutoFilterOp::Equal, Some(value.clone()))
                 }
             }
-            DoperValue::Unknown => Some(opaque(AutoFilterOp::Equal, None)),
+            DoperValue::Unknown => opaque(AutoFilterOp::Equal, None),
         },
         AutoFilterOp::NotEqual => match &doper.value {
             DoperValue::Empty => Some(FilterCriterion::NonBlanks),
-            DoperValue::Bool(b) => Some(opaque(AutoFilterOp::NotEqual, Some(b.to_string()))),
+            DoperValue::Bool(b) => opaque(AutoFilterOp::NotEqual, Some(b.to_string())),
             DoperValue::Number(n) => Some(FilterCriterion::Number(NumberComparison::NotEqual(*n))),
             DoperValue::Text { value, .. } => {
                 if value.is_empty() {
                     Some(FilterCriterion::NonBlanks)
                 } else {
-                    Some(opaque(AutoFilterOp::NotEqual, Some(value.clone())))
+                    opaque(AutoFilterOp::NotEqual, Some(value.clone()))
                 }
             }
-            DoperValue::Unknown => Some(opaque(AutoFilterOp::NotEqual, None)),
+            DoperValue::Unknown => opaque(AutoFilterOp::NotEqual, None),
         },
         AutoFilterOp::GreaterThan => match doper.value {
             DoperValue::Number(n) => Some(FilterCriterion::Number(NumberComparison::GreaterThan(n))),
-            DoperValue::Text { ref value, .. } => {
-                Some(opaque(AutoFilterOp::GreaterThan, Some(value.clone())))
-            }
-            _ => Some(opaque(AutoFilterOp::GreaterThan, None)),
+            DoperValue::Text { ref value, .. } => opaque(AutoFilterOp::GreaterThan, Some(value.clone())),
+            _ => opaque(AutoFilterOp::GreaterThan, None),
         },
         AutoFilterOp::GreaterThanOrEqual => match doper.value {
             DoperValue::Number(n) => Some(FilterCriterion::Number(
                 NumberComparison::GreaterThanOrEqual(n),
             )),
-            DoperValue::Text { ref value, .. } => Some(opaque(
-                AutoFilterOp::GreaterThanOrEqual,
-                Some(value.clone()),
-            )),
-            _ => Some(opaque(AutoFilterOp::GreaterThanOrEqual, None)),
+            DoperValue::Text { ref value, .. } => {
+                opaque(AutoFilterOp::GreaterThanOrEqual, Some(value.clone()))
+            }
+            _ => opaque(AutoFilterOp::GreaterThanOrEqual, None),
         },
         AutoFilterOp::LessThan => match doper.value {
             DoperValue::Number(n) => Some(FilterCriterion::Number(NumberComparison::LessThan(n))),
-            DoperValue::Text { ref value, .. } => Some(opaque(AutoFilterOp::LessThan, Some(value.clone()))),
-            _ => Some(opaque(AutoFilterOp::LessThan, None)),
+            DoperValue::Text { ref value, .. } => opaque(AutoFilterOp::LessThan, Some(value.clone())),
+            _ => opaque(AutoFilterOp::LessThan, None),
         },
         AutoFilterOp::LessThanOrEqual => match doper.value {
             DoperValue::Number(n) => Some(FilterCriterion::Number(
                 NumberComparison::LessThanOrEqual(n),
             )),
-            DoperValue::Text { ref value, .. } => Some(opaque(
-                AutoFilterOp::LessThanOrEqual,
-                Some(value.clone()),
-            )),
-            _ => Some(opaque(AutoFilterOp::LessThanOrEqual, None)),
+            DoperValue::Text { ref value, .. } => {
+                opaque(AutoFilterOp::LessThanOrEqual, Some(value.clone()))
+            }
+            _ => opaque(AutoFilterOp::LessThanOrEqual, None),
         },
-        AutoFilterOp::Between | AutoFilterOp::NotBetween | AutoFilterOp::Unknown(_) => {
-            Some(opaque(doper.op, None))
-        }
+        AutoFilterOp::Contains
+        | AutoFilterOp::DoesNotContain
+        | AutoFilterOp::BeginsWith
+        | AutoFilterOp::EndsWith
+        | AutoFilterOp::DoesNotBeginWith
+        | AutoFilterOp::DoesNotEndWith => match &doper.value {
+            DoperValue::Text { value, .. } => opaque(doper.op, Some(value.clone())),
+            DoperValue::Empty => opaque(doper.op, Some(String::new())),
+            DoperValue::Unknown => opaque(doper.op, None),
+            DoperValue::Bool(b) => opaque(doper.op, Some(b.to_string())),
+            DoperValue::Number(n) => opaque(doper.op, Some(n.to_string())),
+        },
+        // Between/NotBetween should have been handled earlier (when numeric); otherwise skip.
+        AutoFilterOp::Between | AutoFilterOp::NotBetween | AutoFilterOp::Unknown(_) => None,
         AutoFilterOp::None => None,
     }
 }
@@ -787,6 +828,17 @@ mod tests {
         out
     }
 
+    fn xl_unicode_string_unicode(s: &str) -> Vec<u8> {
+        let mut out = Vec::new();
+        let units: Vec<u16> = s.encode_utf16().collect();
+        out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+        out.push(STR_FLAG_HIGH_BYTE); // flags (uncompressed/unicode)
+        for unit in units {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
     fn rk_number(n: i32) -> u32 {
         // Encode a signed integer RK value.
         ((n as u32) << 2) | 0x02
@@ -949,6 +1001,128 @@ mod tests {
         assert_eq!(
             col.criteria,
             vec![FilterCriterion::Equals(FilterValue::Text("ABCDE".into()))]
+        );
+    }
+
+    #[test]
+    fn parses_continued_unicode_string_across_continue_records_with_high_byte_flag() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let mut af_full = Vec::new();
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // col
+        af_full.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: string equals.
+        af_full.push(4); // vt string
+        af_full.push(3); // op equal
+        af_full.extend_from_slice(&0u16.to_le_bytes());
+        af_full.extend_from_slice(&0u32.to_le_bytes());
+        // DOPER2 unused.
+        af_full.extend_from_slice(&[0u8; 8]);
+
+        let s = "Hello";
+        af_full.extend_from_slice(&xl_unicode_string_unicode(s));
+
+        // Split mid-string so the UTF-16 character bytes span a CONTINUE record.
+        let string_start = 20usize;
+        let split_at = string_start + 3 + 4; // header (3) + 2 UTF-16 chars (4 bytes)
+        let first_payload = &af_full[..split_at];
+        let remaining_bytes = &af_full[split_at..];
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(STR_FLAG_HIGH_BYTE); // continued segment flags (unicode)
+        continue_payload.extend_from_slice(remaining_bytes);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_worksheet()),
+            record(RECORD_AUTOFILTER, first_payload),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(
+            &stream,
+            0,
+            BiffVersion::Biff8,
+            1252,
+            range,
+        )
+        .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        let col = &parsed.filter_columns[0];
+        assert_eq!(
+            col.criteria,
+            vec![FilterCriterion::Equals(FilterValue::Text(s.into()))]
+        );
+    }
+
+    #[test]
+    fn truncated_autofilter_payload_emits_warning_and_skips_record() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let stream = [record(RECORD_AUTOFILTER, &[1, 2, 3]), record(records::RECORD_EOF, &[])]
+            .concat();
+
+        let parsed = parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+            .expect("parse");
+        assert!(parsed.filter_columns.is_empty());
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("failed to decode AUTOFILTER record") && w.contains("offset 0")),
+            "expected warning with record offset, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn unknown_operator_codes_fall_back_to_opaque_custom_or_warn_and_skip() {
+        let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 0)); // A
+
+        let mut af = Vec::new();
+        af.extend_from_slice(&0u16.to_le_bytes()); // col
+        af.extend_from_slice(&0u16.to_le_bytes()); // grbit
+
+        // DOPER1: vt=string, op=doesNotContain (0x0C).
+        af.push(4);
+        af.push(12);
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&0u32.to_le_bytes());
+
+        // DOPER2: vt=string, op=unknown (0xFF) => warning + skipped.
+        af.push(4);
+        af.push(0xFF);
+        af.extend_from_slice(&0u16.to_le_bytes());
+        af.extend_from_slice(&0u32.to_le_bytes());
+
+        af.extend_from_slice(&xl_unicode_string_compressed("foo"));
+        af.extend_from_slice(&xl_unicode_string_compressed("bar"));
+
+        let stream = [record(RECORD_AUTOFILTER, &af), record(records::RECORD_EOF, &[])].concat();
+
+        let parsed =
+            parse_biff_sheet_autofilter_criteria(&stream, 0, BiffVersion::Biff8, 1252, range)
+                .expect("parse");
+
+        assert_eq!(parsed.filter_columns.len(), 1);
+        let col = &parsed.filter_columns[0];
+        assert_eq!(
+            col.criteria,
+            vec![FilterCriterion::OpaqueCustom(OpaqueCustomFilter {
+                operator: "doesNotContain".to_string(),
+                value: Some("foo".to_string())
+            })]
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("unknown AUTOFILTER operator code 0xFF") && w.contains("offset 0")),
+            "expected unknown-op warning, got {:?}",
+            parsed.warnings
         );
     }
 

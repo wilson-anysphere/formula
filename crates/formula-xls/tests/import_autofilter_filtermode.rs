@@ -25,7 +25,7 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    let warning_substr = "failed to fully import `.xls` autofilter criteria for sheet `Filtered`";
+    let warning_substr = "sheet `Filtered` has FILTERMODE record at offset";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -203,8 +203,7 @@ fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase
         result.workbook.defined_names
     );
 
-    let warning_substr =
-        "failed to fully import `.xls` autofilter criteria for sheet `FilteredNoDb`";
+    let warning_substr = "sheet `FilteredNoDb` has FILTERMODE record at offset";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -243,8 +242,7 @@ fn warns_on_filtermode_and_sets_autofilter_from_dimensions_when_autofilterinfo_m
         result.workbook.defined_names
     );
 
-    let warning_substr =
-        "failed to fully import `.xls` autofilter criteria for sheet `FilterModeOnly`";
+    let warning_substr = "sheet `FilterModeOnly` has FILTERMODE record at offset";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -283,11 +281,12 @@ fn sets_autofilter_from_sheet_stream_when_autofilterinfo_present_without_filterm
         result.workbook.defined_names
     );
 
-    let warning_substr =
-        "failed to fully import `.xls` autofilter criteria for sheet `AutoFilterInfoOnly`";
     assert!(
-        !result.warnings.iter().any(|w| w.message.contains(warning_substr)),
-        "unexpected autofilter-criteria warning(s): {:?}",
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("has FILTERMODE record")),
+        "unexpected FILTERMODE warning(s): {:?}",
         result.warnings
     );
 }

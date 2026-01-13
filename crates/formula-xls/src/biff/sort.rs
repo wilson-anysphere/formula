@@ -65,10 +65,16 @@ pub(crate) fn parse_biff_sheet_sort_state(
 
     let mut pending_frt_sort: Option<PendingFrtSort> = None;
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    // SORT and BIFF8 future record types can legally be split across `CONTINUE` records. Use the
+    // logical iterator so we can reassemble those payloads before decoding.
+    let allows_continuation = |record_id: u16| {
+        record_id == RECORD_SORT || (RECORD_FRT_MIN..=RECORD_FRT_MAX).contains(&record_id)
+    };
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
 
-    while let Some(next) = iter.next() {
-        let record = match next {
+    for record in iter {
+        let record = match record {
             Ok(r) => r,
             Err(err) => {
                 out.warnings.push(format!("malformed BIFF record: {err}"));
@@ -91,7 +97,7 @@ pub(crate) fn parse_biff_sheet_sort_state(
         match record.record_id {
             RECORD_SORT => {
                 if let Some(sort_state) = parse_sort_record_best_effort(
-                    record.data,
+                    record.data.as_ref(),
                     record.offset,
                     auto_filter_range,
                     &mut out.warnings,
@@ -103,18 +109,19 @@ pub(crate) fn parse_biff_sheet_sort_state(
                 let Some(pending) = pending_frt_sort.as_mut() else {
                     continue;
                 };
-                let payload = parse_frt_header(record.data)
+                let data = record.data.as_ref();
+                let payload = parse_frt_header(data)
                     .map(|(_, p)| p)
-                    .unwrap_or(record.data);
+                    .unwrap_or(data);
                 if payload.is_empty() {
                     continue;
                 }
                 if pending.fragments >= records::MAX_LOGICAL_RECORD_FRAGMENTS {
-                    let msg = match pending.rt {
-                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
-                        _ => "unsupported Sort12",
+                    let kind = match pending.rt {
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12 record",
+                        _ => "unsupported Sort12 record",
                     };
-                    push_warning_once(&mut out.warnings, msg);
+                    push_warning_once_with_offset(&mut out.warnings, kind, pending.record_offset);
                     pending_frt_sort = None;
                     continue;
                 }
@@ -124,11 +131,11 @@ pub(crate) fn parse_biff_sheet_sort_state(
                     .saturating_add(payload.len())
                     > records::MAX_LOGICAL_RECORD_BYTES
                 {
-                    let msg = match pending.rt {
-                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12",
-                        _ => "unsupported Sort12",
+                    let kind = match pending.rt {
+                        RT_SORTDATA12 | RT_SORTDATA12_ALT => "unsupported SortData12 record",
+                        _ => "unsupported Sort12 record",
                     };
-                    push_warning_once(&mut out.warnings, msg);
+                    push_warning_once_with_offset(&mut out.warnings, kind, pending.record_offset);
                     pending_frt_sort = None;
                     continue;
                 }
@@ -136,7 +143,8 @@ pub(crate) fn parse_biff_sheet_sort_state(
                 pending.fragments = pending.fragments.saturating_add(1);
             }
             id if (RECORD_FRT_MIN..=RECORD_FRT_MAX).contains(&id) => {
-                let (rt, payload) = parse_frt_header(record.data).unwrap_or((id, record.data));
+                let data = record.data.as_ref();
+                let (rt, payload) = parse_frt_header(data).unwrap_or((id, data));
                 match rt {
                     RT_SORT12 | RT_SORT12_ALT => {
                         pending_frt_sort = Some(PendingFrtSort {
@@ -197,10 +205,14 @@ fn flush_pending_frt_sort(
     }
 
     match pending.rt {
-        RT_SORT12 | RT_SORT12_ALT => push_warning_once(&mut out.warnings, "unsupported Sort12"),
-        RT_SORTDATA12 | RT_SORTDATA12_ALT => {
-            push_warning_once(&mut out.warnings, "unsupported SortData12")
+        RT_SORT12 | RT_SORT12_ALT => {
+            push_warning_once_with_offset(&mut out.warnings, "unsupported Sort12 record", pending.record_offset)
         }
+        RT_SORTDATA12 | RT_SORTDATA12_ALT => push_warning_once_with_offset(
+            &mut out.warnings,
+            "unsupported SortData12 record",
+            pending.record_offset,
+        ),
         _ => {}
     }
 }
@@ -282,11 +294,11 @@ fn parse_frt_header(data: &[u8]) -> Option<(u16, &[u8])> {
     Some((rt, &data[8..]))
 }
 
-fn push_warning_once(warnings: &mut Vec<String>, msg: &'static str) {
-    if warnings.iter().any(|w| w == msg) {
+fn push_warning_once_with_offset(warnings: &mut Vec<String>, kind: &'static str, offset: usize) {
+    if warnings.iter().any(|w| w.starts_with(kind)) {
         return;
     }
-    warnings.push(msg.to_string());
+    warnings.push(format!("{kind} at offset {offset}"));
 }
 
 /// Returns true if the payload appears to contain a Ref8 range that matches or is contained by the
@@ -784,7 +796,10 @@ mod tests {
 
         let parsed = parse_biff_sheet_sort_state(&stream, 0, af).unwrap();
         assert!(parsed.sort_state.is_none());
-        assert_eq!(parsed.warnings, vec!["unsupported Sort12".to_string()]);
+        assert_eq!(
+            parsed.warnings,
+            vec!["unsupported Sort12 record at offset 20".to_string()]
+        );
     }
 
     #[test]
@@ -837,7 +852,7 @@ mod tests {
         assert!(parsed.sort_state.is_none());
         assert_eq!(
             parsed.warnings,
-            vec!["unsupported SortData12".to_string()]
+            vec!["unsupported SortData12 record at offset 20".to_string()]
         );
     }
 }

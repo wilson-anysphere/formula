@@ -314,6 +314,8 @@ pub(crate) struct SheetRowColProperties {
     pub(crate) sort_state: Option<SortState>,
     /// Whether the worksheet contained a `FILTERMODE` record (indicating filtered rows).
     pub(crate) filter_mode: bool,
+    /// Record offset for the first `FILTERMODE` record seen in this worksheet substream (when any).
+    pub(crate) filter_mode_offset: Option<usize>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -1155,9 +1157,14 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 
     let mut saw_eof = false;
     let mut warned_colinfo_first_oob = false;
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
-    while let Some(next) = iter.next() {
-        let record = match next {
+    // Some worksheet-level records (SORT and BIFF8 Future Record Type records like AutoFilter12)
+    // may legally be split across `CONTINUE` records. Use the logical iterator so we can
+    // reassemble those payloads before decoding.
+    let allows_continuation =
+        |record_id: u16| record_id == RECORD_SORT || (record_id >= 0x0850 && record_id <= 0x08FF);
+    let iter = records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    for record in iter {
+        let record = match record {
             Ok(record) => record,
             Err(err) => {
                 push_warning_bounded(
@@ -1192,10 +1199,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             );
         }
 
+        let data = record.data.as_ref();
         match record.record_id {
             // DIMENSIONS [MS-XLS 2.4.84]
             RECORD_DIMENSIONS => {
-                let data = record.data;
                 if data.len() < 14 {
                     continue;
                 }
@@ -1207,7 +1214,6 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             }
             // AUTOFILTERINFO [MS-XLS 2.4.29]
             RECORD_AUTOFILTERINFO => {
-                let data = record.data;
                 saw_autofilter_info = true;
                 if data.len() < 2 {
                     continue;
@@ -1218,9 +1224,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             // FILTERMODE [MS-XLS 2.4.102]
             RECORD_FILTERMODE => {
                 props.filter_mode = true;
+                props.filter_mode_offset.get_or_insert(record.offset);
             }
             // SORT [MS-XLS 2.4.256]
-            RECORD_SORT => match parse_sort_record_best_effort(record.data) {
+            RECORD_SORT => match parse_sort_record_best_effort(data) {
                 Ok(Some(state)) => {
                     // Prefer the last SORT record in the sheet stream (Excel may emit multiple
                     // records as sort state evolves).
@@ -1242,9 +1249,9 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let Some(pending) = pending_autofilter12.as_mut() else {
                     continue;
                 };
-                let payload = parse_frt_header(record.data)
+                let payload = parse_frt_header(data)
                     .map(|(_, p)| p)
-                    .unwrap_or(record.data);
+                    .unwrap_or(data);
                 if payload.is_empty() {
                     continue;
                 }
@@ -1274,7 +1281,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 pending.fragments = pending.fragments.saturating_add(1);
             }
             id if id >= 0x0850 && id <= 0x08FF => {
-                let Some((rt, frt_payload)) = parse_frt_header(record.data) else {
+                let Some((rt, frt_payload)) = parse_frt_header(data) else {
                     // Not a valid FRT header; ignore silently.
                     continue;
                 };
@@ -1297,7 +1304,6 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             }
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
-                let data = record.data;
                 if data.len() < 16 {
                     push_warning_bounded(
                         &mut props.warnings,
@@ -1350,7 +1356,6 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             }
             // COLINFO [MS-XLS 2.4.48]
             RECORD_COLINFO => {
-                let data = record.data;
                 if data.len() < 12 {
                     push_warning_bounded(
                         &mut props.warnings,
@@ -1438,7 +1443,6 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
             }
             // WSBOOL [MS-XLS 2.4.376]
             RECORD_WSBOOL => {
-                let data = record.data;
                 if data.len() < 2 {
                     push_warning_bounded(
                         &mut props.warnings,
@@ -3281,6 +3285,72 @@ mod tests {
             warnings.last().map(String::as_str),
             Some(WARNINGS_SUPPRESSED_MESSAGE),
             "suppression marker should be preserved; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn parses_sort_record_split_across_continue_records() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // A well-formed SORT record split across CONTINUE. This validates that worksheet parsers
+        // use `LogicalBiffRecordIter` for continuable record ids (SORT can be continued).
+        let mut sort_payload = vec![0u8; 24];
+        // Sorted range: rows 0..=10, cols 0..=0.
+        sort_payload[0..2].copy_from_slice(&0u16.to_le_bytes()); // rwFirst
+        sort_payload[2..4].copy_from_slice(&10u16.to_le_bytes()); // rwLast
+        sort_payload[4..6].copy_from_slice(&0u16.to_le_bytes()); // colFirst
+        sort_payload[6..8].copy_from_slice(&0u16.to_le_bytes()); // colLast
+        sort_payload[8..10].copy_from_slice(&0u16.to_le_bytes()); // grbit
+        sort_payload[10..12].copy_from_slice(&1u16.to_le_bytes()); // cKey
+        sort_payload[12..14].copy_from_slice(&0u16.to_le_bytes()); // key col 1
+        sort_payload[14..16].copy_from_slice(&0xFFFFu16.to_le_bytes()); // key col 2 (unused)
+        sort_payload[16..18].copy_from_slice(&0xFFFFu16.to_le_bytes()); // key col 3 (unused)
+        // orders default to 0 (ascending).
+
+        let split_at = 10usize;
+        stream.extend_from_slice(&record(RECORD_SORT, &sort_payload[..split_at]));
+        stream.extend_from_slice(&record(records::RECORD_CONTINUE, &sort_payload[split_at..]));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
+        assert_eq!(
+            props.sort_state,
+            Some(SortState {
+                conditions: vec![SortCondition {
+                    range: Range::new(CellRef::new(0, 0), CellRef::new(10, 0)),
+                    descending: false,
+                }]
+            })
+        );
+    }
+
+    #[test]
+    fn sort_record_out_of_bounds_is_skipped_with_warning() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // SORT record with an out-of-bounds col range (>= EXCEL_MAX_COLS).
+        let mut sort_payload = vec![0u8; 24];
+        sort_payload[0..2].copy_from_slice(&0u16.to_le_bytes()); // rwFirst
+        sort_payload[2..4].copy_from_slice(&10u16.to_le_bytes()); // rwLast
+        sort_payload[4..6].copy_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // colFirst (OOB)
+        sort_payload[6..8].copy_from_slice(&(EXCEL_MAX_COLS as u16).to_le_bytes()); // colLast (OOB)
+        sort_payload[10..12].copy_from_slice(&1u16.to_le_bytes()); // cKey
+
+        stream.extend_from_slice(&record(RECORD_SORT, &sort_payload));
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
+        assert!(props.sort_state.is_none());
+        assert!(
+            props.warnings.iter().any(|w| {
+                w.contains("failed to parse SORT record")
+                    && w.contains("out of bounds")
+                    && w.contains("offset")
+            }),
+            "expected out-of-bounds SORT warning, got {:?}",
+            props.warnings
         );
     }
 

@@ -1177,6 +1177,25 @@ fn import_xls_with_biff_reader(
                 );
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
+
+                if props.filter_mode {
+                    // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
+                    //
+                    // BIFF row metadata does not distinguish between user-hidden and filter-hidden
+                    // rows. We classify hidden rows best-effort after the canonical AutoFilter
+                    // range is finalized.
+                    push_import_warning(
+                        &mut warnings,
+                        format!(
+                            "sheet `{sheet_name}` has FILTERMODE record at offset {} (filtered rows); filter criteria and row visibility may not round-trip exactly on import",
+                            props
+                                .filter_mode_offset
+                                .map(|o| o.to_string())
+                                .unwrap_or_else(|| "unknown".to_string())
+                        ),
+                        &mut warnings_suppressed,
+                    );
+                }
             }
 
             if sheet.auto_filter.is_none() {
@@ -3110,7 +3129,9 @@ fn import_xls_with_biff_reader(
                                     for w in parsed.warnings.drain(..) {
                                         push_import_warning(
                                             &mut warnings,
-                                            w,
+                                            format!(
+                                                "failed to import `.xls` sort state for sheet `{sheet_name}`: {w}"
+                                            ),
                                             &mut warnings_suppressed,
                                         );
                                     }
