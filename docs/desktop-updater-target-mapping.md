@@ -20,6 +20,7 @@ release contains **exactly** these `latest.json.platforms` keys:
 - `windows-x86_64`
 - `windows-aarch64`
 - `linux-x86_64`
+- `linux-aarch64`
 
 If Tauri changes these identifiers in a future upgrade, our CI guardrail
 (`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is
@@ -39,6 +40,7 @@ equivalents:
 - `x86_64-pc-windows-msvc` → `windows-x86_64`
 - `windows-arm64` / `aarch64-pc-windows-msvc` → `windows-aarch64`
 - `x86_64-unknown-linux-gnu` → `linux-x86_64`
+- `aarch64-unknown-linux-gnu` → `linux-aarch64`
 
 These are treated as aliases for **local** validation, but the canonical keys above are what we
 expect `tauri-action` to produce for Formula releases. If a tagged release ever ships with a
@@ -55,6 +57,7 @@ The table below documents what each platform key should point to in `latest.json
 | Windows x64 | `x86_64-pc-windows-msvc` | `windows-x86_64` | `*.msi` (preferred) or `*.exe` |
 | Windows ARM64 | `aarch64-pc-windows-msvc` | `windows-aarch64` | `*.msi` (preferred) or `*.exe` |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `linux-x86_64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | `linux-aarch64` | `*.AppImage` (self-updatable; **not** `.deb`/`.rpm`) |
 
 ### Notes
 

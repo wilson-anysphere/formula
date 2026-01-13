@@ -75,7 +75,15 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (x86_64)",
     expectedUpdaterAsset: {
       description: "Linux updater bundle (*.AppImage)",
-      matches: (name) => name.endsWith(".AppImage"),
+      matches: (name) => name.endsWith(".AppImage") && /(x86_64|amd64|x64)/i.test(name),
+    },
+  },
+  {
+    key: "linux-aarch64",
+    label: "Linux (ARM64)",
+    expectedUpdaterAsset: {
+      description: "Linux updater bundle (*.AppImage)",
+      matches: (name) => name.endsWith(".AppImage") && /(aarch64|arm64)/i.test(name),
     },
   },
 ];

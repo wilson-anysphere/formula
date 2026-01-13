@@ -167,7 +167,17 @@ const EXPECTED_PLATFORMS = [
     label: "Linux (x86_64)",
     expectedAsset: {
       description: `Linux updater bundle (*.AppImage; not .deb/.rpm)`,
-      matches: (assetName) => assetName.endsWith(".AppImage"),
+      matches: (assetName) =>
+        assetName.endsWith(".AppImage") && /(x86_64|amd64|x64)/i.test(assetName),
+    },
+  },
+  {
+    key: "linux-aarch64",
+    label: "Linux (ARM64)",
+    expectedAsset: {
+      description: `Linux updater bundle (*.AppImage; not .deb/.rpm)`,
+      matches: (assetName) =>
+        assetName.endsWith(".AppImage") && /(aarch64|arm64)/i.test(assetName),
     },
   },
 ];

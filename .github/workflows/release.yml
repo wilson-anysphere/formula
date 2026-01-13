@@ -278,6 +278,12 @@ jobs:
             cache_features: desktop
             rust_target: ""
             tauri_args: "--bundles appimage,deb,rpm"
+          - platform: ubuntu-24.04-arm64
+            label: ubuntu-24.04 (arm64)
+            cache_target: aarch64-unknown-linux-gnu
+            cache_features: desktop
+            rust_target: ""
+            tauri_args: "--bundles appimage,deb,rpm"
           - platform: windows-2022
             label: windows-2022 (x64)
             cache_target: x86_64-pc-windows-msvc
@@ -855,7 +861,7 @@ jobs:
         run: bash scripts/validate-linux-appimage.sh
 
       - name: Verify Linux .deb package (deps + ldd + desktop integration)
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -1094,7 +1100,7 @@ jobs:
           python scripts/ci/check-windows-installer-signatures.py --bundle-dir "$bundleDir"
 
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         shell: bash
         env:
           FORMULA_HAS_TAURI_UPDATER_KEY: ${{ secrets.TAURI_PRIVATE_KEY != '' }}
@@ -1199,7 +1205,7 @@ jobs:
           fi
 
       - name: Verify Linux package dependency metadata (deb + rpm)
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         run: bash scripts/ci/verify-linux-package-deps.sh
 
       - name: Verify macOS universal binary (lipo)
@@ -1728,11 +1734,11 @@ jobs:
           python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir_rpm}"
 
       - name: Smoke test Linux .deb install in clean Ubuntu container
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         run: bash scripts/ci/linux-package-install-smoke.sh deb
 
       - name: Smoke test Linux .rpm install in clean Fedora container
-        if: matrix.platform == 'ubuntu-24.04'
+        if: runner.os == 'Linux'
         run: bash scripts/ci/linux-package-install-smoke.sh rpm
       - name: Dump macOS effective entitlements (codesign) (signed builds only)
         if: runner.os == 'macOS'
