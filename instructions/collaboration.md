@@ -192,9 +192,9 @@ docker build -f services/sync-server/Dockerfile -t formula-sync-server .
 
 ## Security
 
-- **JWT claims:** `docId`, `role` (owner/admin/editor/commenter/viewer)
-- **Read-only enforcement:** viewer/commenter roles enforced at Yjs layer
-- **Awareness sanitization:** presence `id` forced to JWT `sub`
+- **JWT claims:** `docId`, `sub` (user id), `role` (owner/admin/editor/commenter/viewer), optional `rangeRestrictions`
+- **Read-only enforcement:** viewer/commenter roles enforced at the sync-server (drops writes) and mirrored in the desktop UX (binder/UI disable edits)
+- **Awareness sanitization:** presence `id` forced to JWT `sub` (desktop should set its local presence id to `sub` so identities are stable)
 - **Encryption at rest:** AES-256-GCM for persisted documents
 
 ---

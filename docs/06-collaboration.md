@@ -224,6 +224,47 @@ Note the naming difference:
 - `CollabSession.setPermissions` uses `rangeRestrictions`
 - `bindYjsToDocumentController` expects `restrictions`
 
+#### Desktop permission wiring (JWT-derived; best-effort)
+
+In desktop collaboration mode, the sync-server `token` may be either:
+
+- an **opaque** shared token (dev), or
+- a **JWT** (typical production), or
+- an **opaque** token that must be introspected server-side (depending on deployment).
+
+When the token is a JWT, the desktop app **decodes the JWT payload without verifying it** and derives *client-side* permissions + identity:
+
+- `sub` → used as:
+  - the `PresenceManager` user id (so presence ids match what the sync-server will enforce), and
+  - `CollabSession.setPermissions({ userId })` (so `modifiedBy` metadata attribution is stable).
+- `role` → forwarded to `CollabSession.setPermissions({ role })`
+- `rangeRestrictions` → forwarded to `CollabSession.setPermissions({ rangeRestrictions })`
+
+This decode is intentionally best-effort and does **not** replace server-side verification/authorization. The sync-server is the source of truth; the desktop decode exists so the UI can:
+
+- mask unreadable cells immediately (before remote updates arrive), and
+- proactively disable edits that the server would drop anyway.
+
+Fallback for opaque / non-JWT tokens:
+
+- If the token is missing or does not look like a JWT payload (or decoding fails), desktop treats the token as **opaque** and falls back to:
+  - the locally chosen collab identity (for presence),
+  - `{ role: "editor", rangeRestrictions: [] }` for `CollabSession.setPermissions(...)` (client-side gating becomes permissive; server still enforces).
+
+#### Read-only UX behavior (viewer/commenter roles)
+
+Roles apply both at the sync-server layer *and* in the desktop UX.
+
+For `viewer` and `commenter` roles, the desktop app behaves as “read-only” for workbook mutations:
+
+- **Cell edits are blocked**: the binder installs `DocumentController.canEditCell` guards (via `session.canEditCell(...)`) and will reject/revert disallowed deltas if they slip through (e.g. via programmatic calls).
+- **Sheet-level operations are disabled**: actions that would write to shared workbook state (formatting, structural ops, sheet view mutations, etc) are disabled in the UI when the effective role cannot edit.
+- **Comments:**
+  - `commenter` can add/edit replies and resolve threads.
+  - `viewer` can only read comments (comment mutations are disabled).
+
+Note: the sync-server also enforces read-only roles by dropping incoming Yjs write messages for read-only connections, so client-side enforcement is primarily for UX consistency and to avoid “edit → immediate revert” loops.
+
 ### Sheet schema (`sheets` array entries)
 
 Each entry in `doc.getArray("sheets")` is a `Y.Map` with (at least):
@@ -330,6 +371,18 @@ Useful lifecycle helpers:
 - `await session.whenLocalPersistenceLoaded()` — resolves when `options.persistence` has loaded any saved updates into the doc
 - `await session.flushLocalPersistence()` — best-effort: forces any pending local persistence work to be durably written (useful before app teardown)
 - `await session.whenSynced()` — resolves when the sync provider reports `sync=true`
+
+#### IndexedDB persistence flush + compaction (`IndexedDbCollabPersistence`)
+
+`IndexedDbCollabPersistence` (implementation: [`packages/collab/persistence/src/indexeddb.ts`](../packages/collab/persistence/src/indexeddb.ts)) is a thin wrapper around `y-indexeddb`.
+
+Two important operational details:
+
+- **`flush(docId)` is implemented as a snapshot write.** `y-indexeddb` persists incremental Yjs updates asynchronously and does not expose a reliable “await all pending writes” API. To satisfy Formula’s `CollabPersistence.flush` contract, `IndexedDbCollabPersistence.flush` writes a full-document snapshot (`Y.encodeStateAsUpdate(doc)`) into the same IndexedDB `updates` object store. This guarantees that the full in-memory document state at the time of the call can be recovered on the next load, even if some incremental writes are still in flight.
+- **`compact(docId)` rewrites the update log to keep load time and disk usage bounded.** Without compaction, a long-lived document can accumulate a large number of incremental updates, which increases IndexedDB size and slows down `load()` (replay cost). Compaction replaces many small updates with a smaller set (typically a single snapshot update) and prunes older entries.
+  - Knobs: the compaction threshold is configurable (e.g. `maxUpdates`) so callers can trade off write amplification vs faster startup.
+
+`CollabSession.flushLocalPersistence()` delegates to the underlying persistence `flush(docId)` when present. Desktop typically calls it during teardown (or before closing a window) to reduce the chance of losing the last few edits.
 
 If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
 
