@@ -32,6 +32,43 @@ fn many_to_many_relationship_can_be_added_with_duplicate_to_keys() {
 }
 
 #[test]
+fn many_to_many_insert_row_allows_duplicate_to_keys_and_updates_index() {
+    let mut model = DataModel::new();
+
+    let mut dim = Table::new("Dim", vec!["Key", "Attr"]);
+    dim.push_row(vec![1.into(), "A".into()]).unwrap();
+    model.add_table(dim).unwrap();
+
+    let mut fact = Table::new("Fact", vec!["Id", "Key", "Amount"]);
+    fact.push_row(vec![10.into(), 1.into(), 5.0.into()]).unwrap();
+    model.add_table(fact).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Fact_Dim".into(),
+            from_table: "Fact".into(),
+            from_column: "Key".into(),
+            to_table: "Dim".into(),
+            to_column: "Key".into(),
+            cardinality: Cardinality::ManyToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+
+    // Insert a duplicate key on the to-side after the relationship exists.
+    model
+        .insert_row("Dim", vec![1.into(), "B".into()])
+        .unwrap();
+
+    let filter = FilterContext::empty().with_column_equals("Dim", "Attr", "B".into());
+    assert_eq!(model.evaluate_measure("Total", &filter).unwrap(), 5.0.into());
+}
+
+#[test]
 fn many_to_many_filter_propagates_from_dimension_to_fact() {
     let mut model = DataModel::new();
 
@@ -266,4 +303,3 @@ fn relatedtable_works_when_dimension_keys_are_not_unique() {
         2.into()
     );
 }
-
