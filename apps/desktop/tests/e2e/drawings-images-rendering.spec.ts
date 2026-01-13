@@ -172,8 +172,8 @@ test.describe("drawing + image rendering regressions", () => {
     await expect(page.locator("canvas.grid-canvas--chart")).toHaveCount(1);
     await expect(page.getByTestId("drawing-layer-canvas")).toHaveCount(1);
 
-    // Regression guard: overlay stacking should be deterministic across modes
-    // (drawings above cell content, charts above drawings, selection above all).
+    // Regression guard: overlay stacking should be deterministic across modes.
+    // Drawings/images must render above charts and cell content, but below selection UI.
     const z = await page.evaluate(() => {
       const drawing = document.querySelector(".drawing-layer");
       const chart = document.querySelector(".grid-canvas--chart");
@@ -186,8 +186,8 @@ test.describe("drawing + image rendering regressions", () => {
       };
     });
     expect(z).not.toBeNull();
-    expect(Number(z!.drawing)).toBeLessThan(Number(z!.chart));
-    expect(Number(z!.chart)).toBeLessThan(Number(z!.selection));
+    expect(Number(z!.chart)).toBeLessThan(Number(z!.drawing));
+    expect(Number(z!.drawing)).toBeLessThan(Number(z!.selection));
 
     const result = await page.evaluate(async ({ fixture }) => {
       const { anchorToRectPx } = await import("/src/drawings/overlay.ts");
