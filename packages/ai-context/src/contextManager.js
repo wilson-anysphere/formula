@@ -696,7 +696,12 @@ export class ContextManager {
           policyAllowsRestrictedContent,
         })
       : retrieved;
-    const schemaForPrompt = compactSheetSchemaForPrompt(schemaOut);
+    const schemaForPrompt = compactSheetSchemaForPrompt(schemaOut, {
+      maxTables: 10,
+      maxRegions: 10,
+      maxNamedRanges: 10,
+      maxColumns: 25,
+    });
 
     const sections = [
       ...((dlpRedactedCells > 0 || (dlpDecision?.decision === DLP_DECISION.REDACT && dlpHeuristicApplied))
@@ -1444,31 +1449,36 @@ export class ContextManager {
  *
  * @param {any} schema
  */
-function compactSheetSchemaForPrompt(schema) {
+function compactSheetSchemaForPrompt(schema, options = {}) {
   if (!schema || typeof schema !== "object") return schema;
+  const maxTables = normalizeNonNegativeInt(options.maxTables, 25);
+  const maxRegions = normalizeNonNegativeInt(options.maxRegions, 25);
+  const maxNamedRanges = normalizeNonNegativeInt(options.maxNamedRanges, 25);
+  const maxColumns = normalizeNonNegativeInt(options.maxColumns, 25);
+
   const tables = Array.isArray(schema.tables) ? schema.tables : [];
   const namedRanges = Array.isArray(schema.namedRanges) ? schema.namedRanges : [];
   const dataRegions = Array.isArray(schema.dataRegions) ? schema.dataRegions : [];
 
   return {
     name: typeof schema.name === "string" ? schema.name : "",
-    tables: tables.map((t) => {
+    tables: tables.slice(0, maxTables).map((t) => {
       const columns = Array.isArray(t?.columns) ? t.columns : [];
       return {
         name: typeof t?.name === "string" ? t.name : "",
         range: typeof t?.range === "string" ? t.range : "",
         rowCount: Number.isFinite(t?.rowCount) ? Math.max(0, Math.floor(t.rowCount)) : 0,
-        columns: columns.map((c) => ({
+        columns: columns.slice(0, maxColumns).map((c) => ({
           name: typeof c?.name === "string" ? c.name : "",
           type: typeof c?.type === "string" ? c.type : "mixed",
         })),
       };
     }),
-    namedRanges: namedRanges.map((r) => ({
+    namedRanges: namedRanges.slice(0, maxNamedRanges).map((r) => ({
       name: typeof r?.name === "string" ? r.name : "",
       range: typeof r?.range === "string" ? r.range : "",
     })),
-    dataRegions: dataRegions.map((r) => ({
+    dataRegions: dataRegions.slice(0, maxRegions).map((r) => ({
       range: typeof r?.range === "string" ? r.range : "",
       hasHeader: Boolean(r?.hasHeader),
       headers: Array.isArray(r?.headers) ? r.headers.map((h) => String(h ?? "")) : [],
