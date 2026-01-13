@@ -10,7 +10,7 @@ type VersionManagerLike = {
 };
 
 type WorkbookDiff = {
-  sheets: { added: unknown[]; removed: unknown[]; renamed: unknown[]; moved: unknown[] };
+  sheets: { added: unknown[]; removed: unknown[]; renamed: unknown[]; moved: unknown[]; metaChanged?: unknown[] };
   cellsBySheet: Array<{
     sheetId: string;
     sheetName: string | null;
