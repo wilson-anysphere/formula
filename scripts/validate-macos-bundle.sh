@@ -427,8 +427,22 @@ main() {
   if [ -n "$DMG_OVERRIDE" ]; then
     dmgs+=("$DMG_OVERRIDE")
   else
-    local roots=(
+    local roots=()
+
+    # Respect `CARGO_TARGET_DIR` when set (common in CI caching setups). Cargo interprets relative
+    # paths relative to the build working directory (repo root in CI).
+    if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+      local cargo_target_dir="${CARGO_TARGET_DIR}"
+      case "$cargo_target_dir" in
+        /*) ;;
+        *) cargo_target_dir="$REPO_ROOT/$cargo_target_dir" ;;
+      esac
+      roots+=("$cargo_target_dir")
+    fi
+
+    roots+=(
       "$REPO_ROOT/apps/desktop/src-tauri/target"
+      "$REPO_ROOT/apps/desktop/target"
       "$REPO_ROOT/target"
     )
 
@@ -458,7 +472,7 @@ main() {
       warn "found .app.tar.gz artifacts (but DMG is required for validation):"
       printf '  %s\n' "${app_tars[@]}" >&2
     fi
-    die "expected a DMG at apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg or target/**/release/bundle/dmg/*.dmg (or pass --dmg)"
+    die "expected a DMG at apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg, apps/desktop/target/**/release/bundle/dmg/*.dmg, or target/**/release/bundle/dmg/*.dmg (or pass --dmg)"
   fi
 
   if [ "${#app_tars[@]}" -gt 0 ]; then
