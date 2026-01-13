@@ -42,6 +42,7 @@ use thiserror::Error;
 mod biff;
 mod decrypt;
 mod formula_rewrite;
+pub mod diagnostics;
 
 pub use decrypt::DecryptError;
 

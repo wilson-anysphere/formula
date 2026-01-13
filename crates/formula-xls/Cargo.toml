@@ -19,3 +19,7 @@ thiserror = "2.0"
 formula-engine = { path = "../formula-engine", default-features = false }
 proptest = "1.4"
 tempfile = "3.10"
+
+[[bin]]
+name = "xls-formula-diag"
+path = "src/bin/xls_formula_diag.rs"
