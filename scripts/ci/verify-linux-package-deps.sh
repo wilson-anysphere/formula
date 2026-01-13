@@ -5,6 +5,14 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
+tmpdirs=()
+cleanup() {
+  for d in "${tmpdirs[@]}"; do
+    rm -rf "$d" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup EXIT
+
 fail() {
   echo "::error::verify-linux-package-deps: $*" >&2
   exit 1
@@ -245,6 +253,7 @@ for deb in "${debs[@]}"; do
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (deb) $(basename "$deb")"
   tmpdir="$(mktemp -d)"
+  tmpdirs+=("$tmpdir")
   dpkg-deb -x "$deb" "$tmpdir"
   assert_stripped_elf "$tmpdir/usr/bin/formula-desktop" "$(basename "$deb")"
   rm -rf "$tmpdir"
@@ -288,6 +297,7 @@ for rpm_path in "${rpms[@]}"; do
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
   tmpdir="$(mktemp -d)"
+  tmpdirs+=("$tmpdir")
   (
     cd "$tmpdir"
     rpm2cpio "$rpm_path" | cpio -idm --quiet --no-absolute-filenames
