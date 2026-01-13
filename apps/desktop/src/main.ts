@@ -8320,25 +8320,90 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
+    const applyFormatAsTable = (presetId: "light" | "medium" | "dark") => {
+      // Formatting actions should never run while the user is editing (including split-view secondary editor).
+      if (isSpreadsheetEditing()) return;
+
+      applyFormattingToSelection(
+        "Format as Table",
+        (doc, sheetId, ranges) => {
+          if (ranges.length !== 1) {
+            try {
+              showToast("Format as Table currently supports a single rectangular selection.", "warning");
+            } catch {
+              // ignore (e.g. toast root missing in tests)
+            }
+            return true;
+          }
+
+          // `applyFormattingToSelection` allows full row/column band selections (Excel-scale) because
+          // many formatting operations are scalable via layered formats. Format-as-table banding
+          // requires per-row formatting and would be O(rows), so impose a stricter cap here.
+          const range = ranges[0];
+          const rowCount = range.end.row - range.start.row + 1;
+          const colCount = range.end.col - range.start.col + 1;
+          const cellCount = rowCount * colCount;
+          const maxRows = 2_000;
+          if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || rowCount > maxRows) {
+            try {
+              showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
+            } catch {
+              // ignore (e.g. toast root missing in tests)
+            }
+            return true;
+          }
+
+          return applyFormatAsTablePreset(doc, sheetId, range, presetId);
+        },
+        { forceBatch: true },
+      );
+    };
+
+    if (commandId === "home.styles.formatAsTable") {
+      void (async () => {
+        if (isSpreadsheetEditing()) return;
+
+        // Guard before prompting so users don't pick a style only to hit size caps on apply.
+        const ranges = selectionRangesForFormatting();
+        if (ranges.length !== 1) {
+          showToast("Format as Table currently supports a single rectangular selection.", "warning");
+          app.focus();
+          return;
+        }
+        const range = ranges[0]!;
+        const rowCount = range.end.row - range.start.row + 1;
+        const colCount = range.end.col - range.start.col + 1;
+        const cellCount = rowCount * colCount;
+        const maxRows = 2_000;
+        if (cellCount > DEFAULT_FORMATTING_APPLY_CELL_LIMIT || rowCount > maxRows) {
+          showToast("Format as Table selection is too large. Try selecting fewer rows/columns.", "warning");
+          app.focus();
+          return;
+        }
+
+        const picked = await showQuickPick(
+          [
+            { label: "Light", value: "light" as const },
+            { label: "Medium", value: "medium" as const },
+            { label: "Dark", value: "dark" as const },
+          ],
+          { placeHolder: "Format as Table" },
+        );
+        if (!picked) {
+          app.focus();
+          return;
+        }
+
+        applyFormatAsTable(picked.value);
+      })();
+      return;
+    }
+
     const formatAsTablePrefix = "home.styles.formatAsTable.";
     if (commandId.startsWith(formatAsTablePrefix)) {
       const presetId = commandId.slice(formatAsTablePrefix.length);
       if (presetId === "light" || presetId === "medium" || presetId === "dark") {
-        applyFormattingToSelection(
-          "Format as Table",
-          (doc, sheetId, ranges) => {
-            if (ranges.length !== 1) {
-              try {
-                showToast("Format as Table currently supports a single rectangular selection.", "warning");
-              } catch {
-                // ignore (e.g. toast root missing in tests)
-              }
-              return true;
-            }
-            return applyFormatAsTablePreset(doc, sheetId, ranges[0], presetId);
-          },
-          { forceBatch: true },
-        );
+        applyFormatAsTable(presetId);
         return;
       }
     }
