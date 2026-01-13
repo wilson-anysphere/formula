@@ -51,10 +51,23 @@ fn windows_bundle_configures_webview2_install_mode() {
         "`bundle.windows.webviewInstallMode` must not be empty"
     );
 
+    // Keep this allowlist in sync with `scripts/ci/check-webview2-install-mode.mjs`.
+    const ALLOWED: &[&str] = &[
+        "downloadBootstrapper",
+        "embedBootstrapper",
+        "offlineInstaller",
+        "fixedRuntime",
+    ];
+
     assert_ne!(
         trimmed.to_ascii_lowercase(),
         "skip",
         "`bundle.windows.webviewInstallMode` must not be 'skip' (clean Windows machines may not have WebView2 installed)"
     );
-}
 
+    assert!(
+        ALLOWED.contains(&trimmed),
+        "`bundle.windows.webviewInstallMode` must be one of {:?}; got {trimmed}",
+        ALLOWED
+    );
+}

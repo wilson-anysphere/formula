@@ -863,6 +863,9 @@ fn import_xls_path_with_biff_reader(
                                 warnings.extend(settings.warnings.drain(..).map(ImportWarning::new));
                                 let manual_page_breaks = settings.manual_page_breaks;
                                 let page_setup = settings.page_setup;
+ 
+                                // Avoid storing a default `PageSetup` unless there is something
+                                // non-default worth preserving (page setup fields or manual page breaks).
                                 if page_setup != formula_model::PageSetup::default()
                                     || !manual_page_breaks.is_empty()
                                 {
