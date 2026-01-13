@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const capabilitiesDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "capabilities");
+const appPermissionsDir = path.join(repoRoot, "apps", "desktop", "src-tauri", "permissions");
 const releaseWorkflowPath = path.join(repoRoot, ".github", "workflows", "release.yml");
 const permissionLsCachePathRaw =
   process.env.FORMULA_TAURI_PERMISSION_LS_CACHE || process.env.FORMULA_TAURI_PERMISSION_LS_CACHE_PATH || null;
@@ -161,6 +162,44 @@ function parsePermissionIdentifiers(permissionLsOutput) {
   return identifiers;
 }
 
+function readApplicationPermissionIdentifiers() {
+  const identifiers = new Set();
+  if (!fs.existsSync(appPermissionsDir)) return identifiers;
+
+  const files = fs
+    .readdirSync(appPermissionsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.join(appPermissionsDir, entry.name))
+    .sort();
+
+  for (const filePath of files) {
+    const relPath = path.relative(repoRoot, filePath).replace(/\\/g, "/");
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (err) {
+      throw new Error(
+        `Invalid JSON in application permission file ${relPath}: ${(err && err.message) || String(err)}`,
+      );
+    }
+
+    const permissionEntries = parsed?.permission;
+    if (!Array.isArray(permissionEntries)) {
+      throw new Error(`Expected ${relPath} to contain a top-level \"permission\" array`);
+    }
+
+    for (const entry of permissionEntries) {
+      const identifier = entry?.identifier;
+      if (typeof identifier !== "string" || identifier.trim() === "") {
+        throw new Error(`Expected ${relPath} permission entries to have a non-empty string \"identifier\"`);
+      }
+      identifiers.add(identifier);
+    }
+  }
+
+  return identifiers;
+}
+
 function collectCapabilityPermissionRefs(capabilityJson, relPath) {
   const refs = [];
 
@@ -224,7 +263,9 @@ function main() {
   }
 
   const permissionLsOutput = runTauriPermissionLs();
-  const validIdentifiers = parsePermissionIdentifiers(permissionLsOutput);
+  const appIdentifiers = readApplicationPermissionIdentifiers();
+  const toolchainIdentifiers = parsePermissionIdentifiers(permissionLsOutput);
+  const validIdentifiers = new Set([...toolchainIdentifiers, ...appIdentifiers]);
 
   const capabilityFiles = fs
     .readdirSync(capabilitiesDir, { withFileTypes: true })
@@ -289,7 +330,9 @@ function main() {
       lines.push("");
     }
 
-    lines.push(`Toolchain reported ${validIdentifiers.size} permission identifiers.`);
+    lines.push(
+      `Toolchain reported ${toolchainIdentifiers.size} permission identifiers (+ ${appIdentifiers.size} application permissions).`,
+    );
     lines.push("To list them manually:");
     lines.push("  cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls");
     lines.push("");
@@ -299,7 +342,7 @@ function main() {
   }
 
   process.stdout.write(
-    `OK: all capability permission identifiers exist in the installed Tauri toolchain (${validIdentifiers.size} identifiers).\n`,
+    `OK: all capability permission identifiers exist in the installed Tauri toolchain (${toolchainIdentifiers.size} toolchain + ${appIdentifiers.size} app = ${validIdentifiers.size} identifiers).\n`,
   );
 }
 
