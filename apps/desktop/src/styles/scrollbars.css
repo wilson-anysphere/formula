@@ -48,3 +48,30 @@
   bottom: 1px;
   left: 0;
 }
+
+@media (forced-colors: active), (prefers-contrast: more) {
+  .grid-scrollbar-track {
+    /*
+      Avoid lowering contrast in high-contrast/forced-colors mode.
+      `opacity` on the track affects the thumb as well.
+    */
+    opacity: 1;
+  }
+
+  .grid-scrollbar-thumb:hover,
+  .grid-scrollbar-thumb:active {
+    box-shadow: none;
+    outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
+    outline-offset: 1px;
+  }
+}
+
+:root[data-reduced-motion="true"] .grid-scrollbar-thumb {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-scrollbar-thumb {
+    transition: none;
+  }
+}
