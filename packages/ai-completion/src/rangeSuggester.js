@@ -18,6 +18,9 @@ import { columnIndexToLetter, columnLetterToIndex, isEmptyCell, normalizeCellRef
  *   non-empty cells above the current row in that column (A1:A10).
  * - If no block exists above the active row (e.g. formula entered above a data block),
  *   fall back to scanning downward for the first contiguous non-empty run.
+ * - If the active cell is in a different column (e.g. formula in B5 referencing A),
+ *   treat the current row as part of the scan window and (within `maxScanRows`) extend
+ *   downward to capture the full contiguous block around that row.
  * - If adjacent columns contain a similarly-filled block over the same row span,
  *   also suggest a 2D rectangular range (A1:D10). Expansion stops at the first
  *   entirely-empty “gap” column and is bounded by `maxScanCols`.
