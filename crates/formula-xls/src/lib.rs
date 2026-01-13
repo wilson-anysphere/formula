@@ -406,7 +406,6 @@ fn import_xls_path_with_biff_reader(
     let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
-
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let detected_biff_version = biff::detect_biff_version(workbook_stream);
         let codepage = biff::parse_biff_codepage(workbook_stream);
@@ -1688,12 +1687,21 @@ fn import_xls_path_with_biff_reader(
                                     if !calamine_formula_failed {
                                         if let Some(existing) = sheet.formula(anchor) {
                                             // Prefer calamine's string representation when it is
-                                            // available, but fill any gaps from BIFF.
+                                            // available, but fill any gaps (or entire sheets) from BIFF.
                                             //
-                                            // Calamine can return `#UNKNOWN!` placeholders for
-                                            // formulas it cannot fully decode (e.g. shared-formula
-                                            // `PtgExp`), so allow BIFF parsing to overwrite those.
-                                            if !existing.contains("#UNKNOWN!") {
+                                            // Calamine renders some formulas it cannot fully resolve
+                                            // (notably shared-formula `PtgExp` cases) as `#UNKNOWN!`.
+                                            // Treat that as missing so BIFF parsing can replace it with a
+                                            // real formula when possible.
+                                            //
+                                            // Calamine can also render some formulas as `#REF!` when it
+                                            // cannot represent the underlying token stream (e.g. invalid
+                                            // sheet names in 3D references). Prefer BIFF parsing in those
+                                            // cases as well, but avoid overriding a `#REF!` sentinel with a
+                                            // less-informative `#UNKNOWN!`.
+                                            if !existing.contains("#UNKNOWN!")
+                                                && existing != ErrorValue::Ref.as_str()
+                                            {
                                                 continue;
                                             }
                                         }
@@ -1702,6 +1710,16 @@ fn import_xls_path_with_biff_reader(
                                     let Some(normalized) = normalize_formula_text(&formula) else {
                                         continue;
                                     };
+                                    if !calamine_formula_failed {
+                                        if sheet.formula(anchor) == Some(ErrorValue::Ref.as_str())
+                                            && normalized == ErrorValue::Unknown.as_str()
+                                        {
+                                            // Don't replace a (potentially meaningful) `#REF!` with
+                                            // `#UNKNOWN!` if BIFF parsing couldn't decode the token
+                                            // stream either.
+                                            continue;
+                                        }
+                                    }
                                     sheet.set_formula(anchor, Some(normalized));
 
                                     if let Some(resolved) = style_id_for_cell_xf(

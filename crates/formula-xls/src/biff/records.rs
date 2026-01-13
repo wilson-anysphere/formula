@@ -7,9 +7,10 @@ pub(crate) const RECORD_EOF: u16 = 0x000A;
 /// BIFF `FILEPASS` record id (workbook encryption / password protection).
 ///
 /// Presence of this record in the workbook globals substream indicates the file
-/// is encrypted. We do not currently support decrypting legacy `.xls` files, so
-/// the importer uses this as a preflight check to surface a clear error instead
-/// of confusing BIFF parse failures from downstream libraries.
+/// is encrypted. The `.xls` importer uses this as a preflight check so it can:
+/// - return a clear [`crate::ImportError::EncryptedWorkbook`] when no password is provided, and
+/// - decrypt the workbook stream when a password is provided (see
+///   [`crate::import_xls_path_with_password`]).
 pub(crate) const RECORD_FILEPASS: u16 = 0x002F;
 /// BIFF record id reserved for "unknown" sanitization.
 ///

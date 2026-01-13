@@ -550,7 +550,14 @@ fn derive_xor_array(password: &str) -> [u8; 16] {
     out
 }
 
-fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
+fn build_filepass_cryptoapi_payload(
+    password: &str,
+    salt: &[u8; 16],
+    version_major: u16,
+    version_minor: u16,
+    provider_type: u32,
+    csp_name: Option<&str>,
+) -> Vec<u8> {
     // FILEPASS payload layout (CryptoAPI) [MS-XLS 2.4.105]:
     //   u16 wEncryptionType = 0x0001 (RC4)
     //   u16 wEncryptionSubType = 0x0002 (CryptoAPI)
@@ -563,11 +570,6 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     const CALG_RC4: u32 = 0x0000_6801;
     const CALG_SHA1: u32 = 0x0000_8004;
 
-    let salt: [u8; 16] = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F,
-    ];
-
     // Deterministic verifier bytes.
     let verifier_plain: [u8; 16] = [
         0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E,
@@ -576,7 +578,7 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     let verifier_hash_plain = sha1_bytes(&[&verifier_plain]);
 
     // Encrypt verifier + hash using block 0 key.
-    let key_material = derive_cryptoapi_key_material(password, &salt);
+    let key_material = derive_cryptoapi_key_material(password, salt);
     let key0 = derive_cryptoapi_block_key(&key_material, 0, 16);
     let mut rc4 = Rc4::new(&key0);
 
@@ -590,21 +592,28 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     let mut encrypted_verifier_hash = [0u8; 20];
     encrypted_verifier_hash.copy_from_slice(&verifier_buf[16..]);
 
-    // EncryptionHeader (32 bytes) [MS-OFFCRYPTO].
+    // EncryptionHeader (fixed 32 bytes + optional CSPName UTF-16LE NUL-terminated) [MS-OFFCRYPTO].
     let mut header = Vec::<u8>::new();
     header.extend_from_slice(&0u32.to_le_bytes()); // Flags
     header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
     header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
     header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
     header.extend_from_slice(&128u32.to_le_bytes()); // KeySize bits
-    header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType
+    header.extend_from_slice(&provider_type.to_le_bytes()); // ProviderType
     header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
     header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+    if let Some(csp_name) = csp_name {
+        // CSPName is stored as a null-terminated UTF-16LE string.
+        for cu in csp_name.encode_utf16() {
+            header.extend_from_slice(&cu.to_le_bytes());
+        }
+        header.extend_from_slice(&0u16.to_le_bytes());
+    }
 
     // EncryptionVerifier.
     let mut verifier = Vec::<u8>::new();
     verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes());
-    verifier.extend_from_slice(&salt);
+    verifier.extend_from_slice(salt);
     verifier.extend_from_slice(&encrypted_verifier);
     verifier.extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes());
     verifier.extend_from_slice(&encrypted_verifier_hash);
@@ -612,8 +621,8 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     // EncryptionInfo:
     //   u16 MajorVersion, u16 MinorVersion, u32 Flags, u32 HeaderSize, EncryptionHeader, EncryptionVerifier.
     let mut enc_info = Vec::<u8>::new();
-    enc_info.extend_from_slice(&4u16.to_le_bytes()); // Major
-    enc_info.extend_from_slice(&2u16.to_le_bytes()); // Minor
+    enc_info.extend_from_slice(&version_major.to_le_bytes()); // Major
+    enc_info.extend_from_slice(&version_minor.to_le_bytes()); // Minor
     enc_info.extend_from_slice(&0u32.to_le_bytes()); // Flags
     enc_info.extend_from_slice(&(header.len() as u32).to_le_bytes()); // HeaderSize
     enc_info.extend_from_slice(&header);
@@ -801,10 +810,41 @@ fn build_rc4_standard_encrypted_xls_bytes(password: &str) -> Vec<u8> {
 }
 
 fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
+    // Deterministic parameters to keep the fixture stable.
+    let salt = [
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+        0x1E, 0x1F,
+    ];
+
+    build_cryptoapi_encrypted_xls_bytes_with_config(
+        password,
+        &salt,
+        4,
+        2,
+        0,
+        None,
+    )
+}
+
+fn build_cryptoapi_encrypted_xls_bytes_with_config(
+    password: &str,
+    salt: &[u8; 16],
+    version_major: u16,
+    version_minor: u16,
+    provider_type: u32,
+    csp_name: Option<&str>,
+) -> Vec<u8> {
     // Build a minimal BIFF8 workbook stream with one sheet containing A1=42, then encrypt all
     // record payload bytes after FILEPASS using RC4 CryptoAPI.
 
-    let filepass_payload = build_filepass_cryptoapi_payload(password);
+    let filepass_payload = build_filepass_cryptoapi_payload(
+        password,
+        salt,
+        version_major,
+        version_minor,
+        provider_type,
+        csp_name,
+    );
     let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 0);
     let mut offset = 0usize;
     let mut filepass_data_end = None::<usize>;
@@ -818,11 +858,7 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     let filepass_data_end =
         filepass_data_end.expect("generated workbook stream should contain FILEPASS");
 
-    let salt = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
-        0x1F,
-    ];
-    let key_material = derive_cryptoapi_key_material(password, &salt);
+    let key_material = derive_cryptoapi_key_material(password, salt);
     let mut cipher = PayloadRc4::new(key_material, 16);
     encrypt_payloads_after_filepass(&mut workbook_stream, filepass_data_end, |data| {
         cipher.apply_keystream(data);
@@ -912,4 +948,27 @@ fn regenerate_encrypted_xls_fixtures() {
         .unwrap_or_else(|err| {
             panic!("write encrypted fixture {cryptoapi_unicode_emoji_path:?} failed: {err}");
         });
+
+    // Non-ASCII password fixture used to validate Unicode password handling.
+    let unicode_fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("encrypted_rc4cryptoapi_non_ascii_password.xls");
+    // Use stable, deterministic encryption parameters but with an "Excel-like" CryptoAPI header
+    // (version 1.1 + CSPName) to exercise the parser.
+    let unicode_salt: [u8; 16] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0x10, 0x32, 0x54, 0x76, 0x98, 0xBA,
+        0xDC, 0xFE,
+    ];
+    let unicode_bytes = build_cryptoapi_encrypted_xls_bytes_with_config(
+        "pässwörd",
+        &unicode_salt,
+        1,
+        1,
+        1,
+        Some("Microsoft Base Cryptographic Provider v1.0"),
+    );
+    std::fs::write(&unicode_fixture_path, unicode_bytes).unwrap_or_else(|err| {
+        panic!("write encrypted fixture {unicode_fixture_path:?} failed: {err}");
+    });
 }

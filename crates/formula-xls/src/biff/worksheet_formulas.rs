@@ -152,6 +152,10 @@ pub(crate) fn parse_biff8_shrfmla_record(
 
     // SHRFMLA layouts vary slightly between producers (RefU vs Ref8 for the shared range). Try a
     // small set of plausible BIFF8 layouts.
+    //
+    // Most writers follow [MS-XLS] and include the `cUse` field, but some emit a shorter layout
+    // (RefU/Ref8 + cce + rgce) without it. We treat both as best-effort compatible.
+    //
     // Layout A: RefU (6) + cUse (2) + cce (2).
     let mut c = cursor.clone();
     if let Ok(rgce) = parse_shrfmla_with_refu(&mut c) {
