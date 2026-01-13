@@ -257,12 +257,9 @@ export function bindSheetViewToCollabSession(options: {
     if (destroyed) return;
     if (applyingRemote) return;
 
-    const role = typeof (session as any).getRole === "function" ? (session as any).getRole() : null;
-    const isReadOnly =
-      typeof (session as any).isReadOnly === "function"
-        ? Boolean((session as any).isReadOnly())
-        : role === "viewer" || role === "commenter";
-    if (isReadOnly) return;
+    // In read-only collab sessions (viewer/commenter), avoid persisting local view metadata
+    // back into the shared Yjs document.
+    if (session.isReadOnly()) return;
 
     const sheetViewDeltas: SheetViewDelta[] = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
     if (sheetViewDeltas.length === 0) return;
