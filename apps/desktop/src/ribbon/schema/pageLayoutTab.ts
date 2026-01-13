@@ -1,0 +1,270 @@
+import type { RibbonTabDefinition } from "../ribbonSchema.js";
+
+export const pageLayoutTab: RibbonTabDefinition = {
+  id: "pageLayout",
+  label: "Page Layout",
+  groups: [
+    {
+      id: "pageLayout.themes",
+      label: "Themes",
+      buttons: [
+        {
+          id: "pageLayout.themes.themes",
+          label: "Themes",
+          ariaLabel: "Themes",
+          iconId: "settings",
+          kind: "dropdown",
+          size: "large",
+          menuItems: [
+            { id: "pageLayout.themes.themes.office", label: "Office", ariaLabel: "Office Theme", iconId: "settings" },
+            { id: "pageLayout.themes.themes.integral", label: "Integral", ariaLabel: "Integral Theme", iconId: "settings" },
+            { id: "pageLayout.themes.themes.facet", label: "Facet", ariaLabel: "Facet Theme", iconId: "settings" },
+            { id: "pageLayout.themes.themes.customize", label: "Customize…", ariaLabel: "Customize Theme", iconId: "settings" },
+          ],
+        },
+        {
+          id: "pageLayout.themes.colors",
+          label: "Colors",
+          ariaLabel: "Colors",
+          iconId: "palette",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.themes.colors.office", label: "Office", ariaLabel: "Office Colors", iconId: "palette" },
+            { id: "pageLayout.themes.colors.colorful", label: "Colorful", ariaLabel: "Colorful Colors", iconId: "palette" },
+            { id: "pageLayout.themes.colors.customize", label: "Customize Colors…", ariaLabel: "Customize Colors", iconId: "settings" },
+          ],
+        },
+        {
+          id: "pageLayout.themes.fonts",
+          label: "Fonts",
+          ariaLabel: "Fonts",
+          iconId: "numberFormat",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.themes.fonts.office", label: "Office", ariaLabel: "Office Fonts", iconId: "numberFormat" },
+            { id: "pageLayout.themes.fonts.aptos", label: "Aptos", ariaLabel: "Aptos Fonts" },
+            { id: "pageLayout.themes.fonts.customize", label: "Customize Fonts…", ariaLabel: "Customize Fonts", iconId: "settings" },
+          ],
+        },
+        {
+          id: "pageLayout.themes.effects",
+          label: "Effects",
+          ariaLabel: "Effects",
+          iconId: "sparkles",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.themes.effects.subtle", label: "Subtle", ariaLabel: "Subtle Effects", iconId: "sparkles" },
+            { id: "pageLayout.themes.effects.moderate", label: "Moderate", ariaLabel: "Moderate Effects", iconId: "sparkles" },
+            { id: "pageLayout.themes.effects.intense", label: "Intense", ariaLabel: "Intense Effects", iconId: "sparkles" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "pageLayout.pageSetup",
+      label: "Page Setup",
+      buttons: [
+        { id: "pageLayout.pageSetup.pageSetupDialog", label: "Page Setup…", ariaLabel: "Page Setup", iconId: "settings", size: "large", testId: "ribbon-page-setup" },
+        {
+          id: "pageLayout.pageSetup.margins",
+          label: "Margins",
+          ariaLabel: "Margins",
+          iconId: "settings",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.margins.normal", label: "Normal", ariaLabel: "Normal Margins", iconId: "settings" },
+            { id: "pageLayout.pageSetup.margins.wide", label: "Wide", ariaLabel: "Wide Margins", iconId: "arrowLeftRight" },
+            { id: "pageLayout.pageSetup.margins.narrow", label: "Narrow", ariaLabel: "Narrow Margins", iconId: "arrowUpDown" },
+            { id: "pageLayout.pageSetup.margins.custom", label: "Custom Margins…", ariaLabel: "Custom Margins", iconId: "settings" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.orientation",
+          label: "Orientation",
+          ariaLabel: "Orientation",
+          iconId: "pagePortrait",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.orientation.portrait", label: "Portrait", ariaLabel: "Portrait", iconId: "pagePortrait" },
+            { id: "pageLayout.pageSetup.orientation.landscape", label: "Landscape", ariaLabel: "Landscape", iconId: "pageLandscape" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.size",
+          label: "Size",
+          ariaLabel: "Size",
+          iconId: "pagePortrait",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.size.letter", label: "Letter", ariaLabel: "Letter", iconId: "pagePortrait" },
+            { id: "pageLayout.pageSetup.size.a4", label: "A4", ariaLabel: "A4", iconId: "pagePortrait" },
+            { id: "pageLayout.pageSetup.size.more", label: "More Paper Sizes…", ariaLabel: "More Paper Sizes", iconId: "moreFormats" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.printArea",
+          label: "Print Area",
+          ariaLabel: "Print Area",
+          iconId: "print",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.printArea.set", label: "Set Print Area", ariaLabel: "Set Print Area", iconId: "print" },
+            { id: "pageLayout.pageSetup.printArea.clear", label: "Clear Print Area", ariaLabel: "Clear Print Area", iconId: "close" },
+            { id: "pageLayout.pageSetup.printArea.addTo", label: "Add to Print Area", ariaLabel: "Add to Print Area", iconId: "plus" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.breaks",
+          label: "Breaks",
+          ariaLabel: "Breaks",
+          iconId: "pageBreak",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.breaks.insertPageBreak", label: "Insert Page Break", ariaLabel: "Insert Page Break", iconId: "pageBreak" },
+            { id: "pageLayout.pageSetup.breaks.removePageBreak", label: "Remove Page Break", ariaLabel: "Remove Page Break", iconId: "close" },
+            { id: "pageLayout.pageSetup.breaks.resetAll", label: "Reset All Page Breaks", ariaLabel: "Reset All Page Breaks", iconId: "undo" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.background",
+          label: "Background",
+          ariaLabel: "Background",
+          iconId: "image",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.background.background", label: "Background…", ariaLabel: "Background", iconId: "image" },
+            { id: "pageLayout.pageSetup.background.delete", label: "Delete Background", ariaLabel: "Delete Background", iconId: "trash" },
+          ],
+        },
+        {
+          id: "pageLayout.pageSetup.printTitles",
+          label: "Print Titles",
+          ariaLabel: "Print Titles",
+          iconId: "tag",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.pageSetup.printTitles.printTitles", label: "Print Titles…", ariaLabel: "Print Titles", iconId: "tag" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "pageLayout.printArea",
+      label: "Print Area",
+      buttons: [
+        { id: "pageLayout.printArea.setPrintArea", label: "Set Print Area", ariaLabel: "Set Print Area", iconId: "print", testId: "ribbon-set-print-area" },
+        { id: "pageLayout.printArea.clearPrintArea", label: "Clear Print Area", ariaLabel: "Clear Print Area", iconId: "close", testId: "ribbon-clear-print-area" },
+      ],
+    },
+    {
+      id: "pageLayout.export",
+      label: "Export",
+      buttons: [
+        { id: "pageLayout.export.exportPdf", label: "Export to PDF", ariaLabel: "Export to PDF", iconId: "file", testId: "ribbon-export-pdf" },
+      ],
+    },
+    {
+      id: "pageLayout.scaleToFit",
+      label: "Scale to Fit",
+      buttons: [
+        {
+          id: "pageLayout.scaleToFit.width",
+          label: "Width",
+          ariaLabel: "Width",
+          iconId: "arrowLeftRight",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.scaleToFit.width.automatic", label: "Automatic", ariaLabel: "Automatic width" },
+            { id: "pageLayout.scaleToFit.width.1page", label: "1 page", ariaLabel: "Fit to 1 page wide" },
+            { id: "pageLayout.scaleToFit.width.2pages", label: "2 pages", ariaLabel: "Fit to 2 pages wide" },
+          ],
+        },
+        {
+          id: "pageLayout.scaleToFit.height",
+          label: "Height",
+          ariaLabel: "Height",
+          iconId: "arrowUpDown",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.scaleToFit.height.automatic", label: "Automatic", ariaLabel: "Automatic height" },
+            { id: "pageLayout.scaleToFit.height.1page", label: "1 page", ariaLabel: "Fit to 1 page tall" },
+            { id: "pageLayout.scaleToFit.height.2pages", label: "2 pages", ariaLabel: "Fit to 2 pages tall" },
+          ],
+        },
+        {
+          id: "pageLayout.scaleToFit.scale",
+          label: "Scale",
+          ariaLabel: "Scale",
+          iconId: "search",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.scaleToFit.scale.100", label: "100%", ariaLabel: "Scale 100%" },
+            { id: "pageLayout.scaleToFit.scale.90", label: "90%", ariaLabel: "Scale 90%" },
+            { id: "pageLayout.scaleToFit.scale.80", label: "80%", ariaLabel: "Scale 80%" },
+            { id: "pageLayout.scaleToFit.scale.70", label: "70%", ariaLabel: "Scale 70%" },
+            { id: "pageLayout.scaleToFit.scale.more", label: "Custom…", ariaLabel: "Custom scale", iconId: "settings" },
+          ],
+        },
+      ],
+    },
+    {
+      id: "pageLayout.sheetOptions",
+      label: "Sheet Options",
+      buttons: [
+        { id: "pageLayout.sheetOptions.gridlinesView", label: "Gridlines View", ariaLabel: "View Gridlines", iconId: "gridlines", kind: "toggle", size: "small", defaultPressed: true },
+        { id: "pageLayout.sheetOptions.gridlinesPrint", label: "Gridlines Print", ariaLabel: "Print Gridlines", iconId: "print", kind: "toggle", size: "small", defaultPressed: false },
+        { id: "pageLayout.sheetOptions.headingsView", label: "Headings View", ariaLabel: "View Headings", iconId: "headings", kind: "toggle", size: "small", defaultPressed: true },
+        { id: "pageLayout.sheetOptions.headingsPrint", label: "Headings Print", ariaLabel: "Print Headings", iconId: "print", kind: "toggle", size: "small", defaultPressed: false },
+      ],
+    },
+    {
+      id: "pageLayout.arrange",
+      label: "Arrange",
+      buttons: [
+        { id: "pageLayout.arrange.bringForward", label: "Bring Forward", ariaLabel: "Bring Forward", iconId: "arrowUp", kind: "dropdown" },
+        { id: "pageLayout.arrange.sendBackward", label: "Send Backward", ariaLabel: "Send Backward", iconId: "arrowDown", kind: "dropdown" },
+        { id: "pageLayout.arrange.selectionPane", label: "Selection Pane", ariaLabel: "Selection Pane", iconId: "paste" },
+        {
+          id: "pageLayout.arrange.align",
+          label: "Align",
+          ariaLabel: "Align",
+          iconId: "settings",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.arrange.align.alignLeft", label: "Align Left", ariaLabel: "Align Left", iconId: "arrowLeft" },
+            { id: "pageLayout.arrange.align.alignCenter", label: "Align Center", ariaLabel: "Align Center", iconId: "arrowLeftRight" },
+            { id: "pageLayout.arrange.align.alignRight", label: "Align Right", ariaLabel: "Align Right", iconId: "arrowRight" },
+            { id: "pageLayout.arrange.align.alignTop", label: "Align Top", ariaLabel: "Align Top", iconId: "arrowUp" },
+            { id: "pageLayout.arrange.align.alignMiddle", label: "Align Middle", ariaLabel: "Align Middle", iconId: "arrowUpDown" },
+            { id: "pageLayout.arrange.align.alignBottom", label: "Align Bottom", ariaLabel: "Align Bottom", iconId: "arrowDown" },
+          ],
+        },
+        {
+          id: "pageLayout.arrange.group",
+          label: "Group",
+          ariaLabel: "Group",
+          iconId: "link",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.arrange.group.group", label: "Group", ariaLabel: "Group", iconId: "link" },
+            { id: "pageLayout.arrange.group.ungroup", label: "Ungroup", ariaLabel: "Ungroup", iconId: "close" },
+            { id: "pageLayout.arrange.group.regroup", label: "Regroup", ariaLabel: "Regroup", iconId: "redo" },
+          ],
+        },
+        {
+          id: "pageLayout.arrange.rotate",
+          label: "Rotate",
+          ariaLabel: "Rotate",
+          iconId: "redo",
+          kind: "dropdown",
+          menuItems: [
+            { id: "pageLayout.arrange.rotate.rotateRight90", label: "Rotate Right 90°", ariaLabel: "Rotate Right 90 degrees", iconId: "redo" },
+            { id: "pageLayout.arrange.rotate.rotateLeft90", label: "Rotate Left 90°", ariaLabel: "Rotate Left 90 degrees", iconId: "undo" },
+            { id: "pageLayout.arrange.rotate.flipVertical", label: "Flip Vertical", ariaLabel: "Flip Vertical", iconId: "arrowUpDown" },
+            { id: "pageLayout.arrange.rotate.flipHorizontal", label: "Flip Horizontal", ariaLabel: "Flip Horizontal", iconId: "arrowLeftRight" },
+          ],
+        },
+      ],
+    },
+  ],
+};
