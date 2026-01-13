@@ -100,13 +100,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             xvfb \
+            file \
             libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
             patchelf \
+            squashfs-tools \
+            fakeroot \
             rpm
+
+          # `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
+          # Ubuntu 24.04 renamed the package to `libfuse2t64`; try both, but don't fail
+          # the dry run if neither is available (some runners may already provide it).
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
 
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
