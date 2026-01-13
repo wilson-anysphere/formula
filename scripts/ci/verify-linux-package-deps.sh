@@ -126,6 +126,19 @@ for bundle_dir in "${bundle_dirs[@]}"; do
 done
 shopt -u nullglob
 
+# Fallback: if the bundle layout changes, locate packages anywhere under the bundle dirs.
+if [[ "${#debs[@]}" -eq 0 ]]; then
+  while IFS= read -r -d '' f; do
+    debs+=("$f")
+  done < <(find "${bundle_dirs[@]}" -type f -name "*.deb" -print0)
+fi
+
+if [[ "${#rpms[@]}" -eq 0 ]]; then
+  while IFS= read -r -d '' f; do
+    rpms+=("$f")
+  done < <(find "${bundle_dirs[@]}" -type f -name "*.rpm" -print0)
+fi
+
 # Sort/de-dupe for determinism.
 if [[ "${#debs[@]}" -gt 0 ]]; then
   mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u)
