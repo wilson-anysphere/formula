@@ -49,6 +49,14 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   // --- View ------------------------------------------------------------------
   "view.togglePanel.aiChat": "view.togglePanel.aiChat",
   "ai.inlineEdit": "ai.inlineEdit",
+
+  // Theme selector ribbon ids (`view.appearance.*`) route to ribbon-specific commands today,
+  // but the keyboard shortcuts are registered against the canonical `view.theme.*` commands.
+  // Map them so the ribbon tooltip/menu can still display the correct shortcut hint.
+  "view.appearance.theme.system": "view.theme.system",
+  "view.appearance.theme.light": "view.theme.light",
+  "view.appearance.theme.dark": "view.theme.dark",
+  "view.appearance.theme.highContrast": "view.theme.highContrast",
 };
 
 export function deriveRibbonShortcutById(commandKeybindingDisplayIndex: Map<string, string[]>): Record<string, string> {

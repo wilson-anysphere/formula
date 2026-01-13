@@ -234,7 +234,6 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
       role="dialog"
       aria-modal="true"
       aria-label="File menu"
-      data-keybinding-barrier="true"
       onMouseDown={(event) => {
         if (event.target !== event.currentTarget) return;
         onClose();
