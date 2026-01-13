@@ -1132,6 +1132,44 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "6", displayText: "6 (MIN)", confidence: 0.62 },
     ],
   },
+  LINEST: {
+    // const (TRUE = calculate intercept, FALSE = force intercept=0)
+    2: [
+      { replacement: "TRUE", displayText: "TRUE (calculate intercept)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (force intercept=0)", confidence: 0.65 },
+    ],
+    // stats
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (return regression stats)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (coefficients only)", confidence: 0.65 },
+    ],
+  },
+  LOGEST: {
+    // const
+    2: [
+      { replacement: "TRUE", displayText: "TRUE (calculate intercept)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (force intercept=0)", confidence: 0.65 },
+    ],
+    // stats
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (return regression stats)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (coefficients only)", confidence: 0.65 },
+    ],
+  },
+  TREND: {
+    // const
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (calculate intercept)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (force intercept=0)", confidence: 0.65 },
+    ],
+  },
+  GROWTH: {
+    // const
+    3: [
+      { replacement: "TRUE", displayText: "TRUE (calculate intercept)", confidence: 0.66 },
+      { replacement: "FALSE", displayText: "FALSE (force intercept=0)", confidence: 0.65 },
+    ],
+  },
   DAYS360: {
     // method
     2: [

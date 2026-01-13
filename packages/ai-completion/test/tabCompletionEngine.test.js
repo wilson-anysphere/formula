@@ -2266,6 +2266,50 @@ test("FORECAST.ETS.SEASONALITY data_completion suggests 1 and 0", async () => {
   );
 });
 
+test("LINEST const suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LINEST(A1:A10, B1:B10, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  const calc = suggestions.find((s) => s.text === "=LINEST(A1:A10, B1:B10, TRUE");
+  assert.ok(calc, `Expected LINEST to suggest TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok((calc?.confidence ?? 0) > 0.5, `Expected LINEST/TRUE to have elevated confidence, got: ${calc?.confidence}`);
+
+  const force0 = suggestions.find((s) => s.text === "=LINEST(A1:A10, B1:B10, FALSE");
+  assert.ok(force0, `Expected LINEST to suggest FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`);
+  assert.ok(
+    (force0?.confidence ?? 0) > 0.5,
+    `Expected LINEST/FALSE to have elevated confidence, got: ${force0?.confidence}`
+  );
+});
+
+test("LINEST stats suggests TRUE/FALSE with meaning", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=LINEST(A1:A10, B1:B10, , ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=LINEST(A1:A10, B1:B10, , TRUE"),
+    `Expected LINEST to suggest stats=TRUE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=LINEST(A1:A10, B1:B10, , FALSE"),
+    `Expected LINEST to suggest stats=FALSE, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("CEILING.MATH mode suggests 0 and 1", async () => {
   const engine = new TabCompletionEngine();
 
