@@ -46,6 +46,29 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("preserves typed casing when inserting (e.g. =vlo → =vlookup()", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=vlo";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(dropdown?.textContent).toContain("VLOOKUP");
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.model.draft).toBe("=vlookup(");
+
+    host.remove();
+  });
+
   it("supports Arrow navigation + Tab to accept (=VLOOKUP()", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
