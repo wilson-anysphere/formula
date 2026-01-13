@@ -393,19 +393,49 @@ export class ChunkedLocalStorageBinaryStorage {
     // Remove leftover chunks from a prior (larger) save. Best-effort: successful chunk + meta
     // writes should not be treated as failed persistence because cleanup encountered a storage error.
     try {
-      // We avoid relying solely on stored metadata so we can clean up even if `:meta` was missing/corrupted.
-      const prefix = `${this.key}:`;
-      /** @type {string[]} */
-      const keysToRemove = [];
-      for (let i = 0; i < storage.length; i += 1) {
-        const key = storage.key(i);
-        if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
-        const suffix = key.slice(prefix.length);
-        if (!/^\d+$/.test(suffix)) continue;
-        const index = Number(suffix);
-        if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+      // Fast path: if we can read the previous chunk count, remove only the now-stale
+      // chunk keys without scanning unrelated localStorage entries.
+      /** @type {number | null} */
+      let oldChunks = null;
+      if (prevMeta) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          const parsed = JSON.parse(prevMeta);
+          const n = parsed?.chunks;
+          if (Number.isInteger(n) && n >= 0) oldChunks = n;
+        } catch {
+          // ignore
+        }
       }
-      for (const key of keysToRemove) storage.removeItem?.(key);
+
+      const canUseOldChunks =
+        oldChunks != null &&
+        // Avoid pathological loops when meta is corrupted.
+        oldChunks <= 100_000 &&
+        oldChunks > chunks &&
+        // Sanity check against actual key count to avoid deleting an absurd range.
+        oldChunks <= storage.length + 1;
+
+      if (canUseOldChunks) {
+        for (let i = chunks; i < oldChunks; i += 1) {
+          storage.removeItem?.(`${this.key}:${i}`);
+        }
+      } else {
+        // Fallback: scan localStorage and remove any chunk keys >= the new chunk count.
+        // This handles cases where the old meta is missing/corrupted.
+        const prefix = `${this.key}:`;
+        /** @type {string[]} */
+        const keysToRemove = [];
+        for (let i = 0; i < storage.length; i += 1) {
+          const key = storage.key(i);
+          if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
+          const suffix = key.slice(prefix.length);
+          if (!/^\d+$/.test(suffix)) continue;
+          const index = Number(suffix);
+          if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+        }
+        for (const key of keysToRemove) storage.removeItem?.(key);
+      }
 
       // Clean up the legacy single-key storage entry if it exists.
       storage.removeItem?.(this.key);
