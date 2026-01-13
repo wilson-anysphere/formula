@@ -137,6 +137,12 @@ Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppI
 - `FORMULA_BUNDLE_SIZE_LIMIT_MB` (default: 50MB per artifact)
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
 
+Frontend asset download size gating knobs (compressed JS/CSS/WASM under `dist/assets`):
+
+- `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB` (default: 10MB total)
+- `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip` (default: brotli)
+- `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` to fail when the total exceeds the limit
+
 ---
 
 ## Tauri configuration (v2)
