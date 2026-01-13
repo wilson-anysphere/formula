@@ -1,5 +1,6 @@
 import type { AIAuditStore } from "./store.ts";
 import type { AIAuditEntry, AuditListFilters } from "./types.ts";
+import { stableStringify } from "./stable-json.ts";
 
 export interface LocalStorageAIAuditStoreOptions {
   /**
@@ -112,7 +113,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
       return;
     }
     try {
-      storage.setItem(this.key, JSON.stringify(entries));
+      storage.setItem(this.key, stableStringify(snapshot));
     } catch {
       // If persistence fails, at least keep the latest entries in memory.
       this.localStorageUnavailable = true;

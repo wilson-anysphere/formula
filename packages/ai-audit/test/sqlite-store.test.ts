@@ -64,6 +64,50 @@ describe("SqliteAIAuditStore", () => {
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 
+  it("serializes BigInt values as strings for JSON columns (input/tool_calls/verification)", async () => {
+    const storage = new InMemoryBinaryStorage();
+    const store = await SqliteAIAuditStore.create({ storage });
+
+    const entry: AIAuditEntry = {
+      id: randomUUID(),
+      timestamp_ms: Date.now(),
+      session_id: "session-bigint",
+      mode: "chat",
+      input: { big: 123n },
+      model: "unit-test-model",
+      tool_calls: [
+        {
+          name: "tool",
+          parameters: { big: 456n },
+        },
+      ],
+      verification: {
+        needs_tools: false,
+        used_tools: false,
+        verified: true,
+        confidence: 1,
+        warnings: [],
+        claims: [
+          {
+            claim: "bigint",
+            verified: true,
+            toolEvidence: { big: 789n },
+          },
+        ],
+      },
+    };
+
+    await store.logEntry(entry);
+
+    const roundTrip = await SqliteAIAuditStore.create({ storage });
+    const entries = await roundTrip.listEntries({ session_id: "session-bigint" });
+
+    expect(entries).toHaveLength(1);
+    expect((entries[0]!.input as any).big).toBe("123");
+    expect((entries[0]!.tool_calls[0]!.parameters as any).big).toBe("456");
+    expect((entries[0]!.verification as any).claims[0].toolEvidence.big).toBe("789");
+  });
+
   it("supports workbook/mode filtering and enforces retention at write-time", async () => {
     const storage = new InMemoryBinaryStorage();
     const store = await SqliteAIAuditStore.create({

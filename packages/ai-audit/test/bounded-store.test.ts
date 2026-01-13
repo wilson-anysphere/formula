@@ -43,6 +43,28 @@ describe("BoundedAIAuditStore", () => {
     expect(stored[0]!.tool_calls[0]!.result).toEqual({ ok: true });
   });
 
+  it("does not compact entries solely due to BigInt values", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: 2_000 });
+
+    const entry: AIAuditEntry = {
+      id: "entry-bigint",
+      timestamp_ms: Date.now(),
+      session_id: "session-bigint",
+      mode: "chat",
+      input: { big: 123n },
+      model: "unit-test-model",
+      tool_calls: [],
+    };
+
+    await store.logEntry(entry);
+
+    const stored = await underlying.listEntries({ session_id: "session-bigint" });
+    expect(stored).toHaveLength(1);
+    expect((stored[0]!.input as any)?.audit_truncated).toBeUndefined();
+    expect((stored[0]!.input as any).big).toBe(123n);
+  });
+
   it("compacts oversized entries to stay within the configured size limit", async () => {
     const underlying = new MemoryAIAuditStore();
     const maxEntryChars = 2_000;

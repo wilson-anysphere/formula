@@ -47,6 +47,13 @@ export class BoundedAIAuditStore implements AIAuditStore {
       // If the entry isn't JSON-serializable for some reason, force compaction to
       // avoid surprising store failures.
     }
+    if (!serialized) {
+      try {
+        serialized = JSON.stringify(entry, bigIntReplacer);
+      } catch {
+        // Still not serializable (e.g. circular references). Fall back to compaction.
+      }
+    }
 
     if (serialized && serialized.length <= maxChars) {
       await this.store.logEntry(entry);
@@ -60,6 +67,10 @@ export class BoundedAIAuditStore implements AIAuditStore {
   async listEntries(filters?: AuditListFilters): Promise<AIAuditEntry[]> {
     return this.store.listEntries(filters);
   }
+}
+
+function bigIntReplacer(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? value.toString() : value;
 }
 
 type AuditJsonSummary = {

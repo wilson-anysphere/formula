@@ -92,6 +92,45 @@ describe("workbook_id filtering (legacy fallback)", () => {
   });
 });
 
+describe("LocalStorageAIAuditStore serialization", () => {
+  it("persists entries containing BigInt values by exporting them as strings", async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    try {
+      const key = "audit_test_bigint";
+      const store = new LocalStorageAIAuditStore({ key });
+
+      const entry: AIAuditEntry = {
+        id: "bigint-entry-1",
+        timestamp_ms: Date.now(),
+        session_id: "session-bigint",
+        mode: "chat",
+        input: { big: 123n },
+        model: "unit-test-model",
+        tool_calls: [],
+      };
+
+      await store.logEntry(entry);
+
+      const raw = (globalThis as any).localStorage.getItem(key);
+      expect(raw).toBeTruthy();
+      const parsed = JSON.parse(raw!) as any[];
+      expect(parsed[0]?.input?.big).toBe("123");
+
+      const roundTrip = await store.listEntries({ session_id: "session-bigint" });
+      expect((roundTrip[0]!.input as any).big).toBe("123");
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+});
+
 describe("LocalStorageAIAuditStore max_entries retention", () => {
   it("drops oldest entries deterministically when timestamps tie (id tiebreaker)", async () => {
     const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");

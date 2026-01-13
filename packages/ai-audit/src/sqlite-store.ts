@@ -3,6 +3,7 @@ import type { AIAuditEntry, AuditListFilters, TokenUsage, ToolCallLog, UserFeedb
 import type { AIAuditStore } from "./store.ts";
 import type { SqliteBinaryStorage } from "./storage.ts";
 import { InMemoryBinaryStorage } from "./storage.ts";
+import { stableStringify } from "./stable-json.ts";
 
 type SqlJsDatabase = any;
 
@@ -129,14 +130,14 @@ export class SqliteAIAuditStore implements AIAuditStore {
       workbookId ?? null,
       entry.user_id ?? null,
       entry.mode,
-      JSON.stringify(entry.input ?? null),
+      stableStringify(entry.input ?? null),
       entry.model,
       tokenUsage?.prompt_tokens ?? null,
       tokenUsage?.completion_tokens ?? null,
       tokenUsage?.total_tokens ?? null,
       entry.latency_ms ?? null,
-      JSON.stringify(entry.tool_calls ?? []),
-      entry.verification ? JSON.stringify(entry.verification) : null,
+      stableStringify(entry.tool_calls ?? []),
+      entry.verification ? stableStringify(entry.verification) : null,
       entry.user_feedback ?? null
     ]);
     stmt.free();
