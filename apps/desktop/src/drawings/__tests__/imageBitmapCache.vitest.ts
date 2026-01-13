@@ -160,4 +160,31 @@ describe("ImageBitmapCache", () => {
     await cache.get(createEntry("a"));
     expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
   });
+
+  it("setMaxEntries() evicts down to the new limit and closes evicted bitmaps", async () => {
+    const bitmapA = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmapB = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmapC = { close: vi.fn() } as unknown as ImageBitmap;
+
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(bitmapA))
+      .mockImplementationOnce(() => Promise.resolve(bitmapB))
+      .mockImplementationOnce(() => Promise.resolve(bitmapC));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 3 });
+    await cache.get(createEntry("a"));
+    await cache.get(createEntry("b"));
+    await cache.get(createEntry("c"));
+
+    // Make `b` the most recently used so `a` is the LRU.
+    await cache.get(createEntry("b"));
+
+    cache.setMaxEntries(1);
+
+    // Should keep only `b` and evict/close `a` + `c`.
+    expect((bitmapB as any).close).not.toHaveBeenCalled();
+    expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapC as any).close).toHaveBeenCalledTimes(1);
+  });
 });
