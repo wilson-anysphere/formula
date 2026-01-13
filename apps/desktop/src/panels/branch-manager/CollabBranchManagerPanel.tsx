@@ -58,6 +58,9 @@ export function CollabBranchManagerPanel({
   const docId = session.doc.guid;
 
   const { store, storeWarning } = useMemo(() => {
+    if (mutationsDisabled) {
+      return { store: null as any, storeWarning: null as string | null };
+    }
     // Conservative defaults so large branching commits don't exceed common sync-server
     // websocket message limits (close code 1009). Smaller chunks mean more Yjs updates,
     // but keeps the feature usable even when `SYNC_SERVER_MAX_MESSAGE_BYTES` is tuned low.
@@ -94,8 +97,12 @@ export function CollabBranchManagerPanel({
         storeWarning: t("branchManager.compressionFallbackWarning"),
       };
     }
-  }, [session.doc]);
-  const branchService = useMemo(() => new BranchService({ docId, store }), [docId, store]);
+  }, [session.doc, mutationsDisabled]);
+
+  const branchService = useMemo(() => {
+    if (!store) return null;
+    return new BranchService({ docId, store });
+  }, [docId, store]);
 
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -111,6 +118,12 @@ export function CollabBranchManagerPanel({
   }, [mutationsDisabled]);
 
   useEffect(() => {
+    if (mutationsDisabled) {
+      setError(null);
+      setReady(true);
+      return;
+    }
+    if (!branchService) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -128,9 +141,25 @@ export function CollabBranchManagerPanel({
     return () => {
       cancelled = true;
     };
-  }, [actor, branchService, session]);
+  }, [actor, branchService, session, mutationsDisabled]);
 
   const workflow = useMemo(() => {
+    if (!branchService) {
+      const disabled = async () => {
+        throw new Error(reservedRootGuardError ?? "Branching is unavailable");
+      };
+      return {
+        getCurrentBranchName: async () => "main",
+        listBranches: async () => [],
+        createBranch: disabled,
+        renameBranch: disabled,
+        deleteBranch: disabled,
+        checkoutBranch: disabled,
+        previewMerge: disabled,
+        merge: disabled,
+      } as any;
+    }
+
     const commitCurrentState = async (message: string) => {
       const nextState = yjsDocToDocumentState(session.doc);
       await branchService.commit(actor as any, { nextState, message });
@@ -167,7 +196,7 @@ export function CollabBranchManagerPanel({
         return result;
       },
     } as any;
-  }, [actor, branchService, session]);
+  }, [actor, branchService, session, reservedRootGuardError]);
 
   if (error) {
     return (

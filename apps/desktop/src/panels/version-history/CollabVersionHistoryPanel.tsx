@@ -60,6 +60,7 @@ export function CollabVersionHistoryPanel({
   }, [reservedRootGuardError, collabVersioning]);
 
   useEffect(() => {
+    if (mutationsDisabled) return;
     let disposed = false;
     let instance: any | null = null;
 
@@ -85,7 +86,7 @@ export function CollabVersionHistoryPanel({
       disposed = true;
       instance?.destroy();
     };
-  }, [session]);
+  }, [session, mutationsDisabled]);
 
   const refresh = async () => {
     try {
@@ -102,9 +103,10 @@ export function CollabVersionHistoryPanel({
 
   useEffect(() => {
     if (!collabVersioning) return;
+    if (mutationsDisabled) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collabVersioning]);
+  }, [collabVersioning, mutationsDisabled]);
 
   const items = useMemo(() => buildVersionHistoryItems(versions as any), [versions]);
 
@@ -151,6 +153,14 @@ export function CollabVersionHistoryPanel({
   }
 
   if (!collabVersioning) {
+    if (mutationsDisabled) {
+      return (
+        <div className="collab-version-history">
+          <h3 className="collab-version-history__title">{t("panels.versionHistory.title")}</h3>
+          {banner}
+        </div>
+      );
+    }
     return (
       <div className="collab-panel__message">
         {banner}
@@ -309,7 +319,7 @@ export function CollabVersionHistoryPanel({
           {t("versionHistory.actions.deleteSelected")}
         </button>
 
-        <button disabled={busy} onClick={() => void refresh()}>
+        <button disabled={busy || mutationsDisabled} onClick={() => void refresh()}>
           {t("versionHistory.actions.refresh")}
         </button>
       </div>
