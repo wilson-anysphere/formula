@@ -48,6 +48,10 @@ const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
 
+// Cache persistence intentionally uses a short debounce to avoid repeatedly serializing
+// the entire cache map when many AI cells resolve in a burst.
+const CACHE_PERSIST_DEBOUNCE_MS = 50;
+
 type DlpNormalizedRange = ReturnType<typeof normalizeRange>;
 
 type DlpCellIndex = {
@@ -195,6 +199,10 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlightByKey = new Map<string, Promise<void>>();
   private readonly pendingAudits = new Set<Promise<void>>();
+
+  private cachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+  private cachePersistPromise: Promise<void> | null = null;
+  private cachePersistPromiseResolve: (() => void) | null = null;
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
     this.llmClient = options.llmClient ?? getDesktopLLMClient();
@@ -412,6 +420,20 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       const snapshot = [...Array.from(this.inFlightByKey.values()), ...Array.from(this.pendingAudits)];
       await Promise.all(snapshot.map((p) => p.catch(() => undefined)));
     }
+
+    // Also ensure any debounced cache persistence has been flushed so tests can
+    // deterministically inspect localStorage.
+    await this.flushCachePersistenceForTests();
+  }
+
+  /**
+   * Flush any pending cache persistence. Intended for tests; production code
+   * should rely on the debounced persistence mechanism.
+   */
+  async flushCachePersistenceForTests(): Promise<void> {
+    const pending = this.cachePersistPromise;
+    this.flushCachePersistenceNow();
+    if (pending) await pending;
   }
 
   private startRequest(params: {
@@ -553,7 +575,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       if (oldestKey === undefined) break;
       this.cache.delete(oldestKey);
     }
-    this.saveCacheToStorage();
+    this.scheduleCachePersistence();
   }
 
   private loadCacheFromStorage(): void {
@@ -596,6 +618,49 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       storage.setItem(this.cachePersistKey, JSON.stringify(entries));
     } catch {
       // Ignore persistence failures.
+    }
+  }
+
+  private ensureCachePersistPromise(): Promise<void> {
+    if (this.cachePersistPromise) return this.cachePersistPromise;
+    this.cachePersistPromise = new Promise<void>((resolve) => {
+      this.cachePersistPromiseResolve = resolve;
+    });
+    return this.cachePersistPromise;
+  }
+
+  private scheduleCachePersistence(): void {
+    if (!this.cachePersistKey) return;
+    if (!getLocalStorageOrNull()) return;
+
+    this.ensureCachePersistPromise();
+
+    if (this.cachePersistTimer) {
+      clearTimeout(this.cachePersistTimer);
+      this.cachePersistTimer = null;
+    }
+
+    this.cachePersistTimer = setTimeout(() => {
+      this.flushCachePersistenceNow();
+    }, CACHE_PERSIST_DEBOUNCE_MS);
+  }
+
+  private flushCachePersistenceNow(): void {
+    if (this.cachePersistTimer) {
+      clearTimeout(this.cachePersistTimer);
+      this.cachePersistTimer = null;
+    }
+
+    const resolve = this.cachePersistPromiseResolve;
+    const promise = this.cachePersistPromise;
+    if (!promise) return;
+
+    try {
+      this.saveCacheToStorage();
+    } finally {
+      this.cachePersistPromise = null;
+      this.cachePersistPromiseResolve = null;
+      resolve?.();
     }
   }
 }

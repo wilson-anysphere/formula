@@ -328,6 +328,48 @@ describe("AiCellFunctionEngine", () => {
     expect(stored).toMatch(/test-model\\u0000AI\\u0000[0-9a-f]{8}\\u0000[0-9a-f]{8}/);
   });
 
+  it("batches localStorage persistence across multiple cache writes", async () => {
+    vi.useFakeTimers();
+    let setItemSpy: ReturnType<typeof vi.spyOn> | null = null;
+    try {
+      const persistKey = "ai-cache-batched";
+      setItemSpy = vi.spyOn(globalThis.localStorage as any, "setItem");
+
+      let callIndex = 0;
+      const llmClient = {
+        chat: vi.fn(async () => {
+          callIndex += 1;
+          return {
+            message: { role: "assistant", content: `ok_${callIndex}` },
+            usage: { promptTokens: 1, completionTokens: 1 },
+          };
+        }),
+      };
+
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        auditStore: new MemoryAIAuditStore(),
+        model: "test-model",
+        cache: { persistKey },
+      });
+
+      const formulas = ['=AI("task1", "hello")', '=AI("task2", "hello")', '=AI("task3", "hello")'];
+      for (const formula of formulas) {
+        const pending = evaluateFormula(formula, () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+        expect(pending).toBe(AI_CELL_PLACEHOLDER);
+      }
+
+      await engine.waitForIdle();
+
+      const callsForKey = setItemSpy.mock.calls.filter((call) => call[0] === persistKey);
+      expect(callsForKey).toHaveLength(1);
+      expect(llmClient.chat).toHaveBeenCalledTimes(formulas.length);
+    } finally {
+      setItemSpy?.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("changing referenced cells invalidates the cache key", async () => {
     const deferred1 = defer<any>();
     const deferred2 = defer<any>();
