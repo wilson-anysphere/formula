@@ -1,6 +1,7 @@
 import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { resolveCssVar } from "../theme/cssVars.js";
+import { graphicFramePlaceholderLabel, isGraphicFrame } from "./shapeRenderer";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 
@@ -10,6 +11,7 @@ export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
 function resolveOverlayColorTokens(): {
   placeholderChartStroke: string;
   placeholderOtherStroke: string;
+  placeholderGraphicFrameStroke: string;
   placeholderLabel: string;
   selectionStroke: string;
   selectionHandleFill: string;
@@ -17,6 +19,7 @@ function resolveOverlayColorTokens(): {
   return {
     placeholderChartStroke: resolveCssVar("--chart-series-1", { fallback: "blue" }),
     placeholderOtherStroke: resolveCssVar("--chart-series-2", { fallback: "cyan" }),
+    placeholderGraphicFrameStroke: resolveCssVar("--chart-series-3", { fallback: "magenta" }),
     placeholderLabel: resolveCssVar("--text-primary", { fallback: "black" }),
     selectionStroke: resolveCssVar("--selection-border", { fallback: "blue" }),
     selectionHandleFill: resolveCssVar("--bg-primary", { fallback: "white" })
@@ -216,8 +219,18 @@ export class DrawingOverlay {
       // Placeholder rendering for shapes/charts/unknown.
       withClip(() => {
         ctx.save();
+        const rawXml =
+          // Some integration layers still pass through snake_case from the Rust model.
+          (obj.kind as any).rawXml ?? (obj.kind as any).raw_xml;
+        const isGFrame = isGraphicFrame(rawXml);
+        const isUnknown = obj.kind.type === "unknown";
+
         ctx.strokeStyle =
-          obj.kind.type === "chart" ? colors.placeholderChartStroke : colors.placeholderOtherStroke;
+          obj.kind.type === "chart"
+            ? colors.placeholderChartStroke
+            : isUnknown || isGFrame
+              ? colors.placeholderGraphicFrameStroke
+              : colors.placeholderOtherStroke;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 2]);
         ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
@@ -225,7 +238,15 @@ export class DrawingOverlay {
         ctx.fillStyle = colors.placeholderLabel;
         ctx.globalAlpha = 0.6;
         ctx.font = "12px sans-serif";
-        ctx.fillText(obj.kind.type, screenRect.x + 4, screenRect.y + 14);
+        const explicitLabel = obj.kind.label?.trim();
+        const placeholderLabel =
+          explicitLabel && explicitLabel.length > 0
+            ? explicitLabel
+            : // Avoid labeling chart placeholders as "GraphicFrame" — charts already have a distinct kind.
+              obj.kind.type !== "chart"
+              ? graphicFramePlaceholderLabel(rawXml) ?? obj.kind.type
+              : obj.kind.type;
+        ctx.fillText(placeholderLabel, screenRect.x + 4, screenRect.y + 14);
         ctx.restore();
       });
     }
