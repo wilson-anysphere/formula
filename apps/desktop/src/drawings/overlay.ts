@@ -1,9 +1,10 @@
-import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
+import type { Anchor, DrawingObject, DrawingTransform, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
 import { resolveCssVar } from "../theme/cssVars.js";
 import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
+import { applyTransformVector, degToRad } from "./transform";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
 
@@ -177,10 +178,11 @@ export class DrawingOverlay {
         height: rect.height,
       };
       const clipRect = paneLayout.quadrants[pane.quadrant];
+      const aabb = getAabbForObject(screenRect, obj.transform);
 
       if (clipRect.width <= 0 || clipRect.height <= 0) continue;
       // Skip objects that are fully outside of their pane quadrant.
-      if (!intersects(screenRect, clipRect)) continue;
+      if (!intersects(aabb, clipRect)) continue;
       // Paranoia: clip rects are expected to be within the viewport, but keep the
       // early-out for callers providing custom layouts.
       if (!intersects(clipRect, viewportRect)) continue;
@@ -197,7 +199,7 @@ export class DrawingOverlay {
         }
       };
 
-      if (!intersects(screenRect, viewportRect)) {
+      if (!intersects(aabb, viewportRect)) {
         continue;
       }
 
@@ -260,10 +262,12 @@ export class DrawingOverlay {
           const specToDraw = hasText ? { ...spec, label: undefined } : spec;
           withClip(() => {
             try {
-              drawShape(ctx, screenRect, specToDraw, colors);
-              if (hasText) {
-                renderShapeText(ctx, screenRect, textLayout!, { defaultColor: colors.placeholderLabel });
-              }
+              withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                drawShape(ctx, localRect, specToDraw, colors);
+                if (hasText) {
+                  renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+                }
+              });
               rendered = true;
             } catch {
               rendered = false;
@@ -276,15 +280,17 @@ export class DrawingOverlay {
         // still render the text within the anchored bounds (and skip placeholders).
         if (hasText) {
           withClip(() => {
-            ctx.save();
-            try {
-              ctx.beginPath();
-              ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-              ctx.clip();
-              renderShapeText(ctx, screenRect, textLayout!, { defaultColor: colors.placeholderLabel });
-            } finally {
-              ctx.restore();
-            }
+            withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+              ctx.save();
+              try {
+                ctx.beginPath();
+                ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                ctx.clip();
+                renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
+              } finally {
+                ctx.restore();
+              }
+            });
           });
           continue;
         }
@@ -296,7 +302,11 @@ export class DrawingOverlay {
             ctx.strokeStyle = colors.placeholderOtherStroke;
             ctx.lineWidth = 1;
             ctx.setLineDash([4, 2]);
-            ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            if (hasNonIdentityTransform(obj.transform)) {
+              drawTransformedRect(ctx, screenRect, obj.transform!);
+            } else {
+              ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+            }
             ctx.restore();
           });
           continue;
@@ -320,7 +330,11 @@ export class DrawingOverlay {
               : colors.placeholderOtherStroke;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 2]);
-        ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+        if (hasNonIdentityTransform(obj.transform)) {
+          drawTransformedRect(ctx, screenRect, obj.transform!);
+        } else {
+          ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+        }
         ctx.setLineDash([]);
         ctx.fillStyle = colors.placeholderLabel;
         ctx.globalAlpha = 0.6;
@@ -353,12 +367,13 @@ export class DrawingOverlay {
           height: rect.height,
         };
         const clipRect = paneLayout.quadrants[pane.quadrant];
-        if (clipRect.width > 0 && clipRect.height > 0 && intersects(screen, clipRect)) {
+        const selectionAabb = getAabbForObject(screen, selected.transform);
+        if (clipRect.width > 0 && clipRect.height > 0 && intersects(selectionAabb, clipRect)) {
           ctx.save();
           ctx.beginPath();
           ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
           ctx.clip();
-          drawSelection(ctx, screen, colors);
+          drawSelection(ctx, screen, colors, selected.transform);
           ctx.restore();
         }
       }
@@ -385,20 +400,99 @@ function intersects(a: Rect, b: Rect): boolean {
   );
 }
 
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+  if (!transform) return false;
+  return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
+}
+
+type CornerPoint = { x: number; y: number };
+
+function getTransformedCorners(rect: Rect, transform: DrawingTransform): CornerPoint[] {
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const hw = rect.width / 2;
+  const hh = rect.height / 2;
+  const local = [
+    applyTransformVector(-hw, -hh, transform),
+    applyTransformVector(hw, -hh, transform),
+    applyTransformVector(hw, hh, transform),
+    applyTransformVector(-hw, hh, transform),
+  ];
+  return local.map((p) => ({ x: cx + p.x, y: cy + p.y }));
+}
+
+function getAabbForObject(rect: Rect, transform: DrawingTransform | undefined): Rect {
+  if (!hasNonIdentityTransform(transform)) return rect;
+  const corners = getTransformedCorners(rect, transform!);
+  let minX = corners[0]!.x;
+  let maxX = corners[0]!.x;
+  let minY = corners[0]!.y;
+  let maxY = corners[0]!.y;
+  for (let i = 1; i < corners.length; i += 1) {
+    const p = corners[i]!;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function withObjectTransform(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  transform: DrawingTransform | undefined,
+  fn: (localRect: Rect) => void,
+): void {
+  if (!hasNonIdentityTransform(transform)) {
+    fn(rect);
+    return;
+  }
+
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(degToRad(transform!.rotationDeg));
+  ctx.scale(transform!.flipH ? -1 : 1, transform!.flipV ? -1 : 1);
+  try {
+    fn({ x: -rect.width / 2, y: -rect.height / 2, width: rect.width, height: rect.height });
+  } finally {
+    ctx.restore();
+  }
+}
+
+function drawTransformedRect(ctx: CanvasRenderingContext2D, rect: Rect, transform: DrawingTransform): void {
+  const corners = getTransformedCorners(rect, transform);
+  ctx.beginPath();
+  ctx.moveTo(corners[0]!.x, corners[0]!.y);
+  for (let i = 1; i < corners.length; i += 1) {
+    ctx.lineTo(corners[i]!.x, corners[i]!.y);
+  }
+  ctx.closePath();
+  ctx.stroke();
+}
+
 function drawSelection(
   ctx: CanvasRenderingContext2D,
   rect: Rect,
   colors: ReturnType<typeof resolveOverlayColorTokens>,
+  transform?: DrawingTransform,
 ): void {
   ctx.save();
   ctx.strokeStyle = colors.selectionStroke;
   ctx.lineWidth = 2;
   ctx.setLineDash([]);
-  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  if (hasNonIdentityTransform(transform)) {
+    drawTransformedRect(ctx, rect, transform!);
+  } else {
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  }
 
   const handle = RESIZE_HANDLE_SIZE_PX;
   const half = handle / 2;
-  const points = getResizeHandleCenters(rect);
+  const points = getResizeHandleCenters(rect, transform);
 
   ctx.fillStyle = colors.selectionHandleFill;
   ctx.strokeStyle = colors.selectionStroke;

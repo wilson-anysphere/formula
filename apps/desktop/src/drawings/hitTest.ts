@@ -1,9 +1,16 @@
-import type { DrawingObject, Rect } from "./types";
+import type { DrawingObject, DrawingTransform, Rect } from "./types";
 import { anchorToRectPx } from "./overlay";
 import type { GridGeometry, Viewport } from "./overlay";
+import { applyTransformVector, inverseTransformVector } from "./transform";
 
 export interface HitTestResult {
   object: DrawingObject;
+  /**
+   * Screen-space bounds (px) for the object's *untransformed* anchor rectangle.
+   *
+   * Callers that want oriented handles/outlines should combine this with
+   * `object.transform`.
+   */
   bounds: Rect;
 }
 
@@ -19,12 +26,20 @@ export interface HitTestIndex {
    */
   ordered: DrawingObject[];
   /**
-   * Sheet-space bounds (px) for each entry in `ordered`.
+   * Untransformed sheet-space bounds (px) for each entry in `ordered`.
    *
-   * These are computed once when the index is built so hit tests avoid repeatedly
-   * calling `anchorToRectPx` on hot paths.
+   * This corresponds to the anchor rectangle before applying DrawingML
+   * rotation/flip transforms.
    */
   bounds: Rect[];
+  /**
+   * Sheet-space AABBs (px) used for spatial bucketing.
+   *
+   * For transformed objects, this expands `bounds[i]` to the axis-aligned bounding
+   * box of the rotated/flipped rectangle, so hit tests can find objects even when
+   * their visible geometry extends beyond the untransformed anchor rectangle.
+   */
+  aabbs: Rect[];
   /**
    * Spatial bins keyed by bucket X then bucket Y.
    *
@@ -68,6 +83,7 @@ export function buildHitTestIndex(
   // Walk from top to bottom (highest zOrder first).
   const ordered = [...objects].sort((a, b) => b.zOrder - a.zOrder);
   const bounds: Rect[] = new Array(ordered.length);
+  const aabbs: Rect[] = new Array(ordered.length);
   const buckets: Map<number, Map<number, number[]>> = new Map();
   const global: number[] = [];
   const byId = new Map<number, number>();
@@ -77,11 +93,13 @@ export function buildHitTestIndex(
     byId.set(obj.id, i);
     const rect = anchorToRectPx(obj.anchor, geom);
     bounds[i] = rect;
+    const aabb = hasNonIdentityTransform(obj.transform) ? rectToAabb(rect, obj.transform!) : rect;
+    aabbs[i] = aabb;
 
-    const x1 = rect.x;
-    const y1 = rect.y;
-    const x2 = rect.x + rect.width;
-    const y2 = rect.y + rect.height;
+    const x1 = aabb.x;
+    const y1 = aabb.y;
+    const x2 = aabb.x + aabb.width;
+    const y2 = aabb.y + aabb.height;
 
     const minBx = Math.floor(x1 / bucketSizePx);
     const maxBx = Math.floor(x2 / bucketSizePx);
@@ -116,7 +134,7 @@ export function buildHitTestIndex(
     }
   }
 
-  return { ordered, bounds, buckets, global, bucketSizePx, geom, byId };
+  return { ordered, bounds, aabbs, buckets, global, bucketSizePx, geom, byId };
 }
 
 function hitTestCandidateIndex(
@@ -148,9 +166,11 @@ function hitTestCandidateIndex(
     if (next === last) continue;
     last = next;
 
+    const obj = index.ordered[next]!;
     const rect = index.bounds[next]!;
+    const aabb = index.aabbs[next]!;
     if (hasFrozenPanes) {
-      const anchor = index.ordered[next]!.anchor;
+      const anchor = obj.anchor;
       const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
       const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
       // Excel-like pane routing: each drawing belongs to exactly one quadrant, so pointer
@@ -158,7 +178,13 @@ function hitTestCandidateIndex(
       if (objInFrozenRows !== inFrozenRows || objInFrozenCols !== inFrozenCols) continue;
     }
 
-    if (pointInRect(sheetX, sheetY, rect)) {
+    if (!pointInRect(sheetX, sheetY, aabb)) continue;
+
+    const hit = hasNonIdentityTransform(obj.transform)
+      ? pointInTransformedRect(sheetX, sheetY, rect, obj.transform!)
+      : true;
+
+    if (hit) {
       return next;
     }
   }
@@ -181,7 +207,6 @@ export function hitTestDrawings(
 
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
   const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
-
   let frozenBoundaryX = headerOffsetX;
   let frozenBoundaryY = headerOffsetY;
 
@@ -302,6 +327,52 @@ export function hitTestDrawingsObject(
   return hitIndex == null ? null : index.ordered[hitIndex]!;
 }
 
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+  if (!transform) return false;
+  return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
+}
+
 function pointInRect(x: number, y: number, rect: Rect): boolean {
   return x >= rect.x && y >= rect.y && x <= rect.x + rect.width && y <= rect.y + rect.height;
+}
+
+function pointInTransformedRect(x: number, y: number, rect: Rect, transform: DrawingTransform): boolean {
+  if (!(rect.width > 0 && rect.height > 0)) return false;
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const local = inverseTransformVector(x - cx, y - cy, transform);
+  const hw = rect.width / 2;
+  const hh = rect.height / 2;
+  return local.x >= -hw && local.x <= hw && local.y >= -hh && local.y <= hh;
+}
+
+function rectToAabb(rect: Rect, transform: DrawingTransform): Rect {
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const hw = rect.width / 2;
+  const hh = rect.height / 2;
+
+  const corners = [
+    applyTransformVector(-hw, -hh, transform),
+    applyTransformVector(hw, -hh, transform),
+    applyTransformVector(hw, hh, transform),
+    applyTransformVector(-hw, hh, transform),
+  ];
+
+  let minX = cx + corners[0]!.x;
+  let maxX = cx + corners[0]!.x;
+  let minY = cy + corners[0]!.y;
+  let maxY = cy + corners[0]!.y;
+
+  for (let i = 1; i < corners.length; i += 1) {
+    const p = corners[i]!;
+    const x = cx + p.x;
+    const y = cy + p.y;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }

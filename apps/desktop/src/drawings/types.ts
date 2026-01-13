@@ -33,6 +33,13 @@ export type DrawingObjectKind =
   | { type: "chart"; chartId?: string; label?: string; relId?: string; rawXml?: string; raw_xml?: string }
   | { type: "unknown"; label?: string; rawXml?: string; raw_xml?: string };
 
+export interface DrawingTransform {
+  /** Clockwise rotation in degrees (DrawingML uses 60000ths of a degree). */
+  rotationDeg: number;
+  flipH: boolean;
+  flipV: boolean;
+}
+
 export interface DrawingObject {
   id: number;
   kind: DrawingObjectKind;
@@ -49,6 +56,8 @@ export interface DrawingObject {
    * - `xlsx.embed_rel_id`
    */
   preserved?: Record<string, string>;
+  /** Optional DrawingML transform metadata (rotation / flips). */
+  transform?: DrawingTransform;
 }
 
 export interface ImageEntry {

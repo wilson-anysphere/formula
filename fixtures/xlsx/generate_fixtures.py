@@ -1231,6 +1231,67 @@ def sheet1_image_rels_xml() -> str:
 """
 
 
+def sheet_rotated_shape_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Rotated shape</t></is></c>
+    </row>
+  </sheetData>
+  <drawing r:id="rId1"/>
+</worksheet>
+"""
+
+
+def sheet1_rotated_shape_rels_xml() -> str:
+    return sheet1_image_rels_xml()
+
+
+def drawing_rotated_shape_xml() -> str:
+    # Minimal drawing with a rotated shape (`xdr:sp`).
+    #
+    # Rotation is expressed in DrawingML's 60000ths-of-a-degree units.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+          xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:oneCellAnchor>
+    <xdr:from>
+      <xdr:col>1</xdr:col>
+      <xdr:colOff>0</xdr:colOff>
+      <xdr:row>2</xdr:row>
+      <xdr:rowOff>0</xdr:rowOff>
+    </xdr:from>
+    <xdr:ext cx="1828800" cy="914400"/>
+    <xdr:sp>
+      <xdr:nvSpPr>
+        <xdr:cNvPr id="2" name="Rotated Shape 1"/>
+        <xdr:cNvSpPr/>
+      </xdr:nvSpPr>
+      <xdr:spPr>
+        <a:xfrm rot="2700000">
+          <a:off x="0" y="0"/>
+          <a:ext cx="1828800" cy="914400"/>
+        </a:xfrm>
+        <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+      </xdr:spPr>
+    </xdr:sp>
+    <xdr:clientData/>
+  </xdr:oneCellAnchor>
+</xdr:wsDr>
+"""
+
+
+def drawing_empty_rels_xml() -> str:
+    # Drawing parts always have a `.rels` sidecar, even if empty.
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>
+"""
+
+
 def drawing_image_xml() -> str:
     return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
@@ -1879,6 +1940,20 @@ def main() -> None:
     )
     write_chart_xlsx(ROOT / "charts" / "basic-chart.xlsx")
     write_image_xlsx(ROOT / "basic" / "image.xlsx")
+    write_xlsx(
+        ROOT / "basic" / "rotated-shape.xlsx",
+        [sheet_rotated_shape_xml()],
+        styles_minimal_xml(),
+        content_types_extra_overrides=[
+            '  <Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>',
+        ],
+        extra_parts={
+            "xl/worksheets/_rels/sheet1.xml.rels": sheet1_rotated_shape_rels_xml(),
+            "xl/drawings/drawing1.xml": drawing_rotated_shape_xml(),
+            "xl/drawings/_rels/drawing1.xml.rels": drawing_empty_rels_xml(),
+        },
+        sheet_names=["Sheet1"],
+    )
     write_image_in_cell_richdata_xlsx(ROOT / "basic" / "image-in-cell-richdata.xlsx")
     write_cellimages_xlsx(ROOT / "basic" / "cellimages.xlsx")
     write_background_image_xlsx(ROOT / "basic" / "background-image.xlsx")

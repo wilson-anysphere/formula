@@ -1,9 +1,10 @@
-import type { AnchorPoint, DrawingObject, Rect } from "./types";
+import type { AnchorPoint, DrawingObject, DrawingTransform, Rect } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
 import { extractXfrmOff, patchXfrmExt, patchXfrmOff } from "./drawingml/patch";
+import { applyTransformVector, inverseTransformVector } from "./transform";
 
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
@@ -77,7 +78,7 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
-        const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY);
+        const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY, selectedObject.transform);
         if (handle) {
           this.canvas.setPointerCapture(e.pointerId);
           this.resizing = {
@@ -102,7 +103,7 @@ export class DrawingInteractionController {
     }
 
     this.canvas.setPointerCapture(e.pointerId);
-    const handle = hitTestResizeHandle(hit.bounds, e.offsetX, e.offsetY);
+    const handle = hitTestResizeHandle(hit.bounds, e.offsetX, e.offsetY, hit.object.transform);
     if (handle) {
       this.resizing = {
         id: hit.object.id,
@@ -132,7 +133,7 @@ export class DrawingInteractionController {
         if (obj.id !== this.resizing!.id) return obj;
         return {
           ...obj,
-          anchor: resizeAnchor(obj.anchor, this.resizing!.handle, dx, dy, this.geom),
+          anchor: resizeAnchor(obj.anchor, this.resizing!.handle, dx, dy, this.geom, obj.transform),
         };
       });
       this.callbacks.setObjects(next);
@@ -225,7 +226,7 @@ export class DrawingInteractionController {
           selectedInFrozenRows === pointInFrozenRows
         ) {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
-          const handle = hitTestResizeHandle(bounds, x, y);
+          const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
           if (handle) {
             this.canvas.style.cursor = cursorForResizeHandle(handle);
             return;
@@ -332,6 +333,7 @@ export function resizeAnchor(
   dxPx: number,
   dyPx: number,
   geom: GridGeometry,
+  transform?: DrawingTransform,
 ): DrawingObject["anchor"] {
   const rect =
     anchor.type === "absolute"
@@ -359,54 +361,114 @@ export function resizeAnchor(
 
   let { left, top, right, bottom } = rect;
 
-  switch (handle) {
-    case "se":
-      right += dxPx;
-      bottom += dyPx;
-      break;
-    case "nw":
-      left += dxPx;
-      top += dyPx;
-      break;
-    case "ne":
-      right += dxPx;
-      top += dyPx;
-      break;
-    case "sw":
-      left += dxPx;
-      bottom += dyPx;
-      break;
-    case "e":
-      right += dxPx;
-      break;
-    case "w":
-      left += dxPx;
-      break;
-    case "s":
-      bottom += dyPx;
-      break;
-    case "n":
-      top += dyPx;
-      break;
-  }
-
   const movesLeftEdge = handle === "nw" || handle === "w" || handle === "sw";
   const movesTopEdge = handle === "nw" || handle === "n" || handle === "ne";
+  const movesRightEdge = handle === "ne" || handle === "e" || handle === "se";
+  const movesBottomEdge = handle === "sw" || handle === "s" || handle === "se";
 
-  // Prevent negative widths/heights by clamping the moved edges against the
-  // fixed ones. This keeps the opposite edge stationary.
-  if (right < left) {
-    if (movesLeftEdge) {
-      left = right;
-    } else {
-      right = left;
+  if (hasNonIdentityTransform(transform)) {
+    // Convert pointer movement into the shape's local coordinate system (pre-rotation).
+    let localDelta = inverseTransformVector(dxPx, dyPx, transform!);
+
+    // Edge handles resize along a single local axis: ignore perpendicular movement.
+    if (handle === "e" || handle === "w") {
+      localDelta = { x: localDelta.x, y: 0 };
+    } else if (handle === "n" || handle === "s") {
+      localDelta = { x: 0, y: localDelta.y };
     }
-  }
-  if (bottom < top) {
-    if (movesTopEdge) {
-      top = bottom;
-    } else {
-      bottom = top;
+
+    const width = right - left;
+    const height = bottom - top;
+    const hw = width / 2;
+    const hh = height / 2;
+    const cx = left + hw;
+    const cy = top + hh;
+
+    let localLeft = -hw;
+    let localRight = hw;
+    let localTop = -hh;
+    let localBottom = hh;
+
+    if (movesLeftEdge) localLeft += localDelta.x;
+    if (movesRightEdge) localRight += localDelta.x;
+    if (movesTopEdge) localTop += localDelta.y;
+    if (movesBottomEdge) localBottom += localDelta.y;
+
+    // Clamp against negative widths/heights while keeping the opposite edge stationary.
+    if (localRight < localLeft) {
+      if (movesLeftEdge) {
+        localLeft = localRight;
+      } else {
+        localRight = localLeft;
+      }
+    }
+    if (localBottom < localTop) {
+      if (movesTopEdge) {
+        localTop = localBottom;
+      } else {
+        localBottom = localTop;
+      }
+    }
+
+    const nextWidth = Math.max(0, localRight - localLeft);
+    const nextHeight = Math.max(0, localBottom - localTop);
+    const localCenterShift = { x: (localLeft + localRight) / 2, y: (localTop + localBottom) / 2 };
+    const worldCenterShift = applyTransformVector(localCenterShift.x, localCenterShift.y, transform!);
+
+    const nextCx = cx + worldCenterShift.x;
+    const nextCy = cy + worldCenterShift.y;
+
+    left = nextCx - nextWidth / 2;
+    right = nextCx + nextWidth / 2;
+    top = nextCy - nextHeight / 2;
+    bottom = nextCy + nextHeight / 2;
+  } else {
+    switch (handle) {
+      case "se":
+        right += dxPx;
+        bottom += dyPx;
+        break;
+      case "nw":
+        left += dxPx;
+        top += dyPx;
+        break;
+      case "ne":
+        right += dxPx;
+        top += dyPx;
+        break;
+      case "sw":
+        left += dxPx;
+        bottom += dyPx;
+        break;
+      case "e":
+        right += dxPx;
+        break;
+      case "w":
+        left += dxPx;
+        break;
+      case "s":
+        bottom += dyPx;
+        break;
+      case "n":
+        top += dyPx;
+        break;
+    }
+
+    // Prevent negative widths/heights by clamping the moved edges against the
+    // fixed ones. This keeps the opposite edge stationary.
+    if (right < left) {
+      if (movesLeftEdge) {
+        left = right;
+      } else {
+        right = left;
+      }
+    }
+    if (bottom < top) {
+      if (movesTopEdge) {
+        top = bottom;
+      } else {
+        bottom = top;
+      }
     }
   }
 
@@ -443,6 +505,11 @@ export function resizeAnchor(
 function anchorPointToSheetPx(point: AnchorPoint, geom: GridGeometry): { x: number; y: number } {
   const origin = geom.cellOriginPx(point.cell);
   return { x: origin.x + emuToPx(point.offset.xEmu), y: origin.y + emuToPx(point.offset.yEmu) };
+}
+
+function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
+  if (!transform) return false;
+  return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
 }
 
 const MAX_CELL_STEPS = 10_000;

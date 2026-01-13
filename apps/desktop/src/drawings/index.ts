@@ -6,3 +6,4 @@ export * from "./interaction";
 export * from "./insertImage";
 export * from "./modelAdapters";
 export * from "./duplicate";
+export * from "./transform";
