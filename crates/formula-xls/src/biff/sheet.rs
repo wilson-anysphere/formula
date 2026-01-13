@@ -11,6 +11,13 @@ use formula_model::{
 use super::records;
 use super::strings;
 
+/// Hard cap on the number of per-cell XF indices tracked per worksheet.
+///
+/// Worksheet cell-record scans may encounter large numbers of formatted-but-empty
+/// cells (notably `BLANK`/`MULBLANK`). Without a cap a crafted workbook can force
+/// unbounded `HashMap<CellRef, u16>` allocations, risking OOM.
+const MAX_CELL_XF_ENTRIES_PER_SHEET: usize = 1_000_000;
+
 // Record ids used by worksheet parsing.
 // See [MS-XLS] sections:
 // - ROW: 2.4.184
@@ -1850,24 +1857,46 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
     start: usize,
     xf_is_interesting: Option<&[bool]>,
 ) -> Result<HashMap<CellRef, u16>, String> {
+    parse_biff_sheet_cell_xf_indices_filtered_with_cap(
+        workbook_stream,
+        start,
+        xf_is_interesting,
+        MAX_CELL_XF_ENTRIES_PER_SHEET,
+    )
+}
+
+fn parse_biff_sheet_cell_xf_indices_filtered_with_cap(
+    workbook_stream: &[u8],
+    start: usize,
+    xf_is_interesting: Option<&[bool]>,
+    max_entries: usize,
+) -> Result<HashMap<CellRef, u16>, String> {
     let mut out = HashMap::new();
 
-    let mut maybe_insert = |row: u32, col: u32, xf: u16| {
+    let mut maybe_insert = |row: u32, col: u32, xf: u16| -> Result<(), String> {
         if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-            return;
+            return Ok(());
         }
+        let cell = CellRef::new(row, col);
         if let Some(mask) = xf_is_interesting {
             let idx = xf as usize;
             // Retain out-of-range XF indices so callers can surface an aggregated warning.
             if idx >= mask.len() {
-                out.insert(CellRef::new(row, col), xf);
-                return;
+                if out.len() >= max_entries && !out.contains_key(&cell) {
+                    return Err("too many cell XF entries; refusing to allocate".to_string());
+                }
+                out.insert(cell, xf);
+                return Ok(());
             }
             if !mask[idx] {
-                return;
+                return Ok(());
             }
         }
-        out.insert(CellRef::new(row, col), xf);
+        if out.len() >= max_entries && !out.contains_key(&cell) {
+            return Err("too many cell XF entries; refusing to allocate".to_string());
+        }
+        out.insert(cell, xf);
+        Ok(())
     };
 
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
@@ -1885,7 +1914,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let col = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let xf = u16::from_le_bytes([data[4], data[5]]);
-                maybe_insert(row, col, xf);
+                maybe_insert(row, col, xf)?;
             }
             // MULRK [MS-XLS 2.4.141]
             RECORD_MULRK => {
@@ -1906,7 +1935,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                         break;
                     }
                     let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    maybe_insert(row, col, xf);
+                    maybe_insert(row, col, xf)?;
                 }
             }
             // MULBLANK [MS-XLS 2.4.140]
@@ -1928,7 +1957,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
                         break;
                     }
                     let xf = u16::from_le_bytes([chunk[0], chunk[1]]);
-                    maybe_insert(row, col, xf);
+                    maybe_insert(row, col, xf)?;
                 }
             }
             // EOF terminates the sheet substream.
@@ -2940,6 +2969,30 @@ mod tests {
         .concat();
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(4, 4)).copied(), Some(6));
+    }
+
+    #[test]
+    fn cell_xf_scan_refuses_to_allocate_unbounded_maps() {
+        // Use a small cap so the test runs quickly and without large allocations.
+        let cap = 10usize;
+
+        let mut parts = Vec::new();
+        for row in 0..(cap as u16 + 1) {
+            let mut data = Vec::new();
+            data.extend_from_slice(&row.to_le_bytes()); // row
+            data.extend_from_slice(&0u16.to_le_bytes()); // col
+            data.extend_from_slice(&1u16.to_le_bytes()); // xf
+            parts.push(record(RECORD_BLANK, &data));
+        }
+        parts.push(record(records::RECORD_EOF, &[]));
+        let stream = parts.concat();
+
+        let err = parse_biff_sheet_cell_xf_indices_filtered_with_cap(&stream, 0, None, cap)
+            .expect_err("expected cap error");
+        assert!(
+            err.contains("too many cell XF entries"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
