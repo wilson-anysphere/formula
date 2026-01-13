@@ -85,7 +85,7 @@ describe("Ribbon icon rendering", () => {
       await Promise.resolve();
     });
 
-    const freezeTopRow = container.querySelector<HTMLButtonElement>('[data-command-id="view.window.freezePanes.freezeTopRow"]');
+    const freezeTopRow = container.querySelector<HTMLButtonElement>('[data-command-id="view.freezeTopRow"]');
     expect(freezeTopRow).toBeInstanceOf(HTMLButtonElement);
     expect(freezeTopRow?.querySelector(".ribbon-dropdown__icon svg")).toBeInstanceOf(SVGSVGElement);
 

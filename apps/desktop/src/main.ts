@@ -9598,21 +9598,11 @@ mountRibbon(ribbonReactRoot, {
       case "pageLayout.export.exportPdf":
         void handleRibbonExportPdf();
         return;
-      case "view.window.freezePanes.freezePanes":
-        app.freezePanes();
-        app.focus();
-        return;
-      case "view.window.freezePanes.freezeTopRow":
-        app.freezeTopRow();
-        app.focus();
-        return;
-      case "view.window.freezePanes.freezeFirstColumn":
-        app.freezeFirstColumn();
-        app.focus();
-        return;
-      case "view.window.freezePanes.unfreeze":
-        app.unfreezePanes();
-        app.focus();
+      case "view.freezePanes":
+      case "view.freezeTopRow":
+      case "view.freezeFirstColumn":
+      case "view.unfreezePanes":
+        executeBuiltinCommand(commandId);
         return;
       case "view.appearance.theme.system":
         themeController.setThemePreference("system");
