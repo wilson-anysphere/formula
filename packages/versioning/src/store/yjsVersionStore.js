@@ -447,6 +447,7 @@ export class YjsVersionStore {
     const compression = this.compression;
     const snapshotBytes = await compressSnapshot(snapshot, compression);
     const desiredSnapshotEncoding = this.writeMode === "stream" ? "chunks" : this.snapshotEncoding;
+    const createdAtMs = Date.now();
 
     if (this.writeMode !== "stream") {
       this.doc.transact(() => {
@@ -461,6 +462,7 @@ export class YjsVersionStore {
         record.set("id", version.id);
         record.set("kind", version.kind);
         record.set("timestampMs", version.timestampMs);
+        record.set("createdAtMs", createdAtMs);
         record.set("userId", version.userId ?? null);
         record.set("userName", version.userName ?? null);
         record.set("description", version.description ?? null);
@@ -505,6 +507,7 @@ export class YjsVersionStore {
         record.set("id", version.id);
         record.set("kind", version.kind);
         record.set("timestampMs", version.timestampMs);
+        record.set("createdAtMs", createdAtMs);
         record.set("userId", version.userId ?? null);
         record.set("userName", version.userName ?? null);
         record.set("description", version.description ?? null);
@@ -536,6 +539,7 @@ export class YjsVersionStore {
       r.set("id", version.id);
       r.set("kind", version.kind);
       r.set("timestampMs", version.timestampMs);
+      r.set("createdAtMs", createdAtMs);
       r.set("userId", version.userId ?? null);
       r.set("userName", version.userName ?? null);
       r.set("description", version.description ?? null);
@@ -657,9 +661,77 @@ export class YjsVersionStore {
   }
 
   /**
+   * Best-effort cleanup for partially-written streamed version records.
+   *
+   * Streaming `saveVersion()` writes create a record with `snapshotComplete=false`
+   * and then append snapshot chunks across multiple Yjs transactions. If the
+   * writer crashes, these incomplete records remain in the Y.Doc but are hidden
+   * from callers (`getVersion()` returns null, `listVersions()` drops them).
+   *
+   * Because callers don't see them, retention policies may never delete them.
+   * This method deletes *stale* incomplete records so they don't accumulate
+   * indefinitely.
+   *
+   * @param {{ olderThanMs?: number }} [opts]
+   * @returns {Promise<{ prunedIds: string[] }>}
+   */
+  async pruneIncompleteVersions(opts) {
+    const olderThanMs = opts?.olderThanMs ?? 10 * 60 * 1000;
+    const nowMs = Date.now();
+
+    /** @type {Set<string>} */
+    const staleIds = new Set();
+
+    this.versions.forEach((value, key) => {
+      if (typeof key !== "string") return;
+      if (!isYMap(value)) return;
+      if (value.get("snapshotComplete") !== false) return;
+
+      // Prefer `createdAtMs` if present (newer schema), falling back to the
+      // version timestamp for backwards compatibility.
+      const createdAtMs = value.get("createdAtMs");
+      const ts =
+        typeof createdAtMs === "number"
+          ? createdAtMs
+          : typeof value.get("timestampMs") === "number"
+            ? value.get("timestampMs")
+            : 0;
+
+      if (nowMs - ts >= olderThanMs) staleIds.add(key);
+    });
+
+    if (staleIds.size === 0) return { prunedIds: [] };
+
+    const prunedIds = Array.from(staleIds);
+    this.doc.transact(() => {
+      for (const id of staleIds) this.versions.delete(id);
+
+      const order = this.meta.get("order");
+      if (!isYArray(order)) return;
+      for (let i = order.length - 1; i >= 0; i -= 1) {
+        const id = order.get(i);
+        if (typeof id === "string" && staleIds.has(id)) {
+          order.delete(i, 1);
+        }
+      }
+    }, "versioning-store");
+
+    return { prunedIds };
+  }
+
+  /**
    * @returns {Promise<VersionRecord[]>}
    */
   async listVersions() {
+    // Opportunistically clean up stale partial streamed versions. This is
+    // best-effort; `listVersions()` should still work even if the cleanup hits
+    // unexpected schema/cross-instance issues.
+    try {
+      await this.pruneIncompleteVersions();
+    } catch {
+      // ignore
+    }
+
     /** @type {string[]} */
     const ids = [];
     this.versions.forEach((_value, key) => {
