@@ -557,20 +557,37 @@ CI guardrails (tagged releases):
 - `bash scripts/ci/linux-package-install-smoke.sh deb` installs the `.deb` into a clean Ubuntu container and fails if
   `ldd /usr/bin/formula-desktop` reports missing shared libraries.
 
-## Linux: `.rpm` runtime dependencies (Fedora/RHEL-family)
+## Linux: `.rpm` runtime dependencies (Fedora/RHEL-family + openSUSE)
 
 For RPM-based distros (Fedora/RHEL/CentOS derivatives), the same GTK3/WebKitGTK/AppIndicator stack
 must be present at runtime.
 
 These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` under
-`bundle.linux.rpm.depends` (Fedora package names; other RPM distros may differ):
+`bundle.linux.rpm.depends`.
 
-- `webkit2gtk4.1` – WebKitGTK system WebView used by Tauri on Linux (Fedora). Some RHEL-family
-  distros ship WebKitGTK 4.0 as `webkit2gtk3` and may not be compatible with this build.
-- `gtk3` – GTK3 (windowing/event loop; also required by WebKitGTK).
-- `(libayatana-appindicator-gtk3 or libappindicator-gtk3)` – tray icon backend.
-- `librsvg2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
-- `openssl-libs` – OpenSSL runtime libraries required by native dependencies in the Tauri stack.
+We use **RPM rich dependencies** (`(a or b)`) so the RPM declares correct runtime requirements across
+common RPM families (Fedora/RHEL vs openSUSE), which sometimes use different package names for the
+same shared libraries.
+
+Effective package names (varies by distro):
+
+- WebKitGTK 4.1 runtime:
+  - Fedora/RHEL: `webkit2gtk4.1`
+  - openSUSE: `libwebkit2gtk-4_1-0`
+  - Note: some RHEL-family distros ship WebKitGTK 4.0 as `webkit2gtk3` and may not be compatible
+    with this build.
+- GTK3 runtime:
+  - Fedora/RHEL: `gtk3`
+  - openSUSE: `libgtk-3-0`
+- AppIndicator/Ayatana tray backend:
+  - Fedora/RHEL: `libayatana-appindicator-gtk3` or `libappindicator-gtk3`
+  - openSUSE: `libayatana-appindicator3-1` or `libappindicator3-1`
+- librsvg runtime:
+  - Fedora/RHEL: `librsvg2`
+  - openSUSE: `librsvg-2-2`
+- OpenSSL runtime:
+  - Fedora/RHEL: `openssl-libs`
+  - openSUSE: `libopenssl3`
 
 Note: the AppIndicator dependency is expressed using RPM “rich dependency” syntax (`(A or B)`).
 This requires a modern RPM stack (rpm ≥ 4.12). On older RPM-based distros, prefer the `.AppImage`.

@@ -255,8 +255,10 @@ Notable keys:
   - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
-- `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros (e.g. `webkit2gtk4.1`, `gtk3`,
-  `(libayatana-appindicator-gtk3 or libappindicator-gtk3)`, `librsvg2`, `openssl-libs`).
+- `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros using **RPM rich dependencies**
+  (e.g. `(webkit2gtk4.1 or libwebkit2gtk-4_1-0)`, `(gtk3 or libgtk-3-0)`,
+  `((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))`,
+  `(librsvg2 or librsvg-2-2)`, `(openssl-libs or libopenssl3)`).
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
   - `bundle.macOS.entitlements` points at `apps/desktop/src-tauri/entitlements.plist`.
     - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.

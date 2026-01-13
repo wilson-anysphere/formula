@@ -108,11 +108,11 @@
       },
       "rpm": {
         "depends": [
-          "webkit2gtk4.1",
-          "gtk3",
-          "(libayatana-appindicator-gtk3 or libappindicator-gtk3)",
-          "librsvg2",
-          "openssl-libs"
+          "(webkit2gtk4.1 or libwebkit2gtk-4_1-0)",
+          "(gtk3 or libgtk-3-0)",
+          "((libayatana-appindicator-gtk3 or libappindicator-gtk3) or (libayatana-appindicator3-1 or libappindicator3-1))",
+          "(librsvg2 or librsvg-2-2)",
+          "(openssl-libs or libopenssl3)"
         ]
       }
     },
