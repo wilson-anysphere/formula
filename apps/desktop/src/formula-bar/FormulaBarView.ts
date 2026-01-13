@@ -753,7 +753,7 @@ export class FormulaBarView {
 
     textarea.addEventListener("focus", () => this.#beginEditFromFocus());
     textarea.addEventListener("input", () => this.#onInputOrSelection());
-    textarea.addEventListener("mousedown", () => this.#onTextareaMouseDown());
+    textarea.addEventListener("mousedown", (e) => this.#onTextareaMouseDown(e));
     textarea.addEventListener("click", () => this.#onTextareaClick());
     textarea.addEventListener("keyup", () => this.#onInputOrSelection());
     textarea.addEventListener("select", () => this.#onInputOrSelection());
@@ -1118,8 +1118,14 @@ export class FormulaBarView {
     this.#scheduleEngineTooling();
   }
 
-  #onTextareaMouseDown(): void {
+  #onTextareaMouseDown(e: MouseEvent): void {
     if (!this.model.isEditing) return;
+    // Only track click-to-select toggle state for primary-button interactions.
+    // (Right-click/context menu can fire mousedown without a corresponding click.)
+    if (e.button !== 0) {
+      this.#mouseDownSelectedReferenceIndex = null;
+      return;
+    }
 
     // Clicking a textarea can collapse an existing selection *before* the `click` event
     // fires (often emitting a `select` event in between). Capture whether a full
@@ -1436,6 +1442,7 @@ export class FormulaBarView {
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#callbacks.onCancel?.();
     this.#emitOverlays();
@@ -1451,6 +1458,7 @@ export class FormulaBarView {
     this.#hoverOverride = null;
     this.#hoverOverrideText = null;
     this.#selectedReferenceIndex = null;
+    this.#mouseDownSelectedReferenceIndex = null;
     this.#render({ preserveTextareaValue: false });
     this.#callbacks.onCommit(committed, commit);
     this.#emitOverlays();
