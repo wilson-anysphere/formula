@@ -18,6 +18,7 @@ use desktop::open_file_ipc::OpenFileState;
 use desktop::oauth_redirect_ipc::OauthRedirectState;
 #[cfg(target_os = "macos")]
 use desktop::opened_urls;
+use desktop::process_metrics;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
@@ -882,6 +883,9 @@ fn main() {
     let oauth_loopback_state: SharedOauthLoopbackState =
         Arc::new(Mutex::new(OauthLoopbackState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
+    if initial_argv.iter().any(|arg| arg == "--log-process-metrics") {
+        process_metrics::log_process_metrics();
+    }
     let initial_cwd = std::env::current_dir().ok();
     let initial_paths = normalize_open_file_request_paths(extract_open_file_paths(
         &initial_argv,

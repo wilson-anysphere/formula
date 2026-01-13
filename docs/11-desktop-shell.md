@@ -628,6 +628,7 @@ The command list is large; below are the “core” ones most contributors will 
   - `quit_app` (hard-exits the process; used by the tray/menu quit flow)
   - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so Tauri/plugins can shut down cleanly)
   - `--cross-origin-isolation-check` (special CLI mode; exits with 0/1 based on `crossOriginIsolated` + `SharedArrayBuffer`)
+  - `--log-process-metrics` (prints a one-line host process snapshot: `[metrics] rss_mb=<n> pid=<pid>`)
 
 Note: `quit_app` intentionally hard-exits (`std::process::exit(0)`) to avoid re-entering the hide-to-tray close handler.
 For update-driven restarts prefer `restart_app` (graceful).

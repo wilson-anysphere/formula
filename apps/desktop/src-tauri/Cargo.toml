@@ -29,6 +29,7 @@ desktop = [
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-shell",
     "dep:tauri-plugin-updater",
+    "process-metrics",
     # Clipboard integrations on Linux may rely on GTK (system) libraries. Keep them
     # behind the `desktop` feature so backend unit tests can run headless without
     # a GTK/WebKit toolchain installed.
@@ -49,6 +50,7 @@ desktop = [
 # This is kept behind an opt-in feature so default backend unit tests stay
 # lightweight (Arrow/Parquet pulls in a larger dependency surface).
 parquet = ["formula-columnar/arrow"]
+process-metrics = ["dep:sysinfo"]
 
 [dependencies]
 anyhow = "1.0"
@@ -74,6 +76,7 @@ formula-xlsx = { path = "../../../crates/formula-xlsx" }
 pkcs8 = { version = "0.10", features = ["pem"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sysinfo = { version = "0.30", optional = true }
 tempfile = "3.10"
 tokio = { version = "1.38", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 url = "2.5"
