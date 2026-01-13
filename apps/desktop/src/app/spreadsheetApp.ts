@@ -12463,8 +12463,11 @@ export class SpreadsheetApp {
       let changed = false;
       let failed = false;
 
-      const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[#All\],\[([^\]]+)\]\]/gi;
-      const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)([^\]]+)\]/gi;
+      // Match the same supported patterns as `parseStructuredReferenceText`:
+      // - `TableName[ColumnName]`
+      // - `TableName[[#All],[ColumnName]]`
+      const allPattern = /([A-Za-z_][A-Za-z0-9_.]*)\[\[\s*#all\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]/gi;
+      const simplePattern = /([A-Za-z_][A-Za-z0-9_.]*)\[(?!\[)\s*([^\[\]]+?)\s*\]/gi;
 
       const rewriteSegment = (segment: string): string => {
         let out = segment;
