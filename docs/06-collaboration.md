@@ -258,9 +258,9 @@ When the token is a JWT, the desktop app **decodes the JWT payload without verif
 
 - `sub` → used as:
   - the `PresenceManager` user id (so presence ids match what the sync-server will enforce), and
-  - `CollabSession.setPermissions({ userId })` (so `modifiedBy` metadata attribution is stable).
-- `role` → forwarded to `CollabSession.setPermissions({ role })`
-- `rangeRestrictions` → forwarded to `CollabSession.setPermissions({ rangeRestrictions })`
+  - forwarded as `userId` in `CollabSession.setPermissions(...)` (so `modifiedBy` metadata attribution is stable).
+- `role` → forwarded as `role` in `CollabSession.setPermissions(...)`
+- `rangeRestrictions` → forwarded as `rangeRestrictions` in `CollabSession.setPermissions(...)`
 
 This decode is intentionally best-effort and does **not** replace server-side verification/authorization. The sync-server is the source of truth; the desktop decode exists so the UI can:
 
