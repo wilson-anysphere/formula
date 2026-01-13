@@ -269,12 +269,11 @@ async function main() {
 
   // At minimum (per platform requirements). We allow a couple of aliases in case Tauri changes
   // how it formats target identifiers in the updater JSON.
+  const macUniversalKeys = ["darwin-universal", "universal-apple-darwin"];
+  const macX64Keys = ["darwin-x86_64", "x86_64-apple-darwin"];
+  const macArm64Keys = ["darwin-aarch64", "aarch64-apple-darwin"];
+
   const expectedTargets = [
-    {
-      id: "darwin-universal",
-      label: "macOS (universal)",
-      keys: ["darwin-universal", "universal-apple-darwin"],
-    },
     {
       id: "windows-x86_64",
       label: "Windows (x86_64)",
@@ -500,7 +499,7 @@ async function main() {
 
   /** @type {Array<{ target: string; url: string; assetName: string }>} */
   const missingAssets = [];
-  /** @type {Array<{ label: string; expectedKeys: string[] }>} */
+  /** @type {Array<{ label: string; expectation: string }>} */
   const missingTargets = [];
   /** @type {Array<{ target: string; message: string }>} */
   const invalidTargets = [];
@@ -655,10 +654,78 @@ async function main() {
     /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
     const summaryRows = [];
 
+    // macOS: either a dedicated universal key is present, OR both per-arch keys exist.
+    const macUniversalKey = macUniversalKeys.find((k) =>
+      Object.prototype.hasOwnProperty.call(platforms, k),
+    );
+    const macUniversalValidatedKey = macUniversalKeys.find((k) => validatedByTarget.has(k));
+
+    if (macUniversalKey && !macUniversalValidatedKey) {
+      // Key exists but was invalid; the invalid entry error should be enough, but keep the
+      // missing-target message actionable about what we were expecting.
+      missingTargets.push({
+        label: "macOS (universal)",
+        expectation: `expected a valid universal entry (${macUniversalKeys.map((k) => JSON.stringify(k)).join(", ")}) or both per-arch entries (${macX64Keys[0]} + ${macArm64Keys[0]}).`,
+      });
+    } else if (macUniversalValidatedKey) {
+      const validated = validatedByTarget.get(macUniversalValidatedKey);
+      if (validated) {
+        summaryRows.push({
+          label: "macOS (universal)",
+          key: macUniversalValidatedKey,
+          url: validated.url,
+          assetName: validated.assetName,
+        });
+      }
+    } else {
+      const macX64Key = macX64Keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
+      const macArm64Key = macArm64Keys.find((k) =>
+        Object.prototype.hasOwnProperty.call(platforms, k),
+      );
+
+      const macX64ValidatedKey = macX64Keys.find((k) => validatedByTarget.has(k));
+      const macArm64ValidatedKey = macArm64Keys.find((k) => validatedByTarget.has(k));
+
+      if (!macX64Key || !macArm64Key) {
+        missingTargets.push({
+          label: "macOS (universal)",
+          expectation: `expected ${macUniversalKeys.map((k) => JSON.stringify(k)).join(" or ")} or both ${macX64Keys.map((k) => JSON.stringify(k)).join(" / ")} and ${macArm64Keys.map((k) => JSON.stringify(k)).join(" / ")}.`,
+        });
+      } else if (!macX64ValidatedKey || !macArm64ValidatedKey) {
+        // Keys exist but at least one was invalid.
+        missingTargets.push({
+          label: "macOS (universal)",
+          expectation: `expected valid per-arch entries for both macOS x86_64 and arm64 (found ${JSON.stringify(macX64Key)} and ${JSON.stringify(macArm64Key)}).`,
+        });
+      } else {
+        const validatedX64 = validatedByTarget.get(macX64ValidatedKey);
+        const validatedArm64 = validatedByTarget.get(macArm64ValidatedKey);
+        if (validatedX64) {
+          summaryRows.push({
+            label: "macOS (x86_64)",
+            key: macX64ValidatedKey,
+            url: validatedX64.url,
+            assetName: validatedX64.assetName,
+          });
+        }
+        if (validatedArm64) {
+          summaryRows.push({
+            label: "macOS (arm64)",
+            key: macArm64ValidatedKey,
+            url: validatedArm64.url,
+            assetName: validatedArm64.assetName,
+          });
+        }
+      }
+    }
+
     for (const expected of expectedTargets) {
       const foundKey = expected.keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
       if (!foundKey) {
-        missingTargets.push({ label: expected.label, expectedKeys: expected.keys });
+        missingTargets.push({
+          label: expected.label,
+          expectation: `expected one of: ${expected.keys.map((k) => JSON.stringify(k)).join(", ")}`,
+        });
         continue;
       }
 
@@ -676,7 +743,12 @@ async function main() {
     }
 
     // Print additional targets (if any) in the success summary.
-    const expectedKeySet = new Set(expectedTargets.flatMap((t) => t.keys));
+    const expectedKeySet = new Set([
+      ...macUniversalKeys,
+      ...macX64Keys,
+      ...macArm64Keys,
+      ...expectedTargets.flatMap((t) => t.keys),
+    ]);
     const otherTargets = validatedTargets
       .filter((t) => !expectedKeySet.has(t.target))
       .sort((a, b) => a.target.localeCompare(b.target));
@@ -728,10 +800,7 @@ async function main() {
     errors.push(
       [
         `Missing required platform targets in latest.json:`,
-        ...missingTargets.map(
-          (t) =>
-            `  - ${t.label} (expected one of: ${t.expectedKeys.map((k) => JSON.stringify(k)).join(", ")})`,
-        ),
+        ...missingTargets.map((t) => `  - ${t.label} (${t.expectation})`),
       ].join("\n"),
     );
   }
