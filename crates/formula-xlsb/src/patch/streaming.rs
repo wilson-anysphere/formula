@@ -299,9 +299,21 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
-                            changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::NUM => {
@@ -309,15 +321,37 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
-                            changed = true;
-                            super::patch_rk_cell(&mut writer, col, style_out, &payload, edit)?;
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_rk_cell(&mut writer, col, style_out, &payload, edit)?;
+                            }
                         }
                     }
                     biff12::STRING => {
                         if super::value_edit_is_noop_shared_string(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else if let (CellValue::Text(_), Some(isst)) =
                             (&edit.new_value, edit.shared_string_index)
                         {
@@ -358,9 +392,21 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
-                            changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::BOOL => {
@@ -368,9 +414,21 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
-                            changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::BOOLERR => {
@@ -378,9 +436,21 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
-                            super::reject_formula_payload_edit(edit, row, col)?;
-                            changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::BLANK => {
@@ -388,15 +458,39 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
                         } else {
+                            if edit.new_formula.is_some() {
+                                changed = true;
+                                super::convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    &payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                super::reject_formula_payload_edit(edit, row, col)?;
+                                changed = true;
+                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
+                        }
+                    }
+                    _ => {
+                        if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
+                        } else {
                             super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
                             super::patch_value_cell(&mut writer, col, style_out, edit)?;
                         }
-                    }
-                    _ => {
-                        super::reject_formula_payload_edit(edit, row, col)?;
-                        changed = true;
-                        super::patch_value_cell(&mut writer, col, style_out, edit)?;
                     }
                 }
             }

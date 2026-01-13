@@ -460,29 +460,64 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_float(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::NUM => {
                         if value_edit_is_noop_rk(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_rk_cell(&mut writer, col, style_out, payload, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_rk_cell(&mut writer, col, style_out, payload, edit)?;
+                            }
                         }
                     }
                     biff12::CELL_ST => {
                         if value_edit_is_noop_inline_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::STRING => {
                         if value_edit_is_noop_shared_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(&mut writer, id, payload, col, style_out, edit)?;
                         } else if let (CellValue::Text(_), Some(isst)) =
                             (&edit.new_value, edit.shared_string_index)
                         {
@@ -519,29 +554,73 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if value_edit_is_noop_bool(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::BOOLERR => {
                         if value_edit_is_noop_error(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     biff12::BLANK => {
                         if value_edit_is_noop_blank(style, edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            if edit.new_formula.is_some() {
+                                convert_value_record_to_formula(
+                                    &mut writer,
+                                    id,
+                                    payload,
+                                    col,
+                                    style_out,
+                                    edit,
+                                )?;
+                            } else {
+                                reject_formula_payload_edit(edit, row, col)?;
+                                patch_value_cell(&mut writer, col, style_out, edit)?;
+                            }
                         }
                     }
                     _ => {
-                        reject_formula_payload_edit(edit, row, col)?;
-                        patch_value_cell(&mut writer, col, style_out, edit)?;
+                        if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
+                        } else {
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                        }
                     }
                 }
             }
@@ -984,6 +1063,17 @@ fn write_new_cell_record<W: io::Write>(
 ) -> Result<(), Error> {
     let style = edit.new_style.unwrap_or(0u32);
     let rgcb = edit.new_rgcb.as_deref().unwrap_or(&[]);
+    if let Some(rgce) = edit.new_formula.as_deref() {
+        if rgcb.is_empty() && rgce_references_rgcb(rgce) {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "formula update for cell at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
+                    edit.row, edit.col
+                ),
+            )));
+        }
+    }
     match (&edit.new_formula, &edit.new_value) {
         (Some(rgce), CellValue::Number(v)) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
         (Some(rgce), CellValue::Bool(v)) => write_new_fmla_bool(writer, col, style, *v, rgce, rgcb),
@@ -1236,6 +1326,95 @@ fn reject_formula_payload_edit(edit: &CellEdit, row: u32, col: u32) -> Result<()
         io::ErrorKind::InvalidInput,
         format!("attempted to set {kind} for non-formula cell at ({row}, {col})"),
     )))
+}
+
+fn value_record_expected_payload_len(record_id: u32, payload: &[u8]) -> Result<usize, Error> {
+    match record_id {
+        biff12::BLANK => Ok(8),
+        biff12::BOOL | biff12::BOOLERR => Ok(9),
+        biff12::NUM | biff12::STRING => Ok(12),
+        biff12::FLOAT => Ok(16),
+        biff12::CELL_ST => {
+            if payload.len() < 12 {
+                return Err(Error::UnexpectedEof);
+            }
+
+            // BrtCellSt has two observed layouts:
+            // - Simple: [col][style][cch][utf16 chars...]
+            // - Flagged: [col][style][cch][flags:u8][utf16 chars...][optional rich/phonetic...]
+            let cch = read_u32(payload, 8)? as usize;
+            let utf16_len = cch.checked_mul(2).ok_or(Error::UnexpectedEof)?;
+            let expected_simple = 12usize.checked_add(utf16_len).ok_or(Error::UnexpectedEof)?;
+            if payload.len() == expected_simple {
+                return Ok(expected_simple);
+            }
+
+            let ws = parse_wide_string_offsets(payload, 8, FlagsWidth::U8)?;
+            Ok(ws.end)
+        }
+        _ => Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported value record type 0x{record_id:04X}"),
+        ))),
+    }
+}
+
+fn convert_value_record_to_formula<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    record_id: u32,
+    payload: &[u8],
+    col: u32,
+    style: u32,
+    edit: &CellEdit,
+) -> Result<(), Error> {
+    let Some(rgce) = edit.new_formula.as_deref() else {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "convert_value_record_to_formula called without edit.new_formula",
+        )));
+    };
+
+    // Value-record payloads are fully specified by the MS-XLSB spec. If we encounter unexpected
+    // trailing bytes, do not drop them silently when converting the record type — require the
+    // caller to explicitly provide `new_rgcb` to confirm the replacement.
+    let expected_len = value_record_expected_payload_len(record_id, payload)?;
+    if payload.len() < expected_len {
+        return Err(Error::UnexpectedEof);
+    }
+    if payload.len() > expected_len && edit.new_rgcb.is_none() {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot convert value cell at ({}, {}) to formula: existing record 0x{record_id:04X} has unexpected trailing bytes; provide CellEdit.new_rgcb (even empty) to replace them",
+                edit.row, edit.col
+            ),
+        )));
+    }
+
+    let rgcb = edit.new_rgcb.as_deref().unwrap_or(&[]);
+    if rgcb.is_empty() && rgce_references_rgcb(rgce) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "formula update for cell at ({}, {}) requires rgcb bytes (PtgArray present); set CellEdit.new_rgcb",
+                edit.row, edit.col
+            ),
+        )));
+    }
+
+    match &edit.new_value {
+        CellValue::Number(v) => write_new_fmla_num(writer, col, style, *v, rgce, rgcb),
+        CellValue::Text(s) => write_new_fmla_string(writer, col, style, s, rgce, rgcb),
+        CellValue::Bool(v) => write_new_fmla_bool(writer, col, style, *v, rgce, rgcb),
+        CellValue::Error(v) => write_new_fmla_error(writer, col, style, *v, rgce, rgcb),
+        CellValue::Blank => Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot write formula cell with blank cached value at ({}, {})",
+                edit.row, edit.col
+            ),
+        ))),
+    }
 }
 
 fn formula_edit_is_noop(payload: &[u8], edit: &CellEdit) -> Result<bool, Error> {
