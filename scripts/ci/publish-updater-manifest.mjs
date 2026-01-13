@@ -23,6 +23,11 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import crypto from "node:crypto";
+import {
+  ed25519PrivateKeyFromSeed,
+  parseMinisignSecretKeyPayload,
+  parseMinisignSecretKeyText,
+} from "./tauri-minisign.mjs";
 
 /**
  * @param {string} message
@@ -61,6 +66,7 @@ function decodeBase64(value) {
  * - PEM PKCS#8 (encrypted or not)
  * - base64 PKCS#8 DER (encrypted or not)
  * - raw Ed25519 private key (32/64 bytes, base64/base64url)
+ * - minisign secret key (raw text, base64-encoded text, or base64 payload line)
  *
  * @param {string} privateKeyText
  * @param {string} password
@@ -75,19 +81,52 @@ function loadEd25519PrivateKey(privateKeyText, password) {
     return crypto.createPrivateKey({ key: trimmed, format: "pem", passphrase });
   }
 
+  // Support minisign secret keys (as printed by `cargo tauri signer generate`). These are Ed25519
+  // keys; for unencrypted keys we can derive a PKCS#8 Ed25519 private key from the 32-byte seed.
+  if (trimmed.toLowerCase().includes("minisign secret key")) {
+    const parsed = parseMinisignSecretKeyText(trimmed);
+    if (parsed.encrypted) {
+      throw new Error(
+        `Encrypted minisign secret keys are not supported by publish-updater-manifest.mjs. Convert your key to PKCS#8 or use an unencrypted minisign secret key.`,
+      );
+    }
+    return ed25519PrivateKeyFromSeed(parsed.secretKeyBytes.subarray(0, 32));
+  }
+
   const decoded = decodeBase64(trimmed);
   if (!decoded) {
     throw new Error("TAURI_PRIVATE_KEY is not valid base64/base64url and is not PEM.");
   }
 
+  // base64-encoded minisign secret key file
+  {
+    const decodedText = decoded.toString("utf8");
+    if (decodedText.toLowerCase().includes("minisign secret key")) {
+      const parsed = parseMinisignSecretKeyText(decodedText);
+      if (parsed.encrypted) {
+        throw new Error(
+          `Encrypted minisign secret keys are not supported by publish-updater-manifest.mjs. Convert your key to PKCS#8 or use an unencrypted minisign secret key.`,
+        );
+      }
+      return ed25519PrivateKeyFromSeed(parsed.secretKeyBytes.subarray(0, 32));
+    }
+  }
+
+  // base64-encoded minisign secret key binary payload (starts with "Ed")
+  if (decoded.length >= 74 && decoded[0] === 0x45 && decoded[1] === 0x64) {
+    const parsed = parseMinisignSecretKeyPayload(trimmed);
+    if (parsed.encrypted) {
+      throw new Error(
+        `Encrypted minisign secret keys are not supported by publish-updater-manifest.mjs. Convert your key to PKCS#8 or use an unencrypted minisign secret key.`,
+      );
+    }
+    return ed25519PrivateKeyFromSeed(parsed.secretKeyBytes.subarray(0, 32));
+  }
+
   // Raw Ed25519 secret key (seed) or seed+public (libsodium style).
   if (decoded.length === 32 || decoded.length === 64) {
     const seed = decoded.subarray(0, 32);
-    // PKCS#8 wrapper for Ed25519 per RFC 8410:
-    // PrivateKeyInfo ::= SEQUENCE { version, algId (Ed25519), privateKey OCTET STRING(OCTET STRING(seed)) }
-    const pkcs8Prefix = Buffer.from("302e020100300506032b657004220420", "hex");
-    const pkcs8 = Buffer.concat([pkcs8Prefix, Buffer.from(seed)]);
-    return crypto.createPrivateKey({ key: pkcs8, format: "der", type: "pkcs8" });
+    return ed25519PrivateKeyFromSeed(seed);
   }
 
   // Assume DER-encoded PKCS#8.
@@ -370,4 +409,3 @@ async function main() {
 main().catch((err) => {
   fatal(err instanceof Error ? err.stack ?? err.message : String(err));
 });
-

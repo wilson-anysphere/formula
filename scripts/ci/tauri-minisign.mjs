@@ -83,6 +83,15 @@ function extractKeyIdFromPublicKeyComment(line) {
  * @param {string} line
  * @returns {string | null}
  */
+function extractKeyIdFromSecretKeyComment(line) {
+  const match = line.match(/minisign secret key:\s*([0-9a-fA-F]{16})\b/);
+  return match ? match[1].toUpperCase() : null;
+}
+
+/**
+ * @param {string} line
+ * @returns {string | null}
+ */
 function extractKeyIdFromSignatureComment(line) {
   const match = line.match(/minisign signature:\s*([0-9a-fA-F]{16})\b/);
   return match ? match[1].toUpperCase() : null;
@@ -119,6 +128,22 @@ export function ed25519PublicKeyFromRaw(rawKey32) {
   const spkiPrefix = Buffer.from("302a300506032b6570032100", "hex");
   const spkiDer = Buffer.concat([spkiPrefix, Buffer.from(rawKey32)]);
   return crypto.createPublicKey({ key: spkiDer, format: "der", type: "spki" });
+}
+
+/**
+ * Creates a Node.js private key object for an Ed25519 private key stored as a raw 32-byte seed.
+ *
+ * @param {Uint8Array} seed32
+ */
+export function ed25519PrivateKeyFromSeed(seed32) {
+  if (seed32.length !== 32) {
+    throw new Error(`Expected 32-byte Ed25519 private key seed, got ${seed32.length} bytes.`);
+  }
+  // PKCS#8 wrapper for Ed25519 per RFC 8410:
+  // PrivateKeyInfo ::= SEQUENCE { version, algId (Ed25519), privateKey OCTET STRING(OCTET STRING(seed)) }
+  const pkcs8Prefix = Buffer.from("302e020100300506032b657004220420", "hex");
+  const pkcs8Der = Buffer.concat([pkcs8Prefix, Buffer.from(seed32)]);
+  return crypto.createPrivateKey({ key: pkcs8Der, format: "der", type: "pkcs8" });
 }
 
 /**
@@ -215,6 +240,79 @@ export function parseTauriUpdaterPubkey(pubkeyBase64) {
   }
 
   return { publicKeyBytes, keyId, format: "minisign" };
+}
+
+/**
+ * Parses a minisign Ed25519 secret key payload (the base64 payload line in a minisign secret key file).
+ *
+ * Payload binary format (unencrypted; 74 bytes):
+ *   b"Ed" + keyid_le(8) + secret_key(64)
+ *
+ * minisign secret keys may also be encrypted (payload is longer). We expose an `encrypted` flag
+ * so callers can decide whether they support that format.
+ *
+ * @param {string} payloadBase64
+ * @returns {{ secretKeyBytes: Buffer, keyId: string, encrypted: boolean }}
+ */
+export function parseMinisignSecretKeyPayload(payloadBase64) {
+  const bytes = decodeBase64("minisign secret key payload", payloadBase64);
+  if (bytes.length < 74) {
+    throw new Error(
+      `minisign secret key payload decoded to ${bytes.length} bytes (expected at least 74: b\"Ed\" + keyid(8) + secret(64)).`,
+    );
+  }
+  if (bytes[0] !== 0x45 || bytes[1] !== 0x64) {
+    throw new Error(
+      `minisign secret key payload has invalid prefix (expected 0x45 0x64 / \"Ed\", got 0x${bytes[0]?.toString(16)} 0x${bytes[1]?.toString(16)}).`,
+    );
+  }
+  const keyIdLe = bytes.subarray(2, 10);
+  const secret = bytes.subarray(10);
+  if (secret.length < 64) {
+    throw new Error(
+      `minisign secret key payload has ${secret.length} secret key bytes (expected at least 64).`,
+    );
+  }
+  const encrypted = secret.length !== 64;
+  return { secretKeyBytes: Buffer.from(secret), keyId: formatKeyId(keyIdLe), encrypted };
+}
+
+/**
+ * Parses a minisign secret key file (text block), returning the raw secret key bytes.
+ *
+ * @param {string} text
+ * @returns {{ secretKeyBytes: Buffer, keyId: string, encrypted: boolean }}
+ */
+export function parseMinisignSecretKeyText(text) {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new Error(`minisign secret key text is empty.`);
+  }
+
+  const lines = nonEmptyLines(trimmed);
+  if (lines.length === 1 && lines[0].toLowerCase().startsWith("untrusted comment:")) {
+    throw new Error(
+      `minisign secret key text is missing the base64 payload line (found only the comment line).`,
+    );
+  }
+  if (lines.length < 2) {
+    throw new Error(
+      `minisign secret key text has ${lines.length} line(s); expected at least 2 (comment + payload).`,
+    );
+  }
+
+  const commentLine = lines[0];
+  const payloadLine = lines[1];
+  const parsed = parseMinisignSecretKeyPayload(payloadLine);
+
+  const commentKeyId = extractKeyIdFromSecretKeyComment(commentLine);
+  if (commentKeyId && commentKeyId !== parsed.keyId) {
+    throw new Error(
+      `minisign secret key comment key id (${commentKeyId}) does not match payload key id (${parsed.keyId}).`,
+    );
+  }
+
+  return parsed;
 }
 
 /**

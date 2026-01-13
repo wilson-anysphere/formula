@@ -6,6 +6,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   ed25519PublicKeyFromRaw,
+  ed25519PrivateKeyFromSeed,
+  parseMinisignSecretKeyPayload,
+  parseMinisignSecretKeyText,
   parseTauriUpdaterPubkey,
   parseTauriUpdaterSignature,
 } from "./tauri-minisign.mjs";
@@ -118,6 +121,58 @@ test("rejects minisign pubkey text when comment key id does not match payload", 
   const pubkeyText = `untrusted comment: minisign public key: ${wrongKeyId}\n${pubkeyPayload.toString("base64")}\n`;
   const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
   assert.throws(() => parseTauriUpdaterPubkey(pubkeyBase64), /comment key id/i);
+});
+
+test("parses minisign secret key payload/text and derives a usable signing key", () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const message = Buffer.from("minisign secret key parsing", "utf8");
+  const expectedSig = crypto.sign(null, message, privateKey);
+
+  // Extract raw pubkey (32 bytes) and raw seed (32 bytes) from Node's KeyObjects.
+  const spki = /** @type {Buffer} */ (publicKey.export({ format: "der", type: "spki" }));
+  const rawPubkey = spki.subarray(spki.length - 32);
+  assert.equal(rawPubkey.length, 32);
+
+  const pkcs8 = /** @type {Buffer} */ (privateKey.export({ format: "der", type: "pkcs8" }));
+  const seed = pkcs8.subarray(pkcs8.length - 32);
+  assert.equal(seed.length, 32);
+
+  const keyIdLe = Buffer.from("0102030405060708", "hex");
+  const keyIdHex = Buffer.from(keyIdLe).reverse().toString("hex").toUpperCase();
+
+  // Unencrypted minisign secret key payload: "Ed" + keyId + (seed + pubkey).
+  const secretKeyBytes = Buffer.concat([seed, rawPubkey]);
+  assert.equal(secretKeyBytes.length, 64);
+  const payloadBytes = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, secretKeyBytes]);
+  const payloadB64 = payloadBytes.toString("base64");
+
+  {
+    const parsed = parseMinisignSecretKeyPayload(payloadB64);
+    assert.equal(parsed.keyId, keyIdHex);
+    assert.equal(parsed.encrypted, false);
+    assert.deepEqual(parsed.secretKeyBytes, secretKeyBytes);
+  }
+
+  {
+    const text = `untrusted comment: minisign secret key: ${keyIdHex}\n${payloadB64}\n`;
+    const parsed = parseMinisignSecretKeyText(text);
+    assert.equal(parsed.keyId, keyIdHex);
+    assert.equal(parsed.encrypted, false);
+    assert.deepEqual(parsed.secretKeyBytes, secretKeyBytes);
+
+    const derivedPrivateKey = ed25519PrivateKeyFromSeed(parsed.secretKeyBytes.subarray(0, 32));
+    const sig = crypto.sign(null, message, derivedPrivateKey);
+    assert.deepEqual(sig, expectedSig);
+  }
+});
+
+test("rejects minisign secret key when comment key id does not match payload", () => {
+  const keyIdLe = Buffer.from("0102030405060708", "hex");
+  const payloadBytes = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, Buffer.alloc(64, 1)]);
+  const payloadB64 = payloadBytes.toString("base64");
+  const wrongKeyId = "0000000000000000";
+  const text = `untrusted comment: minisign secret key: ${wrongKeyId}\n${payloadB64}\n`;
+  assert.throws(() => parseMinisignSecretKeyText(text), /comment key id/i);
 });
 
 test("end-to-end verify works with minisign pubkey + multiple signature formats", () => {
