@@ -1389,7 +1389,9 @@ export class SqliteVectorStore {
             if (workbookId) invalidByteLengthStmt.bind([workbookId]);
             if (invalidByteLengthStmt.step()) {
               const row = invalidByteLengthStmt.get();
-              throw new Error(`Invalid vector blob length: ${Number(row[1])}`);
+              throw new Error(
+                `SqliteVectorStore dot() failed to decode arg0 vector blob: Invalid vector blob length: ${Number(row[1])}`
+              );
             }
           } finally {
             invalidByteLengthStmt.free();
