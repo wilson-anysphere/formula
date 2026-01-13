@@ -981,14 +981,18 @@ CollabVersioning excludes:
     - `branching:branches`
     - `branching:commits`
     - `branching:meta`
-- **Excluded only when the store is in-doc** (`YjsVersionStore`):
+- **Always excluded** internal versioning roots:
   - `versions`
   - `versionsMeta`
 
-Important detail: when the store is `YjsVersionStore`, excluding `versions` and `versionsMeta` prevents:
+Important details:
 
-- recursive snapshots (history containing itself)
-- restores rolling back version history
+- When the store is `YjsVersionStore`, excluding `versions` and `versionsMeta` prevents:
+  - recursive snapshots (history containing itself)
+  - restores rolling back version history
+- Even when the store is out-of-doc (API/SQLite/etc), a document may still contain these reserved roots
+  (e.g. from earlier in-doc usage or dev sessions). Restoring must never attempt to rewrite them, both
+  to avoid rewinding internal state and to prevent server-side “reserved root mutation” disconnects.
 
 Note: `CollabBranchingWorkflow` supports customizing the branch graph `rootName` (default `"branching"`). If you use a non-default root name, you must also tell `CollabVersioning` to exclude those internal roots; otherwise version snapshots/restores can accidentally include (and later rewind) branch history.
 
