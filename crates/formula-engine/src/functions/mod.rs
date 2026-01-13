@@ -78,7 +78,7 @@ mod builtins_thai;
 // built-in function set under `wasm-bindgen-test`.
 #[cfg(target_arch = "wasm32")]
 #[used]
-static FORCE_LINK_BUILTINS: [fn(); 17] = [
+static FORCE_LINK_BUILTINS: [fn(); 18] = [
     builtins_array::__force_link,
     builtins_date_time::__force_link,
     builtins_dynamic_arrays::__force_link,
