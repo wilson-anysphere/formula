@@ -1139,6 +1139,45 @@ impl DaxEngine {
                         }
                     }
                 }
+                Expr::Call { name, args } if name.eq_ignore_ascii_case("TREATAS") => {
+                    let [source, target] = args.as_slice() else {
+                        return Err(DaxError::Eval("TREATAS expects 2 arguments".into()));
+                    };
+
+                    let source_col_expr = match source {
+                        Expr::Call {
+                            name: source_fn,
+                            args: source_args,
+                        } if (source_fn.eq_ignore_ascii_case("VALUES")
+                            || source_fn.eq_ignore_ascii_case("DISTINCT"))
+                            && matches!(source_args.as_slice(), [Expr::ColumnRef { .. }]) =>
+                        {
+                            &source_args[0]
+                        }
+                        _ => {
+                            return Err(DaxError::Type(
+                                "TREATAS currently only supports VALUES(column) or DISTINCT(column) as its first argument"
+                                    .into(),
+                            ))
+                        }
+                    };
+
+                    let Expr::ColumnRef {
+                        table: target_table,
+                        column: target_column,
+                    } = target
+                    else {
+                        return Err(DaxError::Type(
+                            "TREATAS expects a target column reference as its second argument"
+                                .into(),
+                        ));
+                    };
+
+                    let key = (target_table.clone(), target_column.clone());
+                    clear_columns.insert(key.clone());
+                    let values = self.distinct_column_values(model, source_col_expr, &eval_filter)?;
+                    column_filters.push((key, values));
+                }
                 Expr::Call { name, args }
                     if (name.eq_ignore_ascii_case("VALUES")
                         || name.eq_ignore_ascii_case("DISTINCT"))

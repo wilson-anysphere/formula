@@ -12,6 +12,39 @@ use std::sync::Arc;
 
 use common::{build_model, build_model_bidirectional};
 
+fn build_model_without_relationship() -> DataModel {
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Name", "Region"]);
+    customers
+        .push_row(vec![1.into(), "Alice".into(), "East".into()])
+        .unwrap();
+    customers
+        .push_row(vec![2.into(), "Bob".into(), "West".into()])
+        .unwrap();
+    customers
+        .push_row(vec![3.into(), "Carol".into(), "East".into()])
+        .unwrap();
+    model.add_table(customers).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "CustomerId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 1.into(), 20.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![102.into(), 2.into(), 5.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![103.into(), 3.into(), 8.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+}
+
 #[test]
 fn relationship_enforces_referential_integrity() {
     let mut model = DataModel::new();
@@ -145,6 +178,50 @@ fn calculate_overrides_existing_column_filters() {
         FilterContext::empty().with_column_equals("Customers", "Region", "West".into());
     let value = model.evaluate_measure("East Sales", &west_filter).unwrap();
     assert_eq!(value, Value::from(38.0));
+}
+
+#[test]
+fn calculate_treatas_can_simulate_relationships() {
+    let model = build_model_without_relationship();
+    let filter = FilterContext::empty().with_column_equals("Customers", "Region", "East".into());
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Orders[Amount]), TREATAS(VALUES(Customers[CustomerId]), Orders[CustomerId]))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 38.0.into());
+}
+
+#[test]
+fn calculate_treatas_with_empty_source_values_filters_to_empty_set() {
+    let model = build_model_without_relationship();
+    let filter = FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+
+    let engine = DaxEngine::new();
+    let sum_value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(SUM(Orders[Amount]), TREATAS(VALUES(Customers[CustomerId]), Orders[CustomerId]))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(sum_value, Value::Blank);
+
+    let count_value = engine
+        .evaluate(
+            &model,
+            "CALCULATE(COUNTROWS(Orders), TREATAS(VALUES(Customers[CustomerId]), Orders[CustomerId]))",
+            &filter,
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(count_value, 0.into());
 }
 
 #[test]
