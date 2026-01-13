@@ -98,6 +98,7 @@ export const ar = {
   "command.view.togglePanel.python": "تبديل بايثون",
   "command.view.togglePanel.versionHistory": "تبديل سجل الإصدارات",
   "command.view.togglePanel.branchManager": "تبديل مدير الفروع",
+  "command.view.togglePanel.vbaMigrate": "تبديل ترحيل VBA",
   "command.comments.togglePanel": "تبديل لوحة التعليقات",
   "command.comments.addComment": "إضافة تعليق",
   "command.edit.selectCurrentRegion": "تحديد المنطقة الحالية",
@@ -113,8 +114,9 @@ export const ar = {
   "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون",
   "commandDescription.view.togglePanel.versionHistory": "إظهار/إخفاء لوحة سجل الإصدارات",
   "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع",
+  "commandDescription.view.togglePanel.vbaMigrate": "إظهار/إخفاء لوحة ترحيل VBA",
   "commandDescription.comments.togglePanel": "تبديل اللوحة الجانبية للتعليقات",
   "commandDescription.comments.addComment": "فتح لوحة التعليقات وتركيز حقل إدخال تعليق جديد",
   "commandDescription.edit.selectCurrentRegion":
     "تحديد المنطقة الحالية حول الخلية النشطة (Excel: Ctrl+Shift+* / Ctrl+Shift+8؛ Ctrl+* في لوحة الأرقام)"
-};
+}; 

@@ -98,6 +98,7 @@ export const deDE = {
   "command.view.togglePanel.python": "Python umschalten",
   "command.view.togglePanel.versionHistory": "Versionsverlauf umschalten",
   "command.view.togglePanel.branchManager": "Branch-Manager umschalten",
+  "command.view.togglePanel.vbaMigrate": "VBA-Migration umschalten",
   "command.comments.togglePanel": "Kommentarpanel umschalten",
   "command.comments.addComment": "Kommentar hinzufügen",
   "command.edit.selectCurrentRegion": "Aktuellen Bereich auswählen",
@@ -113,8 +114,9 @@ export const deDE = {
   "commandDescription.view.togglePanel.python": "Das Python-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.versionHistory": "Das Versionsverlaufs-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.branchManager": "Das Branch-Manager-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.vbaMigrate": "Das VBA-Migrationspanel ein-/ausblenden",
   "commandDescription.comments.togglePanel": "Die Kommentare-Seitenleiste ein-/ausblenden",
   "commandDescription.comments.addComment": "Das Kommentarpanel öffnen und das Eingabefeld für neue Kommentare fokussieren",
   "commandDescription.edit.selectCurrentRegion":
     "Den aktuellen Bereich um die aktive Zelle auswählen (Excel: Strg+Umschalt+* / Strg+Umschalt+8; Strg+* auf dem Nummernblock)"
-};
+}; 
