@@ -134,7 +134,7 @@ function Find-BundleFiles {
 
   $out = New-Object System.Collections.Generic.List[System.IO.FileInfo]
   foreach ($dir in $bundleDirs) {
-    $files = Get-ChildItem -LiteralPath $dir.FullName -File -Filter "*$Extension" -ErrorAction SilentlyContinue
+    $files = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
     foreach ($f in $files) { $out.Add($f) }
   }
 
@@ -155,15 +155,15 @@ function Get-SignToolPath {
     return $null
   }
 
-  $kits10 = Join-Path $pf86 "Windows Kits\\10\\bin"
-  $kits81 = Join-Path $pf86 "Windows Kits\\8.1\\bin"
+  $kits10 = [System.IO.Path]::Combine($pf86, "Windows Kits", "10", "bin")
+  $kits81 = [System.IO.Path]::Combine($pf86, "Windows Kits", "8.1", "bin")
 
   foreach ($kits in @($kits10, $kits81)) {
     if (-not (Test-Path -LiteralPath $kits)) { continue }
 
     # Some SDK installs expose signtool directly under bin\\x64.
     foreach ($arch in @("x64", "x86", "arm64")) {
-      $direct = Join-Path $kits "$arch\\signtool.exe"
+      $direct = [System.IO.Path]::Combine($kits, $arch, "signtool.exe")
       if (Test-Path -LiteralPath $direct) {
         return $direct
       }
@@ -173,7 +173,7 @@ function Get-SignToolPath {
     $versionDirs = @(Get-ChildItem -LiteralPath $kits -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)
     foreach ($v in $versionDirs) {
       foreach ($arch in @("x64", "x86", "arm64")) {
-        $p = Join-Path $v.FullName "$arch\\signtool.exe"
+        $p = [System.IO.Path]::Combine($v.FullName, $arch, "signtool.exe")
         if (Test-Path -LiteralPath $p) {
           return $p
         }
@@ -214,9 +214,9 @@ try {
     }
     $searchRoots.Add($cargoTarget)
   }
-  $searchRoots.Add((Join-Path $repoRoot "apps\\desktop\\src-tauri\\target"))
-  $searchRoots.Add((Join-Path $repoRoot "apps\\desktop\\target"))
-  $searchRoots.Add((Join-Path $repoRoot "target"))
+  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "src-tauri", "target"))
+  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "apps", "desktop", "target"))
+  $searchRoots.Add([System.IO.Path]::Combine($repoRoot, "target"))
   $searchRoots = @($searchRoots | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
 
   $exeInstallers = @()
@@ -240,6 +240,11 @@ try {
     }
     $msiInstallers = @($msiInstallers | Sort-Object FullName -Unique)
   }
+
+  # Exclude embedded WebView2 helper installers; we only care about the Formula installers.
+  $exeInstallers = @(
+    $exeInstallers | Where-Object { $_.Name -notmatch '^(?i)MicrosoftEdgeWebview2' }
+  )
 
   $totalInstallers = $exeInstallers.Count + $msiInstallers.Count
 
