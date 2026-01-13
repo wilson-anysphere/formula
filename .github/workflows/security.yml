@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
+  NODE_VERSION: 22
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -40,7 +44,7 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           # Keep security scans on the same Node.js major as CI/release builds to reduce drift.
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: "**/pnpm-lock.yaml"
 

@@ -17,6 +17,9 @@ on:
       - ".github/workflows/perf.yml"
 
 env:
+  # Keep Node pinned to the same major as CI/release workflows to reduce drift in
+  # scripts and build tooling.
+  NODE_VERSION: 22
   # Keep in sync with release.yml/ci.yml so performance runs don't break when
   # wasm-pack publishes a new incompatible version.
   WASM_PACK_VERSION: 0.13.1
@@ -54,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
