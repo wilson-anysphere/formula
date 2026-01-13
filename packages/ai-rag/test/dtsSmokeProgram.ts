@@ -65,6 +65,8 @@ async function smoke() {
     filter: (_metadata, id) => id.startsWith("a"),
   });
 
+  await store.listContentHashes({ workbookId: "wb", signal: abortController.signal });
+
   await store.updateMetadata([{ id: "a", metadata: { workbookId: "wb", updated: true } }]);
   const deletedFromStore: number = await store.deleteWorkbook("wb");
   void deletedFromStore;
@@ -114,7 +116,15 @@ async function smoke() {
   }
   handleSqliteCreateError(null);
 
+  await sqliteStore.batch(async () => {
+    await sqliteStore.upsert([
+      { id: "a", vector: new Float32Array(embedder.dimension), metadata: { workbookId: "wb", tag: "sqlite" } },
+    ]);
+    await sqliteStore.delete(["a"]);
+  });
+
   await sqliteStore.list({ includeVector: true, signal: abortController.signal, workbookId: "wb" });
+  await sqliteStore.listContentHashes({ workbookId: "wb", signal: abortController.signal });
   await sqliteStore.query(new Float32Array(embedder.dimension), 3, { signal: abortController.signal });
   await sqliteStore.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "sqlite" } }]);
   const deletedFromSqlite: number = await sqliteStore.deleteWorkbook("wb");
