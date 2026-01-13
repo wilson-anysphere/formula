@@ -1130,6 +1130,18 @@ export class SqliteVectorStore {
           vecOut = new Float32Array(vec);
         } else {
           const bytes = Number(vecBlobOrBytes);
+          if (!Number.isFinite(bytes)) {
+            throw new Error(
+              `SqliteVectorStore.list() failed to read vector blob byte length for id=${JSON.stringify(id)}: got ${String(
+                vecBlobOrBytes
+              )}`
+            );
+          }
+          if (bytes % 4 !== 0) {
+            throw new Error(
+              `SqliteVectorStore.list() invalid vector blob length for id=${JSON.stringify(id)}: ${bytes}`
+            );
+          }
           const expectedBytes = this._dimension * 4;
           if (bytes !== expectedBytes) {
             throw new Error(
