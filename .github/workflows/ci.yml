@@ -220,6 +220,12 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Node (for static preflight scripts)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Validate macOS entitlements (hardened runtime)
+        run: node scripts/check-macos-entitlements.mjs
       - uses: dtolnay/rust-toolchain@stable
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
       # contention on shared ~/.cargo. In GitHub Actions we prefer the default
