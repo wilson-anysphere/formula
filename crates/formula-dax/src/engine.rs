@@ -479,6 +479,19 @@ impl DaxEngine {
                 };
                 self.eval_distinctcount(model, arg, filter)
             }
+            "DISTINCTCOUNTNOBLANK" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval(
+                        "DISTINCTCOUNTNOBLANK expects 1 argument".into(),
+                    ));
+                };
+                if !matches!(arg, Expr::ColumnRef { .. }) {
+                    return Err(DaxError::Type(
+                        "DISTINCTCOUNTNOBLANK expects a column reference".into(),
+                    ));
+                }
+                self.eval_distinctcountnoblank(model, arg, filter)
+            }
             "HASONEVALUE" => {
                 let [arg] = args else {
                     return Err(DaxError::Eval("HASONEVALUE expects 1 argument".into()));
@@ -902,6 +915,55 @@ impl DaxEngine {
 
         let values = self.distinct_column_values(model, expr, filter)?;
         Ok(Value::from(values.len() as i64))
+    }
+
+    fn eval_distinctcountnoblank(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+    ) -> DaxResult<Value> {
+        let Expr::ColumnRef { table, column } = expr else {
+            return Err(DaxError::Type("expected a column reference".to_string()));
+        };
+
+        let table_ref = model
+            .table(table)
+            .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+        let idx = table_ref
+            .column_idx(column)
+            .ok_or_else(|| DaxError::UnknownColumn {
+                table: table.clone(),
+                column: column.clone(),
+            })?;
+
+        // Fast path: precomputed distinct count (excluding blanks) when unfiltered.
+        if filter.is_empty() {
+            if let Some(distinct) = table_ref.stats_distinct_count(idx) {
+                return Ok(Value::from(distinct as i64));
+            }
+
+            // Fallback: dictionary/group-by distinct values (may include BLANK; filter it out).
+            if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
+                let count = values.iter().filter(|v| !v.is_blank()).count();
+                return Ok(Value::from(count as i64));
+            }
+        }
+
+        let rows = resolve_table_rows(model, filter, table)?;
+        if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
+            let count = values.iter().filter(|v| !v.is_blank()).count();
+            return Ok(Value::from(count as i64));
+        }
+
+        let mut out = HashSet::new();
+        for row in rows {
+            let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+            if !value.is_blank() {
+                out.insert(value);
+            }
+        }
+        Ok(Value::from(out.len() as i64))
     }
 
     fn distinct_column_values(

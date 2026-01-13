@@ -1318,6 +1318,17 @@ fn values_and_distinctcount_include_virtual_blank_row_for_unmatched_relationship
             .unwrap(),
         3.into()
     );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "DISTINCTCOUNTNOBLANK(Customers[Region])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
 
     let blank_region =
         FilterContext::empty().with_column_equals("Customers", "Region", Value::Blank);
@@ -1342,6 +1353,17 @@ fn values_and_distinctcount_include_virtual_blank_row_for_unmatched_relationship
             )
             .unwrap(),
         1.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "DISTINCTCOUNTNOBLANK(Customers[Region])",
+                &blank_region,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
     );
 }
 
