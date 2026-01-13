@@ -20,6 +20,10 @@ fn read_repo_file(relative: &str) -> String {
     fs::read_to_string(&path).unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
 }
 
+fn is_ident_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
 fn find_fn_start(src: &str, fn_name: &str, file: &str) -> usize {
     let patterns = [
         format!("pub async fn {fn_name}"),
@@ -29,8 +33,20 @@ fn find_fn_start(src: &str, fn_name: &str, file: &str) -> usize {
     ];
 
     for pat in patterns {
-        if let Some(idx) = src.find(&pat) {
-            return idx;
+        let mut search_start = 0usize;
+        while let Some(rel_idx) = src[search_start..].find(&pat) {
+            let idx = search_start + rel_idx;
+            let after_idx = idx + pat.len();
+            let next = src.get(after_idx..).and_then(|rest| rest.chars().next());
+            // Ensure we matched the full identifier name (avoid prefix matches like
+            // `fn verify_ed25519_signature_payload` when we were looking for
+            // `fn verify_ed25519_signature`).
+            if next.map_or(true, |ch| !is_ident_char(ch)) {
+                return idx;
+            }
+
+            // Skip past this prefix match and keep searching for the full identifier.
+            search_start = after_idx;
         }
     }
 
@@ -190,5 +206,15 @@ fn tray_status_rs_commands_enforce_origin_guards() {
 
     for cmd in ["set_tray_status"] {
         assert_ipc_origin_checks(&tray_status_rs, file, cmd);
+    }
+}
+
+#[test]
+fn ed25519_verifier_commands_enforce_origin_guards() {
+    let verifier_rs = read_repo_file("src/ed25519_verifier.rs");
+    let file = "src/ed25519_verifier.rs";
+
+    for cmd in ["verify_ed25519_signature"] {
+        assert_ipc_origin_checks(&verifier_rs, file, cmd);
     }
 }
