@@ -12,3 +12,5 @@ export { rectToA1 } from "./workbook/rect.js";
 export { workbookFromSpreadsheetApi } from "./workbook/fromSpreadsheetApi.js";
 
 export { indexWorkbook, approximateTokenCount } from "./pipeline/indexWorkbook.js";
+
+export { searchWorkbookRag } from "./retrieval/searchWorkbookRag.js";
