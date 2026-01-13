@@ -22,6 +22,32 @@ pub(crate) const OPEN_CLIPBOARD_RETRY_DELAYS: &[Duration] = &[
     Duration::from_millis(160),
 ];
 
+/// Retry `op` using the provided deterministic sleep schedule, but only while the error is
+/// considered retryable.
+///
+/// This is useful for APIs like Windows `OpenClipboard` where some failures are transient (another
+/// process holds the clipboard lock) while others are likely permanent (invalid handle, etc). In
+/// the non-retryable case we return immediately to avoid adding unnecessary latency.
+pub(crate) fn retry_with_delays_if<T, E>(
+    mut op: impl FnMut() -> Result<T, E>,
+    delays: &[Duration],
+    mut should_retry: impl FnMut(&E) -> bool,
+    mut sleep: impl FnMut(Duration),
+) -> Result<T, E> {
+    for delay in delays {
+        match op() {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                if !should_retry(&err) {
+                    return Err(err);
+                }
+                sleep(*delay);
+            }
+        }
+    }
+    op()
+}
+
 /// Retry `op` using the provided deterministic sleep schedule.
 ///
 /// - The operation is attempted once immediately.
@@ -31,19 +57,11 @@ pub(crate) const OPEN_CLIPBOARD_RETRY_DELAYS: &[Duration] = &[
 /// This is deliberately written to be unit-testable without platform APIs by injecting both the
 /// operation and sleep functions.
 pub(crate) fn retry_with_delays<T, E>(
-    mut op: impl FnMut() -> Result<T, E>,
+    op: impl FnMut() -> Result<T, E>,
     delays: &[Duration],
-    mut sleep: impl FnMut(Duration),
+    sleep: impl FnMut(Duration),
 ) -> Result<T, E> {
-    for delay in delays {
-        match op() {
-            Ok(value) => return Ok(value),
-            Err(_) => {
-                sleep(*delay);
-            }
-        }
-    }
-    op()
+    retry_with_delays_if(op, delays, |_| true, sleep)
 }
 
 pub(crate) fn total_delay(delays: &[Duration]) -> Duration {
@@ -138,5 +156,57 @@ mod tests {
         assert_eq!(result, Ok(()));
         assert_eq!(attempts, 1);
         assert!(!slept);
+    }
+
+    #[test]
+    fn retry_with_delays_if_aborts_immediately_on_non_retryable_error() {
+        let delays = [
+            Duration::from_millis(1),
+            Duration::from_millis(2),
+            Duration::from_millis(3),
+        ];
+
+        let mut attempts = 0usize;
+        let mut sleeps = Vec::new();
+
+        let result: Result<(), &str> = retry_with_delays_if(
+            || {
+                attempts += 1;
+                Err("fatal")
+            },
+            &delays,
+            |_err| false,
+            |d| sleeps.push(d),
+        );
+
+        assert_eq!(result, Err("fatal"));
+        assert_eq!(attempts, 1);
+        assert!(sleeps.is_empty());
+    }
+
+    #[test]
+    fn retry_with_delays_if_stops_after_non_retryable_error_even_if_delays_remain() {
+        let delays = [
+            Duration::from_millis(1),
+            Duration::from_millis(2),
+            Duration::from_millis(3),
+        ];
+
+        let mut attempts = 0usize;
+        let mut sleeps = Vec::new();
+
+        let result: Result<(), &str> = retry_with_delays_if(
+            || {
+                attempts += 1;
+                if attempts == 1 { Err("retry") } else { Err("fatal") }
+            },
+            &delays,
+            |err| *err == "retry",
+            |d| sleeps.push(d),
+        );
+
+        assert_eq!(result, Err("fatal"));
+        assert_eq!(attempts, 2);
+        assert_eq!(sleeps, vec![Duration::from_millis(1)]);
     }
 }
