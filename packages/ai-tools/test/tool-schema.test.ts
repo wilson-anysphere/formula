@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { TOOL_REGISTRY, validateToolCall } from "../src/tool-schema.js";
 
 describe("create_pivot_table aggregation normalization", () => {
@@ -85,6 +86,59 @@ describe("tool JSON schema fidelity (matches Zod refinements)", () => {
   it("includes minItems: 1 for filter_range.criteria", () => {
     const schema = TOOL_REGISTRY.filter_range.jsonSchema as any;
     expect(schema.properties.criteria.minItems).toBe(1);
+  });
+});
+
+describe("tool schema drift (Zod required keys must be in jsonSchema.required)", () => {
+  function unwrapZodObject(schema: z.ZodTypeAny, toolName: string): z.AnyZodObject {
+    let current: z.ZodTypeAny = schema;
+    // Many schemas are wrapped in ZodEffects due to `superRefine`/`preprocess`.
+    // Peel those layers until we reach the underlying `z.object({ ... })`.
+    while (true) {
+      if (current instanceof z.ZodObject) return current;
+      if (current instanceof z.ZodEffects) {
+        current = (current as z.ZodEffects<any>)._def.schema;
+        continue;
+      }
+      if (current instanceof z.ZodDefault) {
+        current = (current as z.ZodDefault<any>)._def.innerType;
+        continue;
+      }
+      if (current instanceof z.ZodOptional) {
+        current = (current as z.ZodOptional<any>)._def.innerType;
+        continue;
+      }
+      if (current instanceof z.ZodNullable) {
+        current = (current as z.ZodNullable<any>)._def.innerType;
+        continue;
+      }
+      throw new Error(
+        `Tool ${toolName} paramsSchema must be (or wrap) a ZodObject; got ${(current as any)?._def?.typeName ?? "unknown"}`
+      );
+    }
+  }
+
+  it("keeps jsonSchema.required aligned with the Zod object schema", () => {
+    for (const [toolName, tool] of Object.entries(TOOL_REGISTRY)) {
+      const jsonSchema = tool.jsonSchema as any;
+      expect(jsonSchema.type, `${toolName} jsonSchema.type`).toBe("object");
+      expect(Array.isArray(jsonSchema.required), `${toolName} jsonSchema.required must be an array`).toBe(true);
+
+      const jsonRequired = jsonSchema.required as string[];
+
+      const objectSchema = unwrapZodObject(tool.paramsSchema as unknown as z.ZodTypeAny, toolName);
+      const shape = objectSchema.shape as Record<string, z.ZodTypeAny>;
+
+      const zodRequired = Object.entries(shape)
+        .filter(([, fieldSchema]) => fieldSchema.safeParse(undefined).success === false)
+        .map(([key]) => key);
+
+      const missingRequired = zodRequired.filter((key) => !jsonRequired.includes(key));
+      expect(missingRequired, `${toolName} missing Zod-required keys in jsonSchema.required`).toEqual([]);
+
+      const extraRequired = jsonRequired.filter((key) => !Object.prototype.hasOwnProperty.call(shape, key));
+      expect(extraRequired, `${toolName} jsonSchema.required contains unknown keys`).toEqual([]);
+    }
   });
 });
 
