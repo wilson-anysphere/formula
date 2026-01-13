@@ -1,5 +1,4 @@
 import type { DrawingTransform, Rect } from "./types";
-import { applyTransformVector } from "./transform";
 
 /**
  * Resize handles are drawn in the drawing overlay's screen-space coordinate system
@@ -20,6 +19,31 @@ export interface ResizeHandleCenter {
 function hasNonIdentityTransform(transform: DrawingTransform | undefined): boolean {
   if (!transform) return false;
   return transform.rotationDeg !== 0 || transform.flipH || transform.flipV;
+}
+
+type CachedTrig = { rotationDeg: number; cos: number; sin: number };
+
+const trigCache = new WeakMap<DrawingTransform, CachedTrig>();
+
+function getTransformTrig(transform: DrawingTransform): CachedTrig {
+  const cached = trigCache.get(transform);
+  const rot = transform.rotationDeg;
+  if (cached && cached.rotationDeg === rot) return cached;
+  const radians = (rot * Math.PI) / 180;
+  const next: CachedTrig = { rotationDeg: rot, cos: Math.cos(radians), sin: Math.sin(radians) };
+  trigCache.set(transform, next);
+  return next;
+}
+
+function applyTransformVectorFast(dx: number, dy: number, transform: DrawingTransform, trig: CachedTrig): { x: number; y: number } {
+  let x = dx;
+  let y = dy;
+  if (transform.flipH) x = -x;
+  if (transform.flipV) y = -y;
+  return {
+    x: x * trig.cos - y * trig.sin,
+    y: x * trig.sin + y * trig.cos,
+  };
 }
 
 export function getResizeHandleCenters(bounds: Rect, transform?: DrawingTransform): ResizeHandleCenter[] {
@@ -43,8 +67,9 @@ export function getResizeHandleCenters(bounds: Rect, transform?: DrawingTransfor
     return local.map((p) => ({ handle: p.handle, x: cx + p.x, y: cy + p.y }));
   }
 
+  const trig = getTransformTrig(transform!);
   return local.map((p) => {
-    const t = applyTransformVector(p.x, p.y, transform!);
+    const t = applyTransformVectorFast(p.x, p.y, transform!, trig);
     return { handle: p.handle, x: cx + t.x, y: cy + t.y };
   });
 }
@@ -77,12 +102,31 @@ export function hitTestResizeHandle(
     return null;
   }
 
-  for (const c of getResizeHandleCenters(bounds, transform)) {
-    if (x >= c.x - half && x <= c.x + half && y >= c.y - half && y <= c.y + half) {
-      return c.handle;
-    }
-  }
-  return null;
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  const hw = bounds.width / 2;
+  const hh = bounds.height / 2;
+  const trig = getTransformTrig(transform!);
+
+  const test = (handle: ResizeHandle, dx: number, dy: number): ResizeHandle | null => {
+    const t = applyTransformVectorFast(dx, dy, transform!, trig);
+    const hx = cx + t.x;
+    const hy = cy + t.y;
+    if (x >= hx - half && x <= hx + half && y >= hy - half && y <= hy + half) return handle;
+    return null;
+  };
+
+  // Test in the same order as `getResizeHandleCenters` for deterministic behavior.
+  return (
+    test("nw", -hw, -hh) ??
+    test("n", 0, -hh) ??
+    test("ne", hw, -hh) ??
+    test("e", hw, 0) ??
+    test("se", hw, hh) ??
+    test("s", 0, hh) ??
+    test("sw", -hw, hh) ??
+    test("w", -hw, 0)
+  );
 }
 
 export function cursorForResizeHandle(handle: ResizeHandle, transform?: DrawingTransform): string {
@@ -109,24 +153,33 @@ export function cursorForResizeHandle(handle: ResizeHandle, transform?: DrawingT
   //
   // We only have four cursor options (horizontal/vertical + two diagonals), so
   // this is an approximation — but it keeps 90° rotations and flips intuitive.
-  const axis = (() => {
-    switch (handle) {
-      case "n":
-      case "s":
-        return { x: 0, y: 1 };
-      case "e":
-      case "w":
-        return { x: 1, y: 0 };
-      case "nw":
-      case "se":
-        return { x: 1, y: 1 };
-      case "ne":
-      case "sw":
-        return { x: 1, y: -1 };
-    }
-  })();
+  let axisX = 0;
+  let axisY = 0;
+  switch (handle) {
+    case "n":
+    case "s":
+      axisX = 0;
+      axisY = 1;
+      break;
+    case "e":
+    case "w":
+      axisX = 1;
+      axisY = 0;
+      break;
+    case "nw":
+    case "se":
+      axisX = 1;
+      axisY = 1;
+      break;
+    case "ne":
+    case "sw":
+      axisX = 1;
+      axisY = -1;
+      break;
+  }
 
-  const v = applyTransformVector(axis.x, axis.y, transform!);
+  const trig = getTransformTrig(transform!);
+  const v = applyTransformVectorFast(axisX, axisY, transform!, trig);
   const ax = Math.abs(v.x);
   const ay = Math.abs(v.y);
 
