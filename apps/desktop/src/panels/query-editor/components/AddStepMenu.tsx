@@ -28,6 +28,7 @@ export function AddStepMenu(props: {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const schema = props.aiContext.preview?.columns ?? [];
   const columnNames = useMemo(() => schema.map((col) => col.name).filter((name) => name.trim().length > 0), [schema]);
@@ -150,6 +151,19 @@ export function AddStepMenu(props: {
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const root = menuRootRef.current;
+    if (!root) return;
+    // Ensure focus moves into the menu for keyboard users (best-effort).
+    // Avoid focusing back to the trigger on close so we don't steal focus from
+    // outside-click targets (e.g. the AI intent input).
+    queueMicrotask(() => {
+      const first = root.querySelector<HTMLButtonElement>(".query-editor-add-step__menu-popover button:not(:disabled)");
+      first?.focus();
+    });
+  }, [menuOpen]);
+
   return (
     <div className="query-editor-add-step">
       <div ref={menuRootRef} className="query-editor-add-step__menu">
@@ -159,6 +173,7 @@ export function AddStepMenu(props: {
           onClick={() => setMenuOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
+          ref={menuTriggerRef}
         >
           {t("queryEditor.addStep.addStep")}
         </button>
