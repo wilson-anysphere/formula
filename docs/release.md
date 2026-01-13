@@ -429,9 +429,9 @@ Expected `{{target}}` values for this repo’s release matrix:
   at the updater payload, typically an `.app.tar.gz`.
 - **Windows:** `windows-x86_64` (some toolchains use `x86_64-pc-windows-msvc`) and
   `windows-aarch64` / `windows-arm64` (some toolchains use `aarch64-pc-windows-msvc`) — one entry per
-  architecture. Each entry points at the Windows installer used by the updater. The release workflow
-  builds **both** `.msi` (WiX) and `.exe` (NSIS) installers, but `latest.json` will typically
-  reference just one per architecture.
+  architecture. Each entry points at the **updater-consumed** Windows installer (see
+  `docs/desktop-updater-target-mapping.md`; currently the updater entries should point at the
+  **`.msi`** for both x64 and ARM64).
 - **Linux:** `linux-x86_64` (some toolchains use `x86_64-unknown-linux-gnu`; points at the updater
   payload, typically the `.AppImage`).
 
@@ -646,6 +646,11 @@ are attached:
    print("\n".join(keys) if keys else "(no platforms found)")
    PY
    ```
+
+   Also confirm each platform entry points at the **updater-consumed** asset type:
+   - `darwin-*` → `*.app.tar.gz`
+   - `windows-*` → `*.msi` (updater runs the Windows Installer)
+   - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
