@@ -781,8 +781,13 @@ function isSupportedCacheKey(key: string): boolean {
   if (parts.length !== 4) return false;
   const promptHash = parts[2] ?? "";
   const inputsHash = parts[3] ?? "";
-  const isSupportedHash = (value: string) => /^(?:[0-9a-f]{8}|[0-9a-f]{16})$/.test(value);
-  return isSupportedHash(promptHash) && isSupportedHash(inputsHash);
+  const is8 = (value: string) => /^[0-9a-f]{8}$/.test(value);
+  const is16 = (value: string) => /^[0-9a-f]{16}$/.test(value);
+  // Accept legacy 32-bit hashes (8-hex) and current 64-bit hashes (16-hex), but require
+  // that both hash components use the same width. This preserves compatibility while
+  // continuing to reject legacy keys that embedded raw prompt text (including 16-hex
+  // prompt strings) alongside an 8-hex inputs hash.
+  return (is8(promptHash) && is8(inputsHash)) || (is16(promptHash) && is16(inputsHash));
 }
 
 type AiCellFunctionReferences = {

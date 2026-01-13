@@ -407,9 +407,14 @@ describe("AiCellFunctionEngine", () => {
   it("purges legacy persisted cache keys that embed raw prompt text", async () => {
     const persistKey = "ai-cache-legacy";
     const legacyPrompt = "summarize";
+    const legacyPromptHex = "0123456789abcdef";
     globalThis.localStorage?.setItem(
       persistKey,
-      JSON.stringify([{ key: `test-model\u0000AI\u0000${legacyPrompt}\u0000deadbeef`, value: "legacy", updatedAtMs: 0 }]),
+      JSON.stringify([
+        { key: `test-model\u0000AI\u0000${legacyPrompt}\u0000deadbeef`, value: "legacy", updatedAtMs: 0 },
+        // Guard against regressions: a legacy raw prompt that "looks like a hash" should still be rejected.
+        { key: `test-model\u0000AI\u0000${legacyPromptHex}\u0000deadbeef`, value: "legacy_hex", updatedAtMs: 0 },
+      ]),
     );
 
     const llmClient = {
@@ -433,6 +438,7 @@ describe("AiCellFunctionEngine", () => {
     const stored = globalThis.localStorage?.getItem(persistKey) ?? "";
     expect(stored).not.toContain("legacy");
     expect(stored).not.toContain(legacyPrompt);
+    expect(stored).not.toContain(legacyPromptHex);
   });
 
   it("loads persisted cache keys with legacy 8-hex hashes", async () => {
