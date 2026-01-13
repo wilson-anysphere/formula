@@ -156,6 +156,7 @@ struct DiffEntry {
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 struct PartDiffSummary {
     part: String,
+    group: String,
     critical: usize,
     warning: usize,
     info: usize,
@@ -695,12 +696,16 @@ fn summarize_diffs_by_part(
 
     let mut parts_with_diffs: Vec<PartDiffSummary> = counts_by_part
         .into_iter()
-        .map(|(part, c)| PartDiffSummary {
-            part,
-            critical: c.critical,
-            warning: c.warning,
-            info: c.info,
-            total: c.total,
+        .map(|(part, c)| {
+            let group = part_group(&part).to_string();
+            PartDiffSummary {
+                part,
+                group,
+                critical: c.critical,
+                warning: c.warning,
+                info: c.info,
+                total: c.total,
+            }
         })
         .collect();
 
@@ -728,7 +733,7 @@ fn summarize_diffs_by_part(
 
     let part_groups: BTreeMap<String, String> = parts_with_diffs
         .iter()
-        .map(|p| (p.part.clone(), part_group(&p.part).to_string()))
+        .map(|p| (p.part.clone(), p.group.clone()))
         .collect();
 
     (parts_with_diffs, critical_parts, part_groups)
@@ -1265,6 +1270,7 @@ mod tests {
             parts[0],
             PartDiffSummary {
                 part: "xl/workbook.xml".to_string(),
+                group: "other".to_string(),
                 critical: 2,
                 warning: 0,
                 info: 0,
@@ -1282,6 +1288,8 @@ mod tests {
             part_groups.get("docProps/app.xml").map(String::as_str),
             Some("doc_props")
         );
+
+        assert_eq!(parts[2].group, "doc_props");
     }
 
     #[test]
