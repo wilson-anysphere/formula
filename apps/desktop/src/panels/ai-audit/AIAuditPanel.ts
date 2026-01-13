@@ -1,4 +1,5 @@
-import { serializeAuditEntries, type AIAuditEntry, type AIAuditStore } from "@formula/ai-audit/browser";
+import type { AIAuditEntry, AIAuditStore } from "@formula/ai-audit/browser";
+import { serializeAuditEntries } from "@formula/ai-audit/export";
 
 import { downloadAuditLogExport } from "./exportAuditLog";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore";
