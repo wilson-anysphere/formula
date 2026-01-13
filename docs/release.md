@@ -428,6 +428,18 @@ When cross-compiling locally from an x64 Windows machine, run the build in a Vis
 Developer Prompt configured for **amd64 → arm64** (CI uses `ilammy/msvc-dev-cmd` with `arch:
 amd64_arm64`).
 
+Then build the ARM64 installers:
+
+```powershell
+cd apps/desktop
+cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
+```
+
+Expected outputs:
+
+- `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/msi/*.msi`
+- `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe`
+
 GitHub-hosted runner images do not always include this workload by default. The release workflow
 checks for a complete ARM64 MSVC + SDK toolchain:
 
