@@ -10,6 +10,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 - [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables used by images-in-cells
 - [xlsx-embedded-images-in-cells.md](./xlsx-embedded-images-in-cells.md) — confirmed “Place in Cell” chain (the `rdRichValue*` schema; the fixture used there is encoded as `t="e"`/`#VALUE!`, but other real Excel files use other cached-value encodings)
+- [21-xlsx-pivots.md](./21-xlsx-pivots.md) — pivot tables/caches/slicers/timelines compatibility notes + roadmap
 
 ---
 
