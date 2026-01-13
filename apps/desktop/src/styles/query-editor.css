@@ -10,6 +10,12 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  /* Use a container query so the editor can respond to docked panel widths,
+     not just the app viewport. */
+  container-type: inline-size;
 }
 
 .query-editor-container__message {
@@ -25,21 +31,49 @@
 
 .query-editor-container__toolbar {
   padding: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  background: var(--panel-bg);
+}
+
+.query-editor-container__toolbar select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor-container__toolbar select:focus {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .query-editor-container__select {
-  padding: 6px;
+  flex: 0 1 240px;
 }
 
 .query-editor-container__source {
   color: var(--text-muted);
   font-size: 12px;
   margin-right: 8px;
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .query-editor-container__refresh-policy {
@@ -48,27 +82,65 @@
   gap: 4px;
   font-size: 12px;
   color: var(--text-muted);
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.query-editor-container__toolbar button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor-container__toolbar button:hover {
+  background: var(--bg-hover);
+}
+
+.query-editor-container__toolbar button:active {
+  background: var(--bg-active);
+}
+
+.query-editor-container__toolbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.query-editor-container__toolbar button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .query-editor-container__action-error {
   padding: 12px;
   color: var(--error);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
 }
 
 .query-editor {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: clamp(220px, 30%, 320px) 1fr;
   height: 100%;
+  min-width: 0;
 }
 
 .query-editor__sidebar {
-  border-inline-end: 1px solid var(--border);
+  border-inline-end: 1px solid var(--panel-border);
   padding: 12px;
   overflow: auto;
   min-width: 0;
+  background: var(--panel-bg);
 }
 
 .query-editor__title {
@@ -82,17 +154,54 @@
   flex-wrap: wrap;
 }
 
+.query-editor__sidebar-actions button {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor__sidebar-actions button:hover {
+  background: var(--bg-hover);
+}
+
+.query-editor__sidebar-actions button:active {
+  background: var(--bg-active);
+}
+
+.query-editor__sidebar-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.query-editor__sidebar-actions button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
 .query-editor__main {
   display: grid;
   grid-template-rows: auto 1fr;
   overflow: hidden;
   min-width: 0;
   min-height: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .query-editor__schema {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
   padding: 12px;
+  background: var(--panel-bg);
 }
 
 .query-editor__status {
@@ -107,6 +216,7 @@
 
 .query-editor__preview {
   overflow: auto;
+  background: var(--bg-primary);
 }
 
 .query-editor-schema {
@@ -159,14 +269,27 @@
 .query-editor-add-step__menu-trigger {
   width: 100%;
   margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .query-editor-add-step__menu-popover {
   border: 1px solid var(--border);
   background: var(--bg-primary);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 8px;
   margin-bottom: 8px;
+  box-shadow: var(--shadow-surface);
 }
 
 .query-editor-add-step__menu-group {
@@ -188,6 +311,41 @@
   width: 100%;
   margin-top: 4px;
   text-align: start;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor-add-step__menu-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.query-editor-add-step__menu-item:focus-visible {
+  outline: none;
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
+}
+
+.query-editor-add-step__menu-item:disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.query-editor-add-step__menu-item:disabled:hover,
+.query-editor-add-step__menu-item:disabled:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
 }
 
 .query-editor-add-step__menu-hint {
@@ -200,6 +358,23 @@
   width: 100%;
   box-sizing: border-box;
   margin-bottom: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor-add-step__ai-input:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .query-editor-add-step__ai-button {
@@ -210,6 +385,50 @@
   margin-top: 6px;
   font-size: 12px;
   color: var(--error);
+}
+
+.query-editor-add-step__menu-trigger,
+.query-editor-add-step__ai-button,
+.query-editor-add-step__suggestion {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.query-editor-add-step__menu-trigger:hover,
+.query-editor-add-step__ai-button:hover,
+.query-editor-add-step__suggestion:hover {
+  background: var(--bg-hover);
+}
+
+.query-editor-add-step__menu-trigger:active,
+.query-editor-add-step__ai-button:active,
+.query-editor-add-step__suggestion:active {
+  background: var(--bg-active);
+}
+
+.query-editor-add-step__menu-trigger:disabled,
+.query-editor-add-step__ai-button:disabled,
+.query-editor-add-step__suggestion:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.query-editor-add-step__menu-trigger:focus-visible,
+.query-editor-add-step__ai-button:focus-visible,
+.query-editor-add-step__suggestion:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .query-editor-add-step__suggestions {
@@ -235,18 +454,56 @@
 .query-editor-preview__table {
   border-collapse: collapse;
   width: 100%;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
 
 .query-editor-preview__th {
   position: sticky;
   top: 0;
   background: var(--grid-header-bg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
   padding: 6px;
+  text-align: start;
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
 .query-editor-preview__td {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-border);
   padding: 6px;
   font-size: 12px;
+}
+
+/* Responsive layout: when docked panels are narrow, stack the sidebar above the
+   preview so the main table remains usable. */
+@container (max-width: 700px) {
+  .query-editor {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .query-editor__sidebar {
+    border-inline-end: none;
+    border-bottom: 1px solid var(--panel-border);
+    /* Keep the preview visible when the sidebar content grows. */
+    max-block-size: clamp(180px, 35vh, 320px);
+  }
+}
+
+@container (max-width: 520px) {
+  .query-editor-container__toolbar {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .query-editor-container__toolbar select,
+  .query-editor-container__toolbar button {
+    padding: 4px 8px;
+  }
+
+  .query-editor-container__source {
+    flex-basis: 100%;
+    margin-right: 0;
+  }
 }
