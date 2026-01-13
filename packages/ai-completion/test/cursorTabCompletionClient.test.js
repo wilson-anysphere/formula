@@ -218,6 +218,7 @@ test("CursorTabCompletionClient resolves to empty string when an external AbortS
 
 test("CursorTabCompletionClient returns empty string immediately when the external AbortSignal is already aborted", async () => {
   let fetchCalls = 0;
+  let authCalls = 0;
 
   const fetchImpl = async () => {
     fetchCalls += 1;
@@ -228,6 +229,10 @@ test("CursorTabCompletionClient returns empty string immediately when the extern
     baseUrl: "http://example.test",
     fetchImpl,
     timeoutMs: 500,
+    getAuthHeaders: () => {
+      authCalls += 1;
+      return { "x-cursor-test-auth": "yes" };
+    },
   });
 
   const controller = new AbortController();
@@ -242,6 +247,7 @@ test("CursorTabCompletionClient returns empty string immediately when the extern
 
   assert.equal(completion, "");
   assert.equal(fetchCalls, 0);
+  assert.equal(authCalls, 0);
 });
 
 test(
@@ -268,6 +274,38 @@ test(
   assert.equal(fetchCalls, 0);
   },
 );
+
+test("CursorTabCompletionClient awaits async getAuthHeaders", async () => {
+  /** @type {Record<string, string> | null} */
+  let headersSeen = null;
+  let authCalls = 0;
+
+  const fetchImpl = async (_url, init) => {
+    headersSeen = init.headers;
+    return {
+      ok: true,
+      async json() {
+        return { completion: "ok" };
+      },
+    };
+  };
+
+  const client = new CursorTabCompletionClient({
+    baseUrl: "http://example.test",
+    fetchImpl,
+    timeoutMs: 500,
+    getAuthHeaders: async () => {
+      authCalls += 1;
+      await Promise.resolve();
+      return { "x-cursor-test-auth": "async" };
+    },
+  });
+
+  const completion = await client.completeTabCompletion({ input: "=", cursorPosition: 1, cellA1: "A1" });
+  assert.equal(completion, "ok");
+  assert.equal(authCalls, 1);
+  assert.equal(headersSeen?.["x-cursor-test-auth"], "async");
+});
 
 test(
   "CursorTabCompletionClient resolves to empty string when aborted while awaiting getAuthHeaders",
