@@ -124,6 +124,11 @@ function valueSummary(value: unknown): string {
   }
 }
 
+function isSheetPresenceState(value: unknown): value is { meta: unknown; cells: unknown } {
+  if (!isPlainObject(value)) return false;
+  return isPlainObject((value as Record<string, unknown>).meta) && isPlainObject((value as Record<string, unknown>).cells);
+}
+
 function formatSummary(format: unknown): string {
   if (format === null || format === undefined) return "∅";
   try {
@@ -138,6 +143,15 @@ function jsonSummary(value: unknown) {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
 
+  // Sheet presence conflicts can embed huge cell maps; show a compact summary and
+  // avoid traversing `cells` for UI previews.
+  if (isSheetPresenceState(value)) {
+    return jsonSummary({
+      meta: (value as any).meta,
+      cells: "[cells]",
+    });
+  }
+
   const preview = (inner: unknown, depth: number): unknown => {
     if (inner === null || inner === undefined) return null;
     if (typeof inner === "string" || typeof inner === "number" || typeof inner === "boolean") return inner;
@@ -151,12 +165,6 @@ function jsonSummary(value: unknown) {
     if (typeof inner !== "object") return String(inner);
 
     const obj = inner as Record<string, unknown>;
-
-    // Special-case sheet presence conflicts: the cell map can be huge; avoid
-    // traversing it for UI summaries.
-    if (depth === 0 && typeof obj.meta === "object" && obj.meta !== null && "cells" in obj) {
-      return { meta: preview(obj.meta, depth + 1), cells: "[cells]" };
-    }
 
     const out: Record<string, unknown> = {};
 
