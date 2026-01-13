@@ -18,12 +18,7 @@ export function getWorkbookMutationPermission(session: CollabSession | null): Wo
   if (!session) return { allowed: true };
 
   // Prefer the public CollabSession APIs (avoid peeking at private fields).
-  const role = typeof (session as any).getRole === "function" ? ((session as any).getRole() as unknown) : null;
-  const isReadOnly =
-    typeof (session as any).isReadOnly === "function"
-      ? Boolean((session as any).isReadOnly())
-      : role === "viewer" || role === "commenter";
-  if (!isReadOnly) return { allowed: true };
+  if (!session.isReadOnly()) return { allowed: true };
 
   return { allowed: false, reason: READ_ONLY_SHEET_MUTATION_MESSAGE };
 }
