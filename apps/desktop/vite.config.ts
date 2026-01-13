@@ -99,15 +99,21 @@ export default defineConfig({
     resolveJsToTs(),
     ...(typeof visualizer === "function"
       ? [
-           visualizer({
-             filename: "dist/bundle-stats.html",
-             template: "treemap",
+          visualizer({
+            filename: "bundle-stats.html",
+            template: "treemap",
             gzipSize: true,
             brotliSize: true,
+            projectRoot: repoRoot,
+            emitFile: true,
           }),
           visualizer({
-            filename: "dist/bundle-stats.json",
+            filename: "bundle-stats.json",
             template: "raw-data",
+            gzipSize: true,
+            brotliSize: true,
+            projectRoot: repoRoot,
+            emitFile: true,
           }),
         ]
       : []),
@@ -122,9 +128,9 @@ export default defineConfig({
       { find: /^@formula\/marketplace-shared/, replacement: marketplaceSharedEntry },
       { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
+      { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-encryption", replacement: collabEncryptionEntry },
-      { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       // Workspace packages are linked via pnpm's node_modules symlinks. Some CI/dev environments
       // can run with stale node_modules (e.g. cached installs), which causes Vite to fail to

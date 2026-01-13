@@ -9,7 +9,7 @@
     "prebuild": "pnpm -w build:wasm",
     "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",
     "build": "node scripts/ensure-pyodide-assets.mjs && vite build",
-    "build:analyze": "VITE_BUNDLE_ANALYZE=1 pnpm build",
+    "build:analyze": "node scripts/build-analyze.mjs",
     "preview": "vite preview --port 4174 --strictPort",
     "check:coi": "node scripts/check-cross-origin-isolation.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
