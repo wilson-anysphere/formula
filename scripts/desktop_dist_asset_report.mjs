@@ -77,6 +77,14 @@ function usage() {
  * @param {string[]} argv
  */
 function parseArgs(argv) {
+  let args = argv.slice();
+  // pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so
+  // `pnpm report:desktop-dist-assets -- --top 50` behaves the same as passing args directly.
+  const delimiterIdx = args.indexOf("--");
+  if (delimiterIdx >= 0) {
+    args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
+  }
+
   /** @type {{ distDir: string, topN: number, groupDepth: number, groups: boolean }} */
   const out = {
     distDir: path.join(repoRoot, "apps", "desktop", "dist"),
@@ -85,8 +93,8 @@ function parseArgs(argv) {
     groups: true,
   };
 
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
 
     if (arg === "--help" || arg === "-h") {
       console.log(usage());
@@ -104,7 +112,7 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--dist-dir") {
-      const next = argv[i + 1];
+      const next = args[i + 1];
       if (!next) throw new Error("Missing value for --dist-dir");
       out.distDir = next;
       i++;
@@ -119,7 +127,7 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--top" || arg === "--limit") {
-      const next = argv[i + 1];
+      const next = args[i + 1];
       if (!next) throw new Error(`Missing value for ${arg}`);
       const value = Number.parseInt(next, 10);
       if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid ${arg} value: ${next}`);
@@ -136,7 +144,7 @@ function parseArgs(argv) {
       continue;
     }
     if (arg === "--group-depth") {
-      const next = argv[i + 1];
+      const next = args[i + 1];
       if (!next) throw new Error("Missing value for --group-depth");
       const value = Number.parseInt(next, 10);
       if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid --group-depth value: ${next}`);

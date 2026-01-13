@@ -40,6 +40,18 @@ test("desktop_dist_asset_report emits markdown with top offenders + grouped tota
   assert.doesNotMatch(proc.stdout, /`assets\/a\.bin\/`/);
 });
 
+test("desktop_dist_asset_report tolerates pnpm-style -- delimiter", () => {
+  const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-delimiter-"));
+  createSizedFile(path.join(distDir, "assets", "a.bin"), 123);
+  const proc = spawnSync(process.execPath, [scriptPath, "--", "--dist-dir", distDir, "--top", "1", "--no-groups"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /## Desktop dist asset report/);
+  assert.doesNotMatch(proc.stdout, /### Grouped totals/);
+});
+
 test("desktop_dist_asset_report enforces budgets when env vars are set", () => {
   const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-budget-"));
   createSizedFile(path.join(distDir, "assets", "a.bin"), 2_000_000);
