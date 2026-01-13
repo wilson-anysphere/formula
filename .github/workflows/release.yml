@@ -461,8 +461,9 @@ jobs:
             Write-Error "Expected build output directory not found: $searchRoot"
           }
 
-          $installers = Get-ChildItem -Path $searchRoot -Recurse -File -Include *.exe, *.msi |
-            Where-Object { $_.FullName -match '[\\/]release[\\/]bundle[\\/]' }
+          # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
+          $installers = @(Get-ChildItem -Path $searchRoot -Recurse -File -Include *.exe, *.msi |
+            Where-Object { $_.FullName -match '[\\/]release[\\/]bundle[\\/]' })
 
           if ($installers.Count -eq 0) {
             Write-Error "No Windows installers (.exe/.msi) found under target/**/release/bundle/**"
