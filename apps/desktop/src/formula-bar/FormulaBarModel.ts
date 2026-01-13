@@ -134,6 +134,35 @@ export class FormulaBarModel {
     return resolver(name);
   }
 
+  /**
+   * Best-effort resolver for a single reference token text (A1 or structured ref).
+   *
+   * This is primarily used by view-mode hover previews, which operate on the rendered
+   * syntax-highlight spans rather than cursor-aware reference extraction.
+   *
+   * - A1 refs (including sheet-qualified refs like `Sheet2!A1:B2`) are handled via
+   *   `parseSheetQualifiedA1Range`.
+   * - Structured refs (e.g. `Table1[Amount]`) are resolved using the configured
+   *   `ExtractFormulaReferencesOptions` (tables / resolveStructuredRef), if any.
+   */
+  resolveReferenceText(text: string): RangeAddress | null {
+    const trimmed = String(text ?? "").trim();
+    if (!trimmed) return null;
+
+    const a1 = parseSheetQualifiedA1Range(trimmed);
+    if (a1) return a1;
+
+    const { references } = extractFormulaReferences(trimmed, undefined, undefined, this.#extractFormulaReferencesOptions ?? undefined);
+    const first = references[0];
+    if (!first) return null;
+    // Avoid accidentally claiming a range for a more complex expression by requiring the
+    // extracted reference to cover the full input string.
+    if (first.start !== 0 || first.end !== trimmed.length) return null;
+
+    const r = first.range;
+    return { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } };
+  }
+
   get activeCell(): ActiveCellInfo {
     return this.#activeCell;
   }
@@ -287,7 +316,7 @@ export class FormulaBarModel {
       return;
     }
     this.#hoveredReferenceText = referenceText;
-    this.#hoveredReference = parseSheetQualifiedA1Range(referenceText);
+    this.#hoveredReference = this.resolveReferenceText(referenceText);
   }
 
   hoveredReference(): RangeAddress | null {

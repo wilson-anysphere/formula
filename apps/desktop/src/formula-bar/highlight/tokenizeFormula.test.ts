@@ -83,15 +83,22 @@ describe("tokenizeFormula", () => {
     expect(refs).toEqual(["[Book.xlsx]Sheet1!A1", "Sheet1:Sheet3!B2"]);
   });
 
-  it("tokenizes Excel structured table references as a single reference token", () => {
-    const tokens = tokenizeFormula("=SUM(Table1[Amount])");
-    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
-    expect(refs).toEqual(["Table1[Amount]"]);
+  it("tokenizes Excel structured references as single reference tokens", () => {
+    const input = "=SUM(Table1[Amount])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference");
+    expect(refs.map((t) => t.text)).toEqual(["Table1[Amount]"]);
+    expect(refs[0]).toMatchObject({ start: input.indexOf("Table1"), end: input.indexOf("Table1") + "Table1[Amount]".length });
   });
 
-  it("tokenizes structured refs with #All (including internal commas) as a single reference token", () => {
-    const tokens = tokenizeFormula("=SUM(Table1[[#All],[Amount]])");
-    const refs = tokens.filter((t) => t.type === "reference").map((t) => t.text);
-    expect(refs).toEqual(["Table1[[#All],[Amount]]"]);
+  it("tokenizes structured references with nested brackets (e.g. #All) as single tokens", () => {
+    const input = "=SUM(Table1[[#All],[Amount]])";
+    const tokens = tokenizeFormula(input);
+    const refs = tokens.filter((t) => t.type === "reference");
+    expect(refs.map((t) => t.text)).toEqual(["Table1[[#All],[Amount]]"]);
+    expect(refs[0]).toMatchObject({
+      start: input.indexOf("Table1"),
+      end: input.indexOf("Table1") + "Table1[[#All],[Amount]]".length,
+    });
   });
 });

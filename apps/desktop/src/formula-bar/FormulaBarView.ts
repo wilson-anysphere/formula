@@ -1,7 +1,6 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { type ErrorExplanation } from "./errors.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
-import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
@@ -1966,7 +1965,7 @@ export class FormulaBarView {
 
     if (kind === "reference") {
       this.#hoverOverrideText = text;
-      this.#hoverOverride = parseSheetQualifiedA1Range(text);
+      this.#hoverOverride = this.model.resolveReferenceText(text);
       this.#callbacks.onHoverRange?.(this.#hoverOverride);
       this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
       return;

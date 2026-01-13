@@ -86,4 +86,49 @@ describe("FormulaBarView hover previews", () => {
 
     host.remove();
   });
+
+  it("highlights structured references and emits hover previews (with text) in view mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let hoveredRange = null as ReturnType<typeof parseA1Range>;
+    let hoveredText = null as string | null;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onHoverRangeWithText: (range, refText) => {
+        hoveredRange = range;
+        hoveredText = refText;
+      },
+    });
+
+    // Table1 is A1:A3 with a header row at A1, so Table1[Amount] should resolve to A2:A3.
+    view.model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Amount"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 0,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    view.setActiveCell({ address: "A1", input: "=SUM(Table1[Amount])", value: null });
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? [];
+    expect(refSpans).toHaveLength(1);
+    const refSpan = refSpans[0]!;
+    expect(refSpan.textContent).toBe("Table1[Amount]");
+
+    refSpan.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    expect(hoveredText).toBe("Table1[Amount]");
+    expect(hoveredRange).toEqual(parseA1Range("A2:A3"));
+
+    host.remove();
+  });
 });
