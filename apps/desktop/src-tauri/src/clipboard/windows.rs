@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
@@ -15,6 +13,7 @@ use windows::Win32::System::Memory::{
 };
 
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
+use super::retry::{retry_with_delays, total_delay, OPEN_CLIPBOARD_RETRY_DELAYS};
 use super::windows_dib::{dibv5_to_png, png_to_dib_and_dibv5};
 use super::{
     normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
@@ -48,20 +47,27 @@ fn win_err(context: &str, err: windows::core::Error) -> ClipboardError {
 }
 
 fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
-    // The clipboard is often temporarily locked by another process. Retry briefly.
-    const ATTEMPTS: usize = 10;
-    for attempt in 0..ATTEMPTS {
-        match unsafe { OpenClipboard(None) } {
-            Ok(()) => return Ok(ClipboardGuard),
-            Err(_) if attempt + 1 < ATTEMPTS => {
-                // Small backoff.
-                std::thread::sleep(Duration::from_millis(10));
-                continue;
-            }
-            Err(err) => return Err(win_err("OpenClipboard failed", err)),
-        }
-    }
-    unreachable!()
+    // The clipboard is a shared global resource. `OpenClipboard` can fail temporarily when another
+    // process is holding the clipboard lock. Use a deterministic exponential backoff (bounded total
+    // sleep budget) to reduce flakiness under contention.
+    let attempts = OPEN_CLIPBOARD_RETRY_DELAYS.len() + 1;
+    let total_sleep = total_delay(OPEN_CLIPBOARD_RETRY_DELAYS);
+
+    retry_with_delays(
+        || unsafe { OpenClipboard(None) },
+        OPEN_CLIPBOARD_RETRY_DELAYS,
+        std::thread::sleep,
+    )
+    .map(|()| ClipboardGuard)
+    .map_err(|err| {
+        win_err(
+            &format!(
+                "OpenClipboard failed after {attempts} attempts over {}ms",
+                total_sleep.as_millis()
+            ),
+            err,
+        )
+    })
 }
 
 fn register_format(name: &str) -> Result<u32, ClipboardError> {

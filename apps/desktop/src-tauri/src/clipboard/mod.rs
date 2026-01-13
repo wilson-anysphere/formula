@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub mod platform;
 
 mod cf_html;
+#[cfg(any(target_os = "windows", test))]
+mod retry;
 
 // Clipboard items can contain extremely large rich payloads (especially images).
 // Guard against unbounded memory usage / IPC payload sizes by skipping oversized formats.
