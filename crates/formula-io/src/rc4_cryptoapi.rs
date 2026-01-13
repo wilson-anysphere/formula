@@ -37,12 +37,12 @@ pub enum Rc4CryptoApiEncryptedPackageError {
     },
 
     #[error(
-        "invalid `EncryptionHeader.keySize` {key_size_bits} bits: must be a non-zero multiple of 8"
+        "invalid `EncryptionHeader.keySize` {key_size_bits} bits: must be a multiple of 8 (0 is interpreted as 40-bit)"
     )]
     InvalidKeySizeBits { key_size_bits: u32 },
 
     #[error(
-        "unsupported `EncryptionHeader.keySize` {key_size_bits} bits (supported: 40, 56, 128 for RC4 CryptoAPI)"
+        "unsupported `EncryptionHeader.keySize` {key_size_bits} bits (supported: 0/40, 56, 128 for RC4 CryptoAPI)"
     )]
     UnsupportedKeySizeBits { key_size_bits: u32 },
 
@@ -193,7 +193,10 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
             }
         };
 
-        if key_size_bits == 0 || key_size_bits % 8 != 0 {
+        // MS-OFFCRYPTO specifies that `keySize=0` MUST be interpreted as 40-bit (legacy "strong"
+        // encryption export restrictions).
+        let key_size_bits = if key_size_bits == 0 { 40 } else { key_size_bits };
+        if key_size_bits % 8 != 0 {
             return Err(Rc4CryptoApiEncryptedPackageError::InvalidKeySizeBits { key_size_bits });
         }
         if !matches!(key_size_bits, 40 | 56 | 128) {
@@ -649,6 +652,68 @@ mod tests {
         let mut reader =
             Rc4CryptoApiDecryptReader::new(cursor, plaintext.len() as u64, h.clone(), key_len)
                 .unwrap();
+
+        let mut out = vec![0u8; plaintext.len()];
+        reader.read_exact(&mut out).unwrap();
+        assert_eq!(out, plaintext);
+    }
+
+    #[test]
+    fn encrypted_package_round_trip_with_56_bit_key_via_header_keysize() {
+        let h = b"0123456789ABCDEFGHIJ".to_vec(); // 20 bytes
+        let key_len = 7; // 56-bit
+
+        // Ensure plaintext crosses a 0x200 boundary.
+        let mut plaintext = vec![0u8; RC4_BLOCK_SIZE + 64];
+        for (i, b) in plaintext.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
+
+        // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&ciphertext);
+
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            56, // keySize (bits)
+            CALG_SHA1,
+        )
+        .unwrap();
+
+        let mut out = vec![0u8; plaintext.len()];
+        reader.read_exact(&mut out).unwrap();
+        assert_eq!(out, plaintext);
+    }
+
+    #[test]
+    fn encrypted_package_keysize_zero_is_interpreted_as_40_bit() {
+        let h = b"0123456789ABCDEFGHIJ".to_vec(); // 20 bytes
+        let key_len = 5; // 40-bit (padded to 16 bytes for RC4)
+
+        // Ensure plaintext crosses a 0x200 boundary.
+        let mut plaintext = vec![0u8; RC4_BLOCK_SIZE + 64];
+        for (i, b) in plaintext.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let ciphertext = encrypt_rc4_cryptoapi(&plaintext, &h, key_len, HashAlg::Sha1);
+
+        // Simulate EncryptedPackage stream layout: [u64 package_size] + ciphertext.
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(plaintext.len() as u64).to_le_bytes());
+        stream.extend_from_slice(&ciphertext);
+
+        let cursor = Cursor::new(stream);
+        let mut reader = Rc4CryptoApiDecryptReader::from_encrypted_package_stream(
+            cursor,
+            h.clone(),
+            0, // keySize (bits) => 40-bit per MS-OFFCRYPTO
+            CALG_SHA1,
+        )
+        .unwrap();
 
         let mut out = vec![0u8; plaintext.len()];
         reader.read_exact(&mut out).unwrap();

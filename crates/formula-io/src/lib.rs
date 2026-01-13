@@ -1,3 +1,5 @@
+mod cryptoapi_rc4;
+
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
