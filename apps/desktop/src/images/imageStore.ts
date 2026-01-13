@@ -22,10 +22,6 @@ export class DesktopImageStore {
     this.images.delete(String(imageId));
   }
 
-  clear(): void {
-    this.images.clear();
-  }
-
   get(imageId: string): StoredImage | null {
     return this.images.get(String(imageId)) ?? null;
   }
