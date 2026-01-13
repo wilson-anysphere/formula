@@ -43,6 +43,25 @@ test("chunkToText detects header rows below a title row and preserves the title 
   assert.match(text, /Units=10/);
 });
 
+test("chunkToText uses the widest sampled row when computing column counts (jagged samples)", () => {
+  const chunk = {
+    kind: "dataRegion",
+    title: "Data region A1:C3",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 2, c1: 2 },
+    cells: [
+      [{ v: "Revenue Summary" }],
+      [{ v: "Region" }, { v: "Revenue" }, { v: "Units" }],
+      [{ v: "North" }, { v: 1200 }, { v: 10 }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /COLUMNS: Region/);
+  assert.match(text, /Revenue/);
+  assert.match(text, /Units/);
+});
+
 test("chunkToText includes formulas in labeled sample rows for header tables", () => {
   const chunk = {
     kind: "table",

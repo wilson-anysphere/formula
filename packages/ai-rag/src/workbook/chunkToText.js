@@ -125,7 +125,10 @@ export function chunkToText(chunk, opts) {
   const rectA1 = rectToA1(chunk.rect);
   const cells = chunk.cells || [];
   const headerRow = inferHeaderRow(cells);
-  const sampledColCount = cells[0]?.length ?? 0;
+  let sampledColCount = 0;
+  for (const row of cells) {
+    if (Array.isArray(row) && row.length > sampledColCount) sampledColCount = row.length;
+  }
   const sampledRowCount = cells.length;
   const fullColCount = chunk.rect.c1 - chunk.rect.c0 + 1;
   const fullRowCount = chunk.rect.r1 - chunk.rect.r0 + 1;
