@@ -1,0 +1,7 @@
+[toolchain]
+# Pinned Rust toolchain for deterministic CI/release builds.
+# Update this file in a dedicated PR to roll forward the toolchain with CI validation.
+channel = "1.92.0"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+

@@ -108,7 +108,18 @@ jobs:
           version: 9.0.0
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.92.0
+
+      - name: Install Rust targets (WASM)
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install Rust targets (macOS universal)
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Install Rust targets (Windows arm64)
+        if: matrix.platform == 'windows-latest'
+        run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
 
       - name: Install macOS Rust targets (universal build)
         if: runner.os == 'macOS'
