@@ -128,9 +128,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-installed tools.
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
-            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
         # Pinned to match the tagged release workflow so we catch toolchain issues before cutting releases.
@@ -153,9 +154,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-tauri
-          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          # Include the Rust toolchain pin so Rust upgrades force rebuilding cargo-installed tools.
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
-            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install pinned Tauri CLI (cargo tauri)
         if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
