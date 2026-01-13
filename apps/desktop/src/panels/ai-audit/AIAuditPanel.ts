@@ -1,6 +1,6 @@
-import type { AIAuditEntry, AIAuditStore } from "@formula/ai-audit/browser";
+import { serializeAuditEntries, type AIAuditEntry, type AIAuditStore } from "@formula/ai-audit/browser";
 
-import { createAuditLogExport, downloadAuditLogExport } from "./exportAuditLog";
+import { downloadAuditLogExport } from "./exportAuditLog";
 import { getDesktopAIAuditStore } from "../../ai/audit/auditStore";
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -324,8 +324,15 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
   type PendingOperation = "refresh" | "load_more";
   let operationInFlight = false;
   let queuedOperation: PendingOperation | null = null;
+  let exportInFlight = false;
 
   async function runOperation(op: PendingOperation) {
+    if (exportInFlight) {
+      // Queue the latest operation, but don't run concurrent fetches while exporting.
+      if (op === "refresh" || queuedOperation !== "refresh") queuedOperation = op;
+      return;
+    }
+
     if (operationInFlight) {
       // Refresh always wins over load_more (since it resets cursor state).
       if (op === "refresh" || queuedOperation !== "refresh") {
@@ -398,21 +405,87 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     await runOperation("load_more");
   }
 
+  async function exportLog(): Promise<{ blob: Blob; fileName: string } | null> {
+    if (exportInFlight) return null;
+    if (operationInFlight) {
+      // Avoid exporting a moving target while a refresh/load-more fetch is inflight.
+      queuedOperation = "refresh";
+      return null;
+    }
+
+    exportInFlight = true;
+    const btn = exportButton as HTMLButtonElement;
+    const prevDisabled = btn.disabled;
+    btn.disabled = true;
+    refreshButton.disabled = true;
+    loadMoreButton.disabled = true;
+
+    const sessionId = sessionInput.value.trim() || undefined;
+    const workbookId = workbookInput.value.trim() || undefined;
+    const after_timestamp_ms = computeAfterTimestampMs(Date.now());
+
+    // Export can be large; fetch in pages and serialize as NDJSON to avoid holding
+    // the entire log in memory as objects.
+    const exportPageSize = 1000;
+    const parts: Array<BlobPart> = [];
+    let cursor: { before_timestamp_ms: number; before_id: string } | undefined;
+    let total = 0;
+
+    try {
+      for (let pageIndex = 0; pageIndex < 10_000; pageIndex++) {
+        entriesMeta.textContent = total === 0 ? "Exporting…" : `Exporting… ${total} entr${total === 1 ? "y" : "ies"}`;
+
+        const page = await store.listEntries({
+          session_id: sessionId,
+          workbook_id: workbookId,
+          after_timestamp_ms,
+          limit: exportPageSize,
+          ...(cursor ? { cursor } : {}),
+        });
+
+        if (page.length === 0) break;
+        const serialized = serializeAuditEntries(page, { format: "ndjson" });
+        if (parts.length > 0) parts.push("\n");
+        parts.push(serialized);
+
+        total += page.length;
+
+        const last = page[page.length - 1];
+        if (!last) break;
+        if (page.length < exportPageSize) break;
+        cursor = { before_timestamp_ms: last.timestamp_ms, before_id: last.id };
+      }
+
+      const blob = new Blob(parts, { type: "application/x-ndjson" });
+      const fileName = buildExportFileName(
+        {
+          workbookId,
+          sessionId,
+        },
+        "ndjson",
+      );
+      downloadAuditLogExport({ blob, fileName });
+      return { blob, fileName };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      entriesMeta.textContent = `Failed to export audit log: ${message}`;
+      return null;
+    } finally {
+      exportInFlight = false;
+      btn.disabled = prevDisabled;
+      refreshButton.disabled = false;
+      loadMoreButton.disabled = !hasMore;
+      updateMeta();
+    }
+  }
+
   const exportButton = el(
     "button",
     {
       type: "button",
       "data-testid": "ai-audit-export-json",
       onClick: () => {
-        const sessionId = sessionInput.value.trim();
-        const workbookId = workbookInput.value.trim();
-        const exp = createAuditLogExport(currentEntries, {
-          fileName: buildExportFileName({
-            workbookId: workbookId || undefined,
-            sessionId: sessionId || undefined,
-          }),
-        });
-        downloadAuditLogExport(exp);
+        void exportLog();
       },
     },
     ["Export log"],
@@ -476,6 +549,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
     ready,
     refresh,
     loadMore,
+    exportLog,
     getEntries() {
       return currentEntries.slice();
     },

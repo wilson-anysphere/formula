@@ -181,4 +181,75 @@ describe("AIAuditPanel", () => {
     expect(entries).toHaveLength(3);
     expect(entries[2]?.textContent).toContain("model-a");
   });
+
+  it("exports all matching entries (not just the currently loaded page)", async () => {
+    const require = createRequire(import.meta.url);
+    const locateFile = (file: string) => require.resolve(`sql.js/dist/${file}`);
+
+    const store = await SqliteAIAuditStore.create({ storage: new InMemoryBinaryStorage(), locateFile });
+
+    await store.logEntry({
+      id: "entry-a",
+      timestamp_ms: 1700000000000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "a" },
+      model: "model-a",
+      tool_calls: []
+    });
+    await store.logEntry({
+      id: "entry-b",
+      timestamp_ms: 1700000001000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "b" },
+      model: "model-b",
+      tool_calls: []
+    });
+    await store.logEntry({
+      id: "entry-c",
+      timestamp_ms: 1700000002000,
+      session_id: "session-1",
+      workbook_id: "workbook-1",
+      mode: "chat",
+      input: { message: "c" },
+      model: "model-c",
+      tool_calls: []
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const panel = createAIAuditPanel({ container, store, initialWorkbookId: "workbook-1" });
+    await panel.ready;
+
+    const pageSizeInput = container.querySelector<HTMLInputElement>('[data-testid="ai-audit-filter-page-size"]');
+    expect(pageSizeInput).toBeTruthy();
+    if (!pageSizeInput) return;
+
+    // Only load one entry into the UI state.
+    pageSizeInput.value = "1";
+    await panel.refresh();
+
+    const visible = container.querySelectorAll('[data-testid="ai-audit-entry"]');
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.textContent).toContain("model-c");
+
+    const exp = await panel.exportLog();
+    expect(exp).toBeTruthy();
+    if (!exp) return;
+
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(reader.error ?? new Error("FileReader failed"));
+      reader.readAsText(exp.blob);
+    });
+    const lines = text.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(3);
+    const parsed = lines.map((line) => JSON.parse(line) as AIAuditEntry);
+    expect(parsed.map((e) => e.id)).toEqual(["entry-c", "entry-b", "entry-a"]);
+  });
 });
