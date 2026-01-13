@@ -14,6 +14,23 @@ export type TauriEventApi = {
   emit: TauriEmit | null;
 };
 
+function getTauriDialogNamespaceOrNull(): any | null {
+  const tauri = (globalThis as any).__TAURI__ as any;
+  return tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
+}
+
+export function getTauriDialogOpenOrNull(): TauriDialogOpen | null {
+  const dialog = getTauriDialogNamespaceOrNull();
+  const open = dialog?.open as TauriDialogOpen | undefined;
+  return typeof open === "function" ? open : null;
+}
+
+export function getTauriDialogSaveOrNull(): TauriDialogSave | null {
+  const dialog = getTauriDialogNamespaceOrNull();
+  const save = dialog?.save as TauriDialogSave | undefined;
+  return typeof save === "function" ? save : null;
+}
+
 /**
  * Access the Tauri dialog plugin API (open/save) without a hard dependency on
  * `@tauri-apps/api`.
@@ -21,13 +38,12 @@ export type TauriEventApi = {
  * Supports both legacy shapes:
  * - `__TAURI__.dialog.*`
  * - `__TAURI__.plugin.dialog.*`
+ * - `__TAURI__.plugins.dialog.*`
  */
 export function getTauriDialogOrNull(): TauriDialogApi | null {
-  const tauri = (globalThis as any).__TAURI__ as any;
-  const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
-  const open = dialog?.open as TauriDialogOpen | undefined;
-  const save = dialog?.save as TauriDialogSave | undefined;
-  if (typeof open !== "function" || typeof save !== "function") return null;
+  const open = getTauriDialogOpenOrNull();
+  const save = getTauriDialogSaveOrNull();
+  if (!open || !save) return null;
   return { open, save };
 }
 

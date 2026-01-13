@@ -3,6 +3,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   getTauriDialogOrNull,
   getTauriDialogOrThrow,
+  getTauriDialogOpenOrNull,
+  getTauriDialogSaveOrNull,
   getTauriEventApiOrNull,
   getTauriEventApiOrThrow,
   hasTauriWindowApi,
@@ -64,6 +66,14 @@ describe("tauri/api dynamic accessors", () => {
       (globalThis as any).__TAURI__ = { dialog: { open } };
       expect(getTauriDialogOrNull()).toBeNull();
       expect(() => getTauriDialogOrThrow()).toThrowError("Tauri dialog API not available");
+    });
+
+    it("exposes open/save-only helpers that do not require the full API surface", () => {
+      const open = vi.fn();
+      (globalThis as any).__TAURI__ = { dialog: { open } };
+
+      expect(getTauriDialogOpenOrNull()).toBe(open);
+      expect(getTauriDialogSaveOrNull()).toBeNull();
     });
   });
 
