@@ -1,3 +1,4 @@
+import { extractSheetSchema } from "./schema.js";
 import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
 import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
@@ -345,7 +346,8 @@ export class ContextManager {
     throwIfAborted(signal);
 
     if (!this.cacheSheetIndex) {
-      const { schema } = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+      const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+      const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
       return { schema };
     }
 
@@ -363,7 +365,8 @@ export class ContextManager {
     const upToDate = cached?.signature === signature && activeKey === cacheKey;
     if (upToDate) return { schema: cached.schema };
 
-    const { schema } = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+    const indexStats = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+    const schema = indexStats?.schema ?? extractSheetSchema(sheet, { signal });
 
     // Update caches after successful indexing.
     this._sheetNameToActiveCacheKey.set(sheet.name, cacheKey);

@@ -300,6 +300,15 @@ function splitRectByRowWindows(rect, options) {
 }
 
 /**
+ * @typedef {{
+ *   id: string,
+ *   range: string,
+ *   text: string,
+ *   metadata: any
+ * }} SheetChunk
+ */
+
+/**
  * Chunk a sheet by detected regions for a simple RAG pipeline.
  *
  * @param {{ name: string, values: unknown[][], origin?: { row: number, col: number } }} sheet
@@ -310,6 +319,7 @@ function splitRectByRowWindows(rect, options) {
  *   maxChunksPerRegion?: number,
  *   signal?: AbortSignal
  * }} [options]
+ * @returns {SheetChunk[]}
  */
 export function chunkSheetByRegions(sheet, options = {}) {
   return chunkSheetByRegionsWithSchema(sheet, options).chunks;
@@ -327,7 +337,7 @@ export function chunkSheetByRegions(sheet, options = {}) {
  *   maxChunksPerRegion?: number,
  *   signal?: AbortSignal
  * }} [options]
- * @returns {{ schema: ReturnType<typeof extractSheetSchema>, chunks: ReturnType<typeof chunkSheetByRegions> }}
+ * @returns {{ schema: ReturnType<typeof extractSheetSchema>, chunks: SheetChunk[] }}
  */
 export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   const signal = options.signal;
@@ -340,7 +350,7 @@ export function chunkSheetByRegionsWithSchema(sheet, options = {}) {
   const origin = normalizeSheetOrigin(sheet);
   const matrixBounds = getMatrixBounds(sheet.values);
 
-  /** @type {{ id: string, range: string, text: string, metadata: any }[]} */
+  /** @type {SheetChunk[]} */
   const chunks = [];
 
   for (let regionIndex = 0; regionIndex < schema.dataRegions.length; regionIndex++) {
@@ -420,6 +430,7 @@ export class RagIndex {
    *   maxChunksPerRegion?: number,
    *   signal?: AbortSignal
    * }} [options]
+   * @returns {Promise<{ schema: ReturnType<typeof extractSheetSchema>, chunkCount: number }>}
    */
   async indexSheet(sheet, options = {}) {
     const signal = options.signal;
