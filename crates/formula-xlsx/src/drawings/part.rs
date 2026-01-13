@@ -15,6 +15,7 @@ type Result<T> = std::result::Result<T, XlsxError>;
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 pub(crate) const REL_TYPE_IMAGE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+const GRAPHIC_DATA_CHART_URI: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrawingRef(pub usize);
@@ -124,24 +125,71 @@ impl DrawingPart {
                 .find(|n| n.is_element() && n.tag_name().name() == "graphicFrame")
             {
                 let (id, frame_xml) = parse_named_node(&frame, drawing_xml, "cNvPr")?;
-                let chart_rel_id = frame
+
+                // `xdr:graphicFrame` is used for multiple object types (charts, SmartArt diagrams,
+                // etc). Treat it as a chart placeholder only when it actually references a chart.
+                //
+                // Excel chart frames contain either:
+                // - A `<c:chart r:id="...">` (or `cx:chart`) element, or
+                // - An `a:graphicData` node with `uri=".../chart"`.
+                let chart_node = frame
                     .descendants()
-                    .find(|n| n.is_element() && n.tag_name().name() == "chart")
-                    .and_then(|n| n.attribute((REL_NS, "id")).or_else(|| n.attribute("r:id")))
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .find(|n| n.is_element() && n.tag_name().name() == "chart");
+
+                let graphic_data_is_chart = frame
+                    .descendants()
+                    .find(|n| n.is_element() && n.tag_name().name() == "graphicData")
+                    .and_then(|n| n.attribute("uri"))
+                    .is_some_and(|uri| uri == GRAPHIC_DATA_CHART_URI);
+
                 let size = extract_size_from_transform(&frame).or_else(|| size_from_anchor(anchor));
-                objects.push(DrawingObject {
-                    id,
-                    kind: DrawingObjectKind::ChartPlaceholder {
-                        rel_id: chart_rel_id,
-                        raw_xml: frame_xml,
-                    },
-                    anchor,
-                    z_order: z as i32,
-                    size,
-                    preserved: anchor_preserved.clone(),
-                });
+
+                if chart_node.is_some() || graphic_data_is_chart {
+                    if let Some(chart_rel_id) = chart_node
+                        .and_then(|n| {
+                            n.attribute((REL_NS, "id"))
+                                .or_else(|| n.attribute("r:id"))
+                                .or_else(|| n.attribute("id"))
+                        })
+                        .map(|s| s.to_string())
+                    {
+                        objects.push(DrawingObject {
+                            id,
+                            kind: DrawingObjectKind::ChartPlaceholder {
+                                rel_id: chart_rel_id,
+                                raw_xml: frame_xml,
+                            },
+                            anchor,
+                            z_order: z as i32,
+                            size,
+                            preserved: anchor_preserved.clone(),
+                        });
+                    } else {
+                        // Chart frame without a relationship id: preserve as an unknown anchor
+                        // rather than inventing a placeholder rel id.
+                        let raw_anchor =
+                            slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                        objects.push(DrawingObject {
+                            id,
+                            kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                            anchor,
+                            z_order: z as i32,
+                            size,
+                            preserved: anchor_preserved.clone(),
+                        });
+                    }
+                } else {
+                    // Non-chart `graphicFrame` (e.g. SmartArt): preserve the entire anchor subtree.
+                    let raw_anchor = slice_node_xml(&anchor_node, drawing_xml).unwrap_or_default();
+                    objects.push(DrawingObject {
+                        id,
+                        kind: DrawingObjectKind::Unknown { raw_xml: raw_anchor },
+                        anchor,
+                        z_order: z as i32,
+                        size,
+                        preserved: anchor_preserved.clone(),
+                    });
+                }
                 continue;
             }
 
