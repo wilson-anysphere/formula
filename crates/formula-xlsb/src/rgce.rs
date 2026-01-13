@@ -108,6 +108,17 @@ impl std::fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 /// A non-fatal issue encountered while decoding an rgce token stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeFailureKind {
+    UnknownPtg,
+    UnexpectedEof,
+    StackUnderflow,
+    InvalidConstant,
+    OutputTooLarge,
+    StackNotSingular,
+}
+
+/// A non-fatal issue encountered while decoding an rgce token stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeWarning {
     /// Encountered an unknown/extended error code in a `PtgErr` token.
@@ -122,6 +133,15 @@ pub enum DecodeWarning {
     ///
     /// The decoder will ignore unknown bits and emit best-effort formula text.
     UnknownStructuredRefFlags { flags: u32, offset: usize },
+    /// The decoder encountered a hard failure and could not produce formula text.
+    ///
+    /// This is surfaced as a warning (rather than bubbling up an error) because the
+    /// [`decode_formula_rgce*`] APIs are intended to be best-effort for diagnostics.
+    DecodeFailed {
+        kind: DecodeFailureKind,
+        offset: usize,
+        ptg: u8,
+    },
 }
 
 /// Result of decoding an rgce token stream.
@@ -203,7 +223,33 @@ fn decode_formula_rgce_impl(
     base: Option<CellCoord>,
 ) -> DecodedFormula {
     let mut warnings = Vec::new();
-    let text = decode_rgce_impl(rgce, rgcb, ctx, base, Some(&mut warnings)).ok();
+    let text = match decode_rgce_impl(rgce, rgcb, ctx, base, Some(&mut warnings)) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            let (kind, offset, ptg) = match e {
+                DecodeError::UnknownPtg { offset, ptg } => {
+                    (DecodeFailureKind::UnknownPtg, offset, ptg)
+                }
+                DecodeError::UnexpectedEof { offset, ptg, .. } => {
+                    (DecodeFailureKind::UnexpectedEof, offset, ptg)
+                }
+                DecodeError::StackUnderflow { offset, ptg } => {
+                    (DecodeFailureKind::StackUnderflow, offset, ptg)
+                }
+                DecodeError::InvalidConstant { offset, ptg, .. } => {
+                    (DecodeFailureKind::InvalidConstant, offset, ptg)
+                }
+                DecodeError::OutputTooLarge { offset, ptg, .. } => {
+                    (DecodeFailureKind::OutputTooLarge, offset, ptg)
+                }
+                DecodeError::StackNotSingular { offset, ptg, .. } => {
+                    (DecodeFailureKind::StackNotSingular, offset, ptg)
+                }
+            };
+            warnings.push(DecodeWarning::DecodeFailed { kind, offset, ptg });
+            None
+        }
+    };
     DecodedFormula { text, warnings }
 }
 

@@ -1,7 +1,7 @@
 use formula_engine::parse_formula;
 use formula_xlsb::rgce::{
     decode_formula_rgce, decode_formula_rgce_with_rgcb, decode_rgce, decode_rgce_with_base,
-    decode_rgce_with_context, CellCoord, DecodeWarning,
+    decode_rgce_with_context, CellCoord, DecodeFailureKind, DecodeWarning,
 };
 use formula_xlsb::workbook_context::WorkbookContext;
 use pretty_assertions::assert_eq;
@@ -289,4 +289,36 @@ fn decodes_unknown_array_error_codes_without_aborting() {
         }]
     );
     assert_parses_and_roundtrips(decoded.text.as_ref().expect("text"));
+}
+
+#[test]
+fn surfaces_stack_underflow_as_structured_warning() {
+    // A single binary operator token should fail with a stack underflow.
+    let rgce = [0x03]; // PtgAdd
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text, None);
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::StackUnderflow,
+            offset: 0,
+            ptg: 0x03
+        }]
+    );
+}
+
+#[test]
+fn surfaces_unexpected_eof_as_structured_warning() {
+    // Truncated PtgInt: expects 2 trailing bytes for the i16 value.
+    let rgce = [0x1E]; // PtgInt (missing payload)
+    let decoded = decode_formula_rgce(&rgce);
+    assert_eq!(decoded.text, None);
+    assert_eq!(
+        decoded.warnings,
+        vec![DecodeWarning::DecodeFailed {
+            kind: DecodeFailureKind::UnexpectedEof,
+            offset: 0,
+            ptg: 0x1E
+        }]
+    );
 }
