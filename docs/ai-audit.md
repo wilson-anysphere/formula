@@ -139,11 +139,8 @@ When compaction happens, `input`/tool payloads are replaced with a JSON-friendly
 In extreme cases (very large inputs / tool logs), the compaction step may also drop some tool calls
 and optional fields to fit under the cap.
 
-Compaction markers:
-
-- Truncated values are stored as an object like `{ audit_truncated: true, audit_original_chars, audit_json }`.
-- If some tool calls are dropped, `BoundedAIAuditStore` appends a sentinel tool call with
-  `name: "audit_truncated_tool_calls"` describing how many were omitted.
+If some tool calls are dropped, `BoundedAIAuditStore` appends a sentinel tool call with
+`name: "audit_truncated_tool_calls"` describing how many were omitted.
 
 Example:
 
