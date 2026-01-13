@@ -322,7 +322,16 @@ jobs:
               f"({delta_ratio(prev.get('size_overhead_p90'), cur.get('size_overhead_p90'))}); "
               f"samples {cur.get('size_overhead_samples', 0)}"
           )
-          
+
+          lines.append(
+              f"- Part change ratio p90: **{pct(cur.get('part_change_ratio_p90'))}** "
+              f"({delta_pct(prev.get('part_change_ratio_p90'), cur.get('part_change_ratio_p90'))})"
+          )
+          lines.append(
+              f"- Part change ratio p90 (critical): **{pct(cur.get('part_change_ratio_critical_p90'))}** "
+              f"({delta_pct(prev.get('part_change_ratio_critical_p90'), cur.get('part_change_ratio_critical_p90'))})"
+          )
+           
           prev_diff = prev.get("diff_totals") or {}
           cur_diff = cur.get("diff_totals") or {}
           lines.append(
