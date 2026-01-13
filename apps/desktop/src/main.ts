@@ -2179,6 +2179,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.toggleItalic": true,
             "format.toggleUnderline": true,
             "format.toggleStrikethrough": true,
+            "home.font.subscript": true,
+            "home.font.superscript": true,
             "home.font.fontName": true,
             "home.font.fontSize": true,
             "home.font.increaseFont": true,

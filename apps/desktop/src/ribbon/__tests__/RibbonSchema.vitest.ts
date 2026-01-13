@@ -80,6 +80,24 @@ describe("defaultRibbonSchema", () => {
     expect(exportPdf?.testId).toBe("ribbon-export-pdf");
   });
 
+  it("disables Home → Font subscript/superscript until baseline-shift rendering is supported", () => {
+    const homeTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "home");
+    expect(homeTab, "Expected Home tab to exist").toBeTruthy();
+    if (!homeTab) return;
+
+    const fontGroup = homeTab.groups.find((group) => group.id === "home.font");
+    expect(fontGroup, "Expected Home → Font group to exist").toBeTruthy();
+    if (!fontGroup) return;
+
+    const subscript = fontGroup.buttons.find((button) => button.id === "home.font.subscript");
+    expect(subscript, "Expected Home → Font → Subscript button to exist").toBeTruthy();
+    expect(subscript?.disabled).toBe(true);
+
+    const superscript = fontGroup.buttons.find((button) => button.id === "home.font.superscript");
+    expect(superscript, "Expected Home → Font → Superscript button to exist").toBeTruthy();
+    expect(superscript?.disabled).toBe(true);
+  });
+
   it("keeps File → Info → Manage Workbook menu item ids wired", () => {
     const fileTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "file");
     expect(fileTab, "Expected File tab to exist").toBeTruthy();
