@@ -830,6 +830,20 @@ export class TabCompletionEngine {
   }
 }
 
+const DAY_COUNT_BASIS_ENUM_0_TO_4 = [
+  { replacement: "0", displayText: "0 (US/NASD 30/360)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (actual/actual)", confidence: 0.65 },
+  { replacement: "2", displayText: "2 (actual/360)", confidence: 0.64 },
+  { replacement: "3", displayText: "3 (actual/365)", confidence: 0.63 },
+  { replacement: "4", displayText: "4 (European 30/360)", confidence: 0.62 },
+];
+
+const BOND_FREQUENCY_ENUM_1_2_4 = [
+  { replacement: "2", displayText: "2 (semiannual)", confidence: 0.66 },
+  { replacement: "1", displayText: "1 (annual)", confidence: 0.65 },
+  { replacement: "4", displayText: "4 (quarterly)", confidence: 0.64 },
+];
+
 /**
  * Function-specific enumerations for commonly misunderstood "flag" arguments.
  * These are curated because the function catalog only carries coarse arg types.
@@ -1179,6 +1193,40 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "FALSE", displayText: "FALSE (decimals)", confidence: 0.65 },
     ],
   },
+  ACCRINT: {
+    // frequency
+    5: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  ACCRINTM: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  PRICE: {
+    // frequency
+    5: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  YIELD: {
+    // frequency
+    5: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    6: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  DURATION: {
+    // frequency
+    4: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    5: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  MDURATION: {
+    // frequency
+    4: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    5: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
   LINEST: {
     // const (TRUE = calculate intercept, FALSE = force intercept=0)
     2: [
@@ -1226,13 +1274,7 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
   },
   YEARFRAC: {
     // basis
-    2: [
-      { replacement: "0", displayText: "0 (US/NASD 30/360)", confidence: 0.66 },
-      { replacement: "1", displayText: "1 (actual/actual)", confidence: 0.65 },
-      { replacement: "2", displayText: "2 (actual/360)", confidence: 0.64 },
-      { replacement: "3", displayText: "3 (actual/365)", confidence: 0.63 },
-      { replacement: "4", displayText: "4 (European 30/360)", confidence: 0.62 },
-    ],
+    2: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
   VLOOKUP: {
     // range_lookup (TRUE = approx match, FALSE = exact)

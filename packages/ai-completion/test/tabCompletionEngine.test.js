@@ -2264,6 +2264,63 @@ test("YEARFRAC basis suggests 0, 1, 2, 3, 4", async () => {
   }
 });
 
+test("PRICE frequency suggests 2, 1, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PRICE(A1, B1, 0.05, 0.04, 100, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const f of ["2", "1", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=PRICE(A1, B1, 0.05, 0.04, 100, ${f}`),
+      `Expected PRICE to suggest frequency=${f}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("PRICE basis suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PRICE(A1, B1, 0.05, 0.04, 100, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const basis of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=PRICE(A1, B1, 0.05, 0.04, 100, 2, ${basis}`),
+      `Expected PRICE to suggest basis=${basis}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("ACCRINT frequency suggests 2, 1, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=ACCRINT(A1, B1, C1, 0.05, 100, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const f of ["2", "1", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=ACCRINT(A1, B1, C1, 0.05, 100, ${f}`),
+      `Expected ACCRINT to suggest frequency=${f}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("FORECAST.ETS seasonality suggests 0, 1, 12, 4", async () => {
   const engine = new TabCompletionEngine();
 
