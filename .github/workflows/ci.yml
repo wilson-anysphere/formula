@@ -29,6 +29,8 @@ jobs:
         run: bash scripts/ci/check-node-version-pins.sh
       - name: "Guard: pnpm version pins match package.json + release workflow"
         run: bash scripts/ci/check-pnpm-version-pins.sh
+      - name: "Guard: desktop bundle size reporter JSON output"
+        run: python3 -m unittest scripts/test_desktop_bundle_size_report_json.py
 
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
