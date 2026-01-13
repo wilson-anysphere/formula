@@ -24,8 +24,8 @@ export function reservedRootGuardUiMessage(): string {
 
 // Preserve the detected error per provider instance so panels can show the banner
 // even if they are opened after the close event occurred (or are re-opened).
-const providerReservedRootGuardError = new WeakMap<object, string>();
-const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(message: string | null) => void> }>();
+const providerReservedRootGuardDetected = new WeakSet<object>();
+const providerReservedRootGuardMonitors = new WeakMap<object, { subscribers: Set<(detected: boolean) => void> }>();
 
 function coerceReason(reason: unknown): string {
   if (typeof reason === "string") return reason;
@@ -231,16 +231,16 @@ export function isReservedRootGuardDisconnect(info: ProviderCloseInfo): boolean 
 }
 
 export function useReservedRootGuardError(provider: any | null): string | null {
-  const [error, setError] = useState<string | null>(null);
+  const [detected, setDetected] = useState(false);
 
   useEffect(() => {
     if (!provider || (typeof provider !== "object" && typeof provider !== "function")) {
-      setError(null);
+      setDetected(false);
       return;
     }
 
     const key = provider as object;
-    setError(providerReservedRootGuardError.get(key) ?? null);
+    setDetected(providerReservedRootGuardDetected.has(key));
 
     let monitor = providerReservedRootGuardMonitors.get(key);
     if (!monitor) {
@@ -250,11 +250,10 @@ export function useReservedRootGuardError(provider: any | null): string | null {
       // error even when panels are not mounted.
       listenForProviderCloseEvents(provider, (info) => {
         if (!isReservedRootGuardDisconnect(info)) return;
-        const message = reservedRootGuardUiMessage();
-        providerReservedRootGuardError.set(key, message);
+        providerReservedRootGuardDetected.add(key);
         for (const cb of Array.from(monitor!.subscribers)) {
           try {
-            cb(message);
+            cb(true);
           } catch {
             // ignore
           }
@@ -262,25 +261,25 @@ export function useReservedRootGuardError(provider: any | null): string | null {
       });
     }
 
-    const subscriber = (message: string | null) => setError(message);
+    const subscriber = (nextDetected: boolean) => setDetected(nextDetected);
     monitor.subscribers.add(subscriber);
     return () => {
       monitor?.subscribers.delete(subscriber);
     };
   }, [provider]);
 
-  return error;
+  return detected ? reservedRootGuardUiMessage() : null;
 }
 
 export function clearReservedRootGuardError(provider: any | null): void {
   if (!provider || (typeof provider !== "object" && typeof provider !== "function")) return;
   const key = provider as object;
-  providerReservedRootGuardError.delete(key);
+  providerReservedRootGuardDetected.delete(key);
   const monitor = providerReservedRootGuardMonitors.get(key);
   if (!monitor) return;
   for (const cb of Array.from(monitor.subscribers)) {
     try {
-      cb(null);
+      cb(false);
     } catch {
       // ignore
     }
