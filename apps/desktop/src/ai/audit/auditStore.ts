@@ -84,6 +84,14 @@ function coerceViteUrlToNodeFileUrl(href: string): string {
   // In Node, sql.js uses `fs.readFileSync` for wasm loading, so convert these to a
   // file:// URL rooted at the repository cwd.
   if (href.startsWith("/")) {
+    // If this already looks like an absolute filesystem path (e.g. from `import.meta.resolve`),
+    // don't prefix with cwd (that would produce a non-existent path like `<cwd>/state/...`).
+    const looksLikeDevServerUrl =
+      href.startsWith("/assets/") || href.startsWith("/node_modules/") || href.startsWith("/@");
+    if (!looksLikeDevServerUrl) {
+      return `file://${href}`;
+    }
+
     const cwd = typeof (globalThis as any).process?.cwd === "function" ? (globalThis as any).process.cwd() : "";
     if (cwd) {
       // Normalize Windows backslashes to URL-friendly forward slashes.

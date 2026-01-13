@@ -47,17 +47,14 @@ import { SheetTabStrip } from "./sheets/SheetTabStrip";
 
 import { ThemeController } from "./theme/themeController.js";
 
-import { createRibbonActionsFromCommands, createRibbonFileActionsFromCommands, mountRibbon } from "./ribbon/index.js";
+import { mountRibbon } from "./ribbon/index.js";
+import { createRibbonActions } from "./ribbon/ribbonCommandRouter.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
-import {
-  handleRibbonCommand as handleRibbonFormattingCommand,
-  handleRibbonToggle as handleRibbonFormattingToggle,
-} from "./ribbon/commandHandlers.js";
 import { RIBBON_DISABLED_BY_ID_WHILE_EDITING } from "./ribbon/ribbonEditingDisabledById.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
@@ -121,11 +118,9 @@ import { parseImageCellValue } from "./shared/imageCellValue.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
-import { promptAndApplyCustomNumberFormat } from "./formatting/promptCustomNumberFormat.js";
 import { formatValueWithNumberFormat } from "./formatting/numberFormat.ts";
 import { getStyleNumberFormat } from "./formatting/styleFieldAccess.js";
 import { handleCustomSortCommand } from "./sort-filter/openCustomSortDialog.js";
-import { sortSelection } from "./sort-filter/sortSelection.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
 import { loadCollabToken, preloadCollabTokenFromKeychain, storeCollabToken } from "./sharing/collabTokenStore.js";
@@ -9196,79 +9191,6 @@ async function handleRibbonExportPdf(): Promise<void> {
     showToast(`Failed to export PDF: ${String(err)}`, "error");
   }
 }
-
-const onRibbonCommandError = (_commandId: string, err: unknown): void => {
-  // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
-  // Avoid double-toasting "Command failed" for expected policy restrictions.
-  if ((err as any)?.name === "DlpViolationError") return;
-  showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-};
-
-const ribbonCommandHandlersCtx = {
-  app,
-  isEditing: isSpreadsheetEditing,
-  applyFormattingToSelection,
-  showToast,
-  executeCommand: (commandId: string, ...args: any[]) => {
-    void commandRegistry.executeCommand(commandId, ...args).catch((err) => onRibbonCommandError(commandId, err));
-  },
-  sortSelection: (options: { order: "ascending" | "descending" }) => sortSelection(app, options),
-  toggleAutoFilter: () => {
-    // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:
-    // - if any filter is active on the sheet, clear it
-    // - otherwise, prompt for values and apply a simple row-hiding filter
-    if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
-      clearRibbonAutoFiltersForActiveSheet();
-      return;
-    }
-    void applyRibbonAutoFilterFromSelection().catch((err) => {
-      console.error("Failed to apply filter:", err);
-      showToast(`Failed to apply filter: ${String(err)}`, "error");
-      scheduleRibbonSelectionFormatStateUpdate();
-      app.focus();
-    });
-  },
-  clearAutoFilter: () => clearRibbonAutoFilterCriteriaForActiveSheet(),
-  reapplyAutoFilter: () => reapplyRibbonAutoFiltersForActiveSheet(),
-  openCustomSort: (commandId: string) => {
-    handleCustomSortCommand(commandId, {
-      isEditing: isSpreadsheetEditing,
-      isReadOnly: () => app.isReadOnly?.() === true,
-      getDocument: () => app.getDocument(),
-      getSheetId: () => app.getCurrentSheetId(),
-      getSelectionRanges: () => app.getSelectionRanges(),
-      getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
-      focusGrid: () => app.focus(),
-    });
-  },
-  promptCustomNumberFormat: () => {
-    if (isSpreadsheetEditing()) return;
-    // Guard before prompting so users don't enter a format code only to hit selection size caps on apply.
-    // (Matches `applyFormattingToSelection` behavior.)
-    {
-      const selection = app.getSelectionRanges();
-      const limits = getGridLimitsForFormatting();
-      const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
-      if (!decision.allowed) {
-        showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
-        app.focus();
-        return;
-      }
-      if (app.isReadOnly?.() === true && !decision.allRangesBand) {
-        showToast("Read-only: select an entire row, column, or sheet to change formatting defaults.", "warning");
-        app.focus();
-        return;
-      }
-    }
-    void promptAndApplyCustomNumberFormat({
-      isEditing: () => isSpreadsheetEditing(),
-      showInputBox,
-      getActiveCellNumberFormat: activeCellNumberFormat,
-      applyFormattingToSelection,
-    });
-  },
-};
-
 // --- Ribbon: AutoFilter MVP ----------------------------------------------------
 //
 // Excel's AutoFilter is normally driven by header dropdowns inside the grid. For an MVP we wire the
@@ -9567,68 +9489,59 @@ function reapplyRibbonAutoFiltersForActiveSheet(): void {
   app.focus();
 }
 
-const ribbonActions = createRibbonActionsFromCommands({
-  commandRegistry,
-  onCommandError: onRibbonCommandError,
-  toggleOverrides: {
-    "view.toggleShowFormulas": async (pressed) => {
-      await commandRegistry.executeCommand("view.toggleShowFormulas", pressed);
-    },
-  },
-  onUnknownToggle: (commandId, pressed) => handleRibbonFormattingToggle(ribbonCommandHandlersCtx, commandId, pressed),
-  onBeforeExecuteCommand: async (_commandId, source) => {
-    if (source.kind !== "extension") return;
-    // Match keybinding/command palette behavior: executing an extension command should
-    // lazy-load the extension runtime first.
-    await ensureExtensionsLoadedRef?.();
-    syncContributedCommandsRef?.();
-  },
-  onUnknownCommand: handleRibbonCommand,
-});
-
-const ribbonFileActions = createRibbonFileActionsFromCommands({
-  commandRegistry,
-  onCommandError: onRibbonCommandError,
-  commandIds: {
-    newWorkbook: WORKBENCH_FILE_COMMANDS.newWorkbook,
-    openWorkbook: WORKBENCH_FILE_COMMANDS.openWorkbook,
-    saveWorkbook: WORKBENCH_FILE_COMMANDS.saveWorkbook,
-    saveWorkbookAs: WORKBENCH_FILE_COMMANDS.saveWorkbookAs,
-    toggleAutoSave: WORKBENCH_FILE_COMMANDS.setAutoSaveEnabled,
-    versionHistory: "view.togglePanel.versionHistory",
-    branchManager: "view.togglePanel.branchManager",
-    pageSetup: PAGE_LAYOUT_COMMANDS.pageSetupDialog,
-    printPreview: WORKBENCH_FILE_COMMANDS.printPreview,
-    print: WORKBENCH_FILE_COMMANDS.print,
-    closeWindow: WORKBENCH_FILE_COMMANDS.closeWorkbook,
-    quit: WORKBENCH_FILE_COMMANDS.quit,
-  },
-});
-
-mountRibbon(ribbonReactRoot, {
-  fileActions: ribbonFileActions,
-  ...ribbonActions,
-});
-
-function handleRibbonCommand(commandId: string): void {
-  if (handleRibbonFormattingCommand(ribbonCommandHandlersCtx, commandId)) {
+function toggleRibbonAutoFilter(): void {
+  // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:
+  // - if any filter is active on the sheet, clear it
+  // - otherwise, prompt for values and apply a simple row-hiding filter
+  if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
+    clearRibbonAutoFiltersForActiveSheet();
     return;
   }
-
-  switch (commandId) {
-    case "home.cells.format":
-      // This command is a dropdown with menu items; the top-level command is not expected
-      // to fire when the menu is present. Keep this as a fallback.
-      return;
-    default:
-      if (commandId.startsWith("file.")) {
-        showToast(`File command not implemented: ${commandId}`);
-        return;
-      }
-      showToast(`Ribbon: ${commandId}`);
-      return;
-  }
+  void applyRibbonAutoFilterFromSelection().catch((err) => {
+    console.error("Failed to apply filter:", err);
+    showToast(`Failed to apply filter: ${String(err)}`, "error");
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+  });
 }
+
+const ribbonActions = createRibbonActions({
+  app,
+  commandRegistry,
+  isSpreadsheetEditing,
+  showToast,
+  showQuickPick,
+  showInputBox,
+  notify,
+  showDesktopOnlyToast,
+  getTauriBackend: () => tauriBackend,
+  handleSaveAs,
+  handleExportDelimitedText,
+  openOrganizeSheets,
+  handleAddSheet,
+  handleDeleteActiveSheet,
+  openCustomSortDialog: (commandId) => {
+    handleCustomSortCommand(commandId, {
+      isEditing: isSpreadsheetEditing,
+      getDocument: () => app.getDocument(),
+      getSheetId: () => app.getCurrentSheetId(),
+      getSelectionRanges: () => app.getSelectionRanges(),
+      getCellValue: (sheetId, cell) => app.getCellComputedValueForSheet(sheetId, cell),
+      focusGrid: () => app.focus(),
+    });
+  },
+  toggleAutoFilter: toggleRibbonAutoFilter,
+  clearAutoFilter: clearRibbonAutoFiltersForActiveSheet,
+  reapplyAutoFilter: reapplyRibbonAutoFiltersForActiveSheet,
+  applyAutoFilterFromSelection: applyRibbonAutoFilterFromSelection,
+  scheduleRibbonSelectionFormatStateUpdate,
+  applyFormattingToSelection,
+  getActiveCellNumberFormat: activeCellNumberFormat,
+  getEnsureExtensionsLoadedRef: () => ensureExtensionsLoadedRef,
+  getSyncContributedCommandsRef: () => syncContributedCommandsRef,
+});
+
+mountRibbon(ribbonReactRoot, ribbonActions);
 // In Yjs-backed collaboration mode the workbook is continuously persisted, but
 // DocumentController's `isDirty` flips to true on essentially every local/remote
 // change (including `applyExternalDeltas`). That makes the browser/Tauri

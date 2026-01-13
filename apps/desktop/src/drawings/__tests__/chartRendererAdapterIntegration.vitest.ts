@@ -56,11 +56,35 @@ function createNoopSurfaceContext(): CanvasRenderingContext2D {
     globalAlpha: 1,
     strokeStyle: "black",
     lineWidth: 1,
-    measureText: (text: string) => ({ width: text.length * 8 }),
+    // Chart layout uses `measureText` via `OffscreenCanvas` for legend/axis sizing.
+    measureText: (text: string) => ({ width: String(text).length * 8 }),
+
     createLinearGradient: () => gradient,
     createPattern: () => null,
     getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
     putImageData: noop,
+
+    save: noop,
+    restore: noop,
+    clearRect: noop,
+    beginPath: noop,
+    rect: noop,
+    moveTo: noop,
+    lineTo: noop,
+    ellipse: noop,
+    closePath: noop,
+    fill: noop,
+    stroke: noop,
+    setLineDash: noop,
+    arc: noop,
+    fillText: noop,
+    clip: noop,
+    translate: noop,
+    scale: noop,
+    rotate: noop,
+    quadraticCurveTo: noop,
+    bezierCurveTo: noop,
+    arcTo: noop,
   };
 
   let fillStyle = "#000000";
@@ -175,6 +199,7 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     store.setChartModel(chartId, model);
 
     const chartRenderer = new ChartRendererAdapter(store);
+    // Exercise through DrawingOverlay so we cover the canvas integration layer.
     const overlay = new DrawingOverlay(canvas, images, geom, chartRenderer);
     overlay.render([createChartObject(chartId)], viewport);
 

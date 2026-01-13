@@ -30,6 +30,8 @@ async function waitFor(condition: () => boolean, timeoutMs = 1_000) {
 afterEach(() => {
   document.body.innerHTML = "";
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
 });
 
 describe("AIChatPanel tool-calling history", () => {

@@ -910,7 +910,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(result.data?.formulas).toEqual([[null, null, null, "=SUM(A1:C1)"]]);
   });
 
-  it("read_range does not leak mutable references for object cell values", async () => {
+  it("readRange does not leak mutable references for object cell values", () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", {
       text: "Rich Bold",

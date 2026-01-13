@@ -451,6 +451,10 @@ function OrganizeSheetsDialog({ host, onClose }: OrganizeSheetsDialogProps) {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault();
+                        // Read directly from the DOM value so we commit the latest text even when
+                        // React batches the preceding `input` event state update (React 18) or
+                        // test environments update `.value` without triggering `onChange`.
+                        renameDraftRef.current = e.currentTarget.value;
                         void commitRename();
                       }
                     }}

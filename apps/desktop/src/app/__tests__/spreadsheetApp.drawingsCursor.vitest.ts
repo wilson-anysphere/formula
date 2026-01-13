@@ -132,12 +132,13 @@ describe("SpreadsheetApp drawing hover cursor", () => {
           size: { cx: pxToEmu(50), cy: pxToEmu(40) },
         },
         zOrder: 0,
-      };
-      (app as any).drawingObjects = [drawing];
+       };
+       (app as any).drawingObjects = [drawing];
+       (app as any).selectedDrawingId = drawing.id;
 
-      const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
-      const headerOffsetX = (app as any).rowHeaderWidth ?? 48;
-      const headerOffsetY = (app as any).colHeaderHeight ?? 24;
+       const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
+       const headerOffsetX = (app as any).rowHeaderWidth ?? 48;
+       const headerOffsetY = (app as any).colHeaderHeight ?? 24;
       const x = headerOffsetX + 100;
       const y = headerOffsetY + 80;
       (app as any).onSharedPointerMove({

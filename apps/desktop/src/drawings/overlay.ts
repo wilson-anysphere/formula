@@ -593,7 +593,10 @@ export class DrawingOverlay {
       }
 
       // Kick off bitmap decode so we can re-render once ready.
-      this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
+      // Note: the bitmap cache already negative-caches failures to avoid tight retry loops.
+      if (entry.bytes.byteLength > 0) {
+        this.bitmapCache.getOrRequest(entry, this.onBitmapReady);
+      }
 
       this.scheduleHydrationRerender();
     });
@@ -894,9 +897,9 @@ export class DrawingOverlay {
               ctx.fillText("missing image", screenRectScratch.x + 4, screenRectScratch.y + 14);
             } finally {
               ctx.restore();
-            }
-            continue;
           }
+          continue;
+        }
 
           const bitmap =
             screenRectScratch.width > 0 && screenRectScratch.height > 0
@@ -1201,13 +1204,13 @@ export class DrawingOverlay {
         }
       }
     }
+
     completed = true;
     } finally {
       // Release object references eagerly so we don't accidentally retain the most recently visible
       // object set when rendering pauses.
       this.visibleObjectsScratch.length = 0;
       this.queryCandidatesScratch.length = 0;
-
       // Prune cached shape text layouts for shapes that no longer exist.
       //
       if (completed && this.shapeTextCache.size > 0) {

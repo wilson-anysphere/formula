@@ -476,16 +476,6 @@ export class DocumentImageStore implements ImageStore {
     const entry = lookupImageEntry(imageId, doc.images) ?? lookupImageEntry(imageId, doc.imageCache);
     if (entry) return entry;
 
-    // Fallback: direct getter (may clone bytes).
-    if (typeof doc.getImage === "function") {
-      try {
-        const direct = normalizeImageEntry(imageId, doc.getImage(imageId));
-        if (direct) return direct;
-      } catch {
-        // ignore
-      }
-    }
-
     return this.fallback.get(imageId);
   }
 
@@ -20635,7 +20625,23 @@ export class SpreadsheetApp {
     if (entry.mimeType === "image/png") return entry.bytes;
     // Some legacy sources may not populate `mimeType` correctly. If the bytes already look like a
     // PNG, avoid an unnecessary decode+re-encode step (and avoid calling `createImageBitmap`).
-    if (readPngDimensions(entry.bytes)) return entry.bytes;
+    //
+    // Prefer a lightweight signature check so even minimally valid PNG payloads (e.g. tests that
+    // only include header bytes) bypass decode work.
+    const bytes = entry.bytes;
+    if (
+      bytes.byteLength >= 8 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47 &&
+      bytes[4] === 0x0d &&
+      bytes[5] === 0x0a &&
+      bytes[6] === 0x1a &&
+      bytes[7] === 0x0a
+    ) {
+      return bytes;
+    }
 
     if (typeof document === "undefined") return null;
 

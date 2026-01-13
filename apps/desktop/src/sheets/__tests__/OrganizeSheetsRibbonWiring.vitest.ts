@@ -1,41 +1,51 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-import { stripComments } from "../../__tests__/sourceTextUtils";
+import { CommandRegistry } from "../../extensions/commandRegistry";
+import { createRibbonActions } from "../../ribbon/ribbonCommandRouter";
 
 describe("Organize Sheets ribbon wiring", () => {
-  it("routes the ribbon command id through CommandRegistry to openOrganizeSheets()", () => {
-    const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-    const commandsPath = fileURLToPath(new URL("../../commands/registerDesktopCommands.ts", import.meta.url));
-    const main = stripComments(readFileSync(mainTsPath, "utf8"));
-    const commands = stripComments(readFileSync(commandsPath, "utf8"));
+  it("routes the ribbon command id to openOrganizeSheets()", async () => {
+    const openOrganizeSheets = vi.fn();
 
-    // The ribbon schema uses `home.cells.format.organizeSheets`. Ensure it's registered as a
-    // real CommandRegistry command (no main.ts switch-case wiring) and delegates to the
-    // `sheetStructureHandlers` hook.
-    const registerMatch = commands.match(
-      /\bregisterBuiltinCommand\s*\(\s*["']home\.cells\.format\.organizeSheets["']/,
-    );
-    expect(registerMatch).not.toBeNull();
-    const registerIndex = registerMatch?.index ?? -1;
-    expect(registerIndex).toBeGreaterThanOrEqual(0);
-    // Ensure the handler reference is within the same registration block (i.e. before the next command registration),
-    // but avoid brittle fixed-length windows.
-    const nextRegisterIndex = commands.indexOf("registerBuiltinCommand", registerIndex + 1);
-    const blockEnd = nextRegisterIndex >= 0 ? nextRegisterIndex : commands.length;
-    const registrationBlock = commands.slice(registerIndex, blockEnd);
-    expect(registrationBlock).toMatch(/\bsheetStructureHandlers\s*\?\.\s*openOrganizeSheets\b/);
+    const ribbonActions = createRibbonActions({
+      app: {
+        focus: vi.fn(),
+        getDocument: () => ({} as any),
+        getCurrentSheetId: () => "Sheet1",
+        getActiveCell: () => ({ row: 0, col: 0 }),
+        getGridLimits: () => ({ maxRows: 1000, maxCols: 1000 }),
+        getSelectionRanges: () => [],
+        isReadOnly: () => false,
+        getShowFormulas: () => false,
+      } as any,
+      commandRegistry: new CommandRegistry(),
+      isSpreadsheetEditing: () => false,
+      showToast: vi.fn(),
+      showQuickPick: async () => null,
+      showInputBox: async () => null,
+      notify: vi.fn(),
+      showDesktopOnlyToast: vi.fn(),
+      getTauriBackend: () => null,
+      handleSaveAs: async () => {},
+      handleExportDelimitedText: vi.fn(),
+      openOrganizeSheets,
+      handleAddSheet: async () => {},
+      handleDeleteActiveSheet: async () => {},
+      openCustomSortDialog: vi.fn(),
+      toggleAutoFilter: vi.fn(),
+      clearAutoFilter: vi.fn(),
+      reapplyAutoFilter: vi.fn(),
+      applyAutoFilterFromSelection: async () => false,
+      scheduleRibbonSelectionFormatStateUpdate: vi.fn(),
+      applyFormattingToSelection: vi.fn(),
+      getActiveCellNumberFormat: () => null,
+      getEnsureExtensionsLoadedRef: () => null,
+      getSyncContributedCommandsRef: () => null,
+    });
 
-    // Ensure `main.ts` passes the handler into registerDesktopCommands (so the command can open the dialog).
-    expect(main).toMatch(/\bsheetStructureHandlers\s*:\s*\{[\s\S]{0,800}?\bopenOrganizeSheets\b/);
-
-    // Ensure the helper exists and delegates to `openOrganizeSheetsDialog`.
-    const fnMatch = main.match(/(?:function\s+openOrganizeSheets\s*\(|const\s+openOrganizeSheets\s*=\s*\(\)\s*=>)/);
-    expect(fnMatch).not.toBeNull();
-    const fnIndex = fnMatch?.index ?? -1;
-    expect(fnIndex).toBeGreaterThanOrEqual(0);
-    expect(main.slice(fnIndex, fnIndex + 1600)).toContain("openOrganizeSheetsDialog(");
+    ribbonActions.onCommand?.("home.cells.format.organizeSheets");
+    // `createRibbonActionsFromCommands` runs handlers in an async wrapper.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(openOrganizeSheets).toHaveBeenCalledTimes(1);
   });
 });

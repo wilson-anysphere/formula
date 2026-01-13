@@ -788,6 +788,10 @@ export class SecondaryGridView {
     if (change.kind === "col") {
       const docCol = change.index - this.headerCols;
       if (docCol < 0) return;
+      // Renderer column widths are already updated during the drag. Invalidate cached drawing
+      // bounds before mutating the DocumentController so any `document.on("change")` listeners
+      // that trigger a drawings render see the updated geometry immediately.
+      this.drawingsOverlay.invalidateSpatialIndex();
       const label = change.source === "autoFit" ? "Autofit Column Width" : "Resize Column";
       if (isDefault) {
         this.document.resetColWidth(sheetId, docCol, { label, source });
@@ -800,6 +804,9 @@ export class SecondaryGridView {
 
     const docRow = change.index - this.headerRows;
     if (docRow < 0) return;
+    // Match the column resize flow: invalidate before DocumentController emits sheetViewDeltas so
+    // any immediate renders recompute anchors against the updated row heights.
+    this.drawingsOverlay.invalidateSpatialIndex();
     const label = change.source === "autoFit" ? "Autofit Row Height" : "Resize Row";
     if (isDefault) {
       this.document.resetRowHeight(sheetId, docRow, { label, source });

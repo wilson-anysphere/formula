@@ -11,8 +11,8 @@ import { panelRegistry } from "../../panels/panelRegistry";
 import { registerDesktopCommands } from "../../commands/registerDesktopCommands";
 
 import { computeRibbonDisabledByIdFromCommandRegistry } from "../ribbonCommandRegistryDisabling";
+import { handledRibbonCommandIds } from "../ribbonCommandRouter";
 import { defaultRibbonSchema, type RibbonSchema } from "../ribbonSchema";
-import { extractObjectLiteral, extractTopLevelStringKeys, type OverrideKey } from "./ribbonWiringTestUtils";
 
 function collectRibbonCommandIds(schema: RibbonSchema): string[] {
   const ids = new Set<string>();
@@ -106,6 +106,7 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
   it("does not use `home.font.*` prefix parsing for font dropdown menu items", () => {
     const sources = [
       { label: "main.ts", path: fileURLToPath(new URL("../../main.ts", import.meta.url)) },
+      { label: "ribbon/ribbonCommandRouter.ts", path: fileURLToPath(new URL("../ribbonCommandRouter.ts", import.meta.url)) },
       { label: "ribbon/commandHandlers.ts", path: fileURLToPath(new URL("../commandHandlers.ts", import.meta.url)) },
     ];
 
@@ -124,36 +125,12 @@ describe("Ribbon command wiring coverage (Home → Font dropdowns)", () => {
 });
 
 function extractImplementedCommandIdsFromDesktopRibbonFallbackHandlers(schemaCommandIds: Set<string>): string[] {
-  const mainTsPath = fileURLToPath(new URL("../../main.ts", import.meta.url));
-  const ribbonHandlersPath = fileURLToPath(new URL("../commandHandlers.ts", import.meta.url));
-
-  const mainTsSource = stripComments(readFileSync(mainTsPath, "utf8"));
-  const ribbonHandlersSource = stripComments(readFileSync(ribbonHandlersPath, "utf8"));
-  const combinedSource = `${mainTsSource}\n\n${ribbonHandlersSource}`;
-  const ids = new Set<string>();
-
-  const addIfSchema = (id: string) => {
-    if (schemaCommandIds.has(id)) ids.add(id);
-  };
-
-  for (const match of combinedSource.matchAll(/case\s+["']([^"']+)["']/g)) {
-    addIfSchema(match[1]!);
-  }
-
-  for (const match of combinedSource.matchAll(/commandId\s*===\s*["']([^"']+)["']/g)) {
-    addIfSchema(match[1]!);
-  }
-
-  // Keys in the `createRibbonActionsFromCommands({ ... })` overrides (commandOverrides/toggleOverrides).
-  for (const key of ["commandOverrides", "toggleOverrides"] as const satisfies OverrideKey[]) {
-    const obj = extractObjectLiteral(mainTsSource, key);
-    if (!obj) continue;
-    for (const overrideId of extractTopLevelStringKeys(obj)) {
-      addIfSchema(overrideId);
-    }
-  }
-
-  return Array.from(ids).sort();
+  // The ribbon router provides an explicit, testable list of ids that have real implementations
+  // (either via CommandRegistry wiring or ribbon-only handlers). Use that authoritative allowlist
+  // so this test doesn't rely on brittle source parsing.
+  return Array.from(handledRibbonCommandIds)
+    .filter((id) => schemaCommandIds.has(id))
+    .sort();
 }
 
 function registerCommandsForRibbonDisablingTest(commandRegistry: CommandRegistry): void {

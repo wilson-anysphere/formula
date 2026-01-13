@@ -24,6 +24,17 @@ async function flushBinderWork(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
+async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (condition()) return;
+    // Yield so the binder's promise chains + any WebCrypto tasks can resolve.
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for binder work");
+}
+
 describe("dev collab encryption toggle", () => {
   it("encrypts cells in the configured range and masks reads without the key", async () => {
     const docId = "doc-dev-encryption";
@@ -200,6 +211,7 @@ describe("dev collab encryption toggle", () => {
       defaultSheetId: "Sheet1",
     });
     await flushBinderWork();
+    await waitFor(() => documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value === "###");
     expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
     expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).value).toBe("###");
     expect(documentWithoutKey.getCell("Sheet1", { row: 1, col: 0 }).formula).toBeNull();
