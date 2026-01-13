@@ -10,3 +10,4 @@ export * from "./contextManager.js";
 export * from "./queryAware.js";
 export * from "./workbookSchema.js";
 export * from "./summarizeSheet.js";
+export * from "./summarizeWorkbookSchema.js";
