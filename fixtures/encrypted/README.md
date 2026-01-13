@@ -38,6 +38,8 @@ Note: Some encryption tests build minimal encrypted containers programmatically 
 we also keep small in-repo encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` (including
 empty-password + Unicode-password samples, macro-enabled `.xlsm` fixtures, and multi-segment
 `*-large.xlsx` variants; see `fixtures/encrypted/ooxml/README.md` for passwords and provenance).
+That directory includes `basic-password.xlsm`, an encrypted macro-enabled workbook used to validate
+that `xl/vbaProject.bin` survives decryption.
 
 For background on Excel encryption formats and terminology, see `docs/21-encrypted-workbooks.md`.
 

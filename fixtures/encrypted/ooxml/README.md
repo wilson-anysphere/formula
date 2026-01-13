@@ -14,6 +14,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `agile-unicode.xlsx`: `pässwörd` (Unicode, NFC form)
 - `agile-unicode-excel.xlsx`: `pässwörd🔒` (Unicode, NFC form, includes non-BMP emoji)
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
+- `basic-password.xlsm`: `password`
 
 ## Fixtures
 
@@ -72,6 +73,10 @@ therefore more realistic ciphertext sizes + truncation behavior).
 - `standard-basic.xlsm` – Standard encrypted macro-enabled workbook.
   - `EncryptionInfo` header version **Major 3 / Minor 2**
   - Decrypts exactly to `plaintext-basic.xlsm` with password `password`
+- `basic-password.xlsm` – Agile encrypted macro-enabled workbook with a minimal VBA project.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts with password `password`
+  - Source workbook (unencrypted): `fixtures/xlsx/macros/basic.xlsm`
 
 ### Why the `*.xlsm` fixtures exist
 
@@ -100,6 +105,8 @@ ZIP/OPC round-trip corpus under `fixtures/xlsx/`):
   Includes coverage that a **missing** password is distinct from an **empty** password (`""`), and
   that Unicode password normalization matters (NFC vs NFD), and wrong-password coverage for
   `standard.xlsx`, `agile-unicode.xlsx`, and the macro-enabled `.xlsm` fixtures.
+- `crates/formula-io/tests/open_encrypted_xlsm_with_password.rs` (behind `formula-io` feature `encrypted-workbooks`):
+  opens `basic-password.xlsm` and asserts the VBA parts survive decryption.
 - `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`:
   end-to-end decryption for `agile-large.xlsx` + `standard-large.xlsx` against `plaintext-large.xlsx`
   (exercises multi-segment decryption for Agile, and larger-package coverage for Standard).
@@ -140,6 +147,7 @@ bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fix
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-large.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-basic.xlsm
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-basic.xlsm
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/basic-password.xlsm
 ```
 
 See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
@@ -174,6 +182,8 @@ The committed fixture binaries were generated using a mix of tooling:
   [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
 - `standard-large.xlsx` is a synthetic fixture aligned with `crates/formula-xlsx::offcrypto`’s
   Standard decrypt behavior (see `docs/office-encryption.md`).
+- `basic-password.xlsm` was generated in Excel (starting from `fixtures/xlsx/macros/basic.xlsm`)
+  and saved with open password `password`.
 - `agile-large.xlsx` was generated using the Rust
   [`ms-offcrypto-writer`](https://crates.io/crates/ms-offcrypto-writer) crate (with a deterministic
   RNG seed) so it includes `dataIntegrity` and is compatible with our strict Agile decryptor.
