@@ -183,5 +183,8 @@ test.describe("formula bar name box dropdown", () => {
 
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("selection-range")).toHaveText("A1");
+
+    // Escape should restore focus to the name box input (Excel-like behavior).
+    await expect(page.getByTestId("formula-address")).toBeFocused();
   });
 });
