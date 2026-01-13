@@ -289,6 +289,9 @@ export async function indexWorkbook(params) {
     /** @type {number | undefined} */
     let expectedLen = Number.isFinite(storeDim) ? storeDim : undefined;
     for (let i = 0; i < vectors.length; i += 1) {
+      // Preserve AbortSignal semantics: validation happens before persistence, so aborts should
+      // be able to stop work promptly even when indexing large corpora.
+      throwIfAborted(signal);
       const vec = vectors[i];
       const len = vec?.length;
       if (!Number.isFinite(len) || len <= 0) {
@@ -304,6 +307,8 @@ export async function indexWorkbook(params) {
         );
       }
       for (let j = 0; j < len; j += 1) {
+        // Checking every ~256 values keeps abort responsiveness without adding too much overhead.
+        if ((j & 0xff) === 0) throwIfAborted(signal);
         const value = vec[j];
         if (!Number.isFinite(value)) {
           throw new Error(
