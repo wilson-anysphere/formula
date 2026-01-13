@@ -11,11 +11,12 @@ type RichTextValue = CellRichText;
 type DocStyle = Record<string, any>;
 
 const CACHE_KEY_COL_STRIDE = 65_536;
-const SHEET_CACHE_MAX_SIZE = 50_000;
+const DEFAULT_SHEET_CACHE_MAX_SIZE = 50_000;
 // Excel stores alignment indent as an integer "level" (Increase Indent).
 // We approximate each indent level as an 8px text indent at zoom=1.
 const INDENT_STEP_PX = 8;
-const DEFAULT_RESOLVED_FORMAT: { style: CellStyle | undefined; numberFormat: string | null } = {
+type ResolvedFormat = { style: CellStyle | undefined; numberFormat: string | null };
+const DEFAULT_RESOLVED_FORMAT: ResolvedFormat = {
   style: undefined,
   numberFormat: null,
 };
@@ -24,7 +25,8 @@ const DEFAULT_NUMERIC_ALIGNMENT_STYLE: CellStyle = { textAlign: "end" };
 // Using a large stride allows encoding `(sheetDefaultStyleId, layerStyleId)` pairs into a single
 // collision-free number for cache keys (stays below MAX_SAFE_INTEGER for ids < 1_048_576).
 const STYLE_ID_PAIR_STRIDE = 1_048_576;
-const SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE = 10_000;
+const DEFAULT_SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE = 10_000;
+const DEFAULT_RESOLVED_FORMAT_CACHE_MAX_SIZE = 10_000;
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -103,7 +105,23 @@ export class DocumentCellProvider implements CellProvider {
     showFormulas: () => boolean;
     getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+    /**
+     * Max entries per sheet in the per-cell cache. Lower values reduce memory usage
+     * but may increase document reads and formatting work during fast scrolling.
+     */
+    sheetCacheMaxSize?: number;
+    /**
+     * Max entries in the resolved multi-layer format LRU cache.
+     */
+    resolvedFormatCacheMaxSize?: number;
+    /**
+     * Max entries per single-layer resolved format cache (row/col/range-run/cell).
+     */
+    singleLayerFormatCacheMaxSize?: number;
   };
+  private readonly sheetCacheMaxSize: number;
+  private readonly resolvedFormatCacheMaxSize: number;
+  private readonly singleLayerFormatCacheMaxSize: number;
 
   /**
    * Per-sheet caches avoid `${sheetId}:${row},${col}` string allocations in the hot
@@ -115,24 +133,16 @@ export class DocumentCellProvider implements CellProvider {
   private lastSheetCache: LruCache<number, CellData | null> | null = null;
   private readonly coordScratch = { row: 0, col: 0 };
   private readonly styleCache = new Map<number, CellStyle | undefined>();
-  private readonly sheetDefaultResolvedFormatCache = new Map<number, { style: CellStyle | undefined; numberFormat: string | null }>();
-  private readonly sheetColResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
-    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
-  );
-  private readonly sheetRowResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
-    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
-  );
-  private readonly sheetRunResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
-    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
-  );
-  private readonly sheetCellResolvedFormatCache = new LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>(
-    SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE
-  );
+  private readonly sheetDefaultResolvedFormatCache = new Map<number, ResolvedFormat>();
+  private readonly sheetColResolvedFormatCache: LruCache<number, ResolvedFormat>;
+  private readonly sheetRowResolvedFormatCache: LruCache<number, ResolvedFormat>;
+  private readonly sheetRunResolvedFormatCache: LruCache<number, ResolvedFormat>;
+  private readonly sheetCellResolvedFormatCache: LruCache<number, ResolvedFormat>;
   private readonly numericAlignmentStyleCache = new WeakMap<CellStyle, CellStyle>();
   // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
   // formatting layers (e.g. column formatting).
-  private readonly resolvedFormatCache = new LruCache<string, { style: CellStyle | undefined; numberFormat: string | null }>(10_000);
+  private readonly resolvedFormatCache: LruCache<string, ResolvedFormat>;
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
 
@@ -152,8 +162,20 @@ export class DocumentCellProvider implements CellProvider {
     showFormulas: () => boolean;
     getComputedValue: (cell: { row: number; col: number }) => unknown;
     getCommentMeta?: (row: number, col: number) => { resolved: boolean } | null;
+    sheetCacheMaxSize?: number;
+    resolvedFormatCacheMaxSize?: number;
+    singleLayerFormatCacheMaxSize?: number;
   }) {
     this.options = options;
+    this.sheetCacheMaxSize = options.sheetCacheMaxSize ?? DEFAULT_SHEET_CACHE_MAX_SIZE;
+    this.resolvedFormatCacheMaxSize = options.resolvedFormatCacheMaxSize ?? DEFAULT_RESOLVED_FORMAT_CACHE_MAX_SIZE;
+    this.singleLayerFormatCacheMaxSize = options.singleLayerFormatCacheMaxSize ?? DEFAULT_SINGLE_LAYER_FORMAT_CACHE_MAX_SIZE;
+
+    this.sheetColResolvedFormatCache = new LruCache<number, ResolvedFormat>(this.singleLayerFormatCacheMaxSize);
+    this.sheetRowResolvedFormatCache = new LruCache<number, ResolvedFormat>(this.singleLayerFormatCacheMaxSize);
+    this.sheetRunResolvedFormatCache = new LruCache<number, ResolvedFormat>(this.singleLayerFormatCacheMaxSize);
+    this.sheetCellResolvedFormatCache = new LruCache<number, ResolvedFormat>(this.singleLayerFormatCacheMaxSize);
+    this.resolvedFormatCache = new LruCache<string, ResolvedFormat>(this.resolvedFormatCacheMaxSize);
     // Caches cover cell metadata + value formatting work. Keep each sheet bounded to
     // avoid memory blow-ups on huge scrolls.
   }
@@ -239,8 +261,8 @@ export class DocumentCellProvider implements CellProvider {
         // Note: We only take this path when the cache key can be encoded as a safe integer.
         const resolveSingleLayer = (
           layerId: number,
-          cache: LruCache<number, { style: CellStyle | undefined; numberFormat: string | null }>
-        ): { style: CellStyle | undefined; numberFormat: string | null } | null => {
+          cache: LruCache<number, ResolvedFormat>
+        ): ResolvedFormat | null => {
           if (sheetDefaultStyleId >= STYLE_ID_PAIR_STRIDE || layerId >= STYLE_ID_PAIR_STRIDE) return null;
           const key = sheetDefaultStyleId * STYLE_ID_PAIR_STRIDE + layerId;
           const cached = cache.get(key);
@@ -688,9 +710,8 @@ export class DocumentCellProvider implements CellProvider {
     // - Direct-evict per-cell cache keys for invalidations up to `maxDirectEvictions`.
     // - For larger invalidations, scan the bounded LRU cache and evict only matching entries.
     //
-    // Scanning stays cheap because the provider cache is capped (`SHEET_CACHE_MAX_SIZE`), and it
-    // avoids dropping unrelated cached cells when a user formats a large rectangle far away from
-    // the current viewport.
+    // Scanning stays cheap because the provider cache is capped, and it avoids dropping unrelated
+    // cached cells when a user formats a large rectangle far away from the current viewport.
     const maxDirectEvictions = 50_000;
     const shouldEvictDirectly = cellCount <= maxDirectEvictions;
 
@@ -870,13 +891,34 @@ export class DocumentCellProvider implements CellProvider {
 
     let cache = this.sheetCaches.get(sheetId);
     if (!cache) {
-      cache = new LruCache<number, CellData | null>(SHEET_CACHE_MAX_SIZE);
+      cache = new LruCache<number, CellData | null>(this.sheetCacheMaxSize);
       this.sheetCaches.set(sheetId, cache);
     }
 
     this.lastSheetId = sheetId;
     this.lastSheetCache = cache;
     return cache;
+  }
+
+  getCacheStats(): {
+    sheetCache: { size: number; max: number };
+    resolvedFormatCache: { size: number; max: number };
+    sheetColResolvedFormatCache: { size: number; max: number };
+    sheetRowResolvedFormatCache: { size: number; max: number };
+    sheetRunResolvedFormatCache: { size: number; max: number };
+    sheetCellResolvedFormatCache: { size: number; max: number };
+  } {
+    const sheetId = this.options.getSheetId();
+    const sheetCache = this.sheetCaches.get(sheetId);
+
+    return {
+      sheetCache: { size: sheetCache?.size ?? 0, max: this.sheetCacheMaxSize },
+      resolvedFormatCache: { size: this.resolvedFormatCache.size, max: this.resolvedFormatCacheMaxSize },
+      sheetColResolvedFormatCache: { size: this.sheetColResolvedFormatCache.size, max: this.singleLayerFormatCacheMaxSize },
+      sheetRowResolvedFormatCache: { size: this.sheetRowResolvedFormatCache.size, max: this.singleLayerFormatCacheMaxSize },
+      sheetRunResolvedFormatCache: { size: this.sheetRunResolvedFormatCache.size, max: this.singleLayerFormatCacheMaxSize },
+      sheetCellResolvedFormatCache: { size: this.sheetCellResolvedFormatCache.size, max: this.singleLayerFormatCacheMaxSize }
+    };
   }
 
   subscribe(listener: (update: CellProviderUpdate) => void): () => void {
