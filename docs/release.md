@@ -114,6 +114,11 @@ After all platform builds finish, CI also verifies the **uploaded GitHub Release
 complete and consistent with the Tauri updater manifest (`latest.json`). This prevents publishing a
 release where `latest.json` points at missing artifacts or missing signature files.
 
+CI also enforces a **multi-arch safety** rule for Windows releases: when building both `x86_64` and
+`aarch64` targets, the uploaded `.msi` / `.exe` installers must have **distinct filenames that
+include an arch token** (for example `x64`/`x86_64`/`amd64` vs `arm64`/`aarch64`). This prevents
+multi-target runs from overwriting/clobbering assets on the draft GitHub Release.
+
 CI runs:
 
 ```bash

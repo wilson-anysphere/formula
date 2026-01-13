@@ -71,6 +71,11 @@ The table below documents what each platform key should point to in `latest.json
   releases must also ship a corresponding **NSIS `.exe` installer** for both `windows-x86_64` and
   `windows-aarch64`. The release workflow enforces that both `.msi` and `.exe` assets exist per
   architecture.
+- Windows multi-arch safety requirement: the `.msi` / `.exe` filenames must include an explicit
+  architecture marker (for example `x64`, `x86_64`, `amd64`, `win64` vs `arm64`, `aarch64`) so that
+  a multi-target run cannot overwrite/clobber assets on the GitHub Release. CI enforces this via:
+  - `scripts/ci/validate-updater-manifest.mjs` (ensures `latest.json` points at arch-specific assets)
+  - `verify-release-assets` in `.github/workflows/release.yml` (ensures uploaded assets are uniquely named)
 - To inspect a manifest locally:
   - `jq '.platforms | keys' latest.json`
   - `jq -r '.platforms["windows-aarch64"].url' latest.json`
