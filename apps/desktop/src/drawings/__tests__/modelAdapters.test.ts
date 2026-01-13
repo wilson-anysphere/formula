@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { convertModelDrawingObjectToUiDrawingObject, convertModelImageStoreToUiImageStore } from "../modelAdapters";
+import {
+  convertModelDrawingObjectToUiDrawingObject,
+  convertModelImageStoreToUiImageStore,
+  convertModelWorkbookDrawingsToUiDrawingLayer,
+} from "../modelAdapters";
 
 describe("drawings/modelAdapters", () => {
   it("converts a TwoCell Image drawing object", () => {
@@ -112,5 +116,41 @@ describe("drawings/modelAdapters", () => {
     expect(store.get("obj.png")?.bytes).toEqual(new Uint8Array([7, 8]));
     expect(store.get("buf.png")?.bytes).toEqual(new Uint8Array([9, 10, 11]));
     expect(store.get("b64.png")?.bytes).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("converts a Workbook snapshot to per-sheet drawings + images store", () => {
+    const workbook = {
+      images: {
+        images: {
+          "image1.png": { bytes: [1], content_type: "image/png" },
+        },
+      },
+      sheets: [
+        {
+          name: "Sheet1",
+          drawings: [
+            null,
+            {
+              id: { 0: 12 },
+              kind: { Image: { image_id: "image1.png" } },
+              anchor: {
+                TwoCell: {
+                  from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
+                  to: { cell: { row: 1, col: 1 }, offset: { x_emu: 0, y_emu: 0 } },
+                },
+              },
+              z_order: 0,
+            },
+          ],
+        },
+        { name: "Sheet2", drawings: [] },
+      ],
+    };
+
+    const ui = convertModelWorkbookDrawingsToUiDrawingLayer(workbook);
+    expect(ui.images.get("image1.png")?.mimeType).toBe("image/png");
+    expect(ui.drawingsBySheetName.Sheet1).toHaveLength(1);
+    expect(ui.drawingsBySheetName.Sheet1?.[0]?.kind).toEqual({ type: "image", imageId: "image1.png" });
+    expect(ui.drawingsBySheetName.Sheet2).toEqual([]);
   });
 });

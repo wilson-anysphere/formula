@@ -391,3 +391,54 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
 
   return store;
 }
+
+/**
+ * Convert a formula-model `Worksheet` JSON blob into the UI overlay model.
+ *
+ * This is a best-effort adapter: invalid drawing objects are ignored rather than
+ * throwing, so a single malformed entry does not prevent the sheet from
+ * rendering.
+ */
+export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJson: unknown): DrawingObject[] {
+  if (!isRecord(modelWorksheetJson)) return [];
+  const drawingsValue = pick(modelWorksheetJson, ["drawings"]);
+  if (!Array.isArray(drawingsValue)) return [];
+
+  const out: DrawingObject[] = [];
+  for (const obj of drawingsValue) {
+    try {
+      out.push(convertModelDrawingObjectToUiDrawingObject(obj));
+    } catch {
+      // ignore
+    }
+  }
+  return out;
+}
+
+/**
+ * Convert a formula-model `Workbook` JSON snapshot into a structure that's easy to feed into
+ * the canvas overlay (image store + per-sheet drawing objects).
+ */
+export function convertModelWorkbookDrawingsToUiDrawingLayer(modelWorkbookJson: unknown): {
+  images: ImageStore;
+  drawingsBySheetName: Record<string, DrawingObject[]>;
+} {
+  if (!isRecord(modelWorkbookJson)) {
+    return { images: new MapImageStore(), drawingsBySheetName: {} };
+  }
+
+  const images = convertModelImageStoreToUiImageStore(pick(modelWorkbookJson, ["images"]));
+  const drawingsBySheetName: Record<string, DrawingObject[]> = {};
+
+  const sheetsValue = pick(modelWorkbookJson, ["sheets"]);
+  if (Array.isArray(sheetsValue)) {
+    for (const sheet of sheetsValue) {
+      if (!isRecord(sheet)) continue;
+      const name = readOptionalString(pick(sheet, ["name"])) ?? "";
+      if (!name) continue;
+      drawingsBySheetName[name] = convertModelWorksheetDrawingsToUiDrawingObjects(sheet);
+    }
+  }
+
+  return { images, drawingsBySheetName };
+}
