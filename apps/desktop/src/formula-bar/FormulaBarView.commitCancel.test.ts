@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { FormulaBarView } from "./FormulaBarView.js";
+import { parseA1Range } from "../spreadsheet/a1.js";
 
 function queryActions(host: HTMLElement): {
   cancel: HTMLButtonElement;
@@ -359,6 +360,64 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(onCommit).toHaveBeenCalledWith("=1", { reason: "enter", shift: false });
     expect(view.model.isEditing).toBe(false);
     expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("clears hover + reference highlights on commit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onHoverRange, onReferenceHighlights });
+    view.setActiveCell({ address: "A1", input: "=A1", value: null });
+
+    view.textarea.focus();
+
+    const lastHoverBefore = onHoverRange.mock.calls.at(-1)?.[0] ?? null;
+    const lastHighlightsBefore = onReferenceHighlights.mock.calls.at(-1)?.[0] ?? [];
+    expect(lastHoverBefore).toEqual(parseA1Range("A1"));
+    expect(lastHighlightsBefore.length).toBeGreaterThan(0);
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
+
+    host.remove();
+  });
+
+  it("clears hover + reference highlights on cancel", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const onHoverRange = vi.fn();
+    const onReferenceHighlights = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel, onHoverRange, onReferenceHighlights });
+    view.setActiveCell({ address: "A1", input: "=A1", value: null });
+
+    view.textarea.focus();
+
+    const lastHoverBefore = onHoverRange.mock.calls.at(-1)?.[0] ?? null;
+    const lastHighlightsBefore = onReferenceHighlights.mock.calls.at(-1)?.[0] ?? [];
+    expect(lastHoverBefore).toEqual(parseA1Range("A1"));
+    expect(lastHighlightsBefore.length).toBeGreaterThan(0);
+
+    const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onHoverRange.mock.calls.at(-1)?.[0] ?? null).toBeNull();
+    expect(onReferenceHighlights.mock.calls.at(-1)?.[0] ?? null).toEqual([]);
 
     host.remove();
   });
