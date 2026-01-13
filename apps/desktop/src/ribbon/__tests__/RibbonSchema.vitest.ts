@@ -25,7 +25,7 @@ describe("defaultRibbonSchema", () => {
     }
   });
 
-  it("exposes Version History + Branch Manager panel toggles in the View tab", () => {
+  it("exposes panel toggles in the View tab with stable test ids", () => {
     const viewTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "view");
     expect(viewTab, "Expected View tab to exist").toBeTruthy();
     if (!viewTab) return;
@@ -34,6 +34,9 @@ describe("defaultRibbonSchema", () => {
     expect(panelsGroup, "Expected View → Panels group to exist").toBeTruthy();
     if (!panelsGroup) return;
 
+    const marketplace = panelsGroup.buttons.find((button) => button.id === "view.togglePanel.marketplace");
+    expect(marketplace, "Expected view.togglePanel.marketplace button").toBeTruthy();
+    expect(marketplace?.testId).toBe("open-marketplace-panel");
     const versionHistory = panelsGroup.buttons.find((button) => button.id === "view.togglePanel.versionHistory");
     expect(versionHistory, "Expected view.togglePanel.versionHistory button").toBeTruthy();
     expect(versionHistory?.testId).toBe("open-version-history-panel");
