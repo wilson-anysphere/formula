@@ -10630,11 +10630,16 @@ export class SpreadsheetApp {
     };
 
     try {
-      return evaluateFormula(`=${trimmedExpr}`, getCellValue, {
+      const value = evaluateFormula(`=${trimmedExpr}`, getCellValue, {
         cellAddress: `${sheetId}!${cellAddress}`,
         resolveNameToReference,
         maxRangeCells: MAX_CELL_READS,
       });
+      // Errors from the lightweight evaluator usually mean unsupported syntax / functions.
+      // Treat them as "preview unavailable" so we don't show misleading `#NAME?` / `#VALUE!`
+      // while users are typing or when the JS evaluator lags behind the full engine.
+      if (typeof value === "string" && (value === "#NAME?" || value === "#VALUE!")) return "(preview unavailable)";
+      return value;
     } catch {
       return "(preview unavailable)";
     }

@@ -174,7 +174,10 @@ function lex(formula: string, options: EvaluateFormulaOptions): EvalToken[] {
           return { type: "operator", value: token.text };
         case "punctuation":
           if (token.text === "(" || token.text === ")") return { type: "paren", value: token.text };
-          if (token.text === ",") return { type: "comma", value: "," };
+          // Support locale-specific argument separators (`;` in many locales) by treating them
+          // equivalently to commas. This evaluator is used in UI previews where locale-aware
+          // parsing should avoid returning misleading errors.
+          if (token.text === "," || token.text === ";") return { type: "comma", value: "," };
           return { type: "error", value: "#VALUE!" };
         default:
           return { type: "error", value: "#VALUE!" };
@@ -547,7 +550,7 @@ function parsePrimary(
     const isAiFn = isAiFunctionName(name) && Boolean(options.ai);
     if (!parser.match("paren", ")")) {
       while (true) {
-        const argValue = parseExpression(parser, getCellValue, options, argContext);
+        const argValue = parseComparison(parser, getCellValue, options, argContext);
         args.push(argValue);
         if (isAiFn) argProvenance.push(aiFunctionArgumentProvenance(argValue));
         if (parser.match("comma", ",")) continue;
@@ -561,7 +564,7 @@ function parsePrimary(
 
   if (tok.type === "paren" && tok.value === "(") {
     parser.consume();
-    const inner = parseExpression(parser, getCellValue, options, context);
+    const inner = parseComparison(parser, getCellValue, options, context);
     if (!parser.match("paren", ")")) return "#VALUE!";
     return inner;
   }
@@ -578,7 +581,9 @@ function parseUnary(
   const tok = parser.peek();
   if (tok?.type === "operator" && (tok.value === "+" || tok.value === "-")) {
     parser.consume();
+    const before = parser.index;
     const rhs = parseUnary(parser, getCellValue, options, context);
+    if (parser.index === before) return "#VALUE!";
     const rhsScalar = unwrapProvenance(rhs);
     if (isErrorCode(rhsScalar)) return rhsScalar;
     if (Array.isArray(rhsScalar)) return "#VALUE!";
@@ -602,7 +607,9 @@ function parseTerm(
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "*" && tok.value !== "/")) break;
     parser.consume();
+    const before = parser.index;
     const right = parseUnary(parser, getCellValue, options, context);
+    if (parser.index === before) return "#VALUE!";
     const leftScalar = unwrapProvenance(left);
     const rightScalar = unwrapProvenance(right);
     if (isErrorCode(leftScalar)) return leftScalar;
@@ -635,7 +642,9 @@ function parseExpression(
     const tok = parser.peek();
     if (!tok || tok.type !== "operator" || (tok.value !== "+" && tok.value !== "-")) break;
     parser.consume();
+    const before = parser.index;
     const right = parseTerm(parser, getCellValue, options, context);
+    if (parser.index === before) return "#VALUE!";
     const leftScalar = unwrapProvenance(left);
     const rightScalar = unwrapProvenance(right);
     if (isErrorCode(leftScalar)) return leftScalar;
@@ -647,6 +656,120 @@ function parseExpression(
     const refs = context.preserveReferenceProvenance ? [...provenanceRefs(left), ...provenanceRefs(right)] : [];
     const value = tok.value === "+" ? leftNum + rightNum : leftNum - rightNum;
     left = context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
+  }
+  return left;
+}
+
+function parseConcat(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext,
+): CellValue {
+  let left = parseExpression(parser, getCellValue, options, context);
+  while (true) {
+    const tok = parser.peek();
+    if (!tok || tok.type !== "operator" || tok.value !== "&") break;
+    parser.consume();
+    const before = parser.index;
+    const right = parseExpression(parser, getCellValue, options, context);
+    if (parser.index === before) return "#VALUE!";
+
+    const leftScalar = unwrapProvenance(left);
+    const rightScalar = unwrapProvenance(right);
+    if (isErrorCode(leftScalar)) return leftScalar;
+    if (isErrorCode(rightScalar)) return rightScalar;
+    if (Array.isArray(leftScalar) || Array.isArray(rightScalar)) return "#VALUE!";
+
+    const refs = context.preserveReferenceProvenance ? [...provenanceRefs(left), ...provenanceRefs(right)] : [];
+    const value = `${leftScalar == null ? "" : String(leftScalar)}${rightScalar == null ? "" : String(rightScalar)}`;
+    left = context.preserveReferenceProvenance ? wrapWithProvenance(value, refs) : value;
+  }
+  return left;
+}
+
+function compareScalars(left: SpreadsheetValue, right: SpreadsheetValue, op: string): boolean | string {
+  // Match Excel's loose coercion in a simplified way: prefer numeric comparisons when both sides
+  // can be coerced to numbers, otherwise fall back to case-insensitive string comparison.
+  const leftNum = toNumber(left);
+  const rightNum = toNumber(right);
+  if (leftNum !== null && rightNum !== null) {
+    switch (op) {
+      case "=":
+        return leftNum === rightNum;
+      case "<>":
+        return leftNum !== rightNum;
+      case ">":
+        return leftNum > rightNum;
+      case ">=":
+        return leftNum >= rightNum;
+      case "<":
+        return leftNum < rightNum;
+      case "<=":
+        return leftNum <= rightNum;
+      default:
+        return "#VALUE!";
+    }
+  }
+
+  const l = (left == null ? "" : String(left)).toUpperCase();
+  const r = (right == null ? "" : String(right)).toUpperCase();
+  switch (op) {
+    case "=":
+      return l === r;
+    case "<>":
+      return l !== r;
+    case ">":
+      return l > r;
+    case ">=":
+      return l >= r;
+    case "<":
+      return l < r;
+    case "<=":
+      return l <= r;
+    default:
+      return "#VALUE!";
+  }
+}
+
+function parseComparison(
+  parser: Parser,
+  getCellValue: GetCellValue,
+  options: EvaluateFormulaOptions,
+  context: EvalContext,
+): CellValue {
+  let left = parseConcat(parser, getCellValue, options, context);
+  while (true) {
+    const tok = parser.peek();
+    if (
+      !tok ||
+      tok.type !== "operator" ||
+      (tok.value !== "=" &&
+        tok.value !== "<>" &&
+        tok.value !== ">" &&
+        tok.value !== ">=" &&
+        tok.value !== "<" &&
+        tok.value !== "<=")
+    ) {
+      break;
+    }
+
+    const op = tok.value;
+    parser.consume();
+    const before = parser.index;
+    const right = parseConcat(parser, getCellValue, options, context);
+    if (parser.index === before) return "#VALUE!";
+
+    const leftScalar = unwrapProvenance(left);
+    const rightScalar = unwrapProvenance(right);
+    if (isErrorCode(leftScalar)) return leftScalar;
+    if (isErrorCode(rightScalar)) return rightScalar;
+    if (Array.isArray(leftScalar) || Array.isArray(rightScalar)) return "#VALUE!";
+
+    const compared = compareScalars(leftScalar as SpreadsheetValue, rightScalar as SpreadsheetValue, op);
+    if (typeof compared === "string") return compared;
+    const refs = context.preserveReferenceProvenance ? [...provenanceRefs(left), ...provenanceRefs(right)] : [];
+    left = context.preserveReferenceProvenance ? wrapWithProvenance(compared, refs) : compared;
   }
   return left;
 }
@@ -665,7 +788,9 @@ export function evaluateFormula(
 
   const tokens = lex(text.slice(1), options);
   const parser = new Parser(tokens);
-  const value = parseExpression(parser, getCellValue, options, DEFAULT_CONTEXT);
+  const value = parseComparison(parser, getCellValue, options, DEFAULT_CONTEXT);
+  // If we didn't consume the full token stream, treat this as invalid/unsupported syntax.
+  if (parser.peek()) return "#VALUE!";
   if (isErrorCode(value)) return value;
   if (isProvenanceCellValue(value)) return value.value;
   if (Array.isArray(value)) return (value[0] ?? null) as SpreadsheetValue;
