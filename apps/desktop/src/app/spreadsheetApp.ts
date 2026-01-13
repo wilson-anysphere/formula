@@ -1333,9 +1333,8 @@ export class SpreadsheetApp {
       /**
        * Enables interactive drawing manipulation (click-to-select + drag/resize).
        *
-       * This is currently used by unit tests and incremental rollout work; it is
-       * intentionally off by default to avoid changing pointer behavior without a
-       * dedicated feature flag.
+       * Defaults to enabled in shared-grid mode (drawings are otherwise not interactable)
+       * and disabled in legacy mode unless explicitly enabled.
        */
       enableDrawingInteractions?: boolean;
     } = {}
@@ -2365,6 +2364,11 @@ export class SpreadsheetApp {
         setObjects: (next) => {
           this.setDrawingObjectsForSheet(next);
           this.renderDrawings();
+          const selected = this.selectedDrawingId != null ? next.find((obj) => obj.id === this.selectedDrawingId) : undefined;
+          if (selected?.kind.type === "chart") {
+            // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
+            this.renderCharts(false);
+          }
         },
         onSelectionChange: (selectedId) => {
           const prev = this.selectedDrawingId;
@@ -2383,7 +2387,8 @@ export class SpreadsheetApp {
         requestFocus: () => this.focus(),
       };
       this.drawingInteractionCallbacks = callbacks;
-      this.drawingInteractionController = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
+      const interactionElement = this.gridMode === "shared" ? this.selectionCanvas : this.root;
+      this.drawingInteractionController = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
         capture: this.gridMode === "shared",
       });
     }
@@ -7534,10 +7539,13 @@ export class SpreadsheetApp {
       getViewport: () => this.getDrawingInteractionViewport(this.sharedGrid?.renderer.scroll.getViewportState()),
       getObjects: () => this.listDrawingObjectsForSheet(),
       setObjects: (next) => {
-        const doc: any = this.document as any;
-        const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
-        this.drawingObjectsCache = { sheetId: this.sheetId, objects: next, source: drawingsGetter };
+        this.setDrawingObjectsForSheet(next);
         this.renderDrawings();
+        const selected = this.selectedDrawingId != null ? next.find((obj) => obj.id === this.selectedDrawingId) : undefined;
+        if (selected?.kind.type === "chart") {
+          // Best-effort: keep chart overlays aligned when moving/resizing chart drawings.
+          this.renderCharts(false);
+        }
       },
       onSelectionChange: (selectedId) => {
         const prev = this.selectedDrawingId;
@@ -7555,7 +7563,8 @@ export class SpreadsheetApp {
       },
     };
     this.drawingInteractionCallbacks = callbacks;
-    const controller = new DrawingInteractionController(this.root, this.drawingGeom, callbacks, {
+    const interactionElement = this.gridMode === "shared" ? this.selectionCanvas : this.root;
+    const controller = new DrawingInteractionController(interactionElement, this.drawingGeom, callbacks, {
       capture: this.gridMode === "shared",
     });
     this.drawingInteractionController = controller;
@@ -10392,6 +10401,14 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     e.stopPropagation();
+
+    // Chart interactions take precedence over drawing selection. Since we stop propagation
+    // here, any previously-selected drawing would otherwise remain selected indefinitely.
+    if (this.selectedDrawingId != null) {
+      this.selectedDrawingId = null;
+      this.drawingOverlay.setSelectedId(null);
+      this.renderDrawings();
+    }
 
     const wasSelected = this.selectedChartId === hit.chart.id;
     this.setSelectedChartId(hit.chart.id);
