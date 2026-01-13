@@ -161,6 +161,34 @@ test("diffYjsWorkbookSnapshots reports sheet metadata changes (visibility/tabCol
   ]);
 });
 
+test("diffYjsWorkbookSnapshots reads frozen panes from legacy top-level sheet keys", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  // Legacy/experimental: frozen panes stored on the sheet entry (not nested in `view`).
+  sheet1.set("frozenRows", 0);
+  sheet1.set("frozenCols", 1);
+  sheets.push([sheet1]);
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    sheet1.set("frozenRows", 4);
+    sheet1.set("frozenCols", 2);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  assert.deepEqual(diff.sheets.metaChanged, [
+    { id: "sheet1", field: "view.frozenCols", before: 1, after: 2 },
+    { id: "sheet1", field: "view.frozenRows", before: 0, after: 4 },
+  ]);
+});
+
 test("diffYjsWorkbookSnapshots reports formatOnly edits when column default formats change (layered formats)", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");
