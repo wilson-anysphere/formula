@@ -23,7 +23,7 @@ import type {
   FunctionContext as EngineFunctionContext,
 } from "@formula/engine";
 
-export type ActiveCellInfo = {
+type ActiveCellInfo = {
   address: string;
   input: string;
   value: unknown;
