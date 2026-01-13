@@ -1159,7 +1159,7 @@ fn parse_slicer_xml(xml: &[u8]) -> Result<ParsedSlicerXml, XlsxError> {
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"slicer") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         let key = local_name(attr.key.as_ref());
                         let value = attr.unescape_value()?.into_owned();
@@ -1170,7 +1170,7 @@ fn parse_slicer_xml(xml: &[u8]) -> Result<ParsedSlicerXml, XlsxError> {
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"slicerCache") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                             cache_rid = Some(attr.unescape_value()?.into_owned());
@@ -1212,7 +1212,7 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"slicerCache") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         let key = local_name(attr.key.as_ref());
                         let value = attr.unescape_value()?.into_owned();
@@ -1223,7 +1223,7 @@ fn parse_slicer_cache_xml(xml: &[u8]) -> Result<ParsedSlicerCacheXml, XlsxError>
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"slicerCachePivotTable") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                             pivot_table_rids.push(attr.unescape_value()?.into_owned());
@@ -1266,7 +1266,7 @@ fn parse_timeline_xml(xml: &[u8]) -> Result<ParsedTimelineXml, XlsxError> {
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"timeline") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         let key = local_name(attr.key.as_ref());
                         let value = attr.unescape_value()?.into_owned();
@@ -1277,7 +1277,7 @@ fn parse_timeline_xml(xml: &[u8]) -> Result<ParsedTimelineXml, XlsxError> {
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"timelineCache") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                             cache_rid = Some(attr.unescape_value()?.into_owned());
@@ -1324,7 +1324,7 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"timelineCacheDefinition") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         let key = local_name(attr.key.as_ref());
                         let value = attr.unescape_value()?.into_owned();
@@ -1339,7 +1339,7 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
                         }
                     }
                 } else if tag.eq_ignore_ascii_case(b"pivotTable") {
-                    for attr in start.attributes() {
+                    for attr in start.attributes().with_checks(false) {
                         let attr = attr?;
                         if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
                             pivot_table_rids.push(attr.unescape_value()?.into_owned());
@@ -1366,6 +1366,26 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
 mod engine_filter_field_tests {
     use super::*;
     use std::collections::HashSet;
+
+    use std::io::{Cursor, Write};
+
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        let bytes = zip.finish().unwrap().into_inner();
+        XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
 
     #[test]
     fn slicer_selection_to_engine_filter_field_items() {
@@ -1405,5 +1425,49 @@ mod engine_filter_field_tests {
         };
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn pivot_slicer_parts_tolerates_duplicate_attributes() {
+        // Duplicate attributes are not well-formed XML, but we want to be tolerant of producers
+        // that emit them (QuickXML's strict attribute checks reject them).
+        let slicer_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicer xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+        name="Slicer1" name="Slicer1">
+  <slicerCache r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+</slicer>"#;
+
+        // Minimal relationship part for `rId1` -> slicer cache definition.
+        let slicer_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:slicerCache" Target="../slicerCaches/slicerCache1.xml"/>
+</Relationships>"#;
+
+        let slicer_cache_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache xmlns="http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+            name="Cache1" name="Cache1" sourceName="Field1"/>"#;
+
+        let pkg = build_package(&[
+            ("xl/slicers/slicer1.xml", slicer_xml),
+            ("xl/slicers/_rels/slicer1.xml.rels", slicer_rels),
+            ("xl/slicerCaches/slicerCache1.xml", slicer_cache_xml),
+        ]);
+
+        let parsed = pkg
+            .pivot_slicer_parts()
+            .expect("should parse slicer parts despite duplicate attributes");
+
+        assert_eq!(parsed.slicers.len(), 1);
+        assert_eq!(parsed.timelines.len(), 0);
+
+        let slicer = &parsed.slicers[0];
+        assert_eq!(slicer.part_name, "xl/slicers/slicer1.xml");
+        assert_eq!(slicer.name.as_deref(), Some("Slicer1"));
+        assert_eq!(
+            slicer.cache_part.as_deref(),
+            Some("xl/slicerCaches/slicerCache1.xml")
+        );
+        assert_eq!(slicer.cache_name.as_deref(), Some("Cache1"));
+        assert_eq!(slicer.source_name.as_deref(), Some("Field1"));
     }
 }
