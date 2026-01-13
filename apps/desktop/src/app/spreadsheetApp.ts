@@ -685,7 +685,7 @@ export class SpreadsheetApp {
   private drawingCanvas: HTMLCanvasElement;
   private drawingOverlay: DrawingOverlay;
   private readonly drawingImages: ImageStore;
-  private drawingObjectsCache: { sheetId: string; objects: DrawingObject[] } | null = null;
+  private drawingObjectsCache: { sheetId: string; objects: DrawingObject[]; source: unknown } | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
   private drawingViewportMemo:
     | {
@@ -7294,14 +7294,20 @@ export class SpreadsheetApp {
   }
 
   private listDrawingObjectsForSheet(): DrawingObject[] {
-    const cached = this.drawingObjectsCache;
-    if (cached && cached.sheetId === this.sheetId) return cached.objects;
-
     const doc = this.document as any;
+    const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
+
+    const cached = this.drawingObjectsCache;
+    // `getSheetDrawings` is not part of DocumentController's stable public API yet, so some
+    // tests (and older builds) monkeypatch it in after SpreadsheetApp construction. Include the
+    // getter function identity in the cache key so we don't permanently cache an empty list
+    // from the pre-monkeypatch state.
+    if (cached && cached.sheetId === this.sheetId && cached.source === drawingsGetter) return cached.objects;
+
     let raw: unknown = null;
-    if (typeof doc.getSheetDrawings === "function") {
+    if (drawingsGetter) {
       try {
-        raw = doc.getSheetDrawings(this.sheetId);
+        raw = drawingsGetter.call(doc, this.sheetId);
       } catch {
         raw = null;
       }
@@ -7347,7 +7353,7 @@ export class SpreadsheetApp {
       return [];
     })();
 
-    this.drawingObjectsCache = { sheetId: this.sheetId, objects };
+    this.drawingObjectsCache = { sheetId: this.sheetId, objects, source: drawingsGetter };
     return objects;
   }
 
