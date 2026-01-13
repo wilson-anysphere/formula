@@ -90,6 +90,33 @@ require_cmd() {
 
 require_cmd rpm
 
+rel_path() {
+  local p="$1"
+  if [[ "$p" == "${REPO_ROOT}/"* ]]; then
+    echo "${p#${REPO_ROOT}/}"
+  else
+    echo "$p"
+  fi
+}
+
+abs_path() {
+  local p="$1"
+  if [[ "$p" != /* ]]; then
+    p="${REPO_ROOT}/${p}"
+  fi
+  # Canonicalize the directory component so we avoid duplicate (abs vs rel) paths.
+  # If the directory does not exist (e.g. user typo), return the original string
+  # so downstream checks can emit a clearer error.
+  local dir
+  dir="$(dirname "$p")"
+  if [[ -d "$dir" ]]; then
+    dir="$(cd "$dir" && pwd -P)"
+    echo "${dir}/$(basename "$p")"
+  else
+    echo "$p"
+  fi
+}
+
 find_rpms() {
   local -a rpms=()
 
@@ -100,9 +127,9 @@ find_rpms() {
     fi
     if [[ -d "${RPM_OVERRIDE}" ]]; then
       # Accept a directory to make local usage convenient.
-      while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "${RPM_OVERRIDE}" -maxdepth 1 -type f -name '*.rpm' -print0)
+      while IFS= read -r -d '' f; do rpms+=("$(abs_path "$f")"); done < <(find "${RPM_OVERRIDE}" -maxdepth 1 -type f -name '*.rpm' -print0)
     else
-      rpms+=("${RPM_OVERRIDE}")
+      rpms+=("$(abs_path "${RPM_OVERRIDE}")")
     fi
   else
     # Prefer predictable bundle globs (fast), but fall back to `find` for odd layouts.
@@ -122,6 +149,23 @@ find_rpms() {
       fi
     done
 
+    # Canonicalize and de-dupe roots (avoid duplicate scanning when CARGO_TARGET_DIR overlaps defaults).
+    local -A seen_roots=()
+    local -a uniq_roots=()
+    for root in "${roots[@]}"; do
+      if [[ "${root}" != /* ]]; then
+        root="${REPO_ROOT}/${root}"
+      fi
+      [[ -d "${root}" ]] || continue
+      root="$(cd "${root}" && pwd -P)"
+      if [[ -n "${seen_roots[${root}]:-}" ]]; then
+        continue
+      fi
+      seen_roots["${root}"]=1
+      uniq_roots+=("${root}")
+    done
+    roots=("${uniq_roots[@]}")
+
     local nullglob_was_set=0
     if shopt -q nullglob; then
       nullglob_was_set=1
@@ -138,7 +182,7 @@ find_rpms() {
     if [[ ${#rpms[@]} -eq 0 ]]; then
       # Fallback: traverse the expected roots to locate RPM bundles.
       for root in "${roots[@]}"; do
-        while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "${root}" -type f -path '*/release/bundle/rpm/*.rpm' -print0 2>/dev/null || true)
+        while IFS= read -r -d '' f; do rpms+=("$(abs_path "$f")"); done < <(find "${root}" -type f -path '*/release/bundle/rpm/*.rpm' -print0 2>/dev/null || true)
       done
     fi
   fi
@@ -232,10 +276,18 @@ main() {
   mapfile -t rpms < <(find_rpms)
 
   if [[ ${#rpms[@]} -eq 0 ]]; then
-    die "No RPM files found. Use --rpm <path> to specify one explicitly."
+    err "No RPM files found."
+    err "Searched (repo-relative):"
+    err "  - apps/desktop/src-tauri/target/**/release/bundle/rpm/*.rpm"
+    err "  - target/**/release/bundle/rpm/*.rpm"
+    err "Tip: Use --rpm <path> to specify one explicitly."
+    exit 1
   fi
 
-  note "Found ${#rpms[@]} RPM(s) to validate"
+  note "Found ${#rpms[@]} RPM(s) to validate:"
+  for rpm_path in "${rpms[@]}"; do
+    echo "  - $(rel_path "${rpm_path}")"
+  done
   for rpm_path in "${rpms[@]}"; do
     validate_static "${rpm_path}"
     if [[ "${NO_CONTAINER}" -eq 0 ]]; then
