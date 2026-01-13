@@ -37,12 +37,21 @@ function isFormulaCell(cell) {
   return !!(cell && cell.f != null && String(cell.f).trim() !== "");
 }
 
-function hasNonFormulaNonEmptyCell(cells) {
+function hasNonFormulaNonEmptyCell(cells, signal) {
+  // This can be large when callers raise extractMaxRows/Cols. Keep it abortable.
+  let abortCountdown = 0;
   for (const row of cells) {
+    throwIfAborted(signal);
     for (const cell of row) {
+      if (abortCountdown === 0) {
+        throwIfAborted(signal);
+        abortCountdown = 256;
+      }
+      abortCountdown -= 1;
       if (isNonEmptyCell(cell) && !isFormulaCell(cell)) return true;
     }
   }
+  throwIfAborted(signal);
   return false;
 }
 
@@ -617,7 +626,7 @@ function chunkWorkbook(workbook, options = {}) {
 
       // If this region is entirely formulas, prefer a formulaRegion chunk instead of
       // emitting a redundant dataRegion chunk that would suppress it.
-      if (!hasNonFormulaNonEmptyCell(cells)) continue;
+      if (!hasNonFormulaNonEmptyCell(cells, signal)) continue;
 
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
