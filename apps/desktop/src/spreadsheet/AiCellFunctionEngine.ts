@@ -1,4 +1,4 @@
-import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/types.js";
+import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/index.js";
 
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";

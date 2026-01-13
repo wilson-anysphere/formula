@@ -11,7 +11,7 @@ import type { SpreadsheetApi } from "../../../../../packages/ai-tools/src/spread
 import type { TokenEstimator } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
-import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/types.js";
+import type { LLMClient, ToolCall } from "../../../../../packages/llm/src/index.js";
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";

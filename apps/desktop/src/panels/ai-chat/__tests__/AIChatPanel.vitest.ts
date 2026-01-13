@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AIChatPanel } from "../AIChatPanel";
-import type { LLMClient, ToolExecutor } from "../../../../../../packages/llm/src/types.js";
+import type { LLMClient, ToolExecutor } from "../../../../../../packages/llm/src/index.js";
 
 function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));

@@ -1,4 +1,4 @@
-import type { ChatStreamEvent, LLMClient, LLMMessage } from "../../../../../packages/llm/src/types.js";
+import type { ChatStreamEvent, LLMClient, LLMMessage } from "../../../../../packages/llm/src/index.js";
 
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 import type { AIAuditEntry, AuditListFilters } from "../../../../../packages/ai-audit/src/types.js";

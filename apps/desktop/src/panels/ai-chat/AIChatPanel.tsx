@@ -8,8 +8,8 @@ import type {
   LLMMessage,
   ToolCall,
   ToolExecutor,
-} from "../../../../../packages/llm/src/types.js";
-import { runChatWithToolsStreaming } from "../../../../../packages/llm/src/toolCallingStreaming.js";
+} from "../../../../../packages/llm/src/index.js";
+import { runChatWithToolsStreaming } from "../../../../../packages/llm/src/index.js";
 import { classifyQueryNeedsTools, verifyAssistantClaims, verifyToolUsage } from "../../../../../packages/ai-tools/src/llm/verification.js";
 import { t, tWithVars } from "../../i18n/index.js";
 

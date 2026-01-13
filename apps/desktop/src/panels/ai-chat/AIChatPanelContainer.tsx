@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { LLMMessage } from "../../../../../packages/llm/src/types.js";
+import type { LLMMessage } from "../../../../../packages/llm/src/index.js";
 
 import { createAiChatOrchestrator } from "../../ai/chat/orchestrator.js";
 import { runAgentTask, type AgentProgressEvent, type AgentTaskResult } from "../../ai/agent/agentOrchestrator.js";

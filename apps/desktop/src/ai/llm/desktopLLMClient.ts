@@ -1,5 +1,5 @@
-import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
-import type { ChatRequest, ChatResponse, ChatStreamEvent, LLMClient } from "../../../../../packages/llm/src/types.js";
+import { createLLMClient } from "../../../../../packages/llm/src/index.js";
+import type { ChatRequest, ChatResponse, ChatStreamEvent, LLMClient } from "../../../../../packages/llm/src/index.js";
 
 const AI_UNAVAILABLE_MESSAGE = "AI unavailable.";
 
