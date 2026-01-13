@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { readFile, readlink, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -14,6 +14,16 @@ import {
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+
+// Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
+const perfHome = resolve(repoRoot, 'target', 'perf-home');
+const perfTmp = resolve(perfHome, 'tmp');
+const perfXdgConfig = resolve(perfHome, '.config');
+const perfXdgCache = resolve(perfHome, '.cache');
+const perfXdgState = resolve(perfHome, '.local', 'state');
+const perfXdgData = resolve(perfHome, '.local', 'share');
+const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
+const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
 
 // Benchmark environment knobs:
 // - `FORMULA_DISABLE_STARTUP_UPDATE_CHECK=1` prevents the release updater from running a
@@ -297,6 +307,15 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
   const command = useXvfb ? 'bash' : binPath;
   const args = useXvfb ? [xvfbPath, binPath] : [];
 
+  mkdirSync(perfHome, { recursive: true });
+  mkdirSync(perfTmp, { recursive: true });
+  mkdirSync(perfXdgConfig, { recursive: true });
+  mkdirSync(perfXdgCache, { recursive: true });
+  mkdirSync(perfXdgState, { recursive: true });
+  mkdirSync(perfXdgData, { recursive: true });
+  mkdirSync(perfAppData, { recursive: true });
+  mkdirSync(perfLocalAppData, { recursive: true });
+
   const child = spawn(command, args, {
     cwd: repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -307,8 +326,17 @@ async function runOnce(binPath: string, timeoutMs: number): Promise<number> {
       // Enable the Rust-side single-line log in release builds.
       FORMULA_STARTUP_METRICS: '1',
       // In case the app reads $HOME for config, keep per-run caches out of the real home dir.
-      HOME: resolve(repoRoot, 'target', 'perf-home'),
-      USERPROFILE: resolve(repoRoot, 'target', 'perf-home'),
+      HOME: perfHome,
+      USERPROFILE: perfHome,
+      XDG_CONFIG_HOME: perfXdgConfig,
+      XDG_CACHE_HOME: perfXdgCache,
+      XDG_STATE_HOME: perfXdgState,
+      XDG_DATA_HOME: perfXdgData,
+      APPDATA: perfAppData,
+      LOCALAPPDATA: perfLocalAppData,
+      TMPDIR: perfTmp,
+      TEMP: perfTmp,
+      TMP: perfTmp,
     },
   });
 
