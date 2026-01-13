@@ -18,6 +18,7 @@ const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
 const collabYjsUtilsEntry = resolve(repoRoot, "packages/collab/yjs-utils/src/index.ts");
+const collabEncryptedRangesEntry = resolve(repoRoot, "packages/collab/encrypted-ranges/src/index.ts");
 const marketplaceSharedEntry = resolve(repoRoot, "shared");
 const extensionMarketplaceEntry = resolve(repoRoot, "packages/extension-marketplace/src/index.ts");
 const spreadsheetFrontendTokenizerEntry = resolve(repoRoot, "packages/spreadsheet-frontend/src/formula/tokenizeFormula.ts");
@@ -62,6 +63,7 @@ export default defineConfig({
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
+      { find: "@formula/collab-encrypted-ranges", replacement: collabEncryptedRangesEntry },
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
       { find: "@formula/collab-yjs-utils", replacement: collabYjsUtilsEntry },

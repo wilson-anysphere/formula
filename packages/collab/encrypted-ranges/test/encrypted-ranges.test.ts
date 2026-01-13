@@ -1,0 +1,107 @@
+import * as Y from "yjs";
+import { describe, expect, it } from "vitest";
+import { ensureWorkbookSchema } from "@formula/collab-workbook";
+
+import { EncryptedRangeManager, createEncryptionPolicyFromDoc } from "../src/index.ts";
+
+describe("@formula/collab-encrypted-ranges", () => {
+  it("manager add/list/remove is deterministic and dedupes identical ranges", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const mgr = new EncryptedRangeManager({ doc });
+
+    const id1 = mgr.add({
+      sheetId: " Sheet1 ",
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 1,
+      keyId: "k1",
+    });
+    const id2 = mgr.add({
+      sheetId: "Sheet1",
+      startRow: 2,
+      startCol: 0,
+      endRow: 2,
+      endCol: 0,
+      keyId: "k1",
+    });
+
+    const list = mgr.list();
+    expect(list.map((r) => r.id)).toEqual([id1, id2].sort());
+    expect(list.find((r) => r.id === id1)?.sheetId).toBe("Sheet1");
+
+    // Identical range should be deduped.
+    const id1b = mgr.add({
+      sheetId: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 1,
+      keyId: "k1",
+    });
+    expect(id1b).toBe(id1);
+    expect(mgr.list()).toHaveLength(2);
+
+    mgr.remove(id1);
+    expect(mgr.list().map((r) => r.id)).toEqual([id2]);
+  });
+
+  it("createEncryptionPolicyFromDoc shouldEncryptCell / keyIdForCell reflect metadata", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const mgr = new EncryptedRangeManager({ doc });
+    const id = mgr.add({
+      sheetId: "s1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 1,
+      keyId: "key-123",
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(true);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 1, col: 1 })).toBe(true);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 2, col: 0 })).toBe(false);
+    expect(policy.shouldEncryptCell({ sheetId: "other", row: 0, col: 0 })).toBe(false);
+
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 1, col: 1 })).toBe("key-123");
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 2, col: 0 })).toBe(null);
+
+    mgr.remove(id);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 0, col: 0 })).toBe(false);
+    expect(policy.keyIdForCell({ sheetId: "s1", row: 0, col: 0 })).toBe(null);
+  });
+
+  it("policy helper works when encryptedRanges are written directly to workbook metadata", () => {
+    const doc = new Y.Doc();
+    ensureWorkbookSchema(doc, { createDefaultSheet: false });
+
+    const metadata = doc.getMap("metadata");
+    const ranges = new Y.Array<Y.Map<unknown>>();
+    const r = new Y.Map<unknown>();
+    r.set("id", "r1");
+    r.set("sheetId", "s1");
+    r.set("startRow", 5);
+    r.set("startCol", 2);
+    r.set("endRow", 6);
+    r.set("endCol", 4);
+    r.set("keyId", "k1");
+    ranges.push([r]);
+
+    doc.transact(() => {
+      metadata.set("encryptedRanges", ranges);
+    });
+
+    const policy = createEncryptionPolicyFromDoc(doc);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 5, col: 2 })).toBe(true);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 6, col: 4 })).toBe(true);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 4, col: 2 })).toBe(false);
+    expect(policy.shouldEncryptCell({ sheetId: "s1", row: 7, col: 2 })).toBe(false);
+  });
+});
+
