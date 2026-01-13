@@ -39,7 +39,7 @@ pub use crate::engine::DaxEngine;
 pub use crate::model::{
     Cardinality, CrossFilterDirection, DataModel, Measure, Relationship, Table,
 };
-pub use crate::pivot::{pivot, GroupByColumn, PivotMeasure, PivotResult};
+pub use crate::pivot::{pivot, pivot_crosstab, GroupByColumn, PivotMeasure, PivotResult, PivotResultGrid};
 pub use crate::value::Value;
 
 pub use crate::engine::{FilterContext, RowContext};

@@ -49,6 +49,42 @@ pub struct PivotResult {
     pub rows: Vec<Vec<Value>>,
 }
 
+/// The result of a pivot query shaped into a 2D grid (crosstab) suitable for rendering like an
+/// Excel worksheet pivot table.
+///
+/// The first row in [`PivotResultGrid::data`] is a header row. Subsequent rows contain the
+/// row-axis keys followed by aggregated measure values for each column-axis key.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PivotResultGrid {
+    pub data: Vec<Vec<Value>>,
+}
+
+fn header_value_display_string(value: &Value) -> String {
+    match value {
+        Value::Blank => "(blank)".to_string(),
+        Value::Boolean(b) => b.to_string(),
+        Value::Number(n) => {
+            let n = n.0;
+            if n.fract() == 0.0 {
+                format!("{}", n as i64)
+            } else {
+                format!("{n}")
+            }
+        }
+        Value::Text(s) => s.to_string(),
+    }
+}
+
+fn key_display_string(key: &[Value]) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    key.iter()
+        .map(header_value_display_string)
+        .collect::<Vec<_>>()
+        .join(" - ")
+}
+
 fn cmp_value(a: &Value, b: &Value) -> Ordering {
     match (a, b) {
         (Value::Blank, Value::Blank) => Ordering::Equal,
@@ -901,6 +937,110 @@ pub fn pivot(
     }
 
     pivot_row_scan(model, base_table, group_by, measures, filter)
+}
+
+/// Compute a pivot table shaped as a crosstab / 2D grid.
+///
+/// This builds a grouped table by calling [`pivot`] with `row_fields + column_fields`, then
+/// reshapes the grouped result into a grid:
+/// - The header row contains the row field captions, followed by one column per unique column-key
+///   (and per-measure when more than one measure is requested).
+/// - Each body row corresponds to a unique row-key.
+/// - Missing (row_key, col_key) combinations are filled with [`Value::Blank`].
+pub fn pivot_crosstab(
+    model: &DataModel,
+    base_table: &str,
+    row_fields: &[GroupByColumn],
+    column_fields: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+) -> DaxResult<PivotResultGrid> {
+    if measures.is_empty() {
+        return Err(DaxError::Eval(
+            "pivot_crosstab requires at least one measure".to_string(),
+        ));
+    }
+
+    let mut group_by = Vec::with_capacity(row_fields.len() + column_fields.len());
+    group_by.extend_from_slice(row_fields);
+    group_by.extend_from_slice(column_fields);
+
+    let grouped = pivot(model, base_table, &group_by, measures, filter)?;
+
+    let row_key_len = row_fields.len();
+    let col_key_len = column_fields.len();
+    let value_start = row_key_len + col_key_len;
+
+    let mut row_keys: HashSet<Vec<Value>> = HashSet::new();
+    let mut col_keys: HashSet<Vec<Value>> = HashSet::new();
+    let mut cells: HashMap<(Vec<Value>, Vec<Value>), Vec<Value>> = HashMap::new();
+
+    for row in &grouped.rows {
+        if row.len() < value_start {
+            continue;
+        }
+        let row_key = row[..row_key_len].to_vec();
+        let col_key = row[row_key_len..value_start].to_vec();
+        let values = row[value_start..].to_vec();
+
+        row_keys.insert(row_key.clone());
+        col_keys.insert(col_key.clone());
+        cells.insert((row_key, col_key), values);
+    }
+
+    let mut row_keys: Vec<Vec<Value>> = row_keys.into_iter().collect();
+    row_keys.sort_by(|a, b| cmp_key(a, b));
+
+    let mut col_keys: Vec<Vec<Value>> = col_keys.into_iter().collect();
+    col_keys.sort_by(|a, b| cmp_key(a, b));
+
+    // Ensure a deterministic (and non-empty) column axis even when there are no column fields.
+    if col_keys.is_empty() {
+        col_keys.push(Vec::new());
+    }
+
+    let mut data: Vec<Vec<Value>> = Vec::new();
+
+    // Header row.
+    let mut header: Vec<Value> = Vec::new();
+    for col in row_fields {
+        header.push(Value::from(format!("{}[{}]", col.table, col.column)));
+    }
+    if col_key_len == 0 {
+        // No column fields: behave like a normal grouped table (row keys + measures).
+        header.extend(measures.iter().map(|m| Value::from(m.name.clone())));
+    } else {
+        for col_key in &col_keys {
+            let key_label = key_display_string(col_key);
+            if measures.len() == 1 {
+                header.push(Value::from(key_label));
+            } else {
+                for measure in measures {
+                    header.push(Value::from(format!("{key_label} - {}", measure.name)));
+                }
+            }
+        }
+    }
+    data.push(header);
+
+    // Body rows.
+    for row_key in &row_keys {
+        let mut out_row = row_key.clone();
+        for col_key in &col_keys {
+            let values = cells
+                .get(&(row_key.clone(), col_key.clone()))
+                .cloned()
+                .unwrap_or_else(|| vec![Value::Blank; measures.len()]);
+            if measures.len() == 1 && col_key_len > 0 {
+                out_row.push(values.into_iter().next().unwrap_or(Value::Blank));
+            } else {
+                out_row.extend(values);
+            }
+        }
+        data.push(out_row);
+    }
+
+    Ok(PivotResultGrid { data })
 }
 
 #[cfg(test)]
