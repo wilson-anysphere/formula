@@ -54,6 +54,8 @@ pub use crate::pivot::{
     PivotCrosstabOptions, PivotMeasure, PivotResult, PivotResultGrid, ValueFieldAggregation,
     ValueFieldSpec,
 };
+#[cfg(feature = "pivot-model")]
+pub use crate::pivot::measures_from_pivot_model_value_fields;
 
 #[cfg(feature = "pivot-model")]
 pub use crate::pivot::{PivotResultGridPivotValues, PivotResultPivotValues};

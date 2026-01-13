@@ -79,6 +79,26 @@ pub struct ValueFieldSpec {
     pub aggregation: ValueFieldAggregation,
 }
 
+#[cfg(feature = "pivot-model")]
+impl From<formula_model::pivots::AggregationType> for ValueFieldAggregation {
+    fn from(value: formula_model::pivots::AggregationType) -> Self {
+        use formula_model::pivots::AggregationType as Agg;
+        match value {
+            Agg::Sum => ValueFieldAggregation::Sum,
+            Agg::Average => ValueFieldAggregation::Average,
+            Agg::Min => ValueFieldAggregation::Min,
+            Agg::Max => ValueFieldAggregation::Max,
+            Agg::CountNumbers => ValueFieldAggregation::CountNumbers,
+            Agg::Count => ValueFieldAggregation::Count,
+            Agg::Product => ValueFieldAggregation::Product,
+            Agg::StdDev => ValueFieldAggregation::StdDev,
+            Agg::StdDevP => ValueFieldAggregation::StdDevP,
+            Agg::Var => ValueFieldAggregation::Var,
+            Agg::VarP => ValueFieldAggregation::VarP,
+        }
+    }
+}
+
 fn looks_like_measure_ref(source_field: &str) -> bool {
     let source_field = source_field.trim();
     source_field.starts_with('[') && source_field.ends_with(']')
@@ -104,30 +124,55 @@ pub fn measures_from_value_fields(
 ) -> DaxResult<Vec<PivotMeasure>> {
     value_fields
         .iter()
-        .map(|vf| {
-            let source = vf.source_field.trim();
-            if looks_like_measure_ref(source) {
-                return PivotMeasure::new(vf.name.clone(), source.to_string());
-            }
+        .map(|vf| measure_from_value_field(base_table, &vf.source_field, &vf.name, vf.aggregation))
+        .collect()
+}
 
-            let column_ref = normalize_column_ref(base_table, source);
-            let expr = match vf.aggregation {
-                ValueFieldAggregation::Sum => format!("SUM({column_ref})"),
-                ValueFieldAggregation::Average => format!("AVERAGE({column_ref})"),
-                ValueFieldAggregation::Min => format!("MIN({column_ref})"),
-                ValueFieldAggregation::Max => format!("MAX({column_ref})"),
-                ValueFieldAggregation::CountNumbers => format!("COUNT({column_ref})"),
-                ValueFieldAggregation::Count => format!("COUNTA({column_ref})"),
-                ValueFieldAggregation::DistinctCount => format!("DISTINCTCOUNT({column_ref})"),
-                other => {
-                    return Err(DaxError::Eval(format!(
-                        "pivot value field aggregation {other:?} is not supported yet"
-                    )))
-                }
-            };
-            PivotMeasure::new(vf.name.clone(), expr)
+#[cfg(feature = "pivot-model")]
+pub fn measures_from_pivot_model_value_fields(
+    base_table: &str,
+    value_fields: &[formula_model::pivots::ValueField],
+) -> DaxResult<Vec<PivotMeasure>> {
+    value_fields
+        .iter()
+        .map(|vf| {
+            measure_from_value_field(
+                base_table,
+                &vf.source_field,
+                &vf.name,
+                ValueFieldAggregation::from(vf.aggregation),
+            )
         })
         .collect()
+}
+
+fn measure_from_value_field(
+    base_table: &str,
+    source_field: &str,
+    name: &str,
+    aggregation: ValueFieldAggregation,
+) -> DaxResult<PivotMeasure> {
+    let source = source_field.trim();
+    if looks_like_measure_ref(source) {
+        return PivotMeasure::new(name.to_string(), source.to_string());
+    }
+
+    let column_ref = normalize_column_ref(base_table, source);
+    let expr = match aggregation {
+        ValueFieldAggregation::Sum => format!("SUM({column_ref})"),
+        ValueFieldAggregation::Average => format!("AVERAGE({column_ref})"),
+        ValueFieldAggregation::Min => format!("MIN({column_ref})"),
+        ValueFieldAggregation::Max => format!("MAX({column_ref})"),
+        ValueFieldAggregation::CountNumbers => format!("COUNT({column_ref})"),
+        ValueFieldAggregation::Count => format!("COUNTA({column_ref})"),
+        ValueFieldAggregation::DistinctCount => format!("DISTINCTCOUNT({column_ref})"),
+        other => {
+            return Err(DaxError::Eval(format!(
+                "pivot value field aggregation {other:?} is not supported yet"
+            )))
+        }
+    };
+    PivotMeasure::new(name.to_string(), expr)
 }
 
 /// The result of a pivot/group-by query.
@@ -2476,6 +2521,25 @@ mod tests {
             }
             other => panic!("expected eval error, got {other:?}"),
         }
+    }
+
+    #[cfg(feature = "pivot-model")]
+    #[test]
+    fn measures_from_pivot_model_value_fields_maps_aggregation_types() {
+        use formula_model::pivots::{AggregationType, ValueField};
+
+        let value_fields = vec![ValueField {
+            source_field: "Amount".into(),
+            name: "Count Amount".into(),
+            aggregation: AggregationType::Count,
+            number_format: None,
+            show_as: None,
+            base_field: None,
+            base_item: None,
+        }];
+
+        let measures = measures_from_pivot_model_value_fields("Fact", &value_fields).unwrap();
+        assert_eq!(measures[0].expression, "COUNTA(Fact[Amount])");
     }
 
     #[test]
