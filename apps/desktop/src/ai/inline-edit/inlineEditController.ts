@@ -5,6 +5,7 @@ import type { Range } from "../../selection/types";
 import { PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
+import { AIAuditRecorder } from "../../../../../packages/ai-audit/src/recorder.js";
 
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
 import { formatDlpDecisionMessage } from "../../../../../packages/security/dlp/src/errors.js";
@@ -121,7 +122,15 @@ export class InlineEditController {
     let batchStarted = false;
     try {
       const workbookId = this.options.workbookId ?? "local-workbook";
+      const auditStore = this.options.auditStore ?? getDesktopAIAuditStore();
+      const sessionId = createSessionId();
       const dlp = maybeGetAiCloudDlpOptions({ documentId: workbookId, sheetId: params.sheetId }) ?? undefined;
+
+      const selectionSheetLabel = sheetDisplayName(params.sheetId, this.options.sheetNameResolver);
+      const selectionRef = `${formatSheetNameForA1(selectionSheetLabel || params.sheetId)}!${rangeToA1(params.range)}`;
+
+      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
+      const offeredToolsByPolicy = toolPolicy.allowTools ?? [];
 
       // If the selection itself is blocked for cloud processing, stop before reading any
       // sample data or calling the LLM.
@@ -153,6 +162,30 @@ export class InlineEditController {
             redactedCellCount: 0
           });
           this.overlay.showError(formatDlpDecisionMessage(selectionDecision));
+
+          // Mirror `AiCellFunctionEngine.auditBlockedRun`: ensure blocked inline-edit attempts
+          // show up in the AI audit log without including any raw cell values.
+          try {
+            const recorder = new AIAuditRecorder({
+              store: auditStore,
+              session_id: sessionId,
+              workbook_id: workbookId,
+              mode: "inline_edit",
+              model,
+              input: {
+                prompt: params.prompt,
+                selection: selectionRef,
+                workbookId,
+                sheetId: params.sheetId,
+                offered_tools: offeredToolsByPolicy,
+                blocked: true,
+                dlp: { decision: selectionDecision, selectionClassification }
+              }
+            });
+            recorder.finalize().catch(() => undefined);
+          } catch {
+            // If audit logging setup fails (unexpected), do not prevent the UI from surfacing the DLP block message.
+          }
           return;
         }
       }
@@ -167,9 +200,6 @@ export class InlineEditController {
         sheetNameResolver: this.options.sheetNameResolver ?? null
       });
       const api = createAbortableSpreadsheetApi(baseApi, signal);
-
-      const selectionSheetLabel = sheetDisplayName(params.sheetId, this.options.sheetNameResolver);
-      const selectionRef = `${formatSheetNameForA1(selectionSheetLabel || params.sheetId)}!${rangeToA1(params.range)}`;
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
@@ -220,7 +250,6 @@ export class InlineEditController {
         prompt: params.prompt
       });
 
-      const toolPolicy = getDesktopToolPolicy({ mode: "inline_edit", prompt: params.prompt });
       const toolExecutor = new SpreadsheetLLMToolExecutor(api, {
         default_sheet: params.sheetId,
         sheet_name_resolver: this.options.sheetNameResolver ?? null,
@@ -237,9 +266,6 @@ export class InlineEditController {
           return result;
         }
       };
-
-      const auditStore = this.options.auditStore ?? getDesktopAIAuditStore();
-      const sessionId = createSessionId();
 
       try {
         this.overlay.setRunning("Running AI tools…");
