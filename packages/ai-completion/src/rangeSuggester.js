@@ -69,7 +69,10 @@ export function suggestRanges(params) {
     contiguous = findContiguousBlockAbove(surroundingCells, colIndex, cellRef.row - 1, maxScanRows, sheetName);
     contiguousReason = "contiguous_above_current_cell";
     if (!contiguous) {
-      contiguous = findContiguousBlockBelow(surroundingCells, colIndex, cellRef.row + 1, maxScanRows, sheetName);
+      // When the active cell isn't in the referenced column, it's safe (and often
+      // desirable) to include data from the same row (e.g. formula in B2 summing A2:A11).
+      const startRow = cellRef.row + (cellRef.col === colIndex ? 1 : 0);
+      contiguous = findContiguousBlockBelow(surroundingCells, colIndex, startRow, maxScanRows, sheetName);
       contiguousReason = "contiguous_below_current_cell";
     }
   }
@@ -224,7 +227,7 @@ function findContiguousBlockBelow(ctx, col, fromRow, maxScanRows, sheetName) {
     startRow++;
     scanned++;
   }
-  if (scanned >= maxScanRows) return null;
+  if (isEmptyCell(ctx.getCellValue(startRow, col, sheetName))) return null;
 
   let endRow = startRow;
   scanned = 0;
@@ -233,8 +236,17 @@ function findContiguousBlockBelow(ctx, col, fromRow, maxScanRows, sheetName) {
     scanned++;
   }
 
+  const rawStartRow = startRow;
+  const rawEndRow = endRow;
+
   const trimmed = trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName);
-  return { startRow: trimmed.startRow, endRow: trimmed.endRow, numericRatio: trimmed.numericRatio };
+  return {
+    startRow: trimmed.startRow,
+    endRow: trimmed.endRow,
+    numericRatio: trimmed.numericRatio,
+    rawStartRow,
+    rawEndRow,
+  };
 }
 
 function trimNonNumericEdgesIfMostlyNumeric(ctx, col, startRow, endRow, sheetName) {

@@ -83,6 +83,29 @@ test("suggestRanges falls back to scanning down when no data exists above the cu
   assert.ok(suggestions.some((s) => s.range === "A2:A11"));
 });
 
+test("suggestRanges downward fallback includes same-row data when the active cell is in a different column", () => {
+  const ctx = createColumnAContext([
+    [1, 10], // A2
+    [2, 20], // A3
+    [3, 30], // A4
+    [4, 40], // A5
+    [5, 50], // A6
+    [6, 60], // A7
+    [7, 70], // A8
+    [8, 80], // A9
+    [9, 90], // A10
+    [10, 100], // A11
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 1, col: 1 }, // B2, beside the data block start row
+    surroundingCells: ctx,
+  });
+
+  assert.ok(suggestions.some((s) => s.range === "A2:A11"));
+});
+
 test("suggestRanges trims non-numeric header rows when scanning downwards", () => {
   const ctx = createColumnAContext([
     [1, "Header"], // A2
