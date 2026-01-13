@@ -690,6 +690,9 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         const li = document.createElement("li");
         li.className = "command-palette__item";
         li.id = `command-palette-option-${globalIndex}`;
+        // Stable hook for Playwright tests (and future UI automation) to select a specific
+        // spreadsheet function row without relying on ranking order or DOM structure.
+        li.dataset.testid = `command-palette-function-${fn.name}`;
         li.setAttribute("role", "option");
         li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
 
