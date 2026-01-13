@@ -300,8 +300,10 @@ describe("FormulaBarView commit/cancel UX", () => {
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
 
-    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+    const e = new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
 
+    expect(e.defaultPrevented).toBe(false);
     expect(onCommit).not.toHaveBeenCalled();
     expect(view.model.isEditing).toBe(true);
     expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
