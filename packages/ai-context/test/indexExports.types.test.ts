@@ -55,6 +55,8 @@ type DlpResult = ReturnType<typeof classifyText>;
 type _Dlp_NotAny = Assert<IsAny<DlpResult> extends false ? true : false>;
 type _Dlp_Shape = Assert<DlpResult extends { level: "public" | "sensitive"; findings: Array<string> } ? true : false>;
 type DlpFinding = DlpResult["findings"][number];
+// Ensure we preserve the discriminated literal union rather than widening to string.
+type _DlpFinding_NotString = Assert<string extends DlpFinding ? false : true>;
 type _DlpFinding_HasPhone = Assert<"phone_number" extends DlpFinding ? true : false>;
 type _DlpFinding_HasApiKey = Assert<"api_key" extends DlpFinding ? true : false>;
 type _DlpFinding_HasIban = Assert<"iban" extends DlpFinding ? true : false>;
@@ -67,6 +69,7 @@ type _HeaderRow_Return = Assert<ReturnType<typeof isLikelyHeaderRow> extends boo
 type IndexSheetResult = Awaited<ReturnType<RagIndex["indexSheet"]>>;
 type _IndexSheet_NotAny = Assert<IsAny<IndexSheetResult> extends false ? true : false>;
 type _IndexSheet_Shape = Assert<IndexSheetResult extends { schema: SheetSchema; chunkCount: number } ? true : false>;
+type _IndexSheet_Schema_NotAny = Assert<IsAny<IndexSheetResult["schema"]> extends false ? true : false>;
 
 // --- Query-aware scoring ---
 type _RegionType_NotAny = Assert<IsAny<RegionType> extends false ? true : false>;
