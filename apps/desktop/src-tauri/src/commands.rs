@@ -4343,6 +4343,19 @@ pub async fn refresh_pivot_table(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
+pub async fn refresh_all_pivots(state: State<'_, SharedAppState>) -> Result<Vec<CellUpdate>, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let updates = state.refresh_all_pivots().map_err(app_error)?;
+        Ok::<_, String>(updates.into_iter().map(cell_update_from_state).collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
 pub fn list_pivot_tables(
     state: State<'_, SharedAppState>,
 ) -> Result<Vec<PivotTableSummary>, String> {

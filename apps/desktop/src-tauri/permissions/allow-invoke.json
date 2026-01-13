@@ -70,6 +70,7 @@
           "read_binary_file_range",
           "read_clipboard",
           "read_text_file",
+          "refresh_all_pivots",
           "refresh_pivot_table",
           "rename_sheet",
           "report_startup_tti",

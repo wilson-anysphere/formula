@@ -1755,6 +1755,7 @@ fn main() {
             commands::apply_sheet_view_deltas,
             commands::create_pivot_table,
             commands::refresh_pivot_table,
+            commands::refresh_all_pivots,
             commands::list_pivot_tables,
             commands::get_sheet_print_settings,
             commands::set_sheet_page_setup,

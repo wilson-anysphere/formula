@@ -81,4 +81,9 @@ export class TauriPivotBackend {
     const payload = await this.invoke("refresh_pivot_table", { request: { pivot_id: pivotId } });
     return (payload as CellUpdate[]) ?? [];
   }
+
+  async refreshAllPivots(): Promise<CellUpdate[]> {
+    const payload = await this.invoke("refresh_all_pivots");
+    return (payload as CellUpdate[]) ?? [];
+  }
 }
