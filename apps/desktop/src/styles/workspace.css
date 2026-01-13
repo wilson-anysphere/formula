@@ -81,7 +81,7 @@
 }
 
 .grid-root[data-split-active="true"] {
-  box-shadow: inset 0 0 0 2px var(--accent);
+  box-shadow: inset 0 0 0 2px var(--formula-grid-selection-border, var(--accent));
 }
 
 #grid-splitter {

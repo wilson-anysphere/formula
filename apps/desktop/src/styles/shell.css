@@ -239,7 +239,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .outline-toggle:active {
-  background: var(--bg-tertiary);
+  background: var(--formula-grid-scrollbar-track, var(--bg-tertiary));
 }
 
 .cell-editor {
