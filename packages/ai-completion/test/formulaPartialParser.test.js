@@ -97,3 +97,13 @@ test("parsePartialFormula ignores ';' inside structured references", () => {
   assert.equal(parsed.argIndex, 1);
   assert.equal(parsed.currentArg?.text, "A");
 });
+
+test("parsePartialFormula ignores ';' inside nested function calls (depth > baseDepth)", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM(IF(A1>0;A1;0); A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  // Only the semicolon after the nested IF(...) should split SUM args.
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
