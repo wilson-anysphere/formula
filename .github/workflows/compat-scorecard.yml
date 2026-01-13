@@ -32,7 +32,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            async function findCompletedRunId(workflowFile) {
+            async function findRun(workflowFile) {
               const resp = await github.rest.actions.listWorkflowRunsForWorkflow({
                 owner,
                 repo,
@@ -40,12 +40,18 @@ jobs:
                 per_page: 50,
               });
 
+              let any = null;
+              let completed = null;
+
               for (const run of resp.data.workflow_runs) {
-                if (run.head_sha === sha && run.status === "completed") {
-                  return run.id;
+                if (run.head_sha !== sha) continue;
+                if (!any) any = run;
+                if (run.status === "completed") {
+                  completed = run;
+                  break;
                 }
               }
-              return null;
+              return { any, completed };
             }
 
             let corpusRunId = null;
@@ -54,21 +60,43 @@ jobs:
 
             if (triggeredName === "corpus") {
               corpusRunId = context.payload.workflow_run.id;
-              excelRunId = await findCompletedRunId("excel-compat.yml");
-              // If Excel didn't run for this commit, there is no calc metric to report. Avoid
-              // emitting a partial scorecard for corpus-only runs.
-              shouldGenerate = !!excelRunId;
+              const excel = await findRun("excel-compat.yml");
+              if (excel.any && !excel.completed) {
+                // Excel workflow is in progress; wait for it to complete so we don't emit a partial
+                // scorecard and then immediately re-run.
+                shouldGenerate = false;
+              } else {
+                excelRunId = excel.completed ? excel.completed.id : null;
+                // If Excel didn't run for this commit, there is no calc metric to report. Avoid
+                // emitting a corpus-only scorecard.
+                shouldGenerate = !!excelRunId;
+              }
             } else if (triggeredName === "Excel Compatibility (Oracle)") {
               excelRunId = context.payload.workflow_run.id;
-              corpusRunId = await findCompletedRunId("corpus.yml");
-              // Always generate after the Excel workflow; corpus metrics are optional and will be
-              // marked missing when the corpus workflow did not run for this commit.
-              shouldGenerate = true;
+              const corpus = await findRun("corpus.yml");
+              if (corpus.any && !corpus.completed) {
+                // Corpus workflow is in progress; wait so we can generate a full scorecard in one
+                // shot. If corpus never ran, `corpus.any` will be null and we'll generate a partial
+                // scorecard (missing corpus metrics).
+                shouldGenerate = false;
+              } else {
+                corpusRunId = corpus.completed ? corpus.completed.id : null;
+                // Always generate after the Excel workflow; corpus metrics are optional and will be
+                // marked missing when the corpus workflow did not run for this commit.
+                shouldGenerate = true;
+              }
             } else {
               // Unexpected; fall back to searching both.
-              corpusRunId = await findCompletedRunId("corpus.yml");
-              excelRunId = await findCompletedRunId("excel-compat.yml");
-              shouldGenerate = !!excelRunId;
+              const corpus = await findRun("corpus.yml");
+              const excel = await findRun("excel-compat.yml");
+              const anyPending = (corpus.any && !corpus.completed) || (excel.any && !excel.completed);
+              if (anyPending) {
+                shouldGenerate = false;
+              } else {
+                corpusRunId = corpus.completed ? corpus.completed.id : null;
+                excelRunId = excel.completed ? excel.completed.id : null;
+                shouldGenerate = !!excelRunId;
+              }
             }
 
             core.setOutput("sha", sha);
