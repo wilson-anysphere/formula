@@ -16,6 +16,7 @@ cd "$repo_root"
 ci_workflow=".github/workflows/ci.yml"
 release_workflow=".github/workflows/release.yml"
 bundle_size_workflow=".github/workflows/desktop-bundle-size.yml"
+windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
 
 extract_node_major() {
   local file="$1"
@@ -113,6 +114,7 @@ require_env_pin_usage() {
 ci_node_major="$(extract_node_major "$ci_workflow")"
 release_node_major="$(extract_node_major "$release_workflow")"
 bundle_node_major="$(extract_node_major "$bundle_size_workflow")"
+smoke_node_major="$(extract_node_major "$windows_arm64_smoke_workflow")"
 
 if [ -z "$ci_node_major" ]; then
   echo "Failed to find NODE_VERSION in ${ci_workflow}" >&2
@@ -126,6 +128,10 @@ if [ -z "$bundle_node_major" ]; then
   echo "Failed to find NODE_VERSION in ${bundle_size_workflow}" >&2
   exit 1
 fi
+if [ -z "$smoke_node_major" ]; then
+  echo "Failed to find NODE_VERSION in ${windows_arm64_smoke_workflow}" >&2
+  exit 1
+fi
 
 if ! [[ "$ci_node_major" =~ ^[0-9]+$ ]]; then
   echo "Expected NODE_VERSION in ${ci_workflow} to be a Node major (e.g. 22); got ${ci_node_major}" >&2
@@ -137,6 +143,10 @@ if ! [[ "$release_node_major" =~ ^[0-9]+$ ]]; then
 fi
 if ! [[ "$bundle_node_major" =~ ^[0-9]+$ ]]; then
   echo "Expected NODE_VERSION in ${bundle_size_workflow} to be a Node major (e.g. 22); got ${bundle_node_major}" >&2
+  exit 1
+fi
+if ! [[ "$smoke_node_major" =~ ^[0-9]+$ ]]; then
+  echo "Expected NODE_VERSION in ${windows_arm64_smoke_workflow} to be a Node major (e.g. 22); got ${smoke_node_major}" >&2
   exit 1
 fi
 
@@ -156,10 +166,19 @@ if [ "$ci_node_major" != "$bundle_node_major" ]; then
   echo "Fix: update one of the workflows so both use the same Node major." >&2
   exit 1
 fi
+if [ "$ci_node_major" != "$smoke_node_major" ]; then
+  echo "Node major pin mismatch between CI and Windows ARM64 smoke workflows:" >&2
+  echo "  ${ci_workflow}: NODE_VERSION=${ci_node_major}" >&2
+  echo "  ${windows_arm64_smoke_workflow}: NODE_VERSION=${smoke_node_major}" >&2
+  echo "" >&2
+  echo "Fix: update one of the workflows so both use the same Node major." >&2
+  exit 1
+fi
 
 # Also ensure the workflows actually use the env pin consistently.
 require_env_pin_usage "$ci_workflow"
 require_env_pin_usage "$release_workflow"
 require_env_pin_usage "$bundle_size_workflow"
+require_env_pin_usage "$windows_arm64_smoke_workflow"
 
 echo "Node version pins match (NODE_VERSION=${ci_node_major})."

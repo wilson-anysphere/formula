@@ -15,6 +15,7 @@ cd "$repo_root"
 package_json="package.json"
 ci_workflow=".github/workflows/ci.yml"
 release_workflow=".github/workflows/release.yml"
+windows_arm64_smoke_workflow=".github/workflows/windows-arm64-smoke.yml"
 
 extract_package_manager_pnpm_version() {
   local file="$1"
@@ -40,11 +41,35 @@ if [ -z "$expected_pnpm_version" ]; then
   exit 1
 fi
 
+extract_workflow_env_pnpm_version() {
+  local file="$1"
+  local line=""
+  line="$(grep -E '^[[:space:]]*PNPM_VERSION[[:space:]]*:' "$file" | head -n 1 || true)"
+  if [ -z "$line" ]; then
+    return 0
+  fi
+  local value="${line#*:}"
+  value="${value%%#*}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ "$value" == \"*\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  elif [[ "$value" == \'*\' ]]; then
+    value="${value#\'}"
+    value="${value%\'}"
+  fi
+  printf '%s' "$value"
+}
+
 check_workflow_pnpm_pins() {
   local file="$1"
+  local env_pnpm_version=""
+  env_pnpm_version="$(extract_workflow_env_pnpm_version "$file")"
   local in_action=0
   local action_line=""
   local found_any=0
+  local validated_any=0
 
   while IFS= read -r line; do
     if [[ "$line" =~ uses:[[:space:]]*pnpm/action-setup@ ]]; then
@@ -75,7 +100,20 @@ check_workflow_pnpm_pins() {
         # Allow env indirection if it equals the expected version (rare in these workflows,
         # but used in some auxiliary workflows).
         if [[ "$value" == "\${{ env.PNPM_VERSION }}" || "$value" == "\${{ env.PNPM_VERSION }}"* ]]; then
-          # Can't validate the actual env value robustly here without parsing YAML; skip.
+          if [ -z "$env_pnpm_version" ]; then
+            echo "pnpm version pin mismatch in ${file}:" >&2
+            echo "  Found: version: \${{ env.PNPM_VERSION }} (but PNPM_VERSION is not set in the workflow env)" >&2
+            echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+            exit 1
+          fi
+          if [ "$env_pnpm_version" != "$expected_pnpm_version" ]; then
+            echo "pnpm version pin mismatch in ${file}:" >&2
+            echo "  Expected pnpm version: ${expected_pnpm_version} (from ${package_json} packageManager)" >&2
+            echo "  Found workflow PNPM_VERSION: ${env_pnpm_version}" >&2
+            echo "  In action: ${action_line}" >&2
+            exit 1
+          fi
+          validated_any=1
           in_action=0
           continue
         fi
@@ -88,6 +126,7 @@ check_workflow_pnpm_pins() {
           exit 1
         fi
 
+        validated_any=1
         in_action=0
       fi
     fi
@@ -102,10 +141,16 @@ check_workflow_pnpm_pins() {
     echo "No pnpm/action-setup steps found in ${file} (expected at least one for JS workflows)." >&2
     exit 1
   fi
+
+  if [ "$validated_any" -eq 0 ]; then
+    echo "pnpm/action-setup steps found in ${file} but no version pin was validated." >&2
+    echo "Ensure each pnpm/action-setup has a 'version:' key pinned to ${expected_pnpm_version} (directly or via env.PNPM_VERSION)." >&2
+    exit 1
+  fi
 }
 
 check_workflow_pnpm_pins "$ci_workflow"
 check_workflow_pnpm_pins "$release_workflow"
+check_workflow_pnpm_pins "$windows_arm64_smoke_workflow"
 
 echo "pnpm version pins match package.json (pnpm@${expected_pnpm_version})."
-
