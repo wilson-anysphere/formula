@@ -246,10 +246,21 @@ fn detect_chart_kind(
         return chart_type;
     }
 
-    // 4) Unknown. Keep the diagnostic stable since it's used by chart fixture tests.
+    // 4) Unknown: capture a richer diagnostic to make it easier to debug/extend
+    // detection for new ChartEx variants.
+    let root_ns = doc.root_element().tag_name().namespace().unwrap_or("");
+    let hints = collect_chart_ex_kind_hints(doc);
+    let hint_list = if hints.is_empty() {
+        "<none>".to_string()
+    } else {
+        hints.join(", ")
+    };
+
     diagnostics.push(ChartDiagnostic {
         level: ChartDiagnosticLevel::Warning,
-        message: "ChartEx chart kind could not be inferred".to_string(),
+        message: format!(
+            "ChartEx chart kind could not be inferred (root ns={root_ns}); hints: {hint_list}"
+        ),
     });
 
     "unknown".to_string()
@@ -561,6 +572,7 @@ fn parse_series(
         y_values,
         smooth: None,
         invert_if_negative: None,
+        bubble_size: None,
         style: None,
         marker: None,
         data_labels: None,

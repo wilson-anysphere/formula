@@ -100,10 +100,16 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ChartKind {
+    Area,
     Bar,
+    Bubble,
+    Doughnut,
     Line,
     Pie,
+    Radar,
     Scatter,
+    Stock,
+    Surface,
     Unknown { name: String },
 }
 
@@ -161,10 +167,16 @@ pub enum LegendPosition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PlotAreaModel {
+    Area(AreaChartModel),
     Bar(BarChartModel),
+    Bubble(BubbleChartModel),
+    Doughnut(DoughnutChartModel),
     Line(LineChartModel),
     Pie(PieChartModel),
+    Radar(RadarChartModel),
     Scatter(ScatterChartModel),
+    Stock(StockChartModel),
+    Surface(SurfaceChartModel),
     Combo(ComboPlotAreaModel),
     Unknown { name: String },
 }
@@ -214,6 +226,13 @@ pub enum ComboChartEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct AreaChartModel {
+    pub grouping: Option<String>,
+    pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct BarChartModel {
     pub vary_colors: Option<bool>,
     pub bar_direction: Option<String>,
@@ -221,6 +240,23 @@ pub struct BarChartModel {
     pub gap_width: Option<u16>,
     pub overlap: Option<i16>,
     pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BubbleChartModel {
+    pub bubble_scale: Option<u32>,
+    pub show_neg_bubbles: Option<bool>,
+    pub size_represents: Option<String>,
+    pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DoughnutChartModel {
+    pub vary_colors: Option<bool>,
+    pub first_slice_angle: Option<u32>,
+    pub hole_size: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -241,9 +277,29 @@ pub struct PieChartModel {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct RadarChartModel {
+    pub radar_style: Option<String>,
+    pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ScatterChartModel {
     pub vary_colors: Option<bool>,
     pub scatter_style: Option<String>,
+    pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StockChartModel {
+    pub ax_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfaceChartModel {
+    pub wireframe: Option<bool>,
     pub ax_ids: Vec<u32>,
 }
 
@@ -361,6 +417,9 @@ pub struct SeriesModel {
     pub y_values: Option<SeriesData>,
     pub smooth: Option<bool>,
     pub invert_if_negative: Option<bool>,
+    /// Bubble size data (`c:ser/c:bubbleSize`), for bubble charts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bubble_size: Option<SeriesNumberData>,
     /// Series shape properties (`c:ser/c:spPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<ShapeStyle>,

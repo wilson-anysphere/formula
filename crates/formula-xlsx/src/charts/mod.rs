@@ -132,9 +132,11 @@ fn extract_formula(series_node: roxmltree::Node<'_, '_>, series_child: &str) -> 
 
 fn map_chart_type(name: &str) -> ChartType {
     match name {
+        "areaChart" | "area3DChart" => ChartType::Area,
         "barChart" | "bar3DChart" => ChartType::Bar,
+        "doughnutChart" => ChartType::Doughnut,
         "lineChart" | "line3DChart" => ChartType::Line,
-        "pieChart" | "pie3DChart" | "doughnutChart" => ChartType::Pie,
+        "pieChart" | "pie3DChart" => ChartType::Pie,
         "scatterChart" => ChartType::Scatter,
         other => ChartType::Unknown {
             name: other.to_string(),

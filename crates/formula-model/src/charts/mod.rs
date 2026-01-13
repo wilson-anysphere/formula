@@ -10,7 +10,9 @@ pub use style_parts::*;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum ChartType {
+    Area,
     Bar,
+    Doughnut,
     Line,
     Pie,
     Scatter,

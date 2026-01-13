@@ -114,7 +114,7 @@ fn parses_generated_chart_fixtures() {
                 assert_eq!(vals.formula.as_deref(), Some("Sheet1!$B$2:$B$5"));
                 assert_eq!(vals.cache.as_ref().map(Vec::len), Some(4));
             }
-            ChartKind::Unknown { .. } => unreachable!("fixture should not be unknown"),
+            _ => unreachable!("fixture should not be an unsupported chart type"),
         }
     }
 }

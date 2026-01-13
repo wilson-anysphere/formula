@@ -37,8 +37,7 @@
   },
   "modelChartSpace": {
     "chartKind": {
-      "kind": "unknown",
-      "name": "areaChart"
+      "kind": "area"
     },
     "title": {
       "richText": {
@@ -52,8 +51,12 @@
       "overlay": false
     },
     "plotArea": {
-      "kind": "unknown",
-      "name": "areaChart"
+      "kind": "area",
+      "grouping": "standard",
+      "axIds": [
+        50010001,
+        50010002
+      ]
     },
     "axes": [
       {
@@ -123,12 +126,7 @@
       }
     ],
     "plotVisOnly": true,
-    "diagnostics": [
-      {
-        "level": "warning",
-        "message": "unsupported chart type areaChart; rendering may be incomplete"
-      }
-    ]
+    "diagnostics": []
   },
   "modelChartEx": null
 }

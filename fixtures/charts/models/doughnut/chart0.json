@@ -37,7 +37,7 @@
   },
   "modelChartSpace": {
     "chartKind": {
-      "kind": "pie"
+      "kind": "doughnut"
     },
     "title": {
       "richText": {
@@ -51,7 +51,7 @@
       "overlay": false
     },
     "plotArea": {
-      "kind": "pie",
+      "kind": "doughnut",
       "varyColors": true,
       "firstSliceAngle": 0,
       "holeSize": 50

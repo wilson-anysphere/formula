@@ -1,9 +1,11 @@
 use formula_model::charts::{
-    AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
-    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel,
-    DataLabelsModel, LegendModel, LegendPosition, LineChartModel, ManualLayoutModel,
-    NumberFormatModel, PieChartModel, PlotAreaModel, ScatterChartModel, SeriesData,
-    SeriesIndexRange, SeriesModel, SeriesNumberData, SeriesPointStyle, SeriesTextData, TextModel,
+    AreaChartModel, AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel,
+    BubbleChartModel, ChartDiagnostic, ChartDiagnosticLevel, ChartKind, ChartModel,
+    ComboChartEntry, ComboPlotAreaModel, DataLabelsModel, DoughnutChartModel, LegendModel,
+    LegendPosition, LineChartModel, ManualLayoutModel, NumberFormatModel, PieChartModel,
+    PlotAreaModel, RadarChartModel, ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel,
+    SeriesNumberData, SeriesPointStyle, SeriesTextData, StockChartModel, SurfaceChartModel,
+    TextModel,
 };
 use formula_model::rich_text::RichTextRunStyle;
 use formula_model::RichText;
@@ -242,8 +244,20 @@ fn parse_plot_area_chart(
 
         let series_range = SeriesIndexRange { start, end };
         let entry = match subplot_plot_area {
+            PlotAreaModel::Area(_) => ComboChartEntry::Unknown {
+                name: "area".to_string(),
+                series: series_range,
+            },
             PlotAreaModel::Bar(model) => ComboChartEntry::Bar {
                 model,
+                series: series_range,
+            },
+            PlotAreaModel::Bubble(_) => ComboChartEntry::Unknown {
+                name: "bubble".to_string(),
+                series: series_range,
+            },
+            PlotAreaModel::Doughnut(_) => ComboChartEntry::Unknown {
+                name: "doughnut".to_string(),
                 series: series_range,
             },
             PlotAreaModel::Line(model) => ComboChartEntry::Line {
@@ -254,8 +268,20 @@ fn parse_plot_area_chart(
                 model,
                 series: series_range,
             },
+            PlotAreaModel::Radar(_) => ComboChartEntry::Unknown {
+                name: "radar".to_string(),
+                series: series_range,
+            },
             PlotAreaModel::Scatter(model) => ComboChartEntry::Scatter {
                 model,
+                series: series_range,
+            },
+            PlotAreaModel::Stock(_) => ComboChartEntry::Unknown {
+                name: "stock".to_string(),
+                series: series_range,
+            },
+            PlotAreaModel::Surface(_) => ComboChartEntry::Unknown {
+                name: "surface".to_string(),
                 series: series_range,
             },
             PlotAreaModel::Combo(_) => unreachable!("nested combo plot area is not supported"),
@@ -281,6 +307,10 @@ fn parse_plot_area_model(
     diagnostics: &mut Vec<ChartDiagnostic>,
 ) -> PlotAreaModel {
     match chart_kind {
+        ChartKind::Area => PlotAreaModel::Area(AreaChartModel {
+            grouping: child_attr(chart_node, "grouping", "val").map(str::to_string),
+            ax_ids: parse_ax_ids(chart_node),
+        }),
         ChartKind::Bar => PlotAreaModel::Bar(BarChartModel {
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             bar_direction: child_attr(chart_node, "barDir", "val").map(str::to_string),
@@ -289,6 +319,19 @@ fn parse_plot_area_model(
                 .and_then(|v| v.parse::<u16>().ok()),
             overlap: child_attr(chart_node, "overlap", "val").and_then(|v| v.parse::<i16>().ok()),
             ax_ids: parse_ax_ids(chart_node),
+        }),
+        ChartKind::Bubble => PlotAreaModel::Bubble(BubbleChartModel {
+            bubble_scale: child_attr(chart_node, "bubbleScale", "val")
+                .and_then(|v| v.parse::<u32>().ok()),
+            show_neg_bubbles: child_attr(chart_node, "showNegBubbles", "val").map(parse_ooxml_bool),
+            size_represents: child_attr(chart_node, "sizeRepresents", "val").map(str::to_string),
+            ax_ids: parse_ax_ids(chart_node),
+        }),
+        ChartKind::Doughnut => PlotAreaModel::Doughnut(DoughnutChartModel {
+            vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
+            first_slice_angle: child_attr(chart_node, "firstSliceAng", "val")
+                .and_then(|v| v.parse::<u32>().ok()),
+            hole_size: child_attr(chart_node, "holeSize", "val").and_then(|v| v.parse::<u32>().ok()),
         }),
         ChartKind::Line => PlotAreaModel::Line(LineChartModel {
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
@@ -301,9 +344,20 @@ fn parse_plot_area_model(
                 .and_then(|v| v.parse::<u32>().ok()),
             hole_size: child_attr(chart_node, "holeSize", "val").and_then(|v| v.parse::<u8>().ok()),
         }),
+        ChartKind::Radar => PlotAreaModel::Radar(RadarChartModel {
+            radar_style: child_attr(chart_node, "radarStyle", "val").map(str::to_string),
+            ax_ids: parse_ax_ids(chart_node),
+        }),
         ChartKind::Scatter => PlotAreaModel::Scatter(ScatterChartModel {
             vary_colors: child_attr(chart_node, "varyColors", "val").map(parse_ooxml_bool),
             scatter_style: child_attr(chart_node, "scatterStyle", "val").map(str::to_string),
+            ax_ids: parse_ax_ids(chart_node),
+        }),
+        ChartKind::Stock => PlotAreaModel::Stock(StockChartModel {
+            ax_ids: parse_ax_ids(chart_node),
+        }),
+        ChartKind::Surface => PlotAreaModel::Surface(SurfaceChartModel {
+            wireframe: child_attr(chart_node, "wireframe", "val").map(parse_ooxml_bool),
             ax_ids: parse_ax_ids(chart_node),
         }),
         ChartKind::Unknown { name } => {
@@ -357,6 +411,11 @@ fn parse_series(
         .find(|n| n.is_element() && n.tag_name().name() == "yVal")
         .and_then(|y| parse_series_data(y, diagnostics, "series.yVal"));
 
+    let bubble_size = series_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "bubbleSize")
+        .and_then(|b| parse_series_number_data(b, diagnostics, "series.bubbleSize"));
+
     let style = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
@@ -392,6 +451,7 @@ fn parse_series(
         y_values,
         smooth,
         invert_if_negative,
+        bubble_size,
         style,
         marker,
         data_labels,
@@ -1370,10 +1430,16 @@ fn parse_ax_ids(chart_node: Node<'_, '_>) -> Vec<u32> {
 
 fn map_chart_kind(name: &str) -> ChartKind {
     match name {
+        "areaChart" | "area3DChart" => ChartKind::Area,
         "barChart" | "bar3DChart" => ChartKind::Bar,
+        "bubbleChart" => ChartKind::Bubble,
+        "doughnutChart" => ChartKind::Doughnut,
         "lineChart" | "line3DChart" => ChartKind::Line,
-        "pieChart" | "pie3DChart" | "doughnutChart" => ChartKind::Pie,
+        "pieChart" | "pie3DChart" => ChartKind::Pie,
+        "radarChart" => ChartKind::Radar,
         "scatterChart" => ChartKind::Scatter,
+        "stockChart" => ChartKind::Stock,
+        "surfaceChart" | "surface3DChart" => ChartKind::Surface,
         other => ChartKind::Unknown {
             name: other.to_string(),
         },
