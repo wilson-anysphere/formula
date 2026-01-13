@@ -14,6 +14,7 @@ use zip::{CompressionMethod, ZipWriter};
 pub struct XlsbFixtureBuilder {
     sheet_name: String,
     shared_strings: Vec<String>,
+    shared_strings_bin_override: Option<Vec<u8>>,
     // row -> (col -> cell)
     cells: BTreeMap<u32, BTreeMap<u32, CellSpec>>,
     row_record_trailing_bytes: Vec<u8>,
@@ -53,6 +54,7 @@ impl XlsbFixtureBuilder {
         Self {
             sheet_name: "Sheet1".to_string(),
             shared_strings: Vec::new(),
+            shared_strings_bin_override: None,
             cells: BTreeMap::new(),
             row_record_trailing_bytes: Vec::new(),
             extra_zip_parts: Vec::new(),
@@ -63,6 +65,11 @@ impl XlsbFixtureBuilder {
         let idx = self.shared_strings.len() as u32;
         self.shared_strings.push(s.to_string());
         idx
+    }
+
+    /// Override the generated `xl/sharedStrings.bin` part bytes.
+    pub fn set_shared_strings_bin_override(&mut self, bytes: Vec<u8>) {
+        self.shared_strings_bin_override = Some(bytes);
     }
 
     pub fn set_sheet_name(&mut self, name: &str) {
@@ -88,7 +95,10 @@ impl XlsbFixtureBuilder {
     }
 
     pub fn set_cell_blank(&mut self, row: u32, col: u32) {
-        self.cells.entry(row).or_default().insert(col, CellSpec::Blank);
+        self.cells
+            .entry(row)
+            .or_default()
+            .insert(col, CellSpec::Blank);
     }
 
     pub fn set_cell_bool(&mut self, row: u32, col: u32, v: bool) {
@@ -179,7 +189,9 @@ impl XlsbFixtureBuilder {
     pub fn build_bytes(&self) -> Vec<u8> {
         let workbook_bin = build_workbook_bin(&self.sheet_name);
         let sheet1_bin = build_sheet_bin(&self.cells, &self.row_record_trailing_bytes);
-        let shared_strings_bin = if self.shared_strings.is_empty() {
+        let shared_strings_bin = if let Some(bytes) = &self.shared_strings_bin_override {
+            Some(bytes.clone())
+        } else if self.shared_strings.is_empty() {
             None
         } else {
             Some(build_shared_strings_bin(&self.shared_strings, &self.cells))
@@ -226,7 +238,8 @@ impl XlsbFixtureBuilder {
         for (name, bytes) in &self.extra_zip_parts {
             zip.start_file(name, options.clone())
                 .unwrap_or_else(|_| panic!("start {name}"));
-            zip.write_all(bytes).unwrap_or_else(|_| panic!("write {name}"));
+            zip.write_all(bytes)
+                .unwrap_or_else(|_| panic!("write {name}"));
         }
 
         zip.finish().expect("finish xlsb zip").into_inner()
@@ -240,7 +253,10 @@ pub mod rgce {
     /// PtgRef (`0x24`) encoded using the BIFF12 cell-address layout:
     /// `[row: u32][col: u16-with-relative-flags]`.
     pub fn push_ref(out: &mut Vec<u8>, row: u32, col: u32, abs_row: bool, abs_col: bool) {
-        assert!(col <= 0x3FFF, "column index out of range for BIFF12 (max 16383)");
+        assert!(
+            col <= 0x3FFF,
+            "column index out of range for BIFF12 (max 16383)"
+        );
         out.push(0x24);
         out.extend_from_slice(&row.to_le_bytes());
 
@@ -556,7 +572,11 @@ fn build_shared_strings_bin(
     let unique_count = strings.len() as u32;
     let total_count: u32 = cells
         .values()
-        .map(|cols| cols.values().filter(|cell| matches!(cell, CellSpec::Sst(_))).count() as u32)
+        .map(|cols| {
+            cols.values()
+                .filter(|cell| matches!(cell, CellSpec::Sst(_)))
+                .count() as u32
+        })
         .sum();
     let mut sst = Vec::<u8>::new();
     // BrtSST: [totalCount][uniqueCount]

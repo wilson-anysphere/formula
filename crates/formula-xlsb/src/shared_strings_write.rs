@@ -259,28 +259,63 @@ fn parse_plain_si_text(payload: &[u8]) -> Option<String> {
     //   [flags: u8][text: XLWideString]
     // Rich/phonetic data are only present if corresponding flag bits are set.
     let flags = *payload.first()?;
-    if flags != 0 {
-        return None;
-    }
 
     if payload.len() < 1 + 4 {
         return None;
     }
     let cch = u32::from_le_bytes(payload[1..5].try_into().ok()?) as usize;
     let byte_len = cch.checked_mul(2)?;
-    let expected_len = 1usize.checked_add(4)?.checked_add(byte_len)?;
-    // Some writers include benign trailing bytes after the UTF-16 text even when `flags==0`.
-    // Be tolerant and only require that the declared UTF-16 bytes are present.
-    if payload.len() < expected_len {
+    let utf16_end = 1usize.checked_add(4)?.checked_add(byte_len)?;
+    if payload.len() < utf16_end {
         return None;
     }
 
-    let raw = payload.get(5..expected_len)?;
+    let raw = payload.get(5..utf16_end)?;
     let mut units = Vec::with_capacity(cch);
     for chunk in raw.chunks_exact(2) {
         units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
-    Some(String::from_utf16_lossy(&units))
+    let text = String::from_utf16_lossy(&units);
+
+    // Fast path: plain string with no extra blocks.
+    if flags == 0 {
+        // Some writers include benign trailing bytes after the UTF-16 text even when `flags==0`.
+        // Be tolerant and only require that the declared UTF-16 bytes are present.
+        return Some(text);
+    }
+
+    // Some real-world XLSB writers set the rich/phonetic bits in BrtSI flags even when the
+    // corresponding blocks are present-but-empty (cRun=0 / cb=0). These strings are effectively
+    // plain and can be safely reused when interning by text.
+    //
+    // Be conservative: only treat the string as plain if the flags contain *only* the rich /
+    // phonetic bits and the record payload is exactly the base text followed by the empty block
+    // headers (no run/phonetic bytes and no trailing data).
+    if flags & !0x03 != 0 {
+        return None;
+    }
+
+    let mut offset = utf16_end;
+    if flags & 0x01 != 0 {
+        let c_run = u32::from_le_bytes(payload.get(offset..offset + 4)?.try_into().ok()?);
+        if c_run != 0 {
+            return None;
+        }
+        offset = offset.checked_add(4)?;
+    }
+    if flags & 0x02 != 0 {
+        let cb = u32::from_le_bytes(payload.get(offset..offset + 4)?.try_into().ok()?);
+        if cb != 0 {
+            return None;
+        }
+        offset = offset.checked_add(4)?;
+    }
+
+    if offset != payload.len() {
+        return None;
+    }
+
+    Some(text)
 }
 
 fn write_appended_si_records(out: &mut Vec<u8>, strings: &[String]) -> Result<(), Error> {
