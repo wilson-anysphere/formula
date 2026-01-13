@@ -158,8 +158,9 @@ These are the two most common collaboration misconfigurations:
   stores instead. See “Reserved root mutation guard” below and the deployment notes in
   [`docs/06-collaboration.md`](../../docs/06-collaboration.md).
 - **Message size:** `SYNC_SERVER_MAX_MESSAGE_BYTES` defaults to **2 MiB**; large branching commits
-  can exceed this and cause close code `1009`. See “Limits & hardening” below and
-  [`docs/06-collaboration.md`](../../docs/06-collaboration.md) for chunking guidance.
+  *and* large version snapshots (when stored in-doc) can exceed this and cause close code `1009`.
+  See “Limits & hardening” below and [`docs/06-collaboration.md`](../../docs/06-collaboration.md)
+  for chunking/streaming guidance.
 
 ## Stress testing
 
