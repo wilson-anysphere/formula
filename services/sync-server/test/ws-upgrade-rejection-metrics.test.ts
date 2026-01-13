@@ -81,6 +81,7 @@ test("ws upgrade rejection metrics include pre-initialized reasons and increment
   const expectedReasons = [
     "rate_limit",
     "auth_failure",
+    "draining",
     "tombstone",
     "retention_purging",
     "max_connections_per_doc",
@@ -112,4 +113,3 @@ test("ws upgrade rejection metrics include pre-initialized reasons and increment
     100
   );
 });
-

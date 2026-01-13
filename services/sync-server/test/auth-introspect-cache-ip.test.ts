@@ -108,6 +108,7 @@ test("auth:introspect caches results per (token, docId, clientIp)", async (t) =>
     port: 0,
     trustProxy: true,
     gc: true,
+    shutdownGraceMs: 0,
     tls: null,
     metrics: { public: true },
     dataDir,

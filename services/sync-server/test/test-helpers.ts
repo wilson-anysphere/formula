@@ -245,6 +245,9 @@ export async function startSyncServer(opts: {
       // Prevent per-IP websocket message rate limiting env vars from leaking into tests.
       SYNC_SERVER_MAX_MESSAGES_PER_IP_WINDOW: "",
       SYNC_SERVER_IP_MESSAGE_WINDOW_MS: "",
+      // Ensure tests default to immediate shutdown so the child-process harness
+      // doesn't race the configured grace period.
+      SYNC_SERVER_SHUTDOWN_GRACE_MS: "0",
       // Prevent JWT hardening flags from leaking into tests (individual tests can opt in).
       SYNC_SERVER_JWT_REQUIRE_SUB: "",
       SYNC_SERVER_JWT_REQUIRE_EXP: "",

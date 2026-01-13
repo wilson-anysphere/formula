@@ -344,6 +344,9 @@ export function createSyncServer(
   );
 
   const metrics = createSyncServerMetrics();
+  let draining = false;
+  let stopInFlight: Promise<void> | null = null;
+  let drainWaiter: (() => void) | null = null;
   let eventLoopDelay: IntervalHistogram | null = null;
   let processMetricsTimer: NodeJS.Timeout | null = null;
   const updateProcessMetrics = () => {
@@ -1278,8 +1281,13 @@ export function createSyncServer(
       }
 
       if (req.method === "GET" && pathname === "/readyz") {
+        res.setHeader("cache-control", "no-store");
+        if (draining) {
+          sendJson(res, 503, { status: "not_ready", reason: "draining" });
+          return;
+        }
+
         if (!dataDirLock) {
-          res.setHeader("cache-control", "no-store");
           sendJson(res, 503, {
             status: "not_ready",
             reason: config.disableDataDirLock
@@ -1290,7 +1298,6 @@ export function createSyncServer(
         }
 
         const ready = persistenceInitialized && tombstones.isInitialized();
-        res.setHeader("cache-control", "no-store");
         sendJson(res, ready ? 200 : 503, { status: ready ? "ready" : "not_ready" });
         return;
       }
@@ -1306,6 +1313,7 @@ export function createSyncServer(
           heapUsedBytes: mem.heapUsed,
           heapTotalBytes: mem.heapTotal,
           eventLoopDelayMs: getEventLoopDelayMs(),
+          draining,
           connections: snapshot,
           backend: persistenceBackend ?? config.persistence.backend,
           encryptionEnabled: config.persistence.encryption.mode !== "off",
@@ -1362,6 +1370,7 @@ export function createSyncServer(
 
           sendJson(res, 200, {
             ok: true,
+            draining,
             rssBytes: mem.rss,
             heapUsedBytes: mem.heapUsed,
             heapTotalBytes: mem.heapTotal,
@@ -1620,6 +1629,11 @@ export function createSyncServer(
       metrics.wsConnectionsCurrent.set(wss.clients.size);
       metrics.wsActiveDocsCurrent.set(activeSocketsByDoc.size);
       metrics.wsUniqueIpsCurrent.set(connectionTracker.snapshot().uniqueIps);
+      if (draining && drainWaiter && wss.clients.size === 0) {
+        const resolve = drainWaiter;
+        drainWaiter = null;
+        resolve();
+      }
       logger.info({ ip, docName, userId: authCtx?.userId }, "ws_connection_closed");
     });
 
@@ -1712,6 +1726,11 @@ export function createSyncServer(
     void (async () => {
       try {
         const ip = pickIp(req, config.trustProxy);
+        if (draining) {
+          recordUpgradeRejection("draining");
+          sendUpgradeRejection(socket, 503, "draining");
+          return;
+        }
         const uaHeader = req.headers["user-agent"];
         const userAgent = (() => {
           const raw =
@@ -2048,97 +2067,145 @@ export function createSyncServer(
     },
 
     async stop() {
-      const errors: unknown[] = [];
+      if (stopInFlight) return await stopInFlight;
 
-      if (processMetricsTimer) {
-        clearInterval(processMetricsTimer);
-        processMetricsTimer = null;
-      }
-      if (eventLoopDelay) {
-        releaseEventLoopDelayHistogram();
-        eventLoopDelay = null;
-      }
+      stopInFlight = (async () => {
+        const errors: unknown[] = [];
 
-      if (tombstoneSweepTimer) {
-        clearInterval(tombstoneSweepTimer);
-        tombstoneSweepTimer = null;
-      }
-      if (tombstoneSweepInFlight) {
-        try {
-          await tombstoneSweepInFlight;
-        } catch (err) {
-          errors.push(err);
-          logger.warn({ err }, "shutdown_tombstone_sweep_failed");
+        // Enter drain mode: stop accepting new websocket upgrades and fail /readyz
+        // so load balancers stop routing new connections.
+        if (!draining) {
+          draining = true;
+          metrics.shutdownDrainingCurrent.set(1);
         }
-      }
 
-      try {
-        for (const ws of wss.clients) ws.terminate();
-      } catch (err) {
-        errors.push(err);
-        logger.warn({ err }, "shutdown_ws_terminate_failed");
-      }
+        if (processMetricsTimer) {
+          clearInterval(processMetricsTimer);
+          processMetricsTimer = null;
+        }
+        if (eventLoopDelay) {
+          releaseEventLoopDelayHistogram();
+          eventLoopDelay = null;
+        }
 
-      try {
-        await new Promise<void>((resolve, reject) => {
+        if (tombstoneSweepTimer) {
+          clearInterval(tombstoneSweepTimer);
+          tombstoneSweepTimer = null;
+        }
+        if (tombstoneSweepInFlight) {
           try {
-            wss.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+            await tombstoneSweepInFlight;
           } catch (err) {
-            reject(err);
+            errors.push(err);
+            logger.warn({ err }, "shutdown_tombstone_sweep_failed");
           }
-        });
-      } catch (err) {
-        errors.push(err);
-        logger.warn({ err }, "shutdown_wss_close_failed");
-      }
+        }
 
-      try {
-        await new Promise<void>((resolve, reject) =>
-          server.close((err) => (err ? reject(err) : resolve()))
-        );
-      } catch (err) {
-        errors.push(err);
-        logger.warn({ err }, "shutdown_http_close_failed");
-      }
+        const graceMs = Math.max(0, config.shutdownGraceMs ?? 0);
+        if (graceMs > 0 && wss.clients.size > 0) {
+          await new Promise<void>((resolve) => {
+            let finished = false;
+            let timeout: NodeJS.Timeout | null = null;
 
-      if (retentionSweepTimer) {
-        clearInterval(retentionSweepTimer);
-        retentionSweepTimer = null;
-      }
-      if (retentionSweepInFlight) {
+            const finish = () => {
+              if (finished) return;
+              finished = true;
+              if (timeout) clearTimeout(timeout);
+              timeout = null;
+              if (drainWaiter === finish) {
+                drainWaiter = null;
+              }
+              resolve();
+            };
+
+            // Let `ws.on("close")` resolve early once the last client disconnects.
+            drainWaiter = finish;
+
+            if (wss.clients.size === 0) {
+              finish();
+              return;
+            }
+
+            timeout = setTimeout(finish, graceMs);
+            timeout.unref();
+          });
+        }
+
+        // Force terminate remaining websocket clients (if any).
         try {
-          await retentionSweepInFlight;
+          for (const ws of wss.clients) ws.terminate();
         } catch (err) {
           errors.push(err);
-          logger.warn({ err }, "shutdown_retention_sweep_failed");
+          logger.warn({ err }, "shutdown_ws_terminate_failed");
         }
-      }
 
-      if (persistenceCleanup) {
         try {
-          await persistenceCleanup();
+          await new Promise<void>((resolve, reject) => {
+            try {
+              wss.close((closeErr) => (closeErr ? reject(closeErr) : resolve()));
+            } catch (err) {
+              reject(err);
+            }
+          });
         } catch (err) {
           errors.push(err);
-          logger.warn({ err }, "shutdown_persistence_cleanup_failed");
-        } finally {
-          persistenceCleanup = null;
+          logger.warn({ err }, "shutdown_wss_close_failed");
         }
-      }
 
-      if (dataDirLock) {
         try {
-          await dataDirLock.release();
+          await new Promise<void>((resolve, reject) =>
+            server.close((err) => (err ? reject(err) : resolve()))
+          );
         } catch (err) {
           errors.push(err);
-          logger.warn({ err }, "data_dir_lock_release_failed");
-        } finally {
-          dataDirLock = null;
+          logger.warn({ err }, "shutdown_http_close_failed");
         }
-      }
 
-      if (errors.length > 0) {
-        throw new AggregateError(errors, "sync-server shutdown failed");
-      }
+        if (retentionSweepTimer) {
+          clearInterval(retentionSweepTimer);
+          retentionSweepTimer = null;
+        }
+        if (retentionSweepInFlight) {
+          try {
+            await retentionSweepInFlight;
+          } catch (err) {
+            errors.push(err);
+            logger.warn({ err }, "shutdown_retention_sweep_failed");
+          }
+        }
+
+        if (persistenceCleanup) {
+          try {
+            await persistenceCleanup();
+          } catch (err) {
+            errors.push(err);
+            logger.warn({ err }, "shutdown_persistence_cleanup_failed");
+          } finally {
+            persistenceCleanup = null;
+          }
+        }
+
+        if (dataDirLock) {
+          try {
+            await dataDirLock.release();
+          } catch (err) {
+            errors.push(err);
+            logger.warn({ err }, "data_dir_lock_release_failed");
+          } finally {
+            dataDirLock = null;
+          }
+        }
+
+        draining = false;
+        drainWaiter = null;
+        metrics.shutdownDrainingCurrent.set(0);
+
+        if (errors.length > 0) {
+          throw new AggregateError(errors, "sync-server shutdown failed");
+        }
+      })();
+
+      return await stopInFlight;
     },
 
     getHttpUrl() {

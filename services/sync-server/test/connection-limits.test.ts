@@ -16,6 +16,7 @@ function createConfig(dataDir: string, overrides: Partial<SyncServerConfig> = {}
     port: 0,
     trustProxy: false,
     gc: true,
+    shutdownGraceMs: 0,
     tls: null,
     metrics: { public: true },
     dataDir,

@@ -238,6 +238,7 @@ function createFallbackMetrics(): SyncServerMetrics {
   });
   wsConnectionsRejectedTotal.inc({ reason: "rate_limit" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "draining" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "url_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "token_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
@@ -385,6 +386,12 @@ function createFallbackMetrics(): SyncServerMetrics {
   });
   eventLoopDelayMs.set(0);
 
+  const shutdownDrainingCurrent = createGauge({
+    name: "sync_server_shutdown_draining_current",
+    help: "Whether the server is currently draining (1) or accepting new connections (0).",
+  });
+  shutdownDrainingCurrent.set(0);
+
   const persistenceInfo = createGauge<"backend" | "encryption">({
     name: "sync_server_persistence_info",
     help:
@@ -450,6 +457,7 @@ function createFallbackMetrics(): SyncServerMetrics {
     processHeapUsedBytes,
     processHeapTotalBytes,
     eventLoopDelayMs,
+    shutdownDrainingCurrent,
     persistenceInfo,
     persistenceOverloadTotal,
     setPersistenceInfo,
@@ -461,6 +469,7 @@ function createFallbackMetrics(): SyncServerMetrics {
 export type WsConnectionRejectionReason =
   | "rate_limit"
   | "auth_failure"
+  | "draining"
   | "url_too_long"
   | "token_too_long"
   | "tombstone"
@@ -510,6 +519,7 @@ export type SyncServerMetrics = {
   processHeapUsedBytes: Gauge<string>;
   processHeapTotalBytes: Gauge<string>;
   eventLoopDelayMs: Gauge<string>;
+  shutdownDrainingCurrent: Gauge<string>;
 
   persistenceInfo: Gauge<"backend" | "encryption">;
   persistenceOverloadTotal: Counter<"scope">;
@@ -567,6 +577,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   // missing series vs. a literal 0 value.
   wsConnectionsRejectedTotal.inc({ reason: "rate_limit" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "draining" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "url_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "token_too_long" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
@@ -734,6 +745,13 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   });
   eventLoopDelayMs.set(0);
 
+  const shutdownDrainingCurrent = new promClient.Gauge({
+    name: "sync_server_shutdown_draining_current",
+    help: "Whether the server is currently draining (1) or accepting new connections (0).",
+    registers: [registry],
+  });
+  shutdownDrainingCurrent.set(0);
+
   const persistenceInfo = new promClient.Gauge({
     name: "sync_server_persistence_info",
     help:
@@ -805,6 +823,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
     processHeapUsedBytes,
     processHeapTotalBytes,
     eventLoopDelayMs,
+    shutdownDrainingCurrent,
     persistenceInfo,
     persistenceOverloadTotal,
     setPersistenceInfo,

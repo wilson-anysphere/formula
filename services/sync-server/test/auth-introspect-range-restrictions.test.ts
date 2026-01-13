@@ -175,6 +175,7 @@ test("auth:introspect enforces rangeRestrictions and rejects forbidden cell writ
     port: 0,
     trustProxy: false,
     gc: true,
+    shutdownGraceMs: 0,
     tls: null,
     metrics: { public: true },
     dataDir,

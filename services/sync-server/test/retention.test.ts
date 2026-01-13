@@ -96,6 +96,7 @@ function createConfig(ttlMs: number, dataDir: string): SyncServerConfig {
     port: 0,
     trustProxy: false,
     gc: true,
+    shutdownGraceMs: 0,
     tls: null,
     metrics: { public: true },
     dataDir,

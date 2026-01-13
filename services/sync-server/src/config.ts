@@ -52,6 +52,17 @@ export type SyncServerConfig = {
   trustProxy: boolean;
   gc: boolean;
   /**
+   * Grace period (in milliseconds) when shutting down.
+   *
+   * When the server begins shutdown it will:
+   * - enter drain mode (stop accepting new websocket upgrades, /readyz returns 503)
+   * - wait up to this grace period for existing websocket clients to disconnect
+   * - then force terminate any remaining clients and exit.
+   *
+   * `0` preserves legacy behavior (terminate immediately).
+   */
+  shutdownGraceMs: number;
+  /**
    * Optional allowlist of accepted WebSocket `Origin` header values.
    *
    * When set, browser-originated websocket upgrades (requests that include an
@@ -255,6 +266,10 @@ export function loadConfigFromEnv(): SyncServerConfig {
   }
   const trustProxy = envBool(process.env.SYNC_SERVER_TRUST_PROXY, false);
   const gc = envBool(process.env.SYNC_SERVER_GC, true);
+  const shutdownGraceMs = Math.max(
+    0,
+    envInt(process.env.SYNC_SERVER_SHUTDOWN_GRACE_MS, 10_000)
+  );
 
   const disablePublicMetrics = envBool(process.env.SYNC_SERVER_DISABLE_PUBLIC_METRICS, false);
 
@@ -481,6 +496,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
     port,
     trustProxy,
     gc,
+    shutdownGraceMs,
     allowedOrigins,
     tls,
     metrics: {
