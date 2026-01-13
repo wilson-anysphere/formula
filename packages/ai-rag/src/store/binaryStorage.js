@@ -72,7 +72,26 @@ export class ChunkedLocalStorageBinaryStorage {
     if (!storage) return null;
 
     const metaRaw = storage.getItem(this.metaKey);
-    if (!metaRaw) return null;
+    if (!metaRaw) {
+      // Backwards compatibility: earlier versions stored the full base64 blob in a single
+      // `${namespace}:${workbookId}` key (LocalStorageBinaryStorage). If we find a legacy
+      // value, decode it and opportunistically migrate it into the chunked format.
+      const legacy = storage.getItem(this.key);
+      if (!legacy) return null;
+      try {
+        const decoded = fromBase64(legacy);
+        // Best-effort migration: write in chunked format and remove the legacy key to
+        // free space and avoid stale duplicates.
+        try {
+          await this.save(decoded);
+        } catch {
+          // ignore
+        }
+        return decoded;
+      } catch {
+        return null;
+      }
+    }
 
     /** @type {{ chunks?: number } | null} */
     let meta = null;
@@ -128,6 +147,9 @@ export class ChunkedLocalStorageBinaryStorage {
       if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
     }
     for (const key of keysToRemove) storage.removeItem(key);
+
+    // Clean up the legacy single-key storage entry if it exists.
+    storage.removeItem(this.key);
   }
 
   async remove() {
@@ -151,6 +173,10 @@ export class ChunkedLocalStorageBinaryStorage {
     }
 
     for (const key of keysToRemove) storage.removeItem(key);
+
+    // Also remove the legacy single-key entry (if it exists) so `load()` doesn't
+    // fall back to stale data after a caller explicitly clears the store.
+    storage.removeItem(this.key);
   }
 }
 

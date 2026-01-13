@@ -209,3 +209,27 @@ test("LocalStorageBinaryStorage remove deletes persisted bytes", async () => {
   expect(await storage.load()).toBeNull();
   expect(getTestLocalStorage().getItem(storage.key)).toBeNull();
 });
+
+test("ChunkedLocalStorageBinaryStorage can load legacy single-key LocalStorageBinaryStorage values (and migrates them)", async () => {
+  const legacy = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "legacy" });
+  const bytes = new Uint8Array([1, 2, 3, 4, 5, 255]);
+  await legacy.save(bytes);
+  expect(getTestLocalStorage().getItem(legacy.key)).toBeTypeOf("string");
+
+  const chunked = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "legacy",
+    chunkSizeChars: 4,
+  });
+
+  const loaded = await chunked.load();
+  expect(Array.from(loaded ?? [])).toEqual(Array.from(bytes));
+
+  // Migration should remove the legacy single-key entry and write chunked keys instead.
+  expect(getTestLocalStorage().getItem(chunked.key)).toBeNull();
+  const metaRaw = getTestLocalStorage().getItem(`${chunked.key}:meta`);
+  expect(metaRaw).toBeTypeOf("string");
+  const meta = JSON.parse(metaRaw ?? "{}");
+  expect(meta.chunks).toBeGreaterThan(0);
+  expect(getTestLocalStorage().getItem(`${chunked.key}:0`)).toBeTypeOf("string");
+});
