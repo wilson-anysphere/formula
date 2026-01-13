@@ -123,7 +123,7 @@
     },
     "windows": {
       "certificateThumbprint": null,
-      "timestampUrl": "http://timestamp.digicert.com",
+      "timestampUrl": "https://timestamp.digicert.com",
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
         "silent": true

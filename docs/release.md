@@ -245,6 +245,13 @@ Secrets:
 - `WINDOWS_CERTIFICATE` – base64-encoded `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`
 
+Timestamping:
+
+- The Authenticode timestamp server is configured in `apps/desktop/src-tauri/tauri.conf.json` under
+  `bundle.windows.timestampUrl` (currently `https://timestamp.digicert.com`).
+- If a release fails due to timestamping/network issues, switch `timestampUrl` to another **HTTPS**
+  timestamp server provided/recommended by your signing certificate vendor and re-run the workflow.
+
 ## Windows: WebView2 runtime installation (required)
 
 Formula relies on the **Microsoft Edge WebView2 Evergreen Runtime** on Windows. The Windows installers are configured to
