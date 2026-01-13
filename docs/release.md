@@ -1039,18 +1039,18 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
 ```
 
 1. Open the GitHub Release (draft) and confirm:
-    - Updater metadata: `latest.json` and `latest.json.sig`
-    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
-    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
-    - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
-    - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
-    - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `aarch64`)
+   - Updater metadata: `latest.json` and `latest.json.sig`
+   - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
+   - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
+   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
+   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
+   - Linux (**x86_64 + ARM64**): `.AppImage` + `.deb` + `.rpm` for each architecture (filenames typically include `x86_64` / `arm64` / `aarch64`)
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
    be uploaded alongside the produced artifacts:
    - macOS: `.dmg.sig` and `.app.tar.gz.sig`
    - Windows (each architecture): `.msi.sig` and `.exe.sig`
-   - Linux: `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
+   - Linux (each architecture): `.AppImage.sig`, `.deb.sig`, `.rpm.sig`
 
    (These `.sig` files are Tauri/Ed25519 updater signatures, **not** OS/package-manager signatures.)
 
@@ -1090,7 +1090,7 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
     ```
 
    Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive (**not** the `.dmg`)
    - `windows-*` → `*.msi` (preferred; updater runs the Windows Installer) or `*.exe` (depending on updater strategy)
    - `linux-*` → `*.AppImage`
 

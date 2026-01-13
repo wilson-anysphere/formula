@@ -409,7 +409,7 @@ Tagged builds are expected to produce:
 
 - **macOS:** universal `.dmg` (plus updater payload `.app.tar.gz`)
 - **Windows:** installers for **x64** and **ARM64** (`.msi` + `.exe`)
-- **Linux:** `.AppImage` + `.deb` + `.rpm` for **x86_64** and **ARM64**
+- **Linux:** installers for **x86_64** and **ARM64** (`.AppImage` + `.deb` + `.rpm`)
 
 Auto-update is driven by the Tauri updater manifest (`latest.json`) uploaded to the release. The
 in-app updater downloads whatever assets `latest.json.platforms[*].url` points at (not “an installer
