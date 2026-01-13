@@ -9,6 +9,7 @@ import {
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
 import type { EngineClient, FormulaParseOptions } from "@formula/engine";
+import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
@@ -31,6 +32,21 @@ type FormulaReferenceHighlight = {
   text: string;
   index: number;
   active?: boolean;
+};
+
+export type NameBoxMenuItem = {
+  /**
+   * User-visible label. For named ranges/tables this is typically the workbook-defined name.
+   */
+  label: string;
+  /**
+   * Navigation reference. When provided, selecting the item behaves like typing the reference
+   * into the name box + Enter.
+   *
+   * When omitted/null, selection falls back to populating + selecting the name box input text.
+   */
+  reference?: string | null;
+  enabled?: boolean;
 };
 
 type FunctionPickerItem = {
@@ -94,6 +110,7 @@ export interface FormulaBarViewCallbacks {
   onCancel?: () => void;
   onGoTo?: (reference: string) => void;
   onOpenNameBoxMenu?: () => void | Promise<void>;
+  getNameBoxMenuItems?: () => NameBoxMenuItem[];
   onHoverRange?: (range: RangeAddress | null) => void;
   /**
    * Like `onHoverRange`, but includes the original reference text (e.g. `Sheet2!A1:B2`)
@@ -186,6 +203,9 @@ export class FormulaBarView {
     localeId: string;
     referenceStyle: NonNullable<FormulaParseOptions["referenceStyle"]>;
   } | null = null;
+  #nameBoxMenu: ContextMenu | null = null;
+  #restoreNameBoxFocusOnMenuClose = false;
+  #nameBoxMenuEscapeListener: ((e: KeyboardEvent) => void) | null = null;
 
   #functionPickerEl: HTMLDivElement;
   #functionPickerInputEl: HTMLInputElement;
@@ -225,6 +245,8 @@ export class FormulaBarView {
     nameBoxDropdown.textContent = "▾";
     nameBoxDropdown.title = "Name box menu";
     nameBoxDropdown.setAttribute("aria-label", "Open name box menu");
+    nameBoxDropdown.setAttribute("aria-haspopup", "menu");
+    nameBoxDropdown.setAttribute("aria-expanded", "false");
 
     nameBox.appendChild(address);
     nameBox.appendChild(nameBoxDropdown);
@@ -419,6 +441,10 @@ export class FormulaBarView {
     });
 
     nameBoxDropdown.addEventListener("click", () => {
+      if (this.#callbacks.getNameBoxMenuItems) {
+        this.#toggleNameBoxMenu();
+        return;
+      }
       if (this.#callbacks.onOpenNameBoxMenu) {
         void this.#callbacks.onOpenNameBoxMenu();
         return;
@@ -429,6 +455,22 @@ export class FormulaBarView {
     });
 
     address.addEventListener("keydown", (e) => {
+      // Excel-style name box dropdown affordance.
+      if (
+        (e.key === "ArrowDown" && !e.ctrlKey && !e.metaKey) ||
+        (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey)
+      ) {
+        e.preventDefault();
+        if (this.#callbacks.getNameBoxMenuItems) {
+          this.#toggleNameBoxMenu();
+        } else if (this.#callbacks.onOpenNameBoxMenu) {
+          void this.#callbacks.onOpenNameBoxMenu();
+        } else {
+          this.#toggleNameBoxMenu();
+        }
+        return;
+      }
+
       if (e.key === "Enter") {
         e.preventDefault();
         const ref = address.value;
@@ -493,6 +535,94 @@ export class FormulaBarView {
     // Initial render.
     this.model.setActiveCell({ address: "A1", input: "", value: "" });
     this.#render({ preserveTextareaValue: false });
+  }
+
+  #toggleNameBoxMenu(): void {
+    const menu = (this.#nameBoxMenu ??= new ContextMenu({
+      testId: "name-box-menu",
+      onClose: () => {
+        this.#nameBoxDropdownEl.setAttribute("aria-expanded", "false");
+        if (this.#nameBoxMenuEscapeListener) {
+          window.removeEventListener("keydown", this.#nameBoxMenuEscapeListener, true);
+          this.#nameBoxMenuEscapeListener = null;
+        }
+
+        if (this.#restoreNameBoxFocusOnMenuClose) {
+          this.#restoreNameBoxFocusOnMenuClose = false;
+          try {
+            this.#addressEl.focus({ preventScroll: true });
+          } catch {
+            this.#addressEl.focus();
+          }
+          this.#addressEl.select();
+        }
+      },
+    }));
+
+    if (menu.isOpen()) {
+      this.#restoreNameBoxFocusOnMenuClose = true;
+      menu.close();
+      return;
+    }
+
+    // Track Esc-driven closes so we can restore focus without stealing it on outside clicks.
+    this.#restoreNameBoxFocusOnMenuClose = false;
+    if (this.#nameBoxMenuEscapeListener) {
+      window.removeEventListener("keydown", this.#nameBoxMenuEscapeListener, true);
+      this.#nameBoxMenuEscapeListener = null;
+    }
+    this.#nameBoxMenuEscapeListener = (e: KeyboardEvent) => {
+      const isEscape =
+        e.key === "Escape" || e.key === "Esc" || e.code === "Escape" || (e as unknown as { keyCode?: number }).keyCode === 27;
+      if (!isEscape) return;
+      if (!menu.isOpen()) return;
+      this.#restoreNameBoxFocusOnMenuClose = true;
+    };
+    window.addEventListener("keydown", this.#nameBoxMenuEscapeListener, true);
+
+    const rawItems = this.#callbacks.getNameBoxMenuItems?.() ?? [];
+    const items: ContextMenuItem[] = [];
+
+    for (const item of rawItems) {
+      const label = String(item?.label ?? "").trim();
+      if (!label) continue;
+      const enabled = item.enabled ?? true;
+      const reference = typeof item.reference === "string" ? item.reference.trim() : item.reference ?? null;
+
+      items.push({
+        type: "item",
+        label,
+        enabled,
+        onSelect: () => {
+          if (reference) {
+            this.#callbacks.onGoTo?.(reference);
+            return;
+          }
+
+          // Fallback: populate + select the text so the user can edit/confirm.
+          this.#addressEl.value = label;
+          try {
+            this.#addressEl.focus({ preventScroll: true });
+          } catch {
+            this.#addressEl.focus();
+          }
+          this.#addressEl.select();
+        },
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({
+        type: "item",
+        label: "No named ranges",
+        enabled: false,
+        onSelect: () => {},
+      });
+    }
+
+    const rect = this.#nameBoxDropdownEl.getBoundingClientRect();
+    this.#nameBoxDropdownEl.setAttribute("aria-expanded", "true");
+    menu.open({ x: rect.left, y: rect.bottom, items });
   }
 
   setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {

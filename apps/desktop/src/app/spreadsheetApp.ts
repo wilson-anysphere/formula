@@ -1,6 +1,6 @@
 import { CellEditorOverlay } from "../editor/cellEditorOverlay";
 import { FormulaBarTabCompletionController } from "../ai/completion/formulaBarTabCompletion.js";
-import { FormulaBarView, type FormulaBarCommit } from "../formula-bar/FormulaBarView";
+import { FormulaBarView, type FormulaBarCommit, type NameBoxMenuItem } from "../formula-bar/FormulaBarView";
 import type { RangeAddress as A1RangeAddress } from "../spreadsheet/a1.js";
 import { Outline, groupDetailRange, isHidden } from "../grid/outline/outline.js";
 import { parseA1Range } from "../charts/a1.js";
@@ -1881,6 +1881,67 @@ export class SpreadsheetApp {
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
           this.updateEditState();
+        },
+        getNameBoxMenuItems: () => {
+          const formatSheetPrefix = (sheetName: string): string => {
+            const token = formatSheetNameForA1(sheetName);
+            return token ? `${token}!` : "";
+          };
+
+          const isValidDocRange = (range: any): range is { startRow: number; endRow: number; startCol: number; endCol: number } => {
+            if (!range) return false;
+            const { startRow, endRow, startCol, endCol } = range as any;
+            return (
+              Number.isInteger(startRow) &&
+              Number.isInteger(endRow) &&
+              Number.isInteger(startCol) &&
+              Number.isInteger(endCol) &&
+              startRow >= 0 &&
+              endRow >= 0 &&
+              startCol >= 0 &&
+              endCol >= 0
+            );
+          };
+
+          const namedRanges: NameBoxMenuItem[] = [];
+          for (const entry of this.searchWorkbook.names.values()) {
+            const e: any = entry as any;
+            const name = typeof e?.name === "string" ? e.name.trim() : "";
+            if (!name) continue;
+
+            const sheetName = typeof e?.sheetName === "string" ? e.sheetName.trim() : "";
+            const range = e?.range;
+            const reference =
+              sheetName && isValidDocRange(range) ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
+            namedRanges.push({ label: name, reference });
+          }
+
+          const tables: NameBoxMenuItem[] = [];
+          for (const entry of this.searchWorkbook.tables.values()) {
+            const table: any = entry as any;
+            const name = typeof table?.name === "string" ? table.name.trim() : "";
+            if (!name) continue;
+
+            const sheetName = typeof table?.sheetName === "string" ? table.sheetName.trim() : "";
+            const range = {
+              startRow: table?.startRow,
+              endRow: table?.endRow,
+              startCol: table?.startCol,
+              endCol: table?.endCol,
+            };
+            const reference =
+              sheetName && isValidDocRange(range) ? `${formatSheetPrefix(sheetName)}${rangeToA1(range)}` : null;
+            if (!reference) continue;
+            // Table navigation should always be actionable; omit broken table metadata from the menu.
+            tables.push({ label: name, reference });
+          }
+
+          const ciSort = (a: NameBoxMenuItem, b: NameBoxMenuItem): number =>
+            a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+          namedRanges.sort(ciSort);
+          tables.sort(ciSort);
+
+          return [...namedRanges, ...tables];
         },
         onGoTo: (reference) => this.goTo(reference),
         onOpenNameBoxMenu: () => this.openNameBoxMenu(),
