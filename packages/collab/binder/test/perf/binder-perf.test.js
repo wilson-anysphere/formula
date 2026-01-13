@@ -20,6 +20,7 @@
  *   PERF_CELL_UPDATES=50000   # total updates to apply (default: 50000)
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
+ *   PERF_INCLUDE_GUARDS=0     # set to 0 to disable canRead/canEdit hooks (default: enabled)
  */
 
 import test from "node:test";
@@ -28,6 +29,8 @@ import { performance } from "node:perf_hooks";
 
 const RUN_PERF = process.env.FORMULA_RUN_COLLAB_BINDER_PERF === "1";
 const perfTest = RUN_PERF ? test : test.skip;
+
+const INCLUDE_GUARDS = process.env.PERF_INCLUDE_GUARDS !== "0";
 
 async function waitForCondition(fn, timeoutMs = 120_000) {
   const start = Date.now();
@@ -191,7 +194,19 @@ perfTest(
 
     const ydoc = new Y.Doc();
     const dc = new DocumentControllerPerfStub();
-    const binder = bindYjsToDocumentController({ ydoc, documentController: dc, defaultSheetId: "Sheet1" });
+    const binder = bindYjsToDocumentController({
+      ydoc,
+      documentController: dc,
+      defaultSheetId: "Sheet1",
+      ...(INCLUDE_GUARDS
+        ? {
+            // CollabSession wiring always provides these hooks; include them by default so
+            // we exercise the guarded binder paths (permission/encryption checks).
+            canReadCell: () => true,
+            canEditCell: () => true,
+          }
+        : {}),
+    });
 
     const cells = ydoc.getMap("cells");
     const origin = { type: "perf-origin" };
@@ -278,7 +293,17 @@ perfTest(
 
     const ydoc = new Y.Doc();
     const dc = new DocumentControllerPerfStub();
-    const binder = bindYjsToDocumentController({ ydoc, documentController: dc, defaultSheetId: "Sheet1" });
+    const binder = bindYjsToDocumentController({
+      ydoc,
+      documentController: dc,
+      defaultSheetId: "Sheet1",
+      ...(INCLUDE_GUARDS
+        ? {
+            canReadCell: () => true,
+            canEditCell: () => true,
+          }
+        : {}),
+    });
 
     const cells = ydoc.getMap("cells");
 
