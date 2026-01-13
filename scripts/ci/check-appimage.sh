@@ -324,7 +324,7 @@ main() {
 
     chmod +x "$appimage"
 
-    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path ld_library_path
+    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path ld_library_path extract_out extract_status
     appimage_abs="$(realpath "$appimage")"
 
     # Sanity check the AppImage runtime architecture before we try to execute it.
@@ -396,8 +396,8 @@ main() {
     # Shared library dependency check.
     appdir_ld_library_path="$(build_appdir_ld_library_path "$squashfs_root")"
     if [ -n "$appdir_ld_library_path" ]; then
-    echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
-  fi
+      echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
+    fi
 
     ld_library_path="${LD_LIBRARY_PATH:-}"
     if [ -n "$appdir_ld_library_path" ]; then
