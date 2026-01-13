@@ -37,6 +37,10 @@ const RECORD_EXTERNNAME: u16 = 0x0023;
 const RECORD_EXTERNSHEET: u16 = 0x0017;
 const RECORD_SAVERECALC: u16 = 0x005F;
 const RECORD_SHEETEXT: u16 = 0x0862;
+const RECORD_FEATHEADR: u16 = 0x0867;
+const RECORD_FEAT: u16 = 0x0868;
+const RECORD_FEATHEADR11: u16 = 0x0870;
+const RECORD_FEAT11: u16 = 0x0871;
 const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_SCL: u16 = 0x00A0;
 const RECORD_PANE: u16 = 0x0041;
@@ -1692,6 +1696,43 @@ pub fn build_protection_fixture_xls() -> Vec<u8> {
 /// imported.
 pub fn build_protection_truncated_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_protection_truncated_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with worksheet protection enabled and the richer "allow" flags
+/// populated via BIFF8 FEAT/FEATHEADR records.
+pub fn build_sheet_protection_allow_flags_fixture_xls() -> Vec<u8> {
+    let sheet_stream = build_sheet_protection_allow_flags_sheet_stream(false);
+    let workbook_stream =
+        build_single_sheet_workbook_stream("ProtectedAllowFlags", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture like [`build_sheet_protection_allow_flags_fixture_xls`], but with a
+/// deliberately malformed FEAT record that should produce a warning while still importing the final
+/// allow flags.
+pub fn build_sheet_protection_allow_flags_malformed_fixture_xls() -> Vec<u8> {
+    let sheet_stream = build_sheet_protection_allow_flags_sheet_stream(true);
+    let workbook_stream =
+        build_single_sheet_workbook_stream("ProtectedAllowFlagsMalformed", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -6277,6 +6318,84 @@ fn build_protection_truncated_sheet_stream() -> Vec<u8> {
     sheet
 }
 
+fn build_sheet_protection_allow_flags_sheet_stream(include_malformed_feat: bool) -> Vec<u8> {
+    // Enable sheet protection and populate additional allow flags via FEAT/FEATHEADR records.
+    //
+    // The allow-flag mask here is intentionally non-trivial so tests can validate multiple fields.
+    // Bit layout (best-effort, matches importer):
+    //   bit0  select_locked_cells
+    //   bit1  select_unlocked_cells
+    //   bit2  format_cells
+    //   bit3  format_columns
+    //   bit4  format_rows
+    //   bit5  insert_columns
+    //   bit6  insert_rows
+    //   bit7  insert_hyperlinks
+    //   bit8  delete_columns
+    //   bit9  delete_rows
+    //   bit10 sort
+    //   bit11 auto_filter
+    //   bit12 pivot_tables
+    //
+    // Mask chosen:
+    // - select_locked_cells = false
+    // - select_unlocked_cells = true
+    // - format_cells = true
+    // - format_columns = true
+    // - insert_columns = true
+    // - insert_hyperlinks = true
+    // - delete_rows = true
+    // - sort = true
+    // - auto_filter = true
+    let allow_mask: u16 = 0x0EAE;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Basic worksheet protection records.
+    push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
+                                                                        // Allow editing objects and scenarios while protection is enabled.
+    push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
+
+    // Enhanced allow flags. Include both FEATHEADR (header data) and FEAT (feat data) variants;
+    // Excel typically emits these as part of its shared-feature plumbing.
+    push_record(
+        &mut sheet,
+        RECORD_FEATHEADR,
+        &feat_hdr_record_sheet_protection_allow_mask(allow_mask),
+    );
+
+    if include_malformed_feat {
+        push_record(
+            &mut sheet,
+            RECORD_FEAT,
+            &feat_record_sheet_protection_allow_mask_malformed(allow_mask),
+        );
+    }
+
+    push_record(
+        &mut sheet,
+        RECORD_FEAT,
+        &feat_record_sheet_protection_allow_mask(allow_mask),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_tab_color_sheet_stream() -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
@@ -8767,6 +8886,71 @@ fn sheetext_record_indexed(idx: u16) -> Vec<u8> {
     out.extend_from_slice(&1u16.to_le_bytes()); // xclrType = indexed
     out.extend_from_slice(&idx.to_le_bytes()); // icv
     out.extend_from_slice(&[0u8; 4]); // rgb (unused for indexed)
+    out
+}
+
+fn feat_hdr_record_sheet_protection_allow_mask(allow_mask: u16) -> Vec<u8> {
+    // Minimal BIFF8 `FEATHEADR` (shared feature header) payload encoding used by Excel to persist
+    // enhanced worksheet protection options.
+    //
+    // Layout (best-effort):
+    // - FrtHeader (8 bytes): rt/grbitFrt/reserved
+    // - isf (u16): shared feature type (0x0002 = enhanced sheet protection)
+    // - reserved (u16)
+    // - cbHdrData (u32)
+    // - rgbHdrData (cbHdrData bytes): allow-flag bitmask
+    const ISF_SHEET_PROTECTION: u16 = 0x0002;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_FEATHEADR.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    out.extend_from_slice(&ISF_SHEET_PROTECTION.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    out.extend_from_slice(&2u32.to_le_bytes()); // cbHdrData
+    out.extend_from_slice(&allow_mask.to_le_bytes());
+    out
+}
+
+fn feat_record_sheet_protection_allow_mask(allow_mask: u16) -> Vec<u8> {
+    // Minimal BIFF8 `FEAT` payload for enhanced sheet protection.
+    //
+    // Layout (best-effort):
+    // - FrtHeader (8 bytes)
+    // - isf (u16)
+    // - reserved (u16)
+    // - cbFeatData (u32)
+    // - rgbFeatData (cbFeatData bytes): allow-flag bitmask
+    const ISF_SHEET_PROTECTION: u16 = 0x0002;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_FEAT.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    out.extend_from_slice(&ISF_SHEET_PROTECTION.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    out.extend_from_slice(&2u32.to_le_bytes()); // cbFeatData
+    out.extend_from_slice(&allow_mask.to_le_bytes());
+    out
+}
+
+fn feat_record_sheet_protection_allow_mask_malformed(allow_mask: u16) -> Vec<u8> {
+    // Like `feat_record_sheet_protection_allow_mask`, but the declared `cbFeatData` length is
+    // larger than the payload to exercise best-effort warning behavior.
+    const ISF_SHEET_PROTECTION: u16 = 0x0002;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&RECORD_FEAT.to_le_bytes()); // rt
+    out.extend_from_slice(&0u16.to_le_bytes()); // grbitFrt
+    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+
+    out.extend_from_slice(&ISF_SHEET_PROTECTION.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    out.extend_from_slice(&10u32.to_le_bytes()); // cbFeatData (incorrect)
+                                                 // Provide only a 2-byte allow mask even though cbFeatData claims 10 bytes.
+    out.extend_from_slice(&allow_mask.to_le_bytes());
     out
 }
 

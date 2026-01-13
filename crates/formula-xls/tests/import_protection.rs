@@ -79,3 +79,63 @@ fn warns_on_truncated_biff_protection_records_but_continues() {
         "expected truncated SCENPROTECT warning, got: {warnings:?}"
     );
 }
+
+#[test]
+fn imports_biff_sheet_protection_allow_flags() {
+    let bytes = xls_fixture_builder::build_sheet_protection_allow_flags_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheets
+        .first()
+        .expect("fixture should contain one sheet");
+    let p = &sheet.sheet_protection;
+
+    assert_eq!(p.enabled, true);
+    assert_eq!(p.password_hash, Some(0xCBEB));
+    assert_eq!(p.edit_objects, true);
+    assert_eq!(p.edit_scenarios, true);
+
+    // Enhanced allow flags from FEAT/FEATHEADR records.
+    assert_eq!(p.select_locked_cells, false);
+    assert_eq!(p.select_unlocked_cells, true);
+    assert_eq!(p.format_cells, true);
+    assert_eq!(p.format_columns, true);
+    assert_eq!(p.format_rows, false);
+    assert_eq!(p.insert_columns, true);
+    assert_eq!(p.insert_rows, false);
+    assert_eq!(p.insert_hyperlinks, true);
+    assert_eq!(p.delete_columns, false);
+    assert_eq!(p.delete_rows, true);
+    assert_eq!(p.sort, true);
+    assert_eq!(p.auto_filter, true);
+    assert_eq!(p.pivot_tables, false);
+}
+
+#[test]
+fn warns_on_malformed_feat_protection_record_but_continues() {
+    let bytes = xls_fixture_builder::build_sheet_protection_allow_flags_malformed_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheets
+        .first()
+        .expect("fixture should contain one sheet");
+    let p = &sheet.sheet_protection;
+
+    // Allow flags still imported from the valid record.
+    assert_eq!(p.enabled, true);
+    assert_eq!(p.select_unlocked_cells, true);
+    assert_eq!(p.format_cells, true);
+    assert_eq!(p.sort, true);
+    assert_eq!(p.auto_filter, true);
+
+    // Malformed FEAT record surfaces a warning but does not abort import.
+    let warnings: Vec<&str> = result.warnings.iter().map(|w| w.message.as_str()).collect();
+    assert!(
+        warnings.iter().any(|w| w.contains("failed to parse FEAT record")),
+        "expected FEAT warning, got: {warnings:?}"
+    );
+}

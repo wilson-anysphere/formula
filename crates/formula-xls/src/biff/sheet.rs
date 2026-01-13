@@ -56,6 +56,18 @@ const RECORD_PROTECT: u16 = 0x0012;
 const RECORD_PASSWORD: u16 = 0x0013;
 const RECORD_OBJPROTECT: u16 = 0x0063;
 const RECORD_SCENPROTECT: u16 = 0x00DD;
+// Enhanced worksheet protection options (BIFF8 Future Record Type (FRT) records).
+//
+// Excel stores the richer "Protect Sheet" allow-flags (formatting, inserting/deleting, sort,
+// AutoFilter, PivotTables, selection) in the FEAT/FEATHEADR family of records.
+//
+// See [MS-XLS] sections (record names may vary by version):
+// - FEATHEADR / FEAT: shared feature records
+// - FEATHEADR11 / FEAT11: Excel 11 variants
+const RECORD_FEATHEADR: u16 = 0x0867;
+const RECORD_FEAT: u16 = 0x0868;
+const RECORD_FEATHEADR11: u16 = 0x0870;
+const RECORD_FEAT11: u16 = 0x0871;
 
 // View/UX records (worksheet substream).
 // - WINDOW2: [MS-XLS 2.4.354]
@@ -230,12 +242,210 @@ pub(crate) fn parse_biff_sheet_protection(
                 let flag = u16::from_le_bytes([data[0], data[1]]);
                 out.protection.edit_scenarios = flag == 0;
             }
+            RECORD_FEATHEADR | RECORD_FEATHEADR11 => {
+                match parse_biff_feat_hdr_sheet_protection_allow_mask(data, record.record_id) {
+                    Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
+                    Ok(None) => {}
+                    Err(err) => out.warnings.push(format!(
+                        "failed to parse FEATHEADR record at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
+            RECORD_FEAT | RECORD_FEAT11 => {
+                match parse_biff_feat_record_sheet_protection_allow_mask(data, record.record_id) {
+                    Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
+                    Ok(None) => {}
+                    Err(err) => out.warnings.push(format!(
+                        "failed to parse FEAT record at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
             records::RECORD_EOF => break,
             _ => {}
         }
     }
 
     Ok(out)
+}
+
+/// Shared feature type used by Excel to store enhanced worksheet protection options.
+///
+/// This corresponds to the additional checkboxes in Excel's "Protect Sheet" dialog (formatting,
+/// inserting/deleting, sorting, AutoFilter, PivotTables, and selection of locked/unlocked cells).
+///
+/// NOTE: This is based on [MS-XLS] `isf` (shared feature type) values for FEAT/FEATHEADR records.
+const FEAT_ISF_SHEET_PROTECTION: u16 = 0x0002;
+
+// Known allow-flag bits within the enhanced protection mask (best-effort).
+//
+// The BIFF representation stores a bitmask indicating which actions are allowed when sheet
+// protection is enabled. These correspond closely to OOXML `sheetProtection` allow attributes.
+//
+// The exact packing varies by writer/version; we treat this as a best-effort mapping and ignore
+// unknown bits.
+const ALLOW_SELECT_LOCKED_CELLS: u32 = 1 << 0;
+const ALLOW_SELECT_UNLOCKED_CELLS: u32 = 1 << 1;
+const ALLOW_FORMAT_CELLS: u32 = 1 << 2;
+const ALLOW_FORMAT_COLUMNS: u32 = 1 << 3;
+const ALLOW_FORMAT_ROWS: u32 = 1 << 4;
+const ALLOW_INSERT_COLUMNS: u32 = 1 << 5;
+const ALLOW_INSERT_ROWS: u32 = 1 << 6;
+const ALLOW_INSERT_HYPERLINKS: u32 = 1 << 7;
+const ALLOW_DELETE_COLUMNS: u32 = 1 << 8;
+const ALLOW_DELETE_ROWS: u32 = 1 << 9;
+const ALLOW_SORT: u32 = 1 << 10;
+const ALLOW_AUTO_FILTER: u32 = 1 << 11;
+const ALLOW_PIVOT_TABLES: u32 = 1 << 12;
+
+fn apply_sheet_protection_allow_mask(protection: &mut SheetProtection, mask: u32) {
+    // Selection defaults to true in the model. Some BIFF writers omit the selection bits entirely
+    // (relying on defaults), so be conservative: only override selection flags when we see any
+    // explicit selection bits set in the mask (either in the low bits or, for some variants, in
+    // bits 14/15).
+    let low_select = mask & (ALLOW_SELECT_LOCKED_CELLS | ALLOW_SELECT_UNLOCKED_CELLS);
+    let high_select = mask & ((1 << 14) | (1 << 15));
+    if low_select != 0 {
+        protection.select_locked_cells = (mask & ALLOW_SELECT_LOCKED_CELLS) != 0;
+        protection.select_unlocked_cells = (mask & ALLOW_SELECT_UNLOCKED_CELLS) != 0;
+    } else if high_select != 0 {
+        protection.select_locked_cells = (mask & (1 << 14)) != 0;
+        protection.select_unlocked_cells = (mask & (1 << 15)) != 0;
+    }
+    protection.format_cells = (mask & ALLOW_FORMAT_CELLS) != 0;
+    protection.format_columns = (mask & ALLOW_FORMAT_COLUMNS) != 0;
+    protection.format_rows = (mask & ALLOW_FORMAT_ROWS) != 0;
+    protection.insert_columns = (mask & ALLOW_INSERT_COLUMNS) != 0;
+    protection.insert_rows = (mask & ALLOW_INSERT_ROWS) != 0;
+    protection.insert_hyperlinks = (mask & ALLOW_INSERT_HYPERLINKS) != 0;
+    protection.delete_columns = (mask & ALLOW_DELETE_COLUMNS) != 0;
+    protection.delete_rows = (mask & ALLOW_DELETE_ROWS) != 0;
+    protection.sort = (mask & ALLOW_SORT) != 0;
+    protection.auto_filter = (mask & ALLOW_AUTO_FILTER) != 0;
+    protection.pivot_tables = (mask & ALLOW_PIVOT_TABLES) != 0;
+}
+
+fn frt_payload_start(data: &[u8], expected_rt: u16) -> usize {
+    // Many BIFF8 "future record type" (FRT) payloads begin with an `FrtHeader` (8 bytes):
+    //   rt (u16), grbitFrt (u16), reserved (u32)
+    //
+    // When present, the `rt` field typically matches the enclosing record id.
+    if data.len() < 8 {
+        return 0;
+    }
+    let rt = u16::from_le_bytes([data[0], data[1]]);
+    if rt == expected_rt {
+        8
+    } else {
+        0
+    }
+}
+
+fn parse_biff_feat_record_sheet_protection_allow_mask(
+    data: &[u8],
+    record_id: u16,
+) -> Result<Option<u32>, String> {
+    // Best-effort FEAT record parsing.
+    //
+    // Common layout (BIFF8):
+    // - FrtHeader (8 bytes)
+    // - isf (u16) shared feature type
+    // - reserved (u16)
+    // - cbFeatData (u32)
+    // - rgbFeatData (cbFeatData bytes)
+    let base = frt_payload_start(data, record_id);
+    let header_len = base + 2 + 2 + 4;
+    if data.len() < header_len {
+        return Err(format!("FEAT record too short (len={})", data.len()));
+    }
+
+    let isf = u16::from_le_bytes([data[base], data[base + 1]]);
+    if isf != FEAT_ISF_SHEET_PROTECTION {
+        return Ok(None);
+    }
+
+    let cb_feat_data = u32::from_le_bytes([
+        data[base + 4],
+        data[base + 5],
+        data[base + 6],
+        data[base + 7],
+    ]) as usize;
+    let data_start = base + 8;
+    let data_end = data_start
+        .checked_add(cb_feat_data)
+        .ok_or("FEAT.cbFeatData overflow")?;
+    if data.len() < data_end {
+        return Err(format!(
+            "FEAT record too short for cbFeatData={cb_feat_data} (need {data_end} bytes, got {})",
+            data.len()
+        ));
+    }
+    let feat_data = &data[data_start..data_end];
+    let mask = parse_allow_mask_best_effort(feat_data)
+        .ok_or_else(|| "FEAT protection payload missing allow-mask".to_string())?;
+    Ok(Some(mask))
+}
+
+fn parse_biff_feat_hdr_sheet_protection_allow_mask(
+    data: &[u8],
+    record_id: u16,
+) -> Result<Option<u32>, String> {
+    // Best-effort FEATHEADR record parsing.
+    //
+    // Common layout (BIFF8):
+    // - FrtHeader (8 bytes)
+    // - isf (u16) shared feature type
+    // - reserved (u16)
+    // - cbHdrData (u32)
+    // - rgbHdrData (cbHdrData bytes)
+    //
+    // For the sheet-protection feature, Excel stores the allow-mask in the header data.
+    let base = frt_payload_start(data, record_id);
+    let header_len = base + 2 + 2 + 4;
+    if data.len() < header_len {
+        return Err(format!("FEATHEADR record too short (len={})", data.len()));
+    }
+
+    let isf = u16::from_le_bytes([data[base], data[base + 1]]);
+    if isf != FEAT_ISF_SHEET_PROTECTION {
+        return Ok(None);
+    }
+
+    let cb_hdr_data = u32::from_le_bytes([
+        data[base + 4],
+        data[base + 5],
+        data[base + 6],
+        data[base + 7],
+    ]) as usize;
+    let data_start = base + 8;
+    let data_end = data_start
+        .checked_add(cb_hdr_data)
+        .ok_or("FEATHEADR.cbHdrData overflow")?;
+    if data.len() < data_end {
+        return Err(format!(
+            "FEATHEADR record too short for cbHdrData={cb_hdr_data} (need {data_end} bytes, got {})",
+            data.len()
+        ));
+    }
+    let hdr_data = &data[data_start..data_end];
+    let mask = parse_allow_mask_best_effort(hdr_data)
+        .ok_or_else(|| "FEATHEADR protection payload missing allow-mask".to_string())?;
+    Ok(Some(mask))
+}
+
+fn parse_allow_mask_best_effort(payload: &[u8]) -> Option<u32> {
+    // Excel's enhanced protection records have evolved over time. Some writers store the allow
+    // flags as a 16-bit value, while others may store it as a 32-bit bitfield. Parse both.
+    if payload.len() >= 4 {
+        let v = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        return Some(v);
+    }
+    if payload.len() >= 2 {
+        let v = u16::from_le_bytes([payload[0], payload[1]]) as u32;
+        return Some(v);
+    }
+    None
 }
 /// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).
 ///
