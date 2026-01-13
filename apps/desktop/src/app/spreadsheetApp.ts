@@ -727,6 +727,7 @@ export class SpreadsheetApp {
   private activeSheetBackgroundImageId: string | null = null;
   private activeSheetBackgroundBitmap: ImageBitmap | null = null;
   private activeSheetBackgroundLoadToken = 0;
+  private activeSheetBackgroundAbort: AbortController | null = null;
 
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
@@ -2964,6 +2965,10 @@ export class SpreadsheetApp {
     this.disposed = true;
     // Ensure overlay caches (ImageBitmaps, parsed XML) are released promptly.
     this.drawingOverlay?.destroy?.();
+    this.activeSheetBackgroundAbort?.abort();
+    this.activeSheetBackgroundAbort = null;
+    this.workbookImageBitmaps.clear();
+    this.activeSheetBackgroundBitmap = null;
     this.sheetViewBinder?.destroy();
     this.sheetViewBinder = null;
     this.domAbort.abort();
@@ -3681,6 +3686,8 @@ export class SpreadsheetApp {
     }
 
     // Image bytes may have changed; invalidate decoded bitmaps.
+    this.activeSheetBackgroundAbort?.abort();
+    this.activeSheetBackgroundAbort = null;
     this.workbookImageBitmaps.clear();
     // Force a reload even when the active sheet points at the same image id.
     this.activeSheetBackgroundImageId = null;
@@ -3969,6 +3976,10 @@ export class SpreadsheetApp {
       return;
     }
 
+    // Cancel any in-flight background decode so stale work doesn't keep bitmaps alive.
+    this.activeSheetBackgroundAbort?.abort();
+    this.activeSheetBackgroundAbort = null;
+
     // If the background id changed, clear current state and repaint immediately so stale
     // patterns disappear (even if the new image is still decoding).
     if (desiredId !== this.activeSheetBackgroundImageId) {
@@ -3989,10 +4000,14 @@ export class SpreadsheetApp {
     const entry: ImageEntry = { id: desiredId, bytes: stored.bytes, mimeType: stored.mimeType };
 
     const token = ++this.activeSheetBackgroundLoadToken;
+    const abort = typeof AbortController !== "undefined" ? new AbortController() : null;
+    this.activeSheetBackgroundAbort = abort;
+    const signal = abort?.signal;
     const promise = this.workbookImageBitmaps
-      .get(entry)
+      .get(entry, signal ? { signal } : undefined)
       .then((bitmap) => {
         if (this.disposed) return;
+        if (signal?.aborted) return;
         if (token !== this.activeSheetBackgroundLoadToken) return;
         if (this.activeSheetBackgroundImageId !== desiredId) return;
         this.activeSheetBackgroundBitmap = bitmap;
@@ -4002,7 +4017,8 @@ export class SpreadsheetApp {
           this.refresh();
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        if (signal?.aborted || (err as any)?.name === "AbortError") return;
         // Ignore decode failures; treat as "no background image".
         if (token !== this.activeSheetBackgroundLoadToken) return;
         if (this.activeSheetBackgroundImageId !== desiredId) return;

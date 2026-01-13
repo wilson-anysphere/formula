@@ -1057,11 +1057,27 @@ export class CanvasGridRenderer {
     };
     this.imageBitmapCache.set(imageId, placeholder);
 
+    const tryClose = (value: unknown) => {
+      const bitmap = value as any;
+      if (!bitmap || typeof bitmap.close !== "function") return;
+      try {
+        bitmap.close();
+      } catch {
+        // Ignore disposal failures (best-effort).
+      }
+    };
+
     const promise = (async () => {
       try {
         const source = await resolver(imageId);
-        if (this.destroyed) return;
-        if (this.imageBitmapCache.get(imageId) !== placeholder) return;
+        if (this.destroyed) {
+          tryClose(source);
+          return;
+        }
+        if (this.imageBitmapCache.get(imageId) !== placeholder) {
+          tryClose(source);
+          return;
+        }
 
         if (source == null) {
           this.imageBitmapCache.set(imageId, { state: "missing", promise: null, bitmap: null });
@@ -1069,8 +1085,14 @@ export class CanvasGridRenderer {
         }
 
         const decoded = await this.decodeImageSource(source);
-        if (this.destroyed) return;
-        if (this.imageBitmapCache.get(imageId) !== placeholder) return;
+        if (this.destroyed) {
+          tryClose(decoded);
+          return;
+        }
+        if (this.imageBitmapCache.get(imageId) !== placeholder) {
+          tryClose(decoded);
+          return;
+        }
 
         if (!decoded) {
           this.imageBitmapCache.set(imageId, { state: "missing", promise: null, bitmap: null });

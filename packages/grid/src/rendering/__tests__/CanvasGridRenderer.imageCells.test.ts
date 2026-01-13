@@ -337,6 +337,78 @@ describe("CanvasGridRenderer image cells", () => {
     expect(bitmap2.close).not.toHaveBeenCalled();
   });
 
+  it("closes a decoded bitmap when an in-flight request is invalidated before decode completes", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img", width: 100, height: 50 }
+            }
+          : null
+    };
+
+    let resolveDecode!: (value: any) => void;
+    const decodePromise = new Promise<any>((resolve) => {
+      resolveDecode = resolve;
+    });
+
+    const bitmap = { width: 10, height: 10, close: vi.fn() } as any;
+    const createImageBitmapSpy = vi.fn(() => decodePromise);
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 1,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    // Start the request and let it reach the `createImageBitmap` call.
+    renderer.renderImmediately();
+    await flushMicrotasks();
+    expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+
+    // Invalidate before the decode finishes; the decoded bitmap should be closed
+    // once it resolves (since nothing can consume it anymore).
+    renderer.invalidateImage("img1");
+
+    resolveDecode(bitmap);
+    await flushMicrotasks();
+
+    expect(bitmap.close).toHaveBeenCalledTimes(1);
+  });
+
   it("dedupes image requests and marks content dirty when decoding completes", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>
