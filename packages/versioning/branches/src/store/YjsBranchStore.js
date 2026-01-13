@@ -397,6 +397,85 @@ export class YjsBranchStore {
   }
 
   /**
+   * Best-effort cleanup for interrupted multi-transaction gzip-chunks writes.
+   *
+   * Incomplete commits (`commitComplete=false`) are ignored by inference, but can
+   * accumulate over time. To avoid deleting legitimate history, we only delete
+   * commits when they're clearly unreachable:
+   *   - older than a conservative TTL
+   *   - not referenced by any branch head
+   *   - not referenced by rootCommitId
+   *   - not referenced as a parent/merge-parent by any commit
+   *   - have a `writeStartedAt` timestamp (set by this store for gzip-chunks writes)
+   *
+   * @param {string} docId
+   */
+  #cleanupStaleIncompleteCommits(docId) {
+    // Avoid relying on `createdAt` because callers can pass arbitrary commit
+    // timestamps (e.g. imported history). `writeStartedAt` is written by this
+    // store at commit write time and is safe to compare to wall clock time.
+    const ttlMs = 60 * 60 * 1000;
+    const now = Date.now();
+
+    /** @type {Set<string>} */
+    const referenced = new Set();
+
+    const root = this.#meta.get("rootCommitId");
+    if (typeof root === "string" && root.length > 0) referenced.add(root);
+
+    this.#branches.forEach((value) => {
+      const branchMap = getYMap(value);
+      if (!branchMap) return;
+      const branchDocId = branchMap.get("docId");
+      if (typeof branchDocId === "string" && branchDocId.length > 0 && branchDocId !== docId) return;
+      const head = branchMap.get("headCommitId");
+      if (typeof head === "string" && head.length > 0) referenced.add(head);
+    });
+
+    // Be extra conservative: don't delete commits that are referenced by any
+    // other commit's parent pointers.
+    this.#commits.forEach((value) => {
+      const commitMap = getYMap(value);
+      if (!commitMap) return;
+      const commitDocId = commitMap.get("docId");
+      if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      const parent = commitMap.get("parentCommitId");
+      if (typeof parent === "string" && parent.length > 0) referenced.add(parent);
+      const mergeParent = commitMap.get("mergeParentCommitId");
+      if (typeof mergeParent === "string" && mergeParent.length > 0) referenced.add(mergeParent);
+    });
+
+    /** @type {string[]} */
+    const staleUnreachable = [];
+    this.#commits.forEach((value, key) => {
+      if (typeof key !== "string" || key.length === 0) return;
+      if (referenced.has(key)) return;
+      const commitMap = getYMap(value);
+      if (!commitMap) return;
+      const commitDocId = commitMap.get("docId");
+      if (typeof commitDocId === "string" && commitDocId.length > 0 && commitDocId !== docId) return;
+      if (this.#isCommitComplete(commitMap)) return;
+
+      const writeStartedAt = Number(commitMap.get("writeStartedAt") ?? 0);
+      if (!Number.isFinite(writeStartedAt) || writeStartedAt <= 0) return;
+      if (now - writeStartedAt < ttlMs) return;
+
+      staleUnreachable.push(key);
+    });
+
+    if (staleUnreachable.length === 0) return;
+
+    this.#ydoc.transact(() => {
+      for (const commitId of staleUnreachable) {
+        const commitMap = getYMap(this.#commits.get(commitId));
+        if (!commitMap) continue;
+        if (this.#isCommitComplete(commitMap)) continue;
+        this.#commits.delete(commitId);
+      }
+    }, "branching-store");
+  }
+
+  /**
    * @param {unknown} value
    * @returns {Promise<Uint8Array[]>}
    */
@@ -646,6 +725,7 @@ export class YjsBranchStore {
         }
       }
 
+      this.#cleanupStaleIncompleteCommits(docId);
       return;
     }
 
@@ -701,6 +781,7 @@ export class YjsBranchStore {
         commit.set("mergeParentCommitId", null);
         commit.set("createdBy", actor.userId);
         commit.set("createdAt", now);
+        commit.set("writeStartedAt", now);
         commit.set("message", "root");
         commit.set("patchEncoding", "gzip-chunks");
         commit.set("snapshotEncoding", "gzip-chunks");
@@ -1164,6 +1245,7 @@ export class YjsBranchStore {
         commit.set("mergeParentCommitId", mergeParentCommitId);
         commit.set("createdBy", createdBy);
         commit.set("createdAt", createdAt);
+        commit.set("writeStartedAt", Date.now());
         commit.set("message", message ?? null);
         commit.set("patchEncoding", "gzip-chunks");
         commit.set("commitComplete", false);

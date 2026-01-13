@@ -163,3 +163,46 @@ test("YjsBranchStore.ensureDocument can recover when root commit is mid snapshot
   assert.ok(repaired instanceof Y.Map);
   assert.equal(repaired.get("commitComplete"), true);
  });
+
+test("YjsBranchStore.ensureDocument deletes stale unreachable incomplete gzip-chunks commits", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+  });
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+
+  const meta = ydoc.getMap("branching:meta");
+  const commits = ydoc.getMap("branching:commits");
+  const rootId = meta.get("rootCommitId");
+  assert.ok(typeof rootId === "string" && rootId.length > 0);
+
+  const staleId = "stale-incomplete";
+  const now = Date.now();
+
+  ydoc.transact(() => {
+    const commit = new Y.Map();
+    commit.set("id", staleId);
+    commit.set("docId", docId);
+    commit.set("parentCommitId", rootId);
+    commit.set("mergeParentCommitId", null);
+    commit.set("createdBy", actor.userId);
+    commit.set("createdAt", now);
+    commit.set("writeStartedAt", now - 2 * 60 * 60 * 1000);
+    commit.set("message", "stale");
+    commit.set("patchEncoding", "gzip-chunks");
+    commit.set("commitComplete", false);
+    commit.set("patchChunks", new Y.Array());
+    commits.set(staleId, commit);
+  });
+
+  assert.ok(commits.has(staleId));
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+
+  assert.equal(commits.has(staleId), false);
+});
