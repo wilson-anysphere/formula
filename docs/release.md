@@ -309,6 +309,10 @@ If you need an offline-friendly installer, change `bundle.windows.webviewInstall
 For the full set of options, see the Tauri docs:
 https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options
 
+If you need to point end users at a manual install (e.g. no internet / locked-down environments),
+Microsoft’s official WebView2 download page is:
+https://developer.microsoft.com/en-us/microsoft-edge/webview2/
+
 ## 4) Hosting updater endpoints
 
 The desktop app is configured to use **GitHub Releases** as the updater source.
