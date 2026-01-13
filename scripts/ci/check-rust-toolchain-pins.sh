@@ -43,7 +43,8 @@ fail=0
 #   1 = no matches
 #   2 = error
 set +e
-matches="$(git grep -n "uses: dtolnay/rust-toolchain@" -- .github/workflows/*.yml 2>/dev/null)"
+# Scan all tracked workflow files (supports both `.yml` and `.yaml`).
+matches="$(git grep -n "uses: dtolnay/rust-toolchain@" -- .github/workflows 2>/dev/null)"
 status=$?
 set -e
 
