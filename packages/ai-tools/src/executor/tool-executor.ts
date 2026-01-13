@@ -2341,10 +2341,10 @@ function compareCellForSort(left: CellData, right: CellData, opts: { includeForm
 
 function cellComparableValue(cell: CellData, opts: { includeFormulaValues?: boolean } = {}): string | number | boolean | null {
   if (cell.formula) {
-    if (opts.includeFormulaValues) return cell.value;
+    if (opts.includeFormulaValues) return cell.value ?? null;
     return cell.formula;
   }
-  return cell.value;
+  return cell.value ?? null;
 }
 
 function compareScalars(left: CellScalar | string, right: CellScalar | string): number {
