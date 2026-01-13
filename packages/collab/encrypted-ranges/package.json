@@ -9,8 +9,8 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
+    "@formula/collab-yjs-utils": "workspace:*",
     "@formula/collab-workbook": "workspace:*",
     "yjs": "^13.6.27"
   }
 }
-

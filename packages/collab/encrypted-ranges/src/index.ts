@@ -1,5 +1,6 @@
 import * as Y from "yjs";
 import { getWorkbookRoots } from "@formula/collab-workbook";
+import { getYArray, getYMap, getYText } from "@formula/collab-yjs-utils";
 
 export type EncryptedRange = {
   id: string;
@@ -46,52 +47,6 @@ export type EncryptedRangeUpdatePatch = Partial<EncryptedRangeAddInput>;
 export type WorkbookTransact = (fn: () => void) => void;
 
 const METADATA_KEY = "encryptedRanges";
-
-/**
- * Duck-type helpers to tolerate multiple `yjs` module instances (ESM/CJS).
- *
- * In some environments updates can be applied using a different Yjs build,
- * resulting in roots and nested types that fail `instanceof` checks.
- */
-function getYMap(value: unknown): Y.Map<any> | null {
-  if (value instanceof Y.Map) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.keys !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Map<any>;
-}
-
-function getYArray(value: unknown): Y.Array<any> | null {
-  if (value instanceof Y.Array) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.toArray !== "function") return null;
-  if (typeof maybe.push !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Array<any>;
-}
-
-function getYText(value: unknown): Y.Text | null {
-  if (value instanceof Y.Text) return value;
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.toDelta !== "function") return null;
-  if (typeof maybe.applyDelta !== "function") return null;
-  if (typeof maybe.insert !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Text;
-}
 
 function coerceString(value: unknown): string | null {
   const text = getYText(value);
