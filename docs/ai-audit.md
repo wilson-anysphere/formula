@@ -282,10 +282,10 @@ SQLite-backed persistence (better filtering + time-based retention):
 
 ```ts
 import { SqliteAIAuditStore } from "@formula/ai-audit/sqlite";
-import { LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
+import { BoundedAIAuditStore, LocalStorageBinaryStorage } from "@formula/ai-audit/browser";
 import sqlWasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 
-const store = await SqliteAIAuditStore.create({
+const sqliteStore = await SqliteAIAuditStore.create({
   storage: new LocalStorageBinaryStorage("formula:ai_audit_db:v1"),
   locateFile: (file, prefix = "") => (file.endsWith(".wasm") ? sqlWasmUrl : prefix ? `${prefix}${file}` : file),
   retention: {
@@ -293,6 +293,9 @@ const store = await SqliteAIAuditStore.create({
     max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
   },
 });
+
+// Optional but recommended: cap per-entry size for defense-in-depth against quota overruns.
+const store = new BoundedAIAuditStore(sqliteStore, { max_entry_chars: 200_000 });
 ```
 
 #### Node
