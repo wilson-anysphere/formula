@@ -21,12 +21,19 @@ describe("dlp heuristic", () => {
   it("detects phone numbers (international + US)", () => {
     const text = "Call (415) 555-2671 or +44 20 7946 0958.";
     expect(classifyText(text).findings).toContain("phone_number");
+    expect(redactText(text)).toBe("Call [REDACTED_PHONE] or [REDACTED_PHONE].");
   });
 
   it("detects and redacts US phone numbers with extensions", () => {
     const text = "Dial (415) 555-2671 ext 1234 for support.";
     expect(classifyText(text).findings).toContain("phone_number");
     expect(redactText(text)).toBe("Dial [REDACTED_PHONE] for support.");
+  });
+
+  it("does not treat arithmetic expressions like phone numbers (reduced false positives)", () => {
+    const formulaLike = "=A1+12345678901";
+    expect(classifyText(formulaLike).findings).not.toContain("phone_number");
+    expect(redactText(formulaLike)).toBe(formulaLike);
   });
 
   it("detects common API keys/tokens with conservative patterns", () => {

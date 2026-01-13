@@ -14,7 +14,10 @@ const CREDIT_CARD_CANDIDATE_RE = /\b(?:\d[ -]*?){13,16}\b/g;
 // Phone numbers are noisy; keep the patterns conservative and validate digit count.
 // - International: require '+' prefix (E.164-like)
 // - US: require separators / parentheses, optionally prefixed with +1
-const PHONE_INTL_CANDIDATE_RE = /\+\d[\d\s().-]{7,}\d/g;
+// NOTE: We intentionally require the '+' to be preceded by a non-word boundary
+// (or start-of-string) to avoid matching common spreadsheet formulas like `=A1+12345678901`.
+// (Those are arithmetic operations, not phone numbers.)
+const PHONE_INTL_CANDIDATE_RE = /(^|[^\w])(\+\d[\d\s().-]{7,}\d)/g;
 const PHONE_US_CANDIDATE_RE = /(?:\+1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}(?:\s*(?:ext|x|#)\s*\d{1,5})?/g;
 
 // Conservative token detectors. Keep patterns specific to reduce false positives.
@@ -128,7 +131,8 @@ function isValidPhone(candidate) {
 function hasValidPhoneNumber(text) {
   PHONE_INTL_CANDIDATE_RE.lastIndex = 0;
   for (let match; (match = PHONE_INTL_CANDIDATE_RE.exec(text)); ) {
-    if (isValidPhone(match[0])) return true;
+    const candidate = match[2] ?? match[0];
+    if (isValidPhone(candidate)) return true;
   }
   PHONE_US_CANDIDATE_RE.lastIndex = 0;
   for (let match; (match = PHONE_US_CANDIDATE_RE.exec(text)); ) {
@@ -255,7 +259,10 @@ export function redactText(text) {
       if (!extracted) return match;
       return `[REDACTED_IBAN]${extracted.suffix}`;
     })
-    .replace(PHONE_INTL_CANDIDATE_RE, (match) => (isValidPhone(match) ? "[REDACTED_PHONE]" : match))
+    .replace(PHONE_INTL_CANDIDATE_RE, (match, prefix, candidate) => {
+      if (!candidate || !isValidPhone(candidate)) return match;
+      return `${prefix}[REDACTED_PHONE]`;
+    })
     .replace(PHONE_US_CANDIDATE_RE, (match) => (isValidPhone(match) ? "[REDACTED_PHONE]" : match))
     .replace(CREDIT_CARD_CANDIDATE_RE, (match) => (isValidCreditCard(match) ? "[REDACTED_CREDIT_CARD]" : match));
 }
