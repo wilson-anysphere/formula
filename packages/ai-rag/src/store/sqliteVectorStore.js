@@ -280,6 +280,7 @@ export class SqliteVectorStore {
       const insert = this._db.prepare("INSERT INTO vector_store_meta (key, value) VALUES ('dimension', ?);");
       insert.run([String(dimension)]);
       insert.free();
+      this._dirty = true;
       return;
     }
 
@@ -307,6 +308,7 @@ export class SqliteVectorStore {
     `);
     stmt.run([key, value]);
     stmt.free();
+    this._dirty = true;
   }
 
   _getTableColumns(table) {
