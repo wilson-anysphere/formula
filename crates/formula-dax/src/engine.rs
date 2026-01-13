@@ -2848,11 +2848,12 @@ impl DaxEngine {
                     let is_relationship_active =
                         |idx: usize, rel: &RelationshipInfo, overrides: &HashSet<(&str, &str)>| {
                             let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
-                            if overrides.contains(&pair) {
+                            let is_active = if overrides.contains(&pair) {
                                 filter.active_relationship_overrides.contains(&idx)
                             } else {
                                 rel.rel.is_active
-                            }
+                            };
+                            is_active && !filter.is_relationship_disabled(idx)
                         };
 
                     struct RelatedHop {
