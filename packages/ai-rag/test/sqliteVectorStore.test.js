@@ -636,6 +636,14 @@ test(
   async () => {
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
+      const sqlStmt = store._db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_vectors_workbook_hashes' LIMIT 1;"
+      );
+      assert.ok(sqlStmt.step());
+      const sql = String(sqlStmt.get()[0] ?? "");
+      sqlStmt.free();
+      assert.match(sql.toLowerCase(), /length\\(vector\\)/);
+
       const stmt = store._db.prepare("PRAGMA index_list(vectors);");
       /** @type {string[]} */
       const names = [];
