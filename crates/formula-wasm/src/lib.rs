@@ -884,6 +884,7 @@ fn pivot_value_field_model_to_engine(field: &formula_model::pivots::ValueField) 
         source_field: field.source_field.clone(),
         name: field.name.clone(),
         aggregation: pivot_aggregation_model_to_engine(field.aggregation),
+        number_format: field.number_format.clone(),
         show_as: field.show_as,
         base_field: field.base_field.clone(),
         base_item: field.base_item.clone(),
