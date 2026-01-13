@@ -20,6 +20,51 @@ const FLAG_PHONETIC: u16 = 0x0002;
 //   [ich: u32][ifnt: u16][reserved: u16]
 const RICH_RUN_BYTE_LEN: usize = 8;
 
+/// Raw BIFF12 record header bytes for an existing record in the input stream.
+///
+/// When patching an existing record, we sometimes want to preserve the original varint
+/// encodings of the record id and length fields (including non-canonical encodings) as long as
+/// the patched record keeps the same id and payload length.
+#[derive(Clone, Copy)]
+struct ExistingRecordHeader<'a> {
+    in_id: u32,
+    in_len: u32,
+    id_raw: &'a [u8],
+    len_raw: &'a [u8],
+}
+
+fn write_record_header_preserving_varints<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    out_id: u32,
+    out_len: u32,
+    existing: Option<ExistingRecordHeader<'_>>,
+) -> io::Result<()> {
+    if let Some(existing) = existing {
+        if existing.in_id == out_id && existing.in_len == out_len {
+            writer.write_raw(existing.id_raw)?;
+            writer.write_raw(existing.len_raw)?;
+            return Ok(());
+        }
+    }
+    writer.write_record_header(out_id, out_len)
+}
+
+fn write_record_preserving_varints<W: io::Write>(
+    writer: &mut Biff12Writer<W>,
+    out_id: u32,
+    payload: &[u8],
+    existing: Option<ExistingRecordHeader<'_>>,
+) -> io::Result<()> {
+    let out_len = u32::try_from(payload.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "record payload length does not fit in u32",
+        )
+    })?;
+    write_record_header_preserving_varints(writer, out_id, out_len, existing)?;
+    writer.write_raw(payload)
+}
+
 /// A single cell update to apply while patch-writing a worksheet `.bin` part.
 ///
 /// Row/col are zero-based, matching the XLSB internal representation used by the parser.
@@ -282,7 +327,9 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
     while offset < sheet_bin.len() {
         let record_start = offset;
         let id = read_record_id(sheet_bin, &mut offset)?;
-        let len = read_record_len(sheet_bin, &mut offset)? as usize;
+        let id_end = offset;
+        let len_u32 = read_record_len(sheet_bin, &mut offset)?;
+        let len = len_u32 as usize;
         let payload_start = offset;
         let payload_end = payload_start.checked_add(len).ok_or(Error::UnexpectedEof)?;
         let payload = sheet_bin
@@ -429,6 +476,17 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                 let style_out = edit.new_style.unwrap_or(style);
                 advance_insert_cursor(&ordered_edits, &applied, &mut insert_cursor);
 
+                let existing_header = ExistingRecordHeader {
+                    in_id: id,
+                    in_len: len_u32,
+                    id_raw: sheet_bin
+                        .get(record_start..id_end)
+                        .ok_or(Error::UnexpectedEof)?,
+                    len_raw: sheet_bin
+                        .get(id_end..payload_start)
+                        .ok_or(Error::UnexpectedEof)?,
+                };
+
                 // Track used-range expansion for edits that turn an empty cell into a value.
                 if id == biff12::BLANK && !matches!(edit.new_value, CellValue::Blank) {
                     bounds_include(&mut dim_additions, row, col);
@@ -442,92 +500,140 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                         if formula_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_num(&mut writer, payload, col, style_out, edit)?;
+                            patch_fmla_num(
+                                &mut writer,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_STRING => {
                         if formula_string_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_string(&mut writer, payload, col, style_out, edit)?;
+                            patch_fmla_string(
+                                &mut writer,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_BOOL => {
                         if formula_bool_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_bool(&mut writer, payload, col, style_out, edit)?;
+                            patch_fmla_bool(
+                                &mut writer,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_BOOLERR => {
                         if formula_error_edit_is_noop(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else {
-                            patch_fmla_error(&mut writer, payload, col, style_out, edit)?;
+                            patch_fmla_error(
+                                &mut writer,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FLOAT => {
                         if value_edit_is_noop_float(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::NUM => {
                         if value_edit_is_noop_rk(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_rk_cell(&mut writer, col, style_out, payload, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_rk_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                payload,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::CELL_ST => {
                         if value_edit_is_noop_inline_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::STRING => {
                         if value_edit_is_noop_shared_string(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
                         } else if edit.new_formula.is_some() {
-                            convert_value_record_to_formula(&mut writer, id, payload, col, style_out, edit)?;
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else if let (CellValue::Text(_), Some(isst)) =
                             (&edit.new_value, edit.shared_string_index)
                         {
@@ -557,64 +663,82 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
                             // keep shared-string semantics.
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BOOL => {
                         if value_edit_is_noop_bool(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BOOLERR => {
                         if value_edit_is_noop_error(payload, edit)? {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BLANK => {
                         if value_edit_is_noop_blank(style, edit) {
                             writer.write_raw(&sheet_bin[record_start..record_end])?;
+                        } else if edit.new_formula.is_some() {
+                            convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                reject_formula_payload_edit(edit, row, col)?;
-                                patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            reject_formula_payload_edit(edit, row, col)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     _ => {
@@ -629,7 +753,13 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             )?;
                         } else {
                             reject_formula_payload_edit(edit, row, col)?;
-                            patch_value_cell(&mut writer, col, style_out, edit)?;
+                            patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                 }
@@ -1105,7 +1235,7 @@ fn write_new_cell_record<W: io::Write>(
                 edit.row, edit.col
             ),
         ))),
-        (None, _) => patch_value_cell(writer, col, style, edit),
+        (None, _) => patch_value_cell(writer, col, style, edit, None),
     }
 }
 
@@ -1751,6 +1881,7 @@ fn patch_value_cell<W: io::Write>(
     col: u32,
     style: u32,
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     reject_formula_payload_edit(edit, edit.row, edit.col)?;
     match &edit.new_value {
@@ -1758,28 +1889,28 @@ fn patch_value_cell<W: io::Write>(
             let mut payload = [0u8; 8];
             payload[0..4].copy_from_slice(&col.to_le_bytes());
             payload[4..8].copy_from_slice(&style.to_le_bytes());
-            writer.write_record(biff12::BLANK, &payload)?;
+            write_record_preserving_varints(writer, biff12::BLANK, &payload, existing)?;
         }
         CellValue::Number(v) => {
             let mut payload = [0u8; 16];
             payload[0..4].copy_from_slice(&col.to_le_bytes());
             payload[4..8].copy_from_slice(&style.to_le_bytes());
             payload[8..16].copy_from_slice(&v.to_le_bytes());
-            writer.write_record(biff12::FLOAT, &payload)?;
+            write_record_preserving_varints(writer, biff12::FLOAT, &payload, existing)?;
         }
         CellValue::Bool(v) => {
             let mut payload = [0u8; 9];
             payload[0..4].copy_from_slice(&col.to_le_bytes());
             payload[4..8].copy_from_slice(&style.to_le_bytes());
             payload[8] = u8::from(*v);
-            writer.write_record(biff12::BOOL, &payload)?;
+            write_record_preserving_varints(writer, biff12::BOOL, &payload, existing)?;
         }
         CellValue::Error(v) => {
             let mut payload = [0u8; 9];
             payload[0..4].copy_from_slice(&col.to_le_bytes());
             payload[4..8].copy_from_slice(&style.to_le_bytes());
             payload[8] = *v;
-            writer.write_record(biff12::BOOLERR, &payload)?;
+            write_record_preserving_varints(writer, biff12::BOOLERR, &payload, existing)?;
         }
         CellValue::Text(s) => {
             if let Some(isst) = edit.shared_string_index {
@@ -1788,7 +1919,7 @@ fn patch_value_cell<W: io::Write>(
                 payload[0..4].copy_from_slice(&col.to_le_bytes());
                 payload[4..8].copy_from_slice(&style.to_le_bytes());
                 payload[8..12].copy_from_slice(&isst.to_le_bytes());
-                writer.write_record(biff12::STRING, &payload)?;
+                write_record_preserving_varints(writer, biff12::STRING, &payload, existing)?;
                 return Ok(());
             }
 
@@ -1802,7 +1933,7 @@ fn patch_value_cell<W: io::Write>(
             let bytes_len = char_len.checked_mul(2).ok_or(Error::UnexpectedEof)?;
             let payload_len = 12u32.checked_add(bytes_len).ok_or(Error::UnexpectedEof)?;
 
-            writer.write_record_header(biff12::CELL_ST, payload_len)?;
+            write_record_header_preserving_varints(writer, biff12::CELL_ST, payload_len, existing)?;
             writer.write_u32(col)?;
             writer.write_u32(style)?;
             writer.write_utf16_string(s)?;
@@ -1817,6 +1948,7 @@ fn patch_rk_cell<W: io::Write>(
     style: u32,
     _payload: &[u8],
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     match &edit.new_value {
         CellValue::Number(v) => {
@@ -1825,7 +1957,7 @@ fn patch_rk_cell<W: io::Write>(
                 payload[0..4].copy_from_slice(&col.to_le_bytes());
                 payload[4..8].copy_from_slice(&style.to_le_bytes());
                 payload[8..12].copy_from_slice(&rk.to_le_bytes());
-                writer.write_record(biff12::NUM, &payload)?;
+                write_record_preserving_varints(writer, biff12::NUM, &payload, existing)?;
                 return Ok(());
             }
         }
@@ -1833,7 +1965,7 @@ fn patch_rk_cell<W: io::Write>(
     }
 
     // Fall back to the generic (FLOAT / inline string) writer.
-    patch_value_cell(writer, col, style, edit)
+    patch_value_cell(writer, col, style, edit, existing)
 }
 
 fn patch_fmla_num<W: io::Write>(
@@ -1842,11 +1974,12 @@ fn patch_fmla_num<W: io::Write>(
     col: u32,
     style: u32,
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
         // Allow clearing formula cells by rewriting the record as a plain blank cell while
         // preserving the original `style` index.
-        return patch_value_cell(writer, col, style, edit);
+        return patch_value_cell(writer, col, style, edit, existing);
     }
 
     // BrtFmlaNum: [col: u32][style: u32][value: f64][flags: u16][cce: u32][rgce bytes...]
@@ -1914,7 +2047,7 @@ fn patch_fmla_num<W: io::Write>(
         .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
 
-    writer.write_record_header(biff12::FORMULA_FLOAT, payload_len)?;
+    write_record_header_preserving_varints(writer, biff12::FORMULA_FLOAT, payload_len, existing)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_f64(cached)?;
@@ -1931,9 +2064,10 @@ fn patch_fmla_bool<W: io::Write>(
     col: u32,
     style: u32,
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
-        return patch_value_cell(writer, col, style, edit);
+        return patch_value_cell(writer, col, style, edit, existing);
     }
 
     // BrtFmlaBool: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
@@ -2002,7 +2136,7 @@ fn patch_fmla_bool<W: io::Write>(
         .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
 
-    writer.write_record_header(biff12::FORMULA_BOOL, payload_len)?;
+    write_record_header_preserving_varints(writer, biff12::FORMULA_BOOL, payload_len, existing)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_raw(&[u8::from(cached)])?;
@@ -2019,9 +2153,10 @@ fn patch_fmla_error<W: io::Write>(
     col: u32,
     style: u32,
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
-        return patch_value_cell(writer, col, style, edit);
+        return patch_value_cell(writer, col, style, edit, existing);
     }
 
     // BrtFmlaError: [col: u32][style: u32][value: u8][flags: u16][cce: u32][rgce bytes...][extra...]
@@ -2090,7 +2225,7 @@ fn patch_fmla_error<W: io::Write>(
         .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
 
-    writer.write_record_header(biff12::FORMULA_BOOLERR, payload_len)?;
+    write_record_header_preserving_varints(writer, biff12::FORMULA_BOOLERR, payload_len, existing)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     writer.write_raw(&[cached])?;
@@ -2107,9 +2242,10 @@ fn patch_fmla_string<W: io::Write>(
     col: u32,
     style: u32,
     edit: &CellEdit,
+    existing: Option<ExistingRecordHeader<'_>>,
 ) -> Result<(), Error> {
     if matches!(edit.new_value, CellValue::Blank) && edit.new_formula.is_none() {
-        return patch_value_cell(writer, col, style, edit);
+        return patch_value_cell(writer, col, style, edit, existing);
     }
 
     // BrtFmlaString:
@@ -2228,7 +2364,7 @@ fn patch_fmla_string<W: io::Write>(
         .and_then(|v| v.checked_add(extra_len))
         .ok_or(Error::UnexpectedEof)?;
 
-    writer.write_record_header(biff12::FORMULA_STRING, payload_len)?;
+    write_record_header_preserving_varints(writer, biff12::FORMULA_STRING, payload_len, existing)?;
     writer.write_u32(col)?;
     writer.write_u32(style)?;
     if preserve_cached_bytes {

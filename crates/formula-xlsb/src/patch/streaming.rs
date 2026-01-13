@@ -257,6 +257,13 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                     super::bounds_include(&mut dim_additions, row, col);
                 }
 
+                let existing_header = super::ExistingRecordHeader {
+                    in_id: header.id,
+                    in_len: header.len,
+                    id_raw: &header.id_raw,
+                    len_raw: &header.len_raw,
+                };
+
                 match id {
                     biff12::FORMULA_FLOAT => {
                         if super::formula_edit_is_noop(&payload, edit)? {
@@ -264,7 +271,14 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             writer.write_raw(&payload)?;
                         } else {
                             changed = true;
-                            super::patch_fmla_num(&mut writer, &payload, col, style_out, edit)?;
+                            super::patch_fmla_num(
+                                &mut writer,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_STRING => {
@@ -273,7 +287,14 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             writer.write_raw(&payload)?;
                         } else {
                             changed = true;
-                            super::patch_fmla_string(&mut writer, &payload, col, style_out, edit)?;
+                            super::patch_fmla_string(
+                                &mut writer,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_BOOL => {
@@ -282,7 +303,14 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             writer.write_raw(&payload)?;
                         } else {
                             changed = true;
-                            super::patch_fmla_bool(&mut writer, &payload, col, style_out, edit)?;
+                            super::patch_fmla_bool(
+                                &mut writer,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FORMULA_BOOLERR => {
@@ -291,51 +319,67 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             writer.write_raw(&payload)?;
                         } else {
                             changed = true;
-                            super::patch_fmla_error(&mut writer, &payload, col, style_out, edit)?;
+                            super::patch_fmla_error(
+                                &mut writer,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::FLOAT => {
                         if super::value_edit_is_noop_float(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::NUM => {
                         if super::value_edit_is_noop_rk(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_rk_cell(&mut writer, col, style_out, &payload, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_rk_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                &payload,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::STRING => {
@@ -384,95 +428,117 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             // keep shared-string semantics.
                             super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::CELL_ST => {
                         if super::value_edit_is_noop_inline_string(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BOOL => {
                         if super::value_edit_is_noop_bool(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BOOLERR => {
                         if super::value_edit_is_noop_error(&payload, edit)? {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     biff12::BLANK => {
                         if super::value_edit_is_noop_blank(style, edit) {
                             write_raw_header(&mut writer, &header)?;
                             writer.write_raw(&payload)?;
+                        } else if edit.new_formula.is_some() {
+                            changed = true;
+                            super::convert_value_record_to_formula(
+                                &mut writer,
+                                id,
+                                &payload,
+                                col,
+                                style_out,
+                                edit,
+                            )?;
                         } else {
-                            if edit.new_formula.is_some() {
-                                changed = true;
-                                super::convert_value_record_to_formula(
-                                    &mut writer,
-                                    id,
-                                    &payload,
-                                    col,
-                                    style_out,
-                                    edit,
-                                )?;
-                            } else {
-                                super::reject_formula_payload_edit(edit, row, col)?;
-                                changed = true;
-                                super::patch_value_cell(&mut writer, col, style_out, edit)?;
-                            }
+                            super::reject_formula_payload_edit(edit, row, col)?;
+                            changed = true;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                     _ => {
@@ -489,7 +555,13 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                         } else {
                             super::reject_formula_payload_edit(edit, row, col)?;
                             changed = true;
-                            super::patch_value_cell(&mut writer, col, style_out, edit)?;
+                            super::patch_value_cell(
+                                &mut writer,
+                                col,
+                                style_out,
+                                edit,
+                                Some(existing_header),
+                            )?;
                         }
                     }
                 }
