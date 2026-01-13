@@ -257,6 +257,13 @@ jobs:
           cd apps/desktop
           cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
 
+      - name: Desktop dist asset report
+        run: node scripts/desktop_dist_asset_report.mjs
+        env:
+          # Optional: set as GitHub Actions variables to enable gating.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
       - name: Verify compiled desktop executable is ARM64
         shell: pwsh
         run: |
