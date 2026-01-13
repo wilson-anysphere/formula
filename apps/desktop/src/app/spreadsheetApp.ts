@@ -53,7 +53,7 @@ import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
 import { showToast, showQuickPick } from "../extensions/ui.js";
-import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
+import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleStrikethrough, toggleUnderline } from "../formatting/toolbar.js";
 import {
   DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
   evaluateFormattingSelectionSize,
@@ -9888,6 +9888,7 @@ export class SpreadsheetApp {
       | { kind: "bold" }
       | { kind: "underline" }
       | { kind: "italic" }
+      | { kind: "strikethrough" }
       | { kind: "numberFormat"; preset: "currency" | "percent" | "date" }
       | null = (() => {
       // Text formatting.
@@ -9895,6 +9896,8 @@ export class SpreadsheetApp {
       if (primary && !e.shiftKey && keyLower === "u") return { kind: "underline" };
       // Cmd+I is reserved for toggling the AI sidebar. Only bind italic to Ctrl+I.
       if (!e.shiftKey && keyLower === "i" && e.ctrlKey && !e.metaKey) return { kind: "italic" };
+      // Excel: Ctrl+5 toggles strikethrough.
+      if (!e.shiftKey && keyLower === "5" && e.ctrlKey && !e.metaKey) return { kind: "strikethrough" };
 
       // Number formats.
       if (primary && e.shiftKey && (e.key === "$" || e.code === "Digit4"))
@@ -9968,6 +9971,8 @@ export class SpreadsheetApp {
           return "Italic";
         case "underline":
           return "Underline";
+        case "strikethrough":
+          return "Strikethrough";
         case "numberFormat":
           return "Number format";
       }
@@ -9991,6 +9996,9 @@ export class SpreadsheetApp {
             break;
           case "underline":
             if (toggleUnderline(this.document, this.sheetId, docRange) === false) applied = false;
+            break;
+          case "strikethrough":
+            if (toggleStrikethrough(this.document, this.sheetId, docRange) === false) applied = false;
             break;
           case "numberFormat":
             if (applyNumberFormatPreset(this.document, this.sheetId, docRange, action.preset) === false) applied = false;
