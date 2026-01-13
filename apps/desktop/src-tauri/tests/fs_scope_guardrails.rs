@@ -28,13 +28,13 @@ const DESKTOP_ALLOWED_ROOTS_CALL: &str = "desktop_allowed_roots(";
 /// Helper calls that *both* canonicalize and enforce allowed-roots scoping.
 ///
 /// Notes:
-/// - We intentionally match on the function name (not the full module path) so refactors like
-///   `use crate::fs_scope::canonicalize_in_allowed_roots;` don't break the test.
+/// - We intentionally match on the module-qualified form (e.g. `fs_scope::...`) so this guardrail
+///   will fail if a command stops using the central `fs_scope.rs` implementation.
 /// - We include the trailing `(` to reduce false positives from mentions in comments.
 const SCOPE_ENFORCING_HELPER_CALLS: &[&str] = &[
-    "canonicalize_in_allowed_roots(",
-    "canonicalize_in_allowed_roots_with_error(",
-    "resolve_save_path_in_allowed_roots(",
+    "fs_scope::canonicalize_in_allowed_roots(",
+    "fs_scope::canonicalize_in_allowed_roots_with_error(",
+    "fs_scope::resolve_save_path_in_allowed_roots(",
 ];
 
 #[test]
