@@ -195,6 +195,23 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "SUBTOTAL",
+    description: "Returns a subtotal in a list or database.",
+    args: [
+      { name: "function_num", type: "number" },
+      { name: "ref1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "AGGREGATE",
+    description: "Returns an aggregate in a list or database, ignoring hidden rows and errors.",
+    args: [
+      { name: "function_num", type: "number" },
+      { name: "options", type: "number" },
+      { name: "ref1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "COUNT",
     description: "Counts the number of cells that contain numbers.",
     args: [
@@ -257,6 +274,13 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "MEDIAN",
+    description: "Returns the median of the given numbers.",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "MAX",
     description: "Returns the largest value in a set of values.",
     args: [
@@ -286,6 +310,142 @@ const CURATED_FUNCTIONS = [
       { name: "min_range", type: "range" },
       { name: "criteria_range1", type: "range", repeating: true },
       { name: "criteria1", type: "value" },
+    ],
+  },
+  {
+    name: "LARGE",
+    description: "Returns the k-th largest value in a data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "k", type: "number" },
+    ],
+  },
+  {
+    name: "SMALL",
+    description: "Returns the k-th smallest value in a data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "k", type: "number" },
+    ],
+  },
+  {
+    name: "PERCENTILE.INC",
+    description: "Returns the k-th percentile of values in a range.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "k", type: "number" },
+    ],
+  },
+  {
+    name: "QUARTILE.INC",
+    description: "Returns the quartile of a data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "quart", type: "number" },
+    ],
+  },
+  {
+    name: "RANK.EQ",
+    description: "Returns the rank of a number in a list of numbers.",
+    args: [
+      { name: "number", type: "number" },
+      { name: "ref", type: "range" },
+      { name: "order", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "CORREL",
+    description: "Returns the correlation coefficient between two data sets.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "COVAR",
+    description: "Returns the covariance between two data sets.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "COVARIANCE.P",
+    description: "Returns the population covariance between two data sets.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "COVARIANCE.S",
+    description: "Returns the sample covariance between two data sets.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "FREQUENCY",
+    description: "Calculates how often values occur within a range of values and returns a vertical array of numbers.",
+    args: [
+      { name: "data_array", type: "range" },
+      { name: "bins_array", type: "range" },
+    ],
+  },
+  {
+    name: "SLOPE",
+    description: "Returns the slope of the linear regression line through the given data points.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "INTERCEPT",
+    description: "Returns the intercept of the linear regression line through the given data points.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "FORECAST.LINEAR",
+    description: "Returns a value along a linear trend.",
+    args: [
+      { name: "x", type: "number" },
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range" },
+    ],
+  },
+  {
+    name: "LINEST",
+    description: "Returns the statistics for a linear trend by using the least squares method.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range", optional: true },
+      { name: "const", type: "boolean", optional: true },
+      { name: "stats", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "TREND",
+    description: "Returns values along a linear trend.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range", optional: true },
+      { name: "new_xs", type: "range", optional: true },
+      { name: "const", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "GROWTH",
+    description: "Returns values along an exponential trend.",
+    args: [
+      { name: "known_ys", type: "range" },
+      { name: "known_xs", type: "range", optional: true },
+      { name: "new_xs", type: "range", optional: true },
+      { name: "const", type: "boolean", optional: true },
     ],
   },
   {
@@ -473,6 +633,56 @@ const CURATED_FUNCTIONS = [
       { name: "array", type: "range" },
       { name: "by_col", type: "boolean", optional: true },
       { name: "exactly_once", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "HSTACK",
+    description: "Appends arrays horizontally and in sequence to return a larger array.",
+    args: [
+      { name: "array1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VSTACK",
+    description: "Appends arrays vertically and in sequence to return a larger array.",
+    args: [
+      { name: "array1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "TOCOL",
+    description: "Returns a single column containing all the items in the specified array or range.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "ignore", type: "number", optional: true },
+      { name: "scan_by_column", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "TOROW",
+    description: "Returns a single row containing all the items in the specified array or range.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "ignore", type: "number", optional: true },
+      { name: "scan_by_column", type: "boolean", optional: true },
+    ],
+  },
+  {
+    name: "WRAPROWS",
+    description: "Wraps a row or column of values by rows after a specified number of elements.",
+    args: [
+      { name: "vector", type: "range" },
+      { name: "wrap_count", type: "number" },
+      { name: "pad_with", type: "value", optional: true },
+    ],
+  },
+  {
+    name: "WRAPCOLS",
+    description: "Wraps a row or column of values by columns after a specified number of elements.",
+    args: [
+      { name: "vector", type: "range" },
+      { name: "wrap_count", type: "number" },
+      { name: "pad_with", type: "value", optional: true },
     ],
   },
   {

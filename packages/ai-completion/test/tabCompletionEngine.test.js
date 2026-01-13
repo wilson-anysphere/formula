@@ -659,6 +659,98 @@ test("Typing =TEXTJOIN(\",\",TRUE,A suggests a range and auto-closes (min args s
   );
 });
 
+test("Typing =SUBTOTAL(9, A suggests a range and auto-closes (min args satisfied)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUBTOTAL(9, A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUBTOTAL(9, A1:A10)"),
+    `Expected a SUBTOTAL range suggestion with closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =LARGE(A suggests a range but does not auto-close parens (needs k)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=LARGE(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=LARGE(A1:A10"),
+    `Expected a LARGE range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =FORECAST.LINEAR(10, A suggests a range but does not auto-close parens (needs more args)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=FORECAST.LINEAR(10, A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=FORECAST.LINEAR(10, A1:A10"),
+    `Expected a FORECAST.LINEAR range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =HSTACK(A suggests a range and auto-closes (min args satisfied)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=HSTACK(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=HSTACK(A1:A10)"),
+    `Expected an HSTACK range suggestion with closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =MAX(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 

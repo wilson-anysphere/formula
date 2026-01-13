@@ -56,4 +56,29 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.equal(registry.isRangeArg("TEXTJOIN", 1), false, "Expected TEXTJOIN ignore_empty not to be a range");
   assert.ok(registry.isRangeArg("TEXTJOIN", 2), "Expected TEXTJOIN text1 to be a range");
   assert.ok(registry.isRangeArg("TEXTJOIN", 3), "Expected TEXTJOIN text2 to be a range (varargs)");
+
+  // SUBTOTAL(function_num, ref1, [ref2], ...)
+  assert.equal(registry.isRangeArg("SUBTOTAL", 0), false, "Expected SUBTOTAL function_num not to be a range");
+  assert.ok(registry.isRangeArg("SUBTOTAL", 1), "Expected SUBTOTAL ref1 to be a range");
+  assert.ok(registry.isRangeArg("SUBTOTAL", 2), "Expected SUBTOTAL ref2 to be a range (varargs)");
+
+  // AGGREGATE(function_num, options, ref1, [ref2], ...)
+  assert.equal(registry.isRangeArg("AGGREGATE", 0), false, "Expected AGGREGATE function_num not to be a range");
+  assert.equal(registry.isRangeArg("AGGREGATE", 1), false, "Expected AGGREGATE options not to be a range");
+  assert.ok(registry.isRangeArg("AGGREGATE", 2), "Expected AGGREGATE ref1 to be a range");
+  assert.ok(registry.isRangeArg("AGGREGATE", 3), "Expected AGGREGATE ref2 to be a range (varargs)");
+
+  // FORECAST.LINEAR(x, known_y's, known_x's)
+  assert.equal(
+    registry.isRangeArg("FORECAST.LINEAR", 0),
+    false,
+    "Expected FORECAST.LINEAR x not to be a range"
+  );
+  assert.ok(registry.isRangeArg("FORECAST.LINEAR", 1), "Expected FORECAST.LINEAR known_ys to be a range");
+  assert.ok(registry.isRangeArg("FORECAST.LINEAR", 2), "Expected FORECAST.LINEAR known_xs to be a range");
+
+  // HSTACK/VSTACK(array1, [array2], ...)
+  assert.ok(registry.isRangeArg("HSTACK", 0), "Expected HSTACK array1 to be a range");
+  assert.ok(registry.isRangeArg("HSTACK", 1), "Expected HSTACK array2 to be a range (varargs)");
+  assert.ok(registry.isRangeArg("_xlfn.HSTACK", 0), "Expected _xlfn.HSTACK array1 to be a range");
 });
