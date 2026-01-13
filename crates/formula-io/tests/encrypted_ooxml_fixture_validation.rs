@@ -40,6 +40,7 @@ fn read_encryption_info_header(path: &Path) -> (u16, u16, u32) {
 #[test]
 fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
     let agile = fixture_path("agile.xlsx");
+    let agile_empty_password = fixture_path("agile-empty-password.xlsx");
     let standard = fixture_path("standard.xlsx");
 
     let (major, minor, _flags) = read_encryption_info_header(&agile);
@@ -48,6 +49,13 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
         (4, 4),
         "Agile-encrypted OOXML should have EncryptionInfo version 4.4"
     );
+    let (major, minor, _flags) = read_encryption_info_header(&agile_empty_password);
+    assert_eq!(
+        (major, minor),
+        (4, 4),
+        "Agile-encrypted OOXML (empty-password fixture) should have EncryptionInfo version 4.4"
+    );
+
     let (major, minor, _flags) = read_encryption_info_header(&standard);
     assert_eq!(
         (major, minor),

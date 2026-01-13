@@ -144,20 +144,37 @@ fn open_model_with_password(path: &Path, password: &str) -> formula_model::Workb
 fn decrypts_agile_fixture_with_correct_password() {
     let plaintext_path = fixture_path("plaintext.xlsx");
     let agile_path = fixture_path("agile.xlsx");
+    let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
 
     let plaintext = open_workbook_model(&plaintext_path).expect("open plaintext.xlsx");
     assert_expected_contents(&plaintext);
 
     let agile = open_model_with_password(&agile_path, "password");
     assert_expected_contents(&agile);
+
+    let agile_empty = open_model_with_password(&agile_empty_password_path, "");
+    assert_expected_contents(&agile_empty);
+}
+
+#[test]
+fn errors_on_missing_password_for_empty_password_fixture() {
+    let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
+
+    let err = open_workbook_model_with_password(&agile_empty_password_path, None)
+        .expect_err("expected missing password to error");
+    assert!(
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
+    );
 }
 
 #[test]
 fn errors_on_wrong_password_fixtures() {
     let agile_path = fixture_path("agile.xlsx");
+    let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
 
-    for path in [&agile_path, &standard_path] {
+    for path in [&agile_path, &agile_empty_password_path, &standard_path] {
         assert!(
             matches!(
                 open_workbook_model_with_password(path, Some("wrong-password")),

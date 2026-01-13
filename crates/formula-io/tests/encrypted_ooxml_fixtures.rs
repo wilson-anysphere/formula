@@ -46,3 +46,14 @@ fn detects_encrypted_ooxml_standard_fixture() {
     let bytes = std::fs::read(fixture_path).expect("read standard encrypted fixture");
     assert_encrypted_ooxml_bytes_detected(&bytes, "standard");
 }
+
+#[test]
+fn detects_encrypted_ooxml_agile_empty_password_fixture() {
+    let fixture_path = Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/encrypted/ooxml/agile-empty-password.xlsx"
+    ));
+
+    let bytes = std::fs::read(fixture_path).expect("read agile empty-password encrypted fixture");
+    assert_encrypted_ooxml_bytes_detected(&bytes, "agile-empty-password");
+}
