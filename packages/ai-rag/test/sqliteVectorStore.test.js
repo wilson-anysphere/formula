@@ -570,3 +570,25 @@ test("SqliteVectorStore dot() handles unaligned Uint8Array blobs (copies into al
     await store.close();
   }
 });
+
+test("SqliteVectorStore dot() throws when blob dimensions mismatch (arg lengths differ)", { skip: !sqlJsAvailable }, async () => {
+  const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
+  try {
+    const vec3 = new Uint8Array(new Float32Array([1, 0, 0]).buffer);
+    const vec2 = new Uint8Array(new Float32Array([1, 0]).buffer);
+    const stmt = store._db.prepare("SELECT dot(?, ?) AS score;");
+    try {
+      stmt.bind([vec3, vec2]);
+      await assert.rejects(
+        async () => {
+          stmt.step();
+        },
+        /got 3 vs 2/
+      );
+    } finally {
+      stmt.free();
+    }
+  } finally {
+    await store.close();
+  }
+});
