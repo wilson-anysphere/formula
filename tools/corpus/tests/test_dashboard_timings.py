@@ -85,6 +85,43 @@ class DashboardTimingTests(unittest.TestCase):
                 sys.argv = original_argv
             self.assertEqual(rc, 2)
 
+    def test_gate_errors_when_no_successful_round_trip_samples(self) -> None:
+        import io
+        import json
+        import sys
+        import tempfile
+        from contextlib import redirect_stdout
+        from pathlib import Path
+
+        import tools.corpus.dashboard as dashboard_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            triage_dir = Path(td)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            (reports_dir / "r1.json").write_text(
+                json.dumps(
+                    {"steps": {"round_trip": {"status": "failed", "duration_ms": 123}}}
+                ),
+                encoding="utf-8",
+            )
+
+            original_argv = sys.argv
+            try:
+                sys.argv = [
+                    "dashboard.py",
+                    "--triage-dir",
+                    str(triage_dir),
+                    "--gate-round-trip-p90-ms",
+                    "1000",
+                ]
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = dashboard_mod.main()
+            finally:
+                sys.argv = original_argv
+            self.assertEqual(rc, 2)
+
     def test_gate_fails_when_p90_exceeds_threshold(self) -> None:
         import io
         import json
@@ -150,6 +187,81 @@ class DashboardTimingTests(unittest.TestCase):
                     "--triage-dir",
                     str(triage_dir),
                     "--gate-load-p90-ms",
+                    "920",
+                ]
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = dashboard_mod.main()
+            finally:
+                sys.argv = original_argv
+
+            self.assertEqual(rc, 0)
+
+    def test_round_trip_gate_fails_when_p90_exceeds_threshold(self) -> None:
+        import io
+        import json
+        import sys
+        import tempfile
+        from contextlib import redirect_stdout
+        from pathlib import Path
+
+        import tools.corpus.dashboard as dashboard_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            triage_dir = Path(td)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            # Ten samples -> round_trip p90 = 910 (interpolated).
+            for i, d in enumerate([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]):
+                (reports_dir / f"r{i}.json").write_text(
+                    json.dumps({"steps": {"round_trip": {"status": "ok", "duration_ms": d}}}),
+                    encoding="utf-8",
+                )
+
+            original_argv = sys.argv
+            try:
+                sys.argv = [
+                    "dashboard.py",
+                    "--triage-dir",
+                    str(triage_dir),
+                    "--gate-round-trip-p90-ms",
+                    "905",
+                ]
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    rc = dashboard_mod.main()
+            finally:
+                sys.argv = original_argv
+
+            self.assertEqual(rc, 1)
+
+    def test_round_trip_gate_passes_when_p90_below_threshold(self) -> None:
+        import io
+        import json
+        import sys
+        import tempfile
+        from contextlib import redirect_stdout
+        from pathlib import Path
+
+        import tools.corpus.dashboard as dashboard_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            triage_dir = Path(td)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            for i, d in enumerate([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]):
+                (reports_dir / f"r{i}.json").write_text(
+                    json.dumps({"steps": {"round_trip": {"status": "ok", "duration_ms": d}}}),
+                    encoding="utf-8",
+                )
+
+            original_argv = sys.argv
+            try:
+                sys.argv = [
+                    "dashboard.py",
+                    "--triage-dir",
+                    str(triage_dir),
+                    "--gate-round-trip-p90-ms",
                     "920",
                 ]
                 buf = io.StringIO()
