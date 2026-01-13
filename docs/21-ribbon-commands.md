@@ -4,7 +4,8 @@ This document describes how **ribbon controls** (buttons, toggles, dropdown menu
 
 Key files:
 
-- Ribbon schema: `apps/desktop/src/ribbon/ribbonSchema.ts`
+- Ribbon schema entrypoint (types + tab assembly): `apps/desktop/src/ribbon/ribbonSchema.ts`
+- Ribbon tab definitions: `apps/desktop/src/ribbon/schema/*.ts`
 - Ribbon mount + wiring: `apps/desktop/src/main.ts` (`mountRibbon(...)`)
 - Commands: `apps/desktop/src/extensions/commandRegistry.ts`
 - Built-in command registration:
@@ -21,7 +22,8 @@ Key files:
 
 ### 1) Ribbon schema
 
-`apps/desktop/src/ribbon/ribbonSchema.ts` defines the ribbon’s structure:
+`apps/desktop/src/ribbon/ribbonSchema.ts` defines the ribbon’s structure (and imports
+per-tab definitions from `apps/desktop/src/ribbon/schema/*.ts`):
 
 - Tabs → Groups → Buttons
 - Dropdown buttons can contain `menuItems`
@@ -244,4 +246,3 @@ If the ribbon toggle should reflect selection state (Excel-style), update `sched
 - `apps/desktop/test/ribbonTestIds.test.js` (unique + required `testId`s)
 - `apps/desktop/src/ribbon/__tests__/RibbonSchema.vitest.ts` (schema invariants)
 - `apps/desktop/src/ribbon/__tests__/RibbonUiStateOverrides.vitest.ts` (pressed/label overrides by id)
-
