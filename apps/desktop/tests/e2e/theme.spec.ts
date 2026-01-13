@@ -27,4 +27,22 @@ test.describe("theme selector", () => {
 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });
+
+  test("System theme option follows OS preference", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Start with the UX default (Light), even though the OS is dark.
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+
+    await page.getByRole("tab", { name: "View", exact: true }).click();
+
+    const themeDropdown = page.getByTestId("ribbon-root").getByTestId("theme-selector");
+    await expect(themeDropdown).toBeVisible();
+    await themeDropdown.click();
+
+    await page.locator('[role="menuitem"][data-command-id="view.appearance.theme.system"]').click();
+
+    // With OS dark, System should resolve to Dark.
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
 });
