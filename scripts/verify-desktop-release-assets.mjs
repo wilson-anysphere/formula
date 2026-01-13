@@ -73,6 +73,62 @@ function filenameFromUrl(maybeUrl) {
 
 /**
  * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Best-effort locate a Tauri updater `platforms` map within a JSON payload.
+ * (Some formats nest the object; keep this liberal.)
+ *
+ * @param {unknown} root
+ * @returns {{ platforms: Record<string, unknown>; path: string[] } | null}
+ */
+function findPlatformsObject(root) {
+  if (!root || (typeof root !== "object" && !Array.isArray(root))) {
+    return null;
+  }
+
+  /** @type {{ value: unknown; path: string[] }[]} */
+  const queue = [{ value: root, path: [] }];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+
+    const { value, path: currentPath } = current;
+    if (isPlainObject(value)) {
+      if (isPlainObject(value.platforms)) {
+        return { platforms: value.platforms, path: [...currentPath, "platforms"] };
+      }
+
+      if (currentPath.length >= 8) continue;
+      for (const [key, child] of Object.entries(value)) {
+        if (isPlainObject(child) || Array.isArray(child)) {
+          queue.push({ value: child, path: [...currentPath, key] });
+        }
+      }
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      if (currentPath.length >= 8) continue;
+      for (let i = 0; i < value.length; i += 1) {
+        const child = value[i];
+        if (isPlainObject(child) || Array.isArray(child)) {
+          queue.push({ value: child, path: [...currentPath, String(i)] });
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * @param {unknown} value
  * @param {string} context
  */
 function requireNonEmptyString(value, context) {
@@ -409,10 +465,11 @@ function validateLatestJson(manifest, expectedVersion, assetsByName) {
     }
   }
 
-  const platforms = manifest.platforms;
-  if (!platforms || typeof platforms !== "object" || Array.isArray(platforms)) {
+  const foundPlatforms = findPlatformsObject(manifest);
+  if (!foundPlatforms) {
     errors.push(`latest.json is missing a "platforms" object.`);
   } else {
+    const { platforms } = foundPlatforms;
     const keys = Object.keys(platforms);
     const requiredOsSubstrings = ["linux", "windows", "darwin"];
     for (const os of requiredOsSubstrings) {
