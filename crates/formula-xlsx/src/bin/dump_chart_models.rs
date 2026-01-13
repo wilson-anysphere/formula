@@ -25,6 +25,8 @@ struct ChartParts {
     chart_ex_part: Option<String>,
     style_part: Option<String>,
     colors_part: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_shapes_part: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -159,13 +161,14 @@ fn dump_one(
         eprintln!("workbook: {}", xlsx_path.display());
         for (idx, chart) in charts.iter().enumerate() {
             eprintln!(
-                "  chart[{idx}]: sheet={:?} drawing_part={} chart_part={} chart_ex_part={:?} style_part={:?} colors_part={:?}",
+                "  chart[{idx}]: sheet={:?} drawing_part={} chart_part={} chart_ex_part={:?} style_part={:?} colors_part={:?} user_shapes_part={:?}",
                 chart.sheet_name,
                 chart.drawing_part,
                 chart.parts.chart.path,
                 chart.parts.chart_ex.as_ref().map(|p| p.path.as_str()),
                 chart.parts.style.as_ref().map(|p| p.path.as_str()),
                 chart.parts.colors.as_ref().map(|p| p.path.as_str()),
+                chart.parts.user_shapes.as_ref().map(|p| p.path.as_str()),
             );
         }
     }
@@ -185,6 +188,7 @@ fn dump_one(
             chart_ex_part: chart.parts.chart_ex.as_ref().map(|p| p.path.clone()),
             style_part: chart.parts.style.as_ref().map(|p| p.path.clone()),
             colors_part: chart.parts.colors.as_ref().map(|p| p.path.clone()),
+            user_shapes_part: chart.parts.user_shapes.as_ref().map(|p| p.path.clone()),
         };
 
         let mut json = if emit_both_models {

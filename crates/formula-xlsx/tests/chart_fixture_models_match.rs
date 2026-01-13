@@ -15,6 +15,8 @@ struct ChartParts {
     chart_ex_part: Option<String>,
     style_part: Option<String>,
     colors_part: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    user_shapes_part: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -90,6 +92,7 @@ fn chart_fixture_models_match() -> Result<(), Box<dyn std::error::Error>> {
                     chart_ex_part: chart.parts.chart_ex.map(|p| p.path),
                     style_part: chart.parts.style.map(|p| p.path),
                     colors_part: chart.parts.colors.map(|p| p.path),
+                    user_shapes_part: chart.parts.user_shapes.map(|p| p.path),
                 },
                 model_chart_space,
                 model_chart_ex,
