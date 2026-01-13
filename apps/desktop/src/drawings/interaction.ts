@@ -58,6 +58,10 @@ export class DrawingInteractionController {
         startY: number;
         startObjects: DrawingObject[];
         transform?: DrawingTransform;
+        startWidthPx: number;
+        startHeightPx: number;
+        /** Only set for image objects; used when Shift is held during resize. */
+        aspectRatio: number | null;
       }
     | null = null;
   private selectedId: number | null = null;
@@ -158,6 +162,12 @@ export class DrawingInteractionController {
             startY: y,
             startObjects: objects,
             transform: selectedObject.transform,
+            startWidthPx: selectedBounds.width,
+            startHeightPx: selectedBounds.height,
+            aspectRatio:
+              selectedObject.kind.type === "image" && selectedBounds.width > 0 && selectedBounds.height > 0
+                ? selectedBounds.width / selectedBounds.height
+                : null,
           };
           this.element.style.cursor = cursorForResizeHandleWithTransform(handle, selectedObject.transform);
           return;
@@ -189,6 +199,12 @@ export class DrawingInteractionController {
         startY: y,
         startObjects: objects,
         transform: hit.object.transform,
+        startWidthPx: hit.bounds.width,
+        startHeightPx: hit.bounds.height,
+        aspectRatio:
+          hit.object.kind.type === "image" && hit.bounds.width > 0 && hit.bounds.height > 0
+            ? hit.bounds.width / hit.bounds.height
+            : null,
       };
       this.element.style.cursor = cursorForResizeHandleWithTransform(handle, hit.object.transform);
     } else {
@@ -209,8 +225,41 @@ export class DrawingInteractionController {
       const { x, y } = this.getLocalPoint(e, rect);
 
       const zoom = sanitizeZoom(this.callbacks.getViewport().zoom);
-      const dx = x - this.resizing.startX;
-      const dy = y - this.resizing.startY;
+      let dx = x - this.resizing.startX;
+      let dy = y - this.resizing.startY;
+
+      const handle = this.resizing.handle;
+      const isCornerHandle = handle === "nw" || handle === "ne" || handle === "se" || handle === "sw";
+      if (isCornerHandle && e.shiftKey && this.resizing.aspectRatio != null) {
+        const transform = this.resizing.transform;
+        if (hasNonIdentityTransform(transform)) {
+          const local = inverseTransformVector(dx, dy, transform!);
+          const lockedLocal = lockAspectRatioResize({
+            handle,
+            dx: local.x,
+            dy: local.y,
+            startWidthPx: this.resizing.startWidthPx,
+            startHeightPx: this.resizing.startHeightPx,
+            aspectRatio: this.resizing.aspectRatio,
+            minSizePx: 8,
+          });
+          const world = applyTransformVector(lockedLocal.dx, lockedLocal.dy, transform!);
+          dx = world.x;
+          dy = world.y;
+        } else {
+          const locked = lockAspectRatioResize({
+            handle,
+            dx,
+            dy,
+            startWidthPx: this.resizing.startWidthPx,
+            startHeightPx: this.resizing.startHeightPx,
+            aspectRatio: this.resizing.aspectRatio,
+            minSizePx: 8,
+          });
+          dx = locked.dx;
+          dy = locked.dy;
+        }
+      }
 
       const next = this.resizing.startObjects.map((obj) => {
         if (obj.id !== this.resizing!.id) return obj;
@@ -930,3 +979,66 @@ function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry, out: 
 }
 
 // NOTE: Call sites avoid allocating pane objects by computing frozen-row/col membership inline.
+function lockAspectRatioResize(args: {
+  handle: ResizeHandle;
+  dx: number;
+  dy: number;
+  startWidthPx: number;
+  startHeightPx: number;
+  aspectRatio: number;
+  minSizePx: number;
+}): { dx: number; dy: number } {
+  const { handle, startWidthPx, startHeightPx } = args;
+  let { dx, dy, aspectRatio } = args;
+
+  // Only lock corner-handle resizes (edge handles remain unconstrained).
+  if (handle === "n" || handle === "e" || handle === "s" || handle === "w") return { dx, dy };
+  if (!Number.isFinite(aspectRatio) || aspectRatio <= 0) return { dx, dy };
+  if (!Number.isFinite(startWidthPx) || !Number.isFinite(startHeightPx)) return { dx, dy };
+  if (startWidthPx <= 0 || startHeightPx <= 0) return { dx, dy };
+
+  const sx = handle === "ne" || handle === "se" ? 1 : -1;
+  const sy = handle === "sw" || handle === "se" ? 1 : -1;
+
+  // Use the original bounds (captured once on resize start) as the single source of truth for the
+  // aspect ratio. Avoid recomputing from intermediate sizes to prevent drift.
+  //
+  // Prefer width-driven scaling when the user is changing width more (relative to the starting
+  // width). Otherwise, preserve the user's height change and derive width.
+  const proposedWidth = startWidthPx + sx * dx;
+  const proposedHeight = startHeightPx + sy * dy;
+
+  const scaleW = proposedWidth / startWidthPx;
+  const scaleH = proposedHeight / startHeightPx;
+
+  const widthDriven = Math.abs(scaleW - 1) >= Math.abs(scaleH - 1);
+
+  const minScale = Math.max(
+    startWidthPx > args.minSizePx ? args.minSizePx / startWidthPx : 0,
+    startHeightPx > args.minSizePx ? args.minSizePx / startHeightPx : 0,
+  );
+
+  const clampScale = (s: number): number => {
+    if (!Number.isFinite(s)) return 1;
+    // Prevent flipping, and enforce a minimum visual size for stable ratio math.
+    return Math.max(s, minScale, 0);
+  };
+
+  if (widthDriven) {
+    const scale = clampScale(scaleW);
+    const nextWidth = startWidthPx * scale;
+    const nextHeight = nextWidth / aspectRatio;
+    return {
+      dx: (nextWidth - startWidthPx) * sx,
+      dy: (nextHeight - startHeightPx) * sy,
+    };
+  }
+
+  const scale = clampScale(scaleH);
+  const nextHeight = startHeightPx * scale;
+  const nextWidth = nextHeight * aspectRatio;
+  return {
+    dx: (nextWidth - startWidthPx) * sx,
+    dy: (nextHeight - startHeightPx) * sy,
+  };
+}
