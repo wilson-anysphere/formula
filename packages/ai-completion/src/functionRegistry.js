@@ -212,6 +212,22 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "BYROW",
+    description: "Applies a LAMBDA to each row in an array and returns the result as an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
+    name: "BYCOL",
+    description: "Applies a LAMBDA to each column in an array and returns the result as an array.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
     name: "COUNT",
     description: "Counts the number of cells that contain numbers.",
     args: [
@@ -316,6 +332,13 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "STDEV",
+    description: "Estimates standard deviation based on a sample (legacy).",
+    args: [
+      { name: "number1", type: "range", repeating: true },
+    ],
+  },
+  {
     name: "STDEVPA",
     description: "Calculates standard deviation based on the entire population, including logical values and text.",
     args: [
@@ -355,6 +378,13 @@ const CURATED_FUNCTIONS = [
     description: "Calculates variance based on the entire population, including logical values and text.",
     args: [
       { name: "value1", type: "range", repeating: true },
+    ],
+  },
+  {
+    name: "VAR",
+    description: "Estimates variance based on a sample (legacy).",
+    args: [
+      { name: "number1", type: "range", repeating: true },
     ],
   },
   {
@@ -436,6 +466,14 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "PERCENTILE",
+    description: "Returns the k-th percentile of values in a range (legacy).",
+    args: [
+      { name: "array", type: "range" },
+      { name: "k", type: "number" },
+    ],
+  },
+  {
     name: "QUARTILE.INC",
     description: "Returns the quartile of a data set.",
     args: [
@@ -452,8 +490,25 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "QUARTILE",
+    description: "Returns the quartile of a data set (legacy).",
+    args: [
+      { name: "array", type: "range" },
+      { name: "quart", type: "number" },
+    ],
+  },
+  {
     name: "RANK.EQ",
     description: "Returns the rank of a number in a list of numbers.",
+    args: [
+      { name: "number", type: "number" },
+      { name: "ref", type: "range" },
+      { name: "order", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "RANK",
+    description: "Returns the rank of a number in a list of numbers (legacy).",
     args: [
       { name: "number", type: "number" },
       { name: "ref", type: "range" },
@@ -467,6 +522,33 @@ const CURATED_FUNCTIONS = [
       { name: "number", type: "number" },
       { name: "ref", type: "range" },
       { name: "order", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "PERCENTRANK",
+    description: "Returns the rank of a value in a data set as a percentage of the data set.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "x", type: "number" },
+      { name: "significance", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "PERCENTRANK.INC",
+    description: "Returns the rank of a value in a data set as a percentage of the data set, inclusive.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "x", type: "number" },
+      { name: "significance", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "PERCENTRANK.EXC",
+    description: "Returns the rank of a value in a data set as a percentage of the data set, exclusive.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "x", type: "number" },
+      { name: "significance", type: "number", optional: true },
     ],
   },
   {

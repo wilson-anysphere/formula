@@ -116,4 +116,20 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("RANK.AVG", 1), "Expected RANK.AVG ref to be a range");
   assert.ok(registry.isRangeArg("MODE.SNGL", 0), "Expected MODE.SNGL arg1 to be a range");
   assert.ok(registry.isRangeArg("TRIMMEAN", 0), "Expected TRIMMEAN array to be a range");
+
+  // Dynamic array helpers
+  assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
+  assert.ok(registry.isRangeArg("BYCOL", 0), "Expected BYCOL array to be a range");
+
+  // Legacy descriptive stats
+  assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");
+  assert.ok(registry.isRangeArg("QUARTILE", 0), "Expected QUARTILE array to be a range");
+  assert.ok(registry.isRangeArg("RANK", 1), "Expected RANK ref to be a range");
+  assert.ok(registry.isRangeArg("PERCENTRANK", 0), "Expected PERCENTRANK array to be a range");
+  assert.ok(registry.isRangeArg("PERCENTRANK.INC", 0), "Expected PERCENTRANK.INC array to be a range");
+  assert.ok(registry.isRangeArg("PERCENTRANK.EXC", 0), "Expected PERCENTRANK.EXC array to be a range");
+
+  // Legacy varargs
+  assert.ok(registry.isRangeArg("STDEV", 0), "Expected STDEV arg1 to be a range");
+  assert.ok(registry.isRangeArg("VAR", 0), "Expected VAR arg1 to be a range");
 });
