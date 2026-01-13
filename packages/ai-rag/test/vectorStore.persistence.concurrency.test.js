@@ -108,15 +108,27 @@ class ControlledBinaryStorage {
 test("JsonVectorStore serializes persistence writes to prevent lost updates", async () => {
   const storage = new ControlledBinaryStorage();
   const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
-  await store.load();
 
+  // Start the first upsert but do not await it. Wait until its persist has
+  // actually reached `storage.save()` so we know the first snapshot is taken.
   const p1 = store.upsert([{ id: "a", vector: [1, 0], metadata: { label: "A" } }]);
+  await storage.waitForSaves(1);
+
+  // Start a second upsert while the first persist is still in-flight.
   const p2 = store.upsert([{ id: "b", vector: [0, 1], metadata: { label: "B" } }]);
 
-  // Ensure the first save is in-flight, then release the second save before the first.
-  await storage.waitForSaves(1);
+  // Simulate out-of-order completion: allow "save #2" to complete before "save #1".
+  // In fixed implementations, save #2 won't even be invoked until save #1 completes,
+  // but pre-releasing it keeps the test deterministic.
   storage.release(2);
-  await Promise.resolve(); // allow the second upsert to enqueue its persist in buggy implementations
+
+  // Give the second upsert a chance to reach `storage.save()` in buggy
+  // implementations where saves are not serialized.
+  for (let i = 0; i < 25 && storage.saveCount < 2; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+
   storage.release(1);
 
   await Promise.all([p1, p2]);
@@ -144,11 +156,14 @@ test(
     const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
 
     const p1 = store.upsert([{ id: "a", vector: [1, 0], metadata: { label: "A" } }]);
+    await storage.waitForSaves(1);
     const p2 = store.upsert([{ id: "b", vector: [0, 1], metadata: { label: "B" } }]);
 
-    await storage.waitForSaves(1);
     storage.release(2);
-    await Promise.resolve();
+    for (let i = 0; i < 25 && storage.saveCount < 2; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.resolve();
+    }
     storage.release(1);
 
     await Promise.all([p1, p2]);
