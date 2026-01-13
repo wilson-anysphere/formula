@@ -62,6 +62,18 @@ fn formats_negative_numbers_for_each_locale() {
 }
 
 #[test]
+fn does_not_render_negative_zero() {
+    assert_eq!(
+        locale::format_number(-0.0, locale::get_locale("en-US").unwrap()),
+        "0"
+    );
+    assert_eq!(
+        locale::format_number(-0.0, locale::get_locale("fr-FR").unwrap()),
+        "0"
+    );
+}
+
+#[test]
 fn get_locale_normalizes_common_locale_id_spellings() {
     assert_eq!(locale::get_locale("en-us").unwrap().id, "en-US");
     assert_eq!(locale::get_locale("en").unwrap().id, "en-US");

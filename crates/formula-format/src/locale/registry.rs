@@ -125,6 +125,11 @@ pub fn number_locale_from_locale(locale: crate::Locale) -> NumberLocale {
 /// covers the most visible internationalization differences (thousands/decimal
 /// separators) needed by the UI and formula bar.
 pub fn format_number(value: f64, locale: &NumberLocale) -> String {
+    // Avoid displaying negative zero (can show up after floating point operations).
+    if value == 0.0 {
+        return "0".to_string();
+    }
+
     let s = value.to_string();
 
     // Preserve scientific notation as-is except for applying locale decimal
