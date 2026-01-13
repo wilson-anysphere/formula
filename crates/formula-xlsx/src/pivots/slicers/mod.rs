@@ -2,6 +2,7 @@ use crate::openxml::{
     local_name, parse_relationships, resolve_relationship_target, resolve_target,
 };
 use crate::package::{XlsxError, XlsxPackage};
+use crate::sheet_metadata::parse_workbook_sheets;
 use chrono::NaiveDate;
 use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
@@ -99,6 +100,10 @@ pub struct SlicerDefinition {
     pub source_name: Option<String>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
+    /// Worksheet parts that host any drawing containing this slicer (e.g. `xl/worksheets/sheet1.xml`).
+    pub placed_on_sheets: Vec<String>,
+    /// Worksheet names for [`Self::placed_on_sheets`] when resolvable from `xl/workbook.xml`.
+    pub placed_on_sheet_names: Vec<String>,
     pub selection: SlicerSelectionState,
 }
 
@@ -114,6 +119,10 @@ pub struct TimelineDefinition {
     pub level: Option<u32>,
     pub connected_pivot_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
+    /// Worksheet parts that host any drawing containing this timeline (e.g. `xl/worksheets/sheet1.xml`).
+    pub placed_on_sheets: Vec<String>,
+    /// Worksheet names for [`Self::placed_on_sheets`] when resolvable from `xl/workbook.xml`.
+    pub placed_on_sheet_names: Vec<String>,
     pub selection: TimelineSelectionState,
 }
 
@@ -151,6 +160,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
         .map(str::to_string)
         .collect::<Vec<_>>();
 
+    let worksheet_rels = package
+        .part_names()
+        .filter(|name| name.starts_with("xl/worksheets/_rels/") && name.ends_with(".rels"))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
     let mut slicer_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut timeline_to_drawings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
@@ -175,6 +190,36 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             }
         }
     }
+
+    let mut drawing_to_sheets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for rels_name in worksheet_rels {
+        let rels_bytes = package
+            .part(&rels_name)
+            .ok_or_else(|| XlsxError::MissingPart(rels_name.clone()))?;
+        let relationships = parse_relationships(rels_bytes)?;
+        let sheet_part = worksheet_part_name_from_rels(&rels_name);
+        for rel in relationships {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            if !is_drawing_relationship_type(&rel.type_uri) {
+                continue;
+            }
+            let target = resolve_target(&sheet_part, &rel.target);
+            if target.starts_with("xl/drawings/") {
+                drawing_to_sheets
+                    .entry(target)
+                    .or_default()
+                    .insert(sheet_part.clone());
+            }
+        }
+    }
+
+    let sheet_name_by_part = sheet_name_by_part(package)?;
 
     let mut slicers = Vec::with_capacity(slicer_parts.len());
     for part_name in slicer_parts {
@@ -205,6 +250,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
+        let (placed_on_sheets, placed_on_sheet_names) = placement_sheet_info(
+            &placed_on_drawings,
+            &drawing_to_sheets,
+            &sheet_name_by_part,
+        );
+
         let selection = cache_part
             .as_deref()
             .and_then(|cache_part| package.part(cache_part))
@@ -220,6 +271,8 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             source_name,
             connected_pivot_tables,
             placed_on_drawings,
+            placed_on_sheets,
+            placed_on_sheet_names,
             selection,
         });
     }
@@ -255,6 +308,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             .map(|drawings| drawings.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
 
+        let (placed_on_sheets, placed_on_sheet_names) = placement_sheet_info(
+            &placed_on_drawings,
+            &drawing_to_sheets,
+            &sheet_name_by_part,
+        );
+
         let mut selection = parse_timeline_selection(xml).unwrap_or_default();
         if (selection.start.is_none() || selection.end.is_none()) && cache_part.is_some() {
             if let Some(cache_part) = cache_part.as_deref() {
@@ -282,11 +341,78 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             level,
             connected_pivot_tables,
             placed_on_drawings,
+            placed_on_sheets,
+            placed_on_sheet_names,
             selection,
         });
     }
 
     Ok(PivotSlicerParts { slicers, timelines })
+}
+
+fn worksheet_part_name_from_rels(rels_name: &str) -> String {
+    // Example: xl/worksheets/_rels/sheet1.xml.rels -> xl/worksheets/sheet1.xml
+    let trimmed = rels_name
+        .strip_prefix("xl/worksheets/_rels/")
+        .unwrap_or(rels_name);
+    let trimmed = trimmed.strip_suffix(".rels").unwrap_or(trimmed);
+    format!("xl/worksheets/{trimmed}")
+}
+
+fn is_drawing_relationship_type(type_uri: &str) -> bool {
+    // Most producers use the canonical OfficeDocument relationship URI, but some third-party
+    // tools may vary the prefix. Since we only need to locate drawing parts, match by suffix.
+    type_uri.trim_end().ends_with("/drawing")
+}
+
+fn sheet_name_by_part(package: &XlsxPackage) -> Result<BTreeMap<String, String>, XlsxError> {
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = match package.part(workbook_part) {
+        Some(bytes) => bytes,
+        None => return Ok(BTreeMap::new()),
+    };
+    let workbook_xml = String::from_utf8(workbook_xml.to_vec())?;
+    let sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let mut out = BTreeMap::new();
+    for sheet in sheets {
+        let resolved = resolve_relationship_target(package, workbook_part, &sheet.rel_id)?
+            .or_else(|| {
+                let guess = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+                package.part(&guess).map(|_| guess)
+            });
+        if let Some(part) = resolved {
+            out.insert(part, sheet.name);
+        }
+    }
+
+    Ok(out)
+}
+
+fn placement_sheet_info(
+    placed_on_drawings: &[String],
+    drawing_to_sheets: &BTreeMap<String, BTreeSet<String>>,
+    sheet_name_by_part: &BTreeMap<String, String>,
+) -> (Vec<String>, Vec<String>) {
+    let mut placed_on_sheets: BTreeSet<String> = BTreeSet::new();
+    for drawing in placed_on_drawings {
+        if let Some(sheets) = drawing_to_sheets.get(drawing) {
+            placed_on_sheets.extend(sheets.iter().cloned());
+        }
+    }
+    let placed_on_sheets = placed_on_sheets.into_iter().collect::<Vec<_>>();
+
+    let mut placed_on_sheet_names: BTreeSet<String> = BTreeSet::new();
+    for sheet_part in &placed_on_sheets {
+        if let Some(name) = sheet_name_by_part.get(sheet_part) {
+            placed_on_sheet_names.insert(name.clone());
+        }
+    }
+
+    (
+        placed_on_sheets,
+        placed_on_sheet_names.into_iter().collect::<Vec<_>>(),
+    )
 }
 
 fn parse_iso_ymd(value: &str) -> Option<NaiveDate> {

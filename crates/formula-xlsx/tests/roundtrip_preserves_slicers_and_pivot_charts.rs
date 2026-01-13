@@ -26,6 +26,11 @@ fn roundtrip_preserves_slicers_timelines_and_pivot_charts() -> Result<(), Box<dy
         vec!["xl/pivotTables/pivotTable1.xml".to_string()]
     );
     assert_eq!(slicer.placed_on_drawings, vec!["xl/drawings/drawing1.xml"]);
+    assert_eq!(
+        slicer.placed_on_sheets,
+        vec!["xl/worksheets/sheet1.xml".to_string()]
+    );
+    assert_eq!(slicer.placed_on_sheet_names, vec!["Sheet1".to_string()]);
 
     let timeline = &slicers.timelines[0];
     assert_eq!(timeline.name.as_deref(), Some("DateTimeline"));
@@ -41,6 +46,11 @@ fn roundtrip_preserves_slicers_timelines_and_pivot_charts() -> Result<(), Box<dy
         timeline.placed_on_drawings,
         vec!["xl/drawings/drawing1.xml".to_string()]
     );
+    assert_eq!(
+        timeline.placed_on_sheets,
+        vec!["xl/worksheets/sheet1.xml".to_string()]
+    );
+    assert_eq!(timeline.placed_on_sheet_names, vec!["Sheet1".to_string()]);
 
     let charts = package.pivot_chart_parts()?;
     assert_eq!(charts.len(), 1);
