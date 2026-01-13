@@ -84,5 +84,13 @@ test("index.ts (WebCrypto) encryption key cache is bounded (LRU) and clearable",
   clearEncryptionKeyCache();
   await encryptCellPlaintext({ plaintext, key: key3, context });
   assert.equal(importKeyCalls, 5, "expected clearEncryptionKeyCache() to force re-import");
-});
 
+  // Disabling caching (max size = 0) should avoid retaining keys entirely.
+  globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__ = 0;
+  clearEncryptionKeyCache();
+  importKeyCalls = 0;
+
+  await encryptCellPlaintext({ plaintext, key: key1, context });
+  await encryptCellPlaintext({ plaintext, key: key1, context });
+  assert.equal(importKeyCalls, 2, "expected cache disabled to import key on every call");
+});
