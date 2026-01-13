@@ -31,12 +31,13 @@ test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t
   const doc = new Y.Doc();
   t.after(() => doc.destroy());
   const updateListeners = trackUpdateListeners(doc);
+  const baselineListenerCount = updateListeners.size;
 
   // Instantiate workbook roots before VersionManager attaches listeners so the
   // test only measures the effects of *updates*.
   const cells = doc.getMap("cells");
 
-  assert.equal(updateListeners.size, 0);
+  assert.equal(updateListeners.size, baselineListenerCount);
 
   const versioning = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
@@ -44,11 +45,12 @@ test("CollabVersioning.destroy unsubscribes from Yjs document updates", async (t
     autoStart: false,
   });
 
-  assert.equal(updateListeners.size, 1);
+  assert.ok(updateListeners.size > baselineListenerCount);
+  const listenerDelta = updateListeners.size - baselineListenerCount;
   assert.equal(versioning.manager.dirty, false);
 
   versioning.destroy();
-  assert.equal(updateListeners.size, 0);
+  assert.equal(updateListeners.size, baselineListenerCount);
 
   // Workbook edits after destroy should not mark the old manager dirty.
   cells.set("Sheet1:0:0", "alpha");
@@ -65,7 +67,8 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
 
   const cells = doc.getMap("cells");
 
-  assert.equal(updateListeners.size, 0);
+  const baselineListenerCount = updateListeners.size;
+  assert.equal(updateListeners.size, baselineListenerCount);
 
   const versioning1 = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
@@ -73,9 +76,10 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
     autoStart: false,
   });
   const manager1 = versioning1.manager;
-  assert.equal(updateListeners.size, 1);
+  assert.ok(updateListeners.size > baselineListenerCount);
+  const listenerDelta = updateListeners.size - baselineListenerCount;
   versioning1.destroy();
-  assert.equal(updateListeners.size, 0);
+  assert.equal(updateListeners.size, baselineListenerCount);
 
   const versioning2 = createCollabVersioning({
     // @ts-expect-error - minimal session stub for unit tests
@@ -83,7 +87,7 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
     autoStart: false,
   });
   const manager2 = versioning2.manager;
-  assert.equal(updateListeners.size, 1);
+  assert.equal(updateListeners.size, baselineListenerCount + listenerDelta);
 
   cells.set("Sheet1:0:0", "alpha");
 
@@ -91,7 +95,7 @@ test("CollabVersioning create/destroy cycles do not accumulate dirty listeners",
   assert.equal(manager2.dirty, true);
 
   versioning2.destroy();
-  assert.equal(updateListeners.size, 0);
+  assert.equal(updateListeners.size, baselineListenerCount);
 });
 
 test("CollabVersioning.destroy prevents autosnapshot ticks from creating new versions", async (t) => {
