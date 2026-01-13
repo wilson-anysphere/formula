@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ThemeController, resolveTheme } from "../src/theme/index.js";
-import { createMemoryStorage } from "../src/settings/appearance/index.js";
+import {
+  createMemoryStorage,
+  loadAppearanceSettings,
+  saveAppearanceSettings,
+} from "../src/settings/appearance/index.js";
 
 function createMatchMediaStub(initialMatches = {}) {
   const listeners = new Map();
@@ -67,6 +71,22 @@ test("resolveTheme prefers high contrast when forced-colors is active", () => {
   assert.equal(resolveTheme("system", env), "high-contrast");
 });
 
+test("loadAppearanceSettings defaults to light when the storage entry is missing/invalid", () => {
+  const storage = createMemoryStorage();
+  const key = "formula.settings.appearance.v1";
+
+  // Missing key.
+  assert.deepEqual(loadAppearanceSettings(storage), { themePreference: "light" });
+
+  // Invalid JSON.
+  storage.setItem(key, "not-json");
+  assert.deepEqual(loadAppearanceSettings(storage), { themePreference: "light" });
+
+  // Invalid theme value.
+  storage.setItem(key, JSON.stringify({ themePreference: "banana" }));
+  assert.deepEqual(loadAppearanceSettings(storage), { themePreference: "light" });
+});
+
 test("ThemeController applies resolved theme + reduced motion and persists preference", () => {
   const env = createMatchMediaStub({
     "(prefers-color-scheme: dark)": true,
@@ -78,20 +98,24 @@ test("ThemeController applies resolved theme + reduced motion and persists prefe
   const controller = new ThemeController({ env, document, storage });
   controller.start();
 
-  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
+  // UX default: Light theme, regardless of the OS preferred color scheme.
+  assert.equal(controller.getThemePreference(), "light");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
   assert.equal(document.documentElement.getAttribute("data-reduced-motion"), "false");
 
-  controller.setThemePreference("light");
-  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+  controller.setThemePreference("dark");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
 
   // System changes should not affect a user override.
   env.setMatches("(prefers-color-scheme: dark)", false);
-  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
 
   // Persistence.
-  const controller2 = new ThemeController({ env, document: createStubDocument(), storage });
+  const doc2 = createStubDocument();
+  const controller2 = new ThemeController({ env, document: doc2, storage });
   controller2.start();
-  assert.equal(controller2.getThemePreference(), "light");
+  assert.equal(controller2.getThemePreference(), "dark");
+  assert.equal(doc2.documentElement.getAttribute("data-theme"), "dark");
 });
 
 test("ThemeController updates theme when following system preferences", () => {
@@ -102,8 +126,11 @@ test("ThemeController updates theme when following system preferences", () => {
   const controller = new ThemeController({ env, document, storage });
   controller.start();
 
-  assert.equal(controller.getThemePreference(), "system");
+  assert.equal(controller.getThemePreference(), "light");
   assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+
+  controller.setThemePreference("system");
+  assert.equal(controller.getThemePreference(), "system");
 
   env.setMatches("(prefers-color-scheme: dark)", true);
   assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
@@ -120,8 +147,11 @@ test("ThemeController updates to high contrast when forced-colors toggles while 
   const controller = new ThemeController({ env, document, storage });
   controller.start();
 
-  assert.equal(controller.getThemePreference(), "system");
+  assert.equal(controller.getThemePreference(), "light");
   assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+
+  controller.setThemePreference("system");
+  assert.equal(controller.getThemePreference(), "system");
 
   env.setMatches("(forced-colors: active)", true);
   assert.equal(document.documentElement.getAttribute("data-theme"), "high-contrast");
@@ -138,8 +168,11 @@ test("ThemeController updates to high contrast when prefers-contrast toggles whi
   const controller = new ThemeController({ env, document, storage });
   controller.start();
 
-  assert.equal(controller.getThemePreference(), "system");
+  assert.equal(controller.getThemePreference(), "light");
   assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+
+  controller.setThemePreference("system");
+  assert.equal(controller.getThemePreference(), "system");
 
   env.setMatches("(prefers-contrast: more)", true);
   assert.equal(document.documentElement.getAttribute("data-theme"), "high-contrast");
@@ -162,7 +195,9 @@ test("ThemeController prefers high contrast when forced-colors is active (system
     "(forced-colors: active)": true
   });
   const document = createStubDocument();
-  const controller = new ThemeController({ env, document, storage: createMemoryStorage() });
+  const storage = createMemoryStorage();
+  saveAppearanceSettings({ themePreference: "system" }, storage);
+  const controller = new ThemeController({ env, document, storage });
   controller.start();
 
   assert.equal(controller.getThemePreference(), "system");
@@ -186,9 +221,9 @@ test("ThemeController falls back gracefully when storage is unavailable", () => 
 
   const controller = new ThemeController({ env, document, storage });
   controller.start();
-  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
 
   // Mutations still apply even if persistence fails.
-  controller.setThemePreference("light");
-  assert.equal(document.documentElement.getAttribute("data-theme"), "light");
+  controller.setThemePreference("dark");
+  assert.equal(document.documentElement.getAttribute("data-theme"), "dark");
 });

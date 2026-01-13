@@ -47,7 +47,7 @@ export class ThemeController {
     this._storage = options.storage || getDefaultStorage();
 
     /** @type {"system" | "light" | "dark" | "high-contrast"} */
-    this._themePreference = "system";
+    this._themePreference = "light";
     /** @type {"light" | "dark" | "high-contrast"} */
     this._resolvedTheme = "light";
 
@@ -57,7 +57,7 @@ export class ThemeController {
 
   start() {
     /** @type {{ themePreference?: "system" | "light" | "dark" | "high-contrast" }} */
-    let settings = { themePreference: "system" };
+    let settings = { themePreference: "light" };
     try {
       settings = loadAppearanceSettings(this._storage);
     } catch {
@@ -94,7 +94,7 @@ export class ThemeController {
   setThemePreference(themePreference, options = {}) {
     const { persist = true } = options;
 
-    const nextPreference = isThemePreference(themePreference) ? themePreference : "system";
+    const nextPreference = isThemePreference(themePreference) ? themePreference : "light";
 
     this._themePreference = nextPreference;
     this._applyTheme();

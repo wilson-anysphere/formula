@@ -79,7 +79,7 @@ describe("ThemeController (jsdom)", () => {
     controller.stop();
   });
 
-  it("resolves system theme from matchMedia and updates when preferences change", () => {
+  it("defaults to light and follows matchMedia when the user selects System", () => {
     const env = createMatchMediaStub({
       [MEDIA.prefersDark]: false,
       [MEDIA.forcedColors]: false,
@@ -89,12 +89,19 @@ describe("ThemeController (jsdom)", () => {
     const controller = new ThemeController({ document, env, storage: createMemoryStorage() });
     controller.start();
 
+    expect(controller.getThemePreference()).toBe("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
 
+    // While using the explicit Light theme preference, system changes should not apply.
     env.setMatches(MEDIA.prefersDark, true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+
+    // Selecting System should follow matchMedia.
+    controller.setThemePreference("system");
+    expect(controller.getThemePreference()).toBe("system");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
 
-    // High contrast takes precedence over light/dark.
+    // High contrast takes precedence over light/dark while following the system.
     env.setMatches(MEDIA.forcedColors, true);
     expect(document.documentElement.getAttribute("data-theme")).toBe("high-contrast");
 
