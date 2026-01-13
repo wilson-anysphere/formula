@@ -107,6 +107,40 @@ test("Typing =VLO suggests VLOOKUP(", async () => {
   );
 });
 
+test("Function name completion works after ';' inside an array constant", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "={1;VLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "={1;VLOOKUP("),
+    `Expected VLOOKUP completion after ';', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Function name completion works after '{' inside an array constant", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "={VLO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "={VLOOKUP("),
+    `Expected VLOOKUP completion after '{', got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =XLO suggests XLOOKUP(", async () => {
   const engine = new TabCompletionEngine();
 
@@ -306,6 +340,30 @@ test("Range suggestions work for subsequent args when ';' is used as the argumen
   assert.ok(
     suggestions.some((s) => s.text === "=SUM(A1; A1:A10)"),
     `Expected a SUM range suggestion for the 2nd arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Range suggestions work for an empty subsequent arg when ';' is used as the argument separator", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  // Trailing space is common after typing a separator in the formula bar.
+  const currentInput = "=SUM(A1; ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on A11 (0-based row 10), below the data.
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1; A1:A10)"),
+    `Expected a SUM range suggestion for the 2nd (empty) arg, got: ${suggestions.map((s) => s.text).join(", ")}`
   );
 });
 
