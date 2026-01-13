@@ -26,6 +26,7 @@ describe("FormulaBarView fx function picker", () => {
     expect(picker?.hidden).toBe(false);
     expect(pickerInput).toBeTruthy();
     expect(document.activeElement).toBe(pickerInput);
+    expect(fxButton!.getAttribute("aria-expanded")).toBe("true");
 
     host.remove();
   });

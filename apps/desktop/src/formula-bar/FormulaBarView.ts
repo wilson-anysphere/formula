@@ -371,6 +371,8 @@ export class FormulaBarView {
     fxButton.textContent = "fx";
     fxButton.title = "Insert function";
     fxButton.setAttribute("aria-label", "Insert function");
+    fxButton.setAttribute("aria-haspopup", "dialog");
+    fxButton.setAttribute("aria-expanded", "false");
     fxButton.dataset.testid = "formula-fx-button";
 
     actions.appendChild(cancelButton);
@@ -1455,6 +1457,7 @@ export class FormulaBarView {
 
     this.#functionPickerOpen = true;
     this.#functionPickerEl.hidden = false;
+    this.#fxButtonEl.setAttribute("aria-expanded", "true");
     this.#functionPickerInputEl.value = "";
     this.#functionPickerSelectedIndex = 0;
 
@@ -1471,6 +1474,7 @@ export class FormulaBarView {
     if (!this.#functionPickerOpen) return;
     this.#functionPickerOpen = false;
     this.#functionPickerEl.hidden = true;
+    this.#fxButtonEl.setAttribute("aria-expanded", "false");
     this.#functionPickerItems = [];
     this.#functionPickerItemEls = [];
     this.#functionPickerSelectedIndex = 0;
