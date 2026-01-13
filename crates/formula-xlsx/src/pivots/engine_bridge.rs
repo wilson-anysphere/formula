@@ -9,6 +9,7 @@ use formula_engine::pivot::{
     ShowAsType, SubtotalPosition, ValueField,
 };
 
+use super::cache_records::pivot_cache_datetime_to_naive_date;
 use super::{PivotCacheDefinition, PivotCacheValue, PivotTableDefinition};
 
 /// Convert a parsed pivot cache (definition + record iterator) into a pivot-engine
@@ -36,7 +37,7 @@ pub fn pivot_cache_to_engine_source(
                 .get(field_idx)
                 .cloned()
                 .unwrap_or(PivotCacheValue::Missing);
-            row.push(pivot_cache_value_to_engine(value));
+            row.push(pivot_cache_value_to_engine(def, field_idx, value));
         }
         out.push(row);
     }
@@ -44,7 +45,19 @@ pub fn pivot_cache_to_engine_source(
     out
 }
 
-fn pivot_cache_value_to_engine(value: PivotCacheValue) -> PivotValue {
+fn pivot_cache_value_to_engine(
+    def: &PivotCacheDefinition,
+    field_idx: usize,
+    value: PivotCacheValue,
+) -> PivotValue {
+    // Pivot caches can encode record values via a per-field "shared items" table (written as
+    // `<x v="..."/>` indices in `pivotCacheRecords*.xml`). Resolve those indices using the *field
+    // position* in the record (not the field name).
+    let value = def.resolve_record_value(field_idx, value);
+    pivot_cache_value_to_engine_inner(value)
+}
+
+fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
     match value {
         PivotCacheValue::String(s) => PivotValue::Text(s),
         PivotCacheValue::Number(n) => PivotValue::Number(n),
@@ -54,6 +67,8 @@ fn pivot_cache_value_to_engine(value: PivotCacheValue) -> PivotValue {
         PivotCacheValue::DateTime(s) => {
             if s.is_empty() {
                 PivotValue::Blank
+            } else if let Some(date) = pivot_cache_datetime_to_naive_date(&s) {
+                PivotValue::Date(date)
             } else {
                 PivotValue::Text(s)
             }
@@ -113,10 +128,8 @@ pub fn pivot_table_to_engine_config(
                     .map(|f| f.name.clone())
             });
 
-            // `dataField@baseItem` refers to an item within `baseField`'s shared-items table.
-            //
-            // We currently do not parse shared items from `pivotCacheDefinition`, so we can't map
-            // this index to a stable display string yet.
+            // `dataField@baseItem` refers to an item within `baseField`'s shared-items table. We
+            // currently do not map this index to a stable display string.
             let base_item = None;
             Some(ValueField {
                 source_field,

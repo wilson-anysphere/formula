@@ -2,13 +2,12 @@ use std::collections::BTreeSet;
 use std::io::Cursor;
 
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::name::QName;
 use quick_xml::Reader;
 
+use super::PivotCacheValue;
 use crate::openxml::resolve_relationship_target;
 use crate::{XlsxDocument, XlsxError, XlsxPackage};
-
-use super::cache_records::PivotCacheValue;
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PivotCacheDefinition {
     pub record_count: Option<u64>,
@@ -71,7 +70,11 @@ impl PivotCacheDefinition {
     /// - If the index is out of range, the cache field is missing, or the cache field has no
     ///   `shared_items`, this returns [`PivotCacheValue::Missing`].
     #[inline]
-    pub fn resolve_record_value(&self, field_idx: usize, value: PivotCacheValue) -> PivotCacheValue {
+    pub fn resolve_record_value(
+        &self,
+        field_idx: usize,
+        value: PivotCacheValue,
+    ) -> PivotCacheValue {
         let PivotCacheValue::Index(shared_idx) = value else {
             return value;
         };
@@ -96,7 +99,9 @@ impl XlsxPackage {
     /// Parse every pivot cache definition part in the package.
     ///
     /// Returns a sorted list of `(part_name, parsed_definition)` pairs.
-    pub fn pivot_cache_definitions(&self) -> Result<Vec<(String, PivotCacheDefinition)>, XlsxError> {
+    pub fn pivot_cache_definitions(
+        &self,
+    ) -> Result<Vec<(String, PivotCacheDefinition)>, XlsxError> {
         let mut paths: BTreeSet<String> = BTreeSet::new();
         for name in self.part_names() {
             if name.starts_with("xl/pivotCache/")
@@ -169,7 +174,9 @@ impl XlsxDocument {
     /// Parse every pivot cache definition part preserved in the document.
     ///
     /// Returns a sorted list of `(part_name, parsed_definition)` pairs.
-    pub fn pivot_cache_definitions(&self) -> Result<Vec<(String, PivotCacheDefinition)>, XlsxError> {
+    pub fn pivot_cache_definitions(
+        &self,
+    ) -> Result<Vec<(String, PivotCacheDefinition)>, XlsxError> {
         let mut paths: BTreeSet<String> = BTreeSet::new();
         for name in self.parts().keys() {
             if name.starts_with("xl/pivotCache/")
@@ -208,13 +215,94 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
+    let mut nested_buf = Vec::new();
+    let mut skip_buf = Vec::new();
     let mut def = PivotCacheDefinition::default();
+
+    let mut current_field_idx: Option<usize> = None;
+    let mut in_shared_items = false;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
         match event {
-            Event::Start(e) | Event::Empty(e) => {
-                handle_element(&mut def, &e)?;
+            Event::Start(e) => {
+                let tag = e.local_name();
+                let tag = tag.as_ref();
+
+                if in_shared_items {
+                    if let Some(field_idx) = current_field_idx {
+                        if let Some(item) = parse_shared_item_start(
+                            &mut reader,
+                            &e,
+                            &mut nested_buf,
+                            &mut skip_buf,
+                        )? {
+                            if let Some(field) = def.cache_fields.get_mut(field_idx) {
+                                field
+                                    .shared_items
+                                    .get_or_insert_with(Vec::new)
+                                    .push(item);
+                            }
+                        }
+                    } else {
+                        skip_to_end(&mut reader, e.name(), &mut skip_buf);
+                    }
+                } else if tag.eq_ignore_ascii_case(b"cacheField") {
+                    handle_element(&mut def, &e)?;
+                    current_field_idx = def.cache_fields.len().checked_sub(1);
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    // `sharedItems` appears as a child of `cacheField`. Record that we should treat
+                    // the upcoming elements as shared item values until we hit `</sharedItems>`.
+                    if let Some(field_idx) = current_field_idx {
+                        if let Some(field) = def.cache_fields.get_mut(field_idx) {
+                            field.shared_items.get_or_insert_with(Vec::new);
+                        }
+                        in_shared_items = true;
+                    } else {
+                        in_shared_items = false;
+                    }
+                } else {
+                    handle_element(&mut def, &e)?;
+                }
+            }
+            Event::Empty(e) => {
+                let tag = e.local_name();
+                let tag = tag.as_ref();
+
+                if in_shared_items {
+                    if let Some(field_idx) = current_field_idx {
+                        if let Some(item) = parse_shared_item_empty(&e) {
+                            if let Some(field) = def.cache_fields.get_mut(field_idx) {
+                                field
+                                    .shared_items
+                                    .get_or_insert_with(Vec::new)
+                                    .push(item);
+                            }
+                        }
+                    }
+                } else if tag.eq_ignore_ascii_case(b"cacheField") {
+                    handle_element(&mut def, &e)?;
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    // Empty `<sharedItems/>` list.
+                    if let Some(field_idx) = current_field_idx {
+                        if let Some(field) = def.cache_fields.get_mut(field_idx) {
+                            field.shared_items.get_or_insert_with(Vec::new);
+                        }
+                    }
+                } else {
+                    handle_element(&mut def, &e)?;
+                }
+            }
+            Event::End(e) => {
+                let tag = e.local_name();
+                let tag = tag.as_ref();
+
+                if tag.eq_ignore_ascii_case(b"cacheField") {
+                    current_field_idx = None;
+                    in_shared_items = false;
+                } else if tag.eq_ignore_ascii_case(b"sharedItems") {
+                    in_shared_items = false;
+                }
             }
             Event::Eof => break,
             _ => {}
@@ -223,6 +311,274 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
     }
 
     Ok(def)
+}
+
+fn parse_shared_item_empty(e: &BytesStart<'_>) -> Option<PivotCacheValue> {
+    let local_name = e.local_name();
+    let local_name = local_name.as_ref();
+
+    match local_name {
+        b"m" => Some(PivotCacheValue::Missing),
+        b"n" => Some(parse_shared_number(attr_value_local(e, b"v"))),
+        b"s" => Some(parse_shared_string(attr_value_local(e, b"v"))),
+        b"b" => Some(parse_shared_bool(attr_value_local(e, b"v"))),
+        b"e" => Some(parse_shared_error(attr_value_local(e, b"v"))),
+        b"d" => Some(parse_shared_datetime(attr_value_local(e, b"v"))),
+        b"x" => Some(parse_shared_index(attr_value_local(e, b"v"))),
+        _ => None,
+    }
+}
+
+fn parse_shared_item_start<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    e: &BytesStart<'_>,
+    buf: &mut Vec<u8>,
+    skip_buf: &mut Vec<u8>,
+) -> Result<Option<PivotCacheValue>, XlsxError> {
+    let local_name = e.local_name();
+    let local_name = local_name.as_ref();
+
+    // Most shared items are self-closing tags (`Event::Empty`), but some producers emit
+    // `<s><v>...</v></s>` or `<n>42</n>`.
+    let attr_v = attr_value_local(e, b"v");
+
+    let mut value_text =
+        |reader: &mut Reader<R>| read_value_text_from_element(reader, e.name(), buf, skip_buf);
+
+    match local_name {
+        b"m" => {
+            skip_to_end(reader, e.name(), skip_buf);
+            Ok(Some(PivotCacheValue::Missing))
+        }
+        b"n" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_number(v)))
+        }
+        b"d" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_datetime(v)))
+        }
+        b"x" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_index(v)))
+        }
+        b"s" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_string(v)))
+        }
+        b"e" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_error(v)))
+        }
+        b"b" => {
+            let v = match attr_v {
+                Some(v) => {
+                    skip_to_end(reader, e.name(), skip_buf);
+                    Some(v)
+                }
+                None => value_text(reader)?,
+            };
+            Ok(Some(parse_shared_bool(v)))
+        }
+        _ => {
+            // Unknown tags should be ignored, but we must still advance the reader.
+            skip_to_end(reader, e.name(), skip_buf);
+            Ok(None)
+        }
+    }
+}
+
+fn attr_value_local(e: &BytesStart<'_>, key: &[u8]) -> Option<String> {
+    for attr in e.attributes().with_checks(false) {
+        let Ok(attr) = attr else {
+            continue;
+        };
+        if attr.key.local_name().as_ref() != key {
+            continue;
+        }
+        if let Ok(v) = attr.unescape_value() {
+            return Some(v.into_owned());
+        }
+    }
+    None
+}
+
+fn parse_shared_number(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    let Ok(n) = v.trim().parse::<f64>() else {
+        return PivotCacheValue::Missing;
+    };
+    PivotCacheValue::Number(n)
+}
+
+fn parse_shared_datetime(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    PivotCacheValue::DateTime(v)
+}
+
+fn parse_shared_index(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    let Ok(idx) = v.trim().parse::<u32>() else {
+        return PivotCacheValue::Missing;
+    };
+    PivotCacheValue::Index(idx)
+}
+
+fn parse_shared_string(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    PivotCacheValue::String(v)
+}
+
+fn parse_shared_error(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    PivotCacheValue::Error(v)
+}
+
+fn parse_shared_bool(v: Option<String>) -> PivotCacheValue {
+    let Some(v) = v else {
+        return PivotCacheValue::Missing;
+    };
+    let v = v.trim();
+    PivotCacheValue::Bool(v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn skip_to_end<R: std::io::BufRead>(reader: &mut Reader<R>, end: QName<'_>, buf: &mut Vec<u8>) {
+    buf.clear();
+    let _ = reader.read_to_end_into(end, buf);
+}
+
+fn read_value_text_from_element<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    outer_end: QName<'_>,
+    buf: &mut Vec<u8>,
+    skip_buf: &mut Vec<u8>,
+) -> Result<Option<String>, XlsxError> {
+    let mut value: Option<String> = None;
+
+    loop {
+        let event = reader.read_event_into(buf)?;
+
+        match event {
+            Event::Start(e) => {
+                let e = e.into_owned();
+                buf.clear();
+
+                if e.local_name().as_ref() == b"v" {
+                    let v = read_text_to_end(reader, e.name(), buf, skip_buf)?;
+                    if value.is_none() {
+                        value = Some(v);
+                    }
+                } else {
+                    // Skip unknown nested elements inside the value wrapper.
+                    skip_to_end(reader, e.name(), skip_buf);
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"v" => {
+                value.get_or_insert_with(String::new);
+            }
+            Event::Text(e) if value.is_none() => {
+                if let Ok(text) = e.unescape() {
+                    let text = text.into_owned();
+                    if !text.trim().is_empty() {
+                        value = Some(text);
+                    }
+                }
+            }
+            Event::CData(e) if value.is_none() => {
+                if let Ok(text) = std::str::from_utf8(e.as_ref()) {
+                    if !text.trim().is_empty() {
+                        value = Some(text.to_string());
+                    }
+                }
+            }
+            Event::End(e) if e.name() == outer_end => break,
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    Ok(value)
+}
+
+fn read_text_to_end<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    end: QName<'_>,
+    buf: &mut Vec<u8>,
+    skip_buf: &mut Vec<u8>,
+) -> Result<String, XlsxError> {
+    let mut text = String::new();
+
+    loop {
+        let event = reader.read_event_into(buf)?;
+
+        match event {
+            Event::Text(e) => {
+                if let Ok(t) = e.unescape() {
+                    text.push_str(&t);
+                }
+            }
+            Event::CData(e) => {
+                if let Ok(t) = std::str::from_utf8(e.as_ref()) {
+                    text.push_str(t);
+                }
+            }
+            Event::Start(e) => {
+                let e = e.into_owned();
+                buf.clear();
+                // Keep the parser resilient by skipping nested elements.
+                skip_to_end(reader, e.name(), skip_buf);
+            }
+            Event::End(e) if e.name() == end => break,
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    Ok(text)
 }
 
 fn workbook_pivot_cache_rel_id(xml: &[u8], cache_id: u32) -> Result<Option<String>, XlsxError> {
@@ -391,7 +747,10 @@ pub(crate) fn split_sheet_ref(reference: &str) -> Option<(String, String)> {
     }
 
     let sheet_part = sheet_part.trim();
-    let sheet_part = if let Some(stripped) = sheet_part.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+    let sheet_part = if let Some(stripped) = sheet_part
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+    {
         stripped.replace("''", "'")
     } else {
         sheet_part.to_string()
