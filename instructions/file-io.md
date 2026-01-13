@@ -30,6 +30,7 @@ Achieve **perfect Excel file compatibility**. Every `.xlsx` file loads perfectly
 ### Your Documentation
 
 - **Primary:** [`docs/02-xlsx-compatibility.md`](../docs/02-xlsx-compatibility.md) — file format handling, preservation strategy
+- **Pivots:** [`docs/21-xlsx-pivots.md`](../docs/21-xlsx-pivots.md) — PivotTables/PivotCaches/Slicers/Timelines OpenXML compatibility + roadmap
 - **Charts:** [`docs/17-charts.md`](../docs/17-charts.md) — DrawingML chart parsing and round-trip
 - **Encrypted workbooks:** [`docs/21-encrypted-workbooks.md`](../docs/21-encrypted-workbooks.md) — password-protected/encrypted Excel files (OOXML `EncryptedPackage`, legacy `.xls` `FILEPASS`)
 

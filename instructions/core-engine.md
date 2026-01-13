@@ -31,6 +31,7 @@ Build the computational heart of Formula: the formula parser, dependency graph, 
 
 - **Primary:** [`docs/01-formula-engine.md`](../docs/01-formula-engine.md) — formula parsing, evaluation, dependency tracking
 - **Storage:** [`docs/04-data-model-storage.md`](../docs/04-data-model-storage.md) — cell storage, columnar compression
+- **Pivots:** [`docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md`](../docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md) — PivotTables ownership boundaries + data flow (worksheet pivots vs Data Model pivots)
 
 ---
 
