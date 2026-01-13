@@ -1611,50 +1611,87 @@ jobs:
           echo "--- end plutil output ---"
           python scripts/ci/verify_macos_bundle_associations.py --info-plist "${info_plist}"
 
-      - name: Verify Linux .desktop integration in .deb (MimeType + Exec placeholder)
+      - name: Verify Linux .deb package (deps + ldd + desktop integration)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          deb="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/deb/*.deb' -print 2>/dev/null | head -n 1 || true)"
-          if [[ -z "${deb}" ]]; then
-            echo "ERROR: could not find a .deb under apps/desktop/src-tauri/target/**/release/bundle/deb" >&2
-            find apps/desktop/src-tauri/target -maxdepth 10 -type f -name '*.deb' -print | head -n 20 || true
+          # Preferred location (matches docs/release.md), but fall back to scanning common Cargo target dirs.
+          shopt -s nullglob
+          debs=(apps/desktop/src-tauri/target/release/bundle/deb/*.deb)
+          shopt -u nullglob
+
+          if ((${#debs[@]} == 0)); then
+            roots=()
+            if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+              roots+=("${CARGO_TARGET_DIR}")
+            fi
+            roots+=("apps/desktop/src-tauri/target" "apps/desktop/target" "target")
+
+            debs=()
+            for root in "${roots[@]}"; do
+              [[ -d "${root}" ]] || continue
+              while IFS= read -r -d '' f; do
+                debs+=("$f")
+              done < <(find "${root}" -type f -path '*/release/bundle/deb/*.deb' -print0 2>/dev/null || true)
+            done
+          fi
+
+          if ((${#debs[@]} == 0)); then
+            echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
+            echo "Debug: searched roots:" >&2
+            echo "  - apps/desktop/src-tauri/target/release/bundle/deb/*.deb" >&2
+            echo "  - CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-<unset>}" >&2
+            echo "  - apps/desktop/src-tauri/target" >&2
+            echo "  - apps/desktop/target" >&2
+            echo "  - target" >&2
             exit 1
           fi
-          echo "Using deb: ${deb}"
 
-          echo "::group::dpkg -I ${deb}"
-          dpkg -I "${deb}" | tee dpkg-info.txt
-          echo "::endgroup::"
+          if ((${#debs[@]} > 1)); then
+            echo "Found multiple .deb artifacts; validating all:"
+            printf '  - %s\n' "${debs[@]}"
+          fi
 
-          for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
-            if ! grep -qi "$needle" dpkg-info.txt; then
-              echo "::error::Expected runtime dependency '$needle' missing from dpkg -I output for ${deb}"
+          for deb in "${debs[@]}"; do
+            echo "Using deb: ${deb}"
+
+            echo "::group::dpkg -I ${deb}"
+            dpkg -I "${deb}" | tee dpkg-info.txt
+            echo "::endgroup::"
+
+            for needle in "webkit2gtk" "libgtk-3" "appindicator"; do
+              if ! grep -qi "$needle" dpkg-info.txt; then
+                echo "::error::Expected runtime dependency '$needle' missing from dpkg -I output for ${deb}"
+                exit 1
+              fi
+            done
+
+            tmpdir="$(mktemp -d)"
+            trap 'rm -rf "${tmpdir}"' EXIT
+            dpkg-deb -x "${deb}" "${tmpdir}"
+
+            bin="${tmpdir}/usr/bin/formula-desktop"
+            if [[ ! -f "${bin}" ]]; then
+              echo "::error::Expected installed binary not found at ${bin} after extracting ${deb}"
+              echo "Extracted file tree (first 200 entries):"
+              find "${tmpdir}" -maxdepth 5 -type f -print | head -n 200
               exit 1
             fi
+
+            echo "::group::ldd ${bin}"
+            ldd "${bin}" | tee ldd.txt
+            echo "::endgroup::"
+            if grep -q "not found" ldd.txt; then
+              echo "::error::Missing shared library dependencies detected by ldd for ${bin}"
+              exit 1
+            fi
+
+            python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
+
+            rm -rf "${tmpdir}"
+            trap - EXIT
           done
-
-          tmpdir="$(mktemp -d)"
-          dpkg-deb -x "${deb}" "${tmpdir}"
-
-          bin="${tmpdir}/usr/bin/formula-desktop"
-          if [[ ! -f "${bin}" ]]; then
-            echo "::error::Expected installed binary not found at ${bin} after extracting ${deb}"
-            echo "Extracted file tree (first 200 entries):"
-            find "${tmpdir}" -maxdepth 5 -type f -print | head -n 200
-            exit 1
-          fi
-
-          echo "::group::ldd ${bin}"
-          ldd "${bin}" | tee ldd.txt
-          echo "::endgroup::"
-          if grep -q "not found" ldd.txt; then
-            echo "::error::Missing shared library dependencies detected by ldd for ${bin}"
-            exit 1
-          fi
-
-          python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
       - name: Report desktop bundle sizes
         env:
           # Enforce the bundle size budget on tagged releases by default.
