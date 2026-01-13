@@ -203,7 +203,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
         <div className="what-if__section" data-testid="scenario-manager-report">
           <h4 className="what-if__section-title">{t("whatIf.scenario.summaryTitle")}</h4>
           <div className="what-if__table-wrap">
-            <table className="what-if-table">
+            <table className="what-if-table" aria-label={t("whatIf.scenario.summaryTitle")}>
               <thead>
                 <tr>
                   <th scope="col">{t("whatIf.scenario.table.scenario")}</th>
