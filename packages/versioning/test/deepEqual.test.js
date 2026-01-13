@@ -31,14 +31,29 @@ test("deepEqual: plain objects", () => {
   assert.equal(deepEqual({ a: 1 }, { a: 1, b: undefined }), false);
 });
 
-test("deepEqual: does not blow up on cycles", () => {
+test("deepEqual: repeated references do not have to match aliasing", () => {
+  const shared = { a: 1 };
+  const a = { x: shared, y: shared };
+  const b = { x: { a: 1 }, y: { a: 1 } };
+  assert.equal(deepEqual(a, b), true);
+});
+
+test("deepEqual: cycle structure is respected", () => {
   const a = { value: 1 };
   // @ts-ignore - create a cycle for testing
   a.self = a;
   const b = { value: 1 };
+  // @ts-ignore - create a different cycle structure
+  const inner = { value: 1 };
   // @ts-ignore - create a cycle for testing
-  b.self = b;
+  inner.self = inner;
+  // @ts-ignore
+  b.self = inner;
 
-  assert.equal(typeof deepEqual(a, b), "boolean");
+  assert.equal(deepEqual(a, b), false);
+
+  const c = { value: 1 };
+  // @ts-ignore - create a cycle for testing
+  c.self = c;
+  assert.equal(deepEqual(a, c), true);
 });
-

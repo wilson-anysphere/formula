@@ -22,21 +22,31 @@
  * @returns {boolean}
  */
 export function deepEqual(a, b) {
-  /** @type {WeakMap<object, object>} */
-  const aToB = new WeakMap();
-  /** @type {WeakMap<object, object>} */
-  const bToA = new WeakMap();
-  return innerDeepEqual(a, b, aToB, bToA);
+  /** @type {any[]} */
+  const aStack = [];
+  /** @type {any[]} */
+  const bStack = [];
+  // Track only the *current recursion stack* (not all visited nodes). This matches
+  // Node's deep equality semantics:
+  // - repeated (non-cyclic) references do not need to correspond across the two values
+  // - references to an *ancestor* (cycles) must correspond to the same ancestor
+  /** @type {WeakMap<object, number>} */
+  const aIndex = new WeakMap();
+  /** @type {WeakMap<object, number>} */
+  const bIndex = new WeakMap();
+  return innerDeepEqual(a, b, aStack, bStack, aIndex, bIndex);
 }
 
 /**
  * @param {any} a
  * @param {any} b
- * @param {WeakMap<object, object>} aToB
- * @param {WeakMap<object, object>} bToA
+ * @param {any[]} aStack
+ * @param {any[]} bStack
+ * @param {WeakMap<object, number>} aIndex
+ * @param {WeakMap<object, number>} bIndex
  * @returns {boolean}
  */
-function innerDeepEqual(a, b, aToB, bToA) {
+function innerDeepEqual(a, b, aStack, bStack, aIndex, bIndex) {
   if (Object.is(a, b)) return true;
 
   if (a === null || b === null) return false;
@@ -49,9 +59,13 @@ function innerDeepEqual(a, b, aToB, bToA) {
   // Primitives (and functions) that weren't `Object.is` equal are not equal.
   if (typeA !== "object") return false;
 
-  // Objects: handle cycles / repeated references.
-  if (aToB.has(a)) return aToB.get(a) === b;
-  if (bToA.has(b)) return bToA.get(b) === a;
+  // Objects: handle cycles (references to an ancestor in the current recursion stack).
+  // Important: do NOT enforce a global a<->b bijection. Non-cyclic repeated references
+  // are allowed to compare equal even if the two graphs don't share the same aliasing.
+  const aPos = aIndex.get(a);
+  if (aPos !== undefined) return bStack[aPos] === b;
+  const bPos = bIndex.get(b);
+  if (bPos !== undefined) return aStack[bPos] === a;
 
   const tagA = Object.prototype.toString.call(a);
   const tagB = Object.prototype.toString.call(b);
@@ -88,20 +102,30 @@ function innerDeepEqual(a, b, aToB, bToA) {
   const protoB = Object.getPrototypeOf(b);
   if (protoA !== protoB) return false;
 
-  // Record mapping before recursing so cycles short-circuit correctly.
-  aToB.set(a, b);
-  bToA.set(b, a);
+  // Track ancestry for cycle detection.
+  const depth = aStack.length;
+  aStack.push(a);
+  bStack.push(b);
+  aIndex.set(a, depth);
+  bIndex.set(b, depth);
 
-  if (Array.isArray(a)) return arrayEqual(a, b, aToB, bToA);
+  try {
+    if (Array.isArray(a)) return arrayEqual(a, b, aStack, bStack, aIndex, bIndex);
 
-  if (protoA !== Object.prototype && protoA !== null) {
-    // Unknown object type (class instances, Maps, Sets, Errors, Yjs types, …).
-    // We intentionally avoid walking these (they can be cyclic / huge) and fall
-    // back to reference equality (already handled by Object.is above).
-    return false;
+    if (protoA !== Object.prototype && protoA !== null) {
+      // Unknown object type (class instances, Maps, Sets, Errors, Yjs types, …).
+      // We intentionally avoid walking these (they can be cyclic / huge) and fall
+      // back to reference equality (already handled by Object.is above).
+      return false;
+    }
+
+    return plainObjectEqual(a, b, aStack, bStack, aIndex, bIndex);
+  } finally {
+    aStack.pop();
+    bStack.pop();
+    aIndex.delete(a);
+    bIndex.delete(b);
   }
-
-  return plainObjectEqual(a, b, aToB, bToA);
 }
 
 /**
@@ -135,10 +159,12 @@ function arrayBufferViewEqual(a, b) {
 /**
  * @param {any[]} a
  * @param {any[]} b
- * @param {WeakMap<object, object>} aToB
- * @param {WeakMap<object, object>} bToA
+ * @param {any[]} aStack
+ * @param {any[]} bStack
+ * @param {WeakMap<object, number>} aIndex
+ * @param {WeakMap<object, number>} bIndex
  */
-function arrayEqual(a, b, aToB, bToA) {
+function arrayEqual(a, b, aStack, bStack, aIndex, bIndex) {
   if (!Array.isArray(b)) return false;
   if (a.length !== b.length) return false;
 
@@ -147,7 +173,7 @@ function arrayEqual(a, b, aToB, bToA) {
     const aHas = Object.prototype.hasOwnProperty.call(a, i);
     const bHas = Object.prototype.hasOwnProperty.call(b, i);
     if (aHas !== bHas) return false;
-    if (aHas && !innerDeepEqual(a[i], b[i], aToB, bToA)) return false;
+    if (aHas && !innerDeepEqual(a[i], b[i], aStack, bStack, aIndex, bIndex)) return false;
   }
 
   // Compare any additional enumerable properties (rare, but keeps behavior closer
@@ -161,7 +187,7 @@ function arrayEqual(a, b, aToB, bToA) {
     if (aKeys[i] !== bKeys[i]) return false;
   }
   for (const key of aKeys) {
-    if (!innerDeepEqual(a[key], b[key], aToB, bToA)) return false;
+    if (!innerDeepEqual(a[key], b[key], aStack, bStack, aIndex, bIndex)) return false;
   }
   return true;
 }
@@ -181,10 +207,12 @@ function isArrayIndexKey(key) {
 /**
  * @param {Record<string, any>} a
  * @param {Record<string, any>} b
- * @param {WeakMap<object, object>} aToB
- * @param {WeakMap<object, object>} bToA
+ * @param {any[]} aStack
+ * @param {any[]} bStack
+ * @param {WeakMap<object, number>} aIndex
+ * @param {WeakMap<object, number>} bIndex
  */
-function plainObjectEqual(a, b, aToB, bToA) {
+function plainObjectEqual(a, b, aStack, bStack, aIndex, bIndex) {
   /** @type {string[]} */
   const aKeys = Object.keys(a);
   /** @type {string[]} */
@@ -196,8 +224,7 @@ function plainObjectEqual(a, b, aToB, bToA) {
     if (aKeys[i] !== bKeys[i]) return false;
   }
   for (const key of aKeys) {
-    if (!innerDeepEqual(a[key], b[key], aToB, bToA)) return false;
+    if (!innerDeepEqual(a[key], b[key], aStack, bStack, aIndex, bIndex)) return false;
   }
   return true;
 }
-
