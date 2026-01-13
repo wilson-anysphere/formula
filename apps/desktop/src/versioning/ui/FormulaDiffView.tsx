@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 
 import { diffFormulaToRenderOps, isEffectivelyEmptyFormula } from "./formulaDiffRender.js";
 
@@ -38,7 +38,7 @@ export function FormulaDiffView({ before, after, className }: FormulaDiffViewPro
 
   // `diffFormula` is authored in JS (workspace package) so keep the UI boundary
   // typed locally.
-  const ops = diffFormulaToRenderOps(before, after);
+  const ops = useMemo(() => diffFormulaToRenderOps(before, after), [before, after]);
 
   return (
     <code className={joinClassName("formula-diff-view", className)}>
