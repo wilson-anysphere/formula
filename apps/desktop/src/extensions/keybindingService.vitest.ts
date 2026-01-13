@@ -558,29 +558,51 @@ describe("KeybindingService", () => {
     ]);
 
     const index = service.getCommandKeybindingDisplayIndex();
+    const ariaIndex = service.getCommandKeybindingAriaIndex();
     expect(index.get("ext.allowed")).toEqual(["Ctrl+J"]);
+    expect(ariaIndex.get("ext.allowed")).toEqual(["Control+J"]);
 
     // Reserved bindings should not be surfaced as hints since they will never fire.
     expect(index.get("ext.stealCopy")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealCopy")).toBeUndefined();
     expect(index.get("ext.stealPasteSpecial")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealPasteSpecial")).toBeUndefined();
     expect(index.get("ext.stealQuickOpen")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealQuickOpen")).toBeUndefined();
     expect(index.get("ext.stealInlineAI")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealInlineAI")).toBeUndefined();
     expect(index.get("ext.stealEditCell")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealEditCell")).toBeUndefined();
     expect(index.get("ext.stealAddComment")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealAddComment")).toBeUndefined();
     expect(index.get("ext.stealPreviousSheet")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealPreviousSheet")).toBeUndefined();
     expect(index.get("ext.stealNextSheet")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealNextSheet")).toBeUndefined();
     expect(index.get("ext.stealAIChat")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealAIChat")).toBeUndefined();
     expect(index.get("ext.stealCommentsPanel")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealCommentsPanel")).toBeUndefined();
     expect(index.get("ext.stealEscape")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealEscape")).toBeUndefined();
     expect(index.get("ext.stealEnter")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealEnter")).toBeUndefined();
     expect(index.get("ext.stealNew")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealNew")).toBeUndefined();
     expect(index.get("ext.stealOpen")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealOpen")).toBeUndefined();
     expect(index.get("ext.stealSave")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealSave")).toBeUndefined();
     expect(index.get("ext.stealSaveAs")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealSaveAs")).toBeUndefined();
     expect(index.get("ext.stealPrint")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealPrint")).toBeUndefined();
     expect(index.get("ext.stealClose")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealClose")).toBeUndefined();
     expect(index.get("ext.stealQuit")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealQuit")).toBeUndefined();
     expect(index.get("ext.stealContextMenu")).toBeUndefined();
+    expect(ariaIndex.get("ext.stealContextMenu")).toBeUndefined();
   });
 
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {
