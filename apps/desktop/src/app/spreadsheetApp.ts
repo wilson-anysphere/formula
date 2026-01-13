@@ -5029,16 +5029,17 @@ export class SpreadsheetApp {
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
-  goTo(reference: string): void {
+  goTo(reference: string): boolean {
     try {
+      const trimmed = reference.trim();
       // `parseGoTo` needs a sheet token it can round-trip through the workbook lookup.
       // Use the stable id here so unqualified A1 references ("A1") still work even if
       // display-name -> id resolution is temporarily unavailable (e.g. during sheet
       // rename propagation).
       const currentSheetName = this.sheetId;
-      const { sheetName: qualifiedSheetName } = splitSheetQualifier(reference);
-      const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName });
-      if (parsed.type !== "range") return;
+      const { sheetName: qualifiedSheetName } = splitSheetQualifier(trimmed);
+      const parsed = parseGoTo(trimmed, { workbook: this.searchWorkbook, currentSheetName });
+      if (parsed.type !== "range") return false;
 
       const { range } = parsed;
       // For unqualified A1 references (e.g. "A1" or "A1:B2"), always treat navigation as relative
@@ -5046,14 +5047,17 @@ export class SpreadsheetApp {
       // resolver is temporarily unavailable/out-of-date.
       const targetSheetId =
         parsed.source === "a1" && !qualifiedSheetName ? this.sheetId : this.resolveSheetIdByName(parsed.sheetName);
-      if (!targetSheetId) return;
+      if (!targetSheetId) return false;
       if (range.startRow === range.endRow && range.startCol === range.endCol) {
         this.activateCell({ sheetId: targetSheetId, row: range.startRow, col: range.startCol });
       } else {
         this.selectRange({ sheetId: targetSheetId, range });
       }
+      return true;
     } catch {
-      // Ignore invalid Go To inputs for now.
+      // Invalid Go To inputs should not throw; signal failure so the name box can
+      // present "invalid reference" feedback instead of failing silently.
+      return false;
     }
   }
 

@@ -95,6 +95,45 @@
     border-color var(--motion-duration) var(--motion-ease);
 }
 
+.formula-bar-name-box-wrapper {
+  position: relative;
+  min-width: 0;
+}
+
+.formula-bar-name-box.formula-bar-name-box--invalid {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px var(--error-bg);
+}
+
+.formula-bar-name-box.formula-bar-name-box--invalid:focus-within {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px var(--error-bg);
+}
+
+.formula-bar-name-box-error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  padding: 4px 6px;
+  max-width: 220px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--error);
+  background: var(--bg-primary);
+  color: var(--error);
+  font-size: 11px;
+  line-height: 14px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-surface);
+}
+
+.formula-bar-name-box-error[hidden] {
+  display: none;
+}
+
 .formula-bar-address {
   flex: 1;
   min-width: 0;

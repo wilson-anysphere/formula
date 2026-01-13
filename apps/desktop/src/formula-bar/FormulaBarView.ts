@@ -128,7 +128,14 @@ export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
   onCommit: (text: string, commit: FormulaBarCommit) => void;
   onCancel?: () => void;
-  onGoTo?: (reference: string) => void;
+  /**
+   * Navigate the active selection to the provided A1/name/table reference.
+   *
+   * Return `true` only when navigation actually occurred. Return `false` when the
+   * reference could not be parsed/resolved so the view can show "invalid reference"
+   * feedback (Excel-style name box behavior).
+   */
+  onGoTo?: (reference: string) => boolean;
   onOpenNameBoxMenu?: () => void | Promise<void>;
   getNameBoxMenuItems?: () => NameBoxMenuItem[];
   onHoverRange?: (range: RangeAddress | null) => void;
@@ -147,6 +154,12 @@ let errorPanelIdCounter = 0;
 function nextErrorPanelId(): string {
   errorPanelIdCounter += 1;
   return `formula-bar-error-panel-${errorPanelIdCounter}`;
+}
+
+let nameBoxErrorIdCounter = 0;
+function nextNameBoxErrorId(): string {
+  nameBoxErrorIdCounter += 1;
+  return `formula-bar-name-box-error-${nameBoxErrorIdCounter}`;
 }
 
 export type FormulaBarCommitReason = "enter" | "tab" | "command";
@@ -223,6 +236,7 @@ export class FormulaBarView {
   #fxButtonEl: HTMLButtonElement;
   #expandButtonEl: HTMLButtonElement;
   #addressEl: HTMLInputElement;
+  #nameBoxErrorEl: HTMLDivElement;
   #highlightEl: HTMLElement;
   #hintEl: HTMLElement;
   #errorButton: HTMLButtonElement;
@@ -269,6 +283,8 @@ export class FormulaBarView {
   #functionPickerSelectedIndex = 0;
   #functionPickerAnchorSelection: { start: number; end: number } | null = null;
   #functionPickerDocMouseDown = (e: MouseEvent) => this.#onFunctionPickerDocMouseDown(e);
+  #nameBoxErrorId: string;
+  #isNameBoxInvalid = false;
 
   constructor(root: HTMLElement, callbacks: FormulaBarViewCallbacks, opts: FormulaBarViewOptions = {}) {
     this.root = root;
@@ -299,6 +315,9 @@ export class FormulaBarView {
     const nameBox = document.createElement("div");
     nameBox.className = "formula-bar-name-box";
 
+    const nameBoxWrapper = document.createElement("div");
+    nameBoxWrapper.className = "formula-bar-name-box-wrapper";
+
     const nameBoxDropdown = document.createElement("button");
     nameBoxDropdown.className = "formula-bar-name-box-dropdown";
     nameBoxDropdown.dataset.testid = "name-box-dropdown";
@@ -311,6 +330,17 @@ export class FormulaBarView {
 
     nameBox.appendChild(address);
     nameBox.appendChild(nameBoxDropdown);
+
+    const nameBoxError = document.createElement("div");
+    nameBoxError.className = "formula-bar-name-box-error";
+    nameBoxError.hidden = true;
+    nameBoxError.textContent = "Invalid reference";
+    nameBoxError.setAttribute("role", "tooltip");
+    const nameBoxErrorId = nextNameBoxErrorId();
+    nameBoxError.id = nameBoxErrorId;
+
+    nameBoxWrapper.appendChild(nameBox);
+    nameBoxWrapper.appendChild(nameBoxError);
 
     const actions = document.createElement("div");
     actions.className = "formula-bar-actions";
@@ -445,7 +475,7 @@ export class FormulaBarView {
     errorPanel.setAttribute("aria-labelledby", errorTitle.id);
     errorPanel.setAttribute("aria-describedby", errorDesc.id);
 
-    row.appendChild(nameBox);
+    row.appendChild(nameBoxWrapper);
     row.appendChild(actions);
     row.appendChild(editor);
     row.appendChild(expandButton);
@@ -512,6 +542,7 @@ export class FormulaBarView {
     this.#fxButtonEl = fxButton;
     this.#expandButtonEl = expandButton;
     this.#addressEl = address;
+    this.#nameBoxErrorEl = nameBoxError;
     this.#highlightEl = highlight;
     this.#hintEl = hint;
     this.#errorButton = errorButton;
@@ -525,9 +556,15 @@ export class FormulaBarView {
     this.#functionPickerEl = functionPicker;
     this.#functionPickerInputEl = functionPickerInput;
     this.#functionPickerListEl = functionPickerList;
+    this.#nameBoxErrorId = nameBoxErrorId;
 
     address.addEventListener("focus", () => {
       address.select();
+    });
+
+    address.addEventListener("input", () => {
+      if (!this.#isNameBoxInvalid) return;
+      this.#clearNameBoxError();
     });
 
     nameBoxDropdown.addEventListener("click", () => {
@@ -590,12 +627,36 @@ export class FormulaBarView {
             if (active) {
               this.#selectNameBoxDropdownItem(active);
               return;
+             }
+             // Fall back to the standard Go To behavior if filtering produced no matches.
+             this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
+            const ref = address.value.trim();
+            const handler = this.#callbacks.onGoTo;
+            if (!handler) {
+              address.blur();
+              return;
             }
-            // Fall back to the standard Go To behavior if filtering produced no matches.
-            this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
-            const ref = address.value;
+
+            let ok = false;
+            try {
+              ok = handler(ref) === true;
+            } catch {
+              ok = false;
+            }
+
+            if (!ok) {
+              this.#setNameBoxError("Invalid reference");
+              try {
+                address.focus({ preventScroll: true });
+              } catch {
+                address.focus();
+              }
+              return;
+            }
+
+            this.#clearNameBoxError();
             address.blur();
-            this.#callbacks.onGoTo?.(ref);
+            this.#addressEl.value = this.#nameBoxValue;
             return;
           }
           if (e.key === "Escape") {
@@ -627,15 +688,44 @@ export class FormulaBarView {
 
       if (e.key === "Enter") {
         e.preventDefault();
-        const ref = address.value;
-        // Blur before navigating so subsequent renders can update the value.
+        const ref = address.value.trim();
+        const handler = this.#callbacks.onGoTo;
+        if (!handler) {
+          // Fallback: treat Enter as a no-op navigation and allow normal blur behavior.
+          address.blur();
+          return;
+        }
+
+        let ok = false;
+        try {
+          ok = handler(ref) === true;
+        } catch {
+          ok = false;
+        }
+
+        if (!ok) {
+          this.#setNameBoxError("Invalid reference");
+          // Keep focus in the input so the user can correct the reference.
+          try {
+            address.focus({ preventScroll: true });
+          } catch {
+            address.focus();
+          }
+          return;
+        }
+
+        this.#clearNameBoxError();
+        // Blur after navigating so follow-up renders can update the value.
         address.blur();
-        this.#callbacks.onGoTo?.(ref);
+        // In case navigation triggered a render while we were still focused, sync the value now
+        // that the input is no longer focused.
+        this.#addressEl.value = this.#nameBoxValue;
         return;
       }
 
       if (e.key === "Escape") {
         e.preventDefault();
+        this.#clearNameBoxError();
         address.value = this.#nameBoxValue;
         address.blur();
       }
@@ -825,6 +915,47 @@ export class FormulaBarView {
 
     this.#render({ preserveTextareaValue: false });
     this.#emitOverlays();
+  }
+
+  #setNameBoxError(message = "Invalid reference"): void {
+    this.#isNameBoxInvalid = true;
+    this.#nameBoxEl.classList.add("formula-bar-name-box--invalid");
+    this.#addressEl.setAttribute("aria-invalid", "true");
+
+    // Provide a lightweight Excel-like tooltip under the input.
+    this.#nameBoxErrorEl.textContent = message;
+    this.#nameBoxErrorEl.hidden = false;
+
+    // Accessibility: associate the tooltip with the input.
+    const describedBy = this.#addressEl.getAttribute("aria-describedby") ?? "";
+    const tokens = describedBy
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (!tokens.includes(this.#nameBoxErrorId)) {
+      tokens.push(this.#nameBoxErrorId);
+      this.#addressEl.setAttribute("aria-describedby", tokens.join(" "));
+    }
+  }
+
+  #clearNameBoxError(): void {
+    if (!this.#isNameBoxInvalid) return;
+    this.#isNameBoxInvalid = false;
+    this.#nameBoxEl.classList.remove("formula-bar-name-box--invalid");
+    this.#addressEl.removeAttribute("aria-invalid");
+    this.#nameBoxErrorEl.hidden = true;
+
+    const describedBy = this.#addressEl.getAttribute("aria-describedby") ?? "";
+    const next = describedBy
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t && t !== this.#nameBoxErrorId)
+      .join(" ");
+    if (next) {
+      this.#addressEl.setAttribute("aria-describedby", next);
+    } else {
+      this.#addressEl.removeAttribute("aria-describedby");
+    }
   }
 
   setAiSuggestion(suggestion: string | FormulaBarAiSuggestion | null): void {
@@ -2396,9 +2527,34 @@ export class FormulaBarView {
     this.#addressEl.value = item.label;
     this.#closeNameBoxDropdown({ restoreAddress: false, reason: "commit" });
 
-    // Blur before navigating so subsequent renders can update the value.
+    const handler = this.#callbacks.onGoTo;
+    if (!handler) {
+      this.#addressEl.blur();
+      return;
+    }
+
+    let ok = false;
+    try {
+      ok = handler(String(item.reference ?? "").trim()) === true;
+    } catch {
+      ok = false;
+    }
+
+    if (!ok) {
+      this.#setNameBoxError("Invalid reference");
+      try {
+        this.#addressEl.focus({ preventScroll: true });
+      } catch {
+        this.#addressEl.focus();
+      }
+      this.#addressEl.select();
+      return;
+    }
+
+    this.#clearNameBoxError();
+    // Blur after navigating so follow-up renders can update the value.
     this.#addressEl.blur();
-    this.#callbacks.onGoTo?.(item.reference);
+    this.#addressEl.value = this.#nameBoxValue;
   }
 
   #nameBoxDropdownOptionId(item: NameBoxDropdownItem): string {
