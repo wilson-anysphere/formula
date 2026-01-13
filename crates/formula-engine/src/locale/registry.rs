@@ -1,5 +1,6 @@
-use crate::value::casefold;
 use crate::LocaleConfig;
+use crate::value::ErrorKind;
+use crate::value::casefold;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -110,18 +111,20 @@ static ES_ES_FUNCTIONS: FunctionTranslations =
 
 #[derive(Debug)]
 struct ErrorTranslationMaps {
+    /// Case-folded canonical error literal -> preferred localized spelling.
     canon_to_loc: HashMap<String, &'static str>,
+    /// Case-folded localized error literal -> canonical error literal.
     loc_to_canon: HashMap<String, &'static str>,
 }
 
 /// Translation table for Excel error literals (e.g. `#VALUE!`).
 ///
-/// Data is stored outside the Rust source in TSV files under `src/locale/data/` with the suffix
-/// `.errors.tsv` (e.g. `de-DE.errors.tsv`).
+/// Data is stored outside the Rust source in TSV files under `src/locale/data/`.
+/// See `src/locale/data/README.md` for the TSV format and the generator scripts.
 ///
-/// Error TSVs differ slightly from function TSVs: because data lines themselves start with `#`,
-/// comments are defined as lines where the first non-whitespace characters are `#` followed by
-/// whitespace (see `src/locale/data/README.md` for format details).
+/// Unlike function translations, error translation TSVs can contain *multiple* localized spellings
+/// for the same canonical error literal to support Excel-compatible alias spellings (e.g. Spanish
+/// inverted punctuation variants).
 #[derive(Debug)]
 struct ErrorTranslations {
     data_tsv: &'static str,
@@ -140,62 +143,55 @@ impl ErrorTranslations {
         self.maps.get_or_init(|| {
             let mut canon_to_loc = HashMap::new();
             let mut loc_to_canon = HashMap::new();
-            // Track the exact line that introduced each key so we can produce actionable
-            // diagnostics if the TSV contains duplicate entries.
-            let mut canon_line: HashMap<String, (usize, &'static str)> = HashMap::new();
+            // Track the exact line that introduced each localized key so we can produce actionable
+            // diagnostics if the TSV contains duplicates (which would make parsing ambiguous).
             let mut loc_line: HashMap<String, (usize, &'static str)> = HashMap::new();
 
             for (idx, raw_line) in self.data_tsv.lines().enumerate() {
                 let line_no = idx + 1;
-                let line = raw_line.trim();
-                if line.is_empty() {
+                let trimmed = raw_line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                // Error literals themselves start with `#`, so treat comments as `#` followed by
+                // whitespace (or a bare `#`) rather than treating all `#` lines as comments.
+                let is_comment = trimmed == "#"
+                    || (trimmed.starts_with('#')
+                        && trimmed
+                            .chars()
+                            .nth(1)
+                            .is_some_and(|c| c.is_whitespace()));
+                if is_comment {
                     continue;
                 }
 
-                // Error TSVs allow data lines that start with `#` (e.g. `#VALUE!`), so we treat
-                // comments as `#` followed by whitespace.
-                if let Some(rest) = line.strip_prefix('#') {
-                    if rest.is_empty()
-                        || rest
-                            .chars()
-                            .next()
-                            .is_some_and(|ch| ch.is_whitespace())
-                    {
-                        continue;
-                    }
-                }
-
-                let (canon, loc) = line.split_once('\t').unwrap_or_else(|| {
+                let (canon, loc) = raw_line.split_once('\t').unwrap_or_else(|| {
                     panic!(
-                        "invalid error translation line (expected TSV) at line {line_no}: {line:?}"
+                        "invalid error translation line (expected TSV) at line {line_no}: {raw_line:?}"
                     )
                 });
                 let canon = canon.trim();
                 let loc = loc.trim();
                 if canon.is_empty() || loc.is_empty() {
                     panic!(
-                        "invalid error translation line (empty entry) at line {line_no}: {line:?}"
+                        "invalid error translation line (empty entry) at line {line_no}: {raw_line:?}"
                     );
                 }
 
                 let canon_key = casefold(canon);
                 let loc_key = casefold(loc);
 
-                if let Some((prev_no, prev_line)) = canon_line.get(&canon_key) {
-                    panic!(
-                        "duplicate canonical error translation key {canon_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
-                    );
-                }
                 if let Some((prev_no, prev_line)) = loc_line.get(&loc_key) {
                     panic!(
-                        "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {line:?}"
+                        "duplicate localized error translation key {loc_key:?}\n  first: line {prev_no}: {prev_line:?}\n  second: line {line_no}: {raw_line:?}"
                     );
                 }
+                loc_line.insert(loc_key.clone(), (line_no, raw_line));
 
-                canon_line.insert(canon_key.clone(), (line_no, line));
-                loc_line.insert(loc_key.clone(), (line_no, line));
-
-                canon_to_loc.insert(canon_key, loc);
+                // For canonical->localized, the first spelling wins and becomes the preferred
+                // localized display form.
+                canon_to_loc.entry(canon_key).or_insert(loc);
+                // For localized->canonical, accept all localized spellings.
                 loc_to_canon.insert(loc_key, canon);
             }
 
@@ -206,24 +202,27 @@ impl ErrorTranslations {
         })
     }
 
-    fn localized_to_canonical(&self, localized_key: &str) -> Option<&'static str> {
-        self.maps().loc_to_canon.get(localized_key).copied()
+    fn localized_to_canonical(&self, localized: &str) -> Option<&'static str> {
+        self.maps()
+            .loc_to_canon
+            .get(&casefold(localized))
+            .copied()
     }
 
-    fn canonical_to_localized(&self, canonical_key: &str) -> Option<&'static str> {
-        self.maps().canon_to_loc.get(canonical_key).copied()
+    fn canonical_to_localized(&self, canonical: &str) -> Option<&'static str> {
+        self.maps()
+            .canon_to_loc
+            .get(&casefold(canonical))
+            .copied()
     }
 }
 
 static EMPTY_ERRORS: ErrorTranslations = ErrorTranslations::new("");
 // Locale error TSVs live in `src/locale/data/`. See `src/locale/data/README.md` for
 // contributor docs (format, completeness requirements, and generators).
-static DE_DE_ERRORS: ErrorTranslations =
-    ErrorTranslations::new(include_str!("data/de-DE.errors.tsv"));
-static FR_FR_ERRORS: ErrorTranslations =
-    ErrorTranslations::new(include_str!("data/fr-FR.errors.tsv"));
-static ES_ES_ERRORS: ErrorTranslations =
-    ErrorTranslations::new(include_str!("data/es-ES.errors.tsv"));
+static DE_DE_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/de-DE.errors.tsv"));
+static FR_FR_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/fr-FR.errors.tsv"));
+static ES_ES_ERRORS: ErrorTranslations = ErrorTranslations::new(include_str!("data/es-ES.errors.tsv"));
 
 /// Locale configuration for parsing and rendering formulas.
 ///
@@ -303,13 +302,31 @@ impl FormulaLocale {
     }
 
     pub fn canonical_error_literal(&self, localized: &str) -> Option<&'static str> {
-        let folded = casefold(localized);
-        self.errors.localized_to_canonical(&folded)
+        if let Some(canonical) = self.errors.localized_to_canonical(localized) {
+            return Some(normalize_canonical_error_literal(canonical));
+        }
+
+        // Excel also accepts canonical error literals even in localized formulas (and `#N/A!` as an
+        // alias for `#N/A`).
+        ErrorKind::from_code(localized).map(|kind| kind.as_code())
     }
 
     pub fn localized_error_literal(&self, canonical: &str) -> Option<&'static str> {
-        let folded = casefold(canonical);
-        self.errors.canonical_to_localized(&folded)
+        // Normalize canonical spellings (`#N/A!` -> `#N/A`) so they localize consistently.
+        let canonical = normalize_canonical_error_literal(canonical);
+        // Prefer the locale-specific translation when present; otherwise fall back to the canonical
+        // spelling.
+        self.errors
+            .canonical_to_localized(canonical)
+            .or_else(|| ErrorKind::from_code(canonical).map(|kind| kind.as_code()))
+    }
+}
+
+fn normalize_canonical_error_literal(code: &str) -> &str {
+    if code.eq_ignore_ascii_case("#N/A!") {
+        "#N/A"
+    } else {
+        code
     }
 }
 
@@ -513,7 +530,7 @@ AVERAGE\tSOMME
     }
 
     #[test]
-    fn duplicate_canonical_error_key_panics_with_diagnostics() {
+    fn duplicate_canonical_error_key_is_allowed_and_prefers_first_spelling() {
         let translations = ErrorTranslations::new(
             "\
 # Canonical\tLocalized
@@ -521,18 +538,11 @@ AVERAGE\tSOMME
 #VALUE!\t#VALEUR!
 ",
         );
-        let err = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            translations.maps();
-        }))
-        .expect_err("expected duplicate canonical key to panic");
-
-        let msg = panic_message(&*err);
-        assert!(msg.contains("duplicate canonical error translation key"));
-        assert!(msg.contains("\"#VALUE!\""));
-        assert!(msg.contains("line 2"));
-        assert!(msg.contains("line 3"));
-        assert!(msg.contains("#VALUE!\\t#WERT!"));
-        assert!(msg.contains("#VALUE!\\t#VALEUR!"));
+        // First localized spelling should be preferred for canonical->localized.
+        assert_eq!(translations.canonical_to_localized("#VALUE!"), Some("#WERT!"));
+        // All localized spellings should be accepted for localized->canonical.
+        assert_eq!(translations.localized_to_canonical("#WERT!"), Some("#VALUE!"));
+        assert_eq!(translations.localized_to_canonical("#VALEUR!"), Some("#VALUE!"));
     }
 
     #[test]

@@ -47,7 +47,6 @@ fn parse_error_tsv(path: &Path) -> Vec<(String, String)> {
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
 
     let mut rows = Vec::new();
-    let mut canon_line: HashMap<String, usize> = HashMap::new();
 
     for (idx, raw_line) in raw.lines().enumerate() {
         let line_no = idx + 1;
@@ -88,13 +87,6 @@ fn parse_error_tsv(path: &Path) -> Vec<(String, String)> {
                 "invalid error TSV line (canonical must start with '#') at {}:{}: {trimmed:?}",
                 path.display(),
                 line_no
-            );
-        }
-
-        if let Some(prev_no) = canon_line.insert(canon.to_string(), line_no) {
-            panic!(
-                "duplicate canonical error key {canon:?} in {}:\n  first: line {prev_no}\n  second: line {line_no}",
-                path.display()
             );
         }
 
@@ -184,20 +176,26 @@ fn locale_error_tsv_sync() {
             path.display()
         );
 
-        for (canon, loc) in rows {
-            let runtime_loc = match locale.localized_error_literal(&canon) {
-                Some(mapped) => mapped,
-                None => canon.as_str(),
-            };
-            assert_eq!(
-                runtime_loc, loc,
-                "localized error literal mismatch for locale {locale_id}: canonical={canon:?}"
-            );
+        // The error TSV can contain multiple localized spellings for the same canonical error
+        // literal. In those cases, the runtime uses the first spelling as the preferred display
+        // form and accepts all spellings for parsing.
+        let mut preferred_by_canon: HashMap<String, String> = HashMap::new();
+        for (canon, loc) in &rows {
+            preferred_by_canon
+                .entry(canon.clone())
+                .or_insert_with(|| loc.clone());
+        }
 
-            let runtime_canon = match locale.canonical_error_literal(&loc) {
-                Some(mapped) => mapped,
-                None => loc.as_str(),
-            };
+        for (canon, preferred_loc) in preferred_by_canon {
+            let runtime_loc = locale.localized_error_literal(&canon).unwrap_or(canon.as_str());
+            assert_eq!(
+                runtime_loc, preferred_loc,
+                "preferred localized error literal mismatch for locale {locale_id}: canonical={canon:?}"
+            );
+        }
+
+        for (canon, loc) in rows {
+            let runtime_canon = locale.canonical_error_literal(&loc).unwrap_or(loc.as_str());
             assert_eq!(
                 runtime_canon, canon,
                 "canonical error literal mismatch for locale {locale_id}: localized={loc:?}"

@@ -135,6 +135,13 @@ Error literals themselves start with `#`, so error TSVs use a stricter comment c
 
 The generator outputs entries sorted by canonical error literal for deterministic diffs.
 
+Some locales include multiple localized spellings for the same canonical error literal to support
+Excel-compatible alias spellings. In those cases:
+
+- The **first** entry for a canonical error is treated as the preferred display spelling for
+  localization (canonical → localized).
+- All entries are accepted for canonicalization (localized → canonical).
+
 ## Case-folding, Unicode, and why values are stored uppercase
 
 Excel treats function identifiers case-insensitively. Our locale translation layer matches that by
@@ -202,8 +209,9 @@ And for the external-data loading error literal:
 
 - `#GETTING_DATA`
 
-The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) currently
-round-trip unchanged (canonical) for all supported locales.
+The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) are included in
+the error TSVs so both canonicalization (localized → canonical) and localization (canonical →
+localized) are stable and Excel-compatible.
 
 ## Structured references
 
@@ -274,7 +282,7 @@ Treating bracket content as opaque is also important for correctness because it 
      - Add a `static <LOCALE>_ERRORS: ErrorTranslations = ...include_str!("data/<locale>.errors.tsv")`
        in `crates/formula-engine/src/locale/registry.rs`.
      - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
-       error translations (`errors: &<LOCALE>_ERRORS`).
+       both TSV translation tables.
      - Add the locale to `get_locale()` in `registry.rs`.
      - Update `crates/formula-engine/src/locale/mod.rs` (`normalize_locale_id`) so the engine can
        actually resolve locale tags to your new locale id (especially if you add a second locale for

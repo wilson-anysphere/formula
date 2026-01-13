@@ -5,17 +5,30 @@
 # Note: Spanish Excel error literals can use leading inverted punctuation (e.g. `#¡VALOR!`,
 # `#¡DESBORDAMIENTO!`, `#¿NOMBRE?`). The formula engine's lexer supports these spellings, and
 # `src/locale/registry.rs` maps them for localized formula round-tripping.
-#NULL!	#NULL!
+#NULL!	#¡NULO!
+#NULL!	#NULO!
+#DIV/0!	#¡DIV/0!
 #DIV/0!	#DIV/0!
 #VALUE!	#¡VALOR!
+#VALUE!	#VALOR!
+#REF!	#¡REF!
 #REF!	#REF!
 #NAME?	#¿NOMBRE?
+#NAME?	#NOMBRE?
+#NUM!	#¡NUM!
 #NUM!	#NUM!
 #N/A	#N/A
+#N/A	#N/A!
 #GETTING_DATA	#OBTENIENDO_DATOS
 #SPILL!	#¡DESBORDAMIENTO!
+#SPILL!	#DESBORDAMIENTO!
+#CALC!	#¡CALC!
 #CALC!	#CALC!
-#FIELD!	#FIELD!
-#CONNECT!	#CONNECT!
-#BLOCKED!	#BLOCKED!
-#UNKNOWN!	#UNKNOWN!
+#FIELD!	#¡CAMPO!
+#FIELD!	#CAMPO!
+#CONNECT!	#¡CONECTAR!
+#CONNECT!	#CONECTAR!
+#BLOCKED!	#¡BLOQUEADO!
+#BLOCKED!	#BLOQUEADO!
+#UNKNOWN!	#¡DESCONOCIDO!
+#UNKNOWN!	#DESCONOCIDO!

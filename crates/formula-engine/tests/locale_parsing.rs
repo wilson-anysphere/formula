@@ -574,6 +574,9 @@ fn es_es_translation_table_covers_function_catalog() {
 #[test]
 fn locale_error_literal_maps_match_generated_error_tsvs() {
     fn assert_locale(locale: &locale::FormulaLocale, tsv: &str, label: &str) {
+        let mut preferred_localized_by_canonical: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
         for (idx, raw_line) in tsv.lines().enumerate() {
             let line_no = idx + 1;
             let trimmed = raw_line.trim();
@@ -598,12 +601,15 @@ fn locale_error_literal_maps_match_generated_error_tsvs() {
                 "invalid TSV line in {label}:{line_no} (empty field): {raw_line:?}"
             );
 
-            // Some locales intentionally keep many error spellings identical to canonical.
-            // `FormulaLocale` returns `None` for unknown/unmapped errors, so allow identity
-            // spellings to round-trip via the fallback behavior (leave unchanged).
+            // Error translation TSVs can include multiple localized spellings for the same canonical
+            // literal. The locale registry uses the *first* spelling as the preferred display form
+            // (canonical -> localized) and accepts *all* spellings (localized -> canonical).
+            let preferred_localized = preferred_localized_by_canonical
+                .entry(canonical.to_string())
+                .or_insert_with(|| localized.to_string());
             assert_eq!(
                 locale.localized_error_literal(canonical).unwrap_or(canonical),
-                localized,
+                preferred_localized.as_str(),
                 "canonical->localized error translation mismatch for {canonical} in {label}:{line_no}"
             );
             assert_eq!(
@@ -857,97 +863,259 @@ fn field_access_selectors_are_not_translated() {
 }
 
 #[test]
-fn canonicalize_and_localize_error_literals() {
-    let de = "=#WERT!";
-    let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
-    assert_eq!(canon, "=#VALUE!");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
-        de
-    );
+fn canonicalize_and_localize_error_literals_for_all_locales() {
+    struct Case<'a> {
+        kind: ErrorKind,
+        localized_preferred: &'a str,
+        localized_variants: &'a [&'a str],
+    }
+    fn assert_error_round_trip(locale: &locale::FormulaLocale, case: &Case<'_>) {
+        let canonical = case.kind.as_code();
+        // localized -> canonical
+        for &localized in case.localized_variants {
+            let src = format!("={localized}");
+            let canon = locale::canonicalize_formula(&src, locale).unwrap();
+            assert_eq!(canon, format!("={canonical}"));
+        }
 
-    let de_num = "=#ZAHL!";
-    let canon = locale::canonicalize_formula(de_num, &locale::DE_DE).unwrap();
-    assert_eq!(canon, "=#NUM!");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
-        de_num
-    );
+        // canonical -> localized (preferred)
+        let src = format!("={canonical}");
+        let localized = locale::localize_formula(&src, locale).unwrap();
+        assert_eq!(localized, format!("={}", case.localized_preferred));
 
-    let de_na = "=#NV";
-    let canon = locale::canonicalize_formula(de_na, &locale::DE_DE).unwrap();
-    assert_eq!(canon, "=#N/A");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
-        de_na
-    );
-
-    // Canonicalization should normalize error spelling/casing to the engine's canonical codes.
-    assert_eq!(
-        locale::canonicalize_formula("=#n/a!", &locale::EN_US).unwrap(),
-        "=#N/A"
-    );
-    // Localization should defensively normalize non-canonical inputs before mapping.
-    assert_eq!(
-        locale::localize_formula("=#n/a!", &locale::DE_DE).unwrap(),
-        "=#NV"
-    );
-
-    // Non-ASCII localized errors should be translated using Unicode-aware case folding.
-    // de-DE: `#ÜBERLAUF!` is the localized spelling for `#SPILL!`.
-    let de_spill_variants = ["=#ÜBERLAUF!", "=#Überlauf!", "=#üBeRlAuF!"];
-    for src in de_spill_variants {
-        let canon = locale::canonicalize_formula(src, &locale::DE_DE).unwrap();
-        assert_eq!(canon, "=#SPILL!");
-        assert_eq!(
-            locale::localize_formula(&canon, &locale::DE_DE).unwrap(),
-            "=#ÜBERLAUF!"
-        );
+        // `#N/A!` is an accepted alias for `#N/A`; ensure it localizes to the preferred form.
+        if canonical.eq_ignore_ascii_case("#N/A") {
+            let localized = locale::localize_formula("=#N/A!", locale).unwrap();
+            assert_eq!(localized, format!("={}", case.localized_preferred));
+        }
     }
 
-    let fr = "=#VALEUR!";
-    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
-    assert_eq!(canon, "=#VALUE!");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
-        fr
-    );
-
-    let fr_num = "=#NOMBRE!";
-    let canon = locale::canonicalize_formula(fr_num, &locale::FR_FR).unwrap();
-    assert_eq!(canon, "=#NUM!");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
-        fr_num
-    );
-
-    let fr_spill = "=#DEVERSEMENT!";
-    let canon = locale::canonicalize_formula(fr_spill, &locale::FR_FR).unwrap();
-    assert_eq!(canon, "=#SPILL!");
-    assert_eq!(
-        locale::localize_formula(&canon, &locale::FR_FR).unwrap(),
-        fr_spill
-    );
-
-    // Spanish (Spain) uses leading inverted punctuation.
-    let es_value_variants = ["=#¡VALOR!", "=#¡valor!", "=#¡VaLoR!"];
-    for src in es_value_variants {
-        let canon = locale::canonicalize_formula(src, &locale::ES_ES).unwrap();
-        assert_eq!(canon, "=#VALUE!");
-        assert_eq!(
-            locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
-            "=#¡VALOR!"
-        );
+    // de-DE
+    for case in [
+        Case {
+            kind: ErrorKind::Null,
+            localized_preferred: "#NULL!",
+            localized_variants: &["#NULL!"],
+        },
+        Case {
+            kind: ErrorKind::Div0,
+            localized_preferred: "#DIV/0!",
+            localized_variants: &["#DIV/0!"],
+        },
+        Case {
+            kind: ErrorKind::Value,
+            localized_preferred: "#WERT!",
+            localized_variants: &["#WERT!"],
+        },
+        Case {
+            kind: ErrorKind::Ref,
+            localized_preferred: "#BEZUG!",
+            localized_variants: &["#BEZUG!"],
+        },
+        Case {
+            kind: ErrorKind::Name,
+            localized_preferred: "#NAME?",
+            localized_variants: &["#NAME?"],
+        },
+        Case {
+            kind: ErrorKind::Num,
+            localized_preferred: "#ZAHL!",
+            localized_variants: &["#ZAHL!"],
+        },
+        Case {
+            kind: ErrorKind::NA,
+            localized_preferred: "#NV",
+            localized_variants: &["#NV", "#N/A", "#N/A!"],
+        },
+        Case {
+            kind: ErrorKind::GettingData,
+            localized_preferred: "#DATEN_ABRUFEN",
+            localized_variants: &["#DATEN_ABRUFEN"],
+        },
+        Case {
+            kind: ErrorKind::Spill,
+            localized_preferred: "#ÜBERLAUF!",
+            localized_variants: &["#ÜBERLAUF!", "#Überlauf!", "#üBeRlAuF!"],
+        },
+        Case {
+            kind: ErrorKind::Calc,
+            localized_preferred: "#KALK!",
+            localized_variants: &["#KALK!", "#CALC!"],
+        },
+        Case {
+            kind: ErrorKind::Field,
+            localized_preferred: "#FIELD!",
+            localized_variants: &["#FIELD!"],
+        },
+        Case {
+            kind: ErrorKind::Connect,
+            localized_preferred: "#CONNECT!",
+            localized_variants: &["#CONNECT!"],
+        },
+        Case {
+            kind: ErrorKind::Blocked,
+            localized_preferred: "#BLOCKED!",
+            localized_variants: &["#BLOCKED!"],
+        },
+        Case {
+            kind: ErrorKind::Unknown,
+            localized_preferred: "#UNKNOWN!",
+            localized_variants: &["#UNKNOWN!"],
+        },
+    ] {
+        assert_error_round_trip(&locale::DE_DE, &case);
     }
 
-    let es_name_variants = ["=#¿NOMBRE?", "=#¿nombre?", "=#¿NoMbRe?"];
-    for src in es_name_variants {
-        let canon = locale::canonicalize_formula(src, &locale::ES_ES).unwrap();
-        assert_eq!(canon, "=#NAME?");
-        assert_eq!(
-            locale::localize_formula(&canon, &locale::ES_ES).unwrap(),
-            "=#¿NOMBRE?"
-        );
+    // fr-FR
+    for case in [
+        Case {
+            kind: ErrorKind::Null,
+            localized_preferred: "#NUL!",
+            localized_variants: &["#NUL!", "#NULL!"],
+        },
+        Case {
+            kind: ErrorKind::Div0,
+            localized_preferred: "#DIV/0!",
+            localized_variants: &["#DIV/0!"],
+        },
+        Case {
+            kind: ErrorKind::Value,
+            localized_preferred: "#VALEUR!",
+            localized_variants: &["#VALEUR!"],
+        },
+        Case {
+            kind: ErrorKind::Ref,
+            localized_preferred: "#REF!",
+            localized_variants: &["#REF!"],
+        },
+        Case {
+            kind: ErrorKind::Name,
+            localized_preferred: "#NOM?",
+            localized_variants: &["#NOM?"],
+        },
+        Case {
+            kind: ErrorKind::Num,
+            localized_preferred: "#NOMBRE!",
+            localized_variants: &["#NOMBRE!"],
+        },
+        Case {
+            kind: ErrorKind::NA,
+            localized_preferred: "#N/A",
+            localized_variants: &["#N/A", "#N/A!"],
+        },
+        Case {
+            kind: ErrorKind::GettingData,
+            localized_preferred: "#OBTENTION_DONNEES",
+            localized_variants: &["#OBTENTION_DONNEES"],
+        },
+        Case {
+            kind: ErrorKind::Spill,
+            localized_preferred: "#PROPAGATION!",
+            localized_variants: &["#PROPAGATION!", "#DEVERSEMENT!"],
+        },
+        Case {
+            kind: ErrorKind::Calc,
+            localized_preferred: "#CALCUL!",
+            localized_variants: &["#CALCUL!", "#CALC!"],
+        },
+        Case {
+            kind: ErrorKind::Field,
+            localized_preferred: "#CHAMP!",
+            localized_variants: &["#CHAMP!", "#FIELD!"],
+        },
+        Case {
+            kind: ErrorKind::Connect,
+            localized_preferred: "#CONNEXION!",
+            localized_variants: &["#CONNEXION!", "#CONNECT!"],
+        },
+        Case {
+            kind: ErrorKind::Blocked,
+            localized_preferred: "#BLOQUE!",
+            localized_variants: &["#BLOQUE!", "#BLOCKED!"],
+        },
+        Case {
+            kind: ErrorKind::Unknown,
+            localized_preferred: "#INCONNU!",
+            localized_variants: &["#INCONNU!", "#UNKNOWN!"],
+        },
+    ] {
+        assert_error_round_trip(&locale::FR_FR, &case);
+    }
+
+    // es-ES (includes inverted punctuation variants)
+    for case in [
+        Case {
+            kind: ErrorKind::Null,
+            localized_preferred: "#¡NULO!",
+            localized_variants: &["#¡NULO!", "#NULO!"],
+        },
+        Case {
+            kind: ErrorKind::Div0,
+            localized_preferred: "#¡DIV/0!",
+            localized_variants: &["#¡DIV/0!", "#DIV/0!"],
+        },
+        Case {
+            kind: ErrorKind::Value,
+            localized_preferred: "#¡VALOR!",
+            localized_variants: &["#¡VALOR!", "#VALOR!"],
+        },
+        Case {
+            kind: ErrorKind::Ref,
+            localized_preferred: "#¡REF!",
+            localized_variants: &["#¡REF!", "#REF!"],
+        },
+        Case {
+            kind: ErrorKind::Name,
+            localized_preferred: "#¿NOMBRE?",
+            localized_variants: &["#¿NOMBRE?", "#NOMBRE?"],
+        },
+        Case {
+            kind: ErrorKind::Num,
+            localized_preferred: "#¡NUM!",
+            localized_variants: &["#¡NUM!", "#NUM!"],
+        },
+        Case {
+            kind: ErrorKind::NA,
+            localized_preferred: "#N/A",
+            localized_variants: &["#N/A", "#N/A!"],
+        },
+        Case {
+            kind: ErrorKind::GettingData,
+            localized_preferred: "#OBTENIENDO_DATOS",
+            localized_variants: &["#OBTENIENDO_DATOS"],
+        },
+        Case {
+            kind: ErrorKind::Spill,
+            localized_preferred: "#¡DESBORDAMIENTO!",
+            localized_variants: &["#¡DESBORDAMIENTO!", "#DESBORDAMIENTO!"],
+        },
+        Case {
+            kind: ErrorKind::Calc,
+            localized_preferred: "#¡CALC!",
+            localized_variants: &["#¡CALC!", "#CALC!"],
+        },
+        Case {
+            kind: ErrorKind::Field,
+            localized_preferred: "#¡CAMPO!",
+            localized_variants: &["#¡CAMPO!", "#CAMPO!"],
+        },
+        Case {
+            kind: ErrorKind::Connect,
+            localized_preferred: "#¡CONECTAR!",
+            localized_variants: &["#¡CONECTAR!", "#CONECTAR!"],
+        },
+        Case {
+            kind: ErrorKind::Blocked,
+            localized_preferred: "#¡BLOQUEADO!",
+            localized_variants: &["#¡BLOQUEADO!", "#BLOQUEADO!"],
+        },
+        Case {
+            kind: ErrorKind::Unknown,
+            localized_preferred: "#¡DESCONOCIDO!",
+            localized_variants: &["#¡DESCONOCIDO!", "#DESCONOCIDO!"],
+        },
+    ] {
+        assert_error_round_trip(&locale::ES_ES, &case);
     }
 
     let es_spill_variants = [
@@ -1018,14 +1186,6 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_de_de() {
         locale::localize_formula(&canonical_err, &locale::DE_DE).unwrap(),
         localized_err
     );
-
-    // These error literals currently round-trip unchanged for this locale.
-    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
-        let src = format!("={err}");
-        let canon = locale::canonicalize_formula(&src, &locale::DE_DE).unwrap();
-        assert_eq!(canon, src);
-        assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), src);
-    }
 }
 
 #[test]
@@ -1053,14 +1213,6 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_fr_fr() {
         locale::localize_formula(&canonical_err, &locale::FR_FR).unwrap(),
         localized_err
     );
-
-    // These error literals currently round-trip unchanged for this locale.
-    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
-        let src = format!("={err}");
-        let canon = locale::canonicalize_formula(&src, &locale::FR_FR).unwrap();
-        assert_eq!(canon, src);
-        assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), src);
-    }
 }
 
 #[test]
@@ -1088,14 +1240,6 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_es_es() {
         locale::localize_formula(&canonical_err, &locale::ES_ES).unwrap(),
         localized_err
     );
-
-    // These error literals currently round-trip unchanged for this locale.
-    for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
-        let src = format!("={err}");
-        let canon = locale::canonicalize_formula(&src, &locale::ES_ES).unwrap();
-        assert_eq!(canon, src);
-        assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), src);
-    }
 }
 
 #[test]

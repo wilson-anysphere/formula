@@ -2,6 +2,7 @@
 # Source: Extracted from Microsoft Excel via COM automation (tools/excel-oracle/extract-error-literals.ps1).
 # Excel UI locale: fr-FR
 #
+#NULL!	#NUL!
 #NULL!	#NULL!
 #DIV/0!	#DIV/0!
 #VALUE!	#VALEUR!
@@ -9,10 +10,17 @@
 #NAME?	#NOM?
 #NUM!	#NOMBRE!
 #N/A	#N/A
+#N/A	#N/A!
 #GETTING_DATA	#OBTENTION_DONNEES
+#SPILL!	#PROPAGATION!
 #SPILL!	#DEVERSEMENT!
+#CALC!	#CALCUL!
 #CALC!	#CALC!
+#FIELD!	#CHAMP!
 #FIELD!	#FIELD!
+#CONNECT!	#CONNEXION!
 #CONNECT!	#CONNECT!
+#BLOCKED!	#BLOQUE!
 #BLOCKED!	#BLOCKED!
+#UNKNOWN!	#INCONNU!
 #UNKNOWN!	#UNKNOWN!

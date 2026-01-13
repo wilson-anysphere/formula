@@ -90,14 +90,18 @@ function extractCanonicalErrorLiterals(rustSource) {
  * - `# ` (hash + space) starts a comment line (error literals themselves start with `#`)
  * - empty lines ignored
  * - each entry: `Canonical<TAB>Localized`
+ * - multiple rows for the same canonical literal are allowed to represent additional localized
+ *   spellings (aliases); the first entry is treated as the preferred display form.
  *
  * @param {string} contents
  * @param {string} label
- * @returns {Map<string, string>}
+ * @returns {Map<string, string[]>}
  */
 function parseErrorTsv(contents, label) {
-  /** @type {Map<string, string>} */
+  /** @type {Map<string, string[]>} */
   const map = new Map();
+  /** @type {Map<string, string>} */
+  const localizedFoldToCanonical = new Map();
   const lines = contents.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -119,12 +123,23 @@ function parseErrorTsv(contents, label) {
     if (!canonical || !localized) {
       throw new Error(`Invalid TSV line in ${label}:${i + 1} (empty field): ${inspect(raw)}`);
     }
-    if (map.has(canonical)) {
+
+    // Detect duplicated localized spellings (case-insensitive) to avoid ambiguous parsing.
+    const localizedFold = localized.toUpperCase();
+    const existingCanonical = localizedFoldToCanonical.get(localizedFold);
+    if (existingCanonical != null) {
       throw new Error(
-        `Duplicate canonical entry in ${label}:${i + 1}: ${inspect(canonical)} (previously defined)`,
+        `Duplicate localized error spelling in ${label}:${i + 1}: ${inspect(localized)} (already mapped to ${inspect(existingCanonical)})`,
       );
     }
-    map.set(canonical, localized);
+    localizedFoldToCanonical.set(localizedFold, canonical);
+
+    const list = map.get(canonical);
+    if (list == null) {
+      map.set(canonical, [localized]);
+    } else {
+      list.push(localized);
+    }
   }
   return map;
 }
@@ -133,7 +148,7 @@ function parseErrorTsv(contents, label) {
  * @param {object} params
  * @param {string} params.locale
  * @param {string[]} params.canonicalLiteralsSorted
- * @param {Map<string, string>} params.upstreamMap
+ * @param {Map<string, string[]>} params.upstreamMap
  * @param {string} params.upstreamRelPath
  */
 function renderOutputTsv({ locale, canonicalLiteralsSorted, upstreamMap, upstreamRelPath }) {
@@ -143,13 +158,15 @@ function renderOutputTsv({ locale, canonicalLiteralsSorted, upstreamMap, upstrea
   lines.push("");
 
   for (const canonical of canonicalLiteralsSorted) {
-    const localized = upstreamMap.get(canonical);
-    if (localized == null) {
+    const localizedList = upstreamMap.get(canonical);
+    if (localizedList == null || localizedList.length === 0) {
       throw new Error(
         `Upstream mapping ${upstreamRelPath} is missing an entry for ${inspect(canonical)} (locale ${locale})`,
       );
     }
-    lines.push(`${canonical}\t${localized}`);
+    for (const localized of localizedList) {
+      lines.push(`${canonical}\t${localized}`);
+    }
   }
 
   return lines.join("\n") + "\n";

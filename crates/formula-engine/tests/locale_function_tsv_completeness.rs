@@ -11,7 +11,7 @@ struct ParsedLocaleTsv {
 struct ParsedErrorTsv {
     canonical_keys: BTreeSet<String>,
     localized_keys: BTreeSet<String>,
-    entries: BTreeMap<String, String>,
+    entries: BTreeMap<String, Vec<String>>,
 }
 
 fn inventory_function_names() -> BTreeSet<String> {
@@ -113,12 +113,10 @@ fn casefold_unicode(s: &str) -> String {
 fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> ParsedErrorTsv {
     let mut canonical_keys = BTreeSet::new();
     let mut localized_keys = BTreeSet::new();
-    let mut entries: BTreeMap<String, String> = BTreeMap::new();
+    let mut entries: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    let mut canon_first_seen: BTreeMap<String, usize> = BTreeMap::new();
     let mut localized_first_seen: BTreeMap<String, (String, usize)> = BTreeMap::new();
 
-    let mut duplicate_canon: Vec<String> = Vec::new();
     let mut duplicate_localized: Vec<String> = Vec::new();
 
     let mut prev_canon: Option<String> = None;
@@ -166,12 +164,6 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
         let canon_key = casefold_unicode(canon);
         let loc_key = casefold_unicode(loc);
 
-        if let Some(first_line) = canon_first_seen.get(&canon_key).copied() {
-            duplicate_canon.push(format!("{canon_key} (lines {first_line} and {line_no})"));
-        } else {
-            canon_first_seen.insert(canon_key.clone(), line_no);
-        }
-
         if let Some((prior_canon, prior_line)) = localized_first_seen.get(&loc_key).cloned() {
             duplicate_localized.push(format!(
                 "{loc_key} (canon {prior_canon} @ line {prior_line}, canon {canon_key} @ line {line_no})"
@@ -182,19 +174,15 @@ fn parse_error_tsv(locale_id: &str, raw_tsv: &str, require_sorted: bool) -> Pars
 
         canonical_keys.insert(canon.to_string());
         localized_keys.insert(loc.to_string());
-        entries.insert(canon.to_string(), loc.to_string());
+        entries
+            .entry(canon.to_string())
+            .or_default()
+            .push(loc.to_string());
     }
 
-    if !duplicate_canon.is_empty() || !duplicate_localized.is_empty() {
+    if !duplicate_localized.is_empty() {
         let mut report =
             format!("locale error TSV for {locale_id} contains duplicate entries (case-insensitive)\n");
-
-        if !duplicate_canon.is_empty() {
-            report.push_str("\nDuplicate canonical keys:\n");
-            for entry in duplicate_canon {
-                report.push_str(&format!("  - {entry}\n"));
-            }
-        }
 
         if !duplicate_localized.is_empty() {
             report.push_str("\nDuplicate localized keys (collisions):\n");
