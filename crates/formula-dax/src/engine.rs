@@ -178,10 +178,22 @@ impl RowContext {
         self.stack.last().map(|(t, _)| t.as_str())
     }
 
-    fn row_for(&self, table: &str) -> Option<usize> {
+    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
         self.stack
             .iter()
             .rev()
+            .filter(|(t, _)| t == table)
+            .nth(level_from_inner)
+            .map(|(_, r)| *r)
+    }
+
+    fn row_for(&self, table: &str) -> Option<usize> {
+        self.row_for_level(table, 0)
+    }
+
+    fn row_for_outermost(&self, table: &str) -> Option<usize> {
+        self.stack
+            .iter()
             .find(|(t, _)| t == table)
             .map(|(_, r)| *r)
     }
@@ -814,6 +826,86 @@ impl DaxEngine {
                     return Err(DaxError::Eval("RELATED expects 1 argument".into()));
                 };
                 self.eval_related(model, arg, row_ctx)
+            }
+            "EARLIER" => {
+                if args.is_empty() || args.len() > 2 {
+                    return Err(DaxError::Eval(
+                        "EARLIER expects 1 or 2 arguments".into(),
+                    ));
+                }
+
+                let Expr::ColumnRef { table, column } = &args[0] else {
+                    return Err(DaxError::Type(
+                        "EARLIER expects a column reference as the first argument".into(),
+                    ));
+                };
+
+                let level_from_inner: usize = if args.len() == 2 {
+                    let value = self.eval_scalar(model, &args[1], filter, row_ctx)?;
+                    let n = coerce_number(&value)?;
+                    if !n.is_finite() {
+                        return Err(DaxError::Eval(
+                            "EARLIER expects a finite number for the optional second argument"
+                                .into(),
+                        ));
+                    }
+                    let n = n.trunc() as i64;
+                    if n < 1 {
+                        return Err(DaxError::Eval(
+                            "EARLIER expects the optional second argument to be >= 1".into(),
+                        ));
+                    }
+                    n as usize
+                } else {
+                    1
+                };
+
+                let Some(row) = row_ctx.row_for_level(table, level_from_inner) else {
+                    let available = row_ctx.stack.iter().filter(|(t, _)| t == table).count();
+                    return Err(DaxError::Eval(format!(
+                        "EARLIER refers to an outer row context that does not exist for {table}[{column}] (requested level {level_from_inner}, available {available})"
+                    )));
+                };
+
+                let table_ref = model
+                    .table(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                if row >= table_ref.row_count() {
+                    return Ok(Value::Blank);
+                }
+                let value = table_ref.value(row, column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                Ok(value)
+            }
+            "EARLIEST" => {
+                let [arg] = args else {
+                    return Err(DaxError::Eval("EARLIEST expects 1 argument".into()));
+                };
+                let Expr::ColumnRef { table, column } = arg else {
+                    return Err(DaxError::Type(
+                        "EARLIEST expects a column reference as the first argument".into(),
+                    ));
+                };
+
+                let Some(row) = row_ctx.row_for_outermost(table) else {
+                    return Err(DaxError::Eval(format!(
+                        "EARLIEST requires row context for {table}[{column}]"
+                    )));
+                };
+
+                let table_ref = model
+                    .table(table)
+                    .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                if row >= table_ref.row_count() {
+                    return Ok(Value::Blank);
+                }
+                let value = table_ref.value(row, column).ok_or_else(|| DaxError::UnknownColumn {
+                    table: table.clone(),
+                    column: column.clone(),
+                })?;
+                Ok(value)
             }
             other => Err(DaxError::Eval(format!("unsupported function {other}"))),
         }
