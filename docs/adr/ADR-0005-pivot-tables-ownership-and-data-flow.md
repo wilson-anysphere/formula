@@ -241,6 +241,9 @@ Important: timelines are not representable as a pure “allowed set” without e
 - `formula-model::pivots::PivotManager` (and related `DataTable`, `PivotTable::refresh`, slicer/timeline filters) is a **legacy MVP** used by unit tests and early prototypes.
   - It lives in the model crate but performs computation, which violates the desired crate boundary.
 - `formula-engine::pivot` contains the newer cache-backed pivot engine and defines its own pivot config/value types.
+  - Note: types like `formula_engine::pivot::PivotTable` and `formula_engine::pivot::PivotConfig` are **compute-layer**
+    constructs today. They are convenient for tests and bridges (e.g. XLSX → engine), but they are not yet the canonical
+    persisted workbook schema.
 - `formula-xlsx` currently contains a direct bridge from OpenXML pivots → `formula-engine::pivot` types (`crates/formula-xlsx/src/pivots/engine_bridge.rs`).
 - Slicers/timelines:
   - `formula-xlsx` can parse slicer/timeline parts and convert selection state into `formula_model::pivots::slicers::RowFilter`.
