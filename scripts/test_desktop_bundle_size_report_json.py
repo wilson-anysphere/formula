@@ -66,6 +66,18 @@ class DesktopBundleSizeReportJsonTests(unittest.TestCase):
             self.assertEqual(report["over_limit_count"], 0)
             self.assertEqual(report["artifacts"], [])
 
+    def test_json_flag_defaults_to_standard_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_root = Path(tmp_dir)
+            default_path = Path("desktop-bundle-size-report.json")
+
+            proc = self._run(repo_root, ["--json", "--limit-mb", "12"])
+            self.assertEqual(proc.returncode, 1)
+
+            report = self._read_report(repo_root, default_path)
+            self._assert_basic_schema(report)
+            self.assertEqual(report["limit_mb"], 12)
+
     def test_json_schema_contains_artifacts_and_over_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             repo_root = Path(tmp_dir)
