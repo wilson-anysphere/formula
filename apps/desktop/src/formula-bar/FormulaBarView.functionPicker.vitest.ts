@@ -32,9 +32,9 @@ describe("FormulaBarView fx function picker", () => {
 
     pickerInput!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true, bubbles: true }));
 
-    expect(view.textarea.value).toBe("=SUM()");
-    expect(view.textarea.selectionStart).toBe(view.textarea.value.length - 1);
-    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length - 1);
+    expect(view.textarea.value).toBe("=SUM(");
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
     expect(document.activeElement).toBe(view.textarea);
     expect(picker!.hidden).toBe(true);
 

@@ -1281,10 +1281,10 @@ export class FormulaBarView {
     const start = Math.max(0, Math.min(selection.start, prevText.length));
     const end = Math.max(0, Math.min(selection.end, prevText.length));
 
-    const insert = `${name}()`;
+    const insert = `${name}(`;
     const nextText = prevText.slice(0, start) + insert + prevText.slice(end);
     // Place the caret inside the parentheses so users can immediately type arguments.
-    const cursor = start + Math.max(0, insert.length - 1);
+    const cursor = start + insert.length;
 
     this.textarea.value = nextText;
     try {
