@@ -1,3 +1,6 @@
+import type { DlpFinding, DlpLevel } from "./dlp.js";
+import type { NamedRangeSchema } from "./schema.js";
+import type { RagIndex } from "./rag.js";
 import type { SheetSchema } from "./schema.js";
 import type { TokenEstimator } from "./tokenBudget.js";
 
@@ -10,8 +13,8 @@ export interface RetrievedSheetChunk {
 }
 
 export interface WorkbookChunkDlpInfo {
-  level: string;
-  findings: string[];
+  level: DlpLevel;
+  findings: DlpFinding[];
 }
 
 export interface RetrievedWorkbookChunk {
@@ -51,14 +54,14 @@ export interface DlpOptions {
    *
    * Kept intentionally generic to avoid cross-package type coupling.
    */
-  policy?: unknown;
+  policy: unknown;
   classificationRecords?: Array<{ selector: unknown; classification: unknown }>;
   classification_records?: Array<{ selector: unknown; classification: unknown }>;
   classificationStore?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
   classification_store?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
   includeRestrictedContent?: boolean;
   include_restricted_content?: boolean;
-  auditLogger?: { log(event: any): void };
+  auditLogger?: { log(event: unknown): void };
   /**
    * Optional sheet name <-> id resolver used for structured DLP enforcement.
    */
@@ -67,7 +70,7 @@ export interface DlpOptions {
 }
 
 export type WorkbookRagOptions = {
-  vectorStore: any;
+  vectorStore: unknown;
   /**
    * Workbook RAG embedder.
    *
@@ -82,7 +85,7 @@ export type WorkbookRagOptions = {
 export class ContextManager {
   constructor(options?: {
     tokenBudgetTokens?: number;
-    ragIndex?: any;
+    ragIndex?: RagIndex;
     /**
      * Cache single-sheet RAG indexing by content signature.
      *
@@ -114,7 +117,7 @@ export class ContextManager {
   });
 
   buildContext(params: {
-    sheet: { name: string; values: unknown[][]; origin?: { row: number; col: number }; namedRanges?: any[] };
+    sheet: { name: string; values: unknown[][]; origin?: { row: number; col: number }; namedRanges?: NamedRangeSchema[] };
     query: string;
     attachments?: Attachment[];
     sampleRows?: number;
@@ -126,7 +129,7 @@ export class ContextManager {
   }): Promise<BuildContextResult>;
 
   buildWorkbookContext(params: {
-    workbook: any;
+    workbook: unknown;
     query: string;
     attachments?: Attachment[];
     topK?: number;
@@ -138,7 +141,7 @@ export class ContextManager {
   }): Promise<BuildWorkbookContextResult>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
-    spreadsheet: any;
+    spreadsheet: unknown;
     workbookId: string;
     query: string;
     attachments?: Attachment[];
