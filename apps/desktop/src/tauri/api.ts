@@ -24,7 +24,7 @@ export type TauriEventApi = {
  */
 export function getTauriDialogOrNull(): TauriDialogApi | null {
   const tauri = (globalThis as any).__TAURI__ as any;
-  const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? null;
+  const dialog = tauri?.dialog ?? tauri?.plugin?.dialog ?? tauri?.plugins?.dialog ?? null;
   const open = dialog?.open as TauriDialogOpen | undefined;
   const save = dialog?.save as TauriDialogSave | undefined;
   if (typeof open !== "function" || typeof save !== "function") return null;
@@ -44,7 +44,8 @@ export function getTauriDialogOrThrow(): TauriDialogApi {
  * `@tauri-apps/api`.
  */
 export function getTauriEventApiOrNull(): TauriEventApi | null {
-  const eventApi = (globalThis as any).__TAURI__?.event as any;
+  const tauri = (globalThis as any).__TAURI__ as any;
+  const eventApi = tauri?.event ?? tauri?.plugin?.event ?? tauri?.plugins?.event ?? null;
   const listen = eventApi?.listen as TauriListen | undefined;
   if (typeof listen !== "function") return null;
   const emit = eventApi?.emit as TauriEmit | undefined;

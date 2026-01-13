@@ -49,6 +49,16 @@ describe("tauri/api dynamic accessors", () => {
       expect(api.save).toBe(save);
     });
 
+    it("detects the dialog API on __TAURI__.plugins.dialog (alternate plugin container shape)", () => {
+      const open = vi.fn();
+      const save = vi.fn();
+      (globalThis as any).__TAURI__ = { plugins: { dialog: { open, save } } };
+
+      const api = getTauriDialogOrThrow();
+      expect(api.open).toBe(open);
+      expect(api.save).toBe(save);
+    });
+
     it("treats partial dialog APIs as unavailable (e.g. open without save)", () => {
       const open = vi.fn();
       (globalThis as any).__TAURI__ = { dialog: { open } };
@@ -76,6 +86,26 @@ describe("tauri/api dynamic accessors", () => {
       const listen = vi.fn(async () => () => {});
       const emit = vi.fn();
       (globalThis as any).__TAURI__ = { event: { listen, emit } };
+
+      const api = getTauriEventApiOrThrow();
+      expect(api.listen).toBe(listen);
+      expect(api.emit).toBe(emit);
+    });
+
+    it("detects the event API under __TAURI__.plugin.event (legacy shape)", () => {
+      const listen = vi.fn(async () => () => {});
+      const emit = vi.fn();
+      (globalThis as any).__TAURI__ = { plugin: { event: { listen, emit } } };
+
+      const api = getTauriEventApiOrThrow();
+      expect(api.listen).toBe(listen);
+      expect(api.emit).toBe(emit);
+    });
+
+    it("detects the event API under __TAURI__.plugins.event (alternate plugin container shape)", () => {
+      const listen = vi.fn(async () => () => {});
+      const emit = vi.fn();
+      (globalThis as any).__TAURI__ = { plugins: { event: { listen, emit } } };
 
       const api = getTauriEventApiOrThrow();
       expect(api.listen).toBe(listen);

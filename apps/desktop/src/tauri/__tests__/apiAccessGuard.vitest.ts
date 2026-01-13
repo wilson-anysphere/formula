@@ -43,10 +43,18 @@ describe("tauri/api guardrails", () => {
       // Event API access (listen/emit) should go through getTauriEventApiOr{Null,Throw}.
       /\b__TAURI__\s*(?:\?\.)\s*event\b/,
       /\b__TAURI__\s*\.\s*event\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugin\s*(?:\?\.)\s*event\b/,
+      /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*event\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*event\b/,
+      /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*event\b/,
 
       // Window API access should go through getTauriWindowHandleOr{Null,Throw} or hasTauriWindow* helpers.
       /\b__TAURI__\s*(?:\?\.)\s*window\b/,
       /\b__TAURI__\s*\.\s*window\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugin\s*(?:\?\.)\s*window\b/,
+      /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*window\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*window\b/,
+      /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*window\b/,
 
       // Dialog open/save should go through getTauriDialogOr{Null,Throw}. (Confirm/alert are handled
       // separately by nativeDialogs and are intentionally not included here.)
@@ -54,6 +62,8 @@ describe("tauri/api guardrails", () => {
       /\b__TAURI__\s*\.\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*(?:\?\.)\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
       /\b__TAURI__\s*\.\s*plugin\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
+      /\b__TAURI__\s*(?:\?\.)\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
+      /\b__TAURI__\s*\.\s*plugins\s*(?:\?\.)\s*dialog\s*(?:\?\.)\s*(open|save)\b/,
     ];
 
     for (const absPath of files) {
@@ -80,4 +90,3 @@ describe("tauri/api guardrails", () => {
     }
   });
 });
-
