@@ -332,8 +332,14 @@ def _extract_function_counts(z: zipfile.ZipFile) -> Counter[str]:
 
     counts: Counter[str] = Counter()
     for name in z.namelist():
-        normalized = _normalize_zip_entry_name(name)
-        if not (normalized.startswith("xl/worksheets/") and normalized.endswith(".xml")):
+        # Use a case-insensitive match for worksheet part paths. Some malformed packages store
+        # entries like `XL/Worksheets/Sheet1.XML`, which should still be treated as worksheets for
+        # privacy-safe formula function fingerprinting.
+        normalized_casefold = _normalize_zip_entry_name(name).casefold()
+        if not (
+            normalized_casefold.startswith("xl/worksheets/")
+            and normalized_casefold.endswith(".xml")
+        ):
             continue
         root = z.read(name)
 
