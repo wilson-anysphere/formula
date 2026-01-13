@@ -123,8 +123,10 @@ node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.js
 ```
 
 Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level validator
-`scripts/ci/validate-updater-manifest.mjs`, which downloads `latest.json` / `latest.json.sig` from
-the draft release and checks targets, signatures, and referenced assets.
+`scripts/ci/validate-updater-manifest.mjs` when run in `<tag>` mode, which downloads
+`latest.json` / `latest.json.sig` from the draft release and checks targets, signatures, and
+referenced assets. The `--manifest/--sig` mode is a lightweight offline check (platform keys +
+presence of the signature file).
 
 ## Updater restart semantics (important)
 
