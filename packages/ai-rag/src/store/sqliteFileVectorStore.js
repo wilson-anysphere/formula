@@ -6,7 +6,7 @@ import { SqliteVectorStore } from "./sqliteVectorStore.js";
  *
  * This is intentionally kept out of the browser-safe entrypoint; Tauri webviews
  * and browsers should pass a non-filesystem BinaryStorage implementation (e.g.
- * LocalStorageBinaryStorage) to `SqliteVectorStore.create`.
+ * IndexedDBBinaryStorage / LocalStorageBinaryStorage) to `SqliteVectorStore.create`.
  */
 export async function createSqliteFileVectorStore(opts) {
   if (!opts?.filePath) throw new Error("createSqliteFileVectorStore requires filePath");
@@ -18,4 +18,3 @@ export async function createSqliteFileVectorStore(opts) {
     locateFile: opts.locateFile,
   });
 }
-

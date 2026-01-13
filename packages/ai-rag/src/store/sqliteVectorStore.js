@@ -167,7 +167,7 @@ export class SqliteVectorStore {
 
     if (opts.filePath) {
       throw new Error(
-        "SqliteVectorStore.create no longer accepts filePath. Pass { storage } instead (e.g. LocalStorageBinaryStorage / NodeFileBinaryStorage)."
+        "SqliteVectorStore.create no longer accepts filePath. Pass { storage } instead (e.g. IndexedDBBinaryStorage / LocalStorageBinaryStorage / NodeFileBinaryStorage)."
       );
     }
 
