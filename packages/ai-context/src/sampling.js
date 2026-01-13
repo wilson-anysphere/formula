@@ -63,6 +63,17 @@ export function headSampleRows(rows, sampleSize) {
 }
 
 /**
+ * @template T
+ * @param {T[]} rows
+ * @param {number} sampleSize
+ */
+export function tailSampleRows(rows, sampleSize) {
+  if (sampleSize <= 0 || rows.length === 0) return [];
+  if (sampleSize >= rows.length) return rows.slice();
+  return rows.slice(rows.length - sampleSize);
+}
+
+/**
  * Systematic (evenly spaced) sampling without replacement.
  *
  * The starting offset is derived deterministically from the provided `seed` / `rng`

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
+import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
 
 describe("sampling", () => {
   it("randomSampleRows is deterministic with a seed and returns unique rows", () => {
@@ -68,6 +68,13 @@ describe("sampling", () => {
     expect(headSampleRows(rows, 0)).toEqual([]);
     expect(headSampleRows(rows, 3)).toEqual([0, 1, 2]);
     expect(headSampleRows(rows, 20)).toEqual(rows);
+  });
+
+  it("tailSampleRows returns the last N rows", () => {
+    const rows = Array.from({ length: 10 }, (_v, i) => i);
+    expect(tailSampleRows(rows, 0)).toEqual([]);
+    expect(tailSampleRows(rows, 3)).toEqual([7, 8, 9]);
+    expect(tailSampleRows(rows, 20)).toEqual(rows);
   });
 
   it("systematicSampleRows is deterministic and evenly spaced", () => {

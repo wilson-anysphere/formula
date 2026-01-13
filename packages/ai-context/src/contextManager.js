@@ -1,6 +1,6 @@
 import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
-import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
+import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 import { isCellEmpty, parseA1Range, rangeToA1 } from "./a1.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
@@ -392,7 +392,7 @@ export class ContextManager {
    *   query: string,
    *   attachments?: Attachment[],
    *   sampleRows?: number,
-   *   samplingStrategy?: "random" | "stratified" | "head" | "systematic",
+   *   samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic",
    *   stratifyByColumn?: number,
    *   limits?: { maxContextRows?: number, maxContextCells?: number, maxChunkRows?: number },
    *   signal?: AbortSignal,
@@ -612,6 +612,10 @@ export class ContextManager {
       }
       case "head": {
         sampled = headSampleRows(dataForSampling, sampleRows);
+        break;
+      }
+      case "tail": {
+        sampled = tailSampleRows(dataForSampling, sampleRows);
         break;
       }
       case "systematic": {

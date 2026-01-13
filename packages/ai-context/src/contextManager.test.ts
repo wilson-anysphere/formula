@@ -50,6 +50,15 @@ describe("ContextManager samplingStrategy", () => {
     expect(out.sampledRows).toEqual(values.slice(0, 3));
   });
 
+  it("supports samplingStrategy=tail", async () => {
+    const cm = new ContextManager({ tokenBudgetTokens: 1_000_000, redactor: (text: string) => text });
+    const values = Array.from({ length: 10 }, (_v, i) => [`R${i}`]);
+    const sheet = { name: "Sheet1", values };
+
+    const out = await cm.buildContext({ sheet, query: "R", sampleRows: 3, samplingStrategy: "tail" });
+    expect(out.sampledRows).toEqual(values.slice(-3));
+  });
+
   it("supports samplingStrategy=systematic", async () => {
     const cm = new ContextManager({ tokenBudgetTokens: 1_000_000, redactor: (text: string) => text });
     const values = Array.from({ length: 10 }, (_v, i) => [`R${i}`]);

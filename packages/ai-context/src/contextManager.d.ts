@@ -86,7 +86,7 @@ export class ContextManager {
     query: string;
     attachments?: Attachment[];
     sampleRows?: number;
-    samplingStrategy?: "random" | "stratified" | "head" | "systematic";
+    samplingStrategy?: "random" | "stratified" | "head" | "tail" | "systematic";
     stratifyByColumn?: number;
     limits?: { maxContextRows?: number; maxContextCells?: number; maxChunkRows?: number };
     signal?: AbortSignal;

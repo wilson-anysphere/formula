@@ -25,6 +25,7 @@ export function createSeededRng(seed: number): SeededRng;
 export function randomSampleIndices(total: number, sampleSize: number, rng: SeededRng): number[];
 export function randomSampleRows<T>(rows: T[], sampleSize: number, options?: RandomSamplingOptions): T[];
 export function headSampleRows<T>(rows: T[], sampleSize: number): T[];
+export function tailSampleRows<T>(rows: T[], sampleSize: number): T[];
 export function systematicSampleRows<T>(
   rows: T[],
   sampleSize: number,
