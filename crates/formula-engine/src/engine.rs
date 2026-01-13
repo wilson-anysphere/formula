@@ -7449,6 +7449,7 @@ struct EngineBytecodeGrid<'a> {
 impl<'a> EngineBytecodeGrid<'a> {
     fn column_slice_impl(
         &self,
+        cols: &'a HashMap<i32, BytecodeColumn>,
         col: i32,
         row_start: i32,
         row_end: i32,
@@ -7463,7 +7464,7 @@ impl<'a> EngineBytecodeGrid<'a> {
         {
             return None;
         }
-        let data = self.cols.get(&col)?;
+        let data = cols.get(&col)?;
         let idx = data
             .segments
             .partition_point(|seg| seg.row_end() < row_start);
@@ -7526,7 +7527,7 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
-        self.column_slice_impl(col, row_start, row_end, self.slice_mode)
+        self.column_slice_impl(self.cols, col, row_start, row_end, self.slice_mode)
     }
 
     fn column_slice_strict_numeric(
@@ -7535,7 +7536,13 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        self.column_slice_impl(col, row_start, row_end, ColumnSliceMode::StrictNumeric)
+        self.column_slice_impl(
+            self.cols,
+            col,
+            row_start,
+            row_end,
+            ColumnSliceMode::StrictNumeric,
+        )
     }
 
     fn iter_cells(
@@ -7594,42 +7601,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        if col < 0
-            || col >= EXCEL_MAX_COLS_I32
-            || row_start < 0
-            || row_end < 0
-            || row_start > row_end
-            || row_end >= EXCEL_MAX_ROWS_I32
-        {
-            return None;
-        }
         if !self.snapshot.sheets.contains(&sheet) {
             return None;
         }
         let sheet_cols = self.cols_by_sheet.get(sheet)?;
-        let data = sheet_cols.get(&col)?;
-        let idx = data
-            .segments
-            .partition_point(|seg| seg.row_end() < row_start);
-        let seg = data.segments.get(idx)?;
-        if row_start < seg.row_start || row_end > seg.row_end() {
-            return None;
-        }
-
-        let blocked_rows = match self.slice_mode {
-            ColumnSliceMode::StrictNumeric => &seg.blocked_rows_strict,
-            ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
-        };
-        if has_blocked_row(blocked_rows, row_start, row_end) {
-            return None;
-        }
-
-        let start = (row_start - seg.row_start) as usize;
-        let end = (row_end - seg.row_start) as usize;
-        if end >= seg.values.len() {
-            return None;
-        }
-        Some(&seg.values[start..=end])
+        self.column_slice_impl(sheet_cols, col, row_start, row_end, self.slice_mode)
     }
 
     fn column_slice_on_sheet_strict_numeric(
@@ -7639,38 +7615,17 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
         row_start: i32,
         row_end: i32,
     ) -> Option<&[f64]> {
-        if col < 0
-            || col >= EXCEL_MAX_COLS_I32
-            || row_start < 0
-            || row_end < 0
-            || row_start > row_end
-            || row_end >= EXCEL_MAX_ROWS_I32
-        {
-            return None;
-        }
         if !self.snapshot.sheets.contains(&sheet) {
             return None;
         }
         let sheet_cols = self.cols_by_sheet.get(sheet)?;
-        let data = sheet_cols.get(&col)?;
-        let idx = data
-            .segments
-            .partition_point(|seg| seg.row_end() < row_start);
-        let seg = data.segments.get(idx)?;
-        if row_start < seg.row_start || row_end > seg.row_end() {
-            return None;
-        }
-
-        if has_blocked_row(&seg.blocked_rows_strict, row_start, row_end) {
-            return None;
-        }
-
-        let start = (row_start - seg.row_start) as usize;
-        let end = (row_end - seg.row_start) as usize;
-        if end >= seg.values.len() {
-            return None;
-        }
-        Some(&seg.values[start..=end])
+        self.column_slice_impl(
+            sheet_cols,
+            col,
+            row_start,
+            row_end,
+            ColumnSliceMode::StrictNumeric,
+        )
     }
 
     fn bounds(&self) -> (i32, i32) {
@@ -12725,5 +12680,47 @@ mod tests {
             bytecode::grid::Grid::column_slice(&grid, sheet_cols, 0, 0).is_none(),
             "out-of-bounds columns should never be eligible for SIMD slicing"
         );
+    }
+
+    #[test]
+    fn bytecode_multi_sheet_column_slice_uses_correct_sheet() {
+        // Regression test for multi-sheet SIMD slices:
+        // `Grid::column_slice_on_sheet` must return slices for the requested sheet, not the current
+        // sheet. The default `Grid` implementation ignores the sheet id and can incorrectly
+        // double-count the current sheet when SIMD fast paths are used for 3D aggregates.
+        let mut engine = Engine::new();
+        engine.ensure_sheet("Sheet1");
+        engine.ensure_sheet("Sheet2");
+
+        engine
+            .set_cell_value("Sheet1", "A1", Value::Number(1.0))
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", "A2", Value::Number(2.0))
+            .unwrap();
+        engine
+            .set_cell_value("Sheet2", "A1", Value::Number(10.0))
+            .unwrap();
+        engine
+            .set_cell_value("Sheet2", "A2", Value::Number(20.0))
+            .unwrap();
+
+        engine
+            .set_cell_formula(
+                "Sheet1",
+                "B1",
+                // The first SUM forces a column slice to exist for Sheet1, while the second SUM
+                // evaluates a 3D sheet span that must read Sheet2's slice via `column_slice_on_sheet`.
+                "=SUM(A1:A2) + SUM(Sheet1:Sheet2!A1:A2)",
+            )
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+
+        // Expected:
+        // SUM(Sheet1!A1:A2) = 3
+        // SUM(Sheet1:Sheet2!A1:A2) = 3 + 30 = 33
+        // Total = 36
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(36.0));
     }
 }
