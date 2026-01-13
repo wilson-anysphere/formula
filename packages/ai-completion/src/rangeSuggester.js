@@ -136,7 +136,11 @@ const EXCEL_MAX_COL_INDEX = 16383; // XFD (1-based 16384)
 
 function safeColumnLetterToIndex(letters) {
   try {
-    return columnLetterToIndex(letters);
+    const idx = columnLetterToIndex(letters);
+    // Excel's last column is XFD (0-based 16383). Avoid suggesting out-of-bounds
+    // ranges if the user types a 3-letter column beyond Excel's limit (e.g. ZZZ).
+    if (idx > EXCEL_MAX_COL_INDEX) return null;
+    return idx;
   } catch {
     return null;
   }
@@ -305,6 +309,7 @@ function applyColumnCase(letters, typedColToken) {
 function findContiguousTableToRight(ctx, startCol, startRow, endRow, maxScanCols, sheetName) {
   if (maxScanCols <= 1) return null;
   if (endRow < startRow) return null;
+  if (startCol > EXCEL_MAX_COL_INDEX) return null;
 
   const rowCount = endRow - startRow + 1;
   if (rowCount <= 1) return null;

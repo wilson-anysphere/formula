@@ -157,6 +157,39 @@ test("suggestRanges suggests a 2D table range when adjacent columns form a recta
   );
 });
 
+test("suggestRanges stops table expansion when encountering a gap (entirely empty column)", () => {
+  /** @type {Array<[number, number, any]>} */
+  const cells = [];
+  // Header row across A:D (but C will be empty across all rows -> gap).
+  cells.push([0, 0, "Key"]);
+  cells.push([0, 1, "Value"]);
+  // Intentionally omit any values for column C (index 2).
+  cells.push([0, 3, "Ignored"]);
+
+  // Data rows 2..10.
+  for (let r = 1; r < 10; r++) {
+    cells.push([r, 0, `K${r}`]);
+    cells.push([r, 1, r]);
+    // Column C gap.
+    cells.push([r, 3, r * 1000]); // Should not be pulled in due to the gap at C.
+  }
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 10, col: 0 }, // row 11, below the data
+    surroundingCells: createGridContext(cells),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.range === "A1:B10"),
+    `Expected suggestions to contain A1:B10, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+  assert.ok(
+    !suggestions.some((s) => s.range === "A1:D10"),
+    `Expected suggestions to not contain A1:D10 due to gap column, got: ${suggestions.map((s) => s.range).join(", ")}`
+  );
+});
+
 test("suggestRanges does not suggest a 2D table range when only one column is populated", () => {
   /** @type {Array<[number, number, any]>} */
   const cells = [];
