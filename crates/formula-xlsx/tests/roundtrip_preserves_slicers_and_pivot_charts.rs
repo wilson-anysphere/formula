@@ -126,3 +126,107 @@ fn slicer_sheet_names_are_best_effort_when_workbook_xml_is_malformed(
 
     Ok(())
 }
+
+#[test]
+fn slicer_placement_is_best_effort_when_worksheet_rels_is_malformed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/pivot_slicers_and_chart.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut package = XlsxPackage::from_bytes(&bytes)?;
+
+    // When worksheet `.rels` cannot be parsed, we should still parse slicers/timelines, but the
+    // drawing -> sheet mapping becomes empty.
+    package.set_part(
+        "xl/worksheets/_rels/sheet1.xml.rels",
+        b"not xml".to_vec(),
+    );
+
+    let slicers = package.pivot_slicer_parts()?;
+    assert_eq!(slicers.slicers.len(), 1);
+    assert_eq!(slicers.timelines.len(), 1);
+
+    assert_eq!(
+        slicers.slicers[0].placed_on_drawings,
+        vec!["xl/drawings/drawing1.xml".to_string()]
+    );
+    assert!(slicers.slicers[0].placed_on_sheets.is_empty());
+    assert!(slicers.slicers[0].placed_on_sheet_names.is_empty());
+
+    assert_eq!(
+        slicers.timelines[0].placed_on_drawings,
+        vec!["xl/drawings/drawing1.xml".to_string()]
+    );
+    assert!(slicers.timelines[0].placed_on_sheets.is_empty());
+    assert!(slicers.timelines[0].placed_on_sheet_names.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn slicer_placement_is_best_effort_when_drawing_rels_is_malformed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/pivot_slicers_and_chart.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut package = XlsxPackage::from_bytes(&bytes)?;
+
+    // When drawing `.rels` cannot be parsed, we should still parse slicers/timelines, but
+    // slicer/timeline -> drawing mapping becomes empty.
+    package.set_part("xl/drawings/_rels/drawing1.xml.rels", b"not xml".to_vec());
+
+    let slicers = package.pivot_slicer_parts()?;
+    assert_eq!(slicers.slicers.len(), 1);
+    assert_eq!(slicers.timelines.len(), 1);
+
+    assert!(slicers.slicers[0].placed_on_drawings.is_empty());
+    assert!(slicers.slicers[0].placed_on_sheets.is_empty());
+    assert!(slicers.slicers[0].placed_on_sheet_names.is_empty());
+
+    assert!(slicers.timelines[0].placed_on_drawings.is_empty());
+    assert!(slicers.timelines[0].placed_on_sheets.is_empty());
+    assert!(slicers.timelines[0].placed_on_sheet_names.is_empty());
+
+    Ok(())
+}
+
+#[test]
+fn slicer_cache_relationships_are_best_effort_when_slicer_rels_is_malformed(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/pivot_slicers_and_chart.xlsx");
+    let bytes = std::fs::read(&fixture_path)?;
+    let mut package = XlsxPackage::from_bytes(&bytes)?;
+
+    // If the slicer part's `.rels` file is malformed, slicer cache relationships should simply be
+    // treated as absent (rather than failing slicer parsing entirely).
+    package.set_part("xl/slicers/_rels/slicer1.xml.rels", b"not xml".to_vec());
+
+    let slicers = package.pivot_slicer_parts()?;
+    assert_eq!(slicers.slicers.len(), 1);
+    assert_eq!(slicers.timelines.len(), 1);
+
+    // Cache metadata should be empty / missing.
+    assert!(slicers.slicers[0].cache_part.is_none());
+    assert!(slicers.slicers[0].cache_name.is_none());
+    assert!(slicers.slicers[0].source_name.is_none());
+    assert!(slicers.slicers[0].connected_pivot_tables.is_empty());
+
+    // Placement should still be discoverable via drawings + worksheet rels.
+    assert_eq!(
+        slicers.slicers[0].placed_on_sheets,
+        vec!["xl/worksheets/sheet1.xml".to_string()]
+    );
+    assert_eq!(
+        slicers.slicers[0].placed_on_sheet_names,
+        vec!["Sheet1".to_string()]
+    );
+
+    // Timeline parsing should be unaffected by slicer rels corruption.
+    assert_eq!(
+        slicers.timelines[0].cache_part.as_deref(),
+        Some("xl/timelineCaches/timelineCacheDefinition1.xml")
+    );
+
+    Ok(())
+}

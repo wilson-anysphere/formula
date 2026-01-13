@@ -872,13 +872,15 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
 
         let (cache_name, source_name, connected_pivot_tables, connected_tables) =
             if let Some(cache_part) = cache_part.as_deref() {
-                let resolved = resolve_slicer_cache_definition(package, cache_part)?;
-                (
-                    resolved.cache_name,
-                    resolved.source_name,
-                    resolved.connected_pivot_tables,
-                    resolved.connected_tables,
-                )
+                match resolve_slicer_cache_definition(package, cache_part) {
+                    Ok(resolved) => (
+                        resolved.cache_name,
+                        resolved.source_name,
+                        resolved.connected_pivot_tables,
+                        resolved.connected_tables,
+                    ),
+                    Err(_) => (None, None, Vec::new(), Vec::new()),
+                }
             } else {
                 (None, None, Vec::new(), Vec::new())
             };
@@ -930,14 +932,16 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
 
         let (cache_name, source_name, base_field, level, connected_pivot_tables) =
             if let Some(cache_part) = cache_part.as_deref() {
-                let resolved = resolve_timeline_cache_definition(package, cache_part)?;
-                (
-                    resolved.cache_name,
-                    resolved.source_name,
-                    resolved.base_field,
-                    resolved.level,
-                    resolved.connected_pivot_tables,
-                )
+                match resolve_timeline_cache_definition(package, cache_part) {
+                    Ok(resolved) => (
+                        resolved.cache_name,
+                        resolved.source_name,
+                        resolved.base_field,
+                        resolved.level,
+                        resolved.connected_pivot_tables,
+                    ),
+                    Err(_) => (None, None, None, None, Vec::new()),
+                }
             } else {
                 (None, None, None, None, Vec::new())
             };
