@@ -75,10 +75,22 @@ apt-get install -y \
 # For Tauri
 apt-get install -y \
   libgtk-3-dev \
-  libwebkit2gtk-4.0-dev \
-  libappindicator3-dev \
+  libssl-dev \
   librsvg2-dev \
-  patchelf
+  patchelf \
+  squashfs-tools \
+  fakeroot \
+  rpm
+
+# WebKitGTK dev package name differs across Ubuntu versions.
+apt-get install -y libwebkit2gtk-4.1-dev || apt-get install -y libwebkit2gtk-4.0-dev
+
+# AppIndicator dev package name differs across Ubuntu versions (Ubuntu 24.04 prefers Ayatana).
+apt-get install -y libayatana-appindicator3-dev || apt-get install -y libappindicator3-dev
+
+# `appimagetool` is distributed as an AppImage and requires the FUSE 2 runtime.
+# Ubuntu 24.04 uses `libfuse2t64` as part of the time_t 64-bit transition.
+apt-get install -y libfuse2 || apt-get install -y libfuse2t64
 
 # For headless browser testing
 apt-get install -y \
