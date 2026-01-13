@@ -3062,12 +3062,38 @@ mod encode_ast {
         rgce: &mut Vec<u8>,
         class: PtgClass,
     ) -> Result<(), EncodeError> {
+        // 3D sheet ranges for defined names (`Sheet1:Sheet3!MyName`) require `PtgNameX` with an
+        // `ixti` pointing at the sheet span and a `nameIndex` referencing an ExternName entry.
+        //
+        // This is distinct from workbook-scoped and single-sheet-scoped defined names, which are
+        // encoded using `PtgName` (defined name index).
+        if let Some(fe::SheetRef::SheetRange { start, end }) = name.sheet.as_ref() {
+            let (first_key, last_key) = match name.workbook.as_deref() {
+                Some(book) => (format!("[{book}]{start}"), format!("[{book}]{end}")),
+                None => (start.clone(), end.clone()),
+            };
+
+            let ixti = ctx
+                .extern_sheet_range_index(&first_key, &last_key)
+                .ok_or_else(|| EncodeError::UnknownSheet(format!("{start}:{end}")))?;
+
+            let name_index = ctx
+                .namex_defined_name_index_for_ixti(ixti, &name.name)
+                .ok_or_else(|| EncodeError::UnknownName {
+                    name: name.name.clone(),
+                })?;
+
+            rgce.push(ptg_with_class(PTG_NAMEX, class));
+            rgce.extend_from_slice(&ixti.to_le_bytes());
+            rgce.extend_from_slice(&name_index.to_le_bytes());
+            return Ok(());
+        }
+
         let sheet = match name.sheet.as_ref() {
             None => None,
             Some(fe::SheetRef::Sheet(sheet)) => Some(sheet.as_str()),
-            Some(fe::SheetRef::SheetRange { .. }) => {
-                return Err(EncodeError::Unsupported("sheet-range scoped defined names"))
-            }
+            // SheetRange handled above.
+            Some(fe::SheetRef::SheetRange { .. }) => None,
         };
 
         // Prefer workbook-defined names over NameX extern names when the formula text has no

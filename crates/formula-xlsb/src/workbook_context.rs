@@ -361,14 +361,84 @@ impl WorkbookContext {
                     }
                 }
 
+                // Sheet-range scoped external defined names are encoded with a sheet span `ixti`
+                // (index into ExternSheet), but do not carry a single `scope_sheet`.
+                //
+                // When we can resolve the ixti to a span, render it as
+                // `'[Book]SheetA:SheetB'!Name` so the prefix is parseable as a single quoted token
+                // (mirrors `rgce`'s canonical 3D-ref formatting).
+                if extern_name.scope_sheet.is_none() {
+                    if let Some((Some(workbook), first_sheet, last_sheet)) = self.extern_sheet_target(ixti)
+                    {
+                        if normalize_key(first_sheet) != normalize_key(last_sheet) {
+                            let token = format!("[{workbook}]{first_sheet}:{last_sheet}");
+                            return Some(format!(
+                                "{}!{}",
+                                quote_excel_quoted_ident(&token),
+                                extern_name.name
+                            ));
+                        }
+                    }
+                }
+
                 // Workbook-scoped external names use the Excel form `[Book]Name`, but the
                 // formula-engine parser currently can't disambiguate `[Book]Name` from a
                 // structured reference. Quote the entire token so it becomes a `QuotedIdent`.
                 let token = format!("[{book}]{}", extern_name.name);
                 Some(quote_excel_quoted_ident(&token))
             }
+            SupBookKind::Internal => {
+                // Sheet-range scoped internal defined names are encoded with a 3D `ixti` (sheet
+                // span). Excel's canonical formula text uses `Sheet1:Sheet3!Name`, but to keep
+                // the prefix parseable for `formula-engine` we emit the combined span as a single
+                // quoted identifier: `'Sheet1:Sheet3'!Name`.
+                if extern_name.scope_sheet.is_none() {
+                    if let Some((None, first_sheet, last_sheet)) = self.extern_sheet_target(ixti) {
+                        if normalize_key(first_sheet) != normalize_key(last_sheet) {
+                            let token = format!("{first_sheet}:{last_sheet}");
+                            return Some(format!(
+                                "{}!{}",
+                                quote_excel_quoted_ident(&token),
+                                extern_name.name
+                            ));
+                        }
+                    }
+                }
+                Some(extern_name.name.clone())
+            }
             _ => Some(extern_name.name.clone()),
         }
+    }
+
+    #[cfg(feature = "write")]
+    pub(crate) fn namex_defined_name_index_for_ixti(&self, ixti: u16, name: &str) -> Option<u16> {
+        let supbook_index = self.namex_ixti_supbooks.get(&ixti).copied().unwrap_or(ixti);
+        let normalized_name = normalize_key(name);
+
+        // Prefer an ExternName without a single-sheet scope when encoding 3D sheet spans like
+        // `Sheet1:Sheet3!MyName`. Some files also include sheet-scoped ExternName entries for the
+        // same display name; keep a best-effort fallback for those cases.
+        let mut best_no_scope: Option<u16> = None;
+        let mut best_any: Option<u16> = None;
+
+        for (&(sb, name_index), extern_name) in &self.namex_extern_names {
+            if sb != supbook_index {
+                continue;
+            }
+            if extern_name.is_function {
+                continue;
+            }
+            if normalize_key(&extern_name.name) != normalized_name {
+                continue;
+            }
+
+            if extern_name.scope_sheet.is_none() {
+                best_no_scope = Some(best_no_scope.map_or(name_index, |best| best.min(name_index)));
+            }
+            best_any = Some(best_any.map_or(name_index, |best| best.min(name_index)));
+        }
+
+        best_no_scope.or(best_any)
     }
 
     pub(crate) fn namex_function_ref(&self, name: &str) -> Option<(u16, u16)> {
