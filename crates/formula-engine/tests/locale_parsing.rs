@@ -253,8 +253,7 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_de_de() {
         localized_err
     );
 
-    // Newer external-data errors appear to be canonical (English) in Excel's formula language.
-    // Keep these round-tripping unchanged until we have confirmed locale-specific spellings.
+    // These error literals currently round-trip unchanged for this locale.
     for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
         let src = format!("={err}");
         let canon = locale::canonicalize_formula(&src, &locale::DE_DE).unwrap();
@@ -289,8 +288,7 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_fr_fr() {
         localized_err
     );
 
-    // Newer external-data errors appear to be canonical (English) in Excel's formula language.
-    // Keep these round-tripping unchanged until we have confirmed locale-specific spellings.
+    // These error literals currently round-trip unchanged for this locale.
     for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
         let src = format!("={err}");
         let canon = locale::canonicalize_formula(&src, &locale::FR_FR).unwrap();
@@ -325,9 +323,7 @@ fn canonicalize_and_localize_external_data_functions_and_errors_for_es_es() {
         localized_err
     );
 
-    // Newer external-data errors are currently treated as canonical (English) for es-ES.
-    // Spanish Excel often uses inverted punctuation for some errors (e.g. `#¡VALOR!`),
-    // which we do not support yet.
+    // These error literals currently round-trip unchanged for this locale.
     for err in ["#CONNECT!", "#FIELD!", "#BLOCKED!", "#UNKNOWN!"] {
         let src = format!("={err}");
         let canon = locale::canonicalize_formula(&src, &locale::ES_ES).unwrap();

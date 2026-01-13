@@ -12,6 +12,8 @@ struct FunctionTranslationMaps {
 /// Translation table for Excel function identifiers.
 ///
 /// Data is stored outside the Rust source in simple TSV files under `locale/data/`.
+/// See `locale/data/README.md` for the TSV format and the generator scripts that keep
+/// these tables complete and normalized.
 /// This keeps the code small and provides a straightforward path to scale to hundreds
 /// of translated functions by generating the TSV from upstream sources (e.g. Office
 /// function translation lists) without hand-editing Rust tables.
@@ -93,6 +95,8 @@ impl FunctionTranslations {
 }
 
 static EMPTY_FUNCTIONS: FunctionTranslations = FunctionTranslations::new("");
+// Locale TSVs live in `src/locale/data/`. See `src/locale/data/README.md` for
+// contributor docs (format, completeness requirements, and generators).
 static DE_DE_FUNCTIONS: FunctionTranslations =
     FunctionTranslations::new(include_str!("data/de-DE.tsv"));
 static FR_FR_FUNCTIONS: FunctionTranslations =
@@ -126,12 +130,12 @@ impl FormulaLocale {
     /// Translate an input function name into canonical form.
     pub fn canonical_function_name(&self, name: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(name);
-        let upper = base.to_ascii_uppercase();
+        let folded = casefold_ident(base);
 
         let mapped = self
             .functions
-            .localized_to_canonical(&upper)
-            .unwrap_or(upper.as_str());
+            .localized_to_canonical(&folded)
+            .unwrap_or(folded.as_str());
 
         let mut out = String::new();
         if has_prefix {
@@ -144,12 +148,12 @@ impl FormulaLocale {
     /// Translate a canonical function name into its localized display form.
     pub fn localized_function_name(&self, canonical: &str) -> String {
         let (has_prefix, base) = split_xlfn_prefix(canonical);
-        let upper = base.to_ascii_uppercase();
+        let folded = casefold_ident(base);
 
         let mapped = self
             .functions
-            .canonical_to_localized(&upper)
-            .unwrap_or(upper.as_str());
+            .canonical_to_localized(&folded)
+            .unwrap_or(folded.as_str());
 
         let mut out = String::new();
         if has_prefix {
@@ -232,6 +236,16 @@ fn split_xlfn_prefix(name: &str) -> (bool, &str) {
     }
 }
 
+fn casefold_ident(ident: &str) -> String {
+    // Locale translation needs case-insensitive matching that behaves like Excel.
+    // Use Unicode-aware uppercasing (`ß` -> `SS`, `ä` -> `Ä`, ...) for non-ASCII.
+    if ident.is_ascii() {
+        ident.to_ascii_uppercase()
+    } else {
+        ident.chars().flat_map(|ch| ch.to_uppercase()).collect()
+    }
+}
+
 /// English (United States) uses `.` for decimals and `,` for arguments.
 pub static EN_US: FormulaLocale = FormulaLocale {
     id: "en-US",
@@ -254,12 +268,7 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "WAHR",
     boolean_false: "FALSCH",
-    // Error literal spellings verified against Microsoft Excel function/error localization
-    // (see locale TSV sources + `tests/locale_parsing.rs`).
-    //
-    // Note: At time of writing we only have a confirmed localized spelling for
-    // `#GETTING_DATA`. Newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`,
-    // `#UNKNOWN!`) are left canonical until we have a verified de-DE localization list.
+    // For TSV format + generation workflow, see `src/locale/data/README.md`.
     error_literal_map: &[
         ("#VALUE!", "#WERT!"),
         ("#REF!", "#BEZUG!"),
@@ -276,12 +285,7 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VRAI",
     boolean_false: "FAUX",
-    // Error literal spellings verified against Microsoft Excel function/error localization
-    // (see locale TSV sources + `tests/locale_parsing.rs`).
-    //
-    // Note: At time of writing we only have a confirmed localized spelling for
-    // `#GETTING_DATA`. Newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`,
-    // `#UNKNOWN!`) are left canonical until we have a verified fr-FR localization list.
+    // For TSV format + generation workflow, see `src/locale/data/README.md`.
     error_literal_map: &[
         ("#VALUE!", "#VALEUR!"),
         ("#NAME?", "#NOM?"),
@@ -297,17 +301,7 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
     is_rtl: false,
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
-    // Error literal spellings verified against Microsoft Excel function/error localization
-    // (see locale TSV sources + `tests/locale_parsing.rs`).
-    //
-    // Note: Some Spanish Excel error literals use leading inverted punctuation
-    // (`#¡VALOR!`, `#¿NOMBRE?`, ...). Those are not covered yet; this table currently
-    // includes only spellings that use plain ASCII and therefore round-trip through
-    // the lexer unchanged.
-    //
-    // Newer external-data errors like `#CONNECT!`/`#FIELD!`/`#BLOCKED!`/`#UNKNOWN!` are
-    // also kept canonical until we add full Spanish error literal support (including
-    // the inverted punctuation variants that Excel uses in some locales).
+    // For TSV format + generation workflow, see `src/locale/data/README.md`.
     error_literal_map: &[("#GETTING_DATA", "#OBTENIENDO_DATOS")],
     functions: &ES_ES_FUNCTIONS,
 };

@@ -1,60 +1,106 @@
-# Locale function/error translation data (`*.tsv`)
+# Locale translation data (`*.tsv`)
 
-The formula engine persists and evaluates formulas in **canonical Excel (en-US) form**:
+The formula engine **persists and evaluates formulas in canonical Excel (en-US) form**:
 
-- English function names (e.g. `SUM`, `CUBEVALUE`)
-- `,` argument separators
-- `.` decimal separator
-- canonical error literals (e.g. `#VALUE!`, `#GETTING_DATA`)
+- Canonical (English) function identifiers (e.g. `SUM`, `CUBEVALUE`)
+- `,` as the argument separator / union operator
+- `.` as the decimal separator
+- Canonical error literals (e.g. `#VALUE!`, `#GETTING_DATA`)
 
-For UI workflows, we support translating formulas to/from locale-specific display forms via:
+UI/editor workflows can translate formulas to/from locale display forms via:
 
-- `locale::canonicalize_formula*` (localized -> canonical)
-- `locale::localize_formula*` (canonical -> localized)
+- `locale::canonicalize_formula*` (localized → canonical)
+- `locale::localize_formula*` (canonical → localized)
 - `Engine::set_cell_formula_localized*`
+
+This directory contains the translation tables used by the locale translation pipeline
+(`crates/formula-engine/src/locale`).
+
+## Files and completeness requirements
+
+### Function translations (`<locale>.tsv`)
+
+Each supported locale has a function translation TSV (e.g. `de-DE.tsv`, `fr-FR.tsv`, `es-ES.tsv`).
+
+**Completeness goal:** every function TSV must contain **exactly one entry per function** in the
+engine’s function catalog (see `shared/functionCatalog.json`).
+
+This is important because:
+
+- missing entries silently fall back to the canonical (English) name in both directions, which
+  breaks round-tripping and localized editing;
+- keeping the TSVs complete lets us catch regressions any time a function is added/renamed.
+
+### Error translations (`<locale>.errors.tsv`)
+
+Error literal translations are maintained in the locale registry (`src/locale/registry.rs`), but we
+also support generating a TSV export per locale (e.g. `de-DE.errors.tsv`) for auditing and keeping
+coverage in sync with the engine’s error set (`ErrorKind`).
 
 ## TSV format
 
-Each `*.tsv` file is a simple tab-separated mapping:
+Each TSV file is a simple tab-separated mapping:
 
 ```
 Canonical<TAB>Localized
 ```
 
 - Lines starting with `#` and empty lines are ignored.
-- Function names should be provided in the **same spelling Excel displays for that locale**.
-- Entries are treated as case-insensitive in parsing (function names are uppercased during
-  translation), so the convention is to store them as uppercase.
+- The canonical column must use the engine’s canonical spelling.
+- The localized column should use **the exact spelling Excel displays for that locale**.
 
-## External-data functions / errors
+## Case-folding, Unicode, and why values are stored uppercase
 
-These locales include explicit coverage for external-data worksheet functions:
+Excel treats function identifiers case-insensitively. Our locale translation layer matches that by
+normalizing identifiers before lookup:
 
-- `RTD`
-- `CUBEVALUE`
-- `CUBEMEMBER`
-- `CUBEMEMBERPROPERTY`
-- `CUBERANKEDMEMBER`
-- `CUBESET`
-- `CUBESETCOUNT`
-- `CUBEKPIMEMBER`
+- Identifiers are **case-folded using Unicode-aware uppercasing** (Rust `char::to_uppercase`).
+- TSV entries are stored in their **already-case-folded (uppercase) form** so the runtime can do a
+  direct hash lookup against the `include_str!` data without allocating or case-folding every table
+  entry at startup.
 
-And for the external-data loading error literal:
+Practical takeaway: keep the TSV `Localized` values uppercase (including non-ASCII characters), and
+run the generators below to enforce normalization.
 
-- `#GETTING_DATA`
+## Generators and `--check`
 
-The expected spellings are encoded in:
+TSVs are maintained by small generator binaries so we can enforce:
 
-- `de-DE.tsv`
-- `fr-FR.tsv`
-- `es-ES.tsv`
+- completeness against the engine catalog (`shared/functionCatalog.json`);
+- normalization (case-folded uppercase);
+- deterministic ordering and stable diffs.
 
-and exercised by `crates/formula-engine/tests/locale_parsing.rs` so any regression (e.g. locale
-input turning into `#NAME?`) is caught.
+Run these from the repo root:
 
-### Newer external-data errors
+```bash
+# Regenerate function TSVs (writes files in-place)
+cargo run -p formula-engine --bin generate_locale_function_tsv
 
-The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) are currently
-treated as canonical (English) for all supported locales, until we have a verified Excel
-localization list for them. Tests assert they round-trip unchanged.
+# Verify TSVs are up to date (CI mode)
+cargo run -p formula-engine --bin generate_locale_function_tsv -- --check
 
+# Export error literal TSVs from the locale registry
+cargo run -p formula-engine --bin generate_locale_error_tsv
+
+# Verify error TSV exports are up to date
+cargo run -p formula-engine --bin generate_locale_error_tsv -- --check
+```
+
+`--check` exits non-zero if any files would change.
+
+## Adding a new locale
+
+1. **Create the TSV(s):**
+   - Add `crates/formula-engine/src/locale/data/<locale>.tsv` for function names.
+   - (Optional but recommended) add `<locale>.errors.tsv` via the error TSV generator.
+2. **Register the locale in code:**
+   - Add a `static <LOCALE>_FUNCTIONS: FunctionTranslations = ...include_str!("data/<locale>.tsv")`
+     in `crates/formula-engine/src/locale/registry.rs`.
+   - Add a `pub static <LOCALE>: FormulaLocale = ...` entry with separators + boolean literals +
+     error literal mappings.
+   - Add the locale to `get_locale()` in `registry.rs`.
+   - Re-export the new constant from `crates/formula-engine/src/locale/mod.rs` if it should be
+     accessible as `locale::<LOCALE>`.
+3. **Add tests:** extend `crates/formula-engine/tests/locale_parsing.rs` with basic round-trip tests
+   for separators, a couple of translated functions, and at least one localized error literal.
+4. **Run generators in `--check` mode** to ensure TSVs stay in sync with the engine catalog.
