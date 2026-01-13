@@ -62,6 +62,11 @@ describe("dev collab encryption toggle", () => {
     expect(maskedFormula?.formula).toBeNull();
     expect(maskedFormula?.encrypted).toBe(true);
 
+    const outsideRange = await sessionWithoutKey.getCell(b1);
+    expect(outsideRange).not.toBeNull();
+    expect(outsideRange?.value).toBe("public");
+    expect(outsideRange?.formula).toBeNull();
+
     // The dev helper should remain able to *decrypt* already-encrypted cells even if the
     // demo encryption range is later changed (writes are range-restricted via shouldEncryptCell).
     const encryptionDifferentRange = resolveDevCollabEncryptionFromSearch({
