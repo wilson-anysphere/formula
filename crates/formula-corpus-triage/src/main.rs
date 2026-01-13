@@ -67,6 +67,10 @@ struct Args {
     #[arg(long = "ignore-path-in")]
     ignore_paths_in: Vec<String>,
 
+    /// Built-in ignore presets for diffing round-tripped output (repeatable).
+    #[arg(long = "ignore-preset")]
+    ignore_presets: Vec<xlsx_diff::IgnorePreset>,
+
     /// Treat calcChain-related diffs as CRITICAL instead of downgrading them to WARNING.
     #[arg(long = "strict-calc-chain")]
     strict_calc_chain: bool,
@@ -221,6 +225,8 @@ struct DiffDetails {
     ignore: Vec<String>,
     ignore_globs: Vec<String>,
     ignore_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ignore_presets: Vec<String>,
     strict_calc_chain: bool,
     counts: DiffCounts,
     part_stats: DiffPartStats,
@@ -712,6 +718,10 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         })
         .collect();
     ignore_paths_sorted.sort();
+    let mut ignore_presets_sorted: Vec<String> =
+        args.ignore_presets.iter().map(|p| p.to_string()).collect();
+    ignore_presets_sorted.sort();
+    ignore_presets_sorted.dedup();
 
     let expected_archive = xlsx_diff::WorkbookArchive::from_bytes(expected)?;
     let actual_archive = xlsx_diff::WorkbookArchive::from_bytes(actual)?;
@@ -730,16 +740,17 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
     let parts_total = expected_parts.union(&actual_parts).count();
 
     let strict_calc_chain = args.strict_calc_chain;
-    let report = xlsx_diff::diff_archives_with_options(
-        &expected_archive,
-        &actual_archive,
-        &xlsx_diff::DiffOptions {
-            ignore_parts: ignore,
-            ignore_globs: ignore_globs_sorted.clone(),
-            ignore_paths,
-            strict_calc_chain,
-        },
-    );
+    let mut options = xlsx_diff::DiffOptions {
+        ignore_parts: ignore,
+        ignore_globs: ignore_globs_sorted.clone(),
+        ignore_paths,
+        strict_calc_chain,
+    };
+    for preset in &args.ignore_presets {
+        options.apply_preset(*preset);
+    }
+
+    let report = xlsx_diff::diff_archives_with_options(&expected_archive, &actual_archive, &options);
 
     let (parts_with_diffs, critical_parts, part_groups) = summarize_diffs_by_part(&report);
     let parts_changed = parts_with_diffs.len();
@@ -802,6 +813,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         ignore_globs: ignore_globs_sorted,
         ignore_paths: ignore_paths_sorted,
         strict_calc_chain,
+        ignore_presets: ignore_presets_sorted,
         counts,
         part_stats: DiffPartStats {
             parts_total,
@@ -1403,6 +1415,7 @@ mod tests {
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
+            ignore_presets: Vec::new(),
             strict_calc_chain: false,
             diff_limit: 100,
             fail_on: RoundTripFailOn::Critical,
@@ -1601,6 +1614,7 @@ mod tests {
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
+            ignore_presets: Vec::new(),
             strict_calc_chain: false,
             diff_limit: 10,
             fail_on: RoundTripFailOn::Critical,
@@ -1692,6 +1706,7 @@ mod tests {
             ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
+            ignore_presets: Vec::new(),
             strict_calc_chain: false,
             diff_limit: 10,
             fail_on: RoundTripFailOn::Critical,

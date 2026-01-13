@@ -7,6 +7,7 @@
 
 pub mod cli;
 mod part_kind;
+mod presets;
 mod rels;
 mod xml;
 
@@ -26,6 +27,7 @@ use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub use part_kind::{classify_part, PartKind};
+pub use presets::IgnorePreset;
 pub use xml::{diff_xml, NormalizedXml};
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
@@ -253,6 +255,17 @@ pub struct DiffOptions {
     /// For strict round-trip preservation scoring, callers can set this to `true` to
     /// keep calcChain diffs CRITICAL.
     pub strict_calc_chain: bool,
+}
+
+impl DiffOptions {
+    /// Apply a built-in ignore preset (opt-in).
+    pub fn apply_preset(&mut self, preset: IgnorePreset) {
+        for rule in preset.owned_rules() {
+            if !self.ignore_paths.contains(&rule) {
+                self.ignore_paths.push(rule);
+            }
+        }
+    }
 }
 
 /// Parameters for a single diff input (workbook path + optional password).

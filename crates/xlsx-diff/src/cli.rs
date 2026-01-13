@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 use globset::Glob;
 use serde::Serialize;
 
-use crate::{DiffInput, DiffOptions, IgnorePathRule, Severity};
+use crate::{DiffInput, DiffOptions, IgnorePathRule, IgnorePreset, Severity};
 
 #[derive(Clone, Debug, ValueEnum)]
 enum OutputFormat {
@@ -60,6 +60,12 @@ pub struct Args {
     #[arg(long = "ignore-path-in")]
     ignore_paths_in: Vec<String>,
 
+    /// Built-in ignore presets (repeatable).
+    ///
+    /// Presets are opt-in and only apply when explicitly selected.
+    #[arg(long = "ignore-preset")]
+    ignore_presets: Vec<IgnorePreset>,
+
     /// Treat calcChain-related diffs as CRITICAL instead of downgrading them to WARNING.
     #[arg(long = "strict-calc-chain")]
     strict_calc_chain: bool,
@@ -101,6 +107,7 @@ struct JsonReport<'a> {
     ignore_parts: Vec<&'a str>,
     ignore_globs: Vec<&'a str>,
     ignore_paths: Vec<JsonIgnorePathRule<'a>>,
+    ignore_presets: Vec<&'a str>,
     strict_calc_chain: bool,
     counts: JsonCounts,
     diffs: Vec<JsonDiff<'a>>,
@@ -129,7 +136,7 @@ pub fn parse_args() -> Args {
 pub fn run_with_args(args: Args) -> Result<()> {
     let threshold = parse_severity(&args.fail_on)?;
 
-    let options = DiffOptions {
+    let mut options = DiffOptions {
         ignore_parts: args
             .ignore_parts
             .iter()
@@ -145,6 +152,10 @@ pub fn run_with_args(args: Args) -> Result<()> {
         ignore_paths: build_ignore_path_rules(&args)?,
         strict_calc_chain: args.strict_calc_chain,
     };
+
+    for preset in &args.ignore_presets {
+        options.apply_preset(*preset);
+    }
 
     for pattern in &options.ignore_globs {
         Glob::new(pattern)?;
@@ -222,6 +233,17 @@ pub fn run_with_args(args: Args) -> Result<()> {
                     globs.join(", ")
                 }
             );
+            let mut presets: Vec<&str> = args.ignore_presets.iter().map(|p| p.as_str()).collect();
+            presets.sort();
+            presets.dedup();
+            println!(
+                "  ignore-preset: {}",
+                if presets.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    presets.join(", ")
+                }
+            );
             let mut ignore_paths: Vec<String> = options
                 .ignore_paths
                 .iter()
@@ -288,6 +310,10 @@ pub fn run_with_args(args: Args) -> Result<()> {
             ignore_paths.sort_by(|a, b| {
                 (a.part, a.kind, a.path_substring).cmp(&(b.part, b.kind, b.path_substring))
             });
+            let mut ignore_presets: Vec<&str> =
+                args.ignore_presets.iter().map(|p| p.as_str()).collect();
+            ignore_presets.sort();
+            ignore_presets.dedup();
 
             let counts = JsonCounts {
                 critical: report.count(Severity::Critical),
@@ -316,6 +342,7 @@ pub fn run_with_args(args: Args) -> Result<()> {
                 ignore_parts,
                 ignore_globs,
                 ignore_paths,
+                ignore_presets,
                 strict_calc_chain: options.strict_calc_chain,
                 counts,
                 diffs,

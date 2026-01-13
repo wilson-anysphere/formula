@@ -98,10 +98,9 @@ fn supports_encryptioninfo_with_leading_slash_stream_name() {
     // EncryptedPackage stream).
     let encrypted =
         std::fs::read(fixture("inputs/example_password.xlsx")).expect("read encrypted fixture");
-    let mut ole_fixture = cfb::CompoundFile::open(Cursor::new(encrypted)).expect("open fixture cfb");
+    let mut src = cfb::CompoundFile::open(Cursor::new(encrypted)).expect("open fixture cfb");
     let mut encryption_info = Vec::new();
-    ole_fixture
-        .open_stream("EncryptionInfo")
+    src.open_stream("EncryptionInfo")
         .expect("open EncryptionInfo stream")
         .read_to_end(&mut encryption_info)
         .expect("read EncryptionInfo stream");

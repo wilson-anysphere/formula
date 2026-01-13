@@ -1212,6 +1212,7 @@ def _run_rust_triage(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
+    diff_ignore_presets: tuple[str, ...] = tuple(),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
@@ -1258,6 +1259,9 @@ def _run_rust_triage(
             cmd.extend(["--ignore-path", pattern])
         for scoped in sorted({p.strip() for p in diff_ignore_path_in if p and p.strip()}):
             cmd.extend(["--ignore-path-in", scoped])
+        for preset in diff_ignore_presets:
+            if preset:
+                cmd.extend(["--ignore-preset", preset])
         if strict_calc_chain:
             cmd.append("--strict-calc-chain")
         if recalc:
@@ -1291,6 +1295,7 @@ def triage_workbook(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
+    diff_ignore_presets: tuple[str, ...] = tuple(),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
@@ -1373,6 +1378,7 @@ def triage_workbook(
         optional_kwargs = {
             "workbook_name": workbook.display_name,
             "diff_ignore_globs": diff_ignore_globs,
+            "diff_ignore_presets": diff_ignore_presets,
             "round_trip_fail_on": round_trip_fail_on,
             "diff_ignore_path": diff_ignore_path,
             "diff_ignore_path_in": diff_ignore_path_in,
@@ -1536,6 +1542,7 @@ def _triage_one_path(
     diff_ignore_globs: tuple[str, ...] = (),
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
+    diff_ignore_presets: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
@@ -1580,6 +1587,7 @@ def _triage_one_path(
             diff_ignore_globs=set(diff_ignore_globs),
             diff_ignore_path=diff_ignore_path,
             diff_ignore_path_in=diff_ignore_path_in,
+            diff_ignore_presets=diff_ignore_presets,
             diff_limit=diff_limit,
             round_trip_fail_on=round_trip_fail_on,
             recalc=recalc,
@@ -1664,6 +1672,7 @@ def _triage_paths(
     diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
+    diff_ignore_presets: tuple[str, ...] = (),
     diff_limit: int,
     round_trip_fail_on: str = "critical",
     recalc: bool,
@@ -1696,6 +1705,7 @@ def _triage_paths(
     diff_ignore_globs_tuple = tuple(sorted({p for p in diff_ignore_globs if p}))
     diff_ignore_path_tuple = tuple(sorted({p for p in diff_ignore_path if p and p.strip()}))
     diff_ignore_path_in_tuple = tuple(sorted({p for p in diff_ignore_path_in if p and p.strip()}))
+    diff_ignore_presets_tuple = tuple(sorted({p for p in diff_ignore_presets if p and p.strip()}))
 
     if worker_count == 1 or len(paths) <= 1:
         for idx, path in enumerate(paths):
@@ -1706,6 +1716,7 @@ def _triage_paths(
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
+                diff_ignore_presets=diff_ignore_presets_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
@@ -1743,6 +1754,7 @@ def _triage_paths(
                 diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
+                diff_ignore_presets=diff_ignore_presets_tuple,
                 diff_limit=diff_limit,
                 round_trip_fail_on=round_trip_fail_on,
                 recalc=recalc,
@@ -1880,6 +1892,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--diff-ignore-preset",
+        action="append",
+        default=[],
+        help="Pass an xlsx-diff ignore preset through to the diff step (can be repeated).",
+    )
+    parser.add_argument(
         "--no-default-diff-ignore",
         action="store_true",
         help=(
@@ -1922,6 +1940,9 @@ def main() -> int:
     )
     diff_ignore_globs = _compute_diff_ignore_globs(
         diff_ignore_globs=args.diff_ignore_glob, use_default=not args.no_default_diff_ignore
+    )
+    diff_ignore_presets = tuple(
+        sorted({(p or "").strip() for p in args.diff_ignore_preset if (p or "").strip()})
     )
 
     try:
@@ -1982,6 +2003,7 @@ def main() -> int:
         diff_ignore_globs=diff_ignore_globs,
         diff_ignore_path=tuple(diff_ignore_path_values),
         diff_ignore_path_in=tuple(diff_ignore_path_in_values),
+        diff_ignore_presets=diff_ignore_presets,
         diff_limit=args.diff_limit,
         round_trip_fail_on=args.round_trip_fail_on,
         recalc=args.recalc,

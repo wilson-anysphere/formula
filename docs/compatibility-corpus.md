@@ -234,6 +234,19 @@ python -m tools.corpus.triage ... \
 python -m tools.corpus.triage ... \
   --diff-ignore-path-in "xl/worksheets/*.xml:xr:uid"
 ```
+#### Ignore presets (known-volatile Excel XML attributes)
+
+Some OOXML attributes are **not stable across Excel saves** (for example `xr:uid` revision identifiers,
+`a:blip/@cstate`, or `x14ac:dyDescent`). These can create noisy diffs when comparing a workbook against a
+re-saved version.
+
+To opt in to suppressing these known-volatile XML attribute diffs, pass:
+
+```bash
+python -m tools.corpus.triage ... --diff-ignore-preset excel-volatile-ids
+```
+
+This is intentionally **opt-in** so default corpus triage remains strict.
 
 To ignore a family of parts by pattern (repeatable), pass `--diff-ignore-glob`:
 

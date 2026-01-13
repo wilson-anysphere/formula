@@ -742,7 +742,6 @@ impl Engine {
         if current == new_index {
             return true;
         }
-
         let before_order = self.workbook.sheet_order.clone();
         let moved = self.workbook.sheet_order.remove(current);
         self.workbook.sheet_order.insert(new_index, moved);

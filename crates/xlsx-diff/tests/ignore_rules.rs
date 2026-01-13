@@ -1239,6 +1239,100 @@ fn ignore_path_with_invalid_part_glob_does_not_match_all_parts() {
 }
 
 #[test]
+fn ignore_preset_excel_volatile_ids_suppresses_xr_uid_diffs() {
+    let expected_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000001}"/>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000002}"/>"#,
+    )]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let base_report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(
+        base_report
+            .differences
+            .iter()
+            .any(|d| d.part == "xl/workbook.xml"
+                && d.kind == "attribute_changed"
+                && d.path.contains("uid")),
+        "expected a uid attribute diff, got {:#?}",
+        base_report.differences
+    );
+
+    let mut options = DiffOptions::default();
+    options.apply_preset(xlsx_diff::IgnorePreset::ExcelVolatileIds);
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(
+        report.is_empty(),
+        "expected no diffs, got {:#?}",
+        report.differences
+    );
+}
+
+#[test]
+fn cli_ignore_preset_flag_suppresses_xr_uid_diffs() {
+    let expected_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000001}"/>"#,
+    )]);
+    let actual_zip = zip_bytes(&[(
+        "xl/workbook.xml",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"
+          xr:uid="{00000000-0000-0000-0000-000000000002}"/>"#,
+    )]);
+
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, expected_zip).unwrap();
+    std::fs::write(&modified_path, actual_zip).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--ignore-preset")
+        .arg("excel-volatile-ids")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "expected exit 0 with --ignore-preset, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn cli_ignore_path_flag_suppresses_specific_xml_attribute_diffs() {
     let expected_zip = zip_bytes(&[(
         "xl/worksheets/sheet1.xml",
