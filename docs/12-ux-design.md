@@ -97,6 +97,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 4. **View**: Zoom, freeze, split, hide
 5. **AI**: Analyze, explain, generate, transform
 
+Implementation note: PivotTable ownership boundaries (model schema vs compute vs XLSX import/export)
+are captured in [ADR-0005](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
+
 ### Search Behavior
 
 - Fuzzy matching: "pvt tbl" → "Pivot Table"
