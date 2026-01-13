@@ -3,6 +3,13 @@
 /// Tauri does not guarantee that emitted events are queued before JS listeners are registered.
 /// To avoid dropping file-open requests on cold start, the Rust backend queues incoming
 /// `open-file` requests until the frontend signals readiness via an `open-file-ready` event.
+///
+/// The pending queue is intentionally bounded to avoid unbounded memory growth if the OS delivers
+/// many open-file events before the frontend installs its event listeners. When the cap is
+/// exceeded, we drop the **oldest** paths and keep the most recent ones so the latest user action
+/// wins.
+const MAX_PENDING_PATHS: usize = 64;
+
 #[derive(Debug, Default)]
 pub struct OpenFileState {
     ready: bool,
@@ -27,6 +34,11 @@ impl OpenFileState {
             Some(paths)
         } else {
             self.pending_paths.extend(paths);
+            if self.pending_paths.len() > MAX_PENDING_PATHS {
+                let overflow = self.pending_paths.len() - MAX_PENDING_PATHS;
+                // Drop oldest paths first, keeping the most recent ones.
+                self.pending_paths.drain(0..overflow);
+            }
             None
         }
     }
@@ -134,13 +146,37 @@ mod tests {
             "expected exactly one mark_ready_and_drain call inside OPEN_FILE_READY_EVENT listener, found {ready_calls_in_listener}"
         );
 
-        // Extra guardrail: the backend should only flip readiness in response to the frontend
-        // readiness signal. If `mark_ready_and_drain` starts getting called elsewhere (e.g. during
-        // startup), cold-start file-open events can be emitted before the JS listener exists.
-        let total_ready_calls = main_rs.matches(".mark_ready_and_drain(").count();
+        // Extra guardrail: the backend should only flip *open-file* readiness in response to the
+        // frontend readiness signal. If `mark_ready_and_drain` starts getting called on the
+        // `SharedOpenFileState` elsewhere (e.g. during startup), cold-start file-open events can
+        // be emitted before the JS listener exists.
+        let mut open_file_ready_calls = 0;
+        for (idx, _) in main_rs.match_indices("state::<SharedOpenFileState>") {
+            let window = main_rs.get(idx..idx.saturating_add(300)).unwrap_or(&main_rs[idx..]);
+            open_file_ready_calls += window.matches(".mark_ready_and_drain(").count();
+        }
         assert_eq!(
-            total_ready_calls, 1,
-            "expected exactly one mark_ready_and_drain call in desktop main.rs, found {total_ready_calls}"
+            open_file_ready_calls, 1,
+            "expected exactly one mark_ready_and_drain call associated with SharedOpenFileState in desktop main.rs, found {open_file_ready_calls}"
         );
+    }
+
+    #[test]
+    fn caps_pending_paths_and_drops_oldest() {
+        let mut state = OpenFileState::default();
+
+        let mut paths = Vec::new();
+        for idx in 0..(MAX_PENDING_PATHS + 5) {
+            paths.push(format!("p{idx}"));
+        }
+
+        assert!(state.queue_or_emit(paths).is_none());
+        assert_eq!(state.pending_len(), MAX_PENDING_PATHS);
+
+        let flushed = state.mark_ready_and_drain();
+        let expected: Vec<String> = (5..(MAX_PENDING_PATHS + 5))
+            .map(|idx| format!("p{idx}"))
+            .collect();
+        assert_eq!(flushed, expected);
     }
 }

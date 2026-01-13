@@ -37,9 +37,9 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
         .get(init_start..init_start.saturating_add(700))
         .unwrap_or(&main_rs[init_start..]);
     assert!(
-        init_window.contains("pending_urls.extend("),
-        "desktop main.rs must queue initial argv OAuth redirects via OauthRedirectState.pending_urls \
-         (e.g. `guard.pending_urls.extend(initial_oauth_urls)`) so redirects aren't dropped on cold start"
+        init_window.contains(".queue_or_emit("),
+        "desktop main.rs must queue initial argv OAuth redirects via OauthRedirectState::queue_or_emit \
+         so redirects aren't dropped on cold start"
     );
 
     // --- 1) Ensure there is an `oauth-redirect-ready` listener registered.
@@ -59,32 +59,18 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
     let listener_body = &listener_after[..listener_end];
 
     // --- 2) Ensure the listener flips readiness exactly once, drains pending URLs, and emits.
-    let ready_assigns_in_listener = listener_body.matches(".ready = true").count();
+    //
+    // With the dedicated `OauthRedirectState` state machine, idempotent flush-once behavior is
+    // encapsulated in `mark_ready_and_drain`.
+    assert!(
+        listener_body.contains(".mark_ready_and_drain("),
+        "OAUTH_REDIRECT_READY_EVENT listener must call OauthRedirectState::mark_ready_and_drain \
+         so queued OAuth redirect URLs are flushed exactly once"
+    );
+    let ready_calls_in_listener = listener_body.matches(".mark_ready_and_drain(").count();
     assert_eq!(
-        ready_assigns_in_listener, 1,
-        "OAUTH_REDIRECT_READY_EVENT listener must set OauthRedirectState.ready = true exactly once \
-         (idempotent flush). Without this guard, the frontend can trigger multiple flushes and \
-         re-emit stale OAuth redirects."
-    );
-
-    let has_ready_guard = listener_body.contains("if guard.ready")
-        || listener_body.contains("if !guard.ready")
-        || listener_body.contains("if state.ready")
-        || listener_body.contains("if !state.ready");
-    assert!(
-        has_ready_guard,
-        "OAUTH_REDIRECT_READY_EVENT listener should be idempotent (flush at most once), \
-         e.g. `if guard.ready {{ return; }}` before draining pending URLs"
-    );
-
-    let drains_pending = listener_body.contains("take(&mut guard.pending_urls)")
-        || listener_body.contains("take(&mut state.pending_urls)")
-        || listener_body.contains("pending_urls.drain(");
-    assert!(
-        drains_pending,
-        "OAUTH_REDIRECT_READY_EVENT listener must drain queued OAuth redirect URLs \
-         (e.g. `std::mem::take(&mut guard.pending_urls)`). Without draining, redirects captured \
-         before the frontend is ready may be lost or re-emitted unexpectedly."
+        ready_calls_in_listener, 1,
+        "expected exactly one mark_ready_and_drain call inside OAUTH_REDIRECT_READY_EVENT listener, found {ready_calls_in_listener}"
     );
 
     let emits_oauth_redirect = listener_body.contains("emit_oauth_redirect_event")
@@ -115,31 +101,9 @@ fn tauri_main_wires_oauth_redirect_ready_handshake() {
         "oauth redirect handler wiring",
     );
 
-    let has_ready_branch = handler_body.contains("if state.ready") || handler_body.contains("if !state.ready");
     assert!(
-        has_ready_branch,
-        "handle_oauth_redirect_request must branch on OauthRedirectState.ready so it can either \
-         emit immediately (ready) or queue (not ready). Without this, OAuth redirects can be \
-         emitted before the JS listener exists and get dropped."
+        handler_body.contains(".queue_or_emit("),
+        "handle_oauth_redirect_request must route incoming URLs through OauthRedirectState::queue_or_emit \
+         so redirects are either queued (before ready) or emitted immediately (after ready)"
     );
-
-    assert!(
-        handler_body.contains("pending_urls.extend("),
-        "handle_oauth_redirect_request must queue incoming URLs when the frontend isn't ready yet \
-         (e.g. `state.pending_urls.extend(urls)`). If this queueing is removed, OAuth redirects \
-         arriving during startup will be lost."
-    );
-
-    // Heuristic sanity check: in the current implementation the `extend` call should occur after
-    // the readiness check (in the not-ready branch). Keep this check lax so refactors that keep
-    // the semantics intact can still pass.
-    if let (Some(ready_idx), Some(extend_idx)) =
-        (handler_body.find("state.ready"), handler_body.find("pending_urls.extend"))
-    {
-        assert!(
-            extend_idx > ready_idx,
-            "expected `pending_urls.extend(...)` to appear after the readiness check in \
-             handle_oauth_redirect_request (queueing should be conditional on not-ready)"
-        );
-    }
 }

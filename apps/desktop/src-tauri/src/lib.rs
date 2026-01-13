@@ -20,6 +20,7 @@ pub mod macro_trust;
 pub mod macros;
 pub mod open_file;
 pub mod open_file_ipc;
+pub mod oauth_redirect_ipc;
 pub mod opened_urls;
 pub mod oauth_loopback;
 pub mod persistence;

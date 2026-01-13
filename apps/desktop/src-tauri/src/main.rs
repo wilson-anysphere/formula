@@ -15,6 +15,7 @@ use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMac
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
 use desktop::open_file_ipc::OpenFileState;
+use desktop::oauth_redirect_ipc::OauthRedirectState;
 #[cfg(target_os = "macos")]
 use desktop::opened_urls;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
@@ -91,12 +92,6 @@ fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
 }
 
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
-
-#[derive(Debug, Default)]
-struct OauthRedirectState {
-    ready: bool,
-    pending_urls: Vec<String>,
-}
 
 type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
 
@@ -395,15 +390,15 @@ fn handle_oauth_redirect_request(app: &tauri::AppHandle, urls: Vec<String>) {
     show_main_window(app);
 
     let redirect_state = app.state::<SharedOauthRedirectState>().inner().clone();
-    let mut state = redirect_state.lock().unwrap();
+    let maybe_emit = {
+        let mut state = redirect_state.lock().unwrap();
+        state.queue_or_emit(urls)
+    };
 
-    if state.ready {
-        drop(state);
+    if let Some(urls) = maybe_emit {
         for url in urls {
             emit_oauth_redirect_event(app, url);
         }
-    } else {
-        state.pending_urls.extend(urls);
     }
 }
 
@@ -901,7 +896,7 @@ fn main() {
         normalize_oauth_redirect_request_urls(extract_oauth_redirect_urls(&initial_argv));
     if !initial_oauth_urls.is_empty() {
         let mut guard = oauth_redirect_state.lock().unwrap();
-        guard.pending_urls.extend(initial_oauth_urls);
+        guard.queue_or_emit(initial_oauth_urls);
     }
 
     let app = tauri::Builder::default()
@@ -1564,11 +1559,7 @@ fn main() {
                     let state = handle.state::<SharedOauthRedirectState>().inner().clone();
                     let pending = {
                         let mut guard = state.lock().unwrap();
-                        if guard.ready {
-                            return;
-                        }
-                        guard.ready = true;
-                        std::mem::take(&mut guard.pending_urls)
+                        guard.mark_ready_and_drain()
                     };
 
                     let pending = normalize_oauth_redirect_request_urls(pending);
