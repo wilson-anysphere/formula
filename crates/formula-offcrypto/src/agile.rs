@@ -6,6 +6,11 @@
 //!
 //! `Hash(verifierHashInput) == verifierHashValue`.
 //!
+//! The verifier hash value (and other Agile digests like `encryptedHmacValue`) are stored as
+//! AES-CBC ciphertext, and decrypt to a buffer that may be padded to a 16-byte boundary when the
+//! digest size is not a multiple of 16 (e.g. SHA1=20 bytes). Callers should therefore compare only
+//! the digest prefix.
+//!
 //! The derived password hash uses `spinCount` iterations (commonly 100,000). To avoid recomputing
 //! this expensive iterated hash multiple times during a single decryption attempt, this module
 //! exposes [`agile_iterated_hash`] and reuses its output when deriving the block keys for:
@@ -42,15 +47,35 @@ fn hash_output_len(hash_alg: HashAlgorithm) -> usize {
 
 /// Verify the decrypted Agile verifier fields for a candidate password.
 ///
-/// Callers are expected to pass the *decrypted* `verifierHashInput` and `verifierHashValue` fields
-/// (with `verifierHashValue` trimmed to the hash output size).
+/// Callers are expected to pass the *decrypted* `verifierHashInput` and `verifierHashValue` fields.
+/// `verifierHashValue` may include AES-CBC padding; this function compares only the digest prefix.
 pub fn verify_password(
     verifier_hash_input: &[u8],
     verifier_hash_value: &[u8],
     hash_alg: HashAlgorithm,
 ) -> Result<(), OffcryptoError> {
     let digest = hash_alg.digest(verifier_hash_input);
-    if !ct_eq(&digest, verifier_hash_value) {
+    let expected = verifier_hash_value
+        .get(..digest.len())
+        .ok_or(OffcryptoError::InvalidPassword)?;
+    if !ct_eq(&digest, expected) {
+        return Err(OffcryptoError::InvalidPassword);
+    }
+    Ok(())
+}
+
+/// Verify an Agile integrity HMAC value.
+///
+/// `computed_hmac` should be the computed HMAC digest, and `decrypted_hmac_value` should be the
+/// decrypted `encryptedHmacValue` field from the Agile `dataIntegrity` element.
+///
+/// Note: `decrypted_hmac_value` may include AES-CBC padding (e.g. SHA1=20 bytes padded to 32).
+/// This function compares only the digest prefix.
+pub fn verify_hmac(computed_hmac: &[u8], decrypted_hmac_value: &[u8]) -> Result<(), OffcryptoError> {
+    let expected = decrypted_hmac_value
+        .get(..computed_hmac.len())
+        .ok_or(OffcryptoError::InvalidPassword)?;
+    if !ct_eq(computed_hmac, expected) {
         return Err(OffcryptoError::InvalidPassword);
     }
     Ok(())
@@ -129,11 +154,8 @@ pub fn agile_secret_key_from_password(
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
-    let verifier_hash_input = crate::aes_cbc_decrypt(
-        &info.encrypted_verifier_hash_input,
-        &key1,
-        &info.password_salt,
-    )?;
+    let verifier_hash_input =
+        crate::aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &info.password_salt)?;
     if verifier_hash_input.len() < VERIFIER_HASH_INPUT_LEN {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "decrypted verifierHashInput is truncated",
@@ -147,11 +169,8 @@ pub fn agile_secret_key_from_password(
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
-    let verifier_hash_value = crate::aes_cbc_decrypt(
-        &info.encrypted_verifier_hash_value,
-        &key2,
-        &info.password_salt,
-    )?;
+    let verifier_hash_value =
+        crate::aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &info.password_salt)?;
 
     let digest_len = hash_output_len(info.password_hash_algorithm);
     if verifier_hash_value.len() < digest_len {
@@ -161,7 +180,7 @@ pub fn agile_secret_key_from_password(
     }
     verify_password(
         &verifier_hash_input[..VERIFIER_HASH_INPUT_LEN],
-        &verifier_hash_value[..digest_len],
+        &verifier_hash_value,
         info.password_hash_algorithm,
     )?;
 
@@ -230,6 +249,33 @@ mod tests {
     }
 
     #[test]
+    fn sha1_verifier_hash_value_padding_is_ignored() {
+        reset_ct_eq_calls();
+
+        let verifier_input = b"0123456789abcdef"; // 16 bytes
+        let digest = HashAlgorithm::Sha1.digest(verifier_input); // 20 bytes
+
+        let mut padded = digest.clone();
+        padded.extend([0xA5u8; 12]); // pad to 32 bytes
+        assert_eq!(padded.len(), 32);
+
+        verify_password(verifier_input, &padded, HashAlgorithm::Sha1).expect("verify");
+        assert!(ct_eq_call_count() >= 1, "expected ct_eq to be used");
+    }
+
+    #[test]
+    fn sha1_hmac_value_padding_is_ignored() {
+        reset_ct_eq_calls();
+
+        let computed = (0u8..20).collect::<Vec<_>>();
+        let mut padded = computed.clone();
+        padded.extend([0xA5u8; 12]);
+
+        verify_hmac(&computed, &padded).expect("verify");
+        assert!(ct_eq_call_count() >= 1, "expected ct_eq to be used");
+    }
+
+    #[test]
     fn agile_secret_key_from_password_computes_iterated_hash_once() {
         let password = "password";
         let salt = vec![0x11u8; 16];
@@ -283,4 +329,3 @@ mod tests {
         assert_eq!(ITERATED_HASH_CALLS.load(Ordering::Relaxed), 1);
     }
 }
-
