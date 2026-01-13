@@ -2300,6 +2300,41 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A", async () => {
   );
 });
 
+test("Sheet-qualified ranges are suggested when typing Sheet2!A above the data block", async () => {
+  const values = {};
+  for (let r = 2; r <= 11; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 1 (0-based 0), above the data.
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A2:A11)"),
+    `Expected a sheet-qualified range suggestion for data below, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges work when the quoted sheet name contains a comma", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Jan,2024!A${r}`] = r;
