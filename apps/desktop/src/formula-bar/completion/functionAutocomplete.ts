@@ -373,8 +373,11 @@ export class FormulaBarFunctionAutocompleteController {
     }
 
     const input = this.#textarea.value;
-    const canonical = `${ctx.qualifier}${selected.name}`;
-    const insertedName = preserveTypedCasing(ctx.typedPrefix, canonical);
+    // Preserve the user-typed casing for the function name portion while keeping
+    // any `_xlfn.` qualifier prefix intact (Excel compatibility).
+    const typedNamePrefix = ctx.typedPrefix.slice(ctx.qualifier.length);
+    const casedName = preserveTypedCasing(typedNamePrefix, selected.name);
+    const insertedName = `${ctx.qualifier}${casedName}`;
     // Avoid duplicating the opening paren if the user already has one in the text (e.g. editing `=VLO()`).
     const hasParen = input[ctx.replaceEnd] === "(";
     const inserted = hasParen ? insertedName : `${insertedName}(`;

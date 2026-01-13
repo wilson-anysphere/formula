@@ -111,6 +111,25 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("preserves title-style casing after _xlfn. prefix (=_xlfn.Vlo → =_xlfn.Vlookup()", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=_xlfn.Vlo";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.model.draft).toBe("=_xlfn.Vlookup(");
+
+    host.remove();
+  });
+
   it("supports Arrow navigation + Tab to accept (=VLOOKUP()", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
