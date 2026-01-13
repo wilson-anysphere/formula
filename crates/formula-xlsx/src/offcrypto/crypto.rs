@@ -8,6 +8,8 @@
 
 use digest::Digest as _;
 
+const MAX_DIGEST_LEN: usize = 64; // SHA-512
+
 /// Hash algorithm identifiers used by MS-OFFCRYPTO Agile encryption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
@@ -46,31 +48,35 @@ impl HashAlgorithm {
         }
     }
 
-    fn hash_two(self, a: &[u8], b: &[u8]) -> Vec<u8> {
+    fn hash_two_into(self, a: &[u8], b: &[u8], out: &mut [u8]) {
+        debug_assert!(
+            out.len() >= self.digest_len(),
+            "hash output buffer too small"
+        );
         match self {
             HashAlgorithm::Sha1 => {
                 let mut h = sha1::Sha1::new();
                 h.update(a);
                 h.update(b);
-                h.finalize().to_vec()
+                out[..20].copy_from_slice(&h.finalize());
             }
             HashAlgorithm::Sha256 => {
                 let mut h = sha2::Sha256::new();
                 h.update(a);
                 h.update(b);
-                h.finalize().to_vec()
+                out[..32].copy_from_slice(&h.finalize());
             }
             HashAlgorithm::Sha384 => {
                 let mut h = sha2::Sha384::new();
                 h.update(a);
                 h.update(b);
-                h.finalize().to_vec()
+                out[..48].copy_from_slice(&h.finalize());
             }
             HashAlgorithm::Sha512 => {
                 let mut h = sha2::Sha512::new();
                 h.update(a);
                 h.update(b);
-                h.finalize().to_vec()
+                out[..64].copy_from_slice(&h.finalize());
             }
         }
     }
@@ -121,13 +127,50 @@ pub fn hash_password(
     }
 
     let pw = password_utf16le_bytes(password);
-    let mut h = hash_alg.hash_two(salt, &pw);
+    let digest_len = hash_alg.digest_len();
+    debug_assert!(digest_len <= MAX_DIGEST_LEN);
 
-    for i in 0..spin {
-        h = hash_alg.hash_two(&i.to_le_bytes(), &h);
+    // Avoid per-iteration allocations: keep the current hash in a fixed-size buffer and overwrite it
+    // after each digest round.
+    let mut h_buf = [0u8; MAX_DIGEST_LEN];
+    hash_alg.hash_two_into(salt, &pw, &mut h_buf[..digest_len]);
+
+    match hash_alg {
+        HashAlgorithm::Sha1 => {
+            for i in 0..spin {
+                let mut d = sha1::Sha1::new();
+                d.update(i.to_le_bytes());
+                d.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&d.finalize());
+            }
+        }
+        HashAlgorithm::Sha256 => {
+            for i in 0..spin {
+                let mut d = sha2::Sha256::new();
+                d.update(i.to_le_bytes());
+                d.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&d.finalize());
+            }
+        }
+        HashAlgorithm::Sha384 => {
+            for i in 0..spin {
+                let mut d = sha2::Sha384::new();
+                d.update(i.to_le_bytes());
+                d.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&d.finalize());
+            }
+        }
+        HashAlgorithm::Sha512 => {
+            for i in 0..spin {
+                let mut d = sha2::Sha512::new();
+                d.update(i.to_le_bytes());
+                d.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&d.finalize());
+            }
+        }
     }
 
-    Ok(h)
+    Ok(h_buf[..digest_len].to_vec())
 }
 
 /// Derive a key of `key_len` bytes per MS-OFFCRYPTO Agile.
@@ -149,13 +192,18 @@ pub fn derive_key(
     }
 
     let digest_len = hash_alg.digest_len();
-    let mut out = hash_alg.hash_two(h, block_key);
+
+    // Avoid allocating a temporary `H || blockKey` buffer: update the digest twice.
+    let mut digest = [0u8; MAX_DIGEST_LEN];
+    hash_alg.hash_two_into(h, block_key, &mut digest);
+
     if key_len <= digest_len {
-        out.truncate(key_len);
+        Ok(digest[..key_len].to_vec())
     } else {
-        out.resize(key_len, 0u8);
+        let mut out = vec![0u8; key_len];
+        out[..digest_len].copy_from_slice(&digest[..digest_len]);
+        Ok(out)
     }
-    Ok(out)
 }
 
 /// Derive an IV of `iv_len` bytes per MS-OFFCRYPTO Agile.
@@ -177,13 +225,18 @@ pub fn derive_iv(
     }
 
     let digest_len = hash_alg.digest_len();
-    let mut out = hash_alg.hash_two(salt, block_key);
+
+    // Avoid allocating a temporary `salt || blockKey` buffer: update the digest twice.
+    let mut digest = [0u8; MAX_DIGEST_LEN];
+    hash_alg.hash_two_into(salt, block_key, &mut digest);
+
     if iv_len <= digest_len {
-        out.truncate(iv_len);
+        Ok(digest[..iv_len].to_vec())
     } else {
-        out.resize(iv_len, 0u8);
+        let mut out = vec![0u8; iv_len];
+        out[..digest_len].copy_from_slice(&digest[..digest_len]);
+        Ok(out)
     }
-    Ok(out)
 }
 
 /// Block key for `EncryptedPackage` segment IV derivation.
@@ -211,6 +264,7 @@ pub fn derive_segment_iv(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn password_utf16le_encoding_no_bom_no_terminator() {
@@ -293,6 +347,22 @@ mod tests {
         );
         let err = HashAlgorithm::parse_offcrypto_name("md5").unwrap_err();
         assert!(matches!(err, CryptoError::UnsupportedHashAlgorithm(_)));
+    }
+
+    #[test]
+    fn hash_password_perf_guard_spin_10k() {
+        // A simple regression guard: the Agile password KDF loop is often 100k iterations in the
+        // real world, so even modest per-iteration overhead (e.g. heap allocations) can become
+        // noticeable. This test uses a smaller spinCount so it stays fast in debug CI while still
+        // exercising the hot loop.
+        let salt = [0x11u8; 16];
+        let start = Instant::now();
+        let _ = hash_password("password", &salt, 10_000, HashAlgorithm::Sha256).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "hash_password(spinCount=10_000) took too long: {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
