@@ -111,8 +111,10 @@ Add the following repository secrets:
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
 
-CI note: forks/dry-runs without these secrets will still build and upload release artifacts, but
-they will not include updater signature files (`*.sig`) and auto-update will not work.
+CI note: if `plugins.updater.active=true`, tagged releases will **fail fast** if these secrets are
+missing (the workflow prints a “Missing Tauri updater signing secrets” error). Without the private
+key, the release workflow cannot generate the updater signature files (`*.sig`) required for
+auto-update.
 
 ## 3) Code signing (optional but recommended)
 
@@ -125,6 +127,8 @@ CI behavior note:
 - This is implemented by a small CI helper (`scripts/ci/prepare-tauri-signing-config.mjs`) which
   disables the relevant Tauri signing config for that job and only enables notarization when all
   required credentials are available.
+- To **enforce** code signing on tagged releases (fail fast if secrets are missing), set the GitHub
+  Actions variable `FORMULA_REQUIRE_CODESIGN=1`.
 
 ### macOS (Developer ID + notarization)
 

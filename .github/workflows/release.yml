@@ -257,6 +257,10 @@ jobs:
       - name: Prepare optional Tauri signing config (macOS/Windows)
         run: node scripts/ci/prepare-tauri-signing-config.mjs
         env:
+          # Optional: set as a GitHub Actions "Variable" to enforce platform code signing.
+          # - FORMULA_REQUIRE_CODESIGN=1 to fail when required signing secrets are missing
+          FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
+
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

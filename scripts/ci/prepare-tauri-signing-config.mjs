@@ -13,6 +13,10 @@
  *   3) Exports signing/notarization env vars to subsequent steps via `$GITHUB_ENV` only when all
  *      required secrets are present. This avoids `tauri-action` attempting partial signing flows.
  *
+ * If maintainers set the GitHub Actions variable `FORMULA_REQUIRE_CODESIGN=1`, this script switches
+ * to enforcement mode and **fails fast** when platform signing secrets are missing (instead of
+ * patching `tauri.conf.json` to disable signing).
+ *
  * It is intended to run in CI before `tauri-apps/tauri-action`.
  */
 
@@ -30,6 +34,46 @@ const relativeConfigPath = path.relative(repoRoot, configPath);
 function envHasValue(name) {
   const value = process.env[name];
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * @param {unknown} value
+ */
+function isTruthy(value) {
+  if (value === undefined || value === null) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function getRunnerOs() {
+  const envOs = process.env.RUNNER_OS;
+  if (typeof envOs === "string" && envOs.trim().length > 0) return envOs.trim();
+
+  // Fallback for local runs.
+  switch (process.platform) {
+    case "darwin":
+      return "macOS";
+    case "win32":
+      return "Windows";
+    default:
+      return "Linux";
+  }
+}
+
+/**
+ * @param {string} message
+ */
+function err(message) {
+  process.exitCode = 1;
+  console.error(message);
+}
+
+/**
+ * @param {string} heading
+ * @param {string[]} details
+ */
+function errBlock(heading, details) {
+  err(`\n${heading}\n${details.map((d) => `  - ${d}`).join("\n")}`);
 }
 
 /**
@@ -55,6 +99,43 @@ function log(message) {
 }
 
 function main() {
+  const requireCodesign = isTruthy(process.env.FORMULA_REQUIRE_CODESIGN);
+  const runnerOs = getRunnerOs();
+
+  if (requireCodesign) {
+    const missing = [];
+
+    if (runnerOs === "macOS") {
+      const required = [
+        "APPLE_CERTIFICATE",
+        "APPLE_CERTIFICATE_PASSWORD",
+        "APPLE_SIGNING_IDENTITY",
+        "APPLE_ID",
+        "APPLE_PASSWORD",
+        "APPLE_TEAM_ID",
+      ];
+      for (const name of required) {
+        if (!envHasValue(name)) missing.push(name);
+      }
+    } else if (runnerOs === "Windows") {
+      const required = ["WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD"];
+      for (const name of required) {
+        if (!envHasValue(name)) missing.push(name);
+      }
+    }
+
+    if (missing.length > 0) {
+      errBlock(`Code signing is required (${runnerOs}) but secrets are missing`, [
+        `FORMULA_REQUIRE_CODESIGN is enabled, so unsigned artifacts are not allowed.`,
+        `Missing/empty GitHub Actions repository secrets (Settings → Secrets and variables → Actions):`,
+        ...missing.map((name) => name),
+        `To allow unsigned builds again, unset the GitHub Actions variable FORMULA_REQUIRE_CODESIGN.`,
+        `See docs/release.md ("Code signing").`,
+      ]);
+      return;
+    }
+  }
+
   const hasAppleCert = envHasValue("APPLE_CERTIFICATE");
   const hasAppleCertPassword = envHasValue("APPLE_CERTIFICATE_PASSWORD");
   const hasMacSigningSecrets = hasAppleCert && hasAppleCertPassword;
@@ -145,4 +226,3 @@ function main() {
 }
 
 main();
-
