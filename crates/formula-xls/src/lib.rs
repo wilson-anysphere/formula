@@ -275,14 +275,24 @@ fn import_xls_path_with_biff_reader(
     // Calamine does not support BIFF encryption and may return opaque parse
     // errors for password-protected workbooks.
     let mut warnings = Vec::new();
-    let mut workbook_stream = match read_biff_workbook_stream(path) {
-        Ok(bytes) => Some(bytes),
-        Err(err) => {
+    let mut workbook_stream = match catch_calamine_panic_with_context(
+        "reading `.xls` workbook stream",
+        || read_biff_workbook_stream(path),
+    ) {
+        Ok(Ok(bytes)) => Some(bytes),
+        Ok(Err(err)) => {
             warnings.push(ImportWarning::new(format!(
                 "failed to read `.xls` workbook stream: {err}"
             )));
             None
         }
+        Err(ImportError::CalaminePanic(message)) => {
+            warnings.push(ImportWarning::new(format!(
+                "panic while reading `.xls` workbook stream: {message}"
+            )));
+            None
+        }
+        Err(other) => return Err(other),
     };
 
     // Attempt to decrypt BIFF8 `FILEPASS` records when a password is provided. We do this before
@@ -3856,7 +3866,7 @@ fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, St
 mod tests {
     use super::*;
 
-    use std::io::Cursor;
+    use std::io::{Cursor, Write};
 
     use calamine::Data;
     use calamine::Xls;
@@ -3910,6 +3920,31 @@ mod tests {
         assert!(
             message.contains("boom"),
             "expected panic payload in message, got: {message}"
+        );
+    }
+
+    #[test]
+    fn biff_stream_read_panic_is_best_effort_warning() {
+        // Use an on-disk `.xls` fixture and force the BIFF stream reader to panic. The importer
+        // should treat that as non-fatal (warn + fall back to calamine's direct path) rather than
+        // aborting the process.
+        let bytes: &[u8] = include_bytes!("../tests/fixtures/basic.xls");
+
+        let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
+        tmp.write_all(bytes).expect("write xls bytes");
+
+        let result = import_xls_path_with_biff_reader(tmp.path(), None, |_| {
+            panic!("boom from biff reader");
+        })
+        .expect("expected import to succeed after BIFF reader panic");
+
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.message.contains("panic while reading `.xls` workbook stream")),
+            "expected warning about BIFF workbook stream panic, got: {:?}",
+            result.warnings
         );
     }
 
