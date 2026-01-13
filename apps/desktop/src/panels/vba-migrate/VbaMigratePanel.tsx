@@ -63,9 +63,9 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
   if (model.kind === "project") {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="vba-migrate-panel__stack">
         <div data-testid="vba-analysis-risk">
-          <div style={{ fontWeight: 600 }}>Project risk</div>
+          <div className="vba-migrate-panel__heading">Project risk</div>
           <div>
             Score: <span className="vba-migrate-panel__mono">{model.risk.score}</span>{" "}
             <span className="vba-migrate-panel__mono">({model.risk.level})</span>
@@ -73,8 +73,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
         </div>
 
         <div>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Totals</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <div className="vba-migrate-panel__heading vba-migrate-panel__heading--mb-6">Totals</div>
+          <ul className="vba-migrate-panel__list">
             <li>
               External references: <span className="vba-migrate-panel__mono">{model.externalReferencesCount}</span>
             </li>
@@ -94,8 +94,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
         </div>
 
         <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Excel object model calls</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">Excel object model calls</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {Object.entries(model.objectModelUsageCounts).map(([key, count]) => (
               <li key={key}>
                 {key}: <span className="vba-migrate-panel__mono">{count}</span>
@@ -105,8 +105,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
         </details>
 
         <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Range shapes</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">Range shapes</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {Object.entries(model.rangeShapesCounts).map(([key, count]) => (
               <li key={key}>
                 {key}: <span className="vba-migrate-panel__mono">{count}</span>
@@ -116,8 +116,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
         </details>
 
         <div>
-          <div style={{ fontWeight: 600, marginBottom: 6 }}>Modules</div>
-          <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <div className="vba-migrate-panel__heading vba-migrate-panel__heading--mb-6">Modules</div>
+          <ul className="vba-migrate-panel__list">
             {model.modules.map((m) => (
               <li key={m.moduleName} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 {m.moduleName}: risk {m.risk.score} ({m.risk.level}), external {m.externalReferencesCount}, unsafe{" "}
@@ -135,9 +135,9 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
   const rangeShapes = sumCounts(report.rangeShapes as any);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="vba-migrate-panel__stack">
       <div data-testid="vba-analysis-risk">
-        <div style={{ fontWeight: 600 }}>Risk</div>
+        <div className="vba-migrate-panel__heading">Risk</div>
         <div>
           Score: <span className="vba-migrate-panel__mono">{report.risk?.score ?? "?"}</span>{" "}
           <span className="vba-migrate-panel__mono">({report.risk?.level ?? "unknown"})</span>
@@ -145,8 +145,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
       </div>
 
       <details open>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Excel object model calls</summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+        <summary className="vba-migrate-panel__summary">Excel object model calls</summary>
+        <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
           {Object.entries(usage).map(([key, count]) => (
             <li key={key} data-testid={`vba-analysis-usage-${key}`}>
               {key}: <span className="vba-migrate-panel__mono">{count}</span>
@@ -156,8 +156,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
       </details>
 
       <details>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Range shapes</summary>
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+        <summary className="vba-migrate-panel__summary">Range shapes</summary>
+        <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
           {Object.entries(rangeShapes).map(([key, count]) => (
             <li key={key}>
               {key}: <span className="vba-migrate-panel__mono">{count}</span>
@@ -168,8 +168,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
       {report.externalReferences?.length ? (
         <details open data-testid="vba-analysis-external">
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>External references</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">External references</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {report.externalReferences.map((ref: any, idx: number) => (
               <li key={`${ref.line}-${idx}`} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 L{ref.line}: {ref.text.trim()}
@@ -181,8 +181,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
       {report.unsupportedConstructs?.length ? (
         <details open data-testid="vba-analysis-unsupported">
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Unsupported / risky constructs</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">Unsupported / risky constructs</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {report.unsupportedConstructs.map((item: any, idx: number) => (
               <li key={`${item.line}-${idx}`} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 L{item.line}: {item.text.trim()}
@@ -194,8 +194,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
       {report.unsafeConstructs?.length ? (
         <details open data-testid="vba-analysis-unsafe">
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Unsafe dynamic execution</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">Unsafe dynamic execution</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {report.unsafeConstructs.map((item: any, idx: number) => (
               <li key={`${item.line}-${idx}`} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 L{item.line}: {item.text.trim()}
@@ -207,8 +207,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
       {report.warnings?.length ? (
         <details data-testid="vba-analysis-warnings">
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Warnings ({report.warnings.length})</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">Warnings ({report.warnings.length})</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {report.warnings.map((warning: any, idx: number) => (
               <li key={`${warning.line}-${idx}`} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 L{warning.line}: {warning.message}
@@ -220,8 +220,8 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 
       {report.todos?.length ? (
         <details data-testid="vba-analysis-todos">
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>TODOs ({report.todos.length})</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+          <summary className="vba-migrate-panel__summary">TODOs ({report.todos.length})</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8">
             {report.todos.map((todo: any, idx: number) => (
               <li key={`${todo.line}-${idx}`} className="vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                 L{todo.line}: {todo.message}
@@ -540,7 +540,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const sidebar = (
     <div className="vba-migrate-panel__sidebar">
       <div>
-        <div style={{ fontWeight: 600 }}>VBA project</div>
+        <div className="vba-migrate-panel__heading">VBA project</div>
         {loadingProject ? (
           <div className="vba-migrate-panel__secondary-text">Loading…</div>
         ) : project ? (
@@ -555,7 +555,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className="vba-migrate-panel__row">
         <button type="button" onClick={() => void refreshProject()} disabled={loadingProject} data-testid="vba-refresh">
           Refresh
         </button>
@@ -569,15 +569,17 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
       {project?.constants ? (
         <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Constants</summary>
-          <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: "8px 0 0" }}>{project.constants}</pre>
+          <summary className="vba-migrate-panel__summary">Constants</summary>
+          <pre className="vba-migrate-panel__pre vba-migrate-panel__mono vba-migrate-panel__mono-sm">
+            {project.constants}
+          </pre>
         </details>
       ) : null}
 
       {project?.references?.length ? (
         <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>References</summary>
-          <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12 }}>
+          <summary className="vba-migrate-panel__summary">References</summary>
+          <ul className="vba-migrate-panel__list vba-migrate-panel__list--mt-8 vba-migrate-panel__text-sm">
             {project.references.map((ref, idx) => (
               <li key={`${ref.raw}-${idx}`} className="vba-migrate-panel__mono">
                 {ref.name ?? ref.raw}
@@ -589,7 +591,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
       {project?.modules?.length ? (
         <div data-testid="vba-module-list">
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Modules</div>
+          <div className="vba-migrate-panel__heading vba-migrate-panel__heading--mb-8">Modules</div>
           <ul className="vba-migrate-panel__module-list">
             {project.modules.map((mod) => {
               const selected = mod.name === selectedModuleName;
@@ -622,8 +624,8 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
     return (
       <div className="vba-migrate-panel">
         {sidebar}
-        <div style={{ padding: 16, flex: 1 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
+        <div className="vba-migrate-panel__empty">
+          <div className="vba-migrate-panel__empty-title">{title}</div>
           <div className="vba-migrate-panel__secondary-text">{detail}</div>
         </div>
       </div>
@@ -636,7 +638,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
       <div className="vba-migrate-panel__body">
         <div className="vba-migrate-panel__card">
-          <div className="vba-migrate-panel__card-header">VBA module</div>
+          <div className="vba-migrate-panel__card-header vba-migrate-panel__heading">VBA module</div>
           <textarea
             readOnly
             value={selectedModule?.code ?? ""}
@@ -646,11 +648,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
         </div>
 
         <div className="vba-migrate-panel__card">
-          <div
-            className="vba-migrate-panel__card-header vba-migrate-panel__card-header--row"
-          >
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600 }}>Conversion</div>
+          <div className="vba-migrate-panel__card-header vba-migrate-panel__card-header--row">
+            <div className="vba-migrate-panel__grow">
+              <div className="vba-migrate-panel__heading">Conversion</div>
               <div className="vba-migrate-panel__subheader">
                 AI backend: <span className="vba-migrate-panel__mono">Cursor</span>
               </div>
@@ -661,8 +661,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                 <select
                   value={entryPoint}
                   onChange={(e) => setEntryPoint(e.target.value)}
-                  className="vba-migrate-panel__mono vba-migrate-panel__mono-sm vba-migrate-panel__entrypoint-control"
-                  style={{ width: 160 }}
+                  className="vba-migrate-panel__mono vba-migrate-panel__mono-sm vba-migrate-panel__entrypoint-control vba-migrate-panel__entrypoint-control--select"
                   data-testid="vba-entrypoint"
                 >
                   {availableMacros.map((m) => (
@@ -676,8 +675,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                   value={entryPoint}
                   onChange={(e) => setEntryPoint(e.target.value)}
                   placeholder="Main"
-                  className="vba-migrate-panel__mono vba-migrate-panel__mono-sm vba-migrate-panel__entrypoint-control"
-                  style={{ width: 120 }}
+                  className="vba-migrate-panel__mono vba-migrate-panel__mono-sm vba-migrate-panel__entrypoint-control vba-migrate-panel__entrypoint-control--input"
                   data-testid="vba-entrypoint"
                 />
               )}
@@ -750,11 +748,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
           <details className="vba-migrate-panel__details" open={Boolean(validationReport || validationError)}>
             <summary className="vba-migrate-panel__details-summary">Validation</summary>
-            <div className="vba-migrate-panel__section" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="vba-migrate-panel__section vba-migrate-panel__stack vba-migrate-panel__stack--gap-8">
               {validationStatus === "working" ? (
-                <div className="vba-migrate-panel__secondary-text" style={{ fontSize: 12 }}>
-                  Validating…
-                </div>
+                <div className="vba-migrate-panel__secondary-text vba-migrate-panel__text-sm">Validating…</div>
               ) : null}
               {validationError ? (
                 <div className="vba-migrate-panel__error-text" data-testid="vba-validation-error">
@@ -763,7 +759,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
               ) : null}
               {validationReport ? (
                 <div data-testid="vba-validation-report">
-                  <div style={{ fontSize: 12 }}>
+                  <div className="vba-migrate-panel__text-sm">
                     Result:{" "}
                     <span className="vba-migrate-panel__mono">
                       {validationReport.ok ? "ok" : "failed"}
@@ -776,9 +772,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                     <div className="vba-migrate-panel__error-text">{String(validationReport.error)}</div>
                   ) : null}
                   {Array.isArray(validationReport.mismatches) && validationReport.mismatches.length > 0 ? (
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    <ul className="vba-migrate-panel__list vba-migrate-panel__text-sm">
                       {validationReport.mismatches.slice(0, 50).map((m: any, idx: number) => (
-                        <li key={`${m.sheetId ?? m.sheet_id}-${m.row}-${m.col}-${idx}`} style={{ fontSize: 12 }}>
+                        <li key={`${m.sheetId ?? m.sheet_id}-${m.row}-${m.col}-${idx}`}>
                           <span className="vba-migrate-panel__mono">
                             {m.sheetId ?? m.sheet_id}:{Number(m.row) + 1},{Number(m.col) + 1}
                           </span>
@@ -788,19 +784,14 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
                     </ul>
                   ) : null}
                   <details>
-                    <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 12 }}>Raw report</summary>
-                    <pre
-                      className="vba-migrate-panel__mono vba-migrate-panel__mono-sm"
-                      style={{ whiteSpace: "pre-wrap", margin: 0, paddingTop: 8 }}
-                    >
+                    <summary className="vba-migrate-panel__summary vba-migrate-panel__summary--sm">Raw report</summary>
+                    <pre className="vba-migrate-panel__raw-pre vba-migrate-panel__mono vba-migrate-panel__mono-sm">
                       {JSON.stringify(validationReport, null, 2)}
                     </pre>
                   </details>
                 </div>
               ) : (
-                <div className="vba-migrate-panel__secondary-text" style={{ fontSize: 12 }}>
-                  No validation run.
-                </div>
+                <div className="vba-migrate-panel__secondary-text vba-migrate-panel__text-sm">No validation run.</div>
               )}
             </div>
           </details>
@@ -808,11 +799,11 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
         <div className="vba-migrate-panel__card vba-migrate-panel__card--overflow-hidden">
           <div className="vba-migrate-panel__card-header vba-migrate-panel__card-header--row">
-            <div style={{ fontWeight: 600, flex: 1 }}>Analysis</div>
+            <div className="vba-migrate-panel__heading vba-migrate-panel__grow">Analysis</div>
             <select
               value={analysisScope}
               onChange={(e) => setAnalysisScope(e.target.value as any)}
-              style={{ fontSize: 12 }}
+              className="vba-migrate-panel__text-sm"
               data-testid="vba-analysis-scope"
             >
               <option value="module">Selected module</option>
@@ -820,7 +811,7 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             </select>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto" }} className="vba-migrate-panel__section">
+          <div className="vba-migrate-panel__card-body">
             <AggregateAnalysisView report={analysis} />
           </div>
         </div>
