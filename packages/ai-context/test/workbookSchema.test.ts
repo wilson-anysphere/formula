@@ -179,6 +179,32 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
   });
 
+  it("supports origin-offset sheet matrices (rects use absolute coordinates)", () => {
+    const workbook = {
+      id: "wb-origin",
+      sheets: [
+        {
+          name: "Sheet1",
+          origin: { row: 10, col: 5 },
+          values: [
+            ["Name", "Amount"],
+            ["A", 1],
+          ],
+        },
+      ],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 10, c0: 5, r1: 11, c1: 6 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0]).toMatchObject({
+      rangeA1: "Sheet1!F11:G12",
+      rowCount: 1,
+      columnCount: 2,
+    });
+    expect(schema.tables[0].headers).toEqual(["Name", "Amount"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
+  });
+
   it("supports Map-like sheets (cells.get)", () => {
     const backing = new Map<string, any>();
     backing.set("0:0", { v: "Name" });

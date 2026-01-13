@@ -49,15 +49,51 @@ function getSheetCellMap(sheet) {
 }
 
 /**
+ * Sheets can optionally provide an origin offset when their `cells`/`values` matrices
+ * represent a window into a larger absolute sheet.
+ *
+ * This mirrors the origin semantics used elsewhere in `ai-context` (e.g. RAG chunking).
+ *
+ * @param {any} sheet
+ */
+function normalizeSheetOrigin(sheet) {
+  if (!sheet || typeof sheet !== "object" || !sheet.origin || typeof sheet.origin !== "object") {
+    return { row: 0, col: 0 };
+  }
+  const row = Number.isInteger(sheet.origin.row) && sheet.origin.row >= 0 ? sheet.origin.row : 0;
+  const col = Number.isInteger(sheet.origin.col) && sheet.origin.col >= 0 ? sheet.origin.col : 0;
+  return { row, col };
+}
+
+/**
  * @param {any} sheet
  * @param {number} row
  * @param {number} col
  */
 function getCellRaw(sheet, row, col) {
+  const origin = normalizeSheetOrigin(sheet);
   const matrix = getSheetMatrix(sheet);
-  if (matrix) return matrix[row]?.[col];
+  if (matrix) {
+    const localRow = row - origin.row;
+    const localCol = col - origin.col;
+    if (localRow < 0 || localCol < 0) return null;
+    return matrix[localRow]?.[localCol];
+  }
   const map = getSheetCellMap(sheet);
-  if (map) return map.get(`${row},${col}`) ?? map.get(`${row}:${col}`) ?? null;
+  if (map) {
+    const localRow = row - origin.row;
+    const localCol = col - origin.col;
+    // Prefer origin-adjusted coordinates for sparse maps that store local indices, but
+    // also fall back to absolute indices for callers that store absolute keys.
+    return (
+      (localRow >= 0 && localCol >= 0
+        ? map.get(`${localRow},${localCol}`) ?? map.get(`${localRow}:${localCol}`)
+        : null) ??
+      map.get(`${row},${col}`) ??
+      map.get(`${row}:${col}`) ??
+      null
+    );
+  }
   if (typeof sheet?.getCell === "function") return sheet.getCell(row, col);
   return null;
 }

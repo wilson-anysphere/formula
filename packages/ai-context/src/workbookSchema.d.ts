@@ -44,6 +44,7 @@ export function extractWorkbookSchema(
       name: string;
       cells?: unknown;
       values?: unknown[][];
+      origin?: { row: number; col: number };
       getCell?: (row: number, col: number) => unknown;
     }>;
     tables?: Array<{ name: string; sheetName: string; rect: WorkbookSchemaRect }>;
