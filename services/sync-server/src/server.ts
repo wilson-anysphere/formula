@@ -1553,6 +1553,7 @@ export function createSyncServer(
         }
 
         if (req.method !== "GET") {
+          recordUpgradeRejection("method_not_allowed");
           sendUpgradeRejection(socket, 405, "Method Not Allowed");
           return;
         }
@@ -1573,6 +1574,7 @@ export function createSyncServer(
         }
 
         if (!req.url) {
+          recordUpgradeRejection("missing_doc_id");
           sendUpgradeRejection(socket, 400, "Missing URL");
           return;
         }
@@ -1581,10 +1583,12 @@ export function createSyncServer(
         const pathName = rawPathnameFromUrl(req.url);
         const docName = pathName.startsWith("/") ? pathName.slice(1) : pathName;
         if (!docName) {
+          recordUpgradeRejection("missing_doc_id");
           sendUpgradeRejection(socket, 400, "Missing document id");
           return;
         }
         if (Buffer.byteLength(docName, "utf8") > MAX_DOC_NAME_BYTES) {
+          recordUpgradeRejection("doc_id_too_long");
           sendUpgradeRejection(socket, 414, "Document id too long");
           return;
         }

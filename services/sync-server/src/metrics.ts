@@ -221,6 +221,9 @@ function createFallbackMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "doc_id_too_long" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "missing_doc_id" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "method_not_allowed" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "origin_not_allowed" }, 0);
 
   const wsClosesTotal = createCounter<"code">({
@@ -358,6 +361,9 @@ export type WsConnectionRejectionReason =
   | "tombstone"
   | "retention_purging"
   | "max_connections_per_doc"
+  | "doc_id_too_long"
+  | "missing_doc_id"
+  | "method_not_allowed"
   | "origin_not_allowed";
 
 export type RetentionSweepKind = "leveldb" | "tombstone";
@@ -428,6 +434,9 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "doc_id_too_long" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "missing_doc_id" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "method_not_allowed" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "origin_not_allowed" }, 0);
 
   const wsClosesTotal = new promClient.Counter({
