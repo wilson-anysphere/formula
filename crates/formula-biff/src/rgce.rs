@@ -613,7 +613,10 @@ fn decode_rgce_impl(
                 const T_ATTR_SUM: u8 = 0x10;
 
                 if grbit & T_ATTR_SUM != 0 {
-                    let arg = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
+                    let arg = stack.pop().ok_or(DecodeRgceError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
                     let mut text = String::new();
                     text.push_str("SUM(");
                     if !arg.is_missing {

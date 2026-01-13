@@ -2629,7 +2629,7 @@ mod tests {
         }
         stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
 
-        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
         assert_eq!(props.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
         assert_eq!(
             props
@@ -2666,7 +2666,7 @@ mod tests {
         ]
         .concat();
 
-        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        let props = parse_biff_sheet_row_col_properties(&stream, 0, 1252).expect("parse");
 
         assert_eq!(
             props.cols.keys().copied().collect::<Vec<_>>(),

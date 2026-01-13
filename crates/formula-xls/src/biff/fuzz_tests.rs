@@ -228,7 +228,7 @@ proptest! {
                     assert!(zoom.is_finite() && zoom > 0.0);
                 }
 
-                let row_col = sheet::parse_biff_sheet_row_col_properties(&buf, 0)
+                let row_col = sheet::parse_biff_sheet_row_col_properties(&buf, 0, CODEPAGE_1252)
                     .expect("offset 0 should always be in-bounds");
                 if let Some(range) = row_col.auto_filter_range {
                     assert!(range.start.row <= range.end.row);
