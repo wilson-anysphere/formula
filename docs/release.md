@@ -150,6 +150,17 @@ node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.js
 node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
 ```
 
+CI also generates and uploads a `SHA256SUMS.txt` asset (SHA256 checksums for all release assets).
+To reproduce locally:
+
+```bash
+# Verify the GitHub Release asset set and generate SHA256SUMS.txt (requires GH_TOKEN/GITHUB_TOKEN).
+GH_TOKEN=... node scripts/verify-desktop-release-assets.mjs --tag vX.Y.Z --repo owner/repo --out SHA256SUMS.txt
+
+# Or, if you already downloaded the release assets into ./release-assets:
+bash scripts/ci/generate-release-checksums.sh release-assets SHA256SUMS.txt
+```
+
 To inspect the required platform keys in the manifest:
 
 ```bash
@@ -606,6 +617,25 @@ If you don't want clients to fetch update metadata from GitHub directly, you can
 assets (including `latest.json` + `latest.json.sig`) to your own host and update
 `plugins.updater.endpoints` accordingly.
 
+#### Templated endpoints (`{{target}}`, `{{current_version}}`)
+
+Tauri's updater supports **templated endpoint URLs**. At runtime it replaces:
+
+- `{{target}}` — the current platform triple (used to select the right OS/arch artifact)
+- `{{current_version}}` — the currently-installed app version
+
+This is useful when hosting update metadata outside GitHub (or when you want per-target/per-version
+paths on a CDN).
+
+Example **placeholder** endpoint (do not ship this; it is intentionally caught by CI as a placeholder):
+
+```
+https://releases.formula.app/{{target}}/{{current_version}}
+```
+
+Replace it with your real update JSON URL(s) before tagging a release. CI enforces this via
+`scripts/check-updater-config.mjs` when `plugins.updater.active=true`.
+
 ### Updater targets (`{{target}}`) and `latest.json`
 
 Tauri’s updater chooses which file to download by matching the running app’s **target string**
@@ -841,6 +871,44 @@ CI guardrails (tagged releases):
 
 Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
 support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
+
+## Linux: `.AppImage` validation
+
+The AppImage is a **self-contained SquashFS bundle**. Before publishing a release, validate that it
+contains the expected payload (binary + resources) and that the embedded `.desktop` file declares
+the expected MIME/file associations.
+
+Recommended (repo script):
+
+```bash
+appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)"
+bash scripts/validate-linux-appimage.sh --appimage "$appimage"
+```
+
+CI note: the release workflow also runs a lightweight smoke test that validates AppImage extraction
++ELF architecture + `ldd` (no GUI): `bash scripts/ci/check-appimage.sh`.
+
+Manual inspection (useful when debugging bundling issues):
+
+```bash
+appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -n 1)"
+chmod +x "$appimage"
+
+tmpdir="$(mktemp -d)"
+(cd "$tmpdir" && "$appimage" --appimage-extract >/dev/null)
+root="$tmpdir/squashfs-root"
+
+# Confirm the main payload exists
+test -x "$root/usr/bin/formula-desktop"
+
+# Confirm a desktop entry exists and includes MIME types (file associations)
+desktop_file="$(ls "$root/usr/share/applications/"*.desktop | head -n 1)"
+cat "$desktop_file"
+grep -E '^MimeType=' "$desktop_file"
+
+# Optional: validate .desktop syntax (requires `desktop-file-utils`)
+command -v desktop-file-validate >/dev/null && desktop-file-validate "$desktop_file" || true
+```
 
 ## 5) Verifying a release
 

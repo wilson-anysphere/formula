@@ -533,12 +533,11 @@ async function main() {
     return;
   }
 
-  const token = process.env.GITHUB_TOKEN;
-  const ghToken = token ?? process.env.GH_TOKEN;
+  const ghToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
   if (!ghToken) {
-    throw new ActionableError("Missing env var: GITHUB_TOKEN (or GH_TOKEN)", [
-      "Set GITHUB_TOKEN (or GH_TOKEN) to a token that can read the repo's releases.",
-      "In GitHub Actions, you can usually use: env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }",
+    throw new ActionableError("Missing env var: GITHUB_TOKEN / GH_TOKEN", [
+      "Set GITHUB_TOKEN (recommended) or GH_TOKEN to a token that can read the repo's releases.",
+      "In GitHub Actions, you can usually use: env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }.",
     ]);
   }
 
