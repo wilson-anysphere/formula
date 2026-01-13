@@ -1,7 +1,9 @@
 use std::io::{Cursor, Write};
 use std::path::Path;
 
-use formula_io::{open_workbook, open_workbook_model};
+use formula_io::{
+    open_workbook, open_workbook_model, open_workbook_model_with_password, open_workbook_with_password,
+};
 
 fn build_encrypted_ooxml_container(
     encryption_info: &[u8],
@@ -38,11 +40,13 @@ fn encrypted_package_with_size_prefix(decrypted_size: u64, payload: &[u8]) -> Ve
     out
 }
 
-fn assert_open_errors_no_panic(path: &Path) {
-    let res = std::panic::catch_unwind(|| open_workbook(path));
+fn assert_err_no_panic<T: std::fmt::Debug>(
+    label: &str,
+    res: std::thread::Result<Result<T, formula_io::Error>>,
+) {
     assert!(
         res.is_ok(),
-        "open_workbook panicked while opening malformed encrypted OOXML container"
+        "{label} panicked while opening malformed encrypted OOXML container"
     );
     let err = res
         .unwrap()
@@ -51,20 +55,29 @@ fn assert_open_errors_no_panic(path: &Path) {
     assert!(
         msg.contains("encrypt") || msg.contains("password"),
         "expected error message to mention encryption/password, got: {msg}"
+    );
+}
+
+fn assert_open_errors_no_panic(path: &Path) {
+    // Without a password, callers should get a "password required" style error.
+    assert_err_no_panic(
+        "open_workbook",
+        std::panic::catch_unwind(|| open_workbook(path)),
+    );
+    assert_err_no_panic(
+        "open_workbook_model",
+        std::panic::catch_unwind(|| open_workbook_model(path)),
     );
 
-    let res = std::panic::catch_unwind(|| open_workbook_model(path));
-    assert!(
-        res.is_ok(),
-        "open_workbook_model panicked while opening malformed encrypted OOXML container"
+    // With a password, the decrypt/open path should still fail gracefully (not panic) on malformed
+    // encryption metadata.
+    assert_err_no_panic(
+        "open_workbook_with_password",
+        std::panic::catch_unwind(|| open_workbook_with_password(path, Some("password"))),
     );
-    let err = res
-        .unwrap()
-        .expect_err("expected malformed encrypted workbook to error");
-    let msg = err.to_string().to_lowercase();
-    assert!(
-        msg.contains("encrypt") || msg.contains("password"),
-        "expected error message to mention encryption/password, got: {msg}"
+    assert_err_no_panic(
+        "open_workbook_model_with_password",
+        std::panic::catch_unwind(|| open_workbook_model_with_password(path, Some("password"))),
     );
 }
 

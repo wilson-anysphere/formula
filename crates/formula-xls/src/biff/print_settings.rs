@@ -20,7 +20,7 @@ const SETUP_GRBIT_LANDSCAPE: u16 = 0x0002;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BiffSheetPrintSettings {
-    pub(crate) page_setup: PageSetup,
+    pub(crate) page_setup: Option<PageSetup>,
     pub(crate) manual_page_breaks: ManualPageBreaks,
     pub(crate) warnings: Vec<String>,
 }
@@ -28,7 +28,7 @@ pub(crate) struct BiffSheetPrintSettings {
 impl Default for BiffSheetPrintSettings {
     fn default() -> Self {
         Self {
-            page_setup: PageSetup::default(),
+            page_setup: None,
             manual_page_breaks: ManualPageBreaks::default(),
             warnings: Vec::new(),
         }
@@ -44,6 +44,9 @@ pub(crate) fn parse_biff_sheet_print_settings(
     start: usize,
 ) -> Result<BiffSheetPrintSettings, String> {
     let mut out = BiffSheetPrintSettings::default();
+
+    let mut page_setup = PageSetup::default();
+    let mut saw_any_record = false;
 
     let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
 
@@ -63,31 +66,32 @@ pub(crate) fn parse_biff_sheet_print_settings(
         let data = record.data;
         match record.record_id {
             RECORD_SETUP => {
-                parse_setup_record(&mut out.page_setup, data, record.offset, &mut out.warnings)
+                saw_any_record = true;
+                parse_setup_record(&mut page_setup, data, record.offset, &mut out.warnings)
             }
             RECORD_LEFTMARGIN => parse_margin_record(
-                &mut out.page_setup.margins.left,
+                &mut page_setup.margins.left,
                 "LEFTMARGIN",
                 data,
                 record.offset,
                 &mut out.warnings,
             ),
             RECORD_RIGHTMARGIN => parse_margin_record(
-                &mut out.page_setup.margins.right,
+                &mut page_setup.margins.right,
                 "RIGHTMARGIN",
                 data,
                 record.offset,
                 &mut out.warnings,
             ),
             RECORD_TOPMARGIN => parse_margin_record(
-                &mut out.page_setup.margins.top,
+                &mut page_setup.margins.top,
                 "TOPMARGIN",
                 data,
                 record.offset,
                 &mut out.warnings,
             ),
             RECORD_BOTTOMMARGIN => parse_margin_record(
-                &mut out.page_setup.margins.bottom,
+                &mut page_setup.margins.bottom,
                 "BOTTOMMARGIN",
                 data,
                 record.offset,
@@ -96,6 +100,17 @@ pub(crate) fn parse_biff_sheet_print_settings(
             records::RECORD_EOF => break,
             _ => {}
         }
+
+        if matches!(
+            record.record_id,
+            RECORD_LEFTMARGIN | RECORD_RIGHTMARGIN | RECORD_TOPMARGIN | RECORD_BOTTOMMARGIN
+        ) {
+            saw_any_record = true;
+        }
+    }
+
+    if saw_any_record {
+        out.page_setup = Some(page_setup);
     }
 
     // Manual page breaks are stored in dedicated worksheet records. Delegate to the existing
