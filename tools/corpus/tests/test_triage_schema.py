@@ -45,10 +45,12 @@ class TriageSchemaTests(unittest.TestCase):
                 "total": 1,
                 "open_ok": 1,
                 "calculate_ok": 0,
+                "calculate_attempted": 0,
                 "render_ok": 0,
+                "render_attempted": 0,
                 "round_trip_ok": 1,
             },
-            "rates": {"open": 1.0, "calculate": 0.0, "render": 0.0, "round_trip": 1.0},
+            "rates": {"open": 1.0, "calculate": None, "render": None, "round_trip": 1.0},
             "diff_totals": {"critical": 0, "warning": 1, "info": 0},
         }
         reports = [
@@ -68,8 +70,10 @@ class TriageSchemaTests(unittest.TestCase):
         md = _markdown_summary(summary, reports)
         self.assertIn("Diff (C/W/I)", md)
         self.assertIn("0/1/0", md)
+        # Calculate/render should not be reported as "0.0%" when triage skipped those steps.
+        self.assertIn("Calculate: **0 / 0** (SKIP", md)
+        self.assertIn("Render: **0 / 0** (SKIP", md)
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -25,6 +25,12 @@ def _rate(passed: int, total: int) -> float:
     return passed / total
 
 
+def _attempted(value: Any) -> bool:
+    # `*_ok` fields in triage results use `True`/`False`/`None` to mean PASS/FAIL/SKIP.
+    # Treat booleans as "attempted" and `None`/missing as skipped.
+    return value is True or value is False
+
+
 def _load_reports(reports_dir: Path) -> list[dict[str, Any]]:
     reports: list[dict[str, Any]] = []
     for path in sorted(reports_dir.glob("*.json")):
@@ -50,12 +56,20 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
     lines.append(
         f"- Open: **{counts['open_ok']} / {counts['total']}** ({rates['open']:.1%})"
     )
-    lines.append(
-        f"- Calculate: **{counts['calculate_ok']} / {counts['total']}** ({rates['calculate']:.1%})"
-    )
-    lines.append(
-        f"- Render: **{counts['render_ok']} / {counts['total']}** ({rates['render']:.1%})"
-    )
+
+    for key, label in [("calculate", "Calculate"), ("render", "Render")]:
+        ok = int(counts.get(f"{key}_ok", 0))
+        attempted = int(counts.get(f"{key}_attempted", 0))
+        skipped = int(counts.get("total", 0)) - attempted
+        rate = rates.get(key)
+        if attempted <= 0 or rate is None:
+            extra = "SKIP"
+        else:
+            extra = f"{float(rate):.1%}"
+        if skipped > 0:
+            extra = f"{extra}, {skipped} skipped"
+        lines.append(f"- {label}: **{ok} / {attempted}** ({extra})")
+
     lines.append(
         f"- Round-trip: **{counts['round_trip_ok']} / {counts['total']}** ({rates['round_trip']:.1%})"
     )
@@ -143,9 +157,18 @@ def main() -> int:
 
     total = len(reports)
     open_ok = sum(1 for r in reports if r.get("result", {}).get("open_ok") is True)
-    calc_ok = sum(1 for r in reports if r.get("result", {}).get("calculate_ok") is True)
+    calc_ok = sum(
+        1 for r in reports if r.get("result", {}).get("calculate_ok") is True
+    )
     render_ok = sum(1 for r in reports if r.get("result", {}).get("render_ok") is True)
     rt_ok = sum(1 for r in reports if r.get("result", {}).get("round_trip_ok") is True)
+
+    calc_attempted = sum(
+        1 for r in reports if _attempted(r.get("result", {}).get("calculate_ok"))
+    )
+    render_attempted = sum(
+        1 for r in reports if _attempted(r.get("result", {}).get("render_ok"))
+    )
 
     failures_by_category: Counter[str] = Counter()
     failing_function_counts: Counter[str] = Counter()
@@ -183,13 +206,17 @@ def main() -> int:
             "total": total,
             "open_ok": open_ok,
             "calculate_ok": calc_ok,
+            "calculate_attempted": calc_attempted,
             "render_ok": render_ok,
+            "render_attempted": render_attempted,
             "round_trip_ok": rt_ok,
         },
         "rates": {
             "open": _rate(open_ok, total),
-            "calculate": _rate(calc_ok, total),
-            "render": _rate(render_ok, total),
+            # Calculate/render steps are optional. When disabled, their results are `SKIP` and
+            # should not be counted as failures.
+            "calculate": (calc_ok / calc_attempted) if calc_attempted else None,
+            "render": (render_ok / render_attempted) if render_attempted else None,
             "round_trip": _rate(rt_ok, total),
         },
         "failures_by_category": dict(failures_by_category),
