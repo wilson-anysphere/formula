@@ -3,7 +3,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -613,6 +613,7 @@ test.describe("BrowserExtensionHost", () => {
   }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page);
+    await openExtensionsPanel(page);
 
     const clipboardSupport = await page.evaluate(async () => {
       if (!globalThis.isSecureContext) return { supported: false, reason: "not a secure context" };
@@ -1109,40 +1110,47 @@ test.describe("BrowserExtensionHost", () => {
   });
 
   test("desktop host forwards selectionChanged events to extensions", async ({ page }) => {
+    const commandId = "selectionEvents.getCount";
+    const extensionId = "formula-test.selection-events";
+
     await gotoDesktop(page);
 
-    const result = await page.evaluate(async () => {
+    // The desktop host now uses a real permission prompt UI (persisted via `PermissionManager`),
+    // which loads the permission store once and then caches it in-memory. Ensure we seed the grant
+    // for this ad-hoc extension *before* the Extensions panel bootstraps the host; otherwise the
+    // permission prompt appears and the test hangs waiting for user interaction.
+    await page.evaluate((extensionId: string) => {
+      try {
+        const key = "formula.extensionHost.permissions";
+        let existing: any = {};
+        try {
+          const raw = localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+          existing = {};
+        }
+        const current = existing[extensionId];
+        const merged =
+          current && typeof current === "object" && !Array.isArray(current) ? { ...current, "ui.commands": true } : { "ui.commands": true };
+        existing[extensionId] = merged;
+        localStorage.setItem(key, JSON.stringify(existing));
+      } catch {
+        // ignore
+      }
+    }, extensionId);
+
+    await openExtensionsPanel(page);
+
+    const result = await page.evaluate(async ({ commandId, extensionId }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
       if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const host: any = (window as any).__formulaExtensionHost;
       if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop runtime)");
-
-      const commandId = "selectionEvents.getCount";
-      const extensionId = "formula-test.selection-events";
-
-      // The desktop host now uses a real permission prompt UI. Pre-grant `ui.commands`
-      // for this ad-hoc test extension so the worker can activate without blocking
-      // on an interactive modal.
-      try {
-        const key = "formula.extensionHost.permissions";
-        const existing = (() => {
-          try {
-            const raw = localStorage.getItem(key);
-            return raw ? JSON.parse(raw) : {};
-          } catch {
-            return {};
-          }
-        })();
-        existing[extensionId] = {
-          ...(existing[extensionId] ?? {}),
-          "ui.commands": true,
-        };
-        localStorage.setItem(key, JSON.stringify(existing));
-      } catch {
-        // ignore
-      }
 
       const manifest = {
         name: "selection-events",
@@ -1207,7 +1215,7 @@ test.describe("BrowserExtensionHost", () => {
         }
         URL.revokeObjectURL(mainUrl);
       }
-    });
+    }, { commandId, extensionId });
 
     expect(result.updatedCount).toBeGreaterThan(result.initialCount);
   });

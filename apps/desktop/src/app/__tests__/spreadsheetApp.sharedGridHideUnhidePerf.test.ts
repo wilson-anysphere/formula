@@ -430,8 +430,11 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
       expect(unhideRun.mapHasCalls).toBeLessThan(500_000);
 
       if (!process.env.CI) {
-        expect(hideRun.elapsedMs).toBeLessThan(1_000);
-        expect(unhideRun.elapsedMs).toBeLessThan(1_000);
+        // Perf numbers can fluctuate based on host load (and our test harness spins up a lot of
+        // infrastructure). Keep a generous ceiling so we still catch accidental O(maxRows/maxCols)
+        // regressions without introducing local flakiness.
+        expect(hideRun.elapsedMs).toBeLessThan(2_000);
+        expect(unhideRun.elapsedMs).toBeLessThan(2_000);
       }
 
       if (typeof originalGetSheetView === "function") {

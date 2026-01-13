@@ -318,6 +318,14 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
     const text = panel.textContent ?? "";
     return !text.includes("Loading extensions");
   }, undefined, { timeout: 30_000 });
+
+  // Extension host globals are installed lazily. Many suites access `window.__formulaExtensionHost`
+  // directly, so ensure it's present before returning.
+  await page.waitForFunction(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w: any = window as any;
+    return Boolean(w.__formulaExtensionHost) || Boolean(w.__formulaExtensionHostManager);
+  }, undefined, { timeout: 30_000 });
 }
 
 /**

@@ -1042,6 +1042,8 @@ test.describe("Extensions UI integration", () => {
       localStorage.setItem(key, JSON.stringify(existing));
     });
 
+    await openExtensionsPanel(page);
+
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;

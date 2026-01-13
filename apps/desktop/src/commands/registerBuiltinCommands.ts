@@ -83,18 +83,21 @@ export function registerBuiltinCommands(params: {
   } = params;
 
   const refresh = (): void => {
+    if (!refreshRibbonUiState) return;
     try {
-      refreshRibbonUiState?.();
+      refreshRibbonUiState();
     } catch {
-      // ignore
+      // Best-effort only.
     }
   };
 
   const focusApp = (): void => {
+    const focusFn = (app as any)?.focus;
+    if (typeof focusFn !== "function") return;
     try {
-      (app as any)?.focus?.();
+      focusFn.call(app);
     } catch {
-      // ignore
+      // Best-effort only.
     }
   };
 

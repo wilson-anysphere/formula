@@ -299,7 +299,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
     const editedCell = { row: 0, col: 2 };
-    const initialValue = doc.getCell(sheetId, editedCell).value;
+    const initialCellValue = doc.getCell(sheetId, editedCell).value;
 
     const bytes = new Uint8Array([1, 2, 3, 4]);
 
@@ -333,7 +333,7 @@ describe("SpreadsheetApp insert image (floating drawing)", () => {
 
     // Undo again should revert the cell edit.
     doc.undo();
-    expect(doc.getCell(sheetId, editedCell).value).toBe(initialValue);
+    expect(doc.getCell(sheetId, editedCell).value).toEqual(initialCellValue);
 
     app.destroy();
     root.remove();

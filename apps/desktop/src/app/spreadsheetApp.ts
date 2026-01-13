@@ -7035,8 +7035,11 @@ export class SpreadsheetApp {
     const usedDrawingIds = new Set<number>();
     let maxDrawingId = 0;
     for (const obj of existingObjects) {
-      usedDrawingIds.add(obj.id);
-      if (obj.id > maxDrawingId) maxDrawingId = obj.id;
+      const rawId = (obj as any)?.id;
+      const id = typeof rawId === "string" ? Number(rawId) : Number(rawId);
+      if (!Number.isSafeInteger(id) || id <= 0) continue;
+      usedDrawingIds.add(id);
+      if (id > maxDrawingId) maxDrawingId = id;
     }
     const allocateDrawingId = (): number => {
       // Prefer collision-resistant ids for multi-user safety, but guarantee termination even if

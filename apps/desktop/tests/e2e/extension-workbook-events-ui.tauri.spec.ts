@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openExtensionsPanel } from "./helpers";
 
 test.describe("extension workbook events (tauri UI flows)", () => {
   test("menu open + save-as trigger workbookOpened and beforeSave events for extensions", async ({ page }) => {
@@ -126,6 +126,7 @@ test.describe("extension workbook events (tauri UI flows)", () => {
     });
 
     await gotoDesktop(page);
+    await openExtensionsPanel(page);
     await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHostManager));
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-open"]));
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-save-as"]));
@@ -194,6 +195,19 @@ test.describe("extension workbook events (tauri UI flows)", () => {
     });
     await page.waitForFunction(async () => (await (window.__formulaApp as any).getCellValueA1("A1")) === "Hello");
 
+    // The file menu actions are fire-and-forget in the desktop shell. Wait for the open operation
+    // to complete so we don't race save-as (which could otherwise run before workbookOpened emits).
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(async () => {
+            const mgr: any = (window as any).__formulaExtensionHostManager;
+            return (await mgr.host.executeCommand("wbUiEvents.get")).opened;
+          }),
+        { timeout: 30_000 },
+      )
+      .toContain("/tmp/ui-open.xlsx");
+
     // Trigger save-as -> save_workbook.
     await page.evaluate(() => {
       (window as any).__tauriListeners["menu-save-as"]({ payload: null });
@@ -201,6 +215,17 @@ test.describe("extension workbook events (tauri UI flows)", () => {
     await page.waitForFunction(
       () => (window as any).__tauriInvokes?.some((entry: any) => entry?.cmd === "save_workbook" && entry?.args?.path) ?? false,
     );
+
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(async () => {
+            const mgr: any = (window as any).__formulaExtensionHostManager;
+            return (await mgr.host.executeCommand("wbUiEvents.get")).beforeSave;
+          }),
+        { timeout: 30_000 },
+      )
+      .toContain("/tmp/ui-save.xlsx");
 
     const events = await page.evaluate(async () => {
       const mgr: any = (window as any).__formulaExtensionHostManager;
