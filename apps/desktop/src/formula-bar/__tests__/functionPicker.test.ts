@@ -55,6 +55,30 @@ describe("FormulaBarView fx function picker", () => {
     host.remove();
   });
 
+  it("renders a signature/description row for function results", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+    fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    pickerInput.value = "sum";
+    pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const sumItem = host.querySelector<HTMLElement>('[data-testid="formula-function-picker-item-SUM"]');
+    expect(sumItem).toBeTruthy();
+
+    const desc = sumItem!.querySelector<HTMLElement>(".command-palette__item-description");
+    expect(desc).toBeTruthy();
+    expect(desc!.textContent).toContain("SUM(");
+
+    host.remove();
+  });
+
   it("navigates function results with arrow keys", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
