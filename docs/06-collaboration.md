@@ -157,6 +157,10 @@ type EncryptedCellPayloadV1 = {
 Implementation:
 
 - Encryption codec: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`, `isEncryptedCellPayload`)
+- The WebCrypto implementation caches imported `CryptoKey`s by `keyId` in a bounded LRU cache (default max 256) to avoid unbounded growth and to limit retention of sensitive key material.
+  - Configure max size via `globalThis.__FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE__` (and in Node, `FORMULA_ENCRYPTION_KEY_CACHE_MAX_SIZE`).
+  - Set max size to `0` to disable caching entirely.
+  - Call `clearEncryptionKeyCache()` (exported by `@formula/collab-encryption`) during teardown/tests to release cached keys.
 - Session + binder both treat **any** `enc` presence as “encrypted” (even if malformed) to avoid accidentally falling back to plaintext duplicates under legacy cell-key encodings.
 - Versioning diffs (`packages/versioning/src/yjs/*` + `semanticDiff`) treat `enc` as meaningful cell content for modified/moved/format-only detection without requiring decryption, and surface only minimal metadata (e.g. key id) in diff records.
 
