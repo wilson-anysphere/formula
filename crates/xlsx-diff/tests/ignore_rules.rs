@@ -714,6 +714,42 @@ fn cli_ignore_path_flag_suppresses_specific_xml_attribute_diffs() {
 }
 
 #[test]
+fn ignore_glob_suppresses_rels_targets_with_xl_prefix_without_leading_slash() {
+    let expected_zip = zip_bytes(&[
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="xl/media/image1.png"/>
+</Relationships>"#,
+        ),
+        ("xl/media/image1.png", b"pngbytes"),
+    ]);
+
+    let actual_zip = zip_bytes(&[
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+        ),
+        ("xl/media/image1.png", b"pngbytes"),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: vec!["xl/media/*".to_string()],
+        ignore_paths: Vec::new(),
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+}
+
+#[test]
 fn cli_exit_code_honors_fail_on_with_only_warning_diffs() {
     let expected_zip = zip_bytes(&[
         (

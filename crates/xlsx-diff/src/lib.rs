@@ -821,6 +821,19 @@ fn resolve_relationship_target(rels_part: &str, target: &str) -> String {
         return normalize_opc_path(rest);
     }
 
+    // Non-standard but common: some producers emit targets like `xl/media/image1.png` (no leading
+    // `/`) inside `xl/_rels/workbook.xml.rels`. Per OPC rules this would normally be resolved
+    // relative to the source part directory (and therefore become `xl/xl/media/...`), but the
+    // intent is clearly to refer to the package-root `xl/*` tree. Treat these as absolute package
+    // paths so ignore rules like `xl/media/*` still work.
+    let normalized_target = normalize_opc_path(target);
+    if normalized_target
+        .get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("xl/"))
+    {
+        return normalized_target;
+    }
+
     let base_dir = rels_base_dir(rels_part);
     normalize_opc_path(&format!("{base_dir}{target}"))
 }
@@ -893,6 +906,14 @@ mod tests {
         assert!(
             after > before,
             "expected fast path to skip at least one part (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn resolve_relationship_target_tolerates_xl_prefixed_targets() {
+        assert_eq!(
+            resolve_relationship_target("xl/_rels/workbook.xml.rels", "xl/media/image1.png"),
+            "xl/media/image1.png"
         );
     }
 }
