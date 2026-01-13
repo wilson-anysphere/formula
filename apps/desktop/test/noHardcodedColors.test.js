@@ -86,6 +86,92 @@ function stripCssNonSemanticText(css) {
   return result;
 }
 
+/**
+ * Strip JS/TS line + block comments while preserving string literals.
+ *
+ * This keeps the named-color scan high-signal (don't flag `red` mentioned in docs/JSDoc)
+ * without attempting to fully parse JavaScript.
+ *
+ * @param {string} input
+ */
+function stripJsComments(input) {
+  const text = String(input);
+  let out = "";
+  /** @type {"code" | "single" | "double" | "template" | "lineComment" | "blockComment"} */
+  let state = "code";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+
+    if (state === "code") {
+      if (ch === "'" || ch === '"' || ch === "`") {
+        state = ch === "'" ? "single" : ch === '"' ? "double" : "template";
+        out += ch;
+        continue;
+      }
+
+      if (ch === "/" && next === "/") {
+        state = "lineComment";
+        out += "  ";
+        i += 1;
+        continue;
+      }
+
+      if (ch === "/" && next === "*") {
+        state = "blockComment";
+        out += "  ";
+        i += 1;
+        continue;
+      }
+
+      out += ch;
+      continue;
+    }
+
+    if (state === "lineComment") {
+      if (ch === "\n") {
+        state = "code";
+        out += "\n";
+      } else {
+        out += " ";
+      }
+      continue;
+    }
+
+    if (state === "blockComment") {
+      if (ch === "*" && next === "/") {
+        state = "code";
+        out += "  ";
+        i += 1;
+        continue;
+      }
+      out += ch === "\n" ? "\n" : " ";
+      continue;
+    }
+
+    // String literals: preserve as-is so style scans can still match string values.
+    out += ch;
+    if (ch === "\\") {
+      if (next) {
+        out += next;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (state === "single" && ch === "'") {
+      state = "code";
+    } else if (state === "double" && ch === '"') {
+      state = "code";
+    } else if (state === "template" && ch === "`") {
+      state = "code";
+    }
+  }
+
+  return out;
+}
+
 function walk(dirPath) {
   /** @type {string[]} */
   const entries = [];
@@ -242,10 +328,11 @@ test("core UI does not hardcode colors outside tokens.css", () => {
         }
       }
     } else {
+      const stripped = stripJsComments(content);
       const match =
-        jsStyleColor.exec(content) ??
-        domStyleColor.exec(content) ??
-        jsxAttributeColor.exec(content);
+        jsStyleColor.exec(stripped) ??
+        domStyleColor.exec(stripped) ??
+        jsxAttributeColor.exec(stripped);
       jsStyleColor.lastIndex = 0;
       domStyleColor.lastIndex = 0;
       jsxAttributeColor.lastIndex = 0;
