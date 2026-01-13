@@ -1850,6 +1850,9 @@ export class DesktopSharedGrid {
       const thumbTravel = Math.max(0, trackRect.height - thumbRect.height);
       const pointerId = event.pointerId;
 
+      let cleanedUp = false;
+      let cleanup = () => {};
+
       const onMove = (move: PointerEvent) => {
         if (move.pointerId !== pointerId) return;
         move.preventDefault();
@@ -1865,21 +1868,23 @@ export class DesktopSharedGrid {
         this.emitScroll();
       };
 
-      function cleanup() {
+      const onUp = (up: PointerEvent) => {
+        if (up.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      const onCancel = (cancel: PointerEvent) => {
+        if (cancel.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
-      }
-
-      function onUp(up: PointerEvent) {
-        if (up.pointerId !== pointerId) return;
-        cleanup();
-      }
-
-      function onCancel(cancel: PointerEvent) {
-        if (cancel.pointerId !== pointerId) return;
-        cleanup();
-      }
+      };
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
@@ -1903,6 +1908,9 @@ export class DesktopSharedGrid {
       const thumbTravel = Math.max(0, trackRect.width - thumbRect.width);
       const pointerId = event.pointerId;
 
+      let cleanedUp = false;
+      let cleanup = () => {};
+
       const onMove = (move: PointerEvent) => {
         if (move.pointerId !== pointerId) return;
         move.preventDefault();
@@ -1918,21 +1926,23 @@ export class DesktopSharedGrid {
         this.emitScroll();
       };
 
-      function cleanup() {
+      const onUp = (up: PointerEvent) => {
+        if (up.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      const onCancel = (cancel: PointerEvent) => {
+        if (cancel.pointerId !== pointerId) return;
+        cleanup();
+      };
+
+      cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
-      }
-
-      function onUp(up: PointerEvent) {
-        if (up.pointerId !== pointerId) return;
-        cleanup();
-      }
-
-      function onCancel(cancel: PointerEvent) {
-        if (cancel.pointerId !== pointerId) return;
-        cleanup();
-      }
+      };
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
