@@ -31,6 +31,18 @@ Golden PNGs under `fixtures/charts/golden/excel/` are expected to be exported at
 
 - **800 × 600 px**
 
+### Placeholder goldens
+
+Some chart types don't yet have a deterministic Excel-exported golden image
+checked into the repo. For these fixtures we commit a generated placeholder PNG
+(still **800 × 600 px**) so the corpus remains structurally complete in CI:
+
+- `area.png`
+- `doughnut.png`
+- `combo-bar-line.png`
+
+Replace these with real Excel exports once available (see instructions below).
+
 ## Updating / regenerating models
 
 The committed JSON under `fixtures/charts/models/` should always match what the
