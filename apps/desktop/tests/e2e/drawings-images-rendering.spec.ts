@@ -284,7 +284,9 @@ test.describe("drawing + image rendering regressions", () => {
       const sheetId = app.getCurrentSheetId();
       // Use the formula-model envelope shape (`{type:"image", value:{...}}`) so the DocumentCellProvider
       // image detection logic is exercised.
-      doc.setCellValue(sheetId, "A1", { type: "image", value: { imageId: fixture.imageId, altText: "Fixture image" } });
+      // Keep alt text empty so if image rendering regresses and falls back to drawing `cell.value` as text,
+      // we still have a low-coverage glyph ("[Image]") that is easy to distinguish from a fully-painted image.
+      doc.setCellValue(sheetId, "A1", { type: "image", value: { imageId: fixture.imageId, altText: "" } });
 
       // Force an immediate render so the grid requests the image bitmap.
       renderer.markAllDirty?.();
@@ -318,16 +320,15 @@ test.describe("drawing + image rendering regressions", () => {
       app.sharedGrid?.renderer?.renderImmediately?.();
 
       const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+      // Sample most of the cell "content" area (excluding padding + border) so we can distinguish
+      // a fully-painted image from a text-only fallback (which covers far fewer pixels).
+      const paddingX = 4;
+      const paddingY = 2;
       const sampleRect = (() => {
-        const centerX = rect.x + rect.width / 2;
-        const centerY = rect.y + rect.height / 2;
-        const size = Math.min(32, Math.max(12, Math.min(rect.width, rect.height) * 0.5));
-        const x = Math.max(0, Math.floor(centerX - size / 2));
-        const y = Math.max(0, Math.floor(centerY - size / 2));
-        const maxW = Math.max(1, Math.floor(canvas.getBoundingClientRect().width) - x);
-        const maxH = Math.max(1, Math.floor(canvas.getBoundingClientRect().height) - y);
-        const w = Math.min(Math.floor(size), maxW);
-        const h = Math.min(Math.floor(size), maxH);
+        const x = Math.max(0, Math.floor(rect.x + paddingX));
+        const y = Math.max(0, Math.floor(rect.y + paddingY));
+        const w = Math.max(1, Math.floor(rect.width - paddingX * 2));
+        const h = Math.max(1, Math.floor(rect.height - paddingY * 2));
         return { x, y, width: w, height: h };
       })();
 
@@ -342,17 +343,18 @@ test.describe("drawing + image rendering regressions", () => {
       for (let i = 3; i < imageData.data.length; i += 4) {
         if (imageData.data[i] !== 0) nonTransparent += 1;
       }
+      const coverage = imageData.data.length > 0 ? nonTransparent / (imageData.data.length / 4) : 0;
 
       const cache: Map<string, any> | undefined = (app.sharedGrid?.renderer as any)?.imageBitmapCache;
       const state = cache?.get?.(imageId)?.state ?? null;
-      return { nonTransparent, sampleRect, state };
+      return { nonTransparent, coverage, sampleRect, state };
     }, fixture.imageId);
 
     expect(result.state).toBe("ready");
 
     expect(
-      result.nonTransparent,
-      `expected shared-grid content canvas to contain non-transparent pixels near rendered in-cell image (sample=${JSON.stringify(result.sampleRect)})`,
-    ).toBeGreaterThan(0);
+      result.coverage,
+      `expected shared-grid content canvas to paint most pixels for in-cell image (coverage=${result.coverage}, sample=${JSON.stringify(result.sampleRect)})`,
+    ).toBeGreaterThan(0.6);
   });
 });
