@@ -9034,6 +9034,15 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   // Keep the e2e harness up-to-date when we swap the store after opening a workbook.
   window.__workbookSheetStore = workbookSheetStore;
 
+  // Start chart extraction early so it runs in parallel with the cell snapshot load below.
+  // This is best-effort; failures should never block opening the workbook.
+  const importedChartObjectsPromise: Promise<unknown[]> = tauriBackend
+    .listImportedChartObjects()
+    .catch((err) => {
+      console.warn("[formula][desktop] Failed to extract imported chart objects:", err);
+      return [];
+    });
+
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS, chunkRows: CHUNK_ROWS } = getWorkbookLoadLimits();
   // Backend-enforced Tauri limits for `get_range` requests. Keep in sync with:
   // `apps/desktop/src-tauri/src/resource_limits.rs`.
@@ -9175,7 +9184,85 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     Object.assign(sheet, merged);
   }
 
-  const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
+  const importedChartObjectsRaw = await importedChartObjectsPromise;
+  const importedChartObjects = Array.isArray(importedChartObjectsRaw) ? importedChartObjectsRaw : [];
+
+  // Hydrate DrawingML chart placeholders into the DocumentController snapshot so the drawing overlay
+  // can render them. We use a lightweight JSON shape (`{ id, zOrder, anchor, kind }`) that
+  // SpreadsheetApp's drawing adapter can consume.
+  const drawingsBySheet: Record<string, any[]> = {};
+  const knownSheetIds = new Set(sheets.map((s) => s.id));
+  const nextZOrderBySheetId = new Map<string, number>();
+
+  for (const entry of importedChartObjects) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as any;
+    const sheetName: string | null =
+      typeof e.sheet_name === "string" ? e.sheet_name : typeof e.sheetName === "string" ? e.sheetName : null;
+    if (!sheetName) continue;
+
+    const sheetId = workbookSheetStore.resolveIdByName(sheetName) ?? sheetName;
+    if (!knownSheetIds.has(sheetId)) continue;
+
+    const chartId: string | null =
+      typeof e.chart_id === "string"
+        ? e.chart_id
+        : typeof e.chartId === "string"
+          ? e.chartId
+          : null;
+    const relId: string | null =
+      typeof e.rel_id === "string" ? e.rel_id : typeof e.relId === "string" ? e.relId : null;
+    const drawingObjectId: number | null =
+      typeof e.drawing_object_id === "number"
+        ? e.drawing_object_id
+        : typeof e.drawingObjectId === "number"
+          ? e.drawingObjectId
+          : null;
+
+    const id: string | null = drawingObjectId != null ? String(drawingObjectId) : chartId ?? relId;
+    if (!id) continue;
+
+    const anchor = e.anchor;
+    if (!anchor || typeof anchor !== "object") continue;
+
+    const drawingFrameXml: string =
+      typeof e.drawing_frame_xml === "string"
+        ? e.drawing_frame_xml
+        : typeof e.drawingFrameXml === "string"
+          ? e.drawingFrameXml
+          : "";
+    const drawingObjectName: string | null =
+      typeof e.drawing_object_name === "string"
+        ? e.drawing_object_name
+        : typeof e.drawingObjectName === "string"
+          ? e.drawingObjectName
+          : null;
+
+    const zOrder = nextZOrderBySheetId.get(sheetId) ?? 0;
+    nextZOrderBySheetId.set(sheetId, zOrder + 1);
+
+    const drawing = {
+      id,
+      zOrder,
+      anchor,
+      kind: {
+        type: "chart",
+        ...(chartId ? { chart_id: chartId } : {}),
+        ...(relId ? { rel_id: relId } : {}),
+        ...(drawingFrameXml ? { raw_xml: drawingFrameXml } : {}),
+        ...(drawingObjectName ? { label: drawingObjectName } : {}),
+      },
+    };
+
+    (drawingsBySheet[sheetId] ??= []).push(drawing);
+  }
+
+  const snapshotPayload: any = { schemaVersion: 1, sheets: snapshotSheets };
+  if (Object.keys(drawingsBySheet).length > 0) {
+    snapshotPayload.drawingsBySheet = drawingsBySheet;
+  }
+
+  const snapshot = encodeDocumentSnapshot(snapshotPayload);
   const workbookSignature = await workbookSignaturePromise;
   // Reset Power Query table signatures before applying the snapshot so any
   // in-flight query executions cannot reuse cached table results from a
@@ -9265,13 +9352,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   // Populate chart models extracted from imported XLSX chart parts so DrawingML chart placeholders
   // can be rendered via the canvas chart renderer.
-  try {
-    const imported = await tauriBackend.listImportedChartModels();
-    app.setImportedChartModels(imported);
-  } catch (err) {
-    console.warn("[formula][desktop] Failed to load imported chart models:", err);
-    app.setImportedChartModels([]);
-  }
+  app.setImportedChartModels(importedChartObjects);
 
   doc.markSaved();
 

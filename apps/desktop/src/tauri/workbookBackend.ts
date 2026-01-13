@@ -81,6 +81,18 @@ export class TauriWorkbookBackend implements WorkbookBackend {
     return (payload as unknown[]) ?? [];
   }
 
+  /**
+   * Desktop-only: fetch chart drawing objects parsed from the opened XLSX package.
+   *
+   * Each entry includes the DrawingML anchor (for positioning) and may include a parsed chart
+   * `model` (for rendering). The frontend uses this to populate both the drawings overlay and the
+   * imported chart model store.
+   */
+  async listImportedChartObjects(): Promise<unknown[]> {
+    const payload = await this.invoke("list_imported_chart_objects");
+    return (payload as unknown[]) ?? [];
+  }
+
   async saveWorkbook(path?: string): Promise<void> {
     const args: Record<string, unknown> = {};
     if (path) args.path = path;
