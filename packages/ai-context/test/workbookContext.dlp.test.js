@@ -586,6 +586,11 @@ test("buildWorkbookContextFromSpreadsheetApi: redacts sensitive workbook chunks 
 
   assert.match(out.promptContext, /## dlp/i);
   assert.match(out.promptContext, /\[REDACTED_(EMAIL|SSN)\]/);
+  assert.match(out.promptContext, /## workbook_schema/i);
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+  assert.doesNotMatch(schemaSection, /alice@example\.com/);
+  assert.doesNotMatch(schemaSection, /123-45-6789/);
   assert.equal(auditEvents.length, 1);
   assert.equal(auditEvents[0].type, "ai.workbook_context");
   assert.equal(auditEvents[0].decision.decision, "redact");
