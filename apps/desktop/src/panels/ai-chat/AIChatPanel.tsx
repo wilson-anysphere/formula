@@ -107,6 +107,12 @@ export function AIChatPanel(props: AIChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [sending, setSending] = useState(false);
+  // The attachment toolbar depends on external providers (selection, tables, charts) that
+  // may change independently of React state. We use this reducer as a lightweight
+  // `forceUpdate()` when the user interacts with the composer so disabled/enabled states
+  // stay in sync without wiring the panel directly to the spreadsheet app.
+  const [, refreshAttachmentToolbar] = React.useReducer((n: number) => n + 1, 0);
+  const attachmentToolbarRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messageSeqRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -162,8 +168,21 @@ export function AIChatPanel(props: AIChatPanelProps) {
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
+      if (attachmentToolbarRefreshTimer.current != null) {
+        globalThis.clearTimeout(attachmentToolbarRefreshTimer.current);
+        attachmentToolbarRefreshTimer.current = null;
+      }
     };
   }, []);
+
+  function scheduleAttachmentToolbarRefresh() {
+    if (attachmentToolbarRefreshTimer.current != null) return;
+    // Defer refresh so we don't re-render in the middle of a click/focus sequence.
+    attachmentToolbarRefreshTimer.current = globalThis.setTimeout(() => {
+      attachmentToolbarRefreshTimer.current = null;
+      refreshAttachmentToolbar();
+    }, 0);
+  }
 
   function isAbortError(err: unknown): boolean {
     if (!err || (typeof err !== "object" && typeof err !== "function")) return false;
@@ -488,7 +507,11 @@ export function AIChatPanel(props: AIChatPanelProps) {
           </div>
         ))}
       </div>
-      <div className="ai-chat-panel__composer">
+      <div
+        className="ai-chat-panel__composer"
+        onMouseEnter={() => scheduleAttachmentToolbarRefresh()}
+        onFocusCapture={() => scheduleAttachmentToolbarRefresh()}
+      >
         <div className="ai-chat-panel__composer-toolbar">
           <div className="ai-chat-panel__attachment-toolbar" role="toolbar" aria-label="Attach context">
             <AttachmentButton
