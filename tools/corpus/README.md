@@ -46,3 +46,6 @@ For full docs, see: `docs/compatibility-corpus.md`.
 
 CI note: the scheduled private corpus workflow uploads a stable `corpus-private-trend` artifact
 containing `tools/corpus/out/private/trend.json` for easy consumption.
+
+Trend retention note: `tools.corpus.dashboard --append-trend` caps the file to the last 90 entries by
+default. Override with `--trend-max-entries N` (set `0` for unlimited).

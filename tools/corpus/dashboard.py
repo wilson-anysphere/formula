@@ -1058,7 +1058,7 @@ def main() -> int:
         "--trend-max-entries",
         type=int,
         default=TREND_MAX_ENTRIES,
-        help=f"Maximum number of entries to keep in --append-trend output (default: {TREND_MAX_ENTRIES}).",
+        help=f"Maximum number of entries to keep in --append-trend output (0 = unlimited; default: {TREND_MAX_ENTRIES}).",
     )
     parser.add_argument(
         "--gate-load-p90-ms",

@@ -184,6 +184,25 @@ class DashboardTrendTests(unittest.TestCase):
             on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
             self.assertEqual(len(on_disk), 1)
 
+    def test_append_trend_file_max_entries_zero_means_unlimited(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit": "abc",
+            "run_url": "https://example.invalid/run/1",
+            "counts": {"total": 0, "open_ok": 0, "round_trip_ok": 0},
+            "rates": {"open": 0.0, "round_trip": 0.0},
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            trend_path = Path(td) / "trend.json"
+            trend_path.write_text(
+                json.dumps([{"timestamp": "t0"}, {"timestamp": "t1"}, {"timestamp": "t2"}]),
+                encoding="utf-8",
+            )
+
+            entries, _ = _append_trend_file(trend_path, summary=summary, max_entries=0)
+            self.assertEqual(len(entries), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
