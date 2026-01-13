@@ -173,6 +173,7 @@ persistence.
   - `max_entries?: number` (default: `1000`); oldest entries are dropped.
   - `max_age_ms?: number`; entries older than `now - max_age_ms` are dropped at write-time and opportunistically on reads.
 - Notes:
+  - `max_entries` caps the *count* of entries, but does not enforce a strict per-entry size limit. For defense-in-depth against quota write failures from oversized entries, wrap the store with `BoundedAIAuditStore`.
   - LocalStorage can be unavailable or throw (private mode, quota exceeded, some Node “webstorage” environments); this store falls back to an in-memory buffer in those cases.
   - LocalStorage is **not** encrypted and is readable by any JS running in the origin. Treat it as user-accessible storage.
 
@@ -189,6 +190,7 @@ persistence.
 - Notes:
   - Requires IndexedDB support; some environments (private mode, locked-down webviews) may block or clear IndexedDB.
   - Retention is **best-effort**: browsers can still evict/clear data, and quota behavior varies by platform.
+  - IndexedDB also has storage quotas; wrapping with `BoundedAIAuditStore` can help ensure single oversized entries don't break persistence.
 
 ### SQLite store (sql.js)
 
