@@ -23,6 +23,25 @@ describe("flushCollabLocalPersistenceBestEffort", () => {
     expect(flushLocalPersistence).toHaveBeenCalledTimes(1);
   });
 
+  it("awaits the idle hook before flushing", async () => {
+    const calls: string[] = [];
+    const whenIdle = vi.fn(async () => {
+      calls.push("idle");
+    });
+    const flushLocalPersistence = vi.fn(async () => {
+      calls.push("flush");
+    });
+
+    await flushCollabLocalPersistenceBestEffort({
+      session: { flushLocalPersistence },
+      whenIdle,
+      flushTimeoutMs: 100,
+      idleTimeoutMs: 100,
+    });
+
+    expect(calls).toEqual(["idle", "flush"]);
+  });
+
   it("continues quitting even if flushLocalPersistence throws", async () => {
     const flushLocalPersistence = vi.fn(async () => {
       throw new Error("boom");
