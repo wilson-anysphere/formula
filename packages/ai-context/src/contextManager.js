@@ -7,6 +7,7 @@ import { awaitWithAbort, throwIfAborted } from "./abort.js";
 import { inferColumnType, isLikelyHeaderRow } from "./schema.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
+import { searchWorkbookRag } from "../../ai-rag/src/retrieval/searchWorkbookRag.js";
 import { workbookFromSpreadsheetApi } from "../../ai-rag/src/workbook/fromSpreadsheetApi.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import { evaluatePolicy, DLP_DECISION } from "../../security/dlp/src/policyEngine.js";
@@ -942,17 +943,14 @@ export class ContextManager {
     const queryForEmbedding =
       dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
     throwIfAborted(signal);
-    const [queryVector] = await awaitWithAbort(embedder.embedTexts([queryForEmbedding], { signal }), signal);
-    throwIfAborted(signal);
-    const hits = await awaitWithAbort(
-      vectorStore.query(queryVector, topK, {
-        workbookId: params.workbook.id,
-        filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
-        signal,
-      }),
-      signal
-    );
-    throwIfAborted(signal);
+    const hits = await searchWorkbookRag({
+      queryText: queryForEmbedding,
+      workbookId: params.workbook.id,
+      topK,
+      vectorStore,
+      embedder,
+      signal,
+    });
 
     /** @type {{level: string, labels: string[]} } */
     let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
