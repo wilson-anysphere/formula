@@ -23,6 +23,10 @@ function lowerBound(values: number[], target: number): number {
 export class VariableSizeAxis {
   readonly defaultSize: number;
 
+  // Monotonic counter that bumps whenever the effective sizing for any index changes.
+  // Used by VirtualScrollManager to cheaply invalidate cached viewport computations.
+  private version = 0;
+
   private overrides = new Map<number, number>();
   private overrideIndices: number[] = [];
   // Size diffs (override - default) aligned with `overrideIndices`.
@@ -35,6 +39,10 @@ export class VariableSizeAxis {
       throw new Error(`defaultSize must be a positive finite number, got ${defaultSize}`);
     }
     this.defaultSize = defaultSize;
+  }
+
+  getVersion(): number {
+    return this.version;
   }
 
   getSize(index: number): number {
@@ -65,6 +73,19 @@ export class VariableSizeAxis {
 
     entries.sort((a, b) => a[0] - b[0]);
 
+    // Fast path: if the normalized override set is identical to our current overrides, do nothing.
+    if (entries.length === this.overrideIndices.length) {
+      let identical = true;
+      for (let i = 0; i < entries.length; i++) {
+        const [index, size] = entries[i]!;
+        if (this.overrideIndices[i] !== index || this.overrides.get(index) !== size) {
+          identical = false;
+          break;
+        }
+      }
+      if (identical) return;
+    }
+
     const nextOverrides = new Map<number, number>();
     const nextIndices = new Array<number>(entries.length);
     const nextDiffs = new Array<number>(entries.length);
@@ -80,6 +101,7 @@ export class VariableSizeAxis {
     this.overrideIndices = nextIndices;
     this.diffs = nextDiffs;
     this.rebuildDiffBit();
+    this.version++;
   }
 
   setSize(index: number, size: number): void {
@@ -96,6 +118,7 @@ export class VariableSizeAxis {
     }
 
     const existing = this.overrides.get(index);
+    if (existing === size) return;
     this.overrides.set(index, size);
 
     const pos = lowerBound(this.overrideIndices, index);
@@ -111,19 +134,20 @@ export class VariableSizeAxis {
       this.overrideIndices.splice(pos, 0, index);
       this.diffs.splice(pos, 0, diff);
       this.rebuildDiffBit();
+      this.version++;
       return;
     }
 
     // Existing override updated in place; adjust the diff and update the Fenwick tree.
     this.diffs[pos] = diff;
     this.diffBitAdd(pos, delta);
+    this.version++;
   }
 
   deleteSize(index: number): void {
-    if (!this.overrides.has(index)) return;
     const existing = this.overrides.get(index);
-    this.overrides.delete(index);
     if (existing === undefined) return;
+    this.overrides.delete(index);
 
     const pos = lowerBound(this.overrideIndices, index);
     if (this.overrideIndices[pos] !== index) return;
@@ -131,6 +155,7 @@ export class VariableSizeAxis {
     this.overrideIndices.splice(pos, 1);
     this.diffs.splice(pos, 1);
     this.rebuildDiffBit();
+    this.version++;
   }
 
   positionOf(index: number): number {
