@@ -32,6 +32,11 @@ fn dax_function_golden_suite() {
         ("BLANK() = FALSE()", true.into()),
         ("TRUE() + 1", 2.into()),
         ("BLANK() + 1", 1.into()),
+        // ISBLANK
+        ("ISBLANK(BLANK())", true.into()),
+        ("ISBLANK(0)", false.into()),
+        ("ISBLANK(\"\")", false.into()),
+        ("ISBLANK([Total Sales])", false.into()),
     ];
 
     for (expr, expected) in cases {
