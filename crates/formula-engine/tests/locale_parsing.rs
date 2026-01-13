@@ -270,13 +270,28 @@ fn canonicalize_and_localize_true_false_functions_for_de_de_and_es_es() {
 }
 
 #[test]
-fn structured_reference_separators_are_not_translated() {
-    let canonical = "=SUM(Table1[[#Headers],[Qty]],1)";
-    let localized = locale::localize_formula(canonical, &locale::DE_DE).unwrap();
-    assert_eq!(localized, "=SUMME(Table1[[#Headers],[Qty]];1)");
+fn structured_reference_items_are_not_translated() {
+    // Excel keeps structured-reference item keywords (e.g. `#Headers`) and the inner separators
+    // inside `Table1[[...],[...]]` canonical (not locale-dependent). We translate only the
+    // surrounding formula syntax (function name + argument separators).
+    for (canonical, table_spec) in [
+        ("=SUM(Table1[[#Headers],[Qty]],1)", "Table1[[#Headers],[Qty]]"),
+        ("=SUM(Table1[[#This Row],[Qty]],1)", "Table1[[#This Row],[Qty]]"),
+    ] {
+        for locale in [&locale::DE_DE, &locale::FR_FR, &locale::ES_ES] {
+            let expected = format!(
+                "={}({}{}1)",
+                locale.localized_function_name("SUM"),
+                table_spec,
+                locale.config.arg_separator
+            );
+            let localized = locale::localize_formula(canonical, locale).unwrap();
+            assert_eq!(localized, expected);
 
-    let canonical_roundtrip = locale::canonicalize_formula(&localized, &locale::DE_DE).unwrap();
-    assert_eq!(canonical_roundtrip, canonical);
+            let canonical_roundtrip = locale::canonicalize_formula(&localized, locale).unwrap();
+            assert_eq!(canonical_roundtrip, canonical);
+        }
+    }
 }
 
 #[test]

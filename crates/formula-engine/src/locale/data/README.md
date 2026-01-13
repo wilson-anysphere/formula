@@ -149,6 +149,23 @@ And for the external-data loading error literal:
 The newer external-data errors (`#CONNECT!`, `#FIELD!`, `#BLOCKED!`, `#UNKNOWN!`) currently
 round-trip unchanged (canonical) for all supported locales.
 
+## Structured references
+
+Excel table structured references have a small set of reserved **item keywords** such as:
+
+- `[#Headers]`, `[#Data]`, `[#Totals]`, `[#All]`
+- `[@]` / `[#This Row]`
+
+Unlike function names / separators / error literals, these item keywords appear to be **canonical
+(English) in Excel's formula language across our supported locales** (`de-DE`, `fr-FR`, `es-ES`).
+
+Accordingly:
+
+- `locale::canonicalize_formula*` and `locale::localize_formula*` intentionally **do not translate**
+  structured-reference item keywords.
+- Separators **inside structured references** are also canonical (commas inside `Table1[[...],[...]]`
+  are not locale-dependent), so translation avoids rewriting anything inside `[...]` bracket groups.
+
 ## Adding a new locale
 
 1. **Create the sources:**

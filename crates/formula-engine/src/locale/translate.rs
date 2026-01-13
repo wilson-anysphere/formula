@@ -132,7 +132,17 @@ fn translate_formula_with_style(
                 idx += 1;
             }
             _ if bracket_depth > 0 => {
-                // Do not translate anything inside workbook/structured reference brackets.
+                // Do not translate anything inside `[...]` bracket groups.
+                //
+                // This includes:
+                // - external workbook/sheet prefixes like `[Book.xlsx]Sheet1!A1`
+                // - structured references like `Table1[[#Headers],[Qty]]`
+                // - field access selectors like `A1.["Field Name"]`
+                //
+                // For structured references specifically, Excel keeps both the inner separators and
+                // the reserved item keywords (`[#Headers]`, `[#Data]`, `[#Totals]`, `[#All]`,
+                // `[#This Row]`) canonical across locales, so we intentionally avoid rewriting
+                // anything inside the bracketed segments.
                 out.push_str(token_slice(expr_src, tok)?);
                 idx += 1;
             }
