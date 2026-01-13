@@ -309,3 +309,19 @@ test("searchWorkbookRag returns [] for empty queryText without embedding or quer
   assert.equal(embedCalled, false);
   assert.equal(queryCalled, false);
 });
+
+test("searchWorkbookRag requires workbookId when queryText is non-empty", async () => {
+  const embedder = new HashEmbedder({ dimension: 8 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 8 });
+
+  await assert.rejects(
+    searchWorkbookRag({
+      queryText: "hello",
+      // workbookId omitted intentionally
+      topK: 1,
+      vectorStore,
+      embedder,
+    }),
+    /workbookId/
+  );
+});
