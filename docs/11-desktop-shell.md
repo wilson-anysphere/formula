@@ -612,6 +612,7 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 ##### Troubleshooting
 
 - **Provider rejects `formula://…` redirect URIs:** use a loopback redirect and register one of `http://127.0.0.1:<port>/<path>`, `http://localhost:<port>/<path>`, or `http://[::1]:<port>/<path>` with the provider.
+- **Deep link doesn’t trigger / app isn’t opened by `formula://…`:** verify the OS has a protocol handler registered for `formula://`. The desktop host attempts best-effort runtime registration on startup and logs `[deep-link] failed to register formula:// handler: ...` if it fails. In environments where protocol registration is blocked/unreliable, prefer loopback redirects.
 - **Loopback listener fails to start / port already in use:** pick a different port. The Rust command returns an error like `Failed to bind loopback OAuth redirect listener on 127.0.0.1:<port>: ...` (or `localhost:` / `[::1]:` depending on the host).
 - **Provider uses port `0` (dynamic port selection):** not supported — the redirect URI must include an explicit, non-zero port.
 - **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme/host/port/path). The frontend matcher is strict about `pathname` (e.g. `/callback` vs `/callback/`).
