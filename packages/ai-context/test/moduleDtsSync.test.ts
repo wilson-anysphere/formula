@@ -1,0 +1,57 @@
+import { readFile } from "node:fs/promises";
+
+import { expect, test } from "vitest";
+
+function extractStarExports(code: string): string[] {
+  const exports: string[] = [];
+  const re = /^\s*export\s+\*\s+from\s+["'](.+?)["'];/gm;
+  for (let match; (match = re.exec(code)); ) {
+    exports.push(match[1]!);
+  }
+  return exports;
+}
+
+function extractJsNamedExports(code: string): string[] {
+  const names = new Set<string>();
+
+  // export const NAME =
+  for (const m of code.matchAll(/^\s*export\s+const\s+([A-Za-z0-9_]+)\b/gm)) names.add(m[1]!);
+  // export let/var NAME
+  for (const m of code.matchAll(/^\s*export\s+(?:let|var)\s+([A-Za-z0-9_]+)\b/gm)) names.add(m[1]!);
+  // export function NAME / export async function NAME
+  for (const m of code.matchAll(/^\s*export\s+(?:async\s+)?function\s+([A-Za-z0-9_]+)\b/gm)) names.add(m[1]!);
+  // export class NAME
+  for (const m of code.matchAll(/^\s*export\s+class\s+([A-Za-z0-9_]+)\b/gm)) names.add(m[1]!);
+
+  return [...names];
+}
+
+function dtsDeclaresExport(dts: string, name: string): boolean {
+  const patterns: RegExp[] = [
+    new RegExp(`\\bexport\\s+(?:declare\\s+)?(?:const|let|var|function|class)\\s+${name}\\b`),
+    // `export { foo }` or `export { foo as bar }`
+    new RegExp(`\\bexport\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`),
+  ];
+  return patterns.some((re) => re.test(dts));
+}
+
+test("all index-exported modules have matching named exports in their .d.ts files", async () => {
+  const indexJsUrl = new URL("../src/index.js", import.meta.url);
+  const indexJs = await readFile(indexJsUrl, "utf8");
+
+  const modules = extractStarExports(indexJs).filter((spec) => spec.endsWith(".js"));
+
+  for (const spec of modules) {
+    const jsUrl = new URL(spec, indexJsUrl);
+    const dtsUrl = new URL(spec.replace(/\.js$/, ".d.ts"), indexJsUrl);
+
+    const js = await readFile(jsUrl, "utf8");
+    const dts = await readFile(dtsUrl, "utf8");
+
+    const named = extractJsNamedExports(js);
+
+    const missing = named.filter((name) => !dtsDeclaresExport(dts, name));
+    expect(missing, `${spec} exports missing from ${spec.replace(/\\.js$/, ".d.ts")}`).toEqual([]);
+  }
+});
+
