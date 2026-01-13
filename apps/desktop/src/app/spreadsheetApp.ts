@@ -3619,12 +3619,14 @@ export class SpreadsheetApp {
   }
 
   undo(): boolean {
+    if (this.isReadOnly()) return false;
     if (this.editor.isOpen()) return false;
     if (this.formulaBar?.isEditing()) return false;
     return this.applyUndoRedo("undo");
   }
 
   redo(): boolean {
+    if (this.isReadOnly()) return false;
     if (this.editor.isOpen()) return false;
     if (this.formulaBar?.isEditing()) return false;
     return this.applyUndoRedo("redo");
@@ -3632,10 +3634,11 @@ export class SpreadsheetApp {
 
   getUndoRedoState(): UndoRedoState {
     const editing = this.isEditing();
+    const allowUndoRedo = !editing && !this.isReadOnly();
     if (this.collabUndoService) {
       return {
-        canUndo: !editing && this.collabUndoService.canUndo(),
-        canRedo: !editing && this.collabUndoService.canRedo(),
+        canUndo: allowUndoRedo && this.collabUndoService.canUndo(),
+        canRedo: allowUndoRedo && this.collabUndoService.canRedo(),
         // Collab undo/redo is managed by Yjs; DocumentController history labels are not
         // meaningful in this mode.
         undoLabel: null,
@@ -3643,8 +3646,8 @@ export class SpreadsheetApp {
       };
     }
     return {
-      canUndo: !editing && Boolean(this.document.canUndo),
-      canRedo: !editing && Boolean(this.document.canRedo),
+      canUndo: allowUndoRedo && Boolean(this.document.canUndo),
+      canRedo: allowUndoRedo && Boolean(this.document.canRedo),
       undoLabel: (this.document.undoLabel as string | null) ?? null,
       redoLabel: (this.document.redoLabel as string | null) ?? null,
     };
@@ -4860,6 +4863,8 @@ export class SpreadsheetApp {
    * Hide or unhide rows (0-based indices).
    */
   setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     if (!Array.isArray(rows) || rows.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -4883,6 +4888,8 @@ export class SpreadsheetApp {
    * Hide or unhide columns (0-based indices).
    */
   setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
+    if (this.isReadOnly()) return;
+    if (this.isEditing()) return;
     if (!Array.isArray(cols) || cols.length === 0) return;
 
     const outline = this.getOutlineForSheet(this.sheetId);
@@ -9101,6 +9108,13 @@ export class SpreadsheetApp {
     if (target) {
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    // In read-only collab roles (viewer/commenter), we must not mutate local state via undo/redo.
+    // Those changes will not sync, and can leave the UI diverged from the authoritative remote doc.
+    if (this.isReadOnly()) {
+      e.preventDefault();
+      return true;
     }
 
     e.preventDefault();

@@ -5509,21 +5509,23 @@ if (
     return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
   };
 
-  const applyRowHeight = () => promptAndApplyAxisSizing(app, "rowHeight", { isEditing: isSpreadsheetEditing });
-  const applyColWidth = () => promptAndApplyAxisSizing(app, "colWidth", { isEditing: isSpreadsheetEditing });
+  const applyRowHeight = () =>
+    promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
+  const applyColWidth = () => promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const allowEditCommands = !isSpreadsheetEditing();
+    const allowSheetMutations = allowEditCommands && !app.isReadOnly();
     const canComment = app.getCollabSession()?.canComment() ?? true;
 
     let menuItems: ContextMenuItem[] = [];
     if (currentGridArea === "rowHeader") {
       menuItems = [
-        { type: "item", label: "Row Height…", enabled: allowEditCommands, onSelect: applyRowHeight },
+        { type: "item", label: "Row Height…", enabled: allowSheetMutations, onSelect: applyRowHeight },
         {
           type: "item",
           label: "Hide",
-          enabled: allowEditCommands,
+          enabled: allowSheetMutations,
           onSelect: () => {
             // `selectedRowIndices()` enumerates every row in every selection range into a Set.
             // Keep this bounded so Excel-scale select-all (1M rows) can't cause huge allocations.
@@ -5544,7 +5546,7 @@ if (
         {
           type: "item",
           label: "Unhide",
-          enabled: allowEditCommands,
+          enabled: allowSheetMutations,
           onSelect: () => {
             const selection = app.getSelectionRanges();
             let rowUpperBound = 0;
@@ -5563,11 +5565,11 @@ if (
       ];
     } else if (currentGridArea === "colHeader") {
       menuItems = [
-        { type: "item", label: "Column Width…", enabled: allowEditCommands, onSelect: applyColWidth },
+        { type: "item", label: "Column Width…", enabled: allowSheetMutations, onSelect: applyColWidth },
         {
           type: "item",
           label: "Hide",
-          enabled: allowEditCommands,
+          enabled: allowSheetMutations,
           onSelect: () => {
             // `selectedColIndices()` enumerates every column in every selection range into a Set.
             // Keep this bounded so Excel-scale select-all (16k cols) can't cause huge allocations.
@@ -5588,7 +5590,7 @@ if (
         {
           type: "item",
           label: "Unhide",
-          enabled: allowEditCommands,
+          enabled: allowSheetMutations,
           onSelect: () => {
             const selection = app.getSelectionRanges();
             let colUpperBound = 0;
@@ -5643,6 +5645,7 @@ if (
         {
           type: "item",
           label: t("clipboard.cut"),
+          enabled: allowSheetMutations,
           shortcut: getPrimaryCommandKeybindingDisplay("clipboard.cut", commandKeybindingDisplayIndex) ?? primaryShortcut("X"),
           onSelect: () => executeBuiltinCommand("clipboard.cut"),
         },
@@ -5655,6 +5658,7 @@ if (
         {
           type: "item",
           label: t("clipboard.paste"),
+          enabled: allowSheetMutations,
           shortcut: getPrimaryCommandKeybindingDisplay("clipboard.paste", commandKeybindingDisplayIndex) ?? primaryShortcut("V"),
           onSelect: () => executeBuiltinCommand("clipboard.paste"),
         },
@@ -5662,6 +5666,7 @@ if (
         {
           type: "submenu",
           label: t("clipboard.pasteSpecial.title"),
+          enabled: allowSheetMutations,
           // Retain the shortcut hint for the Paste Special command (still available via
           // keybinding/command palette), even though the context menu now exposes direct
           // paste-special modes via a submenu.
@@ -5679,7 +5684,7 @@ if (
           type: "item",
           label: t("menu.clearContents"),
           enabled: (() => {
-            if (!allowEditCommands) return false;
+            if (!allowSheetMutations) return false;
 
             const isSingleCell = contextKeys.get("isSingleCell") === true;
             const activeHasValue = contextKeys.get("cellHasValue") === true;
@@ -5728,7 +5733,7 @@ if (
         {
           type: "item",
           label: t("command.ai.inlineEdit"),
-          enabled: allowEditCommands,
+          enabled: allowSheetMutations,
           shortcut: getPrimaryCommandKeybindingDisplay("ai.inlineEdit", commandKeybindingDisplayIndex) ?? primaryShortcut("K"),
           onSelect: () => executeBuiltinCommand("ai.inlineEdit"),
         },
@@ -5736,6 +5741,7 @@ if (
         {
           type: "submenu",
           label: t("menu.format"),
+          enabled: allowSheetMutations,
           items: [
             {
               type: "item",
@@ -8679,10 +8685,10 @@ function handleRibbonCommand(commandId: string): void {
         // to fire when the menu is present. Keep this as a fallback.
         return;
       case "home.cells.format.rowHeight":
-        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: isSpreadsheetEditing });
+        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
         return;
       case "home.cells.format.columnWidth":
-        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: isSpreadsheetEditing });
+        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: () => isSpreadsheetEditing() || app.isReadOnly() });
         return;
       case "format.openFormatCells":
       case "home.number.formatCells": // legacy ribbon schema id

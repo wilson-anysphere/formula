@@ -204,6 +204,12 @@ describe("SpreadsheetApp read-only collab UX", () => {
     const session = app.getCollabSession() as any;
     expect(session).not.toBeNull();
 
+    const sheetId = app.getCurrentSheetId();
+    // Seed an undoable edit before switching roles so we can ensure undo is blocked
+    // after permissions flip to a read-only role.
+    app.getDocument().setCellValue(sheetId, "A1", "Seed", { label: "Seed Cell" });
+    expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
+
     const inlineEditOverlay = root.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]');
     expect(inlineEditOverlay).toBeInstanceOf(HTMLElement);
     expect(inlineEditOverlay?.hidden).toBe(true);
@@ -223,11 +229,26 @@ describe("SpreadsheetApp read-only collab UX", () => {
     app.openInlineAiEdit();
     expect(inlineEditOverlay?.hidden).toBe(true);
 
+    // Read-only users should not be able to undo/redo local edits (which would diverge
+    // from the authoritative remote document).
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true }));
+    expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
+    expect(app.undo()).toBe(false);
+
     // Read-only users should not be able to change sheet view state (e.g. Freeze Panes),
     // since those changes won't sync via the collab binder.
     expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
     app.freezeTopRow();
     expect(app.getFrozen()).toEqual({ frozenRows: 0, frozenCols: 0 });
+
+    // Hide/unhide rows/cols are also sheet-view mutations and must no-op in read-only.
+    const provider = (app as any).usedRangeProvider();
+    expect(provider.isRowHidden(0)).toBe(false);
+    app.hideRows([0]);
+    expect(provider.isRowHidden(0)).toBe(false);
+    expect(provider.isColHidden(0)).toBe(false);
+    app.hideCols([0]);
+    expect(provider.isColHidden(0)).toBe(false);
 
     // Attempt an in-grid edit (F2).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
@@ -235,8 +256,8 @@ describe("SpreadsheetApp read-only collab UX", () => {
     // when edit mode starts.
     expect(root.querySelector("textarea.cell-editor--open")).toBeNull();
 
-    const sheetId = app.getCurrentSheetId();
-    expect(app.getDocument().getCell(sheetId, "A1").value).toBeNull();
+    // Ensure the earlier seeded value is still present (no accidental clear/undo).
+    expect(app.getDocument().getCell(sheetId, "A1").value).toBe("Seed");
 
     app.destroy();
     root.remove();
