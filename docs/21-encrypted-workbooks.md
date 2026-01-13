@@ -124,6 +124,23 @@ Formula’s encrypted-workbook support targets these two schemes:
 Everything else should fail with a specific “unsupported encryption scheme” error (see
 [Error semantics](#error-semantics)).
 
+### `EncryptedPackage` layout (OOXML)
+
+For both Standard and Agile encryption, the OLE stream `EncryptedPackage` begins with:
+
+- **8 bytes**: `original_package_size` (`u64`, little-endian)
+- remaining bytes: encrypted OPC package data (ciphertext + padding)
+
+After decrypting the ciphertext, the plaintext bytes should be truncated to `original_package_size`
+to recover the real workbook package (a normal ZIP/OPC archive for `.xlsx`/`.xlsm`, or a ZIP/OPC
+archive containing `xl/workbook.bin` for `.xlsb`).
+
+The encryption *mode* differs by scheme:
+
+- **Standard (3.2):** AES-ECB over the ciphertext payload (16-byte blocks).
+- **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
+  `keyData/@saltValue` and the segment index (see MS-OFFCRYPTO Agile encryption).
+
 ### High-level decrypt/open algorithm (OOXML)
 
 At a high level, opening a password-encrypted OOXML workbook is:
