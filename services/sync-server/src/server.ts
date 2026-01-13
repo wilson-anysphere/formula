@@ -38,6 +38,7 @@ import {
 import {
   FilePersistence,
   migrateLegacyPlaintextFilesToEncryptedFormat,
+  type PersistenceOverloadScope,
 } from "./persistence.js";
 import { createEncryptedLevelAdapter } from "./leveldbEncryption.js";
 import {
@@ -416,6 +417,23 @@ export function createSyncServer(
 
   const activeSocketsByDoc = new Map<string, Set<WebSocket>>();
 
+  const closeActiveSocketsForDoc = (docName: string, code: number, reason: string) => {
+    const sockets = activeSocketsByDoc.get(docName);
+    if (!sockets || sockets.size === 0) return;
+    for (const ws of Array.from(sockets)) {
+      try {
+        ws.close(code, reason);
+      } catch {
+        // Ignore failures (socket may already be closing).
+      }
+    }
+  };
+
+  const triggerPersistenceOverload = (docName: string, scope: PersistenceOverloadScope) => {
+    metrics.persistenceOverloadTotal.inc({ scope });
+    closeActiveSocketsForDoc(docName, 1013, "persistence overloaded");
+  };
+
   const tombstones = new TombstoneStore(config.dataDir, logger);
   const shouldPersist = (docName: string) => !tombstones.has(docKeyFromDocName(docName));
 
@@ -530,7 +548,12 @@ export function createSyncServer(
         logger,
         config.persistence.compactAfterUpdates,
         config.persistence.encryption,
-        shouldPersist
+        shouldPersist,
+        {
+          maxQueueDepthPerDoc: config.persistence.maxQueueDepthPerDoc ?? 0,
+          maxQueueDepthTotal: config.persistence.maxQueueDepthTotal ?? 0,
+          onOverload: (docName, scope) => triggerPersistenceOverload(docName, scope),
+        }
       );
       persistenceCleanup = () => persistence.flush();
       setPersistence(persistence);
@@ -569,7 +592,18 @@ export function createSyncServer(
       persistenceBackend = "leveldb";
 
       const queues = new Map<string, Promise<unknown>>();
+      const pendingCountsByDoc = new Map<string, number>();
+      let pendingTotal = 0;
+      const disabledDocs = new Set<string>();
+
+      const maxQueueDepthPerDoc = config.persistence.maxQueueDepthPerDoc ?? 0;
+      const maxQueueDepthTotal = config.persistence.maxQueueDepthTotal ?? 0;
+
       const enqueue = <T>(docName: string, task: () => Promise<T>) => {
+        const pendingForDoc = pendingCountsByDoc.get(docName) ?? 0;
+        pendingCountsByDoc.set(docName, pendingForDoc + 1);
+        pendingTotal += 1;
+
         const prev = queues.get(docName) ?? Promise.resolve();
         const next = prev
           .catch(() => {
@@ -579,6 +613,10 @@ export function createSyncServer(
         const nextForQueue = next as Promise<unknown>;
         queues.set(docName, nextForQueue);
         void nextForQueue.finally(() => {
+          pendingTotal = Math.max(0, pendingTotal - 1);
+          const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
+          if (remaining <= 0) pendingCountsByDoc.delete(docName);
+          else pendingCountsByDoc.set(docName, remaining);
           if (queues.get(docName) === nextForQueue) queues.delete(docName);
         });
         return next;
@@ -626,15 +664,32 @@ export function createSyncServer(
           const persistenceOrigin = "persistence:leveldb";
           const retentionDocName = persistedDocNameForLeveldb(docName);
 
-           ydoc.on("update", (update: Uint8Array, origin: unknown) => {
-             if (origin === persistenceOrigin) return;
-             if (!shouldPersist(docName)) return;
-             if (retentionManager?.isPurging(retentionDocName)) return;
-             void enqueue(retentionDocName, async () => {
-                await hashedLdb.storeUpdate(docName, update);
-              });
-              void retentionManager?.markSeen(retentionDocName);
+          ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+            if (origin === persistenceOrigin) return;
+            if (!shouldPersist(docName)) return;
+            if (retentionManager?.isPurging(retentionDocName)) return;
+            if (disabledDocs.has(docName)) return;
+
+            const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
+            if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
+              disabledDocs.add(docName);
+              triggerPersistenceOverload(docName, "doc");
+              return;
+            }
+            if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
+              disabledDocs.add(docName);
+              triggerPersistenceOverload(docName, "total");
+              return;
+            }
+
+            void enqueue(retentionDocName, async () => {
+              await hashedLdb.storeUpdate(docName, update);
             });
+            void retentionManager?.markSeen(retentionDocName);
+          });
+          ydoc.on("destroy", () => {
+            disabledDocs.delete(docName);
+          });
 
           if (shouldPersist(docName)) {
             void retentionManager?.markSeen(retentionDocName, { force: true });
@@ -683,6 +738,7 @@ export function createSyncServer(
           if (!shouldPersist(docName)) return;
           const retentionDocName = persistedDocNameForLeveldb(docName);
           if (retentionManager?.isPurging(retentionDocName)) return;
+          if (disabledDocs.has(docName)) return;
 
           if (hashingEnabled && docsNeedingMigration.has(docName)) {
             if (ydoc) {
@@ -765,7 +821,12 @@ export function createSyncServer(
           logger,
           config.persistence.compactAfterUpdates,
           config.persistence.encryption,
-          shouldPersist
+          shouldPersist,
+          {
+            maxQueueDepthPerDoc: config.persistence.maxQueueDepthPerDoc ?? 0,
+            maxQueueDepthTotal: config.persistence.maxQueueDepthTotal ?? 0,
+            onOverload: (docName, scope) => triggerPersistenceOverload(docName, scope),
+          }
         );
         setPersistence(persistence);
         metrics.setPersistenceInfo({
@@ -818,7 +879,18 @@ export function createSyncServer(
         persistenceBackend = "leveldb";
 
         const queues = new Map<string, Promise<unknown>>();
+        const pendingCountsByDoc = new Map<string, number>();
+        let pendingTotal = 0;
+        const disabledDocs = new Set<string>();
+
+        const maxQueueDepthPerDoc = config.persistence.maxQueueDepthPerDoc ?? 0;
+        const maxQueueDepthTotal = config.persistence.maxQueueDepthTotal ?? 0;
+
         const enqueue = <T>(docName: string, task: () => Promise<T>) => {
+          const pendingForDoc = pendingCountsByDoc.get(docName) ?? 0;
+          pendingCountsByDoc.set(docName, pendingForDoc + 1);
+          pendingTotal += 1;
+
           const prev = queues.get(docName) ?? Promise.resolve();
           const next = prev
             .catch(() => {
@@ -828,6 +900,10 @@ export function createSyncServer(
           const nextForQueue = next as Promise<unknown>;
           queues.set(docName, nextForQueue);
           void nextForQueue.finally(() => {
+            pendingTotal = Math.max(0, pendingTotal - 1);
+            const remaining = (pendingCountsByDoc.get(docName) ?? 1) - 1;
+            if (remaining <= 0) pendingCountsByDoc.delete(docName);
+            else pendingCountsByDoc.set(docName, remaining);
             if (queues.get(docName) === nextForQueue) queues.delete(docName);
           });
           return next;
@@ -881,10 +957,26 @@ export function createSyncServer(
               if (origin === persistenceOrigin) return;
               if (!shouldPersist(docName)) return;
               if (retentionManager?.isPurging(retentionDocName)) return;
+              if (disabledDocs.has(docName)) return;
+
+              const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
+              if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
+                disabledDocs.add(docName);
+                triggerPersistenceOverload(docName, "doc");
+                return;
+              }
+              if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
+                disabledDocs.add(docName);
+                triggerPersistenceOverload(docName, "total");
+                return;
+              }
               void enqueue(retentionDocName, async () => {
                 await hashedLdb.storeUpdate(docName, update);
               });
               void retentionManager?.markSeen(retentionDocName);
+            });
+            ydoc.on("destroy", () => {
+              disabledDocs.delete(docName);
             });
 
             if (shouldPersist(docName)) {
@@ -934,6 +1026,7 @@ export function createSyncServer(
             if (!shouldPersist(docName)) return;
             const retentionDocName = persistedDocNameForLeveldb(docName);
             if (retentionManager?.isPurging(retentionDocName)) return;
+            if (disabledDocs.has(docName)) return;
 
             if (hashingEnabled && docsNeedingMigration.has(docName)) {
               if (ydoc) {

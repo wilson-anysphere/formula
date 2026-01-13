@@ -248,6 +248,9 @@ export async function startSyncServer(opts: {
       // Prevent JWT hardening flags from leaking into tests (individual tests can opt in).
       SYNC_SERVER_JWT_REQUIRE_SUB: "",
       SYNC_SERVER_JWT_REQUIRE_EXP: "",
+      // Prevent persistence backpressure settings from leaking into tests.
+      SYNC_SERVER_PERSISTENCE_MAX_QUEUE_DEPTH_PER_DOC: "",
+      SYNC_SERVER_PERSISTENCE_MAX_QUEUE_DEPTH_TOTAL: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },
