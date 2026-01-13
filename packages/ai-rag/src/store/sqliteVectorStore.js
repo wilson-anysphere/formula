@@ -260,6 +260,12 @@ export class SqliteVectorStore {
     let store;
     if (!existing) {
       store = initStore(new SQL.Database());
+      // Initializing a brand new in-memory DB will insert meta rows (dimension,
+      // schema version) and mark the store dirty. However, when there is no
+      // persisted payload yet, we don't want `close()` to immediately write an
+      // empty SQLite file to storage — persist only after the first real
+      // mutation (upsert/delete/etc) triggers `_dirty`.
+      store._dirty = false;
       return store;
     }
 
