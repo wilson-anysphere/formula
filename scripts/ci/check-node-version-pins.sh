@@ -48,6 +48,24 @@ require_env_pin_usage() {
   local file="$1"
   local fail=0
 
+  # Fail fast if a workflow uses node-version-file (that would bypass the explicit env pin).
+  set +e
+  local file_pins
+  file_pins="$(git grep -n "node-version-file:" -- "$file" 2>/dev/null)"
+  local file_pin_status=$?
+  set -e
+  if [ "$file_pin_status" -eq 2 ]; then
+    echo "git grep failed while scanning ${file} for node-version-file pins" >&2
+    exit 2
+  fi
+  if [ -n "$file_pins" ]; then
+    echo "Node workflow pin check failed: ${file} uses node-version-file (unsupported in this repo)." >&2
+    echo "Use: node-version: \${{ env.NODE_VERSION }} (and keep NODE_VERSION in sync between CI and release)." >&2
+    echo "" >&2
+    echo "$file_pins" >&2
+    exit 1
+  fi
+
   # We expect workflows to reference the pinned Node major via env.NODE_VERSION.
   # (This makes it harder to accidentally update one job but not the others.)
   set +e
@@ -59,6 +77,12 @@ require_env_pin_usage() {
   if [ "$status" -eq 2 ]; then
     echo "git grep failed while scanning ${file}" >&2
     exit 2
+  fi
+
+  if [ -z "$matches" ]; then
+    echo "Node workflow pin check failed: no node-version pins found in ${file}." >&2
+    echo "Expected actions/setup-node to use: node-version: \${{ env.NODE_VERSION }}" >&2
+    exit 1
   fi
 
   while IFS= read -r match; do
