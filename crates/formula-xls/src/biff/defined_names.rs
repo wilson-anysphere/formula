@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use super::{externsheet, records, rgce, strings, supbook, BiffVersion};
+use super::{records, rgce, strings, workbook_context, BiffVersion};
 
 // Record ids used by workbook-global defined name parsing.
 // See [MS-XLS] sections:
@@ -78,14 +78,14 @@ fn push_warning(out: &mut BiffDefinedNames, msg: String) {
 }
 
 #[derive(Debug, Clone)]
-struct RawDefinedName {
-    name: String,
-    scope_sheet: Option<usize>,
-    itab: u16,
-    hidden: bool,
-    comment: Option<String>,
-    builtin_id: Option<u8>,
-    rgce: Vec<u8>,
+pub(super) struct RawDefinedName {
+    pub(super) name: String,
+    pub(super) scope_sheet: Option<usize>,
+    pub(super) itab: u16,
+    pub(super) hidden: bool,
+    pub(super) comment: Option<String>,
+    pub(super) builtin_id: Option<u8>,
+    pub(super) rgce: Vec<u8>,
 }
 
 pub(crate) fn parse_biff_defined_names(
@@ -104,91 +104,21 @@ pub(crate) fn parse_biff_defined_names(
         return Ok(out);
     }
 
-    // Parse `SUPBOOK` records so `PtgRef3d` / `PtgArea3d` can resolve external workbook references
-    // (iSupBook != 0) into Excel-style text like `'[Book.xlsx]Sheet1'!A1`.
-    //
-    // Best-effort: if SUPBOOK data is missing/malformed, the rgce decoder will fall back to a
-    // parseable Excel error literal (typically `#REF!`) and include details in warnings.
-    let supbook::SupBookTable {
-        supbooks,
-        warnings: supbook_warnings,
-    } = supbook::parse_biff8_supbook_table(workbook_stream, codepage);
-    for warning in supbook_warnings {
-        push_warning(&mut out, warning);
-    }
-
-    let externsheet::ExternSheetTable {
-        entries: externsheet_entries,
-        warnings,
-    } = externsheet::parse_biff_externsheet(workbook_stream, biff, codepage);
-    for warning in warnings {
-        push_warning(&mut out, warning);
-    }
-
-    let allows_continuation = |id: u16| id == RECORD_NAME;
-    let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
-
-    // We need to preserve workbook `NAME` record order so `PtgName` indices in `rgce` streams
-    // remain stable. If a `NAME` record fails to parse, we insert a placeholder entry so the
-    // 1-based `iname` values stored in formulas still line up with the `defined_names` table used
-    // by the rgce decoder.
-    let mut raw_names: Vec<Option<RawDefinedName>> = Vec::new();
-
-    for record in iter {
-        let record = match record {
-            Ok(record) => record,
-            Err(err) => {
-                push_warning(&mut out, format!("malformed BIFF record: {err}"));
-                break;
-            }
-        };
-
-        let record_id = record.record_id;
-
-        // Stop at the next substream BOF; workbook globals start at offset 0.
-        if record.offset != 0 && records::is_bof_record(record_id) {
-            break;
-        }
-
-        match record_id {
-            RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
-                Ok(raw) => raw_names.push(Some(raw)),
-                Err(err) => {
-                    push_warning(&mut out, format!("failed to parse NAME record: {err}"));
-                    raw_names.push(None);
-                }
-            },
-            records::RECORD_EOF => break,
-            _ => {}
-        }
-    }
-
-    // Build name table metadata (for PtgName resolution), then decode formulas.
-    let metas: Vec<rgce::DefinedNameMeta> = raw_names
-        .iter()
-        .map(|n| match n {
-            Some(n) => rgce::DefinedNameMeta {
-                name: n.name.clone(),
-                scope_sheet: n.scope_sheet,
-            },
-            None => rgce::DefinedNameMeta {
-                // Use an Excel error literal so downstream formula parsing stays valid and callers
-                // can distinguish unresolved name references.
-                name: "#NAME?".to_string(),
-                scope_sheet: None,
-            },
-        })
-        .collect();
-
-    let ctx = rgce::RgceDecodeContext {
+    let mut ctx_tables = workbook_context::build_biff_workbook_context_tables(
+        workbook_stream,
+        biff,
         codepage,
         sheet_names,
-        externsheet: &externsheet_entries,
-        supbooks: &supbooks,
-        defined_names: &metas,
-    };
+    );
+    for warning in ctx_tables.warnings.drain(..) {
+        push_warning(&mut out, warning);
+    }
 
-    for raw in raw_names.into_iter().flatten() {
+    // `ctx` borrows from `ctx_tables`, so move the NAME records out up-front.
+    let name_records = std::mem::take(&mut ctx_tables.name_records);
+    let ctx = ctx_tables.rgce_decode_context(sheet_names);
+
+    for raw in name_records.into_iter().flatten() {
         let decoded = rgce::decode_defined_name_rgce_with_context(&raw.rgce, codepage, &ctx);
         for warning in decoded.warnings {
             push_warning(&mut out, format!("defined name `{}`: {warning}", raw.name));
@@ -209,7 +139,7 @@ pub(crate) fn parse_biff_defined_names(
     Ok(out)
 }
 
-fn parse_biff8_name_record(
+pub(super) fn parse_biff8_name_record(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
     sheet_names: &[String],

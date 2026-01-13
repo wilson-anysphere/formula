@@ -20,6 +20,7 @@ pub(crate) mod defined_names;
 pub(crate) mod externsheet;
 pub(crate) mod formulas;
 pub(crate) mod print_settings;
+mod workbook_context;
 pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
