@@ -1,7 +1,7 @@
-use std::collections::HashSet;
 use formula_model::charts::{ChartAnchor, ChartType};
 use formula_xlsx::XlsxPackage;
 use rust_xlsxwriter::{Chart, ChartType as XlsxChartType, Workbook};
+use std::collections::HashSet;
 
 fn build_workbook(chart_type: XlsxChartType) -> Vec<u8> {
     build_workbook_with_chart(chart_type, true)
@@ -48,7 +48,11 @@ fn assert_round_trip_preserves_all_parts(xlsx_bytes: &[u8]) {
     assert_eq!(original_names, round_names);
 
     for name in original_names {
-        assert_eq!(package.part(&name), round_trip.part(&name), "mismatch for {name}");
+        assert_eq!(
+            package.part(&name),
+            round_trip.part(&name),
+            "mismatch for {name}"
+        );
     }
 }
 
@@ -63,8 +67,16 @@ fn bar_chart_round_trip_and_extract() {
 
     let chart = &charts[0];
     assert_eq!(chart.sheet_name.as_deref(), Some("Sheet1"));
-    assert!(chart.sheet_part.as_deref().unwrap().starts_with("xl/worksheets/"));
-    assert!(chart.chart_part.as_deref().unwrap().starts_with("xl/charts/"));
+    assert!(chart
+        .sheet_part
+        .as_deref()
+        .unwrap()
+        .starts_with("xl/worksheets/"));
+    assert!(chart
+        .chart_part
+        .as_deref()
+        .unwrap()
+        .starts_with("xl/charts/"));
     assert_eq!(chart.chart_type, ChartType::Bar);
     assert_eq!(chart.title.as_deref(), Some("Example Chart"));
     assert_eq!(chart.series.len(), 1);
@@ -125,6 +137,28 @@ fn scatter_chart_round_trip_and_extract() {
     let charts = package.extract_charts().unwrap();
     assert_eq!(charts.len(), 1);
     assert_eq!(charts[0].chart_type, ChartType::Scatter);
+}
+
+#[test]
+fn area_chart_round_trip_and_extract() {
+    let bytes = build_workbook(XlsxChartType::Area);
+    assert_round_trip_preserves_all_parts(&bytes);
+
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+    let charts = package.extract_charts().unwrap();
+    assert_eq!(charts.len(), 1);
+    assert_eq!(charts[0].chart_type, ChartType::Area);
+}
+
+#[test]
+fn doughnut_chart_round_trip_and_extract() {
+    let bytes = build_workbook(XlsxChartType::Doughnut);
+    assert_round_trip_preserves_all_parts(&bytes);
+
+    let package = XlsxPackage::from_bytes(&bytes).unwrap();
+    let charts = package.extract_charts().unwrap();
+    assert_eq!(charts.len(), 1);
+    assert_eq!(charts[0].chart_type, ChartType::Doughnut);
 }
 
 #[test]

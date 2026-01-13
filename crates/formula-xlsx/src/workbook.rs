@@ -1,18 +1,19 @@
 use std::collections::{HashMap, HashSet};
 
 use formula_model::charts::{
-    Chart, ChartColorStylePartModel, ChartKind, ChartModel, ChartStylePartModel, ChartType,
+    Chart, ChartAnchor, ChartColorStylePartModel, ChartKind, ChartModel, ChartStylePartModel,
+    ChartType,
 };
+use formula_model::drawings::Anchor as DrawingAnchor;
 use roxmltree::Document;
 
-use crate::charts::parse_chart;
+use crate::charts::legacy_parsed_chart_from_model;
 use crate::drawingml::charts::{
     extract_chart_object_refs, parse_chart_color_style, parse_chart_ex, parse_chart_space,
     parse_chart_style, ChartColorStyleParseError, ChartDiagnostic, ChartDiagnosticSeverity,
     ChartExParseError, ChartObject, ChartParts, ChartSpaceParseError, ChartStyleParseError,
     OpcPart,
 };
-use crate::drawingml::extract_chart_refs;
 use crate::package::XlsxPackage;
 use crate::path::{rels_for_part, resolve_target};
 use crate::relationships::parse_relationships;
@@ -31,80 +32,41 @@ pub enum ChartExtractionError {
 
 impl XlsxPackage {
     pub fn extract_charts(&self) -> Result<Vec<Chart>, ChartExtractionError> {
-        let drawing_to_sheet = self.drawing_to_sheet_map().unwrap_or_default();
-        let mut charts = Vec::new();
+        let chart_objects = self.extract_chart_objects()?;
+        let mut charts = Vec::with_capacity(chart_objects.len());
 
-        for drawing_part in self
-            .part_names()
-            .filter(|name| name.starts_with("xl/drawings/drawing") && name.ends_with(".xml"))
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-        {
-            let sheet_info = drawing_to_sheet.get(&drawing_part);
-            let sheet_name = sheet_info.map(|info| info.name.clone());
-            let sheet_part = sheet_info.and_then(|info| info.part.clone());
+        for chart_object in chart_objects {
+            let parsed = chart_object.model.as_ref().map(legacy_parsed_chart_from_model);
 
-            let drawing_xml = match self.part(&drawing_part) {
-                Some(bytes) => bytes,
-                None => continue,
+            let (chart_type, title, series) = match parsed {
+                Some(parsed) => (parsed.chart_type, parsed.title, parsed.series),
+                None => (
+                    ChartType::Unknown {
+                        name: "unparsed".to_string(),
+                    },
+                    None,
+                    Vec::new(),
+                ),
             };
 
-            let drawing_refs = extract_chart_refs(drawing_xml, &drawing_part)?;
-            if drawing_refs.is_empty() {
-                continue;
-            }
-
-            let drawing_rels_part = rels_for_part(&drawing_part);
-            let drawing_rels = self.part(&drawing_rels_part);
-            let drawing_rel_map = match drawing_rels {
-                Some(xml) => parse_relationships(xml, &drawing_rels_part)?
-                    .into_iter()
-                    .filter(|rel| !is_external_target_mode(rel.target_mode.as_deref()))
-                    .map(|r| (r.id.clone(), r))
-                    .collect::<HashMap<_, _>>(),
-                None => HashMap::new(),
+            let chart_part = if chart_object.parts.chart.path.is_empty() {
+                None
+            } else {
+                Some(chart_object.parts.chart.path.clone())
             };
+            let anchor = chart_anchor_from_drawing_anchor(chart_object.anchor);
 
-            for drawing_ref in drawing_refs {
-                let relationship = drawing_rel_map.get(&drawing_ref.rel_id);
-                let chart_part = relationship
-                    .map(|r| {
-                        let target = normalize_relationship_target(&r.target);
-                        resolve_target(&drawing_part, &target)
-                    })
-                    .filter(|target| self.part(target).is_some());
-
-                let parsed = match chart_part
-                    .as_deref()
-                    .and_then(|chart_part| self.part(chart_part).map(|bytes| (chart_part, bytes)))
-                {
-                    Some((chart_part, bytes)) => parse_chart(bytes, chart_part).unwrap_or(None),
-                    None => None,
-                };
-
-                let (chart_type, title, series) = match parsed {
-                    Some(parsed) => (parsed.chart_type, parsed.title, parsed.series),
-                    None => (
-                        ChartType::Unknown {
-                            name: "unparsed".to_string(),
-                        },
-                        None,
-                        Vec::new(),
-                    ),
-                };
-
-                charts.push(Chart {
-                    sheet_name: sheet_name.clone(),
-                    sheet_part: sheet_part.clone(),
-                    drawing_part: drawing_part.clone(),
-                    chart_part: chart_part.map(|s| s.to_string()),
-                    rel_id: drawing_ref.rel_id,
-                    chart_type,
-                    title,
-                    series,
-                    anchor: drawing_ref.anchor,
-                });
-            }
+            charts.push(Chart {
+                sheet_name: chart_object.sheet_name,
+                sheet_part: chart_object.sheet_part,
+                drawing_part: chart_object.drawing_part,
+                chart_part,
+                rel_id: chart_object.drawing_rel_id,
+                chart_type,
+                title,
+                series,
+                anchor,
+            });
         }
 
         Ok(charts)
@@ -946,4 +908,33 @@ fn normalize_relationship_target(target: &str) -> String {
 
 fn is_external_target_mode(target_mode: Option<&str>) -> bool {
     target_mode.is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+}
+
+fn chart_anchor_from_drawing_anchor(anchor: DrawingAnchor) -> ChartAnchor {
+    match anchor {
+        DrawingAnchor::TwoCell { from, to } => ChartAnchor::TwoCell {
+            from_col: from.cell.col,
+            from_row: from.cell.row,
+            from_col_off_emu: from.offset.x_emu,
+            from_row_off_emu: from.offset.y_emu,
+            to_col: to.cell.col,
+            to_row: to.cell.row,
+            to_col_off_emu: to.offset.x_emu,
+            to_row_off_emu: to.offset.y_emu,
+        },
+        DrawingAnchor::OneCell { from, ext } => ChartAnchor::OneCell {
+            from_col: from.cell.col,
+            from_row: from.cell.row,
+            from_col_off_emu: from.offset.x_emu,
+            from_row_off_emu: from.offset.y_emu,
+            cx_emu: ext.cx,
+            cy_emu: ext.cy,
+        },
+        DrawingAnchor::Absolute { pos, ext } => ChartAnchor::Absolute {
+            x_emu: pos.x_emu,
+            y_emu: pos.y_emu,
+            cx_emu: ext.cx,
+            cy_emu: ext.cy,
+        },
+    }
 }

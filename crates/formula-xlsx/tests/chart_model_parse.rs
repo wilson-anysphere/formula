@@ -74,7 +74,7 @@ fn parses_generated_chart_fixtures() {
                     other => panic!("expected scatter y_values to be number, got {other:?}"),
                 }
             }
-            ChartKind::Bar | ChartKind::Line => {
+            ChartKind::Area | ChartKind::Bar | ChartKind::Line => {
                 assert_eq!(model.axes.len(), 2, "fixture {name}");
                 let cat = model
                     .axes
@@ -104,7 +104,7 @@ fn parses_generated_chart_fixtures() {
                 assert_eq!(vals.cache.as_ref().map(Vec::len), Some(4));
                 assert_eq!(vals.format_code.as_deref(), Some("General"));
             }
-            ChartKind::Pie => {
+            ChartKind::Pie | ChartKind::Doughnut => {
                 assert!(model.axes.is_empty(), "pie charts should not have axes");
                 let ser = &model.series[0];
                 let cats = ser.categories.as_ref().expect("categories present");
