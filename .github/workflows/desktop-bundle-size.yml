@@ -114,6 +114,7 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf \
+            fakeroot \
             squashfs-tools
 
           # Some AppImage tooling requires FUSE2 at runtime. Ubuntu 24.04 renamed the
@@ -178,6 +179,11 @@ jobs:
           # In CI we may not have FUSE2 available, so force AppImages to run in
           # "extract-and-run" mode (safe; does not affect the produced artifacts).
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # `scripts/cargo_agent.sh` defaults `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` to a value
+          # based on its job count for stability on multi-agent hosts. Override so this check
+          # matches the repo's Cargo.toml release profile (codegen-units = 1), keeping bundle
+          # sizes comparable to tagged release builds.
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build --bundles appimage,deb
 
       - name: Smoke test produced AppImage (extract + ldd + arch)
