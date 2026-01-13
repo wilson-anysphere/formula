@@ -249,7 +249,7 @@ Formula relies on the **Microsoft Edge WebView2 Evergreen Runtime** on Windows. 
 install WebView2 automatically if it is missing by using Tauri's WebView2 installer integration:
 
 - Config: `apps/desktop/src-tauri/tauri.conf.json` → `bundle.windows.webviewInstallMode.type = "downloadBootstrapper"`
-  (Evergreen **bootstrapper**; requires an internet connection to download/install the runtime).
+  (Evergreen **bootstrapper**; we also set `silent: true`; requires an internet connection to download/install the runtime).
 - CI verification: the release workflow runs `scripts/ci/check-windows-webview2-installer.py`, which inspects the produced
   Windows installer(s) and asserts they contain a reference to `MicrosoftEdgeWebview2Setup.exe` (or an offline runtime
   installer), failing the release build if this regresses.
