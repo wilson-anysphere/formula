@@ -862,10 +862,10 @@ async function main() {
 
   // GitHub release assets can be eventually consistent right after upload. If the manifest
   // references an asset we can't see yet, re-fetch the asset list a few times before failing.
-    if (platformValidation.missingAssets.length > 0) {
-      const refreshDelaysMs = [2000, 4000, 8000];
-      for (const delay of refreshDelaysMs) {
-        await sleep(delay);
+  if (platformValidation.missingAssets.length > 0) {
+    const refreshDelaysMs = [2000, 4000, 8000];
+    for (const delay of refreshDelaysMs) {
+      await sleep(delay);
       try {
         assets = await fetchAllReleaseAssets({ repo, releaseId, token });
         ({ map: assetByName, names: assetNames } = indexAssetsByName(assets));
@@ -876,9 +876,9 @@ async function main() {
       platformValidation = validatePlatformEntries({ platforms, assetNames });
       if (platformValidation.missingAssets.length === 0) {
         break;
-        }
       }
     }
+  }
 
   errors.push(...platformValidation.errors);
 
