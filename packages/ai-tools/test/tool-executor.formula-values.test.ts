@@ -559,6 +559,28 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data.anomalies[0]?.value).toBe(100);
   });
 
+  it("detect_anomalies can parse numeric string values from formula cells when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A4"), { formula: "=100", value: "100" });
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true });
+    const result = await executor.execute({
+      name: "detect_anomalies",
+      parameters: { range: "Sheet1!A1:A4", method: "zscore", threshold: 1.4 },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("detect_anomalies");
+    if (!result.ok || result.tool !== "detect_anomalies") throw new Error("Unexpected tool result");
+    if (!result.data || result.data.method !== "zscore") throw new Error("Unexpected anomaly result");
+
+    expect(result.data.anomalies.map((a) => a.cell)).toEqual(["Sheet1!A4"]);
+    expect(result.data.anomalies[0]?.value).toBe(100);
+  });
+
   it("detect_anomalies can include formula values under DLP ALLOW decisions when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
