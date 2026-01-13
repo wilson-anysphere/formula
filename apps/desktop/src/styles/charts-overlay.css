@@ -24,7 +24,8 @@
   any floating UI (comments, tooltips, conflicts, etc).
 */
 .grid-root {
-  --grid-z-drawing-overlay: 1;
+  /* CanvasGridRenderer uses z-index 0/1/2 for its base/content/selection canvases. */
+  --grid-z-drawing-overlay: 2;
   --grid-z-chart-overlay: 2;
   --grid-z-selection-overlay: 3;
   --grid-z-outline-overlay: 4;
@@ -32,7 +33,7 @@
 
 /* Shared-grid overlay stacking: drawings above cells, charts above drawings, selection above all. */
 .drawing-layer--shared {
-  z-index: var(--grid-z-drawing-overlay, 1);
+  z-index: var(--grid-z-drawing-overlay, 2);
 }
 
 /* Shared-grid overlay stacking: charts above cells, selection above charts. */
