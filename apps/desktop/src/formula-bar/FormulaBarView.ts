@@ -967,6 +967,12 @@ export class FormulaBarView {
               this.#addressEl.select();
               return;
             }
+
+            // Successful navigation should behave like pressing Enter in the name box:
+            // clear any error feedback and allow follow-up renders to update the displayed address.
+            this.#clearNameBoxError();
+            this.#addressEl.blur();
+            this.#addressEl.value = this.#nameBoxValue;
             return;
           }
 
