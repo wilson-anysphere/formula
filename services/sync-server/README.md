@@ -3,7 +3,9 @@
 `services/sync-server` is a production-oriented [y-websocket](https://github.com/yjs/y-websocket) server with:
 
 - Opaque token or JWT (HS256) authentication
-- Role-based enforcement for read-only users
+- Role-based enforcement:
+  - `viewer`: read-only (drops Yjs update writes)
+  - `commenter`: comment-only (allows updates to the `comments` root; rejects other roots)
 - Reserved-root mutation guard for internal versioning/branching metadata (see below)
 - Awareness anti-spoofing / identity sanitization
 - Connection attempt + message rate limiting

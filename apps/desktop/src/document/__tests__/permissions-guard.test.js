@@ -78,3 +78,27 @@ test("DocumentController blocks sheet view mutations via canEditCell guard (free
   assert.equal(view.colWidths?.["0"], 120);
   assert.equal(view.rowHeights?.["0"], 40);
 });
+
+test("DocumentController allows sheet view mutations when at least some cells are editable (partial range restrictions)", () => {
+  const restrictions = [
+    {
+      // Restrict a small top-left range; editor can still edit the rest of the sheet.
+      range: { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      editAllowlist: ["u-owner"],
+    },
+  ];
+
+  const editorDoc = new DocumentController({
+    canEditCell: makeGuard({ role: "editor", userId: "u-editor", restrictions }),
+  });
+
+  editorDoc.setFrozen("Sheet1", 2, 1);
+  editorDoc.setColWidth("Sheet1", 0, 120);
+  editorDoc.setRowHeight("Sheet1", 0, 40);
+
+  const view = editorDoc.getSheetView("Sheet1");
+  assert.equal(view.frozenRows, 2);
+  assert.equal(view.frozenCols, 1);
+  assert.equal(view.colWidths?.["0"], 120);
+  assert.equal(view.rowHeights?.["0"], 40);
+});

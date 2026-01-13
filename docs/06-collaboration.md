@@ -211,6 +211,7 @@ Important: **masking is not confidentiality**. Masking is a UX/access-control me
 - `session.setPermissions({ role, rangeRestrictions, userId })`
 - `session.canReadCell({ sheetId, row, col })`
 - `session.canEditCell({ sheetId, row, col })`
+- Convenience role helpers: `session.getRole()`, `session.isReadOnly()`, `session.canComment()`, `session.canShare()`
 
 `setPermissions` validates and normalizes `rangeRestrictions` eagerly (using `@formula/collab-permissions`), so misconfigured restrictions fail fast with an actionable error message (e.g. `rangeRestrictions[3] invalid: ...`).
 

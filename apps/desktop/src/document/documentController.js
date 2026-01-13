@@ -3641,13 +3641,19 @@ export class DocumentController {
   #canEditSheetView(sheetId) {
     if (!this.canEditCell) return true;
 
-    // Probe a few nearby coordinates so a single restricted cell (e.g. A1) doesn't
-    // unnecessarily block sheet-view changes for an otherwise-editable sheet.
+    // Probe a few representative coordinates so a small restricted range near the
+    // origin (e.g. header cells like A1:B2) doesn't unnecessarily block sheet-view
+    // changes for an otherwise-editable sheet.
     const probes = [
       { row: 0, col: 0 },
       { row: 0, col: 1 },
       { row: 1, col: 0 },
       { row: 1, col: 1 },
+      { row: 10, col: 10 },
+      { row: 100, col: 100 },
+      { row: 1000, col: 1000 },
+      { row: 0, col: 1000 },
+      { row: 1000, col: 0 },
     ];
     for (const probe of probes) {
       try {

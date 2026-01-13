@@ -913,7 +913,7 @@ test(
   }
 );
 
-test("enforces read-only roles (viewer/commenter) for Yjs updates", async (t) => {
+test("enforces viewer role as read-only for Yjs updates", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-"));
 
   const secret = "test-secret";
