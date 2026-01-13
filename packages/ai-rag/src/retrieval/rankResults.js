@@ -176,21 +176,29 @@ export function dedupeOverlappingResults(results, opts = {}) {
     seenIds.add(cand.id);
 
     const meta = cand.value?.metadata ?? {};
-    const workbookId = meta.workbookId;
+    const workbookId =
+      typeof meta.workbookId === "string" && meta.workbookId
+        ? meta.workbookId
+        : null;
     const sheetName = meta.sheetName;
     const rect = meta.rect;
 
     let isDup = false;
-    if (
-      typeof workbookId === "string" &&
-      workbookId &&
-      typeof sheetName === "string" &&
-      sheetName &&
-      isValidRect(rect)
-    ) {
+    if (typeof sheetName === "string" && sheetName && isValidRect(rect)) {
       for (const prev of kept) {
         const prevMeta = prev.value?.metadata ?? {};
-        if (prevMeta.workbookId !== workbookId) continue;
+        const prevWorkbookId =
+          typeof prevMeta.workbookId === "string" && prevMeta.workbookId
+            ? prevMeta.workbookId
+            : null;
+
+        // If both results have workbook ids, only dedupe within the same workbook.
+        // If only one has a workbook id, be conservative and assume they are different
+        // workbooks (avoid suppressing results across workbooks due to missing metadata).
+        if (workbookId !== prevWorkbookId) {
+          if (workbookId !== null || prevWorkbookId !== null) continue;
+        }
+
         if (prevMeta.sheetName !== sheetName) continue;
         const prevRect = prevMeta.rect;
         if (!isValidRect(prevRect)) continue;
