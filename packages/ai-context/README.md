@@ -149,6 +149,19 @@ const sheet = {
   ],
 };
 
+// Optional: when `values` is a cropped window of a larger sheet (0-based coordinates),
+// provide `origin` so schema + retrieved ranges are emitted as absolute A1 ranges.
+//
+// Example: this `values` matrix corresponds to K11:L12 in the full sheet:
+// const sheet = {
+//   name: "Transactions",
+//   origin: { row: 10, col: 10 },
+//   values: [
+//     ["X", "Y"],
+//     ["Z", "W"],
+//   ],
+// };
+
 const schema = extractSheetSchema(sheet);
 
 // ⚠️ DLP NOTE:
