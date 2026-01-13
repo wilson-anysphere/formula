@@ -47,6 +47,7 @@ const MAX_RANGE_PREVIEW_VALUES = 30;
 const MAX_RANGE_SAMPLE_VALUES = 30;
 const MAX_USER_MESSAGE_CHARS = 16_000;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 4;
+const MAX_OUTPUT_CHARS = 10_000;
 
 // Cache persistence intentionally uses a short debounce to avoid repeatedly serializing
 // the entire cache map when many AI cells resolve in a burst.
@@ -120,10 +121,16 @@ export interface AiCellFunctionEngineOptions {
      * returning `#GETTING_DATA` synchronously.
      */
     maxConcurrentRequests?: number;
+    /**
+     * Hard cap on the final AI cell output stored in cache/returned to the spreadsheet.
+     *
+     * Large string outputs can freeze the grid/UI, so we clamp deterministically.
+     */
+    maxOutputChars?: number;
   };
 }
 
-type CacheEntry = { value: string; updatedAtMs: number };
+type CacheEntry = { value: SpreadsheetValue; updatedAtMs: number };
 
 class ConcurrencyLimiter {
   private readonly maxConcurrent: number;
@@ -193,6 +200,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly maxUserMessageChars: number;
   private readonly maxAuditPreviewChars: number;
   private readonly maxCellChars: number;
+  private readonly maxOutputChars: number;
 
   private readonly requestLimiter: ConcurrencyLimiter;
 
@@ -227,6 +235,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
     this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
     this.maxCellChars = clampInt(options.limits?.maxCellChars ?? MAX_SCALAR_CHARS, { min: 50, max: 100_000 });
+    this.maxOutputChars = clampInt(options.limits?.maxOutputChars ?? MAX_OUTPUT_CHARS, { min: 1, max: 1_000_000 });
 
     this.requestLimiter = new ConcurrencyLimiter(options.limits?.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS);
 
@@ -515,9 +524,19 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         });
       }
 
-      const content = String(response.message?.content ?? "").trim();
-      const finalText = sanitizeCellText(content);
-      this.writeCache(params.cacheKey, finalText);
+      const rawContent = String(response.message?.content ?? "");
+      const sanitized = sanitizeCellText(rawContent);
+
+      // Record bounded output metadata (never store the full output string in audit entries).
+      auditInput.output_hash = hashText(sanitized);
+      auditInput.output_preview = truncateText(sanitized, this.maxAuditPreviewChars);
+      auditInput.output_chars = sanitized.length;
+
+      const normalizedValue = normalizeModelOutputForCellValue(sanitized, { maxStringChars: this.maxOutputChars });
+      auditInput.output_type = normalizedValue === null ? "null" : typeof normalizedValue;
+      if (typeof normalizedValue !== "string") auditInput.output_value = normalizedValue;
+
+      this.writeCache(params.cacheKey, normalizedValue);
     } catch (error) {
       auditInput.error = error instanceof Error ? error.message : String(error);
       this.writeCache(params.cacheKey, AI_CELL_ERROR);
@@ -568,7 +587,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     await recorder.finalize();
   }
 
-  private writeCache(cacheKey: string, value: string): void {
+  private writeCache(cacheKey: string, value: SpreadsheetValue): void {
     this.cache.set(cacheKey, { value, updatedAtMs: Date.now() });
     while (this.cache.size > this.cacheMaxEntries) {
       const oldestKey = this.cache.keys().next().value as string | undefined;
@@ -592,7 +611,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         const key = (entry as any).key;
         const value = (entry as any).value;
         const updatedAtMs = (entry as any).updatedAtMs;
-        if (typeof key !== "string" || typeof value !== "string") continue;
+        if (typeof key !== "string") continue;
+        const normalizedValue = normalizePersistedCellValue(value, this.maxOutputChars);
+        if (normalizedValue === undefined) continue;
         // Cache key format has evolved over time. We currently expect:
         //   `${model}\0${function}\0${promptHash}\0${inputsHash}`
         // where both hashes are 8-hex FNV-1a values.
@@ -600,7 +621,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         // Drop legacy keys that embed the raw prompt text (can be large / sensitive).
         if (!isSupportedCacheKey(key)) continue;
         this.cache.set(key, {
-          value,
+          value: normalizedValue,
           updatedAtMs: typeof updatedAtMs === "number" ? updatedAtMs : Date.now(),
         });
       }
@@ -1745,6 +1766,42 @@ function sanitizeCellText(text: string): string {
   }
 
   return trimmed;
+}
+
+const NUMERIC_LITERAL_REGEX = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+function normalizeModelOutputForCellValue(text: string, opts: { maxStringChars: number }): SpreadsheetValue {
+  const sanitized = sanitizeCellText(text);
+  const trimmed = sanitized.trim();
+  if (!trimmed) return null;
+
+  const upper = trimmed.toUpperCase();
+  if (upper === "TRUE") return true;
+  if (upper === "FALSE") return false;
+  if (upper === "NULL" || upper === "NONE") return null;
+
+  if (NUMERIC_LITERAL_REGEX.test(trimmed)) {
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) return num;
+  }
+
+  return truncateAiOutputText(trimmed, opts.maxStringChars);
+}
+
+function truncateAiOutputText(text: string, maxChars: number): string {
+  const s = String(text);
+  if (!Number.isFinite(maxChars) || maxChars <= 0) return "";
+  if (s.length <= maxChars) return s;
+  if (maxChars === 1) return "…";
+  return `${s.slice(0, Math.max(0, maxChars - 1))}…`;
+}
+
+function normalizePersistedCellValue(value: unknown, maxStringChars: number): SpreadsheetValue | undefined {
+  if (value === null) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "string") return normalizeModelOutputForCellValue(value, { maxStringChars });
+  return undefined;
 }
 
 function formatScalar(value: SpreadsheetValue, opts: { maxChars: number }): string {

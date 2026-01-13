@@ -239,6 +239,87 @@ describe("AiCellFunctionEngine", () => {
     expect(llmClient.chat).toHaveBeenCalledTimes(totalRequests);
   });
 
+  it("coerces numeric-looking model outputs into numbers", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "42" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+    });
+
+    const pending = evaluateFormula('=AI("give me a number", "x")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const resolved = evaluateFormula('=AI("give me a number", "x")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(resolved).toBe(42);
+    expect(typeof resolved).toBe("number");
+  });
+
+  it("coerces TRUE/FALSE model outputs into booleans", async () => {
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: "TRUE" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+    });
+
+    const pending = evaluateFormula('=AI("return true", "x")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const resolved = evaluateFormula('=AI("return true", "x")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(resolved).toBe(true);
+    expect(typeof resolved).toBe("boolean");
+  });
+
+  it("truncates large string outputs before caching to keep the grid responsive", async () => {
+    const maxOutputChars = 10_000;
+    const long = "X".repeat(20_000);
+    const llmClient = {
+      chat: vi.fn(async () => ({
+        message: { role: "assistant", content: long },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore,
+      sessionId: "truncate-session",
+      limits: { maxOutputChars: maxOutputChars, maxAuditPreviewChars: 200 },
+    });
+
+    const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const resolved = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(typeof resolved).toBe("string");
+    expect((resolved as string).length).toBe(maxOutputChars);
+    expect(resolved).toBe(`${long.slice(0, maxOutputChars - 1)}…`);
+
+    // Audit entries should remain bounded: store previews/hashes, not the full output.
+    const entries = await auditStore.listEntries({ session_id: "truncate-session" });
+    expect(entries).toHaveLength(1);
+    const input = entries[0]?.input as any;
+    expect(input?.output_preview?.length).toBe(200);
+    expect(input?.output_preview).not.toBe(resolved);
+    expect(input?.output_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input?.output_value).toBeUndefined();
+  });
+
   it("formats range inputs in LLM prompts using sheet display names (Excel quoting)", async () => {
     const sheetId = "sheet_test_1";
     const sheetIdToName = new Map([[sheetId, "O'Brien"]]);
