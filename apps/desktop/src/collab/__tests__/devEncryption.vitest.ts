@@ -27,7 +27,7 @@ async function flushBinderWork(): Promise<void> {
 describe("dev collab encryption toggle", () => {
   it("encrypts cells in the configured range and masks reads without the key", async () => {
     const docId = "doc-dev-encryption";
-    const doc = new Y.Doc();
+    const doc = new Y.Doc({ guid: docId });
 
     const encryption = resolveDevCollabEncryptionFromSearch({
       search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A2",
@@ -98,7 +98,7 @@ describe("dev collab encryption toggle", () => {
 
   it("can resolve a sheet display name to a stable sheet id when provided a resolver", async () => {
     const docId = "doc-dev-encryption-sheetname";
-    const doc = new Y.Doc();
+    const doc = new Y.Doc({ guid: docId });
 
     const encryption = resolveDevCollabEncryptionFromSearch({
       search: "?collabEncrypt=1&collabEncryptRange=Display!A1:A1",
@@ -153,7 +153,20 @@ describe("dev collab encryption toggle", () => {
       defaultSheetId: "Sheet1",
     });
 
+    // Binder writes into Yjs can be async (encryption via WebCrypto). Wait for a Yjs update so
+    // assertions don't race the encryption/write chain.
+    const whenYjsUpdated = new Promise<void>((resolve) => {
+      const onUpdate = () => {
+        // @ts-expect-error - Yjs typings are looser in some environments.
+        doc.off("update", onUpdate);
+        resolve();
+      };
+      // @ts-expect-error - Yjs typings are looser in some environments.
+      doc.on("update", onUpdate);
+    });
+
     documentWithKey.setCellValue("Sheet1", { row: 0, col: 0 }, "secret");
+    await whenYjsUpdated;
     await flushBinderWork();
 
     const cellKey = makeCellKey({ sheetId: "Sheet1", row: 0, col: 0 });
