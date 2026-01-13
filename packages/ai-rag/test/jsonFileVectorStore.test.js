@@ -33,3 +33,17 @@ test("JsonFileVectorStore persists vectors and can reload them", async () => {
     await rm(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("JsonFileVectorStore.query throws on query vector dimension mismatch", async () => {
+  const tmpRoot = path.join(__dirname, ".tmp");
+  await mkdir(tmpRoot, { recursive: true });
+  const tmpDir = await mkdtemp(path.join(tmpRoot, "json-store-dim-"));
+  const filePath = path.join(tmpDir, "vectors.json");
+
+  try {
+    const store = new JsonFileVectorStore({ filePath, dimension: 3 });
+    await assert.rejects(store.query([1, 0], 1), /expected 3/);
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
