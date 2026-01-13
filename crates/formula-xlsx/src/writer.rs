@@ -4,7 +4,8 @@ use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
-    HyperlinkTarget, Outline, Range, SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
+    HyperlinkTarget, ManualPageBreaks, Outline, PageMargins, PageSetup, Range, Scaling,
+    SheetPrintSettings, SheetVisibility, Workbook, WorkbookWindowState, Worksheet,
 };
 use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -127,11 +128,26 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     }
 
     // Worksheets + relationships
+    let mut print_settings_by_sheet_name: HashMap<String, &SheetPrintSettings> = HashMap::new();
+    for sheet_settings in &workbook.print_settings.sheets {
+        if sheet_settings.sheet_name.is_empty() {
+            continue;
+        }
+        print_settings_by_sheet_name.insert(
+            sheet_settings.sheet_name.to_ascii_uppercase(),
+            sheet_settings,
+        );
+    }
+
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_number = idx + 1;
         let sheet_path = format!("xl/worksheets/sheet{sheet_number}.xml");
+        let sheet_print_settings = print_settings_by_sheet_name
+            .get(&sheet.name.to_ascii_uppercase())
+            .copied();
         let (sheet_xml, sheet_rels) = sheet_xml(
             sheet,
+            sheet_print_settings,
             &shared_strings,
             &table_parts_by_sheet[idx],
             &style_to_xf,
@@ -301,7 +317,73 @@ fn trim_float(value: f64) -> String {
 }
 
 fn workbook_defined_names_xml(workbook: &Workbook) -> String {
-    if workbook.defined_names.is_empty() {
+    let mut settings_by_sheet_name: HashMap<String, &SheetPrintSettings> = HashMap::new();
+    for sheet_settings in &workbook.print_settings.sheets {
+        if sheet_settings.sheet_name.is_empty() {
+            continue;
+        }
+        settings_by_sheet_name.insert(
+            sheet_settings.sheet_name.to_ascii_uppercase(),
+            sheet_settings,
+        );
+    }
+
+    let mut print_defined_names: Vec<(String, u32, String)> = Vec::new();
+    for (sheet_index, sheet) in workbook.sheets.iter().enumerate() {
+        let Some(settings) = settings_by_sheet_name
+            .get(&sheet.name.to_ascii_uppercase())
+            .copied()
+        else {
+            continue;
+        };
+
+        if let Some(areas) = settings.print_area.as_ref().filter(|a| !a.is_empty()) {
+            let ranges: Vec<crate::print::CellRange> = areas
+                .iter()
+                .map(|range| crate::print::CellRange {
+                    start_row: range.start.row.saturating_add(1),
+                    end_row: range.end.row.saturating_add(1),
+                    start_col: range.start.col.saturating_add(1),
+                    end_col: range.end.col.saturating_add(1),
+                })
+                .collect();
+            let value = crate::print::format_print_area_defined_name(&sheet.name, &ranges);
+            if !value.is_empty() {
+                print_defined_names.push((
+                    "_xlnm.Print_Area".to_string(),
+                    sheet_index as u32,
+                    value,
+                ));
+            }
+        }
+
+        if let Some(titles) = settings
+            .print_titles
+            .as_ref()
+            .filter(|t| t.repeat_rows.is_some() || t.repeat_cols.is_some())
+        {
+            let titles = crate::print::PrintTitles {
+                repeat_rows: titles.repeat_rows.map(|rows| crate::print::RowRange {
+                    start: rows.start.saturating_add(1),
+                    end: rows.end.saturating_add(1),
+                }),
+                repeat_cols: titles.repeat_cols.map(|cols| crate::print::ColRange {
+                    start: cols.start.saturating_add(1),
+                    end: cols.end.saturating_add(1),
+                }),
+            };
+            let value = crate::print::format_print_titles_defined_name(&sheet.name, &titles);
+            if !value.is_empty() {
+                print_defined_names.push((
+                    "_xlnm.Print_Titles".to_string(),
+                    sheet_index as u32,
+                    value,
+                ));
+            }
+        }
+    }
+
+    if workbook.defined_names.is_empty() && print_defined_names.is_empty() {
         return String::new();
     }
 
@@ -310,9 +392,26 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         sheet_index_by_id.insert(sheet.id, idx as u32);
     }
 
+    let print_keys: HashSet<(String, u32)> = print_defined_names
+        .iter()
+        .map(|(name, local_sheet_id, _)| (name.clone(), *local_sheet_id))
+        .collect();
+
     let mut out = String::new();
     out.push_str("<definedNames>");
     for defined in &workbook.defined_names {
+        let local_sheet_id = match defined.scope {
+            DefinedNameScope::Sheet(sheet_id) => sheet_index_by_id.get(&sheet_id).copied(),
+            DefinedNameScope::Workbook => None,
+        };
+        if let Some(local_sheet_id) = local_sheet_id {
+            if print_keys.contains(&(defined.name.clone(), local_sheet_id)) {
+                // Avoid emitting duplicate built-in print names; `Workbook::print_settings`
+                // is the canonical representation for these.
+                continue;
+            }
+        }
+
         // Defined name `refersTo` values are stored in workbook.xml without a leading '=' but still
         // use the same `_xlfn.`-prefixed function naming as cell formulas for forward-compatible
         // functions.
@@ -325,13 +424,19 @@ fn workbook_defined_names_xml(workbook: &Workbook) -> String {
         if defined.hidden {
             out.push_str(r#" hidden="1""#);
         }
-        if let DefinedNameScope::Sheet(sheet_id) = defined.scope {
-            if let Some(idx) = sheet_index_by_id.get(&sheet_id) {
-                out.push_str(&format!(r#" localSheetId="{}""#, idx));
-            }
+        if let Some(local_sheet_id) = local_sheet_id {
+            out.push_str(&format!(r#" localSheetId="{}""#, local_sheet_id));
         }
         out.push('>');
         out.push_str(&escape_xml(&refers_to));
+        out.push_str("</definedName>");
+    }
+
+    for (name, local_sheet_id, value) in print_defined_names {
+        out.push_str(r#"<definedName"#);
+        out.push_str(&format!(r#" name="{}""#, escape_xml(&name)));
+        out.push_str(&format!(r#" localSheetId="{}">"#, local_sheet_id));
+        out.push_str(&escape_xml(&value));
         out.push_str("</definedName>");
     }
     out.push_str("</definedNames>");
@@ -496,6 +601,7 @@ fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> St
 
 fn sheet_xml(
     sheet: &Worksheet,
+    print_settings: Option<&SheetPrintSettings>,
     shared_strings: &SharedStrings,
     table_parts: &[(String, String)],
     style_to_xf: &HashMap<u32, u32>,
@@ -539,13 +645,27 @@ fn sheet_xml(
         outline.recompute_outline_hidden_cols();
         outline
     };
-    let sheet_pr_xml = if outline != Outline::default() {
-        format!(
-            r#"<sheetPr><outlinePr summaryBelow="{}" summaryRight="{}" showOutlineSymbols="{}"/></sheetPr>"#,
-            bool_attr(outline.pr.summary_below),
-            bool_attr(outline.pr.summary_right),
-            bool_attr(outline.pr.show_outline_symbols),
-        )
+
+    let fit_to_page = print_settings
+        .as_ref()
+        .is_some_and(|s| matches!(s.page_setup.scaling, Scaling::FitTo { .. }));
+
+    let sheet_pr_xml = if outline != Outline::default() || fit_to_page {
+        let mut out = String::new();
+        out.push_str("<sheetPr>");
+        if outline != Outline::default() {
+            out.push_str(&format!(
+                r#"<outlinePr summaryBelow="{}" summaryRight="{}" showOutlineSymbols="{}"/>"#,
+                bool_attr(outline.pr.summary_below),
+                bool_attr(outline.pr.summary_right),
+                bool_attr(outline.pr.show_outline_symbols),
+            ));
+        }
+        if fit_to_page {
+            out.push_str(r#"<pageSetUpPr fitToPage="1"/>"#);
+        }
+        out.push_str("</sheetPr>");
+        out
     } else {
         String::new()
     };
@@ -798,6 +918,55 @@ fn sheet_xml(
 
     let sheet_protection_xml = sheet_protection_xml(sheet);
 
+    let mut page_margins_xml = String::new();
+    let mut page_setup_xml = String::new();
+    let mut row_breaks_xml = String::new();
+    let mut col_breaks_xml = String::new();
+    if let Some(settings) = print_settings {
+        if settings.page_setup.margins != PageMargins::default() {
+            page_margins_xml = format!(
+                r#"<pageMargins left="{left}" right="{right}" top="{top}" bottom="{bottom}" header="{header}" footer="{footer}"/>"#,
+                left = settings.page_setup.margins.left,
+                right = settings.page_setup.margins.right,
+                top = settings.page_setup.margins.top,
+                bottom = settings.page_setup.margins.bottom,
+                header = settings.page_setup.margins.header,
+                footer = settings.page_setup.margins.footer,
+            );
+        }
+
+        let default_page_setup = PageSetup::default();
+        if settings.page_setup.orientation != default_page_setup.orientation
+            || settings.page_setup.paper_size != default_page_setup.paper_size
+            || settings.page_setup.scaling != default_page_setup.scaling
+        {
+            let orientation = match settings.page_setup.orientation {
+                formula_model::Orientation::Portrait => "portrait",
+                formula_model::Orientation::Landscape => "landscape",
+            };
+
+            let mut attrs = format!(
+                r#" paperSize="{}" orientation="{}""#,
+                settings.page_setup.paper_size.code, orientation
+            );
+            match settings.page_setup.scaling {
+                Scaling::Percent(pct) => {
+                    attrs.push_str(&format!(r#" scale="{}""#, pct));
+                }
+                Scaling::FitTo { width, height } => {
+                    attrs.push_str(&format!(
+                        r#" fitToWidth="{}" fitToHeight="{}""#,
+                        width, height
+                    ));
+                }
+            }
+            page_setup_xml = format!(r#"<pageSetup{attrs}/>"#);
+        }
+
+        row_breaks_xml = render_row_breaks_xml(&settings.manual_page_breaks);
+        col_breaks_xml = render_col_breaks_xml(&settings.manual_page_breaks);
+    }
+
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push('\n');
@@ -830,6 +999,26 @@ fn sheet_xml(
     if !auto_filter_xml.is_empty() {
         xml.push_str("  ");
         xml.push_str(&auto_filter_xml);
+        xml.push('\n');
+    }
+    if !page_margins_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&page_margins_xml);
+        xml.push('\n');
+    }
+    if !page_setup_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&page_setup_xml);
+        xml.push('\n');
+    }
+    if !row_breaks_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&row_breaks_xml);
+        xml.push('\n');
+    }
+    if !col_breaks_xml.is_empty() {
+        xml.push_str("  ");
+        xml.push_str(&col_breaks_xml);
         xml.push('\n');
     }
     if !table_parts_xml.is_empty() {
@@ -935,6 +1124,40 @@ fn sheet_xml(
     };
 
     Ok((xml, rels_xml))
+}
+
+fn render_row_breaks_xml(breaks: &ManualPageBreaks) -> String {
+    if breaks.row_breaks_after.is_empty() {
+        return String::new();
+    }
+    let count = breaks.row_breaks_after.len();
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<rowBreaks count="{count}" manualBreakCount="{count}">"#
+    ));
+    for row0 in &breaks.row_breaks_after {
+        let id = row0.saturating_add(1);
+        out.push_str(&format!(r#"<brk id="{id}" max="16383" man="1"/>"#));
+    }
+    out.push_str("</rowBreaks>");
+    out
+}
+
+fn render_col_breaks_xml(breaks: &ManualPageBreaks) -> String {
+    if breaks.col_breaks_after.is_empty() {
+        return String::new();
+    }
+    let count = breaks.col_breaks_after.len();
+    let mut out = String::new();
+    out.push_str(&format!(
+        r#"<colBreaks count="{count}" manualBreakCount="{count}">"#
+    ));
+    for col0 in &breaks.col_breaks_after {
+        let id = col0.saturating_add(1);
+        out.push_str(&format!(r#"<brk id="{id}" max="1048575" man="1"/>"#));
+    }
+    out.push_str("</colBreaks>");
+    out
 }
 
 fn sheet_protection_xml(sheet: &Worksheet) -> String {
