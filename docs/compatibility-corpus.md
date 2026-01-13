@@ -328,6 +328,18 @@ Workflow: `.github/workflows/corpus.yml`
 - **Compatibility gates (scheduled only)** enforce aggregate targets (e.g. "97%+ round-trip preservation")
   for the private corpus using `tools/corpus/compat_gate.py`.
 
+### Workflow dispatch knobs (Calculate/Render coverage)
+
+The `corpus` workflow supports `workflow_dispatch` inputs so you can opt into heavier checks without code
+changes:
+
+- `recalc`: run `tools.corpus.triage --recalc` (Calculate / L2). The nightly scheduled private corpus run
+  enables this by default.
+- `render_smoke`: run `tools.corpus.triage --render-smoke` (Render smoke / L3).
+
+These inputs apply to both the public and private corpus jobs; the private job will still skip if the
+required secrets/corpus archive are not configured.
+
 ### Compatibility gate thresholds
 
 After generating `tools/corpus/out/**/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
