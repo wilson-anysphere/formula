@@ -11,10 +11,10 @@ import { FormulaBarTabCompletionController } from "../../ai/completion/formulaBa
 describe("FormulaBarView tab completion (integration)", () => {
   it("caps preview evaluation cell reads (MAX_CELL_READS) for large formulas", async () => {
     const doc = new DocumentController();
-    const getCellSpy = vi.spyOn(doc, "getCell");
     // Preview evaluation intentionally avoids materializing sheets in an empty workbook.
     // Seed a single cell so Sheet1 exists and the evaluator will attempt to read the range.
     doc.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+    const getCellSpy = vi.spyOn(doc, "getCell");
 
     const host = document.createElement("div");
     document.body.appendChild(host);

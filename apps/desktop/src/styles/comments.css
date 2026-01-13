@@ -42,7 +42,7 @@
   height: 24px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -50,17 +50,22 @@
   align-items: center;
   justify-content: center;
   line-height: 1;
+  font: inherit;
   transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease),
-    box-shadow var(--motion-duration) var(--motion-ease);
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .comments-panel__close-button:hover {
   background: var(--bg-hover);
   border-color: var(--border);
   color: var(--text-primary);
+}
+
+.comments-panel__close-button:active {
+  background: var(--bg-active);
 }
 
 .comments-panel__close-button:focus-visible {
@@ -153,10 +158,10 @@
   color: var(--text-primary);
   outline: none;
   transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease),
-    box-shadow var(--motion-duration) var(--motion-ease);
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .comments-panel__new-comment-input:hover:not(:disabled),
@@ -187,17 +192,24 @@
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
+  font: inherit;
   transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    color var(--motion-duration) var(--motion-ease),
-    box-shadow var(--motion-duration) var(--motion-ease);
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .comments-panel__submit-button:hover:not(:disabled),
 .comment-thread__resolve-button:hover:not(:disabled),
 .comment-thread__submit-reply-button:hover:not(:disabled) {
   background: var(--bg-hover);
+}
+
+.comments-panel__submit-button:active:not(:disabled),
+.comment-thread__resolve-button:active:not(:disabled),
+.comment-thread__submit-reply-button:active:not(:disabled) {
+  background: var(--bg-active);
 }
 
 .comments-panel__submit-button:focus-visible,
