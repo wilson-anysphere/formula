@@ -309,6 +309,29 @@ jobs:
             "- `$rel` (${mb} MB)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
 
+      - name: Verify MSI targets ARM64 (template summary)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundleDir = "apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+          $msis = @(
+            Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue
+          )
+          if ($msis.Count -eq 0) {
+            throw "windows-arm64-msi: ERROR no .msi installers found under: $bundleDir"
+          }
+
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          foreach ($msi in $msis) {
+            $db = $installer.OpenDatabase($msi.FullName, 0)
+            $summary = $db.SummaryInformation(0)
+            $template = $summary.Property(7)
+            Write-Host "windows-arm64-msi: $($msi.Name) template=$template"
+            if ($template -notmatch '(?i)arm64') {
+              throw "windows-arm64-msi: ERROR Expected MSI Template Summary to include ARM64 for $($msi.FullName), got: $template"
+            }
+          }
+
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
         run: python scripts/ci/check-windows-webview2-installer.py
 

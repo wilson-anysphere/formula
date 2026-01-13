@@ -893,8 +893,11 @@ jobs:
             Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue
           )
 
-          if ($msis.Count -eq 0 -and $exes.Count -eq 0) {
-            throw "windows-bundle: ERROR no .msi or .exe installers found under: $bundleDir`n`nCommon causes:`n- WiX Toolset missing (candle.exe/light.exe not on PATH) so MSI bundling was skipped/failed`n- NSIS missing (makensis.exe not on PATH) so EXE bundling was skipped/failed`n- Tauri bundler failed earlier; inspect the tauri build logs for the root error"
+          if ($msis.Count -eq 0) {
+            throw "windows-bundle: ERROR missing required Windows MSI installer under: $bundleDir`n`nCommon causes:`n- WiX Toolset missing (candle.exe/light.exe not on PATH) so MSI bundling was skipped/failed`n- Tauri MSI bundler does not support target $target on this runner"
+          }
+          if ($exes.Count -eq 0) {
+            throw "windows-bundle: ERROR missing required Windows EXE (NSIS) installer under: $bundleDir`n`nCommon causes:`n- NSIS missing (makensis.exe not on PATH) so EXE bundling was skipped/failed`n- Tauri NSIS bundler does not support target $target on this runner"
           }
 
           Write-Host "windows-bundle: OK (found $($msis.Count) MSI + $($exes.Count) EXE installer file(s))"
@@ -905,6 +908,39 @@ jobs:
           if ($exes.Count -gt 0) {
             Write-Host "EXE installers:"
             $exes | ForEach-Object { Write-Host " - $($_.FullName)" }
+          }
+
+      - name: Verify Windows ARM64 MSI targets ARM64 (template summary)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = "${{ matrix.rust_target }}"
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-arm64-msi: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
+          }
+          $msis = @(
+            Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue
+          )
+          if ($msis.Count -eq 0) {
+            throw "windows-arm64-msi: ERROR no .msi installers found under: $bundleDir"
+          }
+
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          foreach ($msi in $msis) {
+            $db = $installer.OpenDatabase($msi.FullName, 0)
+            $summary = $db.SummaryInformation(0)
+            $template = $summary.Property(7)
+            Write-Host "windows-arm64-msi: $($msi.Name) template=$template"
+            if ($template -notmatch '(?i)arm64') {
+              throw "windows-arm64-msi: ERROR Expected MSI Template Summary to include ARM64 for $($msi.FullName), got: $template"
+            }
           }
 
       - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
