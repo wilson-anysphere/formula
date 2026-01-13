@@ -2244,7 +2244,6 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       labelById,
       disabledById,
       shortcutById: ribbonShortcutById,
-      shortcutById: ribbonShortcutById,
       ariaKeyShortcutsById: ribbonAriaKeyShortcutsById,
     });
   });
