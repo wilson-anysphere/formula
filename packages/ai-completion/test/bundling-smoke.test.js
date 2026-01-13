@@ -7,7 +7,17 @@ import { builtinModules } from "node:module";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { build } from "esbuild";
+/** @type {import("esbuild").build | null} */
+let build = null;
+try {
+  // `esbuild` is a dev dependency that may be missing in some lightweight
+  // environments (e.g. sandboxes that run tests without installing node_modules).
+  // Skip the bundling smoke test in that case.
+  // eslint-disable-next-line node/no-unsupported-features/es-syntax
+  ({ build } = await import("esbuild"));
+} catch {
+  build = null;
+}
 
 function collectOutputImports(result) {
   const outputs = result.metafile?.outputs ?? {};
@@ -28,7 +38,7 @@ function createNodeBuiltinsSet() {
   return builtins;
 }
 
-test("ai-completion bundles for the browser without Node builtins", async () => {
+test("ai-completion bundles for the browser without Node builtins", { skip: !build }, async () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const pkgRoot = path.resolve(here, "..");
 
