@@ -272,6 +272,33 @@ describe("AddStepMenu", () => {
     expect(host!.querySelectorAll("button.query-editor-add-step__suggestion").length).toBe(0);
   });
 
+  it("triggers AI suggest when pressing Enter in the intent input", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+    const query = baseQuery();
+    const aiContext = { query, preview };
+
+    const onAiSuggest = vi.fn(async () => []);
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} onAiSuggest={onAiSuggest} aiContext={aiContext} />);
+    });
+
+    const input = host!.querySelector("input.query-editor-add-step__ai-input") as HTMLInputElement;
+
+    await act(async () => {
+      input.value = "   hello  ";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await flushMicrotasks(10);
+    });
+
+    expect(onAiSuggest).toHaveBeenCalledWith("hello", aiContext);
+    expect(host?.textContent).toContain("No suggestions.");
+  });
+
   it("shows an error message when AI suggestion fails", async () => {
     const preview = new DataTable([{ name: "Region", type: "string" }], []);
     const query = baseQuery();

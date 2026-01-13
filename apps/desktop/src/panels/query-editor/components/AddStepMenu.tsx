@@ -189,6 +189,23 @@ export function AddStepMenu(props: {
     });
   }, [menuOpen]);
 
+  async function runAiSuggest(): Promise<void> {
+    const trimmed = intent.trim();
+    if (!trimmed) return;
+    setAiLoading(true);
+    setAiError(null);
+    setSuggestions(null);
+    try {
+      const ops = await props.onAiSuggest?.(trimmed, props.aiContext);
+      setSuggestions(ops ?? []);
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+      setSuggestions(null);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   return (
     <div className="query-editor-add-step">
       <div ref={menuRootRef} className="query-editor-add-step__menu">
@@ -242,26 +259,20 @@ export function AddStepMenu(props: {
               if (aiError) setAiError(null);
               if (suggestions) setSuggestions(null);
             }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              if (aiLoading) return;
+              if (!intent.trim()) return;
+              e.preventDefault();
+              void runAiSuggest();
+            }}
             placeholder={t("queryEditor.addStep.aiPlaceholder")}
             className="query-editor-add-step__ai-input"
           />
           <button
             type="button"
-            onClick={async () => {
-              const trimmed = intent.trim();
-              if (!trimmed) return;
-              setAiLoading(true);
-              setAiError(null);
-              setSuggestions(null);
-              try {
-                const ops = await props.onAiSuggest?.(trimmed, props.aiContext);
-                setSuggestions(ops ?? []);
-              } catch (err) {
-                setAiError(err instanceof Error ? err.message : String(err));
-                setSuggestions(null);
-              } finally {
-                setAiLoading(false);
-              }
+            onClick={() => {
+              void runAiSuggest();
             }}
             disabled={!intent.trim() || aiLoading}
             className="query-editor-add-step__ai-button"
