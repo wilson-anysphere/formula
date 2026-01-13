@@ -408,9 +408,48 @@
   display: block;
 }
 
+.formula-bar-error-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
 .formula-bar-error-title {
   font-weight: 700;
-  margin-bottom: 4px;
+  margin: 0;
+}
+
+.formula-bar-error-close {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-error-close:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.formula-bar-error-close:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .formula-bar-error-desc {
@@ -420,6 +459,58 @@
 .formula-bar-error-suggestions {
   margin: 0;
   padding-left: 18px;
+}
+
+.formula-bar-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.formula-bar-error-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease),
+    filter var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-error-action:hover {
+  background: var(--bg-tertiary);
+}
+
+.formula-bar-error-action:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-bar-error-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.formula-bar-error-action--primary {
+  border-color: var(--accent-border);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.formula-bar-error-action--primary:hover {
+  filter: brightness(0.95);
 }
 
 .grid {

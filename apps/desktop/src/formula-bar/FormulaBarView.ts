@@ -1,10 +1,34 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
+import { type ErrorExplanation } from "./errors.js";
 import { type RangeAddress } from "../spreadsheet/a1.js";
 import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
-import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import {
+  assignFormulaReferenceColors,
+  extractFormulaReferences,
+  toggleA1AbsoluteAtCursor,
+  type FormulaReferenceRange,
+} from "@formula/spreadsheet-frontend";
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
+
+export type FixFormulaErrorWithAiInfo = {
+  address: string;
+  /** The committed formula text currently stored in the active cell. */
+  input: string;
+  /** The current formula bar draft (may differ from `input` while editing). */
+  draft: string;
+  value: unknown;
+  explanation: ErrorExplanation;
+};
+
+type FormulaReferenceHighlight = {
+  range: FormulaReferenceRange;
+  color: string;
+  text: string;
+  index: number;
+  active?: boolean;
+};
 
 type FunctionPickerItem = {
   name: string;
@@ -71,6 +95,13 @@ export interface FormulaBarViewCallbacks {
   onReferenceHighlights?: (
     highlights: Array<{ range: FormulaReferenceRange; color: string; text: string; index: number; active?: boolean }>
   ) => void;
+  onFixFormulaErrorWithAi?: (info: FixFormulaErrorWithAiInfo) => void;
+}
+
+let errorPanelIdCounter = 0;
+function nextErrorPanelId(): string {
+  errorPanelIdCounter += 1;
+  return `formula-bar-error-panel-${errorPanelIdCounter}`;
 }
 
 export type FormulaBarCommitReason = "enter" | "tab" | "command";
@@ -105,7 +136,14 @@ export class FormulaBarView {
   #hintEl: HTMLElement;
   #errorButton: HTMLButtonElement;
   #errorPanel: HTMLElement;
+  #errorTitleEl: HTMLElement;
+  #errorDescEl: HTMLElement;
+  #errorSuggestionsEl: HTMLUListElement;
+  #errorFixAiButton: HTMLButtonElement;
+  #errorShowRangesButton: HTMLButtonElement;
+  #errorCloseButton: HTMLButtonElement;
   #isErrorPanelOpen = false;
+  #errorPanelReferenceHighlights: FormulaReferenceHighlight[] | null = null;
   #hoverOverride: RangeAddress | null = null;
   #selectedReferenceIndex: number | null = null;
   #callbacks: FormulaBarViewCallbacks;
@@ -207,11 +245,72 @@ export class FormulaBarView {
     errorButton.title = "Show error details";
     errorButton.setAttribute("aria-label", "Show formula error");
     errorButton.setAttribute("aria-expanded", "false");
+    errorButton.setAttribute("aria-haspopup", "dialog");
     errorButton.dataset.testid = "formula-error-button";
+    errorButton.hidden = true;
+    errorButton.disabled = true;
 
     const errorPanel = document.createElement("div");
     errorPanel.className = "formula-bar-error-panel";
     errorPanel.dataset.testid = "formula-error-panel";
+    errorPanel.hidden = true;
+
+    const errorPanelId = nextErrorPanelId();
+    errorPanel.id = errorPanelId;
+    errorButton.setAttribute("aria-controls", errorPanelId);
+    errorPanel.setAttribute("role", "dialog");
+    errorPanel.setAttribute("aria-modal", "false");
+
+    const errorHeader = document.createElement("div");
+    errorHeader.className = "formula-bar-error-header";
+
+    const errorTitle = document.createElement("div");
+    errorTitle.className = "formula-bar-error-title";
+    errorTitle.id = `${errorPanelId}-title`;
+
+    const errorCloseButton = document.createElement("button");
+    errorCloseButton.className = "formula-bar-error-close";
+    errorCloseButton.type = "button";
+    errorCloseButton.textContent = "✕";
+    errorCloseButton.title = "Dismiss (Esc)";
+    errorCloseButton.setAttribute("aria-label", "Dismiss formula error details");
+    errorCloseButton.dataset.testid = "formula-error-close";
+
+    errorHeader.appendChild(errorTitle);
+    errorHeader.appendChild(errorCloseButton);
+
+    const errorDesc = document.createElement("div");
+    errorDesc.className = "formula-bar-error-desc";
+    errorDesc.id = `${errorPanelId}-desc`;
+
+    const errorSuggestions = document.createElement("ul");
+    errorSuggestions.className = "formula-bar-error-suggestions";
+
+    const errorActions = document.createElement("div");
+    errorActions.className = "formula-bar-error-actions";
+
+    const errorFixAiButton = document.createElement("button");
+    errorFixAiButton.className = "formula-bar-error-action formula-bar-error-action--primary";
+    errorFixAiButton.type = "button";
+    errorFixAiButton.textContent = "Fix with AI";
+    errorFixAiButton.dataset.testid = "formula-error-fix-ai";
+
+    const errorShowRangesButton = document.createElement("button");
+    errorShowRangesButton.className = "formula-bar-error-action formula-bar-error-action--secondary";
+    errorShowRangesButton.type = "button";
+    errorShowRangesButton.textContent = "Show referenced ranges";
+    errorShowRangesButton.setAttribute("aria-pressed", "false");
+    errorShowRangesButton.dataset.testid = "formula-error-show-ranges";
+
+    errorActions.appendChild(errorFixAiButton);
+    errorActions.appendChild(errorShowRangesButton);
+
+    errorPanel.appendChild(errorHeader);
+    errorPanel.appendChild(errorDesc);
+    errorPanel.appendChild(errorSuggestions);
+    errorPanel.appendChild(errorActions);
+    errorPanel.setAttribute("aria-labelledby", errorTitle.id);
+    errorPanel.setAttribute("aria-describedby", errorDesc.id);
 
     row.appendChild(nameBox);
     row.appendChild(actions);
@@ -265,6 +364,12 @@ export class FormulaBarView {
     this.#hintEl = hint;
     this.#errorButton = errorButton;
     this.#errorPanel = errorPanel;
+    this.#errorTitleEl = errorTitle;
+    this.#errorDescEl = errorDesc;
+    this.#errorSuggestionsEl = errorSuggestions;
+    this.#errorFixAiButton = errorFixAiButton;
+    this.#errorShowRangesButton = errorShowRangesButton;
+    this.#errorCloseButton = errorCloseButton;
     this.#functionPickerEl = functionPicker;
     this.#functionPickerInputEl = functionPickerInput;
     this.#functionPickerListEl = functionPickerList;
@@ -321,6 +426,11 @@ export class FormulaBarView {
       if (!this.root.classList.contains("formula-bar--has-error")) return;
       this.#setErrorPanelOpen(!this.#isErrorPanelOpen);
     });
+
+    errorCloseButton.addEventListener("click", () => this.#setErrorPanelOpen(false, { restoreFocus: true }));
+    errorPanel.addEventListener("keydown", (e) => this.#onErrorPanelKeyDown(e));
+    errorFixAiButton.addEventListener("click", () => this.#fixFormulaErrorWithAi());
+    errorShowRangesButton.addEventListener("click", () => this.#toggleErrorReferenceHighlights());
 
     cancelButton.addEventListener("click", () => this.#cancel());
     commitButton.addEventListener("click", () => this.#commit({ reason: "command", shift: false }));
@@ -415,6 +525,7 @@ export class FormulaBarView {
 
   #beginEditFromFocus(): void {
     if (this.model.isEditing) return;
+    this.#errorPanelReferenceHighlights = null;
     this.model.beginEdit();
     this.#callbacks.onBeginEdit?.(this.model.activeCell.address);
     this.#selectedReferenceIndex = null;
@@ -1037,26 +1148,64 @@ export class FormulaBarView {
     const explanation = this.model.errorExplanation();
     if (!explanation) {
       this.root.classList.toggle("formula-bar--has-error", false);
-      this.#setErrorPanelOpen(false);
-      this.#errorPanel.textContent = "";
+      this.#errorButton.hidden = true;
+      this.#errorButton.disabled = true;
+      this.#errorTitleEl.textContent = "";
+      this.#errorDescEl.textContent = "";
+      this.#errorSuggestionsEl.replaceChildren();
+      this.#setErrorPanelOpen(false, { restoreFocus: false });
     } else {
       const address = this.model.activeCell.address;
       this.root.classList.toggle("formula-bar--has-error", true);
-      this.#errorPanel.innerHTML = `
-        <div class="formula-bar-error-title">${explanation.code} (${escapeHtml(address)}): ${explanation.title}</div>
-        <div class="formula-bar-error-desc">${explanation.description}</div>
-        <ul class="formula-bar-error-suggestions">${explanation.suggestions.map((s) => `<li>${s}</li>`).join("")}</ul>
-      `;
+      this.#errorButton.hidden = false;
+      this.#errorButton.disabled = false;
+      this.#errorTitleEl.textContent = `${explanation.code} (${address}): ${explanation.title}`;
+      this.#errorDescEl.textContent = explanation.description;
+      this.#errorSuggestionsEl.replaceChildren(
+        ...explanation.suggestions.map((s) => {
+          const li = document.createElement("li");
+          li.textContent = s;
+          return li;
+        })
+      );
     }
+
+    this.#syncErrorPanelActions();
 
     this.#syncScroll();
     this.#adjustHeight();
   }
 
-  #setErrorPanelOpen(open: boolean): void {
+  #setErrorPanelOpen(open: boolean, opts: { restoreFocus: boolean } = { restoreFocus: true }): void {
+    const wasOpen = this.#isErrorPanelOpen;
     this.#isErrorPanelOpen = open;
     this.root.classList.toggle("formula-bar--error-panel-open", open);
     this.#errorButton.setAttribute("aria-expanded", open ? "true" : "false");
+    this.#errorPanel.hidden = !open;
+
+    if (!open) {
+      const hadReferenceHighlights = this.#errorPanelReferenceHighlights != null;
+      this.#errorPanelReferenceHighlights = null;
+      this.#syncErrorPanelActions();
+      // Clear view-mode highlights; preserve formula-editing highlights.
+      if (hadReferenceHighlights) {
+        this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+      }
+      if (opts.restoreFocus) {
+        try {
+          this.#errorButton.focus({ preventScroll: true });
+        } catch {
+          this.#errorButton.focus();
+        }
+      }
+      return;
+    }
+
+    this.#syncErrorPanelActions();
+
+    if (!wasOpen) {
+      this.#focusFirstErrorPanelControl();
+    }
   }
 
   #adjustHeight(): void {
@@ -1096,11 +1245,7 @@ export class FormulaBarView {
     const range = this.#hoverOverride ?? this.model.hoveredReference();
     this.#callbacks.onHoverRange?.(range);
 
-    if (!this.model.isEditing || !this.model.draft.trim().startsWith("=")) {
-      this.#callbacks.onReferenceHighlights?.([]);
-      return;
-    }
-    this.#callbacks.onReferenceHighlights?.(this.model.referenceHighlights());
+    this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
   }
 
   #onHighlightHover(e: MouseEvent): void {
@@ -1136,6 +1281,106 @@ export class FormulaBarView {
     }
     return null;
   }
+
+  #fixFormulaErrorWithAi(): void {
+    const explanation = this.model.errorExplanation();
+    if (!explanation) return;
+    this.#callbacks.onFixFormulaErrorWithAi?.({
+      address: this.model.activeCell.address,
+      input: this.model.activeCell.input,
+      draft: this.model.draft,
+      value: this.model.activeCell.value,
+      explanation
+    });
+  }
+
+  #toggleErrorReferenceHighlights(): void {
+    if (this.#errorPanelReferenceHighlights) {
+      this.#errorPanelReferenceHighlights = null;
+    } else {
+      this.#errorPanelReferenceHighlights = computeReferenceHighlights(this.model.draft);
+      if (this.#errorPanelReferenceHighlights.length === 0) {
+        this.#errorPanelReferenceHighlights = null;
+      }
+    }
+
+    this.#syncErrorPanelActions();
+    this.#callbacks.onReferenceHighlights?.(this.#currentReferenceHighlights());
+  }
+
+  #syncErrorPanelActions(): void {
+    const explanation = this.model.errorExplanation();
+    const canFix = Boolean(explanation) && typeof this.#callbacks.onFixFormulaErrorWithAi === "function";
+    this.#errorFixAiButton.disabled = !canFix;
+
+    const isFormula = this.model.draft.trim().startsWith("=");
+    const isShowingRanges = this.#errorPanelReferenceHighlights != null;
+    this.#errorShowRangesButton.disabled = !isFormula;
+    this.#errorShowRangesButton.setAttribute("aria-pressed", isShowingRanges ? "true" : "false");
+    this.#errorShowRangesButton.textContent = isShowingRanges ? "Hide referenced ranges" : "Show referenced ranges";
+  }
+
+  #currentReferenceHighlights(): FormulaReferenceHighlight[] {
+    const isFormula = this.model.draft.trim().startsWith("=");
+    if (this.model.isEditing && isFormula) {
+      return this.model.referenceHighlights();
+    }
+    if (this.#errorPanelReferenceHighlights) {
+      return this.#errorPanelReferenceHighlights;
+    }
+    return [];
+  }
+
+  #focusFirstErrorPanelControl(): void {
+    const candidates: HTMLElement[] = [];
+    if (!this.#errorFixAiButton.disabled) candidates.push(this.#errorFixAiButton);
+    if (!this.#errorShowRangesButton.disabled) candidates.push(this.#errorShowRangesButton);
+    candidates.push(this.#errorCloseButton);
+
+    const target = candidates.find((el) => !el.hidden && !(el as HTMLButtonElement).disabled) ?? null;
+    if (!target) return;
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      target.focus();
+    }
+  }
+
+  #onErrorPanelKeyDown(e: KeyboardEvent): void {
+    if (!this.#isErrorPanelOpen) return;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.#setErrorPanelOpen(false, { restoreFocus: true });
+      return;
+    }
+
+    if (e.key !== "Tab") return;
+
+    const focusable = [this.#errorFixAiButton, this.#errorShowRangesButton, this.#errorCloseButton].filter(
+      (el) => !el.hidden && !el.disabled
+    );
+    if (focusable.length === 0) return;
+
+    const active = document.activeElement as HTMLElement | null;
+    const currentIdx = active ? focusable.indexOf(active as HTMLButtonElement) : -1;
+    const nextIdx = (() => {
+      if (e.shiftKey) {
+        if (currentIdx <= 0) return focusable.length - 1;
+        return currentIdx - 1;
+      }
+      if (currentIdx < 0 || currentIdx === focusable.length - 1) return 0;
+      return currentIdx + 1;
+    })();
+    const next = focusable[nextIdx]!;
+    e.preventDefault();
+    try {
+      next.focus({ preventScroll: true });
+    } catch {
+      next.focus();
+    }
+  }
 }
 
 function escapeHtml(text: string): string {
@@ -1146,6 +1391,20 @@ function formatPreview(value: unknown): string {
   if (value == null) return "";
   if (typeof value === "string") return ` ${value}`;
   return ` ${String(value)}`;
+}
+
+function computeReferenceHighlights(text: string): FormulaReferenceHighlight[] {
+  if (!text.trim().startsWith("=")) return [];
+  const { references } = extractFormulaReferences(text);
+  if (references.length === 0) return [];
+  const { colored } = assignFormulaReferenceColors(references, null);
+  return colored.map((ref) => ({
+    range: ref.range,
+    color: ref.color,
+    text: ref.text,
+    index: ref.index,
+    active: false
+  }));
 }
 
 function functionPickerItemFromName(name: string): FunctionPickerItem {
