@@ -50,3 +50,31 @@ test("DocumentController respects range-level edit allowlists", () => {
   ownerDoc.setCellValue("Sheet1", { row: 0, col: 0 }, "ok");
   assert.equal(ownerDoc.getCell("Sheet1", { row: 0, col: 0 }).value, "ok");
 });
+
+test("DocumentController blocks sheet view mutations via canEditCell guard (freeze panes + row/col sizes)", () => {
+  const restrictions = [];
+
+  const viewerDoc = new DocumentController({
+    canEditCell: makeGuard({ role: "viewer", userId: "u-viewer", restrictions })
+  });
+
+  // These should be ignored for a read-only role.
+  viewerDoc.setFrozen("Sheet1", 2, 1);
+  viewerDoc.setColWidth("Sheet1", 0, 120);
+  viewerDoc.setRowHeight("Sheet1", 0, 40);
+
+  assert.deepEqual(viewerDoc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+
+  const editorDoc = new DocumentController({
+    canEditCell: makeGuard({ role: "editor", userId: "u-editor", restrictions })
+  });
+  editorDoc.setFrozen("Sheet1", 2, 1);
+  editorDoc.setColWidth("Sheet1", 0, 120);
+  editorDoc.setRowHeight("Sheet1", 0, 40);
+
+  const view = editorDoc.getSheetView("Sheet1");
+  assert.equal(view.frozenRows, 2);
+  assert.equal(view.frozenCols, 1);
+  assert.equal(view.colWidths?.["0"], 120);
+  assert.equal(view.rowHeights?.["0"], 40);
+});

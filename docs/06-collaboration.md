@@ -267,7 +267,7 @@ Roles apply both at the sync-server layer *and* in the desktop UX.
 For `viewer` and `commenter` roles, the desktop app behaves as “read-only” for workbook mutations:
 
 - **Cell edits are blocked**: the binder installs `DocumentController.canEditCell` guards (via `session.canEditCell(...)`) and will reject/revert disallowed deltas if they slip through (e.g. via programmatic calls).
-- **Workbook-editing operations are disabled**: actions that would write to shared workbook state (formatting, structural ops, etc) should be disabled in the UI when the effective role cannot edit. Most formatting/editing paths consult `DocumentController.canEditCell` and are therefore gated automatically in collab mode.
+- **Workbook-editing operations are disabled**: actions that would write to shared workbook state (formatting, structural ops, sheet view state like freeze panes / row+col sizes, etc) should be disabled in the UI when the effective role cannot edit. Most editing paths consult `DocumentController.canEditCell` and are therefore gated automatically in collab mode.
 - **Comments:**
   - `commenter` can add/edit replies and resolve threads (see `roleCanComment` in `@formula/collab-permissions`).
   - `viewer` can only read comments.

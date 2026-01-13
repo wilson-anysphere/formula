@@ -3166,6 +3166,43 @@ export class DocumentController {
   }
 
   /**
+   * Best-effort permission gate for sheet-level view mutations (freeze panes, row/col sizes).
+   *
+   * Most DocumentController mutations are per-cell and can be checked directly via
+   * `canEditCell({ sheetId, row, col })`. Sheet-view changes don't target a single cell,
+   * but in collab/read-only contexts we still need to avoid applying local mutations
+   * when the current user cannot edit *any* cells.
+   *
+   * We probe a small set of early-sheet coordinates to decide whether sheet-view edits
+   * should be allowed. This is intentionally permissive for editors with partial range
+   * restrictions (if at least one probe cell is editable, allow sheet-view edits), while
+   * still blocking fully read-only roles like `viewer` / `commenter`.
+   *
+   * @param {string} sheetId
+   * @returns {boolean}
+   */
+  #canEditSheetView(sheetId) {
+    if (!this.canEditCell) return true;
+
+    // Probe a few nearby coordinates so a single restricted cell (e.g. A1) doesn't
+    // unnecessarily block sheet-view changes for an otherwise-editable sheet.
+    const probes = [
+      { row: 0, col: 0 },
+      { row: 0, col: 1 },
+      { row: 1, col: 0 },
+      { row: 1, col: 1 },
+    ];
+    for (const probe of probes) {
+      try {
+        if (this.canEditCell({ sheetId, row: probe.row, col: probe.col })) return true;
+      } catch {
+        // Ignore guard errors; treat as "not editable" for this probe.
+      }
+    }
+    return false;
+  }
+
+  /**
    * Set frozen pane counts for a sheet.
    *
    * This is undoable and persisted in `encodeState()` snapshots.
@@ -3176,6 +3213,7 @@ export class DocumentController {
    * @param {{ label?: string, mergeKey?: string }} [options]
    */
   setFrozen(sheetId, frozenRows, frozenCols, options = {}) {
+    if (!this.#canEditSheetView(sheetId)) return;
     const before = this.model.getSheetView(sheetId);
     const after = cloneSheetViewState(before);
     after.frozenRows = frozenRows;
@@ -3194,6 +3232,7 @@ export class DocumentController {
    * @param {{ label?: string, mergeKey?: string }} [options]
    */
   setColWidth(sheetId, col, width, options = {}) {
+    if (!this.#canEditSheetView(sheetId)) return;
     const colIdx = Number(col);
     if (!Number.isInteger(colIdx) || colIdx < 0) return;
 
@@ -3237,6 +3276,7 @@ export class DocumentController {
    * @param {{ label?: string, mergeKey?: string }} [options]
    */
   setRowHeight(sheetId, row, height, options = {}) {
+    if (!this.#canEditSheetView(sheetId)) return;
     const rowIdx = Number(row);
     if (!Number.isInteger(rowIdx) || rowIdx < 0) return;
 
