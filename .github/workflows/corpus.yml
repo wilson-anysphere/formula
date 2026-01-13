@@ -206,7 +206,7 @@ jobs:
           if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
             EXTRA_FLAGS+=(--render-smoke)
           fi
-          INPUT_SCOPE="sanitized"
+          INPUT_SCOPE="auto"
           # Calculate (recalc) requires original inputs + cached formula results, which are often
           # stripped from sanitized corpora. Prefer encrypted originals when available.
           if [ "${CORPUS_RUN_RECALC}" = "true" ] && [ -d tools/corpus/private/originals ]; then
