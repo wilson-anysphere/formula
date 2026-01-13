@@ -25,6 +25,7 @@ import {
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import { shellOpen } from "../../tauri/shellOpen.js";
+import { resolveCssVar } from "../../theme/cssVars.js";
 
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
 
@@ -210,8 +211,8 @@ export class DesktopSharedGrid {
       prefetchOverscanCols: options.prefetchOverscanCols,
       // Desktop UX: cell content is monospace by default, while headers and other chrome
       // remain in system UI fonts.
-      defaultCellFontFamily: DEFAULT_GRID_MONOSPACE_FONT_FAMILY,
-      defaultHeaderFontFamily: DEFAULT_GRID_FONT_FAMILY,
+      defaultCellFontFamily: resolveCssVar("--font-mono", { fallback: DEFAULT_GRID_MONOSPACE_FONT_FAMILY }),
+      defaultHeaderFontFamily: resolveCssVar("--font-sans", { fallback: DEFAULT_GRID_FONT_FAMILY }),
       imageResolver: options.imageResolver ?? null
     });
 
