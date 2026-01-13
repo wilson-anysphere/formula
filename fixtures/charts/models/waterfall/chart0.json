@@ -134,7 +134,13 @@
       "kind": "unknown",
       "name": "ChartEx:unknown"
     },
-    "title": null,
+    "title": {
+      "richText": {
+        "text": "Waterfall",
+        "runs": []
+      },
+      "formula": null
+    },
     "legend": null,
     "plotArea": {
       "kind": "unknown",

@@ -1123,7 +1123,7 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
 }
 
 #[cfg(test)]
-mod tests {
+mod engine_filter_tests {
     use super::*;
     use std::collections::HashSet;
 
