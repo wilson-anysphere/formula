@@ -120,6 +120,15 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Dynamic array helpers
   assert.ok(registry.isRangeArg("BYROW", 0), "Expected BYROW array to be a range");
   assert.ok(registry.isRangeArg("BYCOL", 0), "Expected BYCOL array to be a range");
+  assert.ok(registry.isRangeArg("MAP", 0), "Expected MAP array1 to be a range");
+  assert.ok(registry.isRangeArg("MAP", 1), "Expected MAP array2 to be a range");
+  assert.equal(registry.isRangeArg("MAP", 2), false, "Expected MAP lambda not to be a range");
+  assert.equal(registry.isRangeArg("REDUCE", 0), false, "Expected REDUCE initial_value not to be a range");
+  assert.ok(registry.isRangeArg("REDUCE", 1), "Expected REDUCE array to be a range");
+  assert.equal(registry.isRangeArg("REDUCE", 2), false, "Expected REDUCE lambda not to be a range");
+  assert.equal(registry.isRangeArg("SCAN", 0), false, "Expected SCAN initial_value not to be a range");
+  assert.ok(registry.isRangeArg("SCAN", 1), "Expected SCAN array to be a range");
+  assert.equal(registry.isRangeArg("SCAN", 2), false, "Expected SCAN lambda not to be a range");
 
   // Legacy descriptive stats
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");
@@ -144,6 +153,14 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(registry.isRangeArg("COLUMNS", 0), "Expected COLUMNS array to be a range");
   assert.ok(registry.isRangeArg("ROW", 0), "Expected ROW reference to be a range");
   assert.ok(registry.isRangeArg("COLUMN", 0), "Expected COLUMN reference to be a range");
+
+  // Reference/info helpers
+  assert.ok(registry.isRangeArg("AREAS", 0), "Expected AREAS reference to be a range");
+  assert.equal(registry.isRangeArg("CELL", 0), false, "Expected CELL info_type not to be a range");
+  assert.ok(registry.isRangeArg("CELL", 1), "Expected CELL reference to be a range");
+  assert.ok(registry.isRangeArg("FORMULATEXT", 0), "Expected FORMULATEXT reference to be a range");
+  assert.ok(registry.isRangeArg("SHEET", 0), "Expected SHEET value to be a range");
+  assert.ok(registry.isRangeArg("SHEETS", 0), "Expected SHEETS reference to be a range");
 
   // Time-series forecasting functions
   assert.ok(registry.isRangeArg("FORECAST.ETS", 1), "Expected FORECAST.ETS values to be a range");

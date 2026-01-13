@@ -1424,6 +1424,69 @@ const CURATED_FUNCTIONS = [
       { name: "pad_with", type: "value", optional: true },
     ],
   },
+  {
+    name: "MAP",
+    description: "Maps a LAMBDA to one or more arrays and returns an array of results.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range", optional: true },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
+    name: "REDUCE",
+    description: "Reduces an array to an accumulated value by applying a LAMBDA to each value.",
+    args: [
+      { name: "initial_value", type: "value", optional: true },
+      { name: "array", type: "range" },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
+    name: "SCAN",
+    description: "Scans an array by applying a LAMBDA to each value and returns intermediate results as an array.",
+    args: [
+      { name: "initial_value", type: "value", optional: true },
+      { name: "array", type: "range" },
+      { name: "lambda", type: "value" },
+    ],
+  },
+  {
+    name: "AREAS",
+    description: "Returns the number of areas in a reference.",
+    args: [
+      { name: "reference", type: "range" },
+    ],
+  },
+  {
+    name: "CELL",
+    description: "Returns information about the formatting, location, or contents of a cell.",
+    args: [
+      { name: "info_type", type: "string" },
+      { name: "reference", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "FORMULATEXT",
+    description: "Returns the formula in a given cell as text.",
+    args: [
+      { name: "reference", type: "range" },
+    ],
+  },
+  {
+    name: "SHEET",
+    description: "Returns the sheet number of the referenced sheet.",
+    args: [
+      { name: "value", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "SHEETS",
+    description: "Returns the number of sheets in a reference.",
+    args: [
+      { name: "reference", type: "range", optional: true },
+    ],
+  },
 ];
 
 /**
