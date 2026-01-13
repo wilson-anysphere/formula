@@ -301,6 +301,71 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not cancel edit when pressing Escape in the function picker (it only closes the picker)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { cancel, commit } = queryActions(host);
+    const fx = queryFxButton(host);
+
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]')!;
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    expect(picker.hidden).toBe(false);
+    expect(document.activeElement).toBe(pickerInput);
+    expect(view.model.isEditing).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+
+    const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    pickerInput.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(picker.hidden).toBe(true);
+    expect(document.activeElement).toBe(view.textarea);
+    // Crucially: Escape should not cancel the entire edit; it should only close the picker.
+    expect(view.model.isEditing).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+
+    host.remove();
+  });
+
+  it("does not commit edit when pressing Enter in the function picker (it inserts a function)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const fx = queryFxButton(host);
+
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]')!;
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    expect(picker.hidden).toBe(false);
+
+    // Ensure a deterministic selection.
+    pickerInput.value = "sum";
+    pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    pickerInput.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    expect(view.textarea.value).toBe("=SUM(");
+    expect(document.activeElement).toBe(view.textarea);
+    expect(picker.hidden).toBe(true);
+
+    host.remove();
+  });
+
   it("closes the function picker when committing via ✓", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
