@@ -24,7 +24,7 @@ describe("oauthRedirectIpc wiring", () => {
     // 2) Ensure we only emit readiness after the listener promise resolves.
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
     // and close equivalents (e.g. `await x; emit(...)`).
-    const emitReadyMatches = Array.from(code.matchAll(/\bemit\s*\(\s*["']oauth-redirect-ready["']/g));
+    const emitReadyMatches = Array.from(code.matchAll(/\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/g));
     expect(emitReadyMatches).toHaveLength(1);
 
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -34,23 +34,23 @@ describe("oauthRedirectIpc wiring", () => {
       const varName = escapeForRegExp(assignment[1]!);
       const hasThen =
         new RegExp(
-          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']`,
+          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
           "m",
         ).test(code);
       const hasAwait =
         new RegExp(
-          String.raw`await\s+\b${varName}\b[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']`,
+          String.raw`await\s+\b${varName}\b[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
           "m",
         ).test(code);
       expect(hasThen || hasAwait).toBe(true);
     } else {
       // Fallback for inlined promise chaining / top-level await.
       const hasThen =
-        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']/.test(
+        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
           code,
         );
       const hasAwait =
-        /await\s+listen\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*;?[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']/.test(
+        /await\s+listen\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*;?[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
           code,
         );
       expect(hasThen || hasAwait).toBe(true);
