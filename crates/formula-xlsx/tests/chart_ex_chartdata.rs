@@ -325,3 +325,74 @@ fn chart_ex_parses_series_without_explicit_chart_type_node() {
         Some("Sheet1!$A$2:$A$4")
     );
 }
+
+#[test]
+fn chart_ex_parses_chartdata_caches_when_series_omits_inline_dims() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:chartSpace xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex">
+  <cx:chartData>
+    <cx:data id="0">
+      <cx:strDim type="cat">
+        <cx:f>Sheet1!$A$2:$A$4</cx:f>
+        <cx:strCache>
+          <cx:ptCount val="3"/>
+          <cx:pt idx="0"><cx:v>A</cx:v></cx:pt>
+          <cx:pt idx="1"><cx:v>B</cx:v></cx:pt>
+          <cx:pt idx="2"><cx:v>C</cx:v></cx:pt>
+        </cx:strCache>
+      </cx:strDim>
+      <cx:numDim type="val">
+        <cx:f>Sheet1!$B$2:$B$4</cx:f>
+        <cx:numCache>
+          <cx:ptCount val="3"/>
+          <cx:pt idx="0"><cx:v>10</cx:v></cx:pt>
+          <cx:pt idx="1"><cx:v>20</cx:v></cx:pt>
+          <cx:pt idx="2"><cx:v>30</cx:v></cx:pt>
+        </cx:numCache>
+      </cx:numDim>
+    </cx:data>
+  </cx:chartData>
+
+  <cx:chart>
+    <cx:plotArea>
+      <cx:histogramChart>
+        <cx:ser dataId="0" />
+      </cx:histogramChart>
+    </cx:plotArea>
+  </cx:chart>
+</cx:chartSpace>
+"#;
+
+    let model = parse_chart_ex(xml, "chartEx1.xml").expect("parse chartEx");
+    assert_eq!(model.series.len(), 1);
+    let series = &model.series[0];
+
+    assert_eq!(
+        series
+            .categories
+            .as_ref()
+            .and_then(|d| d.formula.as_deref()),
+        Some("Sheet1!$A$2:$A$4")
+    );
+    assert_eq!(
+        series
+            .categories
+            .as_ref()
+            .and_then(|d| d.cache.as_ref())
+            .cloned(),
+        Some(vec!["A".to_string(), "B".to_string(), "C".to_string()])
+    );
+
+    assert_eq!(
+        series.values.as_ref().and_then(|d| d.formula.as_deref()),
+        Some("Sheet1!$B$2:$B$4")
+    );
+    assert_eq!(
+        series
+            .values
+            .as_ref()
+            .and_then(|d| d.cache.as_ref())
+            .cloned(),
+        Some(vec![10.0, 20.0, 30.0])
+    );
+}

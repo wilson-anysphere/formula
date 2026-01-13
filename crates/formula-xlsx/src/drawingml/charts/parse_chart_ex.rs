@@ -379,51 +379,55 @@ fn parse_chart_data<'a>(
                     if dim.attribute("type") != Some("cat") {
                         continue;
                     }
-                    let Some(f) = descendant_text(dim, "f") else {
-                        continue;
+                    let incoming = SeriesTextData {
+                        formula: descendant_text(dim, "f").map(str::to_string),
+                        cache: dim
+                            .descendants()
+                            .find(|n| n.is_element() && n.tag_name().name() == "strCache")
+                            .and_then(|cache| {
+                                parse_str_cache(cache, diagnostics, "chartData.strDim.strCache")
+                            }),
+                        multi_cache: None,
+                        literal: None,
                     };
-                    if def.categories.is_none() {
-                        def.categories = Some(SeriesTextData {
-                            formula: Some(f.to_string()),
-                            cache: None,
-                            multi_cache: None,
-                            literal: None,
-                        });
-                    }
+                    merge_series_text_data_slot(&mut def.categories, incoming);
                 }
                 "numDim" => {
                     let Some(typ) = dim.attribute("type") else {
                         continue;
                     };
-                    let Some(f) = descendant_text(dim, "f") else {
-                        continue;
-                    };
+                    let (cache, format_code) = dim
+                        .descendants()
+                        .find(|n| n.is_element() && n.tag_name().name() == "numCache")
+                        .map(|cache| {
+                            parse_num_cache(cache, diagnostics, "chartData.numDim.numCache")
+                        })
+                        .unwrap_or((None, None));
+
                     let num = SeriesNumberData {
-                        formula: Some(f.to_string()),
-                        cache: None,
-                        format_code: None,
+                        formula: descendant_text(dim, "f").map(str::to_string),
+                        cache,
+                        format_code,
                         literal: None,
                     };
                     match typ {
                         "val" => {
-                            if def.values.is_none() {
-                                def.values = Some(num);
-                            }
+                            merge_series_number_data_slot(&mut def.values, num);
                         }
                         "size" => {
-                            if def.size.is_none() {
-                                def.size = Some(num);
-                            }
+                            merge_series_number_data_slot(&mut def.size, num);
                         }
                         "x" => {
-                            if def.x_values.is_none() {
-                                def.x_values = Some(SeriesData::Number(num));
-                            }
+                            fill_series_data_from_chart_data(
+                                &mut def.x_values,
+                                &Some(SeriesData::Number(num)),
+                            );
                         }
                         "y" => {
-                            if def.y_values.is_none() {
-                                def.y_values = Some(SeriesData::Number(num));
-                            }
+                            fill_series_data_from_chart_data(
+                                &mut def.y_values,
+                                &Some(SeriesData::Number(num)),
+                            );
                         }
                         _ => {}
                     }
@@ -505,6 +509,15 @@ fn parse_series(
                     if dst.formula.is_none() {
                         dst.formula = src.formula.clone();
                     }
+                    if dst.cache.is_none() {
+                        dst.cache = src.cache.clone();
+                    }
+                    if dst.multi_cache.is_none() {
+                        dst.multi_cache = src.multi_cache.clone();
+                    }
+                    if dst.literal.is_none() {
+                        dst.literal = src.literal.clone();
+                    }
                 }
 
                 let src_values = def.values.as_ref().or(def.size.as_ref());
@@ -514,10 +527,19 @@ fn parse_series(
                     if dst.formula.is_none() {
                         dst.formula = src.formula.clone();
                     }
+                    if dst.cache.is_none() {
+                        dst.cache = src.cache.clone();
+                    }
+                    if dst.format_code.is_none() {
+                        dst.format_code = src.format_code.clone();
+                    }
+                    if dst.literal.is_none() {
+                        dst.literal = src.literal.clone();
+                    }
                 }
 
-                fill_series_data_formula(&mut x_values, &def.x_values);
-                fill_series_data_formula(&mut y_values, &def.y_values);
+                fill_series_data_from_chart_data(&mut x_values, &def.x_values);
+                fill_series_data_from_chart_data(&mut y_values, &def.y_values);
             } else {
                 diagnostics.push(ChartDiagnostic {
                     level: ChartDiagnosticLevel::Warning,
@@ -547,13 +569,90 @@ fn parse_series(
     }
 }
 
-fn fill_series_data_formula(dst: &mut Option<SeriesData>, src: &Option<SeriesData>) {
+fn merge_series_text_data_slot(slot: &mut Option<SeriesTextData>, incoming: SeriesTextData) {
+    let has_data = incoming.formula.is_some()
+        || incoming.cache.is_some()
+        || incoming.multi_cache.is_some()
+        || incoming.literal.is_some();
+    match slot {
+        None => {
+            if has_data {
+                *slot = Some(incoming);
+            }
+        }
+        Some(dst) => {
+            if dst.formula.is_none() {
+                dst.formula = incoming.formula;
+            }
+            if dst.cache.is_none() {
+                dst.cache = incoming.cache;
+            }
+            if dst.multi_cache.is_none() {
+                dst.multi_cache = incoming.multi_cache;
+            }
+            if dst.literal.is_none() {
+                dst.literal = incoming.literal;
+            }
+        }
+    }
+}
+
+fn merge_series_number_data_slot(slot: &mut Option<SeriesNumberData>, incoming: SeriesNumberData) {
+    let has_data = incoming.formula.is_some()
+        || incoming.cache.is_some()
+        || incoming.format_code.is_some()
+        || incoming.literal.is_some();
+    match slot {
+        None => {
+            if has_data {
+                *slot = Some(incoming);
+            }
+        }
+        Some(dst) => {
+            if dst.formula.is_none() {
+                dst.formula = incoming.formula;
+            }
+            if dst.cache.is_none() {
+                dst.cache = incoming.cache;
+            }
+            if dst.format_code.is_none() {
+                dst.format_code = incoming.format_code;
+            }
+            if dst.literal.is_none() {
+                dst.literal = incoming.literal;
+            }
+        }
+    }
+}
+
+fn fill_series_data_from_chart_data(dst: &mut Option<SeriesData>, src: &Option<SeriesData>) {
+    let Some(src_data) = src.as_ref() else {
+        return;
+    };
+
+    let has_data = match src_data {
+        SeriesData::Text(text) => {
+            text.formula.is_some()
+                || text.cache.is_some()
+                || text.multi_cache.is_some()
+                || text.literal.is_some()
+        }
+        SeriesData::Number(num) => {
+            num.formula.is_some()
+                || num.cache.is_some()
+                || num.format_code.is_some()
+                || num.literal.is_some()
+        }
+    };
+
     if dst.is_none() {
-        *dst = src.clone();
+        if has_data {
+            *dst = Some(src_data.clone());
+        }
         return;
     }
 
-    let (Some(dst_data), Some(src_data)) = (dst.as_mut(), src.as_ref()) else {
+    let Some(dst_data) = dst.as_mut() else {
         return;
     };
 
@@ -562,10 +661,28 @@ fn fill_series_data_formula(dst: &mut Option<SeriesData>, src: &Option<SeriesDat
             if dst_text.formula.is_none() {
                 dst_text.formula = src_text.formula.clone();
             }
+            if dst_text.cache.is_none() {
+                dst_text.cache = src_text.cache.clone();
+            }
+            if dst_text.multi_cache.is_none() {
+                dst_text.multi_cache = src_text.multi_cache.clone();
+            }
+            if dst_text.literal.is_none() {
+                dst_text.literal = src_text.literal.clone();
+            }
         }
         (SeriesData::Number(dst_num), SeriesData::Number(src_num)) => {
             if dst_num.formula.is_none() {
                 dst_num.formula = src_num.formula.clone();
+            }
+            if dst_num.cache.is_none() {
+                dst_num.cache = src_num.cache.clone();
+            }
+            if dst_num.format_code.is_none() {
+                dst_num.format_code = src_num.format_code.clone();
+            }
+            if dst_num.literal.is_none() {
+                dst_num.literal = src_num.literal.clone();
             }
         }
         _ => {}
