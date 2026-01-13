@@ -38,6 +38,7 @@ test.describe("formula bar - fx function picker", () => {
       // 3) Search/select a known function.
       const pickerInput = page.getByTestId("formula-function-picker-input");
       await expect(pickerInput).toBeVisible();
+      await expect(pickerInput).toBeFocused();
       await pickerInput.fill("sum");
       const sumOption = page.getByTestId("formula-function-picker-item-SUM");
       await expect(sumOption).toBeVisible();
@@ -46,17 +47,20 @@ test.describe("formula bar - fx function picker", () => {
       // Picker should close.
       await expect(page.getByTestId("formula-function-picker")).toBeHidden();
 
-      // 4) Assert formula bar text becomes `=SUM(` with cursor after the opening paren.
-      await expect(formulaInput).toHaveValue("=SUM(");
+      // 4) Assert formula bar text becomes `=SUM()` with cursor inside parentheses.
+      await expect(formulaInput).toHaveValue("=SUM()");
       await expect(formulaInput).toBeFocused();
 
-      const selection = await page.evaluate(() => {
-        const el = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
-        return { start: el?.selectionStart ?? null, end: el?.selectionEnd ?? null };
-      });
-      expect(selection).toEqual({ start: 5, end: 5 });
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const el = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+            return { start: el?.selectionStart ?? null, end: el?.selectionEnd ?? null };
+          }),
+        )
+        .toEqual({ start: 5, end: 5 });
 
-      await page.keyboard.type("1)");
+      await page.keyboard.type("1");
       await expect(formulaInput).toHaveValue("=SUM(1)");
     });
   }
