@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import sys
 import tempfile
@@ -110,6 +111,53 @@ class CorpusMinimizeTests(unittest.TestCase):
         self.assertEqual(calls, [1, 3])
         self.assertEqual(summary["critical_parts"], ["xl/_rels/workbook.xml.rels", "xl/workbook.xml"])
         self.assertEqual(summary["rels_critical_ids"], {"xl/_rels/workbook.xml.rels": ["rId9"]})
+
+    def test_minimize_workbook_includes_critical_part_hashes(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("xl/workbook.xml", b"abc")
+        wb = WorkbookInput(display_name="book.xlsx", data=buf.getvalue())
+
+        def fake_run_rust_triage(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return {
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 1, "warning": 0, "info": 0, "total": 1},
+                            "equal": False,
+                            "top_differences": [
+                                {
+                                    "severity": "CRITICAL",
+                                    "part": "xl/workbook.xml",
+                                    "path": "/workbook",
+                                    "kind": "binary_diff",
+                                }
+                            ],
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": False},
+            }
+
+        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001
+        try:
+            minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
+            summary = minimize_mod.minimize_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=10,
+            )
+        finally:
+            minimize_mod.triage_mod._run_rust_triage = original  # type: ignore[assignment]
+
+        expected_hash = hashlib.sha256(b"abc").hexdigest()
+        self.assertEqual(
+            summary["critical_part_hashes"]["xl/workbook.xml"]["sha256"],
+            expected_hash,
+        )
 
     def test_main_writes_summary_json(self) -> None:
         def fake_build_rust_helper() -> Path:  # type: ignore[no-untyped-def]

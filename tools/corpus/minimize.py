@@ -162,6 +162,7 @@ def minimize_workbook(
     rust_exe: Path,
     diff_ignore: set[str],
     diff_limit: int,
+    compute_part_hashes: bool = True,
 ) -> dict[str, Any]:
     rust_out, diff_details, diffs = _ensure_full_diff_entries(
         rust_exe,
@@ -181,7 +182,16 @@ def minimize_workbook(
     if not isinstance(result, dict):
         result = {}
 
-    return {
+    critical_part_hashes: dict[str, dict[str, Any]] = {}
+    critical_part_hashes_error: str | None = None
+    if compute_part_hashes and critical_parts:
+        try:
+            critical_part_hashes = _compute_part_hashes(workbook.data, critical_parts)
+        except Exception as e:  # noqa: BLE001 (tooling)
+            critical_part_hashes = {}
+            critical_part_hashes_error = str(e)
+
+    out: dict[str, Any] = {
         "display_name": workbook.display_name,
         "sha256": sha256_hex(workbook.data),
         "size_bytes": len(workbook.data),
@@ -200,7 +210,13 @@ def minimize_workbook(
         "critical_parts": critical_parts,
         "part_counts": per_part_counts,
         "rels_critical_ids": rels_ids,
+        "critical_part_hashes": critical_part_hashes,
     }
+
+    if critical_part_hashes_error:
+        out["critical_part_hashes_error"] = critical_part_hashes_error
+
+    return out
 
 
 def _normalize_part_name(name: str) -> str:
@@ -266,6 +282,23 @@ def _read_zip_parts(data: bytes) -> dict[str, bytes]:
                 raise ValueError(f"duplicate part after normalization: {normalized}")
             parts[normalized] = z.read(info.filename)
     return parts
+
+
+def _compute_part_hashes(data: bytes, parts: list[str]) -> dict[str, dict[str, Any]]:
+    wanted = {_normalize_part_name(p) for p in parts if p}
+    out: dict[str, dict[str, Any]] = {}
+    if not wanted:
+        return out
+    with zipfile.ZipFile(io.BytesIO(data), "r") as z:
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            name_norm = _normalize_part_name(info.filename)
+            if name_norm not in wanted:
+                continue
+            b = z.read(info.filename)
+            out[name_norm] = {"sha256": sha256_hex(b), "size_bytes": len(b)}
+    return out
 
 
 def _write_zip_parts(parts: dict[str, bytes]) -> bytes:
@@ -464,6 +497,7 @@ def minimize_workbook_package(
             rust_exe=rust_exe,
             diff_ignore=diff_ignore,
             diff_limit=diff_limit,
+            compute_part_hashes=False,
         )
 
         trial_open_ok = trial_summary.get("open_ok") is True
@@ -579,7 +613,16 @@ def main() -> int:
     print(f"{summary['display_name']} sha256={workbook_id} diff critical_parts={len(summary['critical_parts'])}")
     for part in summary["critical_parts"]:
         counts = summary["part_counts"].get(part, {})
-        print(f"  {part}: {_format_counts(counts)}")
+        part_meta = (summary.get("critical_part_hashes") or {}).get(part) or {}
+        sha = part_meta.get("sha256")
+        sha_short = sha[:16] if isinstance(sha, str) else None
+        size = part_meta.get("size_bytes")
+        suffix = ""
+        if sha_short:
+            suffix += f" sha256={sha_short}"
+        if isinstance(size, int):
+            suffix += f" size={size}"
+        print(f"  {part}: {_format_counts(counts)}{suffix}")
         if part.endswith(".rels"):
             ids = summary["rels_critical_ids"].get(part) or []
             if ids:
