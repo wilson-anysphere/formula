@@ -359,10 +359,13 @@ Expected `{{target}}` values for this repo’s release matrix:
 
 - **macOS (universal):** `darwin-universal` (some toolchains use `universal-apple-darwin`) pointing
   at the updater payload, typically an `.app.tar.gz`.
-- **Windows:** `windows-x86_64` and `windows-aarch64` (one entry per architecture; points at the
-  Windows installer used by the updater. The release workflow builds **both** `.msi` (WiX) and
-  `.exe` (NSIS) installers, but `latest.json` will typically reference just one per architecture.)
-- **Linux:** `linux-x86_64` (points at the updater payload, typically the `.AppImage`).
+- **Windows:** `windows-x86_64` (some toolchains use `x86_64-pc-windows-msvc`) and
+  `windows-aarch64` / `windows-arm64` (some toolchains use `aarch64-pc-windows-msvc`) — one entry per
+  architecture. Each entry points at the Windows installer used by the updater. The release workflow
+  builds **both** `.msi` (WiX) and `.exe` (NSIS) installers, but `latest.json` will typically
+  reference just one per architecture.
+- **Linux:** `linux-x86_64` (some toolchains use `x86_64-unknown-linux-gnu`; points at the updater
+  payload, typically the `.AppImage`).
 
 For reference, this is how the release workflow’s Tauri build targets map to updater targets:
 
