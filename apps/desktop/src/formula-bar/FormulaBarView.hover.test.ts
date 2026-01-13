@@ -87,6 +87,49 @@ describe("FormulaBarView hover previews", () => {
     host.remove();
   });
 
+  it("emits a range for structured references while editing", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let hoveredRange = null as ReturnType<typeof parseA1Range>;
+    let hoveredText = null as string | null;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onHoverRangeWithText: (range, refText) => {
+        hoveredRange = range;
+        hoveredText = refText;
+      },
+    });
+
+    view.model.setExtractFormulaReferencesOptions({
+      tables: [
+        {
+          name: "Table1",
+          columns: ["Amount"],
+          startRow: 0,
+          startCol: 0,
+          endRow: 2,
+          endCol: 0,
+          sheetName: "Sheet1",
+        },
+      ],
+    });
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    view.focus({ cursor: "end" });
+
+    const formula = "=SUM(Table1[Amount])";
+    view.textarea.value = formula;
+    const caret = formula.indexOf("Amount") + 1;
+    view.textarea.setSelectionRange(caret, caret);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    expect(hoveredText).toBe("Table1[Amount]");
+    expect(hoveredRange).toEqual(parseA1Range("A2:A3"));
+
+    host.remove();
+  });
+
   it("highlights structured references and emits hover previews (with text) in view mode", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
