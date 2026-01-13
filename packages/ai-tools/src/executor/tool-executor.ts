@@ -639,19 +639,29 @@ export class ToolExecutor {
 
     const rawCells = this.spreadsheet.readRange(range);
     const cells = Array.isArray(rawCells) ? rawCells : [];
+    const rowCount = range.endRow - range.startRow + 1;
+    const colCount = range.endCol - range.startCol + 1;
+    const includeFormulas = Boolean(params.include_formulas);
     if (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW) {
       const includeFormulaValues = Boolean(this.options.include_formula_values);
-      const values = cells.map((row) =>
-        (Array.isArray(row) ? row : []).map((cell) => {
+      const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
+      const formulas: Array<Array<string | null>> | undefined = includeFormulas
+        ? Array.from({ length: rowCount }, () => new Array(colCount))
+        : undefined;
+
+      for (let r = 0; r < rowCount; r += 1) {
+        const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
+        const valuesRow = values[r]!;
+        const formulasRow = formulas ? formulas[r]! : undefined;
+        for (let c = 0; c < colCount; c += 1) {
+          const cell = row[c];
           const formula = (cell as any)?.formula;
           const hasFormula = Boolean(formula);
           const rawValue = (cell as any)?.value;
-          return normalizeCellOutput(hasFormula ? (includeFormulaValues ? rawValue : null) : rawValue);
-        })
-      );
-      const formulas = params.include_formulas
-        ? cells.map((row) => (Array.isArray(row) ? row : []).map((cell) => normalizeFormulaOutput((cell as any)?.formula)))
-        : undefined;
+          valuesRow[c] = normalizeCellOutput(hasFormula ? (includeFormulaValues ? rawValue : null) : rawValue);
+          if (formulasRow) formulasRow[c] = normalizeFormulaOutput(formula);
+        }
+      }
       if (dlp) {
         this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount: 0 });
       }
@@ -662,59 +672,30 @@ export class ToolExecutor {
 
     let redactedCellCount = 0;
 
-    // When formulas are requested, compute values + formulas in a single pass so we only
-    // evaluate DLP once per cell (avoids per-cell Map caching overhead).
-    if (params.include_formulas) {
-      const values: CellScalar[][] = [];
-      const formulas: Array<Array<string | null>> = [];
-      for (let r = 0, rowIndex = range.startRow; r < cells.length; r += 1, rowIndex += 1) {
-        const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
-        const valuesRow: CellScalar[] = new Array(row.length);
-        const formulasRow: Array<string | null> = new Array(row.length);
-        for (let c = 0, colIndex = range.startCol; c < row.length; c += 1, colIndex += 1) {
-          const cell = row[c];
-          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-            redactedCellCount += 1;
-            valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
-            formulasRow[c] = DLP_REDACTION_PLACEHOLDER;
-            continue;
-          }
-          const formula = (cell as any)?.formula;
-          const hasFormula = Boolean(formula);
-          const rawValue = (cell as any)?.value;
-          valuesRow[c] = normalizeCellOutput(hasFormula ? null : rawValue);
-          formulasRow[c] = normalizeFormulaOutput(formula);
-        }
-        values.push(valuesRow);
-        formulas.push(formulasRow);
-      }
+    const values: CellScalar[][] = Array.from({ length: rowCount }, () => new Array(colCount));
+    const formulas: Array<Array<string | null>> | undefined = includeFormulas
+      ? Array.from({ length: rowCount }, () => new Array(colCount))
+      : undefined;
 
-      this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
-      const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
-      enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
-      return { range: this.formatRangeForUser(range), values, formulas };
-    }
-
-    const values: CellScalar[][] = [];
-    for (let r = 0, rowIndex = range.startRow; r < cells.length; r += 1, rowIndex += 1) {
+    for (let r = 0, rowIndex = range.startRow; r < rowCount; r += 1, rowIndex += 1) {
       const row = Array.isArray(cells[r]) ? (cells[r] ?? []) : [];
-      const valuesRow: CellScalar[] = new Array(row.length);
-      for (let c = 0, colIndex = range.startCol; c < row.length; c += 1, colIndex += 1) {
-        const cell = row[c];
+      const valuesRow = values[r]!;
+      const formulasRow = formulas ? formulas[r]! : undefined;
+      for (let c = 0, colIndex = range.startCol; c < colCount; c += 1, colIndex += 1) {
         if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
           redactedCellCount += 1;
           valuesRow[c] = DLP_REDACTION_PLACEHOLDER;
+          if (formulasRow) formulasRow[c] = DLP_REDACTION_PLACEHOLDER;
           continue;
         }
+        const cell = row[c];
         const formula = (cell as any)?.formula;
         const hasFormula = Boolean(formula);
         const rawValue = (cell as any)?.value;
         valuesRow[c] = normalizeCellOutput(hasFormula ? null : rawValue);
+        if (formulasRow) formulasRow[c] = normalizeFormulaOutput(formula);
       }
-      values.push(valuesRow);
     }
-
-    const formulas = undefined;
 
     this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
     const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
