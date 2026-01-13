@@ -29,6 +29,16 @@
   width: min(420px, calc(100vw - 32px));
   max-height: min(640px, calc(100vh - 32px));
   overflow: auto;
+  border: 1px solid var(--dialog-border);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: var(--dialog-bg);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.what-if-dialog * {
+  box-sizing: border-box;
 }
 
 .what-if-dialog__header {

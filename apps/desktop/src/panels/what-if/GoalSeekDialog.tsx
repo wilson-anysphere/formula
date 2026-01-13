@@ -26,6 +26,41 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
   const titleId = useMemo(() => `goal-seek-title-${domInstanceId}`, [domInstanceId]);
   const errorId = useMemo(() => `goal-seek-error-${domInstanceId}`, [domInstanceId]);
   const targetCellRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  const trapTab = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Tab") return;
+    const root = dialogRef.current;
+    if (!root) return;
+
+    const focusables = Array.from(
+      root.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]"),
+    ).filter((el) => {
+      if (el.getAttribute("aria-hidden") === "true") return false;
+      // Ignore non-tabbable elements and explicitly disabled controls.
+      if (el.getAttribute("tabindex") === "-1") return false;
+      if ((el as HTMLButtonElement).disabled) return false;
+      return true;
+    });
+
+    if (focusables.length === 0) return;
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    const active = document.activeElement as HTMLElement | null;
+
+    if (event.shiftKey) {
+      if (active === first) {
+        event.preventDefault();
+        last.focus();
+      }
+      return;
+    }
+
+    if (active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -72,13 +107,19 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
       aria-labelledby={titleId}
       aria-describedby={error ? errorId : undefined}
       aria-busy={running ? true : undefined}
+      data-keybinding-barrier="true"
       data-testid="goal-seek-dialog"
+      ref={dialogRef}
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         if (running) return;
         event.preventDefault();
         event.stopPropagation();
         onClose();
+      }}
+      onKeyDownCapture={(event) => {
+        // Keep tab focus inside the dialog while it is open.
+        trapTab(event);
       }}
     >
       <div className="what-if-dialog__header">
