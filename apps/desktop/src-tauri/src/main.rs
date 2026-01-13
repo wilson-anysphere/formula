@@ -44,6 +44,13 @@ use uuid::Uuid;
 
 const WORKBOOK_ID: &str = "local-workbook";
 
+/// Minimal HTML used by `--startup-bench`.
+///
+/// The goal of this mode is to measure the desktop shell + webview startup overhead without
+/// depending on the built frontend assets in `apps/desktop/dist`.
+const STARTUP_BENCH_HTML: &str =
+    r#"<!doctype html><html><head><meta charset="utf-8" /><title>Formula</title></head><body></body></html>"#;
+
 static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 // Canonical Tauri event names exchanged between the Rust host and the frontend.
@@ -226,6 +233,11 @@ impl StartupMetrics {
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "n/a".to_string())
             );
+            // `--startup-bench` exits the process shortly after this line is printed. Be explicit
+            // about flushing so CI parsers reliably see the metrics line even with piped stdout.
+            #[allow(unused_imports)]
+            use std::io::Write as _;
+            let _ = std::io::stdout().flush();
             self.logged = true;
         }
     }
@@ -964,6 +976,13 @@ fn main() {
     let oauth_loopback_state: SharedOauthLoopbackState =
         Arc::new(Mutex::new(OauthLoopbackState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
+    let startup_bench = initial_argv.iter().any(|arg| arg == "--startup-bench");
+    if startup_bench {
+        // In production builds we normally gate startup metrics logging behind
+        // `FORMULA_STARTUP_METRICS=1`. The `--startup-bench` mode is explicitly for CI
+        // measurement, so opt-in automatically.
+        std::env::set_var("FORMULA_STARTUP_METRICS", "1");
+    }
     if initial_argv.iter().any(|arg| arg == "--log-process-metrics") {
         process_metrics::log_process_metrics();
     }
@@ -999,9 +1018,34 @@ fn main() {
         //
         // Note: Tauri's internal asset protocol handler is not a stable public API, so we
         // implement a minimal handler using the public `AssetResolver`.
-        .register_uri_scheme_protocol("tauri", |_ctx, request| {
-            let path = request.uri().path().to_string();
+        .register_uri_scheme_protocol("tauri", move |_ctx, request| {
+            let path = request.uri().path();
 
+            // Lightweight shell-startup benchmark: serve a tiny inline HTML document instead of
+            // the real bundled frontend (which may not be present, and is expensive to build).
+            if startup_bench && (path == "/" || path == "/index.html") {
+                let mut builder = Response::builder()
+                    .status(StatusCode::OK)
+                    .header(tauri::http::header::CONTENT_TYPE, "text/html; charset=utf-8");
+
+                if let Some(csp) = _ctx.app_handle().config().app.security.csp.as_ref() {
+                    builder = builder.header("Content-Security-Policy", csp.as_str());
+                }
+
+                let mut response = builder
+                    .body(STARTUP_BENCH_HTML.as_bytes().to_vec())
+                    .unwrap_or_else(|_| {
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+                            .body(b"failed to build tauri startup-bench response".to_vec())
+                            .expect("build error response")
+                    });
+                apply_cross_origin_isolation_headers(&mut response);
+                return response;
+            }
+
+            let path = path.to_string();
             match _ctx.app_handle().asset_resolver().get(path) {
                 Some(asset) => {
                     let mut builder = Response::builder()
@@ -1413,7 +1457,83 @@ fn main() {
             }
             _ => {}
         })
-        .setup(|app| {
+        .setup(move |app| {
+            if startup_bench {
+                // CI benchmark: measure desktop shell startup without requiring built frontend
+                // assets. This mode should be lightweight and exit quickly.
+                const TIMEOUT_SECS: u64 = 20;
+                std::thread::spawn(|| {
+                    std::thread::sleep(Duration::from_secs(TIMEOUT_SECS));
+                    eprintln!(
+                        "[formula][startup-bench] timed out after {TIMEOUT_SECS}s (webview did not report)"
+                    );
+                    std::process::exit(2);
+                });
+
+                let Some(window) = app.get_webview_window("main") else {
+                    eprintln!("[formula][startup-bench] missing main window");
+                    std::process::exit(2);
+                };
+
+                window
+                    .eval(
+                        r#"
+(() => {
+  const deadline = Date.now() + 10_000;
+
+  const raf = () =>
+    new Promise((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => resolve(null));
+      } else {
+        setTimeout(() => resolve(null), 0);
+      }
+    });
+
+  let started = false;
+  const tick = async () => {
+    if (started) return;
+
+    const invoke = globalThis.__TAURI__?.core?.invoke;
+    if (typeof invoke !== "function") {
+      if (Date.now() > deadline) return;
+      setTimeout(tick, 10);
+      return;
+    }
+
+    started = true;
+
+    // "WebView loaded": the earliest point where the JS bridge is ready to invoke into Rust.
+    await invoke("report_startup_webview_loaded");
+
+    // Approximate "time to interactive": a microtask + first frame later.
+    await Promise.resolve();
+    await raf();
+
+    await invoke("report_startup_tti");
+
+    // Hard-exit after the `[startup] ...` line is printed. Add a tiny delay so stdout is
+    // reliably flushed when captured via pipes.
+    setTimeout(() => {
+      invoke("quit_app").catch(() => {});
+    }, 25);
+  };
+
+  tick().catch(() => {});
+})();
+"#,
+                    )
+                    .unwrap_or_else(|err| {
+                        eprintln!("[formula][startup-bench] failed to eval script: {err}");
+                        std::process::exit(2);
+                    });
+
+                // Skip the rest of normal app setup (tray icon, updater, open-file wiring, etc).
+                // The benchmark mode should be as lightweight as possible so it can run in CI and
+                // exit quickly based on the injected JS invocations.
+                return Ok(());
+            }
+
             if std::env::args().any(|arg| arg == "--cross-origin-isolation-check") {
                 // CI/developer smoke test: validate cross-origin isolation (COOP/COEP) in the
                 // packaged Tauri build by running in a special mode that exits quickly with a

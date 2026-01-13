@@ -156,6 +156,13 @@ export function parseStartupLine(line: string): StartupMetrics | null {
 type RunOnceOptions = {
   binPath: string;
   timeoutMs: number;
+  /**
+   * Extra CLI args to pass to the desktop binary.
+   *
+   * This is primarily used for special/CI modes like `--startup-bench` that should not
+   * require bundled frontend assets.
+   */
+  argv?: string[];
   envOverrides?: NodeJS.ProcessEnv;
   /**
    * Root directory for all app/user-data state for this run (HOME, XDG dirs, temp dirs, etc).
@@ -193,6 +200,7 @@ function closeReadline(rl: Interface | null): void {
 export async function runOnce({
   binPath,
   timeoutMs,
+  argv,
   envOverrides,
   profileDir: profileDirRaw,
 }: RunOnceOptions): Promise<StartupMetrics> {
@@ -223,7 +231,8 @@ export async function runOnce({
   const useXvfb = shouldUseXvfb();
   const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
   const command = useXvfb ? 'bash' : binPath;
-  const args = useXvfb ? [xvfbPath, binPath] : [];
+  const desktopArgs = argv ?? [];
+  const args = useXvfb ? [xvfbPath, binPath, ...desktopArgs] : desktopArgs;
 
   const env = mergeEnvParts([
     process.env,
@@ -359,7 +368,10 @@ export async function runOnce({
       settle('reject', err);
     });
 
-    child.on('exit', (code, signal) => {
+    // Use `close` (not `exit`) so stdout/stderr are fully drained before we decide whether we
+    // captured the `[startup] ...` line. This matters for modes like `--startup-bench` that exit
+    // quickly after logging.
+    child.on('close', (code, signal) => {
       if (settled) return;
 
       if (timedOutWaitingForMetrics) {
