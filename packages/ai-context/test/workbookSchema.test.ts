@@ -159,4 +159,23 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].rangeA1).toBe("'Bob''s Sheet'!A1:B2");
     expect(schema.namedRanges[0].rangeA1).toBe("'Bob''s Sheet'!A1:B1");
   });
+
+  it("supports sparse sheet cell maps (row,col keys)", () => {
+    const cells = new Map<string, any>();
+    cells.set("0:0", { v: "Name" });
+    cells.set("0,1", { v: "Value" });
+    cells.set("1,0", { v: "A" });
+    cells.set("1:1", { v: 1 });
+
+    const workbook = {
+      id: "wb-map",
+      sheets: [{ name: "Sheet1", cells }],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0]).toMatchObject({ name: "T", rangeA1: "Sheet1!A1:B2", rowCount: 1, columnCount: 2 });
+    expect(schema.tables[0].headers).toEqual(["Name", "Value"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number"]);
+  });
 });
