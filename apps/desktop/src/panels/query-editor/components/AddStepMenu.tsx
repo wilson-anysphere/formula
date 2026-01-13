@@ -176,6 +176,33 @@ export function AddStepMenu(props: {
     };
   }, [menuOpen]);
 
+  const handleMenuKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (evt) => {
+    if (evt.key !== "ArrowDown" && evt.key !== "ArrowUp" && evt.key !== "Home" && evt.key !== "End") return;
+    const root = menuRootRef.current;
+    if (!root) return;
+    const items = Array.from(
+      root.querySelectorAll<HTMLButtonElement>(".query-editor-add-step__menu-popover button:not(:disabled)"),
+    );
+    if (items.length === 0) return;
+
+    const active = document.activeElement;
+    const currentIdx = items.findIndex((el) => el === active);
+
+    let nextIdx = 0;
+    if (evt.key === "Home") {
+      nextIdx = 0;
+    } else if (evt.key === "End") {
+      nextIdx = items.length - 1;
+    } else if (evt.key === "ArrowDown") {
+      nextIdx = currentIdx >= 0 ? (currentIdx + 1) % items.length : 0;
+    } else if (evt.key === "ArrowUp") {
+      nextIdx = currentIdx >= 0 ? (currentIdx - 1 + items.length) % items.length : items.length - 1;
+    }
+
+    evt.preventDefault();
+    items[nextIdx]?.focus();
+  };
+
   useEffect(() => {
     if (!menuOpen) return;
     const root = menuRootRef.current;
@@ -220,7 +247,7 @@ export function AddStepMenu(props: {
           {t("queryEditor.addStep.addStep")}
         </button>
         {menuOpen ? (
-          <div className="query-editor-add-step__menu-popover" role="menu">
+          <div className="query-editor-add-step__menu-popover" role="menu" onKeyDown={handleMenuKeyDown}>
             {menuGroups.map((group) => (
               <div key={group.id} className="query-editor-add-step__menu-group">
                 <div className="query-editor-add-step__menu-group-title">{group.label}</div>

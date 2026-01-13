@@ -168,6 +168,33 @@ describe("AddStepMenu", () => {
     expect(host!.querySelector(".query-editor-add-step__menu-popover")).toBeNull();
   });
 
+  it("supports ArrowDown/ArrowUp navigation within the operation menu", async () => {
+    const preview = new DataTable([{ name: "Region", type: "string" }], []);
+
+    await act(async () => {
+      root?.render(<AddStepMenu onAddStep={() => {}} aiContext={{ query: baseQuery(), preview }} />);
+    });
+
+    await act(async () => {
+      findButtonByText(host!, "+ Add step").dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flushMicrotasks(5);
+    });
+
+    expect((document.activeElement as HTMLElement | null)?.textContent?.trim()).toBe("Keep Top Rows");
+
+    await act(async () => {
+      (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+
+    expect((document.activeElement as HTMLElement | null)?.textContent?.trim()).toBe("Filter Rows");
+
+    await act(async () => {
+      (document.activeElement as HTMLElement).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    });
+
+    expect((document.activeElement as HTMLElement | null)?.textContent?.trim()).toBe("Keep Top Rows");
+  });
+
   it("handles empty AI intent and renders returned suggestions with readable labels", async () => {
     const preview = new DataTable([{ name: "Region", type: "string" }], []);
     const query = baseQuery();
