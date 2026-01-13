@@ -44,6 +44,30 @@ describe("tauri.conf.json security guardrails", () => {
     ).toBe(true);
   });
 
+  it("configures Windows installers to bootstrap the WebView2 runtime when missing", () => {
+    const config = loadTauriConfig();
+    const mode = config?.bundle?.windows?.webviewInstallMode as unknown;
+    expect(mode, "expected bundle.windows.webviewInstallMode to be set (do not rely on WebView2 being preinstalled)").toBeTruthy();
+
+    if (typeof mode === "string") {
+      expect(
+        mode.toLowerCase(),
+        "bundle.windows.webviewInstallMode must not be 'skip' (installer must install WebView2 on fresh machines)",
+      ).not.toBe("skip");
+      return;
+    }
+
+    expect(mode && typeof mode === "object", "expected bundle.windows.webviewInstallMode to be a string or object").toBe(
+      true,
+    );
+    const type = String((mode as any)?.type ?? "").trim();
+    expect(type.length > 0, "expected bundle.windows.webviewInstallMode.type to be a non-empty string").toBe(true);
+    expect(
+      type.toLowerCase(),
+      "bundle.windows.webviewInstallMode.type must not be 'skip' (installer must install WebView2 on fresh machines)",
+    ).not.toBe("skip");
+  });
+
   it("enables COOP/COEP headers for cross-origin isolation (SharedArrayBuffer)", () => {
     const config = loadTauriConfig();
     const headers = config?.app?.security?.headers as unknown;
