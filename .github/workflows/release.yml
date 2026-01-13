@@ -450,3 +450,24 @@ jobs:
           FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
           FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
         run: python scripts/desktop_bundle_size_report.py
+
+  validate-updater-manifest:
+    name: Validate combined updater manifest (latest.json)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate updater manifest assets + targets
+        env:
+          # gh respects GH_TOKEN (recommended) and GITHUB_TOKEN. We set both so the validator can
+          # use the GitHub API directly and via gh for downloading draft release assets.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/ci/validate-updater-manifest.mjs "${{ github.ref_name }}"
