@@ -137,8 +137,12 @@ export interface AiCellFunctionEngineOptions {
      *
      * Prevents AI cell functions from getting stuck on `#GETTING_DATA` forever if the
      * backend hangs or the network stalls.
+     *
+     * When exceeded, the request is aborted and the cell is cached as `#AI!`.
+     *
+     * Set to `null` or `0` to disable the timeout.
      */
-    requestTimeoutMs?: number;
+    requestTimeoutMs?: number | null;
   };
 }
 
@@ -224,7 +228,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly maxAuditPreviewChars: number;
   private readonly maxCellChars: number;
   private readonly maxOutputChars: number;
-  private readonly requestTimeoutMs: number;
+  private readonly requestTimeoutMs: number | null;
 
   private readonly requestLimiter: ConcurrencyLimiter;
 
@@ -261,7 +265,13 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     this.maxAuditPreviewChars = clampInt(options.limits?.maxAuditPreviewChars ?? 2_000, { min: 200, max: 100_000 });
     this.maxCellChars = clampInt(options.limits?.maxCellChars ?? MAX_SCALAR_CHARS, { min: 50, max: 100_000 });
     this.maxOutputChars = clampInt(options.limits?.maxOutputChars ?? MAX_OUTPUT_CHARS, { min: 1, max: 1_000_000 });
-    this.requestTimeoutMs = clampInt(options.limits?.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, { min: 1, max: 3_600_000 });
+    const requestTimeoutMs = options.limits?.requestTimeoutMs;
+    this.requestTimeoutMs =
+      requestTimeoutMs === null || requestTimeoutMs === 0
+        ? null
+        : typeof requestTimeoutMs === "number" && Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+          ? clampInt(requestTimeoutMs, { min: 1, max: 3_600_000 })
+          : DEFAULT_REQUEST_TIMEOUT_MS;
 
     this.requestLimiter = new ConcurrencyLimiter(options.limits?.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS);
 
@@ -557,8 +567,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     });
 
     const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timeoutMs = this.requestTimeoutMs;
-    const timeoutError = new Error(`AI cell function request timed out after ${timeoutMs}ms`);
+    const timeoutMs = typeof this.requestTimeoutMs === "number" && this.requestTimeoutMs > 0 ? this.requestTimeoutMs : null;
+    const timeoutError = timeoutMs !== null ? new Error(`AI cell function request timed out after ${timeoutMs}ms`) : null;
     let didTimeout = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -577,9 +587,12 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
           }),
           ...(abortController ? { signal: abortController.signal } : {}),
         });
+
         // Release concurrency slots as soon as the underlying chat promise settles so
         // queued requests can start in the same microtask flush.
         chatPromise.finally(release).catch(() => undefined);
+
+        if (timeoutMs === null || !timeoutError) return chatPromise as any;
 
         const timeoutPromise = new Promise<never>((_resolve, reject) => {
           timeoutId = setTimeout(() => {
@@ -596,10 +609,12 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
         return Promise.race([chatPromise, timeoutPromise]) as any;
       });
+
       if (timeoutId != null) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
+
       recorder.recordModelLatency(nowMs() - started);
 
       const promptTokens = response.usage?.promptTokens;
@@ -625,7 +640,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
       this.writeCache(params.cacheKey, normalizedValue);
     } catch (error) {
-      const finalError = didTimeout ? timeoutError : error;
+      const finalError = didTimeout && timeoutError ? timeoutError : error;
       auditInput.error = finalError instanceof Error ? finalError.message : String(finalError);
       if (didTimeout) recorder.setUserFeedback("rejected");
       this.writeCache(params.cacheKey, AI_CELL_ERROR);

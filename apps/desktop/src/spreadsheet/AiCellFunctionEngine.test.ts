@@ -107,12 +107,12 @@ describe("AiCellFunctionEngine", () => {
         chat: vi.fn((request: any) => {
           observedSignal = request?.signal;
           if (observedSignal && typeof (observedSignal as any).addEventListener === "function") {
-            observedSignal.addEventListener("abort", () => {
-              abortEvents += 1;
-            });
-          }
-          return new Promise(() => {
-            // Never resolve/reject: we rely on the engine timeout + abort.
+          observedSignal.addEventListener("abort", () => {
+            abortEvents += 1;
+          });
+        }
+        return new Promise(() => {
+          // Never resolve/reject: we rely on the engine timeout + abort.
           });
         }),
       };
@@ -146,6 +146,59 @@ describe("AiCellFunctionEngine", () => {
       expect(entries).toHaveLength(1);
       expect((entries[0]?.input as any)?.error).toContain("timed out");
       expect(entries[0]?.user_feedback).toBe("rejected");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("times out hung LLM calls that reject only on abort and caches #AI!", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(0));
+    try {
+      const requestTimeoutMs = 1_000;
+      const llmClient = {
+        chat: vi.fn((request: any) => {
+          // Simulate a provider call that never resolves unless it is explicitly aborted.
+          return new Promise((_resolve, reject) => {
+            const signal = request?.signal as AbortSignal | undefined;
+            if (!signal) return;
+            if (signal.aborted) {
+              reject(signal.reason ?? new Error("aborted"));
+              return;
+            }
+            signal.addEventListener(
+              "abort",
+              () => {
+                reject(signal.reason ?? new Error("aborted"));
+              },
+              { once: true },
+            );
+          });
+        }),
+      };
+
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        model: "test-model",
+        auditStore: new MemoryAIAuditStore(),
+        limits: { requestTimeoutMs },
+      });
+
+      const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(pending).toBe(AI_CELL_PLACEHOLDER);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+      const firstCall = llmClient.chat.mock.calls[0]?.[0];
+      expect(firstCall?.signal).toBeDefined();
+
+      vi.advanceTimersByTime(requestTimeoutMs + 1);
+      await engine.waitForIdle();
+
+      expect((firstCall?.signal as AbortSignal | undefined)?.aborted).toBe(true);
+
+      const errored = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(errored).toBe(AI_CELL_ERROR);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
