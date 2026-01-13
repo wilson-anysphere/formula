@@ -26,5 +26,5 @@ fn agile_secret_key_matches_msoffcrypto_docstring_vector() {
     let secret_key = agile_secret_key(&info, password).unwrap();
     let expected =
         hex::decode("40206609d9faadf24b076aebf2c435b74292c8b8a7aa81bc679be89711b02ac2").unwrap();
-    assert_eq!(secret_key, expected);
+    assert_eq!(secret_key.as_slice(), expected.as_slice());
 }

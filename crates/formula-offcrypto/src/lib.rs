@@ -28,6 +28,7 @@ use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader as XmlReader;
 use sha1::{Digest as _, Sha1};
+use zeroize::Zeroizing;
 
 const ITER_COUNT: u32 = 50_000;
 const SHA1_LEN: usize = 20;
@@ -1297,7 +1298,6 @@ pub fn inspect_encryption_info(
     let major = r.read_u16_le("EncryptionVersionInfo.major")?;
     let minor = r.read_u16_le("EncryptionVersionInfo.minor")?;
     let _flags = r.read_u32_le("EncryptionVersionInfo.flags")?;
-
     if (major, minor) == (4, 4) {
         let info = parse_agile_encryption_info_xml(r.remaining())?;
         let key_bits = u32::try_from(info.password_key_bits).map_err(|_| {
@@ -1463,39 +1463,40 @@ pub fn standard_derive_key(
         }
     };
 
-    let password_utf16 = password_to_utf16le_bytes(password);
+    // Password-derived material should not linger in heap buffers longer than needed.
+    let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
 
     // h = sha1(salt || password_utf16)
     let mut hasher = Sha1::new();
     hasher.update(&info.verifier.salt);
     hasher.update(&password_utf16);
-    let mut h: [u8; SHA1_LEN] = hasher.finalize().into();
+    let mut h: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(hasher.finalize().into());
 
     // for i in 0..ITER_COUNT-1: h = sha1(u32le(i) || h)
-    let mut buf = [0u8; 4 + SHA1_LEN];
+    let mut buf: Zeroizing<[u8; 4 + SHA1_LEN]> = Zeroizing::new([0u8; 4 + SHA1_LEN]);
     for i in 0..ITER_COUNT {
         buf[..4].copy_from_slice(&(i as u32).to_le_bytes());
-        buf[4..].copy_from_slice(&h);
-        h = sha1(&buf);
+        buf[4..].copy_from_slice(&h[..]);
+        *h = sha1(&buf[..]);
     }
 
     // hfinal = sha1(h || u32le(0))
-    let mut buf0 = [0u8; SHA1_LEN + 4];
-    buf0[..SHA1_LEN].copy_from_slice(&h);
+    let mut buf0: Zeroizing<[u8; SHA1_LEN + 4]> = Zeroizing::new([0u8; SHA1_LEN + 4]);
+    buf0[..SHA1_LEN].copy_from_slice(&h[..]);
     buf0[SHA1_LEN..].copy_from_slice(&0u32.to_le_bytes());
-    let hfinal = sha1(&buf0);
+    let hfinal: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf0[..]));
 
     // key = (sha1((0x36*64) ^ hfinal) || sha1((0x5c*64) ^ hfinal))[..key_len]
-    let mut buf1 = [0x36u8; 64];
-    let mut buf2 = [0x5cu8; 64];
+    let mut buf1: Zeroizing<[u8; 64]> = Zeroizing::new([0x36u8; 64]);
+    let mut buf2: Zeroizing<[u8; 64]> = Zeroizing::new([0x5cu8; 64]);
     for i in 0..SHA1_LEN {
         buf1[i] ^= hfinal[i];
         buf2[i] ^= hfinal[i];
     }
-    let x1 = sha1(&buf1);
-    let x2 = sha1(&buf2);
+    let x1 = sha1(&buf1[..]);
+    let x2 = sha1(&buf2[..]);
 
-    let mut out = [0u8; SHA1_LEN * 2];
+    let mut out: Zeroizing<[u8; SHA1_LEN * 2]> = Zeroizing::new([0u8; SHA1_LEN * 2]);
     out[..SHA1_LEN].copy_from_slice(&x1);
     out[SHA1_LEN..].copy_from_slice(&x2);
 
@@ -1516,11 +1517,11 @@ pub fn standard_derive_key(
 pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
     validate_standard_encryption_info(info)?;
 
-    let mut verifier = info.verifier.encrypted_verifier;
-    aes_ecb_decrypt_in_place(key, &mut verifier)?;
-    let expected_hash: [u8; SHA1_LEN] = sha1(&verifier);
+    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
+    aes_ecb_decrypt_in_place(key, &mut verifier[..])?;
+    let expected_hash: [u8; SHA1_LEN] = sha1(&verifier[..]);
 
-    let mut verifier_hash = info.verifier.encrypted_verifier_hash.clone();
+    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     aes_ecb_decrypt_in_place(key, &mut verifier_hash)?;
     if verifier_hash.len() < SHA1_LEN {
         return Err(OffcryptoError::InvalidVerifierHashLength {
@@ -1561,24 +1562,24 @@ fn derive_iterated_hash_from_password(
     salt_value: &[u8],
     hash_algorithm: HashAlgorithm,
     spin_count: u32,
-) -> Vec<u8> {
+) -> Zeroizing<Vec<u8>> {
     // Initial round: hash(salt + password(UTF-16LE))
-    let password_utf16 = password_to_utf16le_bytes(password);
-    let mut buf = Vec::with_capacity(salt_value.len() + password_utf16.len());
+    let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
+    let mut buf = Zeroizing::new(Vec::with_capacity(salt_value.len() + password_utf16.len()));
     buf.extend_from_slice(salt_value);
-    buf.extend_from_slice(&password_utf16);
+    buf.extend_from_slice(&password_utf16[..]);
 
-    let mut h = hash_digest(hash_algorithm, &buf);
+    let mut hfinal = Zeroizing::new(hash_digest(hash_algorithm, &buf));
 
     // Iteration 0..spin_count-1: hash(i_le + h)
     for i in 0..spin_count {
-        let mut round = Vec::with_capacity(4 + h.len());
+        let mut round = Zeroizing::new(Vec::with_capacity(4 + hfinal.len()));
         round.extend_from_slice(&i.to_le_bytes());
-        round.extend_from_slice(&h);
-        h = hash_digest(hash_algorithm, &round);
+        round.extend_from_slice(&hfinal[..]);
+        hfinal = Zeroizing::new(hash_digest(hash_algorithm, &round));
     }
 
-    h
+    hfinal
 }
 
 fn derive_encryption_key(
@@ -1586,7 +1587,7 @@ fn derive_encryption_key(
     block_key: &[u8],
     hash_algorithm: HashAlgorithm,
     key_bits: usize,
-) -> Result<Vec<u8>, OffcryptoError> {
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if key_bits % 8 != 0 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "keyBits is not divisible by 8",
@@ -1594,21 +1595,25 @@ fn derive_encryption_key(
     }
     let key_len = key_bits / 8;
 
-    let mut buf = Vec::with_capacity(h.len() + block_key.len());
+    let mut buf = Zeroizing::new(Vec::with_capacity(h.len() + block_key.len()));
     buf.extend_from_slice(h);
     buf.extend_from_slice(block_key);
-    let h_final = hash_digest(hash_algorithm, &buf);
+    let hfinal = Zeroizing::new(hash_digest(hash_algorithm, &buf));
 
-    if h_final.len() < key_len {
+    if hfinal.len() < key_len {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "derived encryption key too short",
         });
     }
 
-    Ok(h_final[..key_len].to_vec())
+    Ok(Zeroizing::new(hfinal[..key_len].to_vec()))
 }
 
-fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, OffcryptoError> {
+fn aes_cbc_decrypt(
+    ciphertext: &[u8],
+    key: &[u8],
+    iv: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     if iv.len() != 16 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
             context: "AES-CBC IV must be 16 bytes",
@@ -1620,19 +1625,19 @@ fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, 
         });
     }
 
-    let mut buf = ciphertext.to_vec();
+    let mut buf = Zeroizing::new(ciphertext.to_vec());
 
-    let pt = match key.len() {
+    match key.len() {
         16 => {
             let decryptor =
                 Decryptor::<Aes128>::new_from_slices(key, iv).map_err(|_| OffcryptoError::InvalidKeyLength {
                     len: key.len(),
                 })?;
             decryptor
-                .decrypt_padded_mut::<NoPadding>(&mut buf)
+                .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
                     context: "AES-CBC decrypt failed",
-                })?
+                })?;
         }
         24 => {
             let decryptor =
@@ -1640,10 +1645,10 @@ fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, 
                     len: key.len(),
                 })?;
             decryptor
-                .decrypt_padded_mut::<NoPadding>(&mut buf)
+                .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
                     context: "AES-CBC decrypt failed",
-                })?
+                })?;
         }
         32 => {
             let decryptor =
@@ -1651,15 +1656,15 @@ fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, 
                     len: key.len(),
                 })?;
             decryptor
-                .decrypt_padded_mut::<NoPadding>(&mut buf)
+                .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
                     context: "AES-CBC decrypt failed",
-                })?
+                })?;
         }
         _ => return Err(OffcryptoError::InvalidKeyLength { len: key.len() }),
     };
 
-    Ok(pt.to_vec())
+    Ok(buf)
 }
 
 /// Extract the Agile "secret key" by decrypting `encryptedKeyValue`.
@@ -1674,8 +1679,8 @@ fn aes_cbc_decrypt(ciphertext: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>, 
 pub fn agile_secret_key(
     info: &AgileEncryptionInfo,
     password: &str,
-) -> Result<Vec<u8>, OffcryptoError> {
-    let h = derive_iterated_hash_from_password(
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let hfinal = derive_iterated_hash_from_password(
         password,
         &info.password_salt,
         info.password_hash_algorithm,
@@ -1683,13 +1688,15 @@ pub fn agile_secret_key(
     );
 
     let encryption_key = derive_encryption_key(
-        &h,
+        &hfinal[..],
         &BLK_KEY_ENCRYPTED_KEY_VALUE,
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
 
-    aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key, &info.password_salt)
+    let secret_key =
+        aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &info.password_salt)?;
+    Ok(secret_key)
 }
 
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
