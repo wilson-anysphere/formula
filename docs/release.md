@@ -542,6 +542,9 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 - `librsvg2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
 - `openssl-libs` – OpenSSL runtime libraries required by native dependencies in the Tauri stack.
 
+Note: the AppIndicator dependency is expressed using RPM “rich dependency” syntax (`(A or B)`).
+This requires a modern RPM stack (rpm ≥ 4.12). On older RPM-based distros, prefer the `.AppImage`.
+
 ### Validating the `.rpm`
 
 After building via `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` (or after CI produces an artifact),
