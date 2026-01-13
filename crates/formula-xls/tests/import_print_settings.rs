@@ -1,6 +1,7 @@
 use std::io::Write;
+use std::collections::BTreeSet;
 
-use formula_model::{ColRange, Range, RowRange};
+use formula_model::{ColRange, Orientation, Range, RowRange, Scaling};
 use formula_model::{DefinedNameScope, XLNM_PRINT_AREA, XLNM_PRINT_TITLES};
 
 mod common;
@@ -106,4 +107,37 @@ fn imports_print_area_from_builtin_defined_name_with_unicode_quoted_sheet_name()
         .get_defined_name(DefinedNameScope::Sheet(sheet_id), XLNM_PRINT_AREA)
         .expect("missing Print_Area defined name");
     assert_parseable_formula(&print_area.refers_to);
+}
+
+#[test]
+fn imports_sheet_page_setup_and_manual_page_breaks_from_biff() {
+    let bytes = xls_fixture_builder::build_sheet_print_settings_fixture_xls();
+    let result = import_fixture(&bytes);
+    let workbook = result.workbook;
+
+    let settings = workbook.sheet_print_settings_by_name("Print");
+    assert_eq!(settings.page_setup.orientation, Orientation::Landscape);
+    assert_eq!(settings.page_setup.paper_size.code, 9);
+    assert_eq!(
+        settings.page_setup.scaling,
+        Scaling::FitTo {
+            width: 2,
+            height: 3
+        }
+    );
+    assert_eq!(settings.page_setup.margins.left, 1.1);
+    assert_eq!(settings.page_setup.margins.right, 1.2);
+    assert_eq!(settings.page_setup.margins.top, 1.3);
+    assert_eq!(settings.page_setup.margins.bottom, 1.4);
+    assert_eq!(settings.page_setup.margins.header, 0.5);
+    assert_eq!(settings.page_setup.margins.footer, 0.6);
+
+    assert_eq!(
+        settings.manual_page_breaks.row_breaks_after,
+        BTreeSet::from([2u32, 4u32])
+    );
+    assert_eq!(
+        settings.manual_page_breaks.col_breaks_after,
+        BTreeSet::from([1u32])
+    );
 }

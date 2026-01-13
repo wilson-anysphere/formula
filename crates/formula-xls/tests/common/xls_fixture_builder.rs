@@ -43,6 +43,13 @@ const RECORD_FEATHEADR11: u16 = 0x0870;
 const RECORD_FEAT11: u16 = 0x0871;
 const RECORD_WINDOW2: u16 = 0x023E;
 const RECORD_SCL: u16 = 0x00A0;
+const RECORD_SETUP: u16 = 0x00A1;
+const RECORD_HPAGEBREAKS: u16 = 0x001B;
+const RECORD_VPAGEBREAKS: u16 = 0x001A;
+const RECORD_LEFTMARGIN: u16 = 0x0026;
+const RECORD_RIGHTMARGIN: u16 = 0x0027;
+const RECORD_TOPMARGIN: u16 = 0x0028;
+const RECORD_BOTTOMMARGIN: u16 = 0x0029;
 const RECORD_PANE: u16 = 0x0041;
 const RECORD_SELECTION: u16 = 0x001D;
 const RECORD_DIMENSIONS: u16 = 0x0200;
@@ -531,6 +538,130 @@ pub fn build_manual_page_breaks_fixture_xls() -> Vec<u8> {
             .expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture that stores worksheet print settings (page setup, margins and
+/// manual page breaks) in the worksheet substream.
+pub fn build_sheet_print_settings_fixture_xls() -> Vec<u8> {
+    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
+    // style XFs).
+    let sheet_stream = build_sheet_print_settings_sheet_stream(16);
+    let workbook_stream = build_single_sheet_workbook_stream("Print", &sheet_stream, 1252);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 5) cols [0, 3) => A1:C5.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&5u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&3u16.to_le_bytes()); // last col + 1 (A..C)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // WINDOW2 is required by some consumers; keep defaults.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Margins.
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &1.1f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &1.2f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_TOPMARGIN, &1.3f64.to_le_bytes());
+    push_record(&mut sheet, RECORD_BOTTOMMARGIN, &1.4f64.to_le_bytes());
+
+    // Page setup: Landscape + A4 + Fit to 2 pages wide by 3 tall + non-default header/footer
+    // margins.
+    push_record(
+        &mut sheet,
+        RECORD_SETUP,
+        &setup_record(
+            9,    // A4
+            100,  // scale (ignored when fit-to is used)
+            2,    // fit width
+            3,    // fit height
+            true, // landscape
+            0.5,  // header margin
+            0.6,  // footer margin
+        ),
+    );
+
+    // Manual page breaks.
+    push_record(&mut sheet, RECORD_HPAGEBREAKS, &hpagebreaks_record(&[2, 4]));
+    push_record(&mut sheet, RECORD_VPAGEBREAKS, &vpagebreaks_record(&[1]));
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn setup_record(
+    paper_size: u16,
+    scale: u16,
+    fit_width: u16,
+    fit_height: u16,
+    landscape: bool,
+    header_margin: f64,
+    footer_margin: f64,
+) -> Vec<u8> {
+    // BIFF8 SETUP record payload.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&paper_size.to_le_bytes()); // iPaperSize
+    out.extend_from_slice(&scale.to_le_bytes()); // iScale
+    out.extend_from_slice(&0u16.to_le_bytes()); // iPageStart
+    out.extend_from_slice(&fit_width.to_le_bytes()); // iFitWidth
+    out.extend_from_slice(&fit_height.to_le_bytes()); // iFitHeight
+    let mut grbit = 0u16;
+    if landscape {
+        grbit |= 0x0002;
+    }
+    out.extend_from_slice(&grbit.to_le_bytes()); // grbit
+    out.extend_from_slice(&600u16.to_le_bytes()); // iRes
+    out.extend_from_slice(&600u16.to_le_bytes()); // iVRes
+    out.extend_from_slice(&header_margin.to_le_bytes()); // numHdr
+    out.extend_from_slice(&footer_margin.to_le_bytes()); // numFtr
+    out.extend_from_slice(&1u16.to_le_bytes()); // iCopies
+    out
+}
+
+fn hpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
+    // HORIZONTALPAGEBREAKS payload:
+    // [cbrk:u16][(rw:u16, colStart:u16, colEnd:u16) * cbrk]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&(breaks.len() as u16).to_le_bytes());
+    for &rw in breaks {
+        out.extend_from_slice(&rw.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // colStart
+        out.extend_from_slice(&255u16.to_le_bytes()); // colEnd (BIFF8 max col for Excel 97-2003)
+    }
+    out
+}
+
+fn vpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
+    // VERTICALPAGEBREAKS payload:
+    // [cbrk:u16][(col:u16, rwStart:u16, rwEnd:u16) * cbrk]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&(breaks.len() as u16).to_le_bytes());
+    for &col in breaks {
+        out.extend_from_slice(&col.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // rwStart
+        out.extend_from_slice(&65535u16.to_le_bytes()); // rwEnd (BIFF8 max row for Excel 97-2003)
+    }
+    out
 }
 
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
