@@ -548,7 +548,6 @@ jobs:
         with:
           projectPath: apps/desktop
           args: --target universal-apple-darwin
-
       - name: Verify macOS signed app includes WKWebView JIT entitlements
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
         if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
@@ -1258,6 +1257,8 @@ jobs:
 
           echo "Dumping effective entitlements from: $exe_path"
           /usr/bin/codesign -d --entitlements :- "$exe_path" || true
+      - name: Verify desktop binary is stripped (no symbols)
+        run: python scripts/verify_desktop_binary_stripped.py
       - name: Report desktop bundle sizes
         env:
           # Enforce the bundle size budget on tagged releases by default.

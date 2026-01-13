@@ -709,6 +709,27 @@ The release workflow reports the size of each generated installer/bundle (DMG / 
 AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails tagged releases** if
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
+### Rust binary size controls (Cargo release profile)
+
+The largest contributor under our control is the Rust desktop binary (`formula-desktop`). Size is
+primarily controlled by the workspace Cargo release profile in the repo root `Cargo.toml`:
+
+- `strip = "symbols"` – ensures release binaries do not ship with symbol/debug info.
+- `lto = "thin"` – enables ThinLTO (often shrinks binaries and improves runtime perf).
+- `codegen-units = 1` – improves LTO effectiveness and typically reduces size.
+
+The release workflow also runs `python scripts/verify_desktop_binary_stripped.py` after building to
+fail the workflow if the produced desktop binary is not stripped (or if symbol sidecar files like
+`.pdb`/`.dSYM` end up in the bundle output directory).
+
+Local note: `scripts/cargo_agent.sh` sets `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` by default for
+stability on multi-agent hosts. If you want local builds to match CI's `codegen-units = 1`, run:
+
+```bash
+export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)
+```
+
 ### Configuration / override (GitHub Actions variables)
 
 The tagged release workflow defaults to `FORMULA_ENFORCE_BUNDLE_SIZE=1`. To override, set repository

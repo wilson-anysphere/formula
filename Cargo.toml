@@ -26,3 +26,15 @@ members = [
   "crates/xlsx-diff",
   "crates/formula-wasm",
 ]
+
+# Release build settings for shipped artifacts.
+#
+# These defaults are tuned to help keep desktop bundles/installer artifacts under
+# the 50 MB budget by avoiding accidental debug/symbol data in release binaries.
+[profile.release]
+# Strip symbol/debug info from release binaries.
+strip = "symbols"
+# Enable ThinLTO to reduce binary size (often improves runtime perf as well).
+lto = "thin"
+# Fewer codegen units improves LTO effectiveness and can shrink binaries.
+codegen-units = 1
