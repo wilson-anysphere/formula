@@ -926,6 +926,44 @@ fn isblank_is_true_for_blank_measures() {
 }
 
 #[test]
+fn if_isblank_pattern_can_replace_blank_with_zero() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let engine = DaxEngine::new();
+
+    // When the measure is non-blank, IF should return its value.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "IF(ISBLANK([Total Sales]), 0, [Total Sales])",
+                &FilterContext::empty(),
+                &RowContext::default(),
+            )
+            .unwrap(),
+        43.0.into()
+    );
+
+    // When filters yield no rows, [Total Sales] is BLANK and IF should return 0.
+    let empty_filter =
+        FilterContext::empty().with_column_equals("Customers", "Region", "Nowhere".into());
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "IF(ISBLANK([Total Sales]), 0, [Total Sales])",
+                &empty_filter,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        0.into()
+    );
+}
+
+#[test]
 fn selectedvalue_and_hasonevalue_use_filter_context() {
     let mut model = build_model();
     model
