@@ -372,6 +372,12 @@ To verify locally after a Windows build, run:
 python scripts/ci/check-windows-webview2-installer.py
 ```
 
+To verify on a clean Windows VM (no preinstalled WebView2 Runtime):
+
+1. Ensure **Microsoft Edge WebView2 Runtime** is not installed (Windows Settings → Apps).
+2. Run the Formula installer.
+3. Confirm the app launches successfully (the installer should bootstrap WebView2 automatically).
+
 If you need an offline-friendly installer, change `bundle.windows.webviewInstallMode` to `offlineInstaller` or
 `fixedRuntime` (at the cost of a much larger installer).
 
