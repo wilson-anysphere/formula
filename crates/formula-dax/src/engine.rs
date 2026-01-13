@@ -610,6 +610,143 @@ impl DaxEngine {
                     IteratorKind::Count,
                 )
             }
+            "LOOKUPVALUE" => {
+                if args.len() < 3 {
+                    return Err(DaxError::Eval(
+                        "LOOKUPVALUE expects at least 3 arguments".into(),
+                    ));
+                }
+
+                let Expr::ColumnRef {
+                    table: result_table,
+                    column: result_column,
+                } = &args[0]
+                else {
+                    return Err(DaxError::Type(
+                        "LOOKUPVALUE expects a column reference as the first argument".into(),
+                    ));
+                };
+
+                // DAX allows an optional final alternate result. With only (col, value) pairs,
+                // LOOKUPVALUE has an odd argument count:
+                //   1 (result column) + 2 * N (search pairs)
+                // Adding alternate result makes the total even.
+                let (search_args, alternate_result) = if args.len() % 2 == 0 {
+                    (&args[1..args.len() - 1], Some(&args[args.len() - 1]))
+                } else {
+                    (&args[1..], None)
+                };
+
+                if search_args.len() < 2 || search_args.len() % 2 != 0 {
+                    return Err(DaxError::Eval(
+                        "LOOKUPVALUE expects at least one (search_column, search_value) pair"
+                            .into(),
+                    ));
+                }
+
+                // Resolve the search table / columns up front (MVP restriction: all search columns
+                // must be in the same table as the result column).
+                let table_ref = model
+                    .table(result_table)
+                    .ok_or_else(|| DaxError::UnknownTable(result_table.clone()))?;
+                let result_idx =
+                    table_ref
+                        .column_idx(result_column)
+                        .ok_or_else(|| DaxError::UnknownColumn {
+                            table: result_table.clone(),
+                            column: result_column.clone(),
+                        })?;
+
+                let mut search_cols: Vec<usize> = Vec::with_capacity(search_args.len() / 2);
+                let mut search_values: Vec<Value> = Vec::with_capacity(search_args.len() / 2);
+                for pair in search_args.chunks(2) {
+                    let [search_col_expr, search_value_expr] = pair else {
+                        unreachable!("validated even number of search args");
+                    };
+
+                    let Expr::ColumnRef {
+                        table: search_table,
+                        column: search_column,
+                    } = search_col_expr
+                    else {
+                        return Err(DaxError::Type(
+                            "LOOKUPVALUE expects search columns to be column references".into(),
+                        ));
+                    };
+
+                    if search_table != result_table {
+                        return Err(DaxError::Eval(
+                            "LOOKUPVALUE MVP requires all search columns to be in the same table as the result column".into(),
+                        ));
+                    }
+
+                    let search_idx =
+                        table_ref
+                            .column_idx(search_column)
+                            .ok_or_else(|| DaxError::UnknownColumn {
+                                table: search_table.clone(),
+                                column: search_column.clone(),
+                            })?;
+                    search_cols.push(search_idx);
+
+                    let search_value =
+                        self.eval_scalar(model, search_value_expr, filter, row_ctx)?;
+                    search_values.push(search_value);
+                }
+
+                // Scan visible rows under the current filter context and apply the search
+                // conditions.
+                let candidate_rows = resolve_table_rows(model, filter, result_table)?;
+                let mut matched_rows = Vec::new();
+                for row in candidate_rows {
+                    let mut matches = true;
+                    for (col_idx, search_value) in search_cols.iter().zip(search_values.iter()) {
+                        let cell_value = table_ref.value_by_idx(row, *col_idx).unwrap_or(Value::Blank);
+                        if !compare_values(&BinaryOp::Equals, &cell_value, search_value)? {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        matched_rows.push(row);
+                    }
+                }
+
+                match matched_rows.len() {
+                    0 => {
+                        if let Some(expr) = alternate_result {
+                            self.eval_scalar(model, expr, filter, row_ctx)
+                        } else {
+                            Ok(Value::Blank)
+                        }
+                    }
+                    1 => Ok(table_ref
+                        .value_by_idx(matched_rows[0], result_idx)
+                        .unwrap_or(Value::Blank)),
+                    _ => {
+                        // DAX: allow duplicates only when the result values are unambiguous.
+                        let mut non_blank: Option<Value> = None;
+                        for &row in &matched_rows {
+                            let value =
+                                table_ref.value_by_idx(row, result_idx).unwrap_or(Value::Blank);
+                            if value.is_blank() {
+                                continue;
+                            }
+                            if let Some(existing) = &non_blank {
+                                if existing != &value {
+                                    return Err(DaxError::Eval(format!(
+                                        "LOOKUPVALUE found multiple values for {result_table}[{result_column}]"
+                                    )));
+                                }
+                            } else {
+                                non_blank = Some(value);
+                            }
+                        }
+
+                        Ok(non_blank.unwrap_or(Value::Blank))
+                    }
+                }
+            }
             "CALCULATE" => {
                 if args.is_empty() {
                     return Err(DaxError::Eval(
