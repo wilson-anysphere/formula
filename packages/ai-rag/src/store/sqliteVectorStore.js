@@ -312,10 +312,27 @@ export class SqliteVectorStore {
     const signal = opts?.signal;
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
+    throwIfAborted(signal);
+    if (topK <= 0) return [];
     const q = normalizeL2(vector);
     const qBlob = float32ToBlob(q);
 
-    throwIfAborted(signal);
+    /**
+     * When a JS-level filter is provided, we can't apply it inside SQLite. To match
+     * InMemoryVectorStore semantics ("return up to topK *matching* records"), we
+     * progressively over-fetch from SQLite and apply the filter as we iterate:
+     *
+     *   1) Start with LIMIT = max(topK * oversampleFactor, minLimit)
+     *   2) If we still have < topK matches, double the LIMIT and retry
+     *   3) Stop once we have topK matches or SQLite returns fewer rows than
+     *      requested (no more candidates)
+     *
+     * This keeps the common case fast while still guaranteeing correctness.
+     */
+    const oversampleFactor = filter ? 4 : 1;
+    const minLimit = filter ? 64 : topK;
+    let limit = Math.max(topK * oversampleFactor, minLimit);
+
     const sql = workbookId
       ? `
         SELECT id, metadata_json, dot(vector, ?) AS score
@@ -331,26 +348,40 @@ export class SqliteVectorStore {
         LIMIT ?;
       `;
 
-    const stmt = this._db.prepare(sql);
-    try {
-      if (workbookId) stmt.bind([qBlob, workbookId, topK]);
-      else stmt.bind([qBlob, topK]);
-
-      const out = [];
-      while (true) {
-        throwIfAborted(signal);
-        if (!stmt.step()) break;
-        const row = stmt.get();
-        const id = row[0];
-        const metadata = JSON.parse(row[1]);
-        if (filter && !filter(metadata, id)) continue;
-        const score = Number(row[2]);
-        out.push({ id, score, metadata });
-      }
+    while (true) {
       throwIfAborted(signal);
-      return out;
-    } finally {
-      stmt.free();
+      const stmt = this._db.prepare(sql);
+      /** @type {{ id: string, score: number, metadata: any }[]} */
+      const out = [];
+      let rows = 0;
+      try {
+        if (workbookId) stmt.bind([qBlob, workbookId, limit]);
+        else stmt.bind([qBlob, limit]);
+
+        while (true) {
+          throwIfAborted(signal);
+          if (!stmt.step()) break;
+          rows += 1;
+          const row = stmt.get();
+          const id = row[0];
+          const metadata = JSON.parse(row[1]);
+          if (filter && !filter(metadata, id)) continue;
+          const score = Number(row[2]);
+          out.push({ id, score, metadata });
+          if (out.length >= topK) break;
+        }
+        throwIfAborted(signal);
+      } finally {
+        stmt.free();
+      }
+
+      if (out.length >= topK) return out;
+      // If SQLite returned fewer rows than we requested, we've exhausted the
+      // candidate set, so return whatever matches we found.
+      if (rows < limit) return out;
+
+      // Still not enough matches; widen the window and retry.
+      limit *= 2;
     }
   }
 
