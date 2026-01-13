@@ -46,7 +46,9 @@ test.describe("ribbon File backstage", () => {
     await expect(fileNew).toBeFocused();
 
     // Tab through all enabled backstage actions to reach the last item.
-    const backstageItems = page.locator(".ribbon-backstage").getByRole("menuitem");
+    const backstageItems = page
+      .locator(".ribbon-backstage")
+      .locator('[role="menuitem"]:not([disabled]), [role="menuitemcheckbox"]:not([disabled])');
     const itemCount = await backstageItems.count();
     for (let i = 0; i < Math.max(0, itemCount - 1); i += 1) await page.keyboard.press("Tab");
     await expect(fileQuit).toBeFocused();
