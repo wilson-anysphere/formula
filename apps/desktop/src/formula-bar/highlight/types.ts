@@ -1,10 +1,7 @@
 import type { FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
-export type HighlightKind =
-  FormulaTokenType;
-
 export type HighlightSpan = {
-  kind: HighlightKind;
+  kind: FormulaTokenType;
   text: string;
   start: number;
   end: number;
