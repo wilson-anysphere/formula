@@ -12,6 +12,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables used by images-in-cells
 - [xlsx-embedded-images-in-cells.md](./xlsx-embedded-images-in-cells.md) — confirmed “Place in Cell” chain (the `rdRichValue*` schema; the fixture used there is encoded as `t="e"`/`#VALUE!`, but other real Excel files use other cached-value encodings)
 - [21-encrypted-workbooks.md](./21-encrypted-workbooks.md) — password-protected / encrypted Excel workbooks (OOXML `EncryptedPackage`, legacy `.xls` `FILEPASS`)
+- [21-offcrypto.md](./21-offcrypto.md) — MS-OFFCRYPTO details for encrypted OOXML workbooks (`EncryptionInfo` + `EncryptedPackage`)
 - [21-xlsx-pivots.md](./21-xlsx-pivots.md) — pivot tables/caches/slicers/timelines compatibility notes + roadmap
 
 ---
@@ -22,8 +23,10 @@ XLSX is a ZIP archive following Open Packaging Conventions (ECMA-376).
 
 **Exception:** Excel “Encrypt with Password” / “Password to open” files are **not ZIP** archives even
 when they use a `.xlsx`/`.xlsm` extension. Excel wraps the encrypted workbook in an **OLE/CFB**
-container with `EncryptionInfo` + `EncryptedPackage` streams. See
-[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md).
+container with `EncryptionInfo` + `EncryptedPackage` streams. See:
+
+- [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) (high-level background + terminology)
+- [`docs/21-offcrypto.md`](./21-offcrypto.md) (developer-facing MS-OFFCRYPTO debugging + API usage)
 
 ```
 workbook.xlsx (ZIP archive)
