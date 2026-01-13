@@ -48,7 +48,7 @@ fn standard_derive_key_matches_msoffcrypto_vector() {
             flags: 0,
             size_extra: 0,
             alg_id: 0x0000_660E,
-            alg_id_hash: 0,
+            alg_id_hash: 0x0000_8004, // CALG_SHA1
             key_size_bits: 128,
             provider_type: 0,
             reserved1: 0,
@@ -74,7 +74,7 @@ fn standard_verify_key_accepts_correct_key_and_rejects_incorrect_key() {
             flags: 0,
             size_extra: 0,
             alg_id: 0x0000_660E,
-            alg_id_hash: 0,
+            alg_id_hash: 0x0000_8004, // CALG_SHA1
             key_size_bits: 128,
             provider_type: 0,
             reserved1: 0,

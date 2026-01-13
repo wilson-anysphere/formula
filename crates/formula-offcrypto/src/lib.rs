@@ -78,6 +78,39 @@ pub struct StandardEncryptionInfo {
     pub verifier: StandardEncryptionVerifier,
 }
 
+fn validate_standard_encryption_info(info: &StandardEncryptionInfo) -> Result<(), OffcryptoError> {
+    let expected_key_size = match info.header.alg_id {
+        CALG_AES_128 => 128,
+        CALG_AES_192 => 192,
+        CALG_AES_256 => 256,
+        other => return Err(OffcryptoError::UnsupportedAlgorithm(other)),
+    };
+
+    if info.header.key_size_bits != expected_key_size {
+        // Mirror the parsing behaviour: mismatch means we don't support the declared algorithm
+        // parameters.
+        return Err(OffcryptoError::UnsupportedAlgorithm(info.header.alg_id));
+    }
+
+    if info.header.alg_id_hash != CALG_SHA1 {
+        return Err(OffcryptoError::UnsupportedAlgorithm(info.header.alg_id_hash));
+    }
+
+    if info.verifier.salt.len() != 16 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.saltSize must be 16 for Standard encryption",
+        });
+    }
+
+    if info.verifier.verifier_hash_size != 20 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
+        });
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
     Sha1,
@@ -1283,6 +1316,8 @@ pub fn standard_derive_key(
     info: &StandardEncryptionInfo,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+
     let key_len = match info.header.key_size_bits.checked_div(8) {
         Some(v) if info.header.key_size_bits % 8 == 0 => v as usize,
         _ => {
@@ -1343,6 +1378,8 @@ pub fn standard_derive_key(
 ///
 /// Reference algorithm: `msoffcrypto` `ECMA376Standard.verifykey`.
 pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
+    validate_standard_encryption_info(info)?;
+
     let mut verifier = info.verifier.encrypted_verifier;
     aes_ecb_decrypt_in_place(key, &mut verifier)?;
     let expected_hash: [u8; SHA1_LEN] = sha1(&verifier);
@@ -1713,7 +1750,7 @@ mod tests {
         bytes.extend_from_slice(&[0u8; 16]); // salt
         bytes.extend_from_slice(&[0u8; 16]); // encryptedVerifier
         bytes.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize (SHA1)
-        bytes.extend_from_slice(&[0u8; 32]); // encryptedVerifierHash
+        bytes.extend_from_slice(&[0u8; 32]); // encryptedVerifierHash (SHA1 padded to AES block)
 
         let summary = inspect_encryption_info(&bytes).expect("inspect");
         assert_eq!(summary.encryption_type, EncryptionType::Standard);
