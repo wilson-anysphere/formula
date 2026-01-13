@@ -844,10 +844,10 @@ are attached:
    PY
    ```
 
-   Also confirm each platform entry points at the **updater-consumed** asset type:
-   - `darwin-*` → `*.app.tar.gz`
-   - `windows-*` → `*.msi` (updater runs the Windows Installer)
-   - `linux-*` → `*.AppImage`
+    Also confirm each platform entry points at the **updater-consumed** asset type:
+    - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+    - `windows-*` → `*.msi` or `*.exe` (depending on updater strategy)
+    - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
@@ -928,15 +928,15 @@ Each tagged release includes a `SHA256SUMS.txt` asset. To verify a download:
 
    ```bash
    # macOS
-   shasum -a 256 Formula*.dmg
+   shasum -a 256 *.dmg
 
    # Linux
-   sha256sum Formula*.AppImage
+   sha256sum *.AppImage
    ```
 
    ```powershell
    # Windows (PowerShell)
-   Get-FileHash -Algorithm SHA256 .\Formula*.msi
+   Get-FileHash -Algorithm SHA256 .\*.msi
    ```
 
 Also verify **cross-origin isolation** is enabled in the packaged app (required for `SharedArrayBuffer` and the Pyodide Worker backend):
