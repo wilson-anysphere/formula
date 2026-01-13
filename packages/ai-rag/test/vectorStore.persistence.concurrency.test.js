@@ -202,6 +202,38 @@ test("JsonVectorStore serializes clear persistence writes to prevent lost update
   assert.deepEqual(ids, ["c"]);
 });
 
+test("JsonVectorStore serializes updateMetadata persistence writes to prevent lost updates", async () => {
+  const storage = new ControlledBinaryStorage();
+  const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
+  await store.load();
+
+  // Seed a record, allowing the initial persist to complete immediately.
+  storage.release(1);
+  await store.upsert([{ id: "a", vector: [1, 0], metadata: { workbookId: "wb", tag: "v1" } }]);
+
+  const p1 = store.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "v2" } }]);
+  await storage.waitForSaves(2);
+  const p2 = store.upsert([{ id: "b", vector: [0, 1], metadata: { workbookId: "wb" } }]);
+
+  // Allow the upsert save to complete first in buggy implementations where saves overlap.
+  storage.release(3);
+  for (let i = 0; i < 25 && storage.saveCount < 3; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+  storage.release(2);
+
+  await Promise.all([p1, p2]);
+
+  assert.equal(storage.saveCount, 3);
+  const persisted = storage.data;
+  assert.ok(persisted, "Expected JsonVectorStore to persist bytes");
+  const parsed = JSON.parse(new TextDecoder().decode(persisted));
+  const byId = new Map(parsed.records.map((r) => [r.id, r]));
+  assert.deepEqual(Array.from(byId.keys()).sort(), ["a", "b"]);
+  assert.equal(byId.get("a").metadata.tag, "v2");
+});
+
 let sqlJsAvailable = true;
 try {
   // Keep this as a computed dynamic import (no literal bare specifier) so
@@ -251,6 +283,42 @@ test(
     await store.close();
     await reloaded.close();
   },
+);
+
+test(
+  "SqliteVectorStore serializes updateMetadata persistence writes to prevent lost updates",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const storage = new ControlledBinaryStorage();
+    const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
+
+    // Seed one record. Pre-release the initial save so it completes immediately.
+    storage.release(1);
+    await store.upsert([{ id: "a", vector: [1, 0], metadata: { workbookId: "wb", tag: "v1" } }]);
+
+    const p1 = store.updateMetadata([{ id: "a", metadata: { workbookId: "wb", tag: "v2" } }]);
+    await storage.waitForSaves(2);
+    const p2 = store.upsert([{ id: "b", vector: [0, 1], metadata: { workbookId: "wb" } }]);
+
+    storage.release(3);
+    for (let i = 0; i < 25 && storage.saveCount < 3; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.resolve();
+    }
+    storage.release(2);
+
+    await Promise.all([p1, p2]);
+    storage.releaseAll();
+
+    const reloaded = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: false });
+    const recA = await reloaded.get("a");
+    assert.ok(recA);
+    assert.equal(recA.metadata.tag, "v2");
+    assert.ok(await reloaded.get("b"));
+
+    await store.close();
+    await reloaded.close();
+  }
 );
 
 test(
