@@ -5,8 +5,8 @@ import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
 import { cosineSimilarity, normalizeL2 } from "../src/store/vectorMath.js";
 
 /**
- * Baseline implementation that mirrors the previous `InMemoryVectorStore.query` behavior:
- * score everything, full sort descending, then slice.
+ * Baseline implementation that mirrors `InMemoryVectorStore.query` behavior:
+ * score everything, full sort descending (tie-break by id asc), then slice.
  *
  * @param {InMemoryVectorStore} store
  * @param {ArrayLike<number>} vector
@@ -26,17 +26,23 @@ async function baselineQuery(store, vector, topK, opts) {
     const score = cosineSimilarity(q, rec.vector);
     scored.push({ id: rec.id, score, metadata: rec.metadata });
   }
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) => {
+    const scoreCmp = b.score - a.score;
+    if (scoreCmp !== 0) return scoreCmp;
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
   return scored.slice(0, topK);
 }
 
-test("InMemoryVectorStore.query matches previous full-sort behavior (stable ties, filters)", async () => {
+test("InMemoryVectorStore.query matches baseline full-sort behavior (deterministic ties, filters)", async () => {
   const store = new InMemoryVectorStore({ dimension: 3 });
   await store.upsert([
-    { id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb1", tag: "keep" } },
     { id: "b", vector: [1, 0, 0], metadata: { workbookId: "wb1", tag: "keep" } },
-    { id: "c", vector: [0, 1, 0], metadata: { workbookId: "wb1", tag: "keep" } },
+    { id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb1", tag: "keep" } },
     { id: "d", vector: [0, 1, 0], metadata: { workbookId: "wb1", tag: "keep" } },
+    { id: "c", vector: [0, 1, 0], metadata: { workbookId: "wb1", tag: "keep" } },
     { id: "e", vector: [1, 1, 0], metadata: { workbookId: "wb1", tag: "keep" } },
     { id: "f", vector: [1, 0, 0], metadata: { workbookId: "wb2", tag: "other" } },
     { id: "g", vector: [1, 0, 0], metadata: { workbookId: "wb1", tag: "filtered" } },
@@ -47,7 +53,7 @@ test("InMemoryVectorStore.query matches previous full-sort behavior (stable ties
     const expected = await baselineQuery(store, [1, 0, 0], 1, opts);
     const actual = await store.query([1, 0, 0], 1, opts);
     assert.deepStrictEqual(actual, expected);
-    // Explicitly exercise stable tie handling at the cutoff: "a" should win over "b"/"g".
+    // Explicitly exercise deterministic tie handling at the cutoff: "a" should win over "b"/"g".
     assert.equal(actual[0]?.id, "a");
   }
 
