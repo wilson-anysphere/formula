@@ -16,7 +16,9 @@ archives**. They are OLE/CFB (Compound File Binary) containers with `EncryptionI
 The ZIP/OPC round-trip harness (`crates/xlsx-diff`) enumerates its corpus via
 `xlsx-diff::collect_fixture_paths(fixtures/xlsx/...)` and then opens each file as a ZIP archive.
 Putting encrypted OOXML fixtures under `fixtures/xlsx/` would cause those round-trip tests to fail
-during ZIP parsing.
+during ZIP parsing. If you *do* need encrypted fixtures under `fixtures/xlsx/` (for example to pair
+an encrypted file with its decrypted plaintext for end-to-end tests), they must live under
+`fixtures/xlsx/encrypted/` which is explicitly skipped by `xlsx-diff::collect_fixture_paths`.
 
 ## Layout
 

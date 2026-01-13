@@ -25,7 +25,8 @@ Encrypted workbook fixtures live under:
 
 - `fixtures/encrypted/` (see `fixtures/encrypted/README.md`; includes real-world encrypted `.xlsx`/`.xlsb`/`.xls` samples used by end-to-end tests)
 - `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md`; vendored encrypted `.xlsx`/`.xlsm` corpus including Agile + Standard fixtures, empty-password + Unicode-password samples, macro-enabled `.xlsm` fixtures, plus `*-large.xlsx` multi-segment variants)
-- `fixtures/xlsx/encrypted/` (optional/legacy; encrypted OOXML samples co-located with this corpus, but **intentionally skipped** by `xlsx-diff::collect_fixture_paths`)
+- `fixtures/xlsx/encrypted/` – end-to-end fixtures paired with a plaintext `.xlsx` (explicitly
+  skipped by `xlsx-diff::collect_fixture_paths`)
 
 For background on how Excel encryption works (and how it differs from workbook/worksheet
 protection), see `docs/21-encrypted-workbooks.md`.

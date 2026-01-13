@@ -1485,7 +1485,6 @@ pub fn open_workbook_model_with_password(
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
-
     // If no password was provided, preserve the existing open path for non-encrypted files.
     //
     // For legacy `.xls` BIFF encryption (FILEPASS), provide a more actionable error: callers using
@@ -2315,6 +2314,7 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     Ok(Some(decrypted))
 }
 
+
 fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookFormat> {
     let archive = zip::ZipArchive::new(std::io::Cursor::new(decrypted_bytes)).ok()?;
 
@@ -2355,7 +2355,6 @@ fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookForma
     }
     None
 }
-
 fn zip_contains_workbook_bin(package_bytes: &[u8]) -> bool {
     matches!(
         sniff_ooxml_zip_workbook_kind(package_bytes),

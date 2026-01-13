@@ -694,7 +694,7 @@ When implementing (or calling) encrypted-workbook support:
   - `fixtures/encrypted/ooxml/plaintext.xlsx` (unencrypted ZIP/OPC workbook used as the known-good plaintext)
   - `fixtures/encrypted/ooxml/plaintext-excel.xlsx` (unencrypted ZIP/OPC workbook produced by Microsoft Excel; used to exercise additional real-world ZIP/part variations)
   - `fixtures/encrypted/ooxml/plaintext-large.xlsx` (unencrypted ZIP/OPC workbook used to exercise multi-segment decryption; intentionally > 4096 bytes)
-  - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4)
+  - `fixtures/encrypted/ooxml/agile.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext.xlsx`)
   - `fixtures/encrypted/ooxml/agile-large.xlsx` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-large.xlsx`)
   - `fixtures/encrypted/ooxml/standard.xlsx` (Standard encryption; `EncryptionInfo` 3.2)
   - `fixtures/encrypted/ooxml/standard-4.2.xlsx` (Standard encryption; `EncryptionInfo` 4.2)
@@ -708,7 +708,7 @@ When implementing (or calling) encrypted-workbook support:
   - `fixtures/encrypted/ooxml/basic-password.xlsm` (Agile encryption; `EncryptionInfo` 4.4; password `password`; macro-enabled workbook)
   - `fixtures/encrypted/ooxml/agile-basic.xlsm` (Agile encryption; `EncryptionInfo` 4.4; decrypts to `plaintext-basic.xlsm`)
   - `fixtures/encrypted/ooxml/standard-basic.xlsm` (Standard encryption; `EncryptionInfo` 3.2; decrypts to `plaintext-basic.xlsm`)
-  See `fixtures/encrypted/ooxml/README.md` for more fixture details.
+  See `fixtures/encrypted/ooxml/README.md` for passwords, provenance, and more fixture details.
   These files are OLE/CFB wrappers (not ZIP/OPC), so they must not live under `fixtures/xlsx/`
   where the round-trip corpus is enumerated via `xlsx-diff::collect_fixture_paths`.
 - Additional “real-world” encrypted workbook fixtures (including encrypted `.xlsb` and legacy
@@ -719,13 +719,18 @@ When implementing (or calling) encrypted-workbook support:
     exercises RC4 CryptoAPI legacy FILEPASS layout + 1024-byte rekey boundary behavior).
 - Encryption-focused tests reference these fixtures explicitly (they are not part of the ZIP/OPC
   round-trip corpus). See `fixtures/encrypted/ooxml/README.md` for the canonical list, passwords,
-  provenance, and test references.
-- `crates/formula-io/tests/encrypted_ooxml.rs` (and `encrypted_ooxml_fixtures.rs`) asserts that
-  opening these fixtures without a password surfaces an error mentioning
-  encryption/password protection (guards the “password required” UX path).
-- End-to-end decryption (including empty-password, Unicode-password, macro-enabled `.xlsm`, and multi-segment coverage) is exercised by
-  `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` and
-  `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`.
+  provenance, and test references. For example:
+  - `crates/formula-io/tests/encrypted_ooxml.rs` (and `encrypted_ooxml_fixtures.rs`) asserts that
+    opening these fixtures without a password surfaces an error mentioning
+    encryption/password protection (guards the “password required” UX path).
+  - End-to-end decryption (including empty-password, Unicode-password, macro-enabled `.xlsm`, and
+    multi-segment coverage) is exercised by `crates/formula-io/tests/encrypted_ooxml_decrypt.rs` and
+    `crates/formula-xlsx/tests/encrypted_ooxml_decrypt.rs`.
+
+- End-to-end encrypted-workbook fixtures that pair an encrypted file with its decrypted plaintext
+  (and therefore need a stable known password) can live under `fixtures/xlsx/encrypted/`. The
+  `xlsx-diff::collect_fixture_paths` helper explicitly skips that subdirectory so round-trip tests
+  do not try to open OLE/CFB containers as ZIP archives.
 - Some encryption coverage is exercised with **synthetic** containers generated directly in tests
   (for example `crates/formula-io/tests/encrypted_xls.rs`, plus a synthetic encrypted OOXML wrapper
   in `crates/formula-io/tests/encrypted_ooxml.rs`).

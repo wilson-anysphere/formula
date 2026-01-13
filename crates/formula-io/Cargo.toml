@@ -35,8 +35,8 @@ formula-columnar = { path = "../formula-columnar", optional = true, features = [
 formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
-formula-offcrypto = { path = "../formula-offcrypto" }
 formula-office-crypto = { path = "../formula-office-crypto", optional = true }
+formula-offcrypto = { path = "../formula-offcrypto" }
 # Disable `formula-xlsx` default features so `formula-io` stays lightweight by
 # default. Consumers that need `formula_xlsx::vba` can opt in via the
 # `formula-io/vba` feature.

@@ -1483,7 +1483,6 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
     let key_data_block_size = key_data_block_size.ok_or(OffcryptoError::InvalidEncryptionInfo {
         context: "missing <keyData> element",
     })?;
-
     // If no password key encryptor is present at all, return a targeted error instead of a generic
     // "missing password <encryptedKey>" message.
     if spin_count.is_none() && !saw_password_key_encryptor {

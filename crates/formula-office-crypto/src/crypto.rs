@@ -624,7 +624,7 @@ impl StandardKeyDeriver {
             StandardKeyDerivation::Rc4 => {
                 if self.key_bytes > h.len() {
                     return Err(OfficeCryptoError::UnsupportedEncryption(format!(
-                        "requested RC4 key length {} exceeds hash output length {}",
+                        "requested key length {} exceeds hash output length {}",
                         self.key_bytes,
                         h.len()
                     )));

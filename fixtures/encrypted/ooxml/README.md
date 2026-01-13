@@ -21,6 +21,10 @@ Note: this directory currently vendors encrypted `.xlsx`/`.xlsm` samples only. F
 - `agile-basic.xlsm` / `standard-basic.xlsm`: `password`
 - `basic-password.xlsm`: `password`
 
+End-to-end fixtures that pair an encrypted file with its decrypted plaintext (and thus need a
+stable known password) can live under `fixtures/xlsx/encrypted/`, which is explicitly skipped by
+`xlsx-diff::collect_fixture_paths`.
+
 ## Fixtures
 
 - `plaintext.xlsx` – unencrypted ZIP-based workbook (starts with `PK`).

@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 // Fixtures in `tests/fixtures/` are copied from the MIT-licensed `nolze/msoffcrypto-tool` repo:
 // https://github.com/nolze/msoffcrypto-tool
 //
@@ -112,7 +114,7 @@ fn supports_encryptioninfo_with_leading_slash_stream_name() {
         .expect("create /EncryptionInfo")
         .write_all(&encryption_info)
         .expect("write /EncryptionInfo");
-
+ 
     let err = decrypt_standard_ooxml_from_bytes(ole.into_inner().into_inner(), "pw").unwrap_err();
     assert!(
         matches!(
