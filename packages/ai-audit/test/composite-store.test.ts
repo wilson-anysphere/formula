@@ -1,22 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { CompositeAIAuditStore } from "../src/composite-store.js";
+import { FailingAIAuditStore } from "../src/failing-store.js";
 import { MemoryAIAuditStore } from "../src/memory-store.js";
 import type { AIAuditEntry } from "../src/types.js";
-import type { AIAuditStore } from "../src/store.js";
-
-class ThrowingAIAuditStore implements AIAuditStore {
-  calls = 0;
-
-  async logEntry(_entry: AIAuditEntry): Promise<void> {
-    this.calls += 1;
-    throw new Error("boom");
-  }
-
-  async listEntries(): Promise<AIAuditEntry[]> {
-    return [];
-  }
-}
 
 describe("CompositeAIAuditStore", () => {
   const entry: AIAuditEntry = {
@@ -45,14 +32,14 @@ describe("CompositeAIAuditStore", () => {
 
   it("best_effort mode swallows individual failures when at least one store succeeds", async () => {
     const okStore = new MemoryAIAuditStore();
-    const badStore = new ThrowingAIAuditStore();
+    const badStore = new FailingAIAuditStore(new Error("boom"));
+    const logSpy = vi.spyOn(badStore, "logEntry");
     const composite = new CompositeAIAuditStore([badStore, okStore]);
 
     await expect(composite.logEntry(entry)).resolves.toBeUndefined();
-    expect(badStore.calls).toBe(1);
+    expect(logSpy).toHaveBeenCalledTimes(1);
 
     const okEntries = await okStore.listEntries({ session_id: "session-1" });
     expect(okEntries.map((e) => e.id)).toEqual(["entry-1"]);
   });
 });
-
