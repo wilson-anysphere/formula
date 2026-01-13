@@ -43,6 +43,26 @@ const FUNCTION_NAMES: string[] = (() => {
 
 const FUNCTION_NAMES_UPPER = new Set(FUNCTION_NAMES.map((name) => name.toUpperCase()));
 
+const DEFAULT_ARG_SEPARATOR = (() => {
+  const locale = (() => {
+    try {
+      const nav = (globalThis as any).navigator;
+      const lang = typeof nav?.language === "string" ? nav.language : "";
+      return lang || "en-US";
+    } catch {
+      return "en-US";
+    }
+  })();
+
+  try {
+    const parts = new Intl.NumberFormat(locale).formatToParts(1.1);
+    const decimal = parts.find((p) => p.type === "decimal")?.value ?? ".";
+    return decimal === "," ? "; " : ", ";
+  } catch {
+    return ", ";
+  }
+})();
+
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
@@ -142,7 +162,7 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
 function signaturePreview(name: string): string {
   const sig = getFunctionSignature(name);
   if (!sig) return `${name}(…)`;
-  return signatureParts(sig, null)
+  return signatureParts(sig, null, { argSeparator: DEFAULT_ARG_SEPARATOR })
     .map((p) => p.text)
     .join("");
 }
