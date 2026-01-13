@@ -19,6 +19,29 @@ export type FormulaToken = {
   end: number;
 };
 
+function codePointAt(str: string, index: number): { ch: string; nextIndex: number } | null {
+  if (index < 0 || index >= str.length) return null;
+  const cp = str.codePointAt(index);
+  if (cp == null) return null;
+  return { ch: String.fromCodePoint(cp), nextIndex: index + (cp > 0xffff ? 2 : 1) };
+}
+
+function prevCodePointAt(str: string, index: number): { ch: string; startIndex: number } | null {
+  if (index <= 0 || index > str.length) return null;
+  let i = index - 1;
+
+  // If we're at the second code unit of a surrogate pair, step back to the high surrogate.
+  const codeUnit = str.charCodeAt(i);
+  if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff && i - 1 >= 0) {
+    const prev = str.charCodeAt(i - 1);
+    if (prev >= 0xd800 && prev <= 0xdbff) i -= 1;
+  }
+
+  const cp = str.codePointAt(i);
+  if (cp == null) return null;
+  return { ch: String.fromCodePoint(cp), startIndex: i };
+}
+
 function isWhitespace(ch: string): boolean {
   return ch === " " || ch === "\t" || ch === "\n" || ch === "\r";
 }
@@ -208,20 +231,40 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
   // at a natural boundary. This avoids incorrectly highlighting the tail of an
   // invalid unquoted sheet name that contains spaces (e.g. `My Sheet!A1` should
   // not be tokenized as `Sheet!A1`).
-  let prev = start - 1;
-  while (prev >= 0 && isWhitespace(input[prev] ?? "")) prev -= 1;
-  if (prev >= 0 && isIdentifierPart(input[prev] ?? "")) return null;
+  let scan = start;
+  while (true) {
+    const prev = prevCodePointAt(input, scan);
+    if (!prev) break;
+    if (isWhitespace(prev.ch)) {
+      scan = prev.startIndex;
+      continue;
+    }
+    if (isIdentifierPart(prev.ch)) return null;
+    break;
+  }
 
-  if (input[start] === "[") {
+  const first = codePointAt(input, start);
+  if (!first) return null;
+
+  if (first.ch === "[") {
     // External workbook prefix: `[Book1.xlsx]Sheet1!A1`
-    let i = start + 1;
+    let i = first.nextIndex;
     while (i < input.length && input[i] !== "]") i += 1;
     if (i >= input.length || input[i] !== "]") return null;
     i += 1;
-    if (!isIdentifierStart(input[i] ?? "")) return null;
+    const sheetStart = codePointAt(input, i);
+    if (!sheetStart || !isIdentifierStart(sheetStart.ch)) return null;
 
-    let j = i + 1;
-    while (j < input.length && (isIdentifierPart(input[j] ?? "") || input[j] === ":")) j += 1;
+    let j = sheetStart.nextIndex;
+    while (j < input.length) {
+      const next = codePointAt(input, j);
+      if (!next) break;
+      if (next.ch === ":" || isIdentifierPart(next.ch)) {
+        j = next.nextIndex;
+        continue;
+      }
+      break;
+    }
     if (input[j] === "!") {
       const sheetSpec = input.slice(i, j);
       const sheetNames = sheetSpec.split(":");
@@ -240,10 +283,18 @@ function tryReadSheetPrefix(input: string, start: number): { text: string; end: 
     return null;
   }
 
-  if (!isIdentifierStart(input[start] ?? "")) return null;
+  if (!isIdentifierStart(first.ch)) return null;
 
-  let i = start + 1;
-  while (i < input.length && (isIdentifierPart(input[i] ?? "") || input[i] === ":")) i += 1;
+  let i = first.nextIndex;
+  while (i < input.length) {
+    const next = codePointAt(input, i);
+    if (!next) break;
+    if (next.ch === ":" || isIdentifierPart(next.ch)) {
+      i = next.nextIndex;
+      continue;
+    }
+    break;
+  }
   if (input[i] === "!") {
     const sheetSpec = input.slice(start, i);
     const sheetNames = sheetSpec.split(":");
@@ -314,10 +365,17 @@ function tryReadReference(input: string, start: number): { text: string; end: nu
 }
 
 function tryReadStructuredReference(input: string, start: number): { text: string; end: number } | null {
-  if (!isIdentifierStart(input[start] ?? "")) return null;
+  const first = codePointAt(input, start);
+  if (!first) return null;
+  if (!isIdentifierStart(first.ch)) return null;
 
-  let i = start + 1;
-  while (i < input.length && isIdentifierPart(input[i] ?? "")) i += 1;
+  let i = first.nextIndex;
+  while (i < input.length) {
+    const next = codePointAt(input, i);
+    if (!next) break;
+    if (!isIdentifierPart(next.ch)) break;
+    i = next.nextIndex;
+  }
   if (input[i] !== "[") return null;
 
   // Bracket matching: structured references can contain nested brackets (e.g.
@@ -348,7 +406,9 @@ export function tokenizeFormula(input: string): FormulaToken[] {
   let i = 0;
 
   while (i < input.length) {
-    const ch = input[i] ?? "";
+    const cp = codePointAt(input, i);
+    const ch = cp?.ch ?? "";
+    const nextIndex = cp?.nextIndex ?? i + 1;
 
     if (isWhitespace(ch)) {
       const start = i;
@@ -378,8 +438,8 @@ export function tokenizeFormula(input: string): FormulaToken[] {
           prev.type === "function" ||
           (prev.type === "punctuation" && (prev.text === ")" || prev.text === "]")));
       if (isPostfixSpill) {
-        tokens.push({ type: "operator", text: "#", start: i, end: i + 1 });
-        i += 1;
+        tokens.push({ type: "operator", text: "#", start: i, end: nextIndex });
+        i = nextIndex;
         continue;
       }
 
@@ -391,8 +451,8 @@ export function tokenizeFormula(input: string): FormulaToken[] {
       }
 
       // Standalone `#` (or followed by whitespace) is still a spill operator.
-      tokens.push({ type: "operator", text: "#", start: i, end: i + 1 });
-      i += 1;
+      tokens.push({ type: "operator", text: "#", start: i, end: nextIndex });
+      i = nextIndex;
       continue;
     }
 
@@ -415,7 +475,7 @@ export function tokenizeFormula(input: string): FormulaToken[] {
       }
       return null;
     })();
-    const possibleSheetPrefix = input[i] !== "'" && precededByWhitespace ? tryReadSheetPrefix(input, i) : null;
+    const possibleSheetPrefix = ch !== "'" && precededByWhitespace ? tryReadSheetPrefix(input, i) : null;
 
     if (!(possibleSheetPrefix && prevNonWhitespace?.type === "identifier")) {
       const ref = tryReadReference(input, i);
@@ -435,8 +495,13 @@ export function tokenizeFormula(input: string): FormulaToken[] {
 
     if (isIdentifierStart(ch)) {
       const start = i;
-      i += 1;
-      while (i < input.length && isIdentifierPart(input[i] ?? "")) i += 1;
+      i = nextIndex;
+      while (i < input.length) {
+        const next = codePointAt(input, i);
+        if (!next) break;
+        if (!isIdentifierPart(next.ch)) break;
+        i = next.nextIndex;
+      }
       const ident = input.slice(start, i);
       if (input[i] === "(") {
         tokens.push({ type: "function", text: ident, start, end: i });
@@ -454,19 +519,19 @@ export function tokenizeFormula(input: string): FormulaToken[] {
     }
 
     if ("+-*/^&=><%@".includes(ch)) {
-      tokens.push({ type: "operator", text: ch, start: i, end: i + 1 });
-      i += 1;
+      tokens.push({ type: "operator", text: ch, start: i, end: nextIndex });
+      i = nextIndex;
       continue;
     }
 
     if ("(),;:[]{}.!".includes(ch)) {
-      tokens.push({ type: "punctuation", text: ch, start: i, end: i + 1 });
-      i += 1;
+      tokens.push({ type: "punctuation", text: ch, start: i, end: nextIndex });
+      i = nextIndex;
       continue;
     }
 
-    tokens.push({ type: "unknown", text: ch, start: i, end: i + 1 });
-    i += 1;
+    tokens.push({ type: "unknown", text: ch, start: i, end: nextIndex });
+    i = nextIndex;
   }
 
   return tokens;

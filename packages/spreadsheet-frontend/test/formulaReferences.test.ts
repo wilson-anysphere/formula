@@ -47,6 +47,15 @@ describe("extractFormulaReferences", () => {
     expect(references[1]?.range).toEqual({ sheet: "数据", startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
   });
 
+  it("parses unquoted non-BMP Unicode sheet-qualified references", () => {
+    const { references } = extractFormulaReferences("=𝔘!A1+𐐷!B2", 0, 0);
+    expect(references).toHaveLength(2);
+    expect(references[0]?.text).toBe("𝔘!A1");
+    expect(references[0]?.range).toEqual({ sheet: "𝔘", startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
+    expect(references[1]?.text).toBe("𐐷!B2");
+    expect(references[1]?.range).toEqual({ sheet: "𐐷", startRow: 1, startCol: 1, endRow: 1, endCol: 1 });
+  });
+
   it("does not treat invalid unquoted sheet names with spaces as sheet-qualified references", () => {
     const { references } = extractFormulaReferences("=My Sheet!A1", 0, 0);
     expect(references).toHaveLength(1);
