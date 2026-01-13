@@ -1004,6 +1004,12 @@ variables in **Settings → Secrets and variables → Actions → Variables**:
    python scripts/desktop_bundle_size_report.py
    ```
 
+   For a machine-readable report (useful for CI debugging):
+
+   ```bash
+   python scripts/desktop_bundle_size_report.py --json target/desktop-bundle-size-report.json
+   ```
+
 3. (Optional) enforce the budget locally:
 
     ```bash
