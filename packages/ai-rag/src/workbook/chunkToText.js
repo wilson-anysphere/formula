@@ -1,4 +1,7 @@
-import { rectToA1 } from "./rect.js";
+import { cellToA1, rectToA1 } from "./rect.js";
+
+const DEFAULT_MAX_COLUMNS_FOR_SCHEMA = 20;
+const DEFAULT_MAX_COLUMNS_FOR_ROWS = 20;
 
 function formatScalar(value) {
   if (value == null) return "";
@@ -14,6 +17,16 @@ function formatScalar(value) {
   }
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   return String(value);
+}
+
+/**
+ * @param {number} total
+ * @param {number} shown
+ */
+function formatExtraColumns(total, shown) {
+  const extra = total - shown;
+  if (extra <= 0) return null;
+  return `… (+${extra} more columns)`;
 }
 
 /**
@@ -73,10 +86,12 @@ function countFormulas(cells) {
  * for RAG embedding and LLM context injection.
  *
  * @param {import('./workbookTypes').WorkbookChunk} chunk
- * @param {{ sampleRows?: number }} [opts]
+ * @param {{ sampleRows?: number, maxColumnsForSchema?: number, maxColumnsForRows?: number }} [opts]
  */
 export function chunkToText(chunk, opts) {
   const sampleRows = opts?.sampleRows ?? 5;
+  const maxColumnsForSchema = opts?.maxColumnsForSchema ?? DEFAULT_MAX_COLUMNS_FOR_SCHEMA;
+  const maxColumnsForRows = opts?.maxColumnsForRows ?? DEFAULT_MAX_COLUMNS_FOR_ROWS;
   const rectA1 = rectToA1(chunk.rect);
   const cells = chunk.cells || [];
   const headerRow = inferHeaderRow(cells);
@@ -97,19 +112,37 @@ export function chunkToText(chunk, opts) {
     );
   }
 
-  if (headerRow === 0 && sampledColCount > 0) {
-    const headers = [];
-    const types = [];
-    for (let c = 0; c < sampledColCount; c += 1) {
-      const h = formatScalar(cells[0][c]?.v) || `Column${c + 1}`;
-      headers.push(h);
-      types.push(inferColumnType(cells, c, 0));
+  const schemaColCount = Math.max(0, Math.min(sampledColCount, maxColumnsForSchema));
+  const rowColCount = Math.max(0, Math.min(sampledColCount, maxColumnsForRows));
+  const headerNames =
+    headerRow === 0
+      ? Array.from({ length: Math.max(schemaColCount, rowColCount) }, (_, c) => {
+          const h = formatScalar(cells[0]?.[c]?.v);
+          return h || `Column${c + 1}`;
+        })
+      : null;
+
+  if (sampledColCount > 0) {
+    if (headerRow === 0) {
+      const headers = [];
+      const types = [];
+      for (let c = 0; c < schemaColCount; c += 1) {
+        headers.push(headerNames?.[c] ?? `Column${c + 1}`);
+        types.push(inferColumnType(cells, c, 0));
+      }
+      const extra = formatExtraColumns(sampledColCount, schemaColCount);
+      if (extra) headers.push(extra);
+      lines.push(`COLUMNS: ${headers.map((h, i) => (types[i] ? `${h} (${types[i]})` : h)).join(" | ")}`);
+    } else {
+      const parts = [];
+      for (let c = 0; c < schemaColCount; c += 1) {
+        const type = inferColumnType(cells, c, -1);
+        parts.push(`Column${c + 1} (${type})`);
+      }
+      const extra = formatExtraColumns(sampledColCount, schemaColCount);
+      if (extra) parts.push(extra);
+      lines.push(`COLUMNS: ${parts.join(" | ")}`);
     }
-    lines.push(`COLUMNS: ${headers.map((h, i) => `${h} (${types[i]})`).join(" | ")}`);
-  } else if (sampledColCount > 0) {
-    const types = [];
-    for (let c = 0; c < sampledColCount; c += 1) types.push(inferColumnType(cells, c, -1));
-    lines.push(`COLUMNS: ${types.map((t, i) => `Column${i + 1} (${t})`).join(" | ")}`);
   }
 
   if (chunk.kind === "formulaRegion") {
@@ -118,7 +151,8 @@ export function chunkToText(chunk, opts) {
       for (let c = 0; c < (cells[r]?.length ?? 0) && formulas.length < 12; c += 1) {
         const f = cells[r][c]?.f;
         if (!f) continue;
-        formulas.push(String(f).replace(/\s+/g, " ").trim());
+        const addr = cellToA1(chunk.rect.r0 + r, chunk.rect.c0 + c);
+        formulas.push(`${addr}:${String(f).replace(/\s+/g, " ").trim()}`);
       }
     }
     if (formulas.length) lines.push(`FORMULAS: ${formulas.join(" | ")}`);
@@ -127,11 +161,24 @@ export function chunkToText(chunk, opts) {
     const rows = [];
     for (let r = startRow; r < Math.min(sampledRowCount, startRow + sampleRows); r += 1) {
       const row = [];
-      for (let c = 0; c < sampledColCount; c += 1) {
+      for (let c = 0; c < rowColCount; c += 1) {
         const cell = cells[r][c] || {};
-        if (cell.f) row.push(formatScalar(cell.f));
-        else row.push(formatScalar(cell.v));
+        if (headerNames) {
+          const header = headerNames[c] || `Column${c + 1}`;
+          if (cell.f) {
+            const formula = formatScalar(cell.f);
+            const value = formatScalar(cell.v);
+            row.push(`${header}(${formula})=${value}`);
+          } else {
+            row.push(`${header}=${formatScalar(cell.v)}`);
+          }
+        } else {
+          if (cell.f) row.push(formatScalar(cell.f));
+          else row.push(formatScalar(cell.v));
+        }
       }
+      const extra = formatExtraColumns(sampledColCount, rowColCount);
+      if (extra) row.push(extra);
       rows.push(row.join(" | "));
     }
     if (rows.length) {

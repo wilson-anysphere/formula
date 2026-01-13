@@ -19,11 +19,14 @@ export function rectIntersectionArea(a, b) {
 }
 
 /**
- * @param {{ r0: number, c0: number, r1: number, c1: number }} rect
+ * Convert a zero-based (row, col) coordinate to an A1 cell address.
+ *
+ * @param {number} row0
+ * @param {number} col0
  */
-export function rectToA1(rect) {
-  function colToLetters(col0) {
-    let col = col0 + 1;
+export function cellToA1(row0, col0) {
+  function colToLetters(colIdx0) {
+    let col = colIdx0 + 1;
     let s = "";
     while (col > 0) {
       const mod = (col - 1) % 26;
@@ -33,7 +36,14 @@ export function rectToA1(rect) {
     return s;
   }
 
-  const a = `${colToLetters(rect.c0)}${rect.r0 + 1}`;
-  const b = `${colToLetters(rect.c1)}${rect.r1 + 1}`;
+  return `${colToLetters(col0)}${row0 + 1}`;
+}
+
+/**
+ * @param {{ r0: number, c0: number, r1: number, c1: number }} rect
+ */
+export function rectToA1(rect) {
+  const a = cellToA1(rect.r0, rect.c0);
+  const b = cellToA1(rect.r1, rect.c1);
   return a === b ? a : `${a}:${b}`;
 }
