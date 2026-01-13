@@ -44,6 +44,7 @@ die() {
   # job logs into the group.
   if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then
     echo "::endgroup::" >&2
+    CHECK_APPIMAGE_GROUP_OPEN=0
   fi
   echo "::error::check-appimage: $*" >&2
   exit 1
@@ -299,6 +300,7 @@ main() {
   require_cmd file
   require_cmd readelf
   require_cmd ldd
+  require_cmd realpath
 
   mapfile -t appimages < <(find_appimages)
   if [ "${#appimages[@]}" -eq 0 ]; then
@@ -337,13 +339,21 @@ main() {
 
     tmp="$(mktemp -d)"
     # shellcheck disable=SC2064
-    trap "rm -rf '$tmp'" EXIT
+    trap 'rm -rf "$tmp"; if [[ "${CHECK_APPIMAGE_GROUP_OPEN:-0}" -eq 1 ]]; then echo "::endgroup::"; fi' EXIT
 
-    (
-      cd "$tmp"
-      # Extract (no FUSE required). This will create ./squashfs-root
-      "$appimage_abs" --appimage-extract >/dev/null
-    )
+    # Extract (no FUSE required). This will create ./squashfs-root.
+    #
+    # Capture output so failures surface clearly in CI logs without spamming on success.
+    set +e
+    extract_out="$(
+      cd "$tmp" && "$appimage_abs" --appimage-extract 2>&1
+    )"
+    extract_status=$?
+    set -e
+    if [[ "$extract_status" -ne 0 ]]; then
+      echo "$extract_out"
+      die "failed to extract AppImage via --appimage-extract (status $extract_status)"
+    fi
 
     squashfs_root="$tmp/squashfs-root"
     if [ ! -d "$squashfs_root" ]; then
