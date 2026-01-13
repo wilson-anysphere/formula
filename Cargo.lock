@@ -2399,6 +2399,7 @@ dependencies = [
  "formula-vba",
  "hmac",
  "insta",
+ "md-5",
  "ms-offcrypto-writer",
  "openssl",
  "pretty_assertions",

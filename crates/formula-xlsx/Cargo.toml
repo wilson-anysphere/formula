@@ -42,6 +42,7 @@ formula-fs = { path = "../formula-fs" }
 
 [dev-dependencies]
 ms-offcrypto-writer = "1.0.7"
+md-5 = "0.10"
 openssl = "0.10"
 pretty_assertions = "1"
 insta = "1.46"

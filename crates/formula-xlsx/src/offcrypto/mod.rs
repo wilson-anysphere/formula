@@ -58,6 +58,8 @@ mod encryption_info;
 mod error;
 mod ooxml;
 mod rc4;
+#[cfg(test)]
+mod standard_rc4;
 
 #[allow(unused_imports)]
 pub use aes_cbc::{
