@@ -244,4 +244,23 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].headers).toEqual(["Date", "Amount"]);
     expect(schema.tables[0].inferredColumnTypes).toEqual(["date", "number"]);
   });
+
+  it("respects AbortSignal", () => {
+    const workbook = {
+      id: "wb-abort",
+      sheets: [{ name: "Sheet1", cells: [["Header"], [1]] }],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
+    };
+
+    const abortController = new AbortController();
+    abortController.abort();
+
+    let error: unknown = null;
+    try {
+      extractWorkbookSchema(workbook, { signal: abortController.signal });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toMatchObject({ name: "AbortError" });
+  });
 });
