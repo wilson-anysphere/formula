@@ -2160,6 +2160,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
           }
         : null),
       "comments.addComment": isEditing || !canComment,
+      // Comment mutations should be disabled for viewers even if the UI surface
+      // is otherwise visible (e.g. the Review tab includes delete actions).
+      "review.comments.deleteComment": !canComment,
+      "review.comments.deleteComment.deleteThread": !canComment,
+      "review.comments.deleteComment.deleteAll": !canComment,
       ...(isReadOnly
         ? {
             // Editing clipboard actions are disabled in read-only mode.
