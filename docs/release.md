@@ -510,6 +510,9 @@ If you need an offline-friendly installer, change `bundle.windows.webviewInstall
 `fixedRuntime` (at the cost of a much larger installer: roughly **+127 MB** for `offlineInstaller` or **+180 MB** for
 `fixedRuntime`).
 
+Note: per the upstream Tauri docs/schema, the **Windows updater bundle** uses `downloadBootstrapper` for WebView2. Keep
+that in mind if you switch the installer mode and expect update payloads to include an offline/fixed runtime.
+
 For the full set of options, see the Tauri docs:
 https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options
 
