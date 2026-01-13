@@ -1152,6 +1152,11 @@ jobs:
               export XDG_CONFIG_HOME="${HOME}/.config"
               export XDG_DATA_HOME="${HOME}/.local/share"
               mkdir -p "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}"
+              if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+                export XDG_RUNTIME_DIR="${HOME}/.run"
+                mkdir -p "${XDG_RUNTIME_DIR}"
+                chmod 700 "${XDG_RUNTIME_DIR}"
+              fi
               # Run `timeout` *inside* the xvfb helper so the helper's EXIT trap can reliably
               # clean up the background Xvfb process even when the command times out.
               bash scripts/xvfb-run-safe.sh timeout 45s "${bin}" --cross-origin-isolation-check
