@@ -1320,12 +1320,27 @@ enum PageSetupScalingMode {
     FitTo,
 }
 
-/// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
-/// using percent scaling (`WSBOOL.fFitToPage=0`, `SETUP.iScale=85`).
-pub fn build_page_setup_percent_scaling_fixture_xls() -> Vec<u8> {
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Sheet1` with worksheet
+/// page setup records (WSBOOL + SETUP + margins) and manual page breaks (horizontal + vertical).
+///
+/// The sheet uses percent-based scaling (`WSBOOL.fFitToPage = 0`) and a non-default `SETUP.iScale`.
+pub fn build_page_setup_and_breaks_fixture_xls_percent_scaling() -> Vec<u8> {
+    build_page_setup_and_breaks_fixture_xls(PageSetupScalingMode::Percent)
+}
+
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Sheet1` with worksheet
+/// page setup records (WSBOOL + SETUP + margins) and manual page breaks (horizontal + vertical).
+///
+/// The sheet uses fit-to-page scaling (`WSBOOL.fFitToPage = 1`) and non-default `SETUP.iFitWidth`
+/// + `SETUP.iFitHeight` values.
+pub fn build_page_setup_and_breaks_fixture_xls_fit_to_scaling() -> Vec<u8> {
+    build_page_setup_and_breaks_fixture_xls(PageSetupScalingMode::FitTo)
+}
+
+fn build_page_setup_and_breaks_fixture_xls(mode: PageSetupScalingMode) -> Vec<u8> {
     // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
     // style XFs).
-    let sheet_stream = build_page_setup_fixture_sheet_stream(16, PageSetupScalingMode::Percent);
+    let sheet_stream = build_page_setup_fixture_sheet_stream(16, mode);
     let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
 
     let cursor = Cursor::new(Vec::new());
@@ -1362,22 +1377,15 @@ pub fn build_margins_without_setup_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
+/// using percent scaling (`WSBOOL.fFitToPage=0`, `SETUP.iScale=85`).
+pub fn build_page_setup_percent_scaling_fixture_xls() -> Vec<u8> {
+    build_page_setup_and_breaks_fixture_xls_percent_scaling()
+}
+
+/// Build a BIFF8 `.xls` fixture containing worksheet page setup + margins + manual page breaks,
 /// using fit-to scaling (`WSBOOL.fFitToPage=1`, `SETUP.iFitWidth=2`, `SETUP.iFitHeight=3`).
 pub fn build_page_setup_fit_to_scaling_fixture_xls() -> Vec<u8> {
-    // `build_single_sheet_workbook_stream` always emits a single cell XF at index 16 (after 16
-    // style XFs).
-    let sheet_stream = build_page_setup_fixture_sheet_stream(16, PageSetupScalingMode::FitTo);
-    let workbook_stream = build_single_sheet_workbook_stream("Sheet1", &sheet_stream, 1252);
-
-    let cursor = Cursor::new(Vec::new());
-    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-    {
-        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
-        stream
-            .write_all(&workbook_stream)
-            .expect("write Workbook stream");
-    }
-    ole.into_inner().into_inner()
+    build_page_setup_and_breaks_fixture_xls_fit_to_scaling()
 }
 
 /// Build a BIFF8 `.xls` fixture containing a worksheet `SETUP` record with a custom paper size
@@ -1904,6 +1912,10 @@ fn build_page_setup_scaling_sheet_stream(xf_general: u16, fit_to_page: bool) -> 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
+
+fn xnum(v: f64) -> [u8; 8] {
+    v.to_le_bytes()
+}
 fn setup_record(
     paper_size: u16,
     scale: u16,
@@ -1947,8 +1959,8 @@ fn setup_record_with_grbit(
     out.extend_from_slice(&grbit.to_le_bytes()); // grbit
     out.extend_from_slice(&600u16.to_le_bytes()); // iRes
     out.extend_from_slice(&600u16.to_le_bytes()); // iVRes
-    out.extend_from_slice(&header_margin.to_le_bytes()); // numHdr
-    out.extend_from_slice(&footer_margin.to_le_bytes()); // numFtr
+    out.extend_from_slice(&xnum(header_margin)); // numHdr
+    out.extend_from_slice(&xnum(footer_margin)); // numFtr
     out.extend_from_slice(&1u16.to_le_bytes()); // iCopies
     out
 }
@@ -1979,6 +1991,32 @@ fn build_page_setup_flags_sheet_stream(xf_cell: u16, setup: Vec<u8>) -> Vec<u8> 
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+fn horizontal_page_breaks(break_rows_below: &[(u16, u16, u16)]) -> Vec<u8> {
+    // HORIZONTALPAGEBREAKS record payload (BIFF8) [MS-XLS 2.4.122].
+    // [cbrk:u16][(rw:u16,colStart:u16,colEnd:u16)*]
+    let mut out = Vec::with_capacity(2 + 6 * break_rows_below.len());
+    out.extend_from_slice(&(break_rows_below.len() as u16).to_le_bytes());
+    for &(rw, col_start, col_end) in break_rows_below {
+        out.extend_from_slice(&rw.to_le_bytes());
+        out.extend_from_slice(&col_start.to_le_bytes());
+        out.extend_from_slice(&col_end.to_le_bytes());
+    }
+    out
+}
+
+fn vertical_page_breaks(break_cols_right: &[(u16, u16, u16)]) -> Vec<u8> {
+    // VERTICALPAGEBREAKS record payload (BIFF8) [MS-XLS 2.4.350].
+    // [cbrk:u16][(col:u16,rwStart:u16,rwEnd:u16)*]
+    let mut out = Vec::with_capacity(2 + 6 * break_cols_right.len());
+    out.extend_from_slice(&(break_cols_right.len() as u16).to_le_bytes());
+    for &(col, rw_start, rw_end) in break_cols_right {
+        out.extend_from_slice(&col.to_le_bytes());
+        out.extend_from_slice(&rw_start.to_le_bytes());
+        out.extend_from_slice(&rw_end.to_le_bytes());
+    }
+    out
 }
 
 fn hpagebreaks_record(breaks: &[u16]) -> Vec<u8> {

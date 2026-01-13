@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read, Write};
 use std::path::PathBuf;
 
-use formula_model::CellValue;
+use formula_model::{CellRef, CellValue};
 
 const PASSWORD: &str = "correct horse battery staple";
 const UNICODE_PASSWORD: &str = "pässwörd";
@@ -70,7 +70,10 @@ fn patch_filepass_cryptoapi_alg_id(workbook_stream: &mut [u8], new_alg_id: u32) 
             u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
         let data_start = offset + 4;
         let data_end = data_start + len;
-        assert!(data_end <= workbook_stream.len(), "truncated record while scanning");
+        assert!(
+            data_end <= workbook_stream.len(),
+            "truncated record while scanning"
+        );
 
         if record_id == RECORD_FILEPASS {
             // FILEPASS payload:
@@ -92,12 +95,8 @@ fn patch_filepass_cryptoapi_alg_id(workbook_stream: &mut [u8], new_alg_id: u32) 
                 "expected FILEPASS payload to contain CryptoAPI EncryptionInfo"
             );
 
-            let header_size = u32::from_le_bytes([
-                payload[16],
-                payload[17],
-                payload[18],
-                payload[19],
-            ]) as usize;
+            let header_size =
+                u32::from_le_bytes([payload[16], payload[17], payload[18], payload[19]]) as usize;
             let header_start = 20usize;
             assert!(
                 header_start + header_size <= payload.len(),
@@ -172,6 +171,30 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
     //
     // Without masking/ignoring `FILEPASS`, the workbook-globals parser stops at that record and
     // never sees `WINDOW1`, leaving `active_sheet_id` unset.
+    //
+    // In an encrypted workbook, XF/font/format records are located after FILEPASS and their
+    // payload bytes are encrypted. After decryption we still retain the FILEPASS record header,
+    // so we must mask it to allow BIFF parsing to continue and import the XF table.
+    let cell = sheet
+        .cell(CellRef::from_a1("A1").unwrap())
+        .expect("A1 cell exists");
+    assert_ne!(
+        cell.style_id,
+        0,
+        "expected BIFF-derived style id (styles_len={}, warnings={:?})",
+        result.workbook.styles.len(),
+        result.warnings
+    );
+
+    let style = result
+        .workbook
+        .styles
+        .get(cell.style_id)
+        .expect("style exists for A1");
+    assert!(
+        style.alignment.is_some(),
+        "expected at least one XF-derived alignment property to be imported"
+    );
     assert_eq!(
         result.workbook.view.active_sheet_id,
         Some(sheet.id),

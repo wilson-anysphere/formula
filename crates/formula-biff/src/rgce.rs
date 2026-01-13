@@ -1147,20 +1147,13 @@ fn decode_rgce_impl(
             }
             // PtgRefN: [row_off: i32][col_off: i16]
             0x2C | 0x4C | 0x6C => {
-                if rgce.len().saturating_sub(i) < 6 {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 6,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
                 let Some((base_row0, base_col0)) = base else {
                     return Err(DecodeRgceError::UnsupportedToken {
                         offset: ptg_offset,
                         ptg,
                     });
                 };
+
                 if rgce.len().saturating_sub(i) < 6 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
@@ -1190,20 +1183,13 @@ fn decode_rgce_impl(
             }
             // PtgAreaN: [rowFirst_off: i32][rowLast_off: i32][colFirst_off: i16][colLast_off: i16]
             0x2D | 0x4D | 0x6D => {
-                if rgce.len().saturating_sub(i) < 12 {
-                    return Err(DecodeRgceError::UnexpectedEof {
-                        offset: ptg_offset,
-                        ptg,
-                        needed: 12,
-                        remaining: rgce.len().saturating_sub(i),
-                    });
-                }
                 let Some((base_row0, base_col0)) = base else {
                     return Err(DecodeRgceError::UnsupportedToken {
                         offset: ptg_offset,
                         ptg,
                     });
                 };
+
                 if rgce.len().saturating_sub(i) < 12 {
                     return Err(DecodeRgceError::UnexpectedEof {
                         offset: ptg_offset,
@@ -1216,8 +1202,7 @@ fn decode_rgce_impl(
                 let row1_off =
                     i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
                 let row2_off =
-                    i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]])
-                        as i64;
+                    i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) as i64;
                 let col1_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
                 let col2_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
                 i += 12;

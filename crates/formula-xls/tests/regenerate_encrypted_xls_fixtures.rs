@@ -95,7 +95,10 @@ fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {
     // BIFF8 short XLUnicodeString: cch (u8) + flags (u8) + chars.
     // Use compressed (flags=0) for ASCII strings.
     let bytes = s.as_bytes();
-    assert!(bytes.len() <= u8::MAX as usize, "string too long for BIFF8 short string");
+    assert!(
+        bytes.len() <= u8::MAX as usize,
+        "string too long for BIFF8 short string"
+    );
     out.push(bytes.len() as u8);
     out.push(0); // flags: compressed ANSI
     out.extend_from_slice(bytes);
@@ -119,7 +122,12 @@ fn font(name: &str) -> Vec<u8> {
     out
 }
 
-fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool, alignment: u8) -> [u8; 20] {
+fn xf_record_with_alignment(
+    font_idx: u16,
+    fmt_idx: u16,
+    is_style_xf: bool,
+    alignment: u8,
+) -> [u8; 20] {
     let mut out = [0u8; 20];
     out[0..2].copy_from_slice(&font_idx.to_le_bytes());
     out[2..4].copy_from_slice(&fmt_idx.to_le_bytes());
@@ -147,6 +155,11 @@ fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool, alignment: u8) -> [
     out
 }
 
+fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 20] {
+    // Default BIFF8 alignment: General + Bottom.
+    xf_record_with_alignment(font_idx, fmt_idx, is_style_xf, 0x20)
+}
+
 fn number_cell(row: u16, col: u16, xf: u16, v: f64) -> [u8; 14] {
     let mut out = [0u8; 14];
     out[0..2].copy_from_slice(&row.to_le_bytes());
@@ -170,12 +183,12 @@ fn build_plain_biff8_workbook_stream(filepass_payload: &[u8], extra_sheet_payloa
 
     // XF table: keep the usual 16 style XFs so BIFF consumers stay happy.
     for _ in 0..16 {
-        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true, 0x20));
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
     }
     // Cell XF used by the sheet's NUMBER record. Make it non-default (vertical alignment = Top)
     // so the decrypt + BIFF parser tests can assert that XF metadata after FILEPASS was imported.
     let xf_cell: u16 = 16;
-    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false, 0x00));
+    push_record(&mut globals, RECORD_XF, &xf_record_with_alignment(0, 0, false, 0x00));
 
     // BoundSheet with placeholder offset.
     let boundsheet_start = globals.len();
@@ -476,14 +489,14 @@ fn build_filepass_cryptoapi_payload(password: &str) -> Vec<u8> {
     const CALG_SHA1: u32 = 0x0000_8004;
 
     let salt: [u8; 16] = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
-        0x1E, 0x1F,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+        0x1F,
     ];
 
     // Deterministic verifier bytes.
     let verifier_plain: [u8; 16] = [
-        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D,
-        0x1E, 0x0F,
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C, 0x2D, 0x1E,
+        0x0F,
     ];
     let verifier_hash_plain = sha1_bytes(&[&verifier_plain]);
 
@@ -666,9 +679,7 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
     let mut workbook_stream = build_plain_biff8_workbook_stream(&filepass_payload, 0);
     let mut offset = 0usize;
     let mut filepass_data_end = None::<usize>;
-    while let Some((record_id, payload, next)) =
-        super_read_record(&workbook_stream, offset)
-    {
+    while let Some((record_id, payload, next)) = super_read_record(&workbook_stream, offset) {
         if record_id == RECORD_FILEPASS {
             filepass_data_end = Some(offset + 4 + payload.len());
             break;
@@ -679,8 +690,8 @@ fn build_cryptoapi_encrypted_xls_bytes(password: &str) -> Vec<u8> {
         filepass_data_end.expect("generated workbook stream should contain FILEPASS");
 
     let salt = [
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
-        0x1E, 0x1F,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+        0x1F,
     ];
     let key_material = derive_cryptoapi_key_material(password, &salt);
     let mut cipher = PayloadRc4::new(key_material, 16);
