@@ -24,10 +24,10 @@ import {
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
 import { DrawingInteractionController, type DrawingInteractionCallbacks } from "../drawings/interaction";
+import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import { createDrawingObjectId, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
-import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -746,11 +746,22 @@ export class SpreadsheetApp {
   private gridCanvas: HTMLCanvasElement;
   private chartCanvas: HTMLCanvasElement;
   private drawingCanvas: HTMLCanvasElement;
+  private readonly drawingGeom: DrawingGridGeometry;
   private drawingOverlay: DrawingOverlay;
   private drawingInteractionController: DrawingInteractionController | null = null;
   private drawingInteractionCallbacks: DrawingInteractionCallbacks | null = null;
   private readonly drawingImages: ImageStore;
   private drawingObjectsCache: { sheetId: string; objects: DrawingObject[]; source: unknown } | null = null;
+  /**
+   * Cached drawing objects for the active sheet.
+   *
+   * This avoids recomputing/allocating draw-object lists on pointermove hover paths.
+   * `renderDrawings()` refreshes this list when the underlying drawing layer changes.
+   */
+  private drawingObjects: DrawingObject[] = [];
+  private drawingHitTestIndex: HitTestIndex | null = null;
+  private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
+  private selectedDrawingId: number | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
   private drawingViewportMemo:
     | {
@@ -813,17 +824,6 @@ export class SpreadsheetApp {
   // Scroll offsets in CSS pixels relative to the sheet data origin (A1 at 0,0).
   private scrollX = 0;
   private scrollY = 0;
-
-  /**
-   * Cached drawing objects for the active sheet.
-   *
-   * This avoids recomputing/allocating draw-object lists on pointermove hover paths.
-   * `renderDrawings()` refreshes this list when the underlying drawing layer changes.
-   */
-  private drawingObjects: DrawingObject[] = [];
-  private drawingHitTestIndex: HitTestIndex | null = null;
-  private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
-  private readonly drawingGeom: DrawingGridGeometry;
 
   private readonly cellWidth = 100;
   private readonly cellHeight = 24;
@@ -2143,6 +2143,17 @@ export class SpreadsheetApp {
       signal: this.domAbort.signal,
     });
 
+    // Drawings interactions also require capture-based hit testing because in shared-grid mode
+    // pointer events are handled by the full-size `selectionCanvas` (which includes headers)
+    // while drawings are rendered onto `drawingCanvas` (positioned under headers).
+    //
+    // Use a capture listener so we can intercept drawing clicks before grid selection handlers run.
+    this.root.addEventListener("pointerdown", (e) => this.onDrawingPointerDownCapture(e), {
+      capture: true,
+      passive: false,
+      signal: this.domAbort.signal,
+    });
+
     this.root.addEventListener("dragover", (e) => this.onGridDragOver(e), { signal: this.domAbort.signal });
     this.root.addEventListener("drop", (e) => this.onGridDrop(e), { signal: this.domAbort.signal });
 
@@ -2399,6 +2410,8 @@ export class SpreadsheetApp {
     const invalidateAndRenderDrawings = () => {
       // Keep memory bounded: only cache the active sheet's objects.
       this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
       this.renderDrawings();
     };
 
@@ -4752,6 +4765,9 @@ export class SpreadsheetApp {
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
+    this.drawingHitTestIndex = null;
+    this.drawingHitTestIndexObjects = null;
+    this.selectedDrawingId = null;
     this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
@@ -4802,6 +4818,9 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
+      this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -4862,6 +4881,9 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.drawingHitTestIndex = null;
+      this.drawingHitTestIndexObjects = null;
+      this.selectedDrawingId = null;
       this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
@@ -8367,6 +8389,61 @@ export class SpreadsheetApp {
     window.addEventListener("pointercancel", onUp, { capture: true, passive: false, signal });
   }
 
+  private onDrawingPointerDownCapture(e: PointerEvent): void {
+    if (this.disposed) return;
+    if (e.button !== 0) return;
+    // If another capture listener already claimed the event (e.g. chart interactions),
+    // do not compete.
+    if (e.cancelBubble) return;
+
+    // Drawings should not interfere with the in-place editor.
+    if (this.editor.isOpen()) return;
+
+    const objects = this.listDrawingObjectsForSheet();
+    const prevSelected = this.selectedDrawingId;
+
+    // If there are no drawings, clear selection on any click in the cell area.
+    if (objects.length === 0) {
+      if (prevSelected != null) {
+        this.selectedDrawingId = null;
+        this.renderDrawings(this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined);
+      }
+      return;
+    }
+
+    this.maybeRefreshRootPosition({ force: true });
+    const x = e.clientX - this.rootLeft;
+    const y = e.clientY - this.rootTop;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const sharedViewport = this.sharedGrid ? this.sharedGrid.renderer.scroll.getViewportState() : undefined;
+    const viewport = this.getDrawingInteractionViewport(sharedViewport);
+    const index = this.getDrawingHitTestIndex(objects);
+    const hit = hitTestDrawings(index, viewport, x, y, this.drawingGeom);
+
+    if (!hit) {
+      // Clicking outside of any drawing clears selection, but still allows normal grid selection.
+      if (prevSelected != null) {
+        const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+        const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+        if (x >= headerOffsetX && y >= headerOffsetY) {
+          this.selectedDrawingId = null;
+          this.renderDrawings(sharedViewport);
+        }
+      }
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    this.selectedDrawingId = hit.object.id;
+    if (this.selectedDrawingId !== prevSelected) {
+      this.renderDrawings(sharedViewport);
+    }
+    this.focus();
+  }
+
   private onChartDragPointerMove(e: PointerEvent): void {
     const state = this.chartDragState;
     if (!state) return;
@@ -9026,6 +9103,10 @@ export class SpreadsheetApp {
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
     this.drawingObjects = objects;
+    if (this.selectedDrawingId != null && !objects.some((o) => o.id === this.selectedDrawingId)) {
+      this.selectedDrawingId = null;
+    }
+    overlay.setSelectedId(this.selectedDrawingId);
     void overlay.render(objects, viewport).catch((err) => {
       console.warn("Drawing overlay render failed", err);
     });
