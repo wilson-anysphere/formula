@@ -21,3 +21,4 @@ zeroize = "1.8"
 [dev-dependencies]
 cfb = "0.10"
 hex = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
