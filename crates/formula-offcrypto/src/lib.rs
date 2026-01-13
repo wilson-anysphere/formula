@@ -1998,6 +1998,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_agile_encryption_info_with_utf8_bom_and_padding() {
+        let xml = r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+    xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData saltValue="AAECAwQFBgcICQoLDA0ODw==" hashAlgorithm="SHA256" blockSize="16"/>
+  <dataIntegrity encryptedHmacKey="EBESEw==" encryptedHmacValue="qrvM"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey spinCount="100000" saltValue="AQIDBA==" hashAlgorithm="SHA512" keyBits="256"
+        encryptedKeyValue="BQYHCA=="
+        encryptedVerifierHashInput="CQoLDA=="
+        encryptedVerifierHashValue="DQ4PEA=="/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#;
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]); // UTF-8 BOM
+        bytes.extend_from_slice(xml.as_bytes());
+        bytes.extend_from_slice(&[0, 0, 0]); // padding
+
+        let parsed = parse_encryption_info(&bytes).expect("parse");
+        let EncryptionInfo::Agile { info, .. } = parsed else {
+            panic!("expected Agile EncryptionInfo");
+        };
+
+        assert_eq!(info.key_data_hash_algorithm, HashAlgorithm::Sha256);
+        assert_eq!(info.spin_count, 100_000);
+    }
+
+    #[test]
     fn inspects_minimal_standard_encryption_info() {
         // Minimal Standard EncryptionInfo buffer sufficient for `inspect_encryption_info` / the
         // Standard parser validation logic:
