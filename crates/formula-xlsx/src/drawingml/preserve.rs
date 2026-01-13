@@ -1131,6 +1131,13 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = root_parts.into_iter().collect();
 
+    fn strip_fragment(target: &str) -> &str {
+        target
+            .split_once('#')
+            .map(|(base, _)| base)
+            .unwrap_or(target)
+    }
+
     while let Some(part_name) = queue.pop_front() {
         if !visited.insert(part_name.clone()) {
             continue;
@@ -1167,7 +1174,21 @@ fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
                 continue;
             }
 
-            let target_part = resolve_target(&part_name, &rel.target);
+            // Match the non-streaming traversal behavior: strip URI fragments, tolerate invalid
+            // Windows-style path separators, and ignore leading `./`.
+            let target = strip_fragment(&rel.target);
+            if target.is_empty() {
+                continue;
+            }
+            let target: std::borrow::Cow<'_, str> = if target.contains('\\') {
+                std::borrow::Cow::Owned(target.replace('\\', "/"))
+            } else {
+                std::borrow::Cow::Borrowed(target)
+            };
+            let target = target.as_ref();
+            let target = target.strip_prefix("./").unwrap_or(target);
+
+            let target_part = resolve_target(&part_name, target);
             if part_names.contains(&target_part) {
                 queue.push_back(target_part);
             }
@@ -2012,7 +2033,7 @@ mod tests {
     use zip::write::FileOptions;
     use zip::ZipWriter;
 
-    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+    fn build_zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let cursor = Cursor::new(Vec::new());
         let mut zip = ZipWriter::new(cursor);
         let options =
@@ -2023,8 +2044,90 @@ mod tests {
             zip.write_all(bytes).unwrap();
         }
 
-        let bytes = zip.finish().unwrap().into_inner();
+        zip.finish().unwrap().into_inner()
+    }
+
+    fn build_package(entries: &[(&str, &[u8])]) -> XlsxPackage {
+        let bytes = build_zip_bytes(entries);
         XlsxPackage::from_bytes(&bytes).expect("read test pkg")
+    }
+
+    #[test]
+    fn collect_transitive_related_parts_strips_relationship_fragments() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="chart1.xml#something"/>
+</Relationships>"#;
+
+        let bytes = build_zip_bytes(&[
+            ("xl/charts/chart0.xml", br#"<c:chartSpace/>"#),
+            ("xl/charts/_rels/chart0.xml.rels", rels),
+            ("xl/charts/chart1.xml", br#"<c:chartSpace/>"#),
+        ]);
+
+        let cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open zip");
+        let mut part_names: HashSet<String> = HashSet::new();
+        for i in 0..archive.len() {
+            let file = archive.by_index(i).expect("zip entry");
+            if file.is_dir() {
+                continue;
+            }
+            let name = file.name();
+            part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
+        }
+
+        let preserved = collect_transitive_related_parts_from_archive(
+            &mut archive,
+            &part_names,
+            ["xl/charts/chart0.xml".to_string()],
+        )
+        .expect("traverse");
+
+        assert!(
+            preserved.contains_key("xl/charts/chart1.xml"),
+            "expected fragment-stripped relationship to pull in chart1.xml, got keys: {:?}",
+            preserved.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn collect_transitive_related_parts_normalizes_relationship_backslashes() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="..\media\image1.png"/>
+</Relationships>"#;
+
+        let bytes = build_zip_bytes(&[
+            ("xl/drawings/drawing1.xml", br#"<xdr:wsDr/>"#),
+            ("xl/drawings/_rels/drawing1.xml.rels", rels),
+            ("xl/media/image1.png", b"png-bytes"),
+        ]);
+
+        let cursor = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(cursor).expect("open zip");
+        let mut part_names: HashSet<String> = HashSet::new();
+        for i in 0..archive.len() {
+            let file = archive.by_index(i).expect("zip entry");
+            if file.is_dir() {
+                continue;
+            }
+            let name = file.name();
+            part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
+        }
+
+        let preserved = collect_transitive_related_parts_from_archive(
+            &mut archive,
+            &part_names,
+            ["xl/drawings/drawing1.xml".to_string()],
+        )
+        .expect("traverse");
+
+        assert!(
+            preserved.contains_key("xl/media/image1.png"),
+            "expected backslash-normalized relationship to pull in media part, got keys: {:?}",
+            preserved.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]
