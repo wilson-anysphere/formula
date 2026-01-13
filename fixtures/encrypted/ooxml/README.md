@@ -14,12 +14,15 @@ These fixtures live outside `fixtures/xlsx/` so they are not picked up by
 
 - `agile.xlsx` – encrypted OOXML (Agile encryption; MS-OFFCRYPTO `EncryptionInfo` version 4.4)
 - `standard.xlsx` – encrypted OOXML (Standard encryption; MS-OFFCRYPTO `EncryptionInfo` version 3.2)
+- `plaintext.xlsx` – small ZIP/OPC `.xlsx` package used as the ground-truth plaintext for decryption fixtures
+- `agile-empty-password.xlsx` – Agile encrypted OOXML whose open password is the empty string (`""`); decrypts exactly to `plaintext.xlsx`
 
 You can inspect an encrypted OOXML container (and confirm Agile vs Standard) with:
 
 ```bash
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
 ```
 
 These are used by:
@@ -27,9 +30,12 @@ These are used by:
 - `crates/formula-io/tests/encrypted_ooxml.rs` (ensures `open_workbook` / `open_workbook_model`
   surface a password/encryption error when no password is supplied)
 - `crates/formula-io/tests/encrypted_ooxml_fixtures.rs` (format sniffing/detection; optional)
+- `crates/formula-xlsx/tests/encrypted_ooxml_empty_password.rs` (test-only decrypt harness that
+  validates the Agile KDF handles an empty-string password and distinguishes `None` from `Some("")`)
 
-These fixtures are currently only used to exercise the “password required” error path, so the
-actual passwords are not needed by tests (Formula does not decrypt encrypted workbooks yet).
+Most encrypted OOXML fixtures are currently only used to exercise the “password required” error
+path, so the actual passwords are not needed by those tests (Formula does not decrypt encrypted
+workbooks yet).
 
 ## Regenerating fixtures (without Excel)
 
