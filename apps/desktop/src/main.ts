@@ -2147,6 +2147,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     const zoomDisabled = !app.supportsZoom();
     const outlineDisabled = app.getGridMode() === "shared";
+    const canComment = app.getCollabSession()?.canComment() ?? true;
     const disabledById = {
       ...(isEditing
           ? {
@@ -2167,24 +2168,25 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "format.toggleWrapText": true,
             "home.alignment.topAlign": true,
             "home.alignment.middleAlign": true,
-            "home.alignment.bottomAlign": true,
-            "home.alignment.alignLeft": true,
-            "home.alignment.center": true,
-            "home.alignment.alignRight": true,
-            "home.alignment.orientation": true,
-            "home.alignment.increaseIndent": true,
-            "home.alignment.decreaseIndent": true,
-            "home.number.numberFormat": true,
-            "home.number.moreFormats": true,
-            "format.numberFormat.percent": true,
-            "format.numberFormat.accounting": true,
-            "format.numberFormat.shortDate": true,
-            "format.numberFormat.commaStyle": true,
-            "format.numberFormat.increaseDecimal": true,
-            "format.numberFormat.decreaseDecimal": true,
-            "format.openFormatCells": true,
-          }
-        : null),
+              "home.alignment.bottomAlign": true,
+              "home.alignment.alignLeft": true,
+              "home.alignment.center": true,
+              "home.alignment.alignRight": true,
+              "home.alignment.orientation": true,
+              "home.alignment.increaseIndent": true,
+              "home.alignment.decreaseIndent": true,
+              "home.number.numberFormat": true,
+              "home.number.moreFormats": true,
+              "format.numberFormat.percent": true,
+              "format.numberFormat.accounting": true,
+              "format.numberFormat.shortDate": true,
+              "format.numberFormat.commaStyle": true,
+              "format.numberFormat.increaseDecimal": true,
+              "format.numberFormat.decreaseDecimal": true,
+              "format.openFormatCells": true,
+            }
+          : null),
+      "comments.addComment": isEditing || !canComment,
       ...(printExportAvailable
         ? null
         : {
@@ -5813,6 +5815,7 @@ if (
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const allowEditCommands = !isSpreadsheetEditing();
+    const canComment = app.getCollabSession()?.canComment() ?? true;
 
     let menuItems: ContextMenuItem[] = [];
     if (currentGridArea === "rowHeader") {
@@ -6067,7 +6070,7 @@ if (
         {
           type: "item",
           label: t("menu.addComment"),
-          enabled: allowEditCommands,
+          enabled: allowEditCommands && canComment,
           shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
           onSelect: () => executeBuiltinCommand("comments.addComment"),
         },
