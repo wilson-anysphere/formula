@@ -11,13 +11,14 @@ test("index.js is fully typed for TS consumers", async () => {
   const entryFile = fileURLToPath(new URL("./.ai-context-index-typecheck.ts", import.meta.url));
 
   const source = `\
-import {
-  parseA1Range,
-  RagIndex,
-  scoreRegionForQuery,
-  pickBestRegionForQuery,
-  type RegionType,
-  type RegionRef,
+ import {
+   parseA1Range,
+   extractWorkbookSchema,
+   RagIndex,
+   scoreRegionForQuery,
+   pickBestRegionForQuery,
+   type RegionType,
+   type RegionRef,
 } from "../src/index.js";
 import type { SheetSchema } from "../src/schema.js";
 
@@ -41,17 +42,30 @@ type _RegionType_NotAny = Assert<IsAny<RegionType> extends false ? true : false>
 type _RegionRef_NotAny = Assert<IsAny<RegionRef> extends false ? true : false>;
 type _Score_ReturnType = Assert<ReturnType<typeof scoreRegionForQuery> extends number ? true : false>;
 type PickedRegion = ReturnType<typeof pickBestRegionForQuery>;
-type _PickBest_NotAny = Assert<IsAny<PickedRegion> extends false ? true : false>;
-type _PickBest_Shape = Assert<PickedRegion extends { type: RegionType; index: number; range: string } | null ? true : false>;
+ type _PickBest_NotAny = Assert<IsAny<PickedRegion> extends false ? true : false>;
+ type _PickBest_Shape = Assert<PickedRegion extends { type: RegionType; index: number; range: string } | null ? true : false>;
+ 
+ // --- Workbook schema extraction ---
+ type WorkbookSchema = ReturnType<typeof extractWorkbookSchema>;
+ type _WorkbookSchema_NotAny = Assert<IsAny<WorkbookSchema> extends false ? true : false>;
+ type _WorkbookSchema_Shape = Assert<
+   WorkbookSchema extends { id: string; sheets: Array<{ name: string }>; tables: unknown[]; namedRanges: unknown[] } ? true : false
+ >;
 
-// Basic runtime sanity checks (also ensures the compiler doesn't tree-shake the imports).
-const parsed = parseA1Range("$A$1:B2");
-const index = new RagIndex();
-void index;
-const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
-const ref: RegionRef = { type: "table", index: 0 };
-scoreRegionForQuery(ref, schema, "revenue");
-pickBestRegionForQuery(schema, "revenue");
+ // Basic runtime sanity checks (also ensures the compiler doesn't tree-shake the imports).
+ const parsed = parseA1Range("$A$1:B2");
+ const index = new RagIndex();
+ void index;
+ const wbSchema = extractWorkbookSchema({
+   id: "wb1",
+   sheets: [{ name: "Sheet1", cells: [[{ v: "Header" }], [{ v: 1 }]] }],
+   tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } }],
+ });
+ wbSchema.tables[0]?.rangeA1;
+ const schema: SheetSchema = { name: "Sheet1", tables: [], namedRanges: [], dataRegions: [] };
+ const ref: RegionRef = { type: "table", index: 0 };
+ scoreRegionForQuery(ref, schema, "revenue");
+ pickBestRegionForQuery(schema, "revenue");
 void parsed;
 `;
 
