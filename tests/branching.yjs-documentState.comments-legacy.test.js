@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import * as Y from "yjs";
 
-import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../packages/versioning/branches/src/yjs/index.js";
+import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../packages/versioning/branches/src/browser.js";
 
 test("yjs documentState: snapshots legacy array-backed comments without clobbering root type", () => {
   const doc = new Y.Doc();
