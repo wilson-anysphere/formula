@@ -247,3 +247,75 @@ test(
     await reloaded.close();
   },
 );
+
+test(
+  "SqliteVectorStore serializes deleteWorkbook persistence writes to prevent lost updates",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const storage = new ControlledBinaryStorage();
+    const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
+
+    // Seed two workbooks.
+    const seed = store.upsert([
+      { id: "a", vector: [1, 0], metadata: { workbookId: "wb1" } },
+      { id: "b", vector: [0, 1], metadata: { workbookId: "wb2" } },
+    ]);
+    await storage.waitForSaves(1);
+    storage.release(1);
+    await seed;
+
+    const p1 = store.deleteWorkbook("wb1");
+    const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
+
+    // Ensure the deleteWorkbook save is in-flight, then release the upsert save before it.
+    await storage.waitForSaves(2);
+    storage.release(3);
+    await Promise.resolve();
+    storage.release(2);
+
+    await Promise.all([p1, p2]);
+
+    storage.releaseAll();
+    const reloaded = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: false });
+    const ids = (await reloaded.list({ includeVector: false })).map((r) => r.id).sort();
+    assert.deepEqual(ids, ["b", "c"]);
+
+    await store.close();
+    await reloaded.close();
+  }
+);
+
+test(
+  "SqliteVectorStore serializes clear persistence writes to prevent lost updates",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const storage = new ControlledBinaryStorage();
+    const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
+
+    const seed = store.upsert([
+      { id: "a", vector: [1, 0], metadata: { workbookId: "wb1" } },
+      { id: "b", vector: [0, 1], metadata: { workbookId: "wb2" } },
+    ]);
+    await storage.waitForSaves(1);
+    storage.release(1);
+    await seed;
+
+    const p1 = store.clear();
+    const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
+
+    await storage.waitForSaves(2);
+    storage.release(3);
+    await Promise.resolve();
+    storage.release(2);
+
+    await Promise.all([p1, p2]);
+
+    storage.releaseAll();
+    const reloaded = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: false });
+    const ids = (await reloaded.list({ includeVector: false })).map((r) => r.id).sort();
+    assert.deepEqual(ids, ["c"]);
+
+    await store.close();
+    await reloaded.close();
+  }
+);
