@@ -406,6 +406,82 @@ describe("AIChatPanel tool-calling history", () => {
 });
 
 describe("AIChatPanel attachments UI", () => {
+  it("never inlines raw table/range attachment data into the prompt (demo mode)", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const secret = "TOP SECRET";
+    const chat = vi.fn<LLMClient["chat"]>(async () => {
+      return {
+        message: {
+          role: "assistant",
+          content: "Ok",
+        },
+      };
+    });
+
+    const client: LLMClient = { chat };
+    const toolExecutor: ToolExecutor = {
+      tools: [],
+      execute: vi.fn(async () => ({})),
+    };
+
+    const getSelectionAttachment = vi.fn(() => ({
+      type: "range" as const,
+      reference: "Sheet1!A1:B2",
+      data: { snapshot: secret },
+    }));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          client,
+          toolExecutor,
+          systemPrompt: "system",
+          getSelectionAttachment,
+        }),
+      );
+    });
+
+    const attachSelectionBtn = container.querySelector('[data-testid="ai-chat-attach-selection"]') as HTMLButtonElement | null;
+    expect(attachSelectionBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachSelectionBtn?.disabled).toBe(false);
+
+    await act(async () => {
+      attachSelectionBtn!.click();
+    });
+
+    const input = container.querySelector("input") as HTMLInputElement | null;
+    const sendButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Send") as
+      | HTMLButtonElement
+      | undefined;
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    expect(sendButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      setNativeInputValue(input!, "Hello");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+      input!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await act(async () => {
+      sendButton!.click();
+      await waitFor(() => chat.mock.calls.length === 1);
+    });
+
+    const request = chat.mock.calls[0]?.[0] as any;
+    const combined = JSON.stringify(request?.messages ?? []);
+    expect(combined).not.toContain(secret);
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("disables attach selection when no selection is available and exposes tooltip text", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);

@@ -26,7 +26,14 @@ function safeStringify(value: unknown, opts: { pretty?: boolean } = {}): string 
 
 function formatAttachmentsForPrompt(attachments: Attachment[]) {
   return attachments
-    .map((a) => `- ${a.type}: ${a.reference}${a.data ? ` (${safeStringify(a.data)})` : ""}`)
+    // Prompts may be sent to cloud models. Never inline raw table/range attachment payloads
+    // (they can contain copied spreadsheet values) even when small.
+    // Keep formula/chart behavior unchanged.
+    .map((a) => {
+      const includeData =
+        a.data !== undefined && (a.type === "formula" || a.type === "chart");
+      return `- ${a.type}: ${a.reference}${includeData ? ` (${safeStringify(a.data)})` : ""}`;
+    })
     .join("\n");
 }
 
