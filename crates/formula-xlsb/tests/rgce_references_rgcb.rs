@@ -1,5 +1,5 @@
-use std::io::{Cursor, Read};
 use std::io;
+use std::io::{Cursor, Read};
 
 use formula_xlsb::{patch_sheet_bin, rgce_references_rgcb, CellEdit, CellValue, Error};
 
