@@ -15,7 +15,7 @@ vba = ["formula-xlsx/vba"]
 # Enable password-based decryption for encrypted workbooks (OOXML + legacy XLS).
 #
 # This is currently used to gate integration tests while decryption support is landing.
-encrypted-workbooks = []
+encrypted-workbooks = ["dep:formula-office-crypto"]
 # MS-OFFCRYPTO parsing/verifier helpers and fuzz tests.
 #
 # Keep this separate from the main decryption feature so we can run hardening tests without
@@ -34,6 +34,7 @@ formula-fs = { path = "../formula-fs" }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 formula-offcrypto = { path = "../formula-offcrypto" }
+formula-office-crypto = { path = "../formula-office-crypto", optional = true }
 # Disable `formula-xlsx` default features so `formula-io` stays lightweight by
 # default. Consumers that need `formula_xlsx::vba` can opt in via the
 # `formula-io/vba` feature.

@@ -1,7 +1,8 @@
 # Encrypted workbook fixtures
 
 This directory is the canonical location for **password-to-open / encrypted** Excel workbook
-fixtures used by tests that validate **format detection** and **error handling**.
+fixtures used by tests that validate **format detection**, **error handling**, and (when enabled)
+**decryption** compatibility.
 
 This is **file encryption** (“Encrypt with Password”), not workbook/worksheet protection (“password
 to edit”).
@@ -21,7 +22,10 @@ during ZIP parsing.
 
 ```
 fixtures/encrypted/
-  ooxml/      # Encrypted OOXML spreadsheets (e.g. `.xlsx`, `.xlsm`, `.xlsb` OLE/CFB containers)
+  ooxml/                # Encrypted OOXML spreadsheets used by targeted decryption tests
+  encrypted_agile.xlsx  # Real-world encrypted XLSX (Agile)
+  encrypted.xlsb        # Real-world encrypted XLSB (OOXML-in-OLE)
+  encrypted.xls         # Real-world encrypted legacy XLS (BIFF8 FILEPASS)
 ```
 
 Tests that need encrypted fixtures should reference these paths **explicitly** (they are not part
@@ -42,3 +46,37 @@ Encrypted OOXML fixtures under `fixtures/encrypted/ooxml/` can be regenerated wi
 
 - Preferred/documented workflow (matches committed fixtures): see `fixtures/encrypted/ooxml/README.md`
 - Alternative generator (Apache POI): `tools/encrypted-ooxml-fixtures/generate.sh`
+
+## Real-world fixtures (used by `open_encrypted_fixtures.rs`)
+
+These binary fixtures are used by `crates/formula-io/tests/open_encrypted_fixtures.rs` to ensure
+that `formula-io` can decrypt and open **real-world** password-protected Excel files.
+
+| File | Format | Encryption | Notes | Expected contents |
+|---|---|---|---|---|
+| `encrypted_agile.xlsx` | XLSX | ECMA-376 Agile (OOXML-in-OLE) | Sourced from `msoffcrypto-tool` test corpus | Password: `Password1234_` • `Sheet1!A1="lorem"`, `Sheet1!B1="ipsum"` |
+| `encrypted.xlsb` | XLSB | ECMA-376 Agile (OOXML-in-OLE) | Sourced from Apache POI test corpus (`protected_passtika.xlsb`) | Password: `tika` • `Sheet1!A1="You can't see me"` |
+| `encrypted.xls` | XLS | BIFF8 `FILEPASS` RC4 CryptoAPI | Copied from this repo’s `formula-xls` test fixtures | Password: `correct horse battery staple` • `Sheet1!A1=42` |
+
+### Provenance
+
+`encrypted_agile.xlsx` is downloaded from the upstream `msoffcrypto-tool` repository:
+
+- https://github.com/nolze/msoffcrypto-tool
+
+`encrypted.xlsb` is downloaded from the Apache POI repository:
+
+- https://github.com/apache/poi
+
+`encrypted.xls` is copied from the `formula-xls` test fixture corpus:
+
+- `crates/formula-xls/tests/fixtures/encrypted/biff8_rc4_cryptoapi_pw_open.xls`
+
+### Regenerating `encrypted.xlsb`
+
+From the repo root:
+
+```bash
+curl -L -o fixtures/encrypted/encrypted.xlsb \
+  https://raw.githubusercontent.com/apache/poi/trunk/test-data/spreadsheet/protected_passtika.xlsb
+```

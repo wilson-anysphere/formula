@@ -128,6 +128,30 @@ pub fn decrypt_encrypted_package_with_options(
     decrypt_encrypted_package_ole_with_options(ole_bytes, password, opts)
 }
 
+/// Decrypt a Standard (CryptoAPI) encrypted OOXML package given the raw `EncryptionInfo` and
+/// `EncryptedPackage` stream bytes.
+///
+/// This is a lower-level helper that avoids requiring the full OLE/CFB container. It is primarily
+/// intended for callers (like `formula-io`) that already have access to the streams.
+pub fn decrypt_standard_encrypted_package(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OfficeCryptoError> {
+    let header = util::parse_encryption_info_header(encryption_info)?;
+    if header.kind != util::EncryptionInfoKind::Standard {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "expected Standard EncryptionInfo, got version {}.{}",
+            header.version_major, header.version_minor
+        )));
+    }
+
+    let info = standard::parse_standard_encryption_info(encryption_info, &header)?;
+    let out = standard::decrypt_standard_encrypted_package(&info, encrypted_package, password)?;
+    validate_decrypted_package(&out)?;
+    Ok(out)
+}
+
 /// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
 ///
 /// The returned bytes are an OLE/CFB container containing:

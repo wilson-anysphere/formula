@@ -170,7 +170,8 @@ pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoErro
         .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
-    isize::try_from(len).map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
+    isize::try_from(len)
+        .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     Ok(len)
 }
@@ -238,7 +239,6 @@ pub(crate) fn looks_like_zip(bytes: &[u8]) -> bool {
         if cd_offset + cd_size > i {
             continue;
         }
-
         // Central directory file header signature `PK\x01\x02`.
         if bytes.get(cd_offset..cd_offset + 4) != Some(b"PK\x01\x02") {
             continue;

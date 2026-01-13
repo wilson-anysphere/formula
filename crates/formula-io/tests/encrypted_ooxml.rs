@@ -274,7 +274,7 @@ fn errors_on_unsupported_encryption_version() {
 }
 
 #[test]
-fn encrypted_ooxml_plaintext_xlsb_payload_is_reported_as_unsupported_kind() {
+fn encrypted_ooxml_plaintext_xlsb_payload_is_opened_as_xlsb() {
     // Construct a minimal OPC/ZIP payload that looks like an XLSB workbook (contains
     // `xl/workbook.bin`) and wrap it in a synthetic OLE `EncryptedPackage` container.
     let zip_bytes = {
@@ -297,20 +297,14 @@ fn encrypted_ooxml_plaintext_xlsb_payload_is_reported_as_unsupported_kind() {
     let err = open_workbook_with_password(&path, Some("dummy"))
         .expect_err("expected xlsb encrypted workbook to error");
     assert!(
-        matches!(
-            err,
-            Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }
-        ),
-        "expected Error::UnsupportedEncryptedWorkbookKind(xlsb), got {err:?}"
+        matches!(err, Error::OpenXlsb { .. }),
+        "expected Error::OpenXlsb, got {err:?}"
     );
 
     let err = open_workbook_model_with_password(&path, Some("dummy"))
         .expect_err("expected xlsb encrypted workbook model open to error");
     assert!(
-        matches!(
-            err,
-            Error::UnsupportedEncryptedWorkbookKind { kind: "xlsb", .. }
-        ),
-        "expected Error::UnsupportedEncryptedWorkbookKind(xlsb), got {err:?}"
+        matches!(err, Error::OpenXlsb { .. }),
+        "expected Error::OpenXlsb, got {err:?}"
     );
 }

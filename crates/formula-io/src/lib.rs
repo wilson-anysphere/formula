@@ -1143,39 +1143,57 @@ fn open_workbook_from_decrypted_ooxml_zip_bytes(
     path: &Path,
     decrypted_bytes: Vec<u8>,
 ) -> Result<Workbook, Error> {
-    if sniff_ooxml_zip_workbook_kind(&decrypted_bytes) == Some(WorkbookFormat::Xlsb) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
-
-    let package = xlsx::XlsxLazyPackage::from_vec(decrypted_bytes).map_err(|source| {
-        Error::OpenXlsx {
-            path: path.to_path_buf(),
-            source,
+    match sniff_ooxml_zip_workbook_kind(&decrypted_bytes) {
+        Some(WorkbookFormat::Xlsb) => xlsb::XlsbWorkbook::open_from_vec(decrypted_bytes)
+            .map(Workbook::Xlsb)
+            .map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            }),
+        _ => {
+            let package = xlsx::XlsxLazyPackage::from_vec(decrypted_bytes).map_err(|source| {
+                Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+            Ok(Workbook::Xlsx(package))
         }
-    })?;
-    Ok(Workbook::Xlsx(package))
+    }
 }
 
 fn open_workbook_model_from_decrypted_ooxml_zip_bytes(
     path: &Path,
     decrypted_bytes: Vec<u8>,
 ) -> Result<formula_model::Workbook, Error> {
-    if sniff_ooxml_zip_workbook_kind(&decrypted_bytes) == Some(WorkbookFormat::Xlsb) {
-        return Err(Error::UnsupportedEncryptedWorkbookKind {
-            path: path.to_path_buf(),
-            kind: "xlsb",
-        });
-    }
-
-    xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes)).map_err(|source| {
-        Error::OpenXlsx {
-            path: path.to_path_buf(),
-            source,
+    match sniff_ooxml_zip_workbook_kind(&decrypted_bytes) {
+        Some(WorkbookFormat::Xlsb) => {
+            let wb = xlsb::XlsbWorkbook::open_from_vec_with_options(
+                decrypted_bytes,
+                xlsb::OpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                    decode_formulas: true,
+                    ..Default::default()
+                },
+            )
+            .map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsb_to_model_workbook(&wb).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })
         }
-    })
+        _ => xlsx::read_workbook_from_reader(std::io::Cursor::new(decrypted_bytes)).map_err(
+            |source| Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            },
+        ),
+    }
 }
 
 /// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`], optionally
@@ -1198,17 +1216,24 @@ pub fn open_workbook_model_with_password(
 ) -> Result<formula_model::Workbook, Error> {
     let path = path.as_ref();
 
+    // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
+    // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    {
-        if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+    if let Some(password) = password {
+        if let Some(workbook) = open_encrypted_ooxml_model_workbook(path, password)? {
+            return Ok(workbook);
         }
     }
 
-    if let Some(package_bytes) =
-        maybe_read_plaintext_ooxml_package_from_encrypted_ole(path, password)?
-    {
-        return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, package_bytes);
+    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
+    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
+    // decryption support.
+    if password.is_some() {
+        if let Some(bytes) =
+            maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
+        {
+            return open_workbook_model_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
@@ -1230,11 +1255,12 @@ pub fn open_workbook_model_with_password(
         }
         return open_workbook_model(path);
     };
-
+    // For non-OOXML formats (including legacy `.xls` FILEPASS), reuse the options-based open path.
     open_workbook_model_with_options(
         path,
         OpenOptions {
             password: Some(password.to_string()),
+            ..Default::default()
         },
     )
 }
@@ -1259,43 +1285,36 @@ pub fn open_workbook_with_password(
 ) -> Result<Workbook, Error> {
     let path = path.as_ref();
 
+    // Attempt to decrypt Office-encrypted OOXML workbooks (OLE container with `EncryptionInfo` +
+    // `EncryptedPackage`) when the feature is enabled.
     #[cfg(feature = "encrypted-workbooks")]
-    {
-        if let Some(bytes) = try_decrypt_ooxml_encrypted_package_from_path(path, password)? {
-            return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
+    if let Some(password) = password {
+        if let Some(workbook) = open_encrypted_ooxml_workbook(path, password)? {
+            return Ok(workbook);
         }
     }
 
-    if let Some(package_bytes) =
-        maybe_read_plaintext_ooxml_package_from_encrypted_ole(path, password)?
-    {
-        return open_workbook_from_decrypted_ooxml_zip_bytes(path, package_bytes);
+    // Handle the special-case where an `EncryptedPackage` stream already contains a plaintext ZIP
+    // payload (e.g. synthetic fixtures or already-decrypted pipelines). This does not require
+    // decryption support.
+    if password.is_some() {
+        if let Some(bytes) =
+            maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(path)?
+        {
+            return open_workbook_from_decrypted_ooxml_zip_bytes(path, bytes);
+        }
     }
 
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
 
-    // If no password was provided, preserve the existing open path for non-encrypted files.
-    //
-    // For legacy `.xls` BIFF encryption (FILEPASS), provide a more actionable error: callers using
-    // the password-capable API likely want to prompt the user for a password rather than being told
-    // to remove encryption.
-    let Some(password) = password else {
-        if let Ok(Some(info)) = detect_workbook_encryption(path) {
-            if info.kind == WorkbookEncryptionKind::XlsFilepass {
-                return Err(Error::PasswordRequired {
-                    path: path.to_path_buf(),
-                });
-            }
-        }
-        return open_workbook(path);
-    };
-
+    // Delegate to the options-based password open path (this handles legacy `.xls` FILEPASS).
     open_workbook_with_options(
         path,
         OpenOptions {
-            password: Some(password.to_string()),
+            password: password.map(ToString::to_string),
+            ..Default::default()
         },
     )
 }
@@ -1918,6 +1937,102 @@ fn unsupported_office_ooxml_encryption(path: &Path) -> Error {
     }
 }
 
+/// Attempt to read the `EncryptedPackage` stream as a plaintext OOXML ZIP payload (without
+/// performing any cryptography).
+///
+/// This is primarily used for:
+/// - synthetic fixtures that wrap a plaintext package in an OLE container, and
+/// - callers that have already decrypted the payload upstream but still provide the OOXML-in-OLE
+///   wrapper structure.
+///
+/// Returns:
+/// - `Ok(Some(zip_bytes))` when the `EncryptedPackage` stream appears to contain a valid ZIP payload
+///   (either directly or after the usual 8-byte size header),
+/// - `Ok(None)` when the input is not an encrypted OOXML wrapper or the package does not appear to
+///   be plaintext,
+/// - `Err(..)` for I/O errors while reading the file.
+fn maybe_read_plaintext_ooxml_package_from_encrypted_ole_if_plaintext(
+    path: &Path,
+) -> Result<Option<Vec<u8>>, Error> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    use std::io::{self, Cursor};
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.seek(SeekFrom::Start(0))
+        .map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+
+    let mut ole = match cfb::CompoundFile::open(file) {
+        Ok(ole) => ole,
+        Err(_) => return Ok(None),
+    };
+
+    if !(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")) {
+        return Ok(None);
+    }
+
+    let mut stream = match open_stream_best_effort(&mut ole, "EncryptedPackage") {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    // Read a small prefix to determine if this looks like a plaintext ZIP payload.
+    let mut prefix = [0u8; 10];
+    let prefix_len = match stream.read(&mut prefix) {
+        Ok(n) => n,
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => 0,
+        Err(err) => {
+            return Err(Error::OpenIo {
+                path: path.to_path_buf(),
+                source: err,
+            })
+        }
+    };
+    if prefix_len < 2 {
+        return Ok(None);
+    }
+
+    let looks_like_zip_direct = prefix[..2] == *b"PK";
+    let looks_like_zip_after_len = prefix_len >= 10 && prefix[8..10] == *b"PK";
+    if !looks_like_zip_direct && !looks_like_zip_after_len {
+        return Ok(None);
+    }
+
+    // Read the full stream bytes only when the prefix suggests a plaintext package.
+    let mut encrypted_package = Vec::new();
+    encrypted_package.extend_from_slice(&prefix[..prefix_len]);
+    stream.read_to_end(&mut encrypted_package).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let Some(package_bytes) = maybe_extract_ooxml_package_bytes(&encrypted_package) else {
+        return Ok(None);
+    };
+
+    // Validate ZIP structure to avoid false positives on ciphertext that happens to start with `PK`.
+    if zip::ZipArchive::new(Cursor::new(package_bytes)).is_err() {
+        return Ok(None);
+    }
+
+    Ok(Some(package_bytes.to_vec()))
+}
+
 fn maybe_read_plaintext_ooxml_package_from_encrypted_ole(
     path: &Path,
     password: Option<&str>,
@@ -2112,6 +2227,458 @@ fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
             path: path.to_path_buf(),
         })
     }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn open_encrypted_ooxml_model_workbook(
+    path: &Path,
+    password: &str,
+) -> Result<Option<formula_model::Workbook>, Error> {
+    let Some((format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
+        return Ok(None);
+    };
+
+    match format {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
+            let cursor = std::io::Cursor::new(decrypted);
+            xlsx::read_workbook_from_reader(cursor).map(Some).map_err(|source| Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        WorkbookFormat::Xlsb => {
+            let wb = xlsb::XlsbWorkbook::open_from_vec_with_options(
+                decrypted,
+                xlsb::OpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                    decode_formulas: true,
+                    ..Default::default()
+                },
+            )
+            .map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsb_to_model_workbook(&wb).map(Some).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        _ => Err(Error::InvalidPassword {
+            path: path.to_path_buf(),
+        }),
+    }
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn open_encrypted_ooxml_workbook(path: &Path, password: &str) -> Result<Option<Workbook>, Error> {
+    let Some((format, decrypted)) = decrypt_encrypted_ooxml_package(path, password)? else {
+        return Ok(None);
+    };
+
+    match format {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
+            let package =
+                xlsx::XlsxLazyPackage::from_vec(decrypted).map_err(|source| Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            Ok(Some(Workbook::Xlsx(package)))
+        }
+        WorkbookFormat::Xlsb => {
+            let wb = xlsb::XlsbWorkbook::open_from_vec(decrypted).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            Ok(Some(Workbook::Xlsb(wb)))
+        }
+        _ => Err(Error::InvalidPassword {
+            path: path.to_path_buf(),
+        }),
+    }
+}
+
+/// Decrypt an Office-encrypted OOXML workbook (OLE `EncryptionInfo` + `EncryptedPackage`) into the
+/// plaintext OOXML ZIP bytes, along with the detected workbook format.
+///
+/// Returns `Ok(None)` when the file does not appear to be an encrypted OOXML container.
+#[cfg(feature = "encrypted-workbooks")]
+fn decrypt_encrypted_ooxml_package(
+    path: &Path,
+    password: &str,
+) -> Result<Option<(WorkbookFormat, Vec<u8>)>, Error> {
+    use std::io::Read as _;
+
+    let mut file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return Ok(None);
+    }
+
+    file.rewind().map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let Ok(mut ole) = cfb::CompoundFile::open(file) else {
+        // Malformed OLE container; treat as "not an encrypted OOXML workbook" and let normal open
+        // code paths surface the parsing error.
+        return Ok(None);
+    };
+
+    if !(stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")) {
+        return Ok(None);
+    }
+
+    // Read full `EncryptionInfo` and `EncryptedPackage` streams.
+    let mut encryption_info = Vec::new();
+    {
+        let mut stream = ole
+            .open_stream("EncryptionInfo")
+            .or_else(|_| ole.open_stream("/EncryptionInfo"))
+            .map_err(|_| Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            })?;
+        stream.read_to_end(&mut encryption_info).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+    let mut encrypted_package = Vec::new();
+    {
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .map_err(|_| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+        stream.read_to_end(&mut encrypted_package).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+
+    // `EncryptionInfo` version header is the first 4 bytes:
+    // - VersionMajor (u16 LE)
+    // - VersionMinor (u16 LE)
+    let (version_major, version_minor) = match encryption_info.get(0..4) {
+        Some(header) => (
+            u16::from_le_bytes([header[0], header[1]]),
+            u16::from_le_bytes([header[2], header[3]]),
+        ),
+        None => {
+            return Err(Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })
+        }
+    };
+
+    // Mirror the defensive behavior in `encrypted_ooxml_error`: treat implausible version headers
+    // as a generic "encrypted container" so we surface `InvalidPassword` instead of nonsense.
+    if version_major > 10 || version_minor > 10 {
+        return Err(Error::InvalidPassword {
+            path: path.to_path_buf(),
+        });
+    }
+
+    let is_agile = version_major == 4 && version_minor == 4;
+    let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
+    if !is_agile && !is_standard {
+        return Err(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
+
+    let decrypted = if is_agile {
+        // Real-world producers vary in how they encode/wrap the Agile `EncryptionInfo` XML
+        // (UTF-8/UTF-16, length prefixes, padding). Normalize to a strict UTF-8 XML payload so we
+        // can reuse the `formula-xlsx` offcrypto implementation.
+        let xml = extract_agile_encryption_info_xml(&encryption_info).map_err(|_| {
+            Error::InvalidPassword {
+                path: path.to_path_buf(),
+            }
+        })?;
+        let mut normalized_info = Vec::with_capacity(8 + xml.len());
+        normalized_info.extend_from_slice(
+            encryption_info
+                .get(..8)
+                .ok_or_else(|| Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })?,
+        );
+        normalized_info.extend_from_slice(xml.as_bytes());
+
+        formula_xlsx::decrypt_agile_encrypted_package(&normalized_info, &encrypted_package, password)
+        .map_err(|_| Error::InvalidPassword {
+            path: path.to_path_buf(),
+        })?
+    } else {
+        // Standard/CryptoAPI encryption has multiple variants in the wild.
+        //
+        // In particular, some workbooks use the "CryptoAPI RC4" cipher (CALG_RC4) instead of AES.
+        // Excel-generated Standard encryption typically uses AES, but we keep the implementation
+        // compatible with the committed corpus fixtures (including RC4).
+        //
+        // References:
+        // - `docs/offcrypto-standard-cryptoapi-rc4.md`
+        // - `crates/formula-io/tests/offcrypto_standard_rc4_vectors.rs`
+        use sha1::{Digest as _, Sha1};
+
+        // Parse the Standard EncryptionInfo stream to read algId/algIdHash/keySize + verifier
+        // fields. For the RC4 variant, we need the salt + key size to derive per-block keys.
+        //
+        // Stream layout (MS-OFFCRYPTO):
+        // [0..8)   EncryptionVersionInfo (major, minor, flags)
+        // [8..12)  EncryptionHeaderSize (u32 LE)
+        // [..]     EncryptionHeader (header_size bytes)
+        // [..]     EncryptionVerifier (salt/verifier/verifierHash)
+        let header_size = encryption_info
+            .get(8..12)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })? as usize;
+
+        let header_start = 12usize;
+        let header_end = header_start.saturating_add(header_size);
+        let header_bytes = encryption_info
+            .get(header_start..header_end)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+        if header_bytes.len() < 32 {
+            return Err(Error::InvalidPassword {
+                path: path.to_path_buf(),
+            });
+        }
+
+        let alg_id = u32::from_le_bytes(header_bytes[8..12].try_into().unwrap());
+        let alg_id_hash = u32::from_le_bytes(header_bytes[12..16].try_into().unwrap());
+        let key_size_bits = u32::from_le_bytes(header_bytes[16..20].try_into().unwrap());
+
+        let mut offset = header_end;
+        let salt_size: usize = encryption_info
+            .get(offset..offset + 4)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })? as usize;
+        offset += 4;
+        let salt = encryption_info
+            .get(offset..offset + salt_size)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?
+            .to_vec();
+        offset += salt_size;
+
+        let encrypted_verifier = encryption_info
+            .get(offset..offset + 16)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?
+            .to_vec();
+        offset += 16;
+
+        let verifier_hash_size = encryption_info
+            .get(offset..offset + 4)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or_else(|| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+        offset += 4;
+
+        let encrypted_verifier_hash = encryption_info
+            .get(offset..)
+            .unwrap_or_default()
+            .to_vec();
+
+        const CALG_RC4: u32 = 0x0000_6801;
+        const CALG_SHA1: u32 = 0x0000_8004;
+
+        if alg_id == CALG_RC4 {
+            // --- Standard CryptoAPI RC4 ---------------------------------------------------------
+            if alg_id_hash != CALG_SHA1 {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+            if key_size_bits == 0 || key_size_bits % 8 != 0 {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+            let key_len = (key_size_bits / 8) as usize;
+
+            // Derive the spun password hash H (20 bytes) (MS-OFFCRYPTO Standard RC4).
+            fn password_utf16le_bytes(password: &str) -> Vec<u8> {
+                let mut out = Vec::with_capacity(password.len().saturating_mul(2));
+                for cu in password.encode_utf16() {
+                    out.extend_from_slice(&cu.to_le_bytes());
+                }
+                out
+            }
+
+            let pw = password_utf16le_bytes(password);
+            let mut hasher = Sha1::new();
+            hasher.update(&salt);
+            hasher.update(&pw);
+            let mut h: [u8; 20] = hasher.finalize().into();
+            for i in 0..50_000u32 {
+                let mut hasher = Sha1::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(h);
+                h = hasher.finalize().into();
+            }
+            let h_vec = h.to_vec();
+
+            // Verify password using EncryptionVerifier:
+            // decrypt `encryptedVerifier || encryptedVerifierHash` using block 0 key.
+            let mut verifier_cipher = Vec::new();
+            verifier_cipher.extend_from_slice(&encrypted_verifier);
+            verifier_cipher.extend_from_slice(&encrypted_verifier_hash);
+            let mut verifier_reader = Rc4CryptoApiDecryptReader::new(
+                std::io::Cursor::new(verifier_cipher.as_slice()),
+                verifier_cipher.len() as u64,
+                h_vec.clone(),
+                key_len,
+            )
+            .map_err(|_| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+            let mut verifier_plain = Vec::new();
+            verifier_reader
+                .read_to_end(&mut verifier_plain)
+                .map_err(|_| Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })?;
+            if verifier_plain.len() < 16 {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+            let verifier = &verifier_plain[..16];
+            let hash_len = verifier_hash_size as usize;
+            let decrypted_hash = verifier_plain
+                .get(16..16 + hash_len)
+                .ok_or_else(|| Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                })?;
+            let expected_hash: [u8; 20] = Sha1::digest(verifier).into();
+            if expected_hash.get(..hash_len) != Some(decrypted_hash) {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+
+            // Decrypt EncryptedPackage stream (RC4 in 0x200-byte blocks) and truncate to orig_size.
+            if encrypted_package.len() < 8 {
+                return Err(Error::InvalidPassword {
+                    path: path.to_path_buf(),
+                });
+            }
+            let orig_size = u64::from_le_bytes(encrypted_package[..8].try_into().unwrap());
+            let mut cursor = std::io::Cursor::new(encrypted_package.as_slice());
+            cursor
+                .seek(std::io::SeekFrom::Start(8))
+                .map_err(|source| Error::OpenIo {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            let mut reader =
+                Rc4CryptoApiDecryptReader::new(cursor, orig_size, h_vec, key_len).map_err(|_| {
+                    Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    }
+                })?;
+            let mut out = Vec::new();
+            reader.read_to_end(&mut out).map_err(|_| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?;
+            out
+        } else {
+            // --- Standard CryptoAPI AES ---------------------------------------------------------
+            // Delegate to `formula-office-crypto` which performs verifier validation and tries the
+            // common Standard/AES decryption schemes.
+            formula_office_crypto::decrypt_standard_encrypted_package(
+                &encryption_info,
+                &encrypted_package,
+                password,
+            )
+            .map_err(|_| Error::InvalidPassword {
+                path: path.to_path_buf(),
+            })?
+        }
+    };
+    let format = workbook_format_from_ooxml_zip_bytes(&decrypted).unwrap_or(WorkbookFormat::Unknown);
+    Ok(Some((format, decrypted)))
+}
+
+#[cfg(feature = "encrypted-workbooks")]
+fn workbook_format_from_ooxml_zip_bytes(bytes: &[u8]) -> Option<WorkbookFormat> {
+    use std::io::Cursor;
+
+    if bytes.len() < 2 || bytes[..2] != *b"PK" {
+        return None;
+    }
+    let cursor = Cursor::new(bytes);
+    let Ok(archive) = zip::ZipArchive::new(cursor) else {
+        return None;
+    };
+
+    let mut has_workbook_bin = false;
+    let mut has_workbook_xml = false;
+    let mut has_vba_project = false;
+
+    for name in archive.file_names() {
+        let mut normalized = name.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+
+        if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+            has_workbook_bin = true;
+        } else if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
+            has_workbook_xml = true;
+        } else if normalized.eq_ignore_ascii_case("xl/vbaProject.bin") {
+            has_vba_project = true;
+        }
+
+        if has_workbook_bin || (has_workbook_xml && has_vba_project) {
+            break;
+        }
+    }
+
+    if has_workbook_bin {
+        return Some(WorkbookFormat::Xlsb);
+    }
+    if has_workbook_xml {
+        return Some(if has_vba_project {
+            WorkbookFormat::Xlsm
+        } else {
+            WorkbookFormat::Xlsx
+        });
+    }
+
+    Some(WorkbookFormat::Unknown)
 }
 
 /// Return `Some(true)` when the OLE `Workbook`/`Book` stream starts with a BIFF `BOF` record.
