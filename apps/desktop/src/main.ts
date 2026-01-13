@@ -4,6 +4,7 @@ import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/command-palette.css";
 import "./styles/dialogs.css";
+import "./styles/sort-filter.css";
 import "./styles/extensions-ui.css";
 import "./styles/extensions.css";
 import "./styles/workspace.css";

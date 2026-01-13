@@ -17,18 +17,24 @@ export function SortDialog(props: SortDialogProps) {
   const [hasHeader, setHasHeader] = useState<boolean>(props.initial.hasHeader);
 
   return (
-    <div style={{ width: 420, padding: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>Sort</div>
+    <div className="formula-sort-dialog">
+      <div className="formula-sort-dialog__title">Sort</div>
 
-      <label style={{ display: "block", marginBottom: 12 }}>
-        <input type="checkbox" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} />{" "}
+      <label className="formula-sort-dialog__header-toggle">
+        <input
+          className="formula-sort-filter__checkbox"
+          type="checkbox"
+          checked={hasHeader}
+          onChange={(e) => setHasHeader(e.target.checked)}
+        />{" "}
         My data has headers
       </label>
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="formula-sort-dialog__levels">
         {keys.map((key, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div key={i} className="formula-sort-dialog__level">
             <select
+              className="formula-sort-filter__select formula-sort-dialog__select"
               value={key.column}
               onChange={(e) => {
                 const col = Number(e.target.value);
@@ -42,15 +48,22 @@ export function SortDialog(props: SortDialogProps) {
               ))}
             </select>
             <button
+              className="formula-sort-filter__button"
               onClick={() => setKeys((prev) => prev.map((k, idx) => (idx === i ? { ...k, order: nextOrder(k.order) } : k)))}
             >
               {key.order === "ascending" ? "A→Z" : "Z→A"}
             </button>
-            <button onClick={() => setKeys((prev) => prev.filter((_, idx) => idx !== i))}>Remove</button>
+            <button
+              className="formula-sort-filter__button"
+              onClick={() => setKeys((prev) => prev.filter((_, idx) => idx !== i))}
+            >
+              Remove
+            </button>
           </div>
         ))}
 
         <button
+          className="formula-sort-filter__button formula-sort-dialog__add-level"
           onClick={() =>
             setKeys((prev) => [
               ...prev,
@@ -65,13 +78,18 @@ export function SortDialog(props: SortDialogProps) {
         </button>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-        <button onClick={props.onCancel}>Cancel</button>
-        <button onClick={() => props.onApply({ keys, hasHeader })} disabled={keys.length === 0}>
+      <div className="formula-sort-filter__controls formula-sort-dialog__controls">
+        <button className="formula-sort-filter__button" onClick={props.onCancel}>
+          Cancel
+        </button>
+        <button
+          className="formula-sort-filter__button formula-sort-filter__button--primary"
+          onClick={() => props.onApply({ keys, hasHeader })}
+          disabled={keys.length === 0}
+        >
           OK
         </button>
       </div>
     </div>
   );
 }
-

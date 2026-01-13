@@ -19,29 +19,32 @@ export function FilterDropdown(props: FilterDropdownProps) {
   }, [props.uniqueValues, query]);
 
   return (
-    <div style={{ width: 280, padding: 8 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>
+    <div className="formula-filter-dropdown">
+      <div className="formula-filter-dropdown__title">
         {props.columnName} {props.isFiltered ? t("filterDropdown.filtered") : ""}
       </div>
 
       <input
+        className="formula-sort-filter__input formula-filter-dropdown__search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t("filterDropdown.search.placeholder")}
-        style={{ width: "100%", marginBottom: 8 }}
       />
 
-      <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid var(--border)" }}>
+      <div className="formula-filter-dropdown__values">
         {visibleValues.map((v) => (
-          <label key={v} style={{ display: "block", padding: "4px 8px" }}>
-            <input type="checkbox" /> {v}
+          <label key={v} className="formula-sort-filter__row formula-filter-dropdown__value">
+            <input className="formula-sort-filter__checkbox" type="checkbox" /> {v}
           </label>
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
-        <button onClick={() => props.onChange(undefined)}>{t("filterDropdown.clear")}</button>
+      <div className="formula-sort-filter__controls formula-filter-dropdown__controls">
+        <button className="formula-sort-filter__button" onClick={() => props.onChange(undefined)}>
+          {t("filterDropdown.clear")}
+        </button>
         <button
+          className="formula-sort-filter__button formula-sort-filter__button--primary"
           onClick={() =>
             props.onChange({
               join: "any",

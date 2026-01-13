@@ -32,10 +32,11 @@ export function AutoFilterDropdown({
 
   return (
     <div className="formula-table-filter-dropdown">
-      <div style={{ maxHeight: 240, overflow: "auto", padding: 6 }}>
+      <div className="formula-table-filter-dropdown__list">
         {values.map((v) => (
-          <label key={v} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label key={v} className="formula-sort-filter__row formula-table-filter-dropdown__item">
             <input
+              className="formula-sort-filter__checkbox"
               type="checkbox"
               checked={selected.has(v)}
               onChange={() => toggle(v)}
@@ -44,11 +45,12 @@ export function AutoFilterDropdown({
           </label>
         ))}
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: 6 }}>
-        <button type="button" onClick={onClose}>
+      <div className="formula-sort-filter__controls formula-table-filter-dropdown__controls">
+        <button className="formula-sort-filter__button" type="button" onClick={onClose}>
           Cancel
         </button>
         <button
+          className="formula-sort-filter__button formula-sort-filter__button--primary"
           type="button"
           onClick={() => {
             onApply(Array.from(selected));
@@ -61,4 +63,3 @@ export function AutoFilterDropdown({
     </div>
   );
 }
-

@@ -1,0 +1,210 @@
+/*
+  Sort / filter UI (dialogs + dropdowns).
+
+  Intentionally uses only design tokens from `tokens.css` and avoids hardcoded
+  colors (enforced by `test/noHardcodedColors.test.js`).
+*/
+
+/* --- Shared controls ------------------------------------------------------ */
+
+.formula-sort-filter__input,
+.formula-sort-filter__select {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease);
+}
+
+.formula-sort-filter__input::placeholder {
+  color: var(--text-secondary);
+}
+
+.formula-sort-filter__input:focus,
+.formula-sort-filter__select:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-sort-filter__checkbox {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.formula-sort-filter__button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease),
+    filter var(--motion-duration) var(--motion-ease);
+}
+
+.formula-sort-filter__button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.formula-sort-filter__button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-sort-filter__button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.formula-sort-filter__button--primary {
+  background: var(--accent);
+  border-color: var(--accent-border);
+  color: var(--text-on-accent);
+  font-weight: 700;
+}
+
+.formula-sort-filter__button--primary:hover:not(:disabled) {
+  /* Avoid hardcoded colors; adjust the existing token-driven background instead. */
+  filter: brightness(1.1);
+}
+
+.formula-sort-filter__controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.formula-sort-filter__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease);
+}
+
+.formula-sort-filter__row:hover {
+  background: var(--bg-hover);
+}
+
+.formula-sort-filter__row:focus-within {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+/* --- FilterDropdown ------------------------------------------------------- */
+
+.formula-filter-dropdown {
+  width: 280px;
+  padding: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.formula-filter-dropdown__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.formula-filter-dropdown__search {
+  margin-bottom: 8px;
+}
+
+.formula-filter-dropdown__values {
+  max-height: 220px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.formula-filter-dropdown__controls {
+  margin-top: 8px;
+}
+
+/* --- SortDialog ----------------------------------------------------------- */
+
+.formula-sort-dialog {
+  width: 420px;
+  padding: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.formula-sort-dialog__title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.formula-sort-dialog__header-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.formula-sort-dialog__levels {
+  display: grid;
+  gap: 8px;
+}
+
+.formula-sort-dialog__level {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.formula-sort-dialog__select {
+  flex: 1;
+  min-width: 0;
+}
+
+.formula-sort-dialog__controls {
+  margin-top: 16px;
+}
+
+/* --- AutoFilterDropdown --------------------------------------------------- */
+
+.formula-table-filter-dropdown {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-surface);
+  overflow: hidden;
+}
+
+.formula-table-filter-dropdown__list {
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.formula-table-filter-dropdown__controls {
+  padding: 6px;
+  border-top: 1px solid var(--border);
+}
+
