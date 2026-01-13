@@ -174,14 +174,13 @@ function heapReplaceMin(heap, item) {
  *
  * Implementation: Efraimidis–Spirakis "A-Res" weighted reservoir sampling.
  *
- * @param {Array<[string, number]>} stratumEntries
+ * @param {Iterable<[string, number]>} stratumEntries
  * @param {number} sampleSize
  * @param {() => number} rng
  * @returns {string[]}
  */
 function sampleStrataWithoutReplacement(stratumEntries, sampleSize, rng) {
   if (sampleSize <= 0) return [];
-  if (sampleSize >= stratumEntries.length) return stratumEntries.map(([key]) => key);
 
   /** @type {HeapItem[]} */
   const heap = [];
@@ -225,27 +224,35 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
     strata.set(key, (strata.get(key) ?? 0) + 1);
   }
 
-  const stratumEntries = [...strata.entries()];
+  const strataCount = strata.size;
 
   /** @type {Map<string, number>} */
   const allocation = new Map();
 
-  if (sampleSize < stratumEntries.length) {
+  if (sampleSize < strataCount) {
     // Not enough room for every stratum: choose strata (weighted by size) and take one each.
-    const chosen = sampleStrataWithoutReplacement(stratumEntries, sampleSize, rng);
+    const chosen = sampleStrataWithoutReplacement(strata.entries(), sampleSize, rng);
     for (const key of chosen) allocation.set(key, 1);
   } else {
     // Ensure at least one sample per stratum, then distribute the remainder proportionally.
-    for (const [key] of stratumEntries) allocation.set(key, 1);
-    let remaining = sampleSize - stratumEntries.length;
+    let remaining = sampleSize - strataCount;
 
-    const totalRemainderPopulation = rows.length - stratumEntries.length;
+    const totalRemainderPopulation = rows.length - strataCount;
     if (remaining > 0 && totalRemainderPopulation > 0) {
-      const shares = stratumEntries.map(([key, count]) => {
+      const shares = [];
+      for (const [key, count] of strata.entries()) {
+        allocation.set(key, 1);
         const available = Math.max(count - 1, 0);
         const exact = (available / totalRemainderPopulation) * remaining;
-        return { key, count, available, exact, floor: Math.floor(exact), frac: exact - Math.floor(exact) };
-      });
+        shares.push({
+          key,
+          count,
+          available,
+          exact,
+          floor: Math.floor(exact),
+          frac: exact - Math.floor(exact),
+        });
+      }
 
       let allocated = 0;
       for (const share of shares) {
@@ -272,6 +279,9 @@ export function stratifiedSampleRows(rows, sampleSize, options) {
         allocation.set(pick.key, (allocation.get(pick.key) ?? 0) + 1);
         remaining--;
       }
+    } else {
+      // `remaining <= 0` or no remainder population: still ensure we allocate one sample per stratum.
+      for (const [key] of strata.entries()) allocation.set(key, 1);
     }
   }
 
