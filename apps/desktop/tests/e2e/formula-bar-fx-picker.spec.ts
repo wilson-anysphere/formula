@@ -50,6 +50,12 @@ test.describe("formula bar - fx function picker", () => {
       await expect(formulaInput).toHaveValue("=SUM()");
       await expect(formulaInput).toBeFocused();
 
+      const selection = await page.evaluate(() => {
+        const el = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+        return { start: el?.selectionStart ?? null, end: el?.selectionEnd ?? null };
+      });
+      expect(selection).toEqual({ start: 5, end: 5 });
+
       await page.keyboard.type("1");
       await expect(formulaInput).toHaveValue("=SUM(1)");
     });
