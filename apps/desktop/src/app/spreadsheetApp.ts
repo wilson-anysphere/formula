@@ -2391,7 +2391,6 @@ export class SpreadsheetApp {
             const formatted = formatSheetNameForA1(token);
             return formatted ? `${formatted}!` : "";
           };
-
           const normalizeDocRange = (range: any): Range | null => {
             if (!range) return null;
             const { startRow, endRow, startCol, endCol } = range as any;
@@ -2477,7 +2476,13 @@ export class SpreadsheetApp {
         opts.formulaBar,
         {
         onBeginEdit: () => {
-          if (this.isReadOnly()) return;
+          if (this.isReadOnly()) {
+            const cell = this.selection.active;
+            showCollabEditRejectedToast([
+              { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+            ]);
+            return;
+          }
           this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
           this.syncSharedGridInteractionMode();
           this.updateEditState();
@@ -3366,7 +3371,13 @@ export class SpreadsheetApp {
 
   cut(): void {
     if (this.inlineEditController.isOpen()) return;
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -3391,7 +3402,13 @@ export class SpreadsheetApp {
 
   paste(): void {
     if (this.inlineEditController.isOpen()) return;
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     if (focusTarget) {
@@ -3416,7 +3433,13 @@ export class SpreadsheetApp {
 
   clearSelection(): void {
     if (this.inlineEditController.isOpen()) return;
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
@@ -3427,12 +3450,24 @@ export class SpreadsheetApp {
   }
 
   async clipboardCut(): Promise<void> {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     await this.cutSelectionToClipboard();
   }
 
   async clipboardPaste(): Promise<void> {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     await this.pasteClipboardToSelection();
   }
 
@@ -3440,7 +3475,13 @@ export class SpreadsheetApp {
     mode: "all" | "values" | "formulas" | "formats" = "all",
     options: { transpose?: boolean } = {}
   ): Promise<void> {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return;
 
     const normalized: "all" | "values" | "formulas" | "formats" =
@@ -6048,7 +6089,13 @@ export class SpreadsheetApp {
 
   openInlineAiEdit(): void {
     // Match the Cmd/Ctrl+K guard behavior (see `onKeyDown`).
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     // Inline edit should not trigger while the formula bar is actively editing.
@@ -10522,7 +10569,13 @@ export class SpreadsheetApp {
   }
 
   private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): boolean {
-    if (this.isReadOnly()) return false;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return false;
+    }
     if (this.isEditing()) return false;
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
@@ -11077,9 +11130,7 @@ export class SpreadsheetApp {
       // Inline edit (Cmd/Ctrl+K) should not trigger while the formula bar is actively editing.
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
-      if (this.isReadOnly()) return;
-      this.inlineEditController.open();
-      this.updateEditState();
+      this.openInlineAiEdit();
       return;
     }
     if (e.key === "Delete") {
@@ -12106,7 +12157,13 @@ export class SpreadsheetApp {
   async pasteClipboardToSelection(
     options: { mode?: "all" | "values" | "formulas" | "formats"; transpose?: boolean } = {}
   ): Promise<void> {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     try {
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
@@ -12410,7 +12467,13 @@ export class SpreadsheetApp {
   }
 
   private async cutSelectionToClipboard(): Promise<void> {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     try {
       const range = this.getClipboardCopyRange();
       const rowCount = Math.max(0, range.endRow - range.startRow + 1);
@@ -13455,7 +13518,13 @@ export class SpreadsheetApp {
    * (command palette, context menus, extensions) can invoke it via `CommandRegistry`.
    */
   clearSelectionContents(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.clearSelectionContentsInternal();
     this.refresh();

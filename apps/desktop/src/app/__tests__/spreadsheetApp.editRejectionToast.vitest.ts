@@ -213,4 +213,42 @@ describe("SpreadsheetApp edit rejection toasts", () => {
     app.destroy();
     root.remove();
   });
+
+  it("shows a read-only toast when clearing contents in read-only collab mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    app.clearSelectionContents();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("shows a read-only toast when opening inline AI edit in read-only collab mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { isReadOnly: () => true };
+
+    app.openInlineAiEdit();
+
+    expect(document.querySelector("#toast-root")?.textContent ?? "").toContain("Read-only");
+
+    app.destroy();
+    root.remove();
+  });
 });

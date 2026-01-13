@@ -224,6 +224,21 @@ importers:
 
   packages/audit-core: {}
 
+  packages/collab/binder:
+    dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
+
+  packages/collab/branching:
+    dependencies:
+      '@formula/collab-yjs-utils':
+        specifier: workspace:*
+        version: link:../yjs-utils
+
   packages/collab/comments:
     dependencies:
       '@formula/collab-yjs-utils':
