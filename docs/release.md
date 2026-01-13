@@ -365,11 +365,14 @@ Verification (signed artifacts):
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
   ```
+  - Release CI also runs `signtool verify /pa /v` on the produced installers when `WINDOWS_CERTIFICATE`
+    is configured (see `scripts/ci/check-windows-installer-signatures.py`).
 
 Timestamping:
 
 - The Authenticode timestamp server is configured in `apps/desktop/src-tauri/tauri.conf.json` under
   `bundle.windows.timestampUrl` (currently `https://timestamp.digicert.com`).
+  - Release CI preflight enforces this uses HTTPS (see `scripts/ci/check-windows-timestamp-url.mjs`).
 - If a release fails due to timestamping/network issues, switch `timestampUrl` to another **HTTPS**
   timestamp server provided/recommended by your signing certificate vendor and re-run the workflow.
 
