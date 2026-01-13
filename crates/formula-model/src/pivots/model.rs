@@ -75,13 +75,17 @@ pub struct PivotConfig {
     pub row_fields: Vec<PivotField>,
     pub column_fields: Vec<PivotField>,
     pub value_fields: Vec<ValueField>,
+    #[serde(default)]
     pub filter_fields: Vec<FilterField>,
     #[serde(default)]
     pub calculated_fields: Vec<CalculatedField>,
     #[serde(default)]
     pub calculated_items: Vec<CalculatedItem>,
+    #[serde(default)]
     pub layout: Layout,
+    #[serde(default)]
     pub subtotals: SubtotalPosition,
+    #[serde(default)]
     pub grand_totals: GrandTotals,
 }
 

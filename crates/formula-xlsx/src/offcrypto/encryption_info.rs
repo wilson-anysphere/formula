@@ -37,7 +37,7 @@ pub struct PasswordKeyEncryptor {
 
 /// Parsed Agile `EncryptionInfo` XML (best-effort; currently focused on key encryptor selection).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgileEncryptionInfo {
+pub struct AgileEncryptionInfoXml {
     /// The selected password-based key encryptor.
     pub password_key_encryptor: PasswordKeyEncryptor,
     /// Non-fatal parse warnings (deterministic; suitable for telemetry/corpus triage).
@@ -48,7 +48,7 @@ pub struct AgileEncryptionInfo {
 ///
 /// The caller is responsible for reading the `EncryptionInfo` stream header and providing only the
 /// XML bytes.
-pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo> {
+pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfoXml> {
     let xml = std::str::from_utf8(xml)?;
     let doc = roxmltree::Document::parse(xml)?;
 
@@ -119,7 +119,7 @@ pub fn parse_agile_encryption_info_xml(xml: &[u8]) -> Result<AgileEncryptionInfo
         });
     }
 
-    Ok(AgileEncryptionInfo {
+    Ok(AgileEncryptionInfoXml {
         password_key_encryptor: PasswordKeyEncryptor { uri },
         warnings,
     })

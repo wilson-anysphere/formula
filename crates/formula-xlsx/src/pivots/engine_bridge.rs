@@ -80,24 +80,7 @@ fn pivot_cache_value_to_engine_inner(value: PivotCacheValue) -> PivotValue {
 }
 
 fn pivot_key_display_string(value: PivotValue) -> String {
-    match value {
-        PivotValue::Blank => "(blank)".to_string(),
-        PivotValue::Number(n) => {
-            // Keep it simple; Excel has more nuanced formatting.
-            if n.fract() == 0.0 {
-                format!("{}", n as i64)
-            } else {
-                format!("{n}")
-            }
-        }
-        PivotValue::Date(d) => d.to_string(),
-        PivotValue::Text(s) => s,
-        PivotValue::Bool(b) => b.to_string(),
-    }
-}
-
-fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
-    value.to_key_part()
+    value.to_key_part().display_string()
 }
 
 /// Convert a parsed pivot table definition into a pivot-engine config.
@@ -193,7 +176,7 @@ pub fn pivot_table_to_engine_config(
                 let shared_items = cache_field.shared_items.as_ref()?;
                 let item = shared_items.get(item_idx)?.clone();
                 let pivot_value = pivot_cache_value_to_engine(cache_def, field_idx, item);
-                let key_part = pivot_value_to_key_part(pivot_value);
+                let key_part = pivot_value.to_key_part();
                 let mut set = HashSet::new();
                 set.insert(key_part);
                 Some(set)
@@ -276,11 +259,12 @@ fn pivot_table_field_to_engine(
                                 .and_then(|items| items.get(*item_idx as usize))
                                 .cloned()
                                 .map(|v| {
-                                    pivot_value_to_key_part(pivot_cache_value_to_engine(
+                                    pivot_cache_value_to_engine(
                                         cache_def,
                                         field_idx as usize,
                                         v,
-                                    ))
+                                    )
+                                    .to_key_part()
                                 }),
                         })
                         .collect();

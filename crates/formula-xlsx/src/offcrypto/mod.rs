@@ -82,9 +82,8 @@ pub use crypto::{
 
 #[allow(unused_imports)]
 pub use encryption_info::{
-    parse_agile_encryption_info_xml, AgileEncryptionInfo as AgileEncryptionInfoXml,
-    EncryptionInfoWarning, PasswordKeyEncryptor, KEY_ENCRYPTOR_URI_CERTIFICATE,
-    KEY_ENCRYPTOR_URI_PASSWORD,
+    parse_agile_encryption_info_xml, AgileEncryptionInfoXml, EncryptionInfoWarning,
+    PasswordKeyEncryptor, KEY_ENCRYPTOR_URI_CERTIFICATE, KEY_ENCRYPTOR_URI_PASSWORD,
 };
 
 pub use error::{OffCryptoError, Result};
