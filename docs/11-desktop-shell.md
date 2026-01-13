@@ -501,10 +501,13 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
     "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }]
     // (Other bundle config omitted for brevity; see the real file.)
     //
-    // Note: `formula://` deep links are registered at runtime via `tauri-plugin-deep-link`,
-    // not via `bundle.protocols`.
+    // Note: `formula://` deep links are configured/handled via `tauri-plugin-deep-link`
+    // (see `plugins["deep-link"].desktop.schemes`), not via `bundle.protocols`.
   },
   "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["formula"] }
+    },
     "updater": {
       "active": true,
       "dialog": false,
@@ -653,7 +656,8 @@ Formula Desktop supports two redirect-capture strategies for OAuth (typically PK
 Deep-link scheme config/registration:
 
 - Config: `apps/desktop/src-tauri/tauri.conf.json` → `plugins["deep-link"].desktop.schemes: ["formula"]`
-- Runtime: `apps/desktop/src-tauri/src/main.rs` attempts best-effort OS registration via `app.handle().deep_link().register("formula")`.
+- Runtime: `apps/desktop/src-tauri/src/main.rs` attempts best-effort OS registration on Linux/Windows via
+  `app.handle().deep_link().register_all()`. (macOS uses `Info.plist` `CFBundleURLTypes` and cannot register schemes dynamically.)
 - Delivery into Rust: on cold start / relaunch the URL is typically present in argv (handled by `extract_oauth_redirect_urls(...)` + the single-instance callback); on macOS, already-running instances can receive deep links via `tauri::RunEvent::Opened` (classified by `apps/desktop/src-tauri/src/opened_urls.rs`).
 
 **How the frontend chooses:** `DesktopOAuthBroker.openAuthUrl(...)` (`apps/desktop/src/power-query/oauthBroker.ts`) inspects the auth URL’s `redirect_uri` query param. If it is a supported loopback URI, it invokes `oauth_loopback_listen` **before** opening the system browser; otherwise it relies on `formula://…` deep-link delivery.
