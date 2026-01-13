@@ -13,7 +13,7 @@ import { InMemoryBranchStore } from "../packages/versioning/branches/src/store/I
 import {
   applyBranchStateToYjsDoc,
   branchStateFromYjsDoc,
-} from "../packages/versioning/branches/src/yjs/branchStateAdapter.js";
+} from "../packages/versioning/branches/src/browser.js";
 import { createCollabSession } from "../packages/collab/session/src/index.ts";
 import {
   getAvailablePort,
