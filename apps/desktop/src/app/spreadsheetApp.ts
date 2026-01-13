@@ -26,7 +26,14 @@ import {
 import { DrawingInteractionController, type DrawingInteractionCallbacks } from "../drawings/interaction";
 import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
-import { createDrawingObjectId, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
+import { insertImageFromFile } from "../drawings/insertImage";
+import {
+  createDrawingObjectId,
+  type Anchor as DrawingAnchor,
+  type DrawingObject,
+  type ImageEntry,
+  type ImageStore,
+} from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
@@ -763,6 +770,12 @@ export class SpreadsheetApp {
   private drawingHitTestIndexObjects: readonly DrawingObject[] | null = null;
   private selectedDrawingId: number | null = null;
   private readonly formulaChartModelStore = new FormulaChartModelStore();
+  private readonly drawingGeom: DrawingGridGeometry;
+  private drawingInteraction: DrawingInteractionController;
+  private readonly drawingObjectsBySheetId = new Map<string, DrawingObject[]>();
+  private nextDrawingObjectId = 1;
+  private nextDrawingImageId = 1;
+  private insertImageInput: HTMLInputElement | null = null;
   private drawingViewportMemo:
     | {
         width: number;
@@ -1808,91 +1821,92 @@ export class SpreadsheetApp {
             const prevZoom = this.sharedGridZoom;
             const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
 
-             const zoomChanged = nextZoom !== prevZoom;
-              if (zoomChanged) {
-                this.sharedGridZoom = nextZoom;
-                // `CanvasGridRenderer.setZoom()` scales both the default row/col sizes and any
-                // existing overrides derived from document state. Avoid re-applying persisted
-                // overrides here: rebuilding large override maps on every zoom gesture step can
-                // be expensive when many explicit row/col sizes exist.
-                this.dispatchZoomChanged();
-                this.notifyZoomListeners();
-                effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
-              }
+            const zoomChanged = nextZoom !== prevZoom;
+            if (zoomChanged) {
+              this.sharedGridZoom = nextZoom;
+              // `CanvasGridRenderer.setZoom()` scales both the default row/col sizes and any
+              // existing overrides derived from document state. Avoid re-applying persisted
+              // overrides here: rebuilding large override maps on every zoom gesture step can
+              // be expensive when many explicit row/col sizes exist.
+              this.dispatchZoomChanged();
+              this.notifyZoomListeners();
+              effectiveViewport = this.sharedGrid?.renderer.getViewportState() ?? viewport;
+            }
 
-              const prevX = this.scrollX;
-              const prevY = this.scrollY;
-              const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-              this.scrollX = nextScroll.x;
-              this.scrollY = nextScroll.y;
-              this.clearSharedHoverCellCache();
-              this.hideCommentTooltip();
-              this.renderDrawings(effectiveViewport);
-              this.renderCharts(zoomChanged);
-              this.renderAuditing();
-              this.renderSelection();
-              if (this.scrollX !== prevX || this.scrollY !== prevY) {
-                this.notifyScrollListeners();
-              }
-            },
-            onSelectionChange: () => {
-              if (this.sharedGridSelectionSyncInProgress) return;
-              this.syncSelectionFromSharedGrid();
-              this.updateStatus();
+            const prevX = this.scrollX;
+            const prevY = this.scrollY;
+            const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+            this.scrollX = nextScroll.x;
+            this.scrollY = nextScroll.y;
+            this.clearSharedHoverCellCache();
+            this.hideCommentTooltip();
+            this.renderDrawings(effectiveViewport);
+            this.renderCharts(zoomChanged);
+            this.renderAuditing();
+            this.renderSelection();
+            if (this.scrollX !== prevX || this.scrollY !== prevY) {
+              this.notifyScrollListeners();
+            }
           },
-           onSelectionRangeChange: () => {
-             if (this.sharedGridSelectionSyncInProgress) return;
-             this.syncSelectionFromSharedGrid();
-             this.updateStatus();
-           },
-            onRequestCellEdit: (request) => {
-              this.openEditorFromSharedGrid(request);
-            },
-             onAxisSizeChange: (change) => {
-               this.onSharedGridAxisSizeChange(change);
-             },
-            onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
-            onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
-            onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
-             onFillCommit: ({ sourceRange, targetRange, mode }) => {
-               // Fill operations should never mutate the sheet while the user is actively editing text
-               // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
-              //
-              // Note: DesktopSharedGrid will still expand the selection to the dragged target range
-              // after this callback runs. Revert the selection on the next microtask so the UI
-              // reflects that no fill occurred.
-              if (this.isReadOnly() || this.isEditing()) {
-                const selectionSnapshot = {
-                  ranges: this.selection.ranges.map((r) => ({ ...r })),
-                  active: { ...this.selection.active },
-                  anchor: { ...this.selection.anchor },
-                  activeRangeIndex: this.selection.activeRangeIndex
-                };
-                queueMicrotask(() => {
-                  if (!this.sharedGrid) return;
-                  if (this.disposed) return;
-                  this.selection = buildSelection(selectionSnapshot, this.limits);
-                  this.syncSharedGridSelectionFromState({ scrollIntoView: false });
-                  this.renderSelection();
-                  this.updateStatus();
-                  if (this.formulaBar?.isEditing() || this.formulaEditCell) {
-                    this.formulaBar?.focus();
-                  } else {
-                    this.focus();
-                  }
-                });
-                return;
-              }
-              const headerRows = this.sharedHeaderRows();
-              const headerCols = this.sharedHeaderCols();
- 
-              const toFillRange = (range: GridCellRange): FillEngineRange | null => {
-                const startRow = Math.max(0, range.startRow - headerRows);
-                const endRow = Math.max(0, range.endRow - headerRows);
-                const startCol = Math.max(0, range.startCol - headerCols);
-                const endCol = Math.max(0, range.endCol - headerCols);
-                if (endRow <= startRow || endCol <= startCol) return null;
-                return { startRow, endRow, startCol, endCol };
+          onSelectionChange: () => {
+            if (this.sharedGridSelectionSyncInProgress) return;
+            this.syncSelectionFromSharedGrid();
+            this.updateStatus();
+          },
+          onSelectionRangeChange: () => {
+            if (this.sharedGridSelectionSyncInProgress) return;
+            this.syncSelectionFromSharedGrid();
+            this.updateStatus();
+          },
+          onRequestCellEdit: (request) => {
+            if (this.isReadOnly()) return;
+            this.openEditorFromSharedGrid(request);
+          },
+          onAxisSizeChange: (change) => {
+            this.onSharedGridAxisSizeChange(change);
+          },
+          onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
+          onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
+          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
+          onFillCommit: ({ sourceRange, targetRange, mode }) => {
+            // Fill operations should never mutate the sheet while the user is actively editing text
+            // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
+            //
+            // Note: DesktopSharedGrid will still expand the selection to the dragged target range
+            // after this callback runs. Revert the selection on the next microtask so the UI
+            // reflects that no fill occurred.
+            if (this.isReadOnly() || this.isEditing()) {
+              const selectionSnapshot = {
+                ranges: this.selection.ranges.map((r) => ({ ...r })),
+                active: { ...this.selection.active },
+                anchor: { ...this.selection.anchor },
+                activeRangeIndex: this.selection.activeRangeIndex
+              };
+              queueMicrotask(() => {
+                if (!this.sharedGrid) return;
+                if (this.disposed) return;
+                this.selection = buildSelection(selectionSnapshot, this.limits);
+                this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                this.renderSelection();
+                this.updateStatus();
+                if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+                  this.formulaBar?.focus();
+                } else {
+                  this.focus();
+                }
+              });
+              return;
+            }
+            const headerRows = this.sharedHeaderRows();
+            const headerCols = this.sharedHeaderCols();
+
+            const toFillRange = (range: GridCellRange): FillEngineRange | null => {
+              const startRow = Math.max(0, range.startRow - headerRows);
+              const endRow = Math.max(0, range.endRow - headerRows);
+              const startCol = Math.max(0, range.startCol - headerCols);
+              const endCol = Math.max(0, range.endCol - headerCols);
+              if (endRow <= startRow || endCol <= startCol) return null;
+              return { startRow, endRow, startCol, endCol };
             };
 
             const source = toFillRange(sourceRange);
@@ -2045,6 +2059,25 @@ export class SpreadsheetApp {
       this.drawingImages,
       this.drawingGeom,
       new ChartRendererAdapter(this.formulaChartModelStore),
+    );
+    this.drawingInteraction = new DrawingInteractionController(
+      this.selectionCanvas,
+      this.drawingGeom,
+      {
+        getViewport: () => this.getDrawingInteractionViewport(),
+        getObjects: () => this.drawingObjectsBySheetId.get(this.sheetId) ?? [],
+        setObjects: (next) => {
+          this.drawingObjectsBySheetId.set(this.sheetId, next);
+          this.renderDrawings();
+        },
+        onSelectionChange: (selectedId) => {
+          this.drawingOverlay.setSelectedId(selectedId);
+          this.renderDrawings();
+        },
+      },
+      {
+        capture: true,
+      },
     );
 
     if (opts.enableDrawingInteractions) {
@@ -3114,6 +3147,7 @@ export class SpreadsheetApp {
     this.pendingStructuralConflicts = [];
 
     this.formulaBarCompletion?.destroy();
+    this.drawingInteraction?.dispose();
     this.sharedGrid?.destroy();
     this.sharedGrid = null;
     this.sharedProvider = null;
@@ -5733,6 +5767,33 @@ export class SpreadsheetApp {
     this.focus();
   }
 
+  insertImageFromLocalFile(): void {
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
+    if (this.isEditing()) return;
+    if (typeof document === "undefined") return;
+
+    const input = this.ensureInsertImageInput();
+    // Allow selecting the same file repeatedly.
+    input.value = "";
+    input.onchange = () => {
+      const file = input.files?.[0] ?? null;
+      if (!file) return;
+      void this.insertImageFromPickedFile(file);
+    };
+
+    try {
+      input.click();
+    } catch {
+      // Best-effort; some environments (tests) may not support programmatic clicks.
+    }
+  }
+
   autoSum(): void {
     if (this.isReadOnly()) {
       const cell = this.selection.active;
@@ -5765,6 +5826,68 @@ export class SpreadsheetApp {
     const initialValue = this.getCellInputText(cell);
     this.editor.open(cell, bounds, initialValue, { cursor: "end" });
     this.updateEditState();
+  }
+
+  private ensureInsertImageInput(): HTMLInputElement {
+    const existing = this.insertImageInput;
+    if (existing && existing.isConnected) return existing;
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.style.display = "none";
+    input.dataset.testid = "insert-image-input";
+
+    // Keep the element mounted so subsequent insertions reuse it (and tests can find it).
+    this.root.appendChild(input);
+    this.insertImageInput = input;
+    return input;
+  }
+
+  private async insertImageFromPickedFile(file: File): Promise<void> {
+    if (this.isReadOnly()) return;
+    const imageId = (() => {
+      const randomUUID = (globalThis as any)?.crypto?.randomUUID;
+      if (typeof randomUUID === "function") {
+        try {
+          return String(randomUUID.call((globalThis as any).crypto));
+        } catch {
+          // Fall back to monotonic ids below.
+        }
+      }
+      return `image_${this.nextDrawingImageId++}`;
+    })();
+
+    const active = this.selection.active;
+    const anchor: DrawingAnchor = {
+      type: "oneCell",
+      from: { cell: { row: active.row, col: active.col }, offset: { xEmu: 0, yEmu: 0 } },
+      size: { cx: pxToEmu(200), cy: pxToEmu(150) },
+    };
+
+    const existingObjects = this.listDrawingObjectsForSheet();
+    const maxZOrder = existingObjects.reduce((max, obj) => Math.max(max, obj.zOrder), -1);
+    const nextObjectId = this.nextDrawingObjectId++;
+    const { objects: combinedObjects } = await insertImageFromFile(file, {
+      imageId,
+      anchor,
+      nextObjectId,
+      objects: existingObjects,
+      images: this.drawingImages,
+    });
+
+    const inserted = combinedObjects[combinedObjects.length - 1];
+    if (!inserted) return;
+
+    // Prefer placing the new object on top of existing drawings.
+    inserted.zOrder = maxZOrder + 1;
+
+    const localObjects = this.drawingObjectsBySheetId.get(this.sheetId) ?? [];
+    this.drawingObjectsBySheetId.set(this.sheetId, [...localObjects, inserted]);
+    this.drawingOverlay.setSelectedId(inserted.id);
+    this.drawingInteraction.setSelectedId(inserted.id);
+    this.renderDrawings();
+    this.focus();
   }
 
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {
@@ -9211,6 +9334,7 @@ export class SpreadsheetApp {
   }
 
   private listDrawingObjectsForSheet(sheetId: string = this.sheetId): DrawingObject[] {
+    const localObjects = this.drawingObjectsBySheetId.get(sheetId) ?? [];
     const doc = this.document as any;
     const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
 
@@ -9219,59 +9343,72 @@ export class SpreadsheetApp {
     // tests (and older builds) monkeypatch it in after SpreadsheetApp construction. Include the
     // getter function identity in the cache key so we don't permanently cache an empty list
     // from the pre-monkeypatch state.
-    if (cached && cached.sheetId === sheetId && cached.source === drawingsGetter) return cached.objects;
-
-    let raw: unknown = null;
-    if (drawingsGetter) {
-      try {
-        raw = drawingsGetter.call(doc, sheetId);
-      } catch {
-        raw = null;
+    let docObjects: DrawingObject[];
+    if (cached && cached.sheetId === sheetId && cached.source === drawingsGetter) {
+      docObjects = cached.objects;
+    } else {
+      let raw: unknown = null;
+      if (drawingsGetter) {
+        try {
+          raw = drawingsGetter.call(doc, sheetId);
+        } catch {
+          raw = null;
+        }
       }
+
+      const isUiDrawingObject = (value: unknown): value is DrawingObject => {
+        if (!value || typeof value !== "object") return false;
+        const anyValue = value as any;
+        return (
+          typeof anyValue.id === "number" &&
+          anyValue.kind &&
+          typeof anyValue.kind.type === "string" &&
+          anyValue.anchor &&
+          typeof anyValue.anchor.type === "string"
+        );
+      };
+
+      const objects: DrawingObject[] = (() => {
+        if (raw == null) return [];
+        // Already normalized UI objects.
+        if (Array.isArray(raw)) {
+          if (raw.length === 0) return [];
+          if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
+          // DocumentController drawings (or model objects) as a raw array (best-effort).
+          return convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId });
+        }
+
+        if (isUiDrawingObject(raw)) return [raw];
+
+        // Formula-model worksheet JSON blob ({ drawings: [...] }).
+        if (typeof raw === "object") {
+          const maybeWorksheet = raw as any;
+          if (Array.isArray(maybeWorksheet.drawings)) {
+            return convertModelWorksheetDrawingsToUiDrawingObjects(maybeWorksheet);
+          }
+          if (Array.isArray(maybeWorksheet.objects)) {
+            const list = maybeWorksheet.objects as unknown[];
+            if (list.every(isUiDrawingObject)) return list as DrawingObject[];
+            return convertDocumentSheetDrawingsToUiDrawingObjects(list, { sheetId });
+          }
+        }
+
+        return [];
+      })();
+
+      this.drawingObjectsCache = { sheetId, objects, source: drawingsGetter };
+      docObjects = objects;
     }
 
-    const isUiDrawingObject = (value: unknown): value is DrawingObject => {
-      if (!value || typeof value !== "object") return false;
-      const anyValue = value as any;
-      return (
-        typeof anyValue.id === "number" &&
-        anyValue.kind &&
-        typeof anyValue.kind.type === "string" &&
-        anyValue.anchor &&
-        typeof anyValue.anchor.type === "string"
-      );
-    };
+    if (localObjects.length === 0) return docObjects;
+    if (docObjects.length === 0) return localObjects;
 
-    const objects: DrawingObject[] = (() => {
-      if (raw == null) return [];
-      // Already normalized UI objects.
-      if (Array.isArray(raw)) {
-        if (raw.length === 0) return [];
-        if (raw.every(isUiDrawingObject)) return raw as DrawingObject[];
-        // DocumentController drawings (or model objects) as a raw array (best-effort).
-        return convertDocumentSheetDrawingsToUiDrawingObjects(raw, { sheetId: this.sheetId });
-      }
-
-      if (isUiDrawingObject(raw)) return [raw];
-
-      // Formula-model worksheet JSON blob ({ drawings: [...] }).
-      if (typeof raw === "object") {
-        const maybeWorksheet = raw as any;
-        if (Array.isArray(maybeWorksheet.drawings)) {
-          return convertModelWorksheetDrawingsToUiDrawingObjects(maybeWorksheet);
-        }
-        if (Array.isArray(maybeWorksheet.objects)) {
-          const list = maybeWorksheet.objects as unknown[];
-          if (list.every(isUiDrawingObject)) return list as DrawingObject[];
-          return convertDocumentSheetDrawingsToUiDrawingObjects(list, { sheetId: this.sheetId });
-        }
-      }
-
-      return [];
-    })();
-
-    this.drawingObjectsCache = { sheetId, objects, source: drawingsGetter };
-    return objects;
+    // Merge document-backed drawings with locally inserted/edited ones. Locals
+    // win on id collisions so interactive edits can override document state.
+    const byId = new Map<number, DrawingObject>();
+    for (const obj of docObjects) byId.set(obj.id, obj);
+    for (const obj of localObjects) byId.set(obj.id, obj);
+    return Array.from(byId.values());
   }
 
   private renderDrawings(sharedViewport?: GridViewportState): void {
@@ -11956,6 +12093,7 @@ export class SpreadsheetApp {
     if (this.handleFormattingShortcut(e)) return;
     if (this.handleInsertDateTimeShortcut(e)) return;
     if (this.handleAutoSumShortcut(e)) return;
+    if (this.handleInsertImageShortcut(e)) return;
 
     // Editing
     // Excel-style: Shift+F2 adds/edits a comment (we wire this to "Add Comment").
@@ -12395,6 +12533,16 @@ export class SpreadsheetApp {
 
     e.preventDefault();
     this.autoSum();
+    return true;
+  }
+
+  private handleInsertImageShortcut(e: KeyboardEvent): boolean {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || !e.shiftKey || e.altKey) return false;
+    if (e.key.toLowerCase() !== "i") return false;
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+    e.preventDefault();
+    this.insertImageFromLocalFile();
     return true;
   }
 

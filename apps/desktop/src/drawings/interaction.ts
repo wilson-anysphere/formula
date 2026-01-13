@@ -83,6 +83,10 @@ export class DrawingInteractionController {
     this.element.removeEventListener("pointercancel", this.onPointerUp, this.listenerOptions);
   }
 
+  setSelectedId(id: number | null): void {
+    this.selectedId = id;
+  }
+
   /**
    * Cached bounding rect (client-space) used to convert `clientX/Y` → local
    * coordinates without doing per-pointermove layout reads.
@@ -98,12 +102,13 @@ export class DrawingInteractionController {
   }
 
   private stopPointerEvent(e: PointerEvent): void {
-    e.preventDefault();
+    const anyEvent = e as any;
+    if (typeof anyEvent.preventDefault === "function") anyEvent.preventDefault();
     // Stop both bubbling to parents and any subsequent listeners on the same element.
-    e.stopPropagation();
+    if (typeof anyEvent.stopPropagation === "function") anyEvent.stopPropagation();
     // `stopImmediatePropagation` isn't strictly required for the grid-root capture use case,
     // but it makes arbitration resilient when multiple listeners are attached to the same element.
-    e.stopImmediatePropagation();
+    if (typeof anyEvent.stopImmediatePropagation === "function") anyEvent.stopImmediatePropagation();
   }
 
   private readonly onPointerDown = (e: PointerEvent) => {
