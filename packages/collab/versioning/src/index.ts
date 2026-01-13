@@ -59,40 +59,6 @@ export type DefaultYjsVersionStoreOptions = {
   snapshotEncoding?: "chunks" | "base64";
 };
 
-function isYMapLike(value: unknown): value is {
-  get: (...args: any[]) => any;
-  set: (...args: any[]) => any;
-  delete: (...args: any[]) => any;
-  observeDeep: (...args: any[]) => any;
-  unobserveDeep: (...args: any[]) => any;
-} {
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  // Plain JS Maps also have get/set/delete, so additionally require Yjs'
-  // deep observer APIs.
-  return (
-    typeof maybe.get === "function" &&
-    typeof maybe.set === "function" &&
-    typeof maybe.delete === "function" &&
-    typeof maybe.observeDeep === "function" &&
-    typeof maybe.unobserveDeep === "function"
-  );
-}
-
-function isYjsVersionStore(store: VersionStore): store is YjsVersionStore {
-  // Prefer `instanceof`, but tolerate multiple copies of the class and/or mixed
-  // module instances (ESM + CJS) via structural checks.
-  if (store instanceof (YjsVersionStore as any)) return true;
-  const maybe = store as any;
-  if (!maybe || typeof maybe !== "object") return false;
-  const doc = maybe.doc;
-  if (!doc || typeof doc !== "object") return false;
-  if (typeof doc.getMap !== "function") return false;
-  if (!isYMapLike(maybe.versions)) return false;
-  if (!isYMapLike(maybe.meta)) return false;
-  return true;
-}
-
 export type CollabVersioningOptions = {
   session: CollabSession;
   /**
@@ -121,8 +87,8 @@ export type CollabVersioningOptions = {
    * Additional Yjs root names to exclude from version snapshots/restores.
    *
    * CollabVersioning always excludes built-in internal collaboration roots
-   * (e.g. `cellStructuralOps`, `branching:*`, and `versions*` when using
-   * {@link YjsVersionStore}). This option lets callers extend that list (for
+   * (e.g. `cellStructuralOps`, `branching:*`, and the reserved versioning roots
+   * `versions`/`versionsMeta`). This option lets callers extend that list (for
    * example when {@link CollabBranchingWorkflow} is configured with a non-default
    * branch root name).
    */
@@ -190,19 +156,25 @@ export class CollabVersioning {
     // (default "branching"). We only exclude the default roots here; callers
     // can extend the list via `CollabVersioningOptions.excludeRoots`.
     //
-    // Additionally, when version history itself is stored in the Yjs doc
-    // (YjsVersionStore), we must exclude those roots from snapshots/restores to
-    // avoid recursive snapshots and to prevent restores from rolling back
-    // history.
-    const storeInDoc = isYjsVersionStore(store);
+    // Additionally, we always exclude version history roots (`versions`,
+    // `versionsMeta`). When history is stored in-doc (YjsVersionStore) this
+    // avoids recursive snapshots and prevents restores from rolling back
+    // internal history.
+    //
+    // Even when history is stored out-of-doc (Api/SQLite/etc), a document may
+    // still contain these reserved roots (e.g. from earlier in-doc usage or dev
+    // sessions). Restoring must never attempt to rewrite them, both to avoid
+    // rewinding internal state and to prevent server-side "reserved root
+    // mutation" disconnects.
     const builtInExcludeRoots = [
       // Always excluded internal collaboration roots.
       "cellStructuralOps",
       "branching:branches",
       "branching:commits",
       "branching:meta",
-      // Exclude versioning history roots only when history is stored in-doc.
-      ...(storeInDoc ? ["versions", "versionsMeta"] : []),
+      // Always excluded internal versioning roots.
+      "versions",
+      "versionsMeta",
     ];
 
     const excludeRoots = Array.from(
