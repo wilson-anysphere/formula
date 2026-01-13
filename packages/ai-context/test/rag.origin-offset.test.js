@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { chunkSheetByRegions, RagIndex } from "../src/rag.js";
+import { chunkSheetByRegions, RagIndex, rangeToChunk } from "../src/rag.js";
 
 test("chunkSheetByRegions: translates schema ranges to local indices when sheet.origin is set", () => {
   const sheet = {
@@ -39,6 +39,49 @@ test("RagIndex.indexSheet: origin-offset sheets can be indexed and searched", as
   assert.ok(results.length > 0);
   assert.equal(results[0].range, "'My Sheet'!C5:D7");
   assert.match(results[0].preview, /\bAlice\b/);
+});
+
+test("rangeToChunk: translates absolute coordinates to local indices when sheet.origin is set", () => {
+  const sheet = {
+    name: "My Sheet",
+    origin: { row: 10, col: 5 }, // F11
+    values: [
+      ["A", "B"],
+      ["C", "D"],
+      ["E", "F"],
+    ],
+  };
+
+  const chunk = rangeToChunk(
+    sheet,
+    { startRow: 10, startCol: 5, endRow: 12, endCol: 6 }, // F11:G13
+    { maxRows: 10 },
+  );
+
+  assert.equal(chunk.range, "'My Sheet'!F11:G13");
+  assert.match(chunk.text, /\bA\tB\b/);
+  assert.match(chunk.text, /\bC\tD\b/);
+});
+
+test("rangeToChunk: clamps partially out-of-bounds absolute ranges to the provided matrix", () => {
+  const sheet = {
+    name: "My Sheet",
+    origin: { row: 10, col: 5 }, // F11
+    values: [
+      ["A", "B"],
+      ["C", "D"],
+    ],
+  };
+
+  // Requested absolute range extends beyond the provided window, but intersects it.
+  const chunk = rangeToChunk(
+    sheet,
+    { startRow: 9, startCol: 4, endRow: 12, endCol: 8 },
+    { maxRows: 10 },
+  );
+
+  assert.match(chunk.text, /\bA\tB\b/);
+  assert.match(chunk.text, /\bC\tD\b/);
 });
 
 test("chunk splitting: tall regions produce multiple chunks; shrinking removes stale ids", async () => {

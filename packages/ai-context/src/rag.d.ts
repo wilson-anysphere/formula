@@ -1,6 +1,16 @@
+import type { SheetSchema } from "./schema.js";
+
 export interface RagSheet {
   name: string;
   values: unknown[][];
+  /**
+   * Optional coordinate origin (0-based) for the provided `values` matrix.
+   *
+   * When `values` is a cropped window of a larger sheet (e.g. a capped used-range
+   * sample), `origin` lets schema extraction and RAG chunking produce correct
+   * absolute A1 ranges.
+   */
+  origin?: { row: number; col: number };
 }
 
 export interface RagChunk<TMetadata = any> {
@@ -8,6 +18,20 @@ export interface RagChunk<TMetadata = any> {
   range: string;
   text: string;
   metadata: TMetadata;
+}
+
+export interface ChunkSheetByRegionsOptions {
+  maxChunkRows?: number;
+  /**
+   * Split tall regions into multiple row-window chunks to improve retrieval quality.
+   * Defaults to `false` for backwards compatibility.
+   */
+  splitByRowWindows?: boolean;
+  /** Row overlap between windows (only when splitting). Defaults to 3. */
+  rowOverlap?: number;
+  /** Maximum number of chunks per region (only when splitting). Defaults to 50. */
+  maxChunksPerRegion?: number;
+  signal?: AbortSignal;
 }
 
 export interface Embedder {
@@ -70,8 +94,16 @@ export class InMemoryVectorStore<TMetadata = any>
 
 export function chunkSheetByRegions(
   sheet: RagSheet,
-  options?: { maxChunkRows?: number; signal?: AbortSignal },
-): Array<RagChunk<{ type: "region"; sheetName: string }>>;
+  options?: ChunkSheetByRegionsOptions,
+): Array<RagChunk<{ type: "region"; sheetName: string; regionRange: string }>>;
+
+export function chunkSheetByRegionsWithSchema(
+  sheet: RagSheet,
+  options?: ChunkSheetByRegionsOptions,
+): {
+  schema: SheetSchema;
+  chunks: Array<RagChunk<{ type: "region"; sheetName: string; regionRange: string }>>;
+};
 
 export class RagIndex {
   embedder: Embedder;
@@ -79,7 +111,10 @@ export class RagIndex {
 
   constructor(options?: { embedder?: Embedder; store?: VectorStore });
 
-  indexSheet(sheet: RagSheet, options?: { signal?: AbortSignal }): Promise<void>;
+  indexSheet(
+    sheet: RagSheet,
+    options?: ChunkSheetByRegionsOptions,
+  ): Promise<{ schema: SheetSchema; chunkCount: number }>;
 
   search(
     query: string,
