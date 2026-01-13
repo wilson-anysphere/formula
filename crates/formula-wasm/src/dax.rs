@@ -1,8 +1,303 @@
+use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
-use formula_dax::{FilterContext, GroupByColumn, PivotMeasure, Value as DaxValue};
+use formula_dax::{
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
+    GroupByColumn, PivotMeasure, Relationship, RowContext, Table, Value,
+};
+
+fn js_error(message: impl AsRef<str>) -> JsValue {
+    js_sys::Error::new(message.as_ref()).into()
+}
+
+fn dax_error_to_js(err: DaxError) -> JsValue {
+    js_sys::Error::new(&err.to_string()).into()
+}
+
+fn js_value_to_dax_value(value: JsValue) -> Result<Value, JsValue> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(Value::Blank);
+    }
+
+    if let Some(n) = value.as_f64() {
+        return Ok(Value::from(n));
+    }
+    if let Some(s) = value.as_string() {
+        return Ok(Value::from(s));
+    }
+    if let Some(b) = value.as_bool() {
+        return Ok(Value::from(b));
+    }
+
+    Err(js_error(
+        "unsupported value type (expected null, number, string, or boolean)",
+    ))
+}
+
+fn dax_value_to_js(value: Value) -> JsValue {
+    match value {
+        Value::Blank => JsValue::NULL,
+        Value::Number(n) => JsValue::from_f64(n.0),
+        Value::Text(s) => JsValue::from_str(&s),
+        Value::Boolean(b) => JsValue::from_bool(b),
+    }
+}
+
+fn object_set(obj: &Object, key: &str, value: &JsValue) -> Result<(), JsValue> {
+    Reflect::set(obj, &JsValue::from_str(key), value).map(|_| ())
+}
+
+fn cardinality_from_js(raw: Option<&str>) -> Result<Cardinality, JsValue> {
+    match raw.unwrap_or("OneToMany") {
+        "OneToMany" => Ok(Cardinality::OneToMany),
+        "OneToOne" => Ok(Cardinality::OneToOne),
+        "ManyToMany" => Ok(Cardinality::ManyToMany),
+        other => Err(js_error(format!(
+            "unknown relationship.cardinality: {other} (expected OneToMany | OneToOne | ManyToMany)"
+        ))),
+    }
+}
+
+fn cross_filter_direction_from_js(raw: Option<&str>) -> Result<CrossFilterDirection, JsValue> {
+    match raw.unwrap_or("Single") {
+        "Single" => Ok(CrossFilterDirection::Single),
+        "Both" => Ok(CrossFilterDirection::Both),
+        other => Err(js_error(format!(
+            "unknown relationship.crossFilterDirection: {other} (expected Single | Both)"
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RelationshipDto {
+    name: String,
+    from_table: String,
+    from_column: String,
+    to_table: String,
+    to_column: String,
+    #[serde(default)]
+    cardinality: Option<String>,
+    #[serde(default)]
+    cross_filter_direction: Option<String>,
+    #[serde(default)]
+    is_active: Option<bool>,
+    #[serde(default)]
+    enforce_referential_integrity: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GroupByDto {
+    table: String,
+    column: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PivotMeasureDto {
+    name: String,
+    expression: String,
+}
+
+/// JS-friendly wrapper around [`formula_dax::DataModel`].
+#[wasm_bindgen]
+pub struct DaxModel {
+    model: DataModel,
+}
+
+#[wasm_bindgen]
+impl DaxModel {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            model: DataModel::new(),
+        }
+    }
+
+    /// Add an in-memory table from JS data.
+    ///
+    /// Values are converted as:
+    /// - `null`/`undefined` → BLANK
+    /// - `number` → Number
+    /// - `string` → Text
+    /// - `boolean` → Boolean
+    #[wasm_bindgen(js_name = "addTable")]
+    pub fn add_table(
+        &mut self,
+        name: &str,
+        columns: Vec<String>,
+        rows: JsValue,
+    ) -> Result<(), JsValue> {
+        let rows = rows
+            .dyn_into::<Array>()
+            .map_err(|_| js_error("rows must be an array of arrays"))?;
+
+        let mut table = Table::new(name, columns);
+        for row in rows.iter() {
+            let row = row
+                .dyn_into::<Array>()
+                .map_err(|_| js_error("rows must be an array of arrays"))?;
+
+            let mut out = Vec::with_capacity(row.length() as usize);
+            for cell in row.iter() {
+                out.push(js_value_to_dax_value(cell)?);
+            }
+            table.push_row(out).map_err(dax_error_to_js)?;
+        }
+
+        self.model.add_table(table).map_err(dax_error_to_js)
+    }
+
+    #[wasm_bindgen(js_name = "addRelationship")]
+    pub fn add_relationship(&mut self, relationship: JsValue) -> Result<(), JsValue> {
+        let dto: RelationshipDto =
+            serde_wasm_bindgen::from_value(relationship).map_err(|err| js_error(err.to_string()))?;
+
+        let relationship = Relationship {
+            name: dto.name,
+            from_table: dto.from_table,
+            from_column: dto.from_column,
+            to_table: dto.to_table,
+            to_column: dto.to_column,
+            cardinality: cardinality_from_js(dto.cardinality.as_deref())?,
+            cross_filter_direction: cross_filter_direction_from_js(dto.cross_filter_direction.as_deref())?,
+            is_active: dto.is_active.unwrap_or(true),
+            enforce_referential_integrity: dto.enforce_referential_integrity.unwrap_or(true),
+        };
+
+        self.model.add_relationship(relationship).map_err(dax_error_to_js)
+    }
+
+    #[wasm_bindgen(js_name = "addMeasure")]
+    pub fn add_measure(&mut self, name: &str, expression: &str) -> Result<(), JsValue> {
+        self.model.add_measure(name, expression).map_err(dax_error_to_js)
+    }
+
+    #[wasm_bindgen(js_name = "addCalculatedColumn")]
+    pub fn add_calculated_column(
+        &mut self,
+        table: &str,
+        name: &str,
+        expression: &str,
+    ) -> Result<(), JsValue> {
+        self.model
+            .add_calculated_column(table, name, expression)
+            .map_err(dax_error_to_js)
+    }
+
+    #[wasm_bindgen(js_name = "evaluate")]
+    pub fn evaluate(
+        &self,
+        expression_or_measure_name: &str,
+        filter_context: Option<DaxFilterContext>,
+    ) -> Result<JsValue, JsValue> {
+        let filter = filter_context
+            .map(|ctx| ctx.ctx)
+            .unwrap_or_else(FilterContext::empty);
+
+        // Provide a JS-friendly shortcut: if the input matches a known measure name,
+        // evaluate it as a measure even if it isn't wrapped in `[brackets]`.
+        match self
+            .model
+            .evaluate_measure(expression_or_measure_name, &filter)
+        {
+            Ok(value) => Ok(dax_value_to_js(value)),
+            Err(DaxError::UnknownMeasure(_)) => DaxEngine::new()
+                .evaluate(
+                    &self.model,
+                    expression_or_measure_name,
+                    &filter,
+                    &RowContext::default(),
+                )
+                .map(dax_value_to_js)
+                .map_err(dax_error_to_js),
+            Err(err) => Err(dax_error_to_js(err)),
+        }
+    }
+
+    #[wasm_bindgen(js_name = "pivot")]
+    pub fn pivot(
+        &self,
+        base_table: &str,
+        group_by: JsValue,
+        measures: JsValue,
+        filter_context: Option<DaxFilterContext>,
+    ) -> Result<JsValue, JsValue> {
+        let group_by: Vec<GroupByDto> =
+            serde_wasm_bindgen::from_value(group_by).map_err(|err| js_error(err.to_string()))?;
+        let measures: Vec<PivotMeasureDto> =
+            serde_wasm_bindgen::from_value(measures).map_err(|err| js_error(err.to_string()))?;
+
+        let group_by: Vec<GroupByColumn> = group_by
+            .into_iter()
+            .map(|c| GroupByColumn::new(c.table, c.column))
+            .collect();
+
+        let mut pivot_measures = Vec::with_capacity(measures.len());
+        for m in measures {
+            pivot_measures.push(PivotMeasure::new(m.name, m.expression).map_err(dax_error_to_js)?);
+        }
+
+        let filter = filter_context
+            .map(|ctx| ctx.ctx)
+            .unwrap_or_else(FilterContext::empty);
+
+        let result = pivot(&self.model, base_table, &group_by, &pivot_measures, &filter)
+            .map_err(dax_error_to_js)?;
+
+        let obj = Object::new();
+        let cols = Array::new();
+        for col in result.columns {
+            cols.push(&JsValue::from_str(&col));
+        }
+        let rows = Array::new();
+        for row in result.rows {
+            let out = Array::new();
+            for value in row {
+                out.push(&dax_value_to_js(value));
+            }
+            rows.push(&out);
+        }
+
+        object_set(&obj, "columns", &cols.into())?;
+        object_set(&obj, "rows", &rows.into())?;
+        Ok(obj.into())
+    }
+}
+
+/// JS wrapper around [`formula_dax::FilterContext`].
+#[wasm_bindgen]
+pub struct DaxFilterContext {
+    ctx: FilterContext,
+}
+
+#[wasm_bindgen]
+impl DaxFilterContext {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            ctx: FilterContext::empty(),
+        }
+    }
+
+    #[wasm_bindgen(js_name = "setColumnEquals")]
+    pub fn set_column_equals(
+        &mut self,
+        table: &str,
+        column: &str,
+        value: JsValue,
+    ) -> Result<(), JsValue> {
+        let value = js_value_to_dax_value(value)?;
+        self.ctx.set_column_equals(table, column, value);
+        Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Compatibility: a minimal pivot-only API added in an earlier iteration.
+// -----------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct TableSchemaDto {
@@ -36,33 +331,33 @@ pub struct PivotResultDto {
     pub rows: Vec<Vec<JsonValue>>,
 }
 
-fn json_scalar_to_dax_value(value: &JsonValue) -> Result<DaxValue, JsValue> {
+fn json_scalar_to_dax_value(value: &JsonValue) -> Result<Value, JsValue> {
     match value {
-        JsonValue::Null => Ok(DaxValue::Blank),
-        JsonValue::Bool(b) => Ok(DaxValue::from(*b)),
+        JsonValue::Null => Ok(Value::Blank),
+        JsonValue::Bool(b) => Ok(Value::from(*b)),
         JsonValue::Number(n) => n
             .as_f64()
             .ok_or_else(|| super::js_err("invalid number".to_string()))
-            .map(DaxValue::from),
-        JsonValue::String(s) => Ok(DaxValue::from(s.clone())),
+            .map(Value::from),
+        JsonValue::String(s) => Ok(Value::from(s.clone())),
         _ => Err(super::js_err("expected a JSON scalar".to_string())),
     }
 }
 
-fn dax_value_to_json_scalar(value: &DaxValue) -> JsonValue {
+fn dax_value_to_json_scalar(value: &Value) -> JsonValue {
     match value {
-        DaxValue::Blank => JsonValue::Null,
-        DaxValue::Boolean(b) => JsonValue::Bool(*b),
-        DaxValue::Number(n) => serde_json::Number::from_f64(n.0)
+        Value::Blank => JsonValue::Null,
+        Value::Boolean(b) => JsonValue::Bool(*b),
+        Value::Number(n) => serde_json::Number::from_f64(n.0)
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
-        DaxValue::Text(s) => JsonValue::String(s.to_string()),
+        Value::Text(s) => JsonValue::String(s.to_string()),
     }
 }
 
 #[wasm_bindgen(js_name = "DaxDataModel")]
 pub struct WasmDaxDataModel {
-    inner: formula_dax::DataModel,
+    inner: DataModel,
 }
 
 #[wasm_bindgen(js_class = "DaxDataModel")]
@@ -70,7 +365,7 @@ impl WasmDaxDataModel {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WasmDaxDataModel {
         WasmDaxDataModel {
-            inner: formula_dax::DataModel::new(),
+            inner: DataModel::new(),
         }
     }
 
@@ -81,7 +376,7 @@ impl WasmDaxDataModel {
         let rows: Vec<Vec<JsonValue>> =
             serde_wasm_bindgen::from_value(rows).map_err(|err| super::js_err(err.to_string()))?;
 
-        let mut table = formula_dax::Table::new(&schema.name, schema.columns);
+        let mut table = Table::new(&schema.name, schema.columns);
         for row in rows {
             let mut values = Vec::with_capacity(row.len());
             for cell in row {
@@ -108,8 +403,8 @@ impl WasmDaxDataModel {
 
     #[wasm_bindgen(js_name = "pivot")]
     pub fn pivot(&self, request: JsValue) -> Result<JsValue, JsValue> {
-        let request: PivotRequestDto =
-            serde_wasm_bindgen::from_value(request).map_err(|err| super::js_err(err.to_string()))?;
+        let request: PivotRequestDto = serde_wasm_bindgen::from_value(request)
+            .map_err(|err| super::js_err(err.to_string()))?;
 
         let group_by: Vec<GroupByColumn> = request
             .group_by

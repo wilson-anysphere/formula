@@ -22,8 +22,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "dax")]
 mod dax;
-pub use dax::WasmDaxDataModel;
+#[cfg(feature = "dax")]
+pub use dax::{DaxFilterContext, DaxModel, WasmDaxDataModel};
 
 pub const DEFAULT_SHEET: &str = "Sheet1";
 
