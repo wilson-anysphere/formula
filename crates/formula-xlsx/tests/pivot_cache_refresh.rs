@@ -4,17 +4,23 @@ use formula_xlsx::XlsxPackage;
 use pretty_assertions::assert_eq;
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::io::Write;
+use zip::write::FileOptions;
+use zip::ZipWriter;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CacheValue {
     String(String),
     Number(String),
+    DateTime(String),
     Bool(bool),
     Missing,
 }
 
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
 fn parse_cache_records(xml: &str) -> Vec<Vec<CacheValue>> {
     let mut reader = Reader::from_reader(Cursor::new(xml.as_bytes()));
@@ -44,6 +50,7 @@ fn parse_cache_records(xml: &str) -> Vec<Vec<CacheValue>> {
                 match tag.as_ref() {
                     b"s" => row.push(CacheValue::String(v.unwrap_or_default())),
                     b"n" => row.push(CacheValue::Number(v.unwrap_or_default())),
+                    b"d" => row.push(CacheValue::DateTime(v.unwrap_or_default())),
                     b"b" => row.push(CacheValue::Bool(v.as_deref() == Some("1"))),
                     b"m" => row.push(CacheValue::Missing),
                     _ => {}
@@ -99,7 +106,10 @@ fn refreshes_pivot_cache_records_from_worksheet_range() {
   </sheetData>
 </worksheet>"#;
 
-    pkg.set_part("xl/worksheets/sheet1.xml", updated_sheet.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/worksheets/sheet1.xml",
+        updated_sheet.as_bytes().to_vec(),
+    );
 
     pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
         .expect("refresh cache");
@@ -348,7 +358,10 @@ fn refreshes_pivot_cache_records_with_custom_shared_strings_part() {
   </sheetData>
 </worksheet>"#;
 
-    pkg.set_part("xl/worksheets/sheet1.xml", updated_sheet.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/worksheets/sheet1.xml",
+        updated_sheet.as_bytes().to_vec(),
+    );
 
     pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
         .expect("refresh cache");
@@ -532,4 +545,182 @@ fn refreshes_pivot_cache_records_with_quoted_sheet_in_ref() {
     .expect("utf-8");
     let doc = roxmltree::Document::parse(cache_records_xml).expect("parse records xml");
     assert_eq!(doc.root_element().attribute("count"), Some("4"));
+}
+
+fn build_date_pivot_fixture(date1904: bool) -> Vec<u8> {
+    let workbook_pr = if date1904 {
+        r#"<workbookPr date1904="1"/>"#
+    } else {
+        ""
+    };
+
+    let workbook_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  {workbook_pr}
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#
+    );
+
+    let workbook_rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>
+</Relationships>"#
+    );
+
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="1">
+    <numFmt numFmtId="165" formatCode="yyyy-mm-dd"/>
+  </numFmts>
+</styleSheet>"#;
+
+    let (serial1, serial2) = if date1904 { (0, 1) } else { (1, 2) };
+    let worksheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Date</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Value</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>{serial1}</v></c>
+      <c r="B2"><v>10</v></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>{serial2}</v></c>
+      <c r="B3"><v>20</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#
+    );
+
+    let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource sheet="Sheet1" ref="A1:B3"/>
+  </cacheSource>
+  <cacheFields count="2">
+    <cacheField name="Date" numFmtId="165"/>
+    <cacheField name="Value" numFmtId="0"/>
+  </cacheFields>
+</pivotCacheDefinition>"#;
+
+    let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
+</Relationships>"#;
+
+    let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options)
+        .unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/styles.xml", options).unwrap();
+    zip.write_all(styles_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+        .unwrap();
+    zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+    zip.start_file(
+        "xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels",
+        options,
+    )
+    .unwrap();
+    zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+        .unwrap();
+    zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn refreshes_pivot_cache_records_with_date_time_fields_as_d_tags() {
+    let fixture = build_date_pivot_fixture(false);
+    let mut pkg = XlsxPackage::from_bytes(&fixture).expect("read pkg");
+
+    pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("refresh cache");
+
+    let cache_definition_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("cache definition exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_definition_xml).expect("parse definition xml");
+    assert_eq!(doc.root_element().attribute("recordCount"), Some("2"));
+
+    let cache_records_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheRecords1.xml")
+            .expect("cache records exists"),
+    )
+    .expect("utf-8");
+    let doc = roxmltree::Document::parse(cache_records_xml).expect("parse records xml");
+    assert_eq!(doc.root_element().attribute("count"), Some("2"));
+
+    let rows = parse_cache_records(cache_records_xml);
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                CacheValue::DateTime("1900-01-01T00:00:00Z".to_string()),
+                CacheValue::Number("10".to_string())
+            ],
+            vec![
+                CacheValue::DateTime("1900-01-02T00:00:00Z".to_string()),
+                CacheValue::Number("20".to_string())
+            ],
+        ]
+    );
+}
+
+#[test]
+fn refreshes_pivot_cache_records_uses_workbook_date1904_for_datetime_serials() {
+    let fixture = build_date_pivot_fixture(true);
+    let mut pkg = XlsxPackage::from_bytes(&fixture).expect("read pkg");
+
+    pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("refresh cache");
+
+    let cache_records_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheRecords1.xml")
+            .expect("cache records exists"),
+    )
+    .expect("utf-8");
+
+    let rows = parse_cache_records(cache_records_xml);
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                CacheValue::DateTime("1904-01-01T00:00:00Z".to_string()),
+                CacheValue::Number("10".to_string())
+            ],
+            vec![
+                CacheValue::DateTime("1904-01-02T00:00:00Z".to_string()),
+                CacheValue::Number("20".to_string())
+            ],
+        ]
+    );
 }

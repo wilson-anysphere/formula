@@ -272,8 +272,8 @@ fn extracts_embedded_image_even_without_metadata_xml() {
     let cell_img = images.get(&key).expect("expected A1 embedded image");
     assert_eq!(cell_img.image_part, "xl/media/image1.png");
     assert_eq!(cell_img.image_bytes, png);
-    // Without `xl/metadata.xml` / `rdRichValue` parts we can't recover CalcOrigin, so the
-    // extractor reports it as unknown.
+    // Without `xl/metadata.xml` / `rdRichValue` parts we can't recover CalcOrigin. We default to
+    // `0` (unknown).
     assert_eq!(cell_img.calc_origin, 0);
     assert!(cell_img.alt_text.is_none());
 }

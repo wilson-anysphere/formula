@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 
+use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
 use formula_model::{CellRef, Range};
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -12,10 +13,13 @@ use crate::pivots::cache_records::PivotCacheValue;
 use crate::pivots::PivotCacheSourceType;
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::xml::{QName, XmlElement, XmlNode};
+use crate::DateSystem;
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const REL_TYPE_SHARED_STRINGS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorksheetSource {
@@ -93,9 +97,14 @@ impl XlsxPackage {
             .part(&worksheet_part)
             .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
 
+        let date_system = workbook_date_system(self)?;
+        let field_date_flags = detect_date_fields(self, &cache_definition_bytes, range)?;
+
         let shared_strings = load_shared_strings(self)?;
         let cells = parse_worksheet_cells_in_range(worksheet_xml, range, &shared_strings)?;
-        let (field_names, records) = build_cache_fields_and_records(range, &cells);
+        let (field_names, mut records) = build_cache_fields_and_records(range, &cells);
+
+        coerce_date_fields(&mut records, &field_date_flags, date_system);
 
         let record_count = records.len() as u64;
 
@@ -139,6 +148,38 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn workbook_date_system(package: &XlsxPackage) -> Result<DateSystem, XlsxError> {
+    let workbook_xml = package
+        .part(WORKBOOK_PART)
+        .ok_or_else(|| XlsxError::MissingPart(WORKBOOK_PART.to_string()))?;
+
+    let mut reader = Reader::from_reader(Cursor::new(workbook_xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"workbookPr" => {
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    if local_name(attr.key.as_ref()) == b"date1904" {
+                        let val = attr.unescape_value()?.into_owned();
+                        if val == "1" || val.eq_ignore_ascii_case("true") {
+                            return Ok(DateSystem::V1904);
+                        }
+                    }
+                }
+                return Ok(DateSystem::V1900);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(DateSystem::V1900)
 }
 
 fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetSource, XlsxError> {
@@ -253,6 +294,276 @@ fn load_shared_strings(package: &XlsxPackage) -> Result<Vec<String>, XlsxError> 
         .map_err(|e| XlsxError::Invalid(format!("failed to parse {shared_strings_part:?}: {e}")))?;
 
     Ok(parsed.items.into_iter().map(|rt| rt.text).collect())
+}
+
+fn detect_date_fields(
+    package: &XlsxPackage,
+    cache_definition_xml: &[u8],
+    range: Range,
+) -> Result<Vec<bool>, XlsxError> {
+    let field_count = range.width() as usize;
+    if field_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let num_fmt_ids = parse_cache_definition_num_fmt_ids(cache_definition_xml)?;
+    let num_fmts = load_styles_num_fmts(package)?;
+
+    let mut flags = Vec::with_capacity(field_count);
+    for idx in 0..field_count {
+        let num_fmt_id = num_fmt_ids.get(idx).copied().unwrap_or(0);
+        flags.push(is_datetime_num_fmt_id(num_fmt_id, &num_fmts));
+    }
+    Ok(flags)
+}
+
+fn parse_cache_definition_num_fmt_ids(xml: &[u8]) -> Result<Vec<u16>, XlsxError> {
+    let root = XmlElement::parse(xml).map_err(|e| {
+        XlsxError::Invalid(format!("failed to parse pivot cache definition xml: {e}"))
+    })?;
+    let Some(cache_fields) = root.child("cacheFields") else {
+        return Ok(Vec::new());
+    };
+
+    let mut out = Vec::new();
+    for cache_field in cache_fields.children_by_local("cacheField") {
+        let id = cache_field
+            .attr("numFmtId")
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(0);
+        out.push(id);
+    }
+
+    Ok(out)
+}
+
+fn load_styles_num_fmts(package: &XlsxPackage) -> Result<HashMap<u16, String>, XlsxError> {
+    let styles_part = resolve_styles_part_name(package)?.or_else(|| {
+        package
+            .part("xl/styles.xml")
+            .map(|_| "xl/styles.xml".to_string())
+    });
+    let Some(styles_part) = styles_part else {
+        return Ok(HashMap::new());
+    };
+    let Some(bytes) = package.part(&styles_part) else {
+        return Ok(HashMap::new());
+    };
+
+    parse_styles_num_fmts_xml(bytes)
+        .map_err(|e| XlsxError::Invalid(format!("failed to parse {styles_part:?}: {e}")))
+}
+
+fn resolve_styles_part_name(package: &XlsxPackage) -> Result<Option<String>, XlsxError> {
+    let rels_part = rels_part_name(WORKBOOK_PART);
+    let rels_bytes = match package.part(&rels_part) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    let rels = parse_relationships(rels_bytes)?;
+    Ok(rels
+        .into_iter()
+        .find(|rel| {
+            rel.type_uri == REL_TYPE_STYLES
+                && !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        })
+        .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
+}
+
+fn parse_styles_num_fmts_xml(xml: &[u8]) -> Result<HashMap<u16, String>, quick_xml::Error> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_num_fmts = false;
+    let mut out: HashMap<u16, String> = HashMap::new();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"numFmts" => {
+                in_num_fmts = true;
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"numFmts" => {
+                in_num_fmts = false;
+            }
+            Event::Empty(e) if in_num_fmts && local_name(e.name().as_ref()) == b"numFmt" => {
+                if let Some((id, code)) = parse_num_fmt_attrs(&e)? {
+                    out.insert(id, code);
+                }
+            }
+            Event::Start(e) if in_num_fmts && local_name(e.name().as_ref()) == b"numFmt" => {
+                if let Some((id, code)) = parse_num_fmt_attrs(&e)? {
+                    out.insert(id, code);
+                }
+                reader.read_to_end_into(e.name(), &mut Vec::new())?;
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn parse_num_fmt_attrs(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<(u16, String)>, quick_xml::Error> {
+    let mut id: Option<u16> = None;
+    let mut code: Option<String> = None;
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        match local_name(attr.key.as_ref()) {
+            b"numFmtId" => id = attr.unescape_value()?.into_owned().parse::<u16>().ok(),
+            b"formatCode" => code = Some(attr.unescape_value()?.into_owned()),
+            _ => {}
+        }
+    }
+    match (id, code) {
+        (Some(id), Some(code)) => Ok(Some((id, code))),
+        _ => Ok(None),
+    }
+}
+
+fn is_datetime_num_fmt_id(num_fmt_id: u16, num_fmts: &HashMap<u16, String>) -> bool {
+    if num_fmt_id == 0 {
+        return false;
+    }
+
+    if let Some(code) = num_fmts.get(&num_fmt_id) {
+        return format_code_looks_like_datetime(code);
+    }
+
+    if let Some(code) = formula_format::builtin_format_code(num_fmt_id) {
+        return format_code_looks_like_datetime(code);
+    }
+
+    // Excel reserves additional built-in numFmtId slots for locale-specific date/time patterns
+    // (commonly 50-58). These frequently represent dates in real-world files even when the
+    // corresponding format code is not present in styles.xml.
+    (50..=58).contains(&num_fmt_id)
+}
+
+fn format_code_looks_like_datetime(code: &str) -> bool {
+    let mut in_quotes = false;
+    let mut escape = false;
+    let mut chars = code.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_quotes {
+            if ch == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        match ch {
+            '"' => in_quotes = true,
+            '\\' => escape = true,
+            '[' => {
+                // Elapsed time: [h], [m], [s]
+                let mut content = String::new();
+                while let Some(c) = chars.next() {
+                    if c == ']' {
+                        break;
+                    }
+                    content.push(c);
+                }
+                let lower = content.to_ascii_lowercase();
+                if !lower.is_empty()
+                    && (lower.chars().all(|c| c == 'h')
+                        || lower.chars().all(|c| c == 'm')
+                        || lower.chars().all(|c| c == 's'))
+                {
+                    return true;
+                }
+            }
+            'y' | 'Y' | 'd' | 'D' | 'h' | 'H' | 's' | 'S' => return true,
+            'm' | 'M' => return true,
+            'a' | 'A' => {
+                // AM/PM or A/P markers (case-insensitive).
+                let mut probe = String::new();
+                probe.push(ch);
+                let mut clone = chars.clone();
+                for _ in 0..4 {
+                    if let Some(c) = clone.next() {
+                        probe.push(c);
+                    } else {
+                        break;
+                    }
+                }
+                let lower = probe.to_ascii_lowercase();
+                if lower.starts_with("am/pm") || lower.starts_with("a/p") {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn coerce_date_fields(
+    records: &mut [Vec<PivotCacheValue>],
+    date_fields: &[bool],
+    date_system: DateSystem,
+) {
+    if date_fields.is_empty() {
+        return;
+    }
+
+    for record in records {
+        for (idx, value) in record.iter_mut().enumerate() {
+            if !date_fields.get(idx).copied().unwrap_or(false) {
+                continue;
+            }
+
+            if let PivotCacheValue::Number(n) = value {
+                if let Some(dt) = excel_serial_to_pivot_datetime(*n, date_system) {
+                    *value = PivotCacheValue::DateTime(dt);
+                }
+            }
+        }
+    }
+}
+
+fn excel_serial_to_pivot_datetime(serial: f64, date_system: DateSystem) -> Option<String> {
+    if !serial.is_finite() || serial < 0.0 {
+        return None;
+    }
+
+    let mut days = serial.floor() as i64;
+    let frac = serial - (days as f64);
+    let mut seconds = (frac * 86_400.0).round() as i64;
+
+    if seconds >= 86_400 {
+        seconds = 0;
+        days = days.saturating_add(1);
+    }
+
+    let serial_days: i32 = days.try_into().ok()?;
+    let system = match date_system {
+        DateSystem::V1900 => ExcelDateSystem::EXCEL_1900,
+        DateSystem::V1904 => ExcelDateSystem::Excel1904,
+    };
+    let date = serial_to_ymd(serial_days, system).ok()?;
+
+    let hour = (seconds / 3_600) as u32;
+    let minute = ((seconds % 3_600) / 60) as u32;
+    let second = (seconds % 60) as u32;
+
+    Some(format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        date.year, date.month, date.day, hour, minute, second
+    ))
 }
 
 fn resolve_shared_strings_part_name(package: &XlsxPackage) -> Result<Option<String>, XlsxError> {

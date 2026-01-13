@@ -177,11 +177,11 @@ fn build_synthetic_rich_data_xlsx_impl(
 
     // Any bytes are fine for the CLI, but keep it a valid PNG for sanity.
     let image1_png: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
-        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
-        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
-        0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
     let cursor = Cursor::new(Vec::new());
@@ -229,7 +229,8 @@ fn build_synthetic_rich_data_xlsx_impl(
     if include_rd_rich_value_parts {
         zip.start_file("xl/richData/rdrichvaluestructure.xml", options)
             .unwrap();
-        zip.write_all(rd_rich_value_structure_xml.as_bytes()).unwrap();
+        zip.write_all(rd_rich_value_structure_xml.as_bytes())
+            .unwrap();
 
         zip.start_file("xl/richData/rdrichvalue.xml", options)
             .unwrap();
@@ -341,7 +342,11 @@ fn dump_rich_data_cli_prints_no_richdata_message() -> Result<(), Box<dyn std::er
     );
 
     let stdout = String::from_utf8(output.stdout)?;
-    assert_eq!(stdout.trim_end(), "no richData found", "unexpected stdout:\n{stdout}");
+    assert_eq!(
+        stdout.trim_end(),
+        "no richData found",
+        "unexpected stdout:\n{stdout}"
+    );
 
     Ok(())
 }
@@ -443,11 +448,14 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
 
     assert_eq!(cols[0], "Sheet1");
     assert_eq!(cols[1], "A1");
-    assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
+    assert!(
+        cols[2].parse::<usize>().is_ok(),
+        "bytes column not numeric: {row}"
+    );
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
     // The workbook does not include `rdrichvalue.xml` local-image metadata, so `CalcOrigin`
-    // cannot be recovered and defaults to `0` (unknown).
+    // cannot be recovered. We default to `0` (unknown).
     assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
@@ -456,8 +464,8 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
 }
 
 #[test]
-fn dump_rich_data_cli_extracts_cell_images_with_hyperlink(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn dump_rich_data_cli_extracts_cell_images_with_hyperlink() -> Result<(), Box<dyn std::error::Error>>
+{
     let bytes = build_synthetic_rich_data_xlsx_with_hyperlink();
     let dir = tempdir()?;
     let path = dir.path().join("fixture.xlsx");
@@ -547,11 +555,14 @@ fn dump_rich_data_cli_extracts_cell_images_without_metadata(
 
     assert_eq!(cols[0], "Sheet1");
     assert_eq!(cols[1], "A1");
-    assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
+    assert!(
+        cols[2].parse::<usize>().is_ok(),
+        "bytes column not numeric: {row}"
+    );
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
     // Metadata is missing, so the extractor falls back to relationship-slot indexing; without
-    // `rdrichvalue.xml`, `CalcOrigin` cannot be recovered and defaults to `0` (unknown).
+    // `rdrichvalue.xml`, `CalcOrigin` cannot be recovered. We default to `0` (unknown).
     assert_eq!(cols[5], "0");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
@@ -598,7 +609,10 @@ fn dump_rich_data_cli_extracts_cell_images_with_alt_text_and_calc_origin(
 
     assert_eq!(cols[0], "Sheet1");
     assert_eq!(cols[1], "A1");
-    assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
+    assert!(
+        cols[2].parse::<usize>().is_ok(),
+        "bytes column not numeric: {row}"
+    );
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
     assert_eq!(cols[5], "6");
