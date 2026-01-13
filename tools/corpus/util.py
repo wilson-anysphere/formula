@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+from functools import lru_cache
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -92,13 +93,13 @@ def iter_workbook_paths(corpus_dir: Path, *, include_xlsb: bool = False) -> Iter
             yield path
 
 
-def github_commit_sha() -> str | None:
-    sha = os.environ.get("GITHUB_SHA")
-    if sha:
-        return sha
-    # Local runs: best-effort fallback to the current git commit so trend files can be used
-    # deterministically outside of GitHub Actions. This is intentionally non-fatal: if `git`
-    # isn't available (or we're not in a worktree), return None.
+@lru_cache(maxsize=1)
+def _local_git_commit_sha() -> str | None:
+    """Best-effort git HEAD SHA for local runs.
+
+    Cached so per-workbook triage doesn't spawn `git` repeatedly.
+    """
+
     try:
         root = Path(__file__).resolve().parents[2]
         proc = subprocess.run(
@@ -112,6 +113,16 @@ def github_commit_sha() -> str | None:
         return out or None
     except Exception:  # noqa: BLE001
         return None
+
+
+def github_commit_sha() -> str | None:
+    sha = os.environ.get("GITHUB_SHA")
+    if sha:
+        return sha
+    # Local runs: best-effort fallback to the current git commit so trend files can be used
+    # deterministically outside of GitHub Actions. This is intentionally non-fatal: if `git`
+    # isn't available (or we're not in a worktree), return None.
+    return _local_git_commit_sha()
 
 
 def github_run_url() -> str | None:
