@@ -1,9 +1,9 @@
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
 use formula_io::{
-    detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model, Error,
-    WorkbookEncryptionKind,
+    detect_workbook_encryption, detect_workbook_format, open_workbook, open_workbook_model,
+    open_workbook_model_with_password, open_workbook_with_password, Error, WorkbookEncryptionKind,
 };
 
 fn fixture_path(rel: &str) -> PathBuf {
@@ -13,8 +13,18 @@ fn fixture_path(rel: &str) -> PathBuf {
 fn encrypted_ooxml_bytes() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-    ole.create_stream("EncryptionInfo")
-        .expect("create EncryptionInfo stream");
+    {
+        let mut stream = ole
+            .create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream");
+        // Minimal EncryptionInfo header:
+        // - VersionMajor = 4
+        // - VersionMinor = 4 (Agile encryption)
+        // - Flags = 0
+        stream
+            .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
+            .expect("write EncryptionInfo header");
+    }
     ole.create_stream("EncryptedPackage")
         .expect("create EncryptedPackage stream");
     ole.into_inner().into_inner()
@@ -39,14 +49,14 @@ fn detects_encrypted_ooxml_xlsx_container() {
 
         let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
         assert!(
-            matches!(err, Error::EncryptedWorkbook { .. }),
-            "expected Error::EncryptedWorkbook, got {err:?}"
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
         );
 
         let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
         assert!(
-            matches!(err, Error::EncryptedWorkbook { .. }),
-            "expected Error::EncryptedWorkbook, got {err:?}"
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
         );
         let msg = err.to_string().to_lowercase();
         assert!(
@@ -56,8 +66,22 @@ fn detects_encrypted_ooxml_xlsx_container() {
 
         let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
         assert!(
-            matches!(err, Error::EncryptedWorkbook { .. }),
-            "expected Error::EncryptedWorkbook, got {err:?}"
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
+        );
+
+        // Providing a password should surface a distinct "invalid password" error.
+        let err =
+            open_workbook_with_password(&path, Some("wrong")).expect_err("expected invalid password");
+        assert!(
+            matches!(err, Error::InvalidPassword { .. }),
+            "expected Error::InvalidPassword, got {err:?}"
+        );
+        let err = open_workbook_model_with_password(&path, Some("wrong"))
+            .expect_err("expected invalid password");
+        assert!(
+            matches!(err, Error::InvalidPassword { .. }),
+            "expected Error::InvalidPassword, got {err:?}"
         );
     }
 }
@@ -73,8 +97,8 @@ fn detects_encrypted_ooxml_xlsx_container_for_model_loader() {
 
         let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
         assert!(
-            matches!(err, Error::EncryptedWorkbook { .. }),
-            "expected Error::EncryptedWorkbook, got {err:?}"
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
         );
     }
 }
@@ -98,4 +122,46 @@ fn encrypted_ooxml_fixtures_require_password() {
             "expected error message to mention encryption/password protection, got: {msg}"
         );
     }
+}
+
+#[test]
+fn errors_on_unsupported_encryption_version() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+
+    // Same OLE container structure, but with an unsupported EncryptionInfo version.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole
+            .create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream");
+        // VersionMajor = 9, VersionMinor = 9 (nonsense, but exercises error reporting).
+        stream
+            .write_all(&[9, 0, 9, 0, 0, 0, 0, 0])
+            .expect("write EncryptionInfo header");
+    }
+    ole.create_stream("EncryptedPackage")
+        .expect("create EncryptedPackage stream");
+    let bytes = ole.into_inner().into_inner();
+
+    let path = tmp.path().join("unsupported.xlsx");
+    std::fs::write(&path, &bytes).expect("write unsupported encrypted fixture");
+
+    let err = open_workbook(&path).expect_err("expected unsupported encryption to error");
+    assert!(
+        matches!(
+            err,
+            Error::UnsupportedOoxmlEncryption {
+                version_major: 9,
+                version_minor: 9,
+                ..
+            }
+        ),
+        "expected Error::UnsupportedOoxmlEncryption(9,9), got {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("9.9"),
+        "expected error message to include encryption version, got: {msg}"
+    );
 }

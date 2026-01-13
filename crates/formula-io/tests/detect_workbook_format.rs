@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 
 use formula_io::{detect_workbook_format, Error, WorkbookFormat};
@@ -22,8 +22,15 @@ fn xls_fixture_path(rel: &str) -> PathBuf {
 fn encrypted_ooxml_bytes() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-    ole.create_stream("EncryptionInfo")
-        .expect("create EncryptionInfo stream");
+    {
+        let mut stream = ole
+            .create_stream("EncryptionInfo")
+            .expect("create EncryptionInfo stream");
+        // Minimal EncryptionInfo header for Agile encryption (4.4).
+        stream
+            .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
+            .expect("write EncryptionInfo header");
+    }
     ole.create_stream("EncryptedPackage")
         .expect("create EncryptedPackage stream");
     ole.into_inner().into_inner()
@@ -157,7 +164,7 @@ fn detects_encrypted_ooxml_container() {
 
     let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
     assert!(
-        matches!(err, Error::EncryptedWorkbook { .. }),
-        "expected Error::EncryptedWorkbook, got {err:?}"
+        matches!(err, Error::PasswordRequired { .. }),
+        "expected Error::PasswordRequired, got {err:?}"
     );
 }

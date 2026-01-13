@@ -13,8 +13,8 @@ fn assert_encrypted_ooxml_bytes_detected(bytes: &[u8], stem: &str) {
 
         let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
         assert!(
-            matches!(err, Error::EncryptedWorkbook { .. }),
-            "expected Error::EncryptedWorkbook, got {err:?}"
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
         );
 
         let msg = err.to_string().to_lowercase();
@@ -56,4 +56,3 @@ fn detects_encrypted_ooxml_standard_fixture_if_present() {
     let bytes = std::fs::read(fixture_path).expect("read standard encrypted fixture");
     assert_encrypted_ooxml_bytes_detected(&bytes, "standard");
 }
-

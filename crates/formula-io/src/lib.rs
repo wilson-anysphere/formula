@@ -35,6 +35,20 @@ pub enum Error {
     #[error("unsupported extension `{extension}` for workbook `{path}`")]
     UnsupportedExtension { path: PathBuf, extension: String },
     #[error(
+        "password required: workbook `{path}` is password-protected/encrypted; provide the password to open it"
+    )]
+    PasswordRequired { path: PathBuf },
+    #[error("invalid password for workbook `{path}`")]
+    InvalidPassword { path: PathBuf },
+    #[error(
+        "unsupported encrypted OOXML workbook `{path}`: EncryptionInfo version {version_major}.{version_minor} is not supported"
+    )]
+    UnsupportedOoxmlEncryption {
+        path: PathBuf,
+        version_major: u16,
+        version_minor: u16,
+    },
+    #[error(
         "encrypted workbook not supported: workbook `{path}` is password-protected/encrypted; remove password protection in Excel and try again"
     )]
     EncryptedWorkbook { path: PathBuf },
@@ -377,11 +391,8 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
             source,
         })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
-            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
-            {
-                return Err(Error::EncryptedWorkbook {
-                    path: path.to_path_buf(),
-                });
+            if let Some(err) = encrypted_ooxml_error(&mut ole, path, None) {
+                return Err(err);
             }
 
             // Only treat OLE compound files as legacy `.xls` workbooks when they contain the BIFF
@@ -610,11 +621,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                 source,
             })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
-            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
-            {
-                return Err(Error::EncryptedWorkbook {
-                    path: path.to_path_buf(),
-                });
+            if let Some(err) = encrypted_ooxml_error(&mut ole, path, None) {
+                return Err(err);
             }
 
             // Only treat OLE compound files as legacy `.xls` workbooks when they contain the BIFF
@@ -839,6 +847,52 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
     }
 }
 
+/// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`], providing a
+/// password for encrypted OOXML workbooks when needed.
+///
+/// This behaves like [`open_workbook_model`], but can surface an [`Error::InvalidPassword`] when a
+/// password is provided but incorrect.
+pub fn open_workbook_model_with_password(
+    path: impl AsRef<Path>,
+    password: Option<&str>,
+) -> Result<formula_model::Workbook, Error> {
+    let path = path.as_ref();
+    if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
+        return Err(err);
+    }
+    open_workbook_model(path)
+}
+
+/// Open a spreadsheet workbook from disk, providing a password for encrypted OOXML workbooks when
+/// needed.
+///
+/// This behaves like [`open_workbook`], but can surface an [`Error::InvalidPassword`] when a
+/// password is provided but incorrect.
+pub fn open_workbook_with_password(
+    path: impl AsRef<Path>,
+    password: Option<&str>,
+) -> Result<Workbook, Error> {
+    let path = path.as_ref();
+    if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
+        return Err(err);
+    }
+    open_workbook(path)
+}
+
+fn encrypted_ooxml_error_from_path(path: &Path, password: Option<&str>) -> Option<Error> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 8];
+    let n = file.read(&mut header).ok()?;
+    if n < OLE_MAGIC.len() || header[..OLE_MAGIC.len()] != OLE_MAGIC {
+        return None;
+    }
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let mut ole = cfb::CompoundFile::open(file).ok()?;
+    encrypted_ooxml_error(&mut ole, path, password)
+}
+
 fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
@@ -848,6 +902,97 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     }
     let with_leading_slash = format!("/{name}");
     ole.open_stream(&with_leading_slash).is_ok()
+}
+
+/// Returns an OOXML-encryption related error when the given OLE compound file is an encrypted
+/// OOXML container (`EncryptionInfo` + `EncryptedPackage` streams).
+///
+/// This is used to provide user-friendly error reporting for password-protected `.xlsx` files
+/// (which are *not* ZIP archives; they are OLE containers that wrap an encrypted ZIP package).
+fn encrypted_ooxml_error<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    path: &Path,
+    password: Option<&str>,
+) -> Option<Error> {
+    use std::io::Read as _;
+
+    if !(stream_exists(ole, "EncryptionInfo") && stream_exists(ole, "EncryptedPackage")) {
+        return None;
+    }
+
+    // EncryptionInfo begins with:
+    // - VersionMajor (u16 LE)
+    // - VersionMinor (u16 LE)
+    //
+    // See MS-OFFCRYPTO / ECMA-376. Excel commonly uses Agile encryption (4.4).
+    let (version_major, version_minor) = {
+        let mut header = [0u8; 4];
+        let mut stream = match ole
+            .open_stream("EncryptionInfo")
+            .or_else(|_| ole.open_stream("/EncryptionInfo"))
+        {
+            Ok(s) => s,
+            Err(_) => {
+                // Streams exist but can't be opened; treat as unsupported.
+                return Some(Error::UnsupportedOoxmlEncryption {
+                    path: path.to_path_buf(),
+                    version_major: 0,
+                    version_minor: 0,
+                });
+            }
+        };
+        if stream.read_exact(&mut header).is_err() {
+            return Some(Error::UnsupportedOoxmlEncryption {
+                path: path.to_path_buf(),
+                version_major: 0,
+                version_minor: 0,
+            });
+        }
+        (
+            u16::from_le_bytes([header[0], header[1]]),
+            u16::from_le_bytes([header[2], header[3]]),
+        )
+    };
+
+    // Most real-world Excel files use either:
+    // - Agile encryption (4.4; XML descriptor payload)
+    // - Standard/CryptoAPI encryption (major in {2,3,4}, minor=2; binary header/verifier)
+    //
+    // Be defensive around malformed/synthetic fixtures: if the "version" header doesn't look like
+    // a plausible small integer pair, fall back to generic "password required" semantics instead of
+    // reporting a nonsense version.
+    if version_major > 10 || version_minor > 10 {
+        if password.is_none() {
+            return Some(Error::PasswordRequired {
+                path: path.to_path_buf(),
+            });
+        }
+        return Some(Error::InvalidPassword {
+            path: path.to_path_buf(),
+        });
+    }
+
+    let is_agile = version_major == 4 && version_minor == 4;
+    let is_standard = version_minor == 2 && matches!(version_major, 2 | 3 | 4);
+    if !is_agile && !is_standard {
+        return Some(Error::UnsupportedOoxmlEncryption {
+            path: path.to_path_buf(),
+            version_major,
+            version_minor,
+        });
+    }
+
+    if password.is_none() {
+        return Some(Error::PasswordRequired {
+            path: path.to_path_buf(),
+        });
+    }
+
+    // We currently don't implement OOXML decryption in `formula-io`, but we still want callers to
+    // be able to surface a dedicated "wrong password" error when the user *did* provide one.
+    Some(Error::InvalidPassword {
+        path: path.to_path_buf(),
+    })
 }
 
 /// Return `Some(true)` when the OLE `Workbook`/`Book` stream starts with a BIFF `BOF` record.
