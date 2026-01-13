@@ -163,6 +163,63 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     }
   });
 
+  it("feeds formula-model drawing objects from DocumentController through the model adapter layer", () => {
+    const prior = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "shared";
+    let app: SpreadsheetApp | null = null;
+    let root: HTMLElement | null = null;
+    try {
+      const renderSpy = vi.spyOn(DrawingOverlay.prototype, "render").mockResolvedValue();
+
+      root = createRoot();
+      const status = {
+        activeCell: document.createElement("div"),
+        selectionRange: document.createElement("div"),
+        activeValue: document.createElement("div"),
+      };
+
+      app = new SpreadsheetApp(root, status);
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument() as any;
+
+      doc.setSheetDrawings(sheetId, [
+        {
+          id: "12",
+          zOrder: 0,
+          kind: { Image: { image_id: "image1.png" } },
+          anchor: {
+            TwoCell: {
+              from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
+              to: { cell: { row: 1, col: 1 }, offset: { x_emu: 0, y_emu: 0 } },
+            },
+          },
+        },
+      ]);
+
+      // Ensure the next render pass re-reads the document state (in case a prior render
+      // cached an empty list before drawings were populated).
+      (app as any).drawingObjectsCache = null;
+
+      renderSpy.mockClear();
+      (app as any).renderDrawings();
+
+      expect(renderSpy).toHaveBeenCalled();
+      const objects = renderSpy.mock.calls.at(-1)?.[0] as any[];
+      expect(objects).toHaveLength(1);
+      expect(objects[0]).toMatchObject({
+        id: 12,
+        kind: { type: "image", imageId: "image1.png" },
+        anchor: { type: "twoCell" },
+        zOrder: 0,
+      });
+    } finally {
+      app?.destroy();
+      root?.remove();
+      if (prior === undefined) delete process.env.DESKTOP_GRID_MODE;
+      else process.env.DESKTOP_GRID_MODE = prior;
+    }
+  });
+
   it("passes frozen pane metadata to the drawing overlay viewport so drawings pin + clip correctly", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
