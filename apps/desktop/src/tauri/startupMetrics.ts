@@ -1,4 +1,4 @@
-import { getTauriEventApiOrNull } from "./api";
+import { getTauriEventApiOrNull, type TauriListen } from "./api";
 
 export type StartupTimings = {
   /**
@@ -69,7 +69,6 @@ async function nextFrame(): Promise<void> {
 }
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
-type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
 
 function getTauriInvoke(): TauriInvoke | null {
   const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;

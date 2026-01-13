@@ -1,5 +1,6 @@
-export type TauriListen = (event: string, handler: (event: any) => void) => Promise<() => void>;
-export type TauriEmit = (event: string, payload?: any) => Promise<void> | void;
+import type { TauriEmit, TauriListen } from "./api";
+
+export type { TauriEmit, TauriListen } from "./api";
 
 export function installOpenFileIpc({
   listen,
@@ -31,4 +32,3 @@ export function installOpenFileIpc({
       console.error("Failed to signal open-file readiness:", err);
     });
 }
-
