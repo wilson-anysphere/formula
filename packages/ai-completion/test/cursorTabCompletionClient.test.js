@@ -239,6 +239,40 @@ test(
   },
 );
 
+test(
+  "CursorTabCompletionClient resolves to empty string when aborted while awaiting getAuthHeaders",
+  { timeout: 1000 },
+  async () => {
+    let fetchCalls = 0;
+
+    const fetchImpl = async () => {
+      fetchCalls += 1;
+      return { ok: true, async json() {} };
+    };
+
+    const client = new CursorTabCompletionClient({
+      baseUrl: "http://example.test",
+      fetchImpl,
+      timeoutMs: 500,
+      getAuthHeaders: () => new Promise(() => {}), // never resolves
+    });
+
+    const controller = new AbortController();
+    const promise = client.completeTabCompletion({
+      input: "=1+2",
+      cursorPosition: 4,
+      cellA1: "A1",
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    const completion = await promise;
+    assert.equal(completion, "");
+    assert.equal(fetchCalls, 0);
+  },
+);
+
 test("CursorTabCompletionClient returns empty string on non-2xx responses", async () => {
   const fetchImpl = async () => {
     return {
