@@ -66,6 +66,24 @@ The release workflow pins its Node.js major via `NODE_VERSION` in `.github/workf
 (currently Node 22). If you run the preflight scripts or build release bundles locally, use the same
 Node version to avoid subtle differences between local and CI artifacts (see `.nvmrc` / `mise.toml`).
 
+The workflow also pins the Rust CLI tools it installs at runtime:
+
+- `wasm-pack` (env.WASM_PACK_VERSION) – required for the `@formula/engine` WASM build
+- Tauri CLI (`cargo tauri`, installed from the `tauri-cli` crate; env.TAURI_CLI_VERSION)
+
+If you need to build release bundles locally, install the same versions (agents: use the repo cargo
+wrapper):
+
+```bash
+source scripts/agent-init.sh
+
+WASM_PACK_VERSION=0.13.1
+TAURI_CLI_VERSION=2.9.5
+
+bash scripts/cargo_agent.sh install wasm-pack --version "$WASM_PACK_VERSION" --locked --force
+bash scripts/cargo_agent.sh install tauri-cli --version "$TAURI_CLI_VERSION" --locked --force
+```
+
 ## Preflight validations (CI enforced)
 
 The release workflow runs a couple of lightweight preflight scripts before it spends time building
@@ -176,7 +194,6 @@ Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level valida
 `latest.json.sig` from the draft release and checks targets, signatures, and referenced assets.
 The `--manifest/--sig` mode is an offline manifest structure check; use
 `scripts/ci/verify-updater-manifest-signature.mjs` to cryptographically verify `latest.json.sig`.
-
 ## Updater restart semantics (important)
 
 When an update is downloaded/installed, the desktop app should restart/exit using Tauri's supported
