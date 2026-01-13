@@ -110,7 +110,12 @@ def _assert_timestamped(signtool_output: str) -> str | None:
     # - "The signature is not timestamped."
     if "not timestamped" in out_lc:
         return "signature is not timestamped"
-    return None
+    if "signature is timestamped" in out_lc or "the signature is timestamped" in out_lc:
+        return None
+    if "timestamp verified by" in out_lc:
+        # Some output formats include a timestamp verifier section even if the short sentence is missing.
+        return None
+    return "unable to determine timestamp status (expected signtool to report a timestamped signature)"
 
 
 def main(argv: list[str]) -> int:
