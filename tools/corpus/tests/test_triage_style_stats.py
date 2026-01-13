@@ -105,7 +105,37 @@ class TriageStyleStatsTests(unittest.TestCase):
         self.assertIn("style_stats_error", report)
         self.assertTrue(str(report["style_stats_error"]))
 
+    def test_private_mode_hashes_style_stats_error(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        styles_xml = "<styleSheet><fonts></styleSheet>"  # malformed XML
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            wb = WorkbookInput(
+                display_name="book.xlsx", data=_make_xlsx_with_styles_xml(styles_xml)
+            )
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        self.assertNotIn("style_stats", report)
+        self.assertIn("style_stats_error", report)
+        self.assertTrue(str(report["style_stats_error"]).startswith("sha256="))
+
 
 if __name__ == "__main__":
     unittest.main()
-

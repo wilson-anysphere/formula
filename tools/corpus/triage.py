@@ -1141,7 +1141,10 @@ def triage_workbook(
             if style_stats is not None:
                 report["style_stats"] = style_stats
             elif style_err:
-                report["style_stats_error"] = style_err
+                if privacy_mode == _PRIVACY_PRIVATE:
+                    report["style_stats_error"] = f"sha256={_sha256_text(style_err)}"
+                else:
+                    report["style_stats_error"] = style_err
     except Exception as e:  # noqa: BLE001 (triage tool)
         # Feature scanning failures should not leak exception strings into JSON artifacts.
         msg = str(e)
