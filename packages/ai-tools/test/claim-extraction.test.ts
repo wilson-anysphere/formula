@@ -20,6 +20,23 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("extracts a range statistic claim when the sheet name contains dots", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "The average of Sheet.Name!A1:A3 is 2.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet.Name!A1:A3",
+        expected: 2,
+        source: "average of Sheet.Name!A1:A3 is 2"
+      }
+    ]);
+  });
+
   it("attaches the user question reference when the assistant omits the range", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Average is 2.",
@@ -31,6 +48,23 @@ describe("extractVerifiableClaims", () => {
         kind: "range_stat",
         measure: "mean",
         reference: "A1:A3",
+        expected: 2,
+        source: "Average is 2"
+      }
+    ]);
+  });
+
+  it("infers dot-containing sheet references from the user question when the assistant omits the range", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Average is 2.",
+      userText: "What is the average of Sheet.Name!A1:A3?"
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet.Name!A1:A3",
         expected: 2,
         source: "Average is 2"
       }
