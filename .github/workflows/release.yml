@@ -642,6 +642,9 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          # Use the Cargo-installed Tauri CLI (`cargo tauri`) instead of letting the
+          # action install a floating `@tauri-apps/cli@v2` toolchain.
+          tauriScript: cargo tauri
           args: --target universal-apple-darwin
       - name: Verify macOS signed app includes WKWebView JIT entitlements
         # Only run when code signing is enabled (forks/dry-runs may not have signing secrets).
@@ -696,6 +699,9 @@ jobs:
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
+          # Use the Cargo-installed Tauri CLI (`cargo tauri`) instead of letting the
+          # action install a floating `@tauri-apps/cli@v2` toolchain.
+          tauriScript: cargo tauri
           args: ${{ matrix.tauri_args }}
 
       - name: Smoke test produced AppImage (extract + ldd + arch)
