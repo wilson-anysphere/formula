@@ -232,7 +232,7 @@ pub(crate) fn parse_biff_sheet_protection(
         let record = match record {
             Ok(r) => r,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -245,10 +245,10 @@ pub(crate) fn parse_biff_sheet_protection(
         match record.record_id {
             RECORD_PROTECT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated PROTECT record at offset {}",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!("truncated PROTECT record at offset {}", record.offset),
+                    );
                     continue;
                 }
                 let flag = u16::from_le_bytes([data[0], data[1]]);
@@ -256,10 +256,10 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_PASSWORD => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated PASSWORD record at offset {}",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!("truncated PASSWORD record at offset {}", record.offset),
+                    );
                     continue;
                 }
                 let hash = u16::from_le_bytes([data[0], data[1]]);
@@ -267,10 +267,10 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_OBJPROTECT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated OBJPROTECT record at offset {}",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!("truncated OBJPROTECT record at offset {}", record.offset),
+                    );
                     continue;
                 }
                 let flag = u16::from_le_bytes([data[0], data[1]]);
@@ -280,10 +280,10 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_SCENPROTECT => {
                 if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated SCENPROTECT record at offset {}",
-                        record.offset
-                    ));
+                    push_warning_bounded(
+                        &mut out.warnings,
+                        format!("truncated SCENPROTECT record at offset {}", record.offset),
+                    );
                     continue;
                 }
                 let flag = u16::from_le_bytes([data[0], data[1]]);
@@ -293,20 +293,23 @@ pub(crate) fn parse_biff_sheet_protection(
                 match parse_biff_feat_hdr_sheet_protection_allow_mask(data, record.record_id) {
                     Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
                     Ok(None) => {}
-                    Err(err) => out.warnings.push(format!(
-                        "failed to parse FEATHEADR record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => push_warning_bounded(
+                        &mut out.warnings,
+                        format!(
+                            "failed to parse FEATHEADR record at offset {}: {err}",
+                            record.offset
+                        ),
+                    ),
                 }
             }
             RECORD_FEAT | RECORD_FEAT11 => {
                 match parse_biff_feat_record_sheet_protection_allow_mask(data, record.record_id) {
                     Ok(Some(mask)) => apply_sheet_protection_allow_mask(&mut out.protection, mask),
                     Ok(None) => {}
-                    Err(err) => out.warnings.push(format!(
-                        "failed to parse FEAT record at offset {}: {err}",
-                        record.offset
-                    )),
+                    Err(err) => push_warning_bounded(
+                        &mut out.warnings,
+                        format!("failed to parse FEAT record at offset {}: {err}", record.offset),
+                    ),
                 }
             }
             records::RECORD_EOF => break,
@@ -514,7 +517,7 @@ pub(crate) fn parse_biff_sheet_view_state(
         let record = match next {
             Ok(r) => r,
             Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
+                push_warning_bounded(&mut out.warnings, format!("malformed BIFF record: {err}"));
                 break;
             }
         };
@@ -532,30 +535,33 @@ pub(crate) fn parse_biff_sheet_view_state(
                     out.show_zeros = Some(window2.show_zeros);
                     window2_frozen = Some(window2.frozen_panes);
                 }
-                Err(err) => out
-                    .warnings
-                    .push(format!("failed to parse WINDOW2 record: {err}")),
+                Err(err) => push_warning_bounded(
+                    &mut out.warnings,
+                    format!("failed to parse WINDOW2 record: {err}"),
+                ),
             },
             RECORD_SCL => match parse_scl_zoom(data) {
                 Ok(zoom) => out.zoom = Some(zoom),
-                Err(err) => out
-                    .warnings
-                    .push(format!("failed to parse SCL record: {err}")),
+                Err(err) => {
+                    push_warning_bounded(&mut out.warnings, format!("failed to parse SCL record: {err}"))
+                }
             },
             RECORD_PANE => match parse_pane_record(data, window2_frozen) {
                 Ok((pane, pnn_act)) => {
                     out.pane = Some(pane);
                     active_pane = Some(pnn_act);
                 }
-                Err(err) => out
-                    .warnings
-                    .push(format!("failed to parse PANE record: {err}")),
+                Err(err) => push_warning_bounded(
+                    &mut out.warnings,
+                    format!("failed to parse PANE record: {err}"),
+                ),
             },
             RECORD_SELECTION => match parse_selection_record_best_effort(data) {
                 Ok((pane, selection)) => selections.push((pane, selection)),
-                Err(err) => out
-                    .warnings
-                    .push(format!("failed to parse SELECTION record: {err}")),
+                Err(err) => push_warning_bounded(
+                    &mut out.warnings,
+                    format!("failed to parse SELECTION record: {err}"),
+                ),
             },
             records::RECORD_EOF => break,
             _ => {}
@@ -1229,10 +1235,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     props.sort_state = Some(state);
                 }
                 Ok(None) => {}
-                Err(err) => props.warnings.push(format!(
-                    "failed to parse SORT record at offset {}: {err}",
-                    record.offset
-                )),
+                Err(err) => push_warning_bounded(
+                    &mut props.warnings,
+                    format!("failed to parse SORT record at offset {}: {err}", record.offset),
+                ),
             },
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
@@ -2341,6 +2347,31 @@ mod tests {
         // allocate unbounded warning strings.
         for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
             stream.extend_from_slice(&record(RECORD_ROW, &[]));
+        }
+        stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
+
+        let props = parse_biff_sheet_row_col_properties(&stream, 0).expect("parse");
+        assert_eq!(props.warnings.len(), MAX_WARNINGS_PER_SHEET + 1);
+        assert_eq!(
+            props
+                .warnings
+                .iter()
+                .filter(|w| w.contains(WARNINGS_SUPPRESSED_MESSAGE))
+                .count(),
+            1,
+            "suppression warning should only be emitted once; warnings={:?}",
+            props.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_row_col_sort_warnings_are_bounded() {
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&record(records::RECORD_BOF_BIFF8, &[0u8; 16]));
+
+        // Emit many malformed SORT records (payload < 24 bytes).
+        for _ in 0..(MAX_WARNINGS_PER_SHEET + 100) {
+            stream.extend_from_slice(&record(RECORD_SORT, &[]));
         }
         stream.extend_from_slice(&record(records::RECORD_EOF, &[]));
 
