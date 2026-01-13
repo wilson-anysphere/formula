@@ -278,6 +278,42 @@ jobs:
           echo "$info" | grep -q "x86_64" || { echo "::error::macOS binary is missing x86_64 slice"; exit 1; }
           echo "$info" | grep -q "arm64" || { echo "::error::macOS binary is missing arm64 slice"; exit 1; }
 
+      - name: Verify Windows installers are Authenticode-signed
+        if: runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE != '' && secrets.WINDOWS_CERTIFICATE_PASSWORD != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Tauri Windows bundles are emitted under src-tauri/target/**/release/bundle/**.
+          # We only enforce signature validity when Windows signing secrets are present
+          # so forks/dry runs (which cannot access secrets) skip this check cleanly.
+          $searchRoot = "apps/desktop/src-tauri/target"
+          if (-not (Test-Path $searchRoot)) {
+            Write-Error "Expected build output directory not found: $searchRoot"
+          }
+
+          $installers = Get-ChildItem -Path $searchRoot -Recurse -File -Include *.exe, *.msi |
+            Where-Object { $_.FullName -match '[\\/]release[\\/]bundle[\\/]' }
+
+          if ($installers.Count -eq 0) {
+            Write-Error "No Windows installers (.exe/.msi) found under target/**/release/bundle/**"
+          }
+
+          $failed = $false
+          foreach ($file in $installers) {
+            Write-Host "Checking Authenticode signature: $($file.FullName)"
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid') {
+              Write-Host ($sig | Format-List | Out-String)
+              Write-Error "Authenticode signature is not valid for $($file.FullName): Status=$($sig.Status) $($sig.StatusMessage)"
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            exit 1
+          }
+
       - name: Report desktop bundle sizes
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
