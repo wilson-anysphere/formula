@@ -15,7 +15,7 @@ This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes t
 
 Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
 
-## Bundle size budgets (CI guard)
+## JS bundle size budgets (CI guard)
 
 CI runs a lightweight bundle size check after the desktop Vite build to prevent accidental
 dependency additions that bloat the desktop initial load.
@@ -36,6 +36,21 @@ Optional:
 
 - `FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY=1` – report budget violations but exit 0
 - `FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP=1` – skip gzip computation (faster)
+
+## Frontend asset download size (compressed JS/CSS/WASM)
+
+To measure the **network download size** of the frontend (Vite `dist/assets`) using Brotli or gzip:
+
+```bash
+pnpm -C apps/desktop build
+node scripts/frontend_asset_size_report.mjs --dist apps/desktop/dist
+```
+
+Optional budget enforcement (MB = 1,000,000 bytes):
+
+- `FORMULA_FRONTEND_ASSET_SIZE_LIMIT_MB=10` (default: 10MB total)
+- `FORMULA_FRONTEND_ASSET_SIZE_COMPRESSION=brotli|gzip` (default: brotli)
+- `FORMULA_ENFORCE_FRONTEND_ASSET_SIZE=1` to fail when the total exceeds the limit
 
 ## Dist asset breakdown (static assets)
 
