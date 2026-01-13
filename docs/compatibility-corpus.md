@@ -312,7 +312,8 @@ time-series file:
 ```bash
 python -m tools.corpus.dashboard \
   --triage-dir tools/corpus/out/private \
-  --append-trend tools/corpus/out/private/trend.json
+  --append-trend tools/corpus/out/private/trend.json \
+  --trend-max-entries 90
 ```
 
 Trend entries are intentionally compact (rates + diff totals + a few key size/timing percentiles) so they can

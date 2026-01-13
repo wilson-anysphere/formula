@@ -1033,6 +1033,12 @@ def main() -> int:
         help="Append a compact time-series entry for this run to the given JSON list file.",
     )
     parser.add_argument(
+        "--trend-max-entries",
+        type=int,
+        default=TREND_MAX_ENTRIES,
+        help=f"Maximum number of entries to keep in --append-trend output (default: {TREND_MAX_ENTRIES}).",
+    )
+    parser.add_argument(
         "--gate-load-p90-ms",
         type=int,
         help="Optional CI gate: fail if load p90 exceeds this threshold (ms).",
@@ -1064,7 +1070,7 @@ def main() -> int:
     )
 
     if args.append_trend:
-        _append_trend_file(args.append_trend, summary=summary)
+        _append_trend_file(args.append_trend, summary=summary, max_entries=args.trend_max_entries)
 
     gate_failures: list[str] = []
     if args.gate_load_p90_ms is not None:
