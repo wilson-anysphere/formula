@@ -1,0 +1,291 @@
+# OOXML Password Decryption (MS-OFFCRYPTO Agile 4.4)
+
+This document is a **developer-facing reference** for how Formula handles **Excel “Encrypt with
+Password”** (password-to-open) OOXML files (`.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`).
+
+It is intentionally specific about:
+
+- what we **support** vs **reject**
+- which bytes are authenticated (HMAC target)
+- which salts/IVs are used where (common source of subtle bugs)
+
+The goal is to prevent regressions where “almost right” implementations pass basic tests but fail on
+real Excel-produced files.
+
+## Container format: OLE/CFB wrapper
+
+Password-encrypted OOXML files are **not ZIP files on disk**. Excel stores them as an **OLE/CFB
+(Compound File Binary)** container with (at least) these streams:
+
+- `EncryptionInfo` — encryption parameters (version header + XML descriptor for Agile)
+- `EncryptedPackage` — the encrypted bytes of the real workbook package
+
+Spec: MS-OFFCRYPTO “Encrypted OOXML File” / “EncryptionInfo Stream” / “EncryptedPackage Stream”.
+
+## Where this lives in Formula (implementation map)
+
+This doc is intentionally “close to the metal”. Helpful entrypoints in this repo:
+
+- **User-facing detection / error semantics:** `crates/formula-io/src/lib.rs`
+  - `Error::PasswordRequired`
+  - `Error::InvalidPassword`
+  - `Error::UnsupportedOoxmlEncryption`
+- **MS-OFFCRYPTO parsing + decryption building blocks:** `crates/formula-offcrypto`
+  - `parse_encryption_info`, `inspect_encryption_info` (`crates/formula-offcrypto/src/lib.rs`)
+  - Agile password verifier + secret key (`crates/formula-offcrypto/src/agile.rs`)
+  - Agile `EncryptedPackage` segment decryption + IV derivation
+    (`crates/formula-offcrypto/src/encrypted_package.rs`, `agile_decrypt_package`)
+
+## Supported vs unsupported (current scope)
+
+Formula’s OOXML decryption support is intentionally scoped to the dominant real-world scheme Excel
+uses today: **Agile Encryption (version 4.4) with password-based key encryption**.
+
+### Supported
+
+| Area | Supported |
+|------|-----------|
+| `EncryptionInfo` version | **Agile** `major=4, minor=4` |
+| Package cipher (`keyData`) | **AES** + **CBC** (`cipherAlgorithm="AES"`, `cipherChaining="ChainingModeCBC"`) |
+| Package key sizes | 128/192/256-bit (`keyBits` 128/192/256) |
+| Hash algorithms | `SHA1`, `SHA256`, `SHA384`, `SHA512` (case-insensitive) |
+| Key encryptor | **Password** key-encryptor only (`uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password"`) |
+| Integrity | `dataIntegrity` is parsed; HMAC verification algorithm is documented below (not yet validated in `formula-offcrypto`) |
+
+### Explicitly unsupported (hard errors)
+
+These inputs should fail with actionable “unsupported” errors (not “corrupt file”):
+
+- **Certificate key-encryptor** (`…/keyEncryptor/certificate`) and other non-password key encryptors
+- **Non-CBC chaining** (e.g. CFB, ECB) for either the package (`keyData`) or the password key-encryptor
+- **Non-AES ciphers**
+- **Extensible Encryption** and other `EncryptionInfo` versions besides `4.4`
+
+## The `EncryptionInfo` stream (Agile 4.4)
+
+The `EncryptionInfo` stream begins with an 8-byte `EncryptionVersionInfo` header:
+
+```text
+u16 majorVersion (LE)
+u16 minorVersion (LE)
+u32 flags        (LE)
+```
+
+For Agile encryption this is typically `4.4` with `flags=0x00000040`, followed by an XML document
+(`<?xml …?><encryption …>…</encryption>`).
+
+See also: `crates/formula-io/src/bin/ooxml-encryption-info.rs` (a small helper that prints the
+version header and sniffs the XML root tag).
+
+### Key point: there are *two* parameter sets
+
+The Agile XML descriptor contains two different “parameter sets” that are easy to mix up:
+
+1. `<keyData …>` — parameters for **encrypting the workbook package** (`EncryptedPackage`)
+2. `<p:encryptedKey …>` — parameters for **deriving keys from the user password** and decrypting the
+   **package key** + verifier fields
+
+Representative shape (attributes elided):
+
+```xml
+<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption"
+            xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+  <keyData ... saltValue="..."/>
+  <dataIntegrity encryptedHmacKey="..." encryptedHmacValue="..."/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey ... saltValue="..."
+                      encryptedVerifierHashInput="..."
+                      encryptedVerifierHashValue="..."
+                      encryptedKeyValue="..."/>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>
+```
+
+When debugging decryption bugs, always ask:
+
+- “Am I using the `keyData` salt/hash, or the `p:encryptedKey` salt/hash?”
+
+They are **not interchangeable**.
+
+## Password KDF and package key decryption
+
+The password processing pipeline is:
+
+1. **Hash the password** (salt + spin count) using the password key-encryptor parameters
+2. **Derive 3 AES keys** from that hash (verifier input, verifier value, package key)
+3. **Decrypt verifier fields** and compare (WrongPassword vs continue)
+4. **Decrypt `encryptedKeyValue`** → yields the **package key** used for `EncryptedPackage`
+
+These primitives (password hashing, verifier checks, and secret-key extraction) are implemented in:
+
+- `crates/formula-offcrypto/src/agile.rs`
+
+### Password hashing (Agile)
+
+MS-OFFCRYPTO defines the password hash as:
+
+```text
+pw = UTF-16LE(password)          (no BOM, no terminator)
+H0 = Hash(saltValue || pw)
+Hi = Hash(LE32(i) || H(i-1))     for i in 0..spinCount-1
+```
+
+Notes:
+
+- The `saltValue` and `spinCount` come from `<p:encryptedKey ...>`, not `<keyData>`.
+- “Hash” is the algorithm named by `p:encryptedKey/@hashAlgorithm`.
+
+### Verifier check (wrong password vs continue)
+
+To distinguish a wrong password from “corrupt/unsupported file”, Excel-style Agile encryption stores
+an encrypted verifier:
+
+- decrypt `encryptedVerifierHashInput`
+- decrypt `encryptedVerifierHashValue`
+- compute `Hash(verifierHashInput)` and compare to `verifierHashValue`
+
+If this comparison fails, we should return a **wrong password** error:
+
+- at the decryption layer: `formula_offcrypto::OffcryptoError::InvalidPassword`
+- at the API layer: `formula_io::Error::InvalidPassword`
+
+### IV usage for verifier/key fields (important)
+
+For the password key-encryptor fields (`encryptedVerifierHashInput`, `encryptedVerifierHashValue`,
+`encryptedKeyValue`), the IV used by Excel-compatible implementations is the `p:encryptedKey/@saltValue`
+(padded/truncated to the AES block size).
+
+Do **not** reuse the per-segment IV logic from `EncryptedPackage` here.
+
+## Decrypting `EncryptedPackage`
+
+The `EncryptedPackage` stream layout (after decrypting) is:
+
+```text
+8B   original_package_size (u64 little-endian, *not encrypted*)
+...  ciphertext bytes (AES-CBC, block-aligned)
+```
+
+Decryption rules:
+
+- Plaintext is processed in **4096-byte segments** (except the last).
+- Each segment is AES-CBC-encrypted **independently** using:
+  - the **package key** (from `encryptedKeyValue`)
+  - a **per-segment IV** derived from `keyData/@saltValue` and the segment index
+
+### Segment IV derivation (the common pitfall)
+
+For segment `i` (0-based), derive:
+
+```text
+iv_i = Truncate(keyData/@blockSize, Hash(keyData/@saltValue || LE32(i)))
+```
+
+where `Hash` is `keyData/@hashAlgorithm`.
+
+This is implemented in `crates/formula-offcrypto/src/encrypted_package.rs`
+(`agile_decrypt_package`).
+
+**Gotcha:** it is easy to accidentally use `p:encryptedKey/@saltValue` here. That will “decrypt” to
+garbage that often looks like a corrupt ZIP.
+
+### Truncation (padding is not PKCS#7)
+
+Do not rely on PKCS#7 unpadding. The ciphertext is block-aligned, and the plaintext semantic length
+is the `original_package_size` stored in the first 8 bytes. After decrypting segments, truncate the
+output to that length.
+
+## Integrity verification (`dataIntegrity` HMAC)
+
+Agile encryption can include a package-level integrity check via:
+
+```xml
+<dataIntegrity encryptedHmacKey="..." encryptedHmacValue="..."/>
+```
+
+This is **not optional** for correctness when we want good error semantics:
+
+- “password wrong” should not surface as “ZIP is corrupt”
+- file tampering/corruption should be detected even if the decrypted ZIP happens to parse
+
+### What bytes are authenticated (critical)
+
+The HMAC is computed over the **raw bytes of the `EncryptedPackage` stream as stored**, i.e.:
+
+> **HMAC target = `EncryptedPackage` stream bytes = header (u64 size) + ciphertext + padding**
+
+Notably:
+
+- It is **not** the HMAC of the decrypted ZIP bytes.
+- It is **not** the HMAC of “ciphertext excluding the 8-byte header”.
+- It includes any final block padding bytes present in the `EncryptedPackage` stream.
+
+This detail has been the source of prior incorrect implementations.
+
+### High-level integrity algorithm (Agile)
+
+1. Obtain the **package key** (by password verification + decrypting `encryptedKeyValue`)
+2. Decrypt `encryptedHmacKey` and `encryptedHmacValue` using the **package key**
+   - IVs are derived from `keyData/@saltValue` and constant blocks:
+     - HMAC key block: `5F B2 AD 01 0C B9 E1 F6`
+     - HMAC value block: `A0 67 7F 02 B2 2C 84 33`
+3. Compute:
+
+```text
+actual = HMAC(key = hmacKey, hash = keyData/@hashAlgorithm, data = EncryptedPackageStreamBytes)
+```
+
+4. Compare `actual` to the decrypted `hmacValue`
+   - mismatch ⇒ treat as an **integrity failure** (recommended to surface a distinct error rather than `InvalidPassword`)
+
+## Common errors and what they mean
+
+The Agile decryption errors are designed to be actionable. The most important distinctions:
+
+| Error | Meaning | Typical user action |
+|------|---------|---------------------|
+| `formula_io::Error::PasswordRequired` | Encrypted OOXML detected, but no password provided | Prompt for password |
+| `formula_io::Error::InvalidPassword` / `formula_offcrypto::OffcryptoError::InvalidPassword` | Password verifier mismatch | Retry password |
+| *(recommended)* integrity mismatch (HMAC) | HMAC mismatch (tampering/corruption) | Re-download file; if persistent, treat as corrupted |
+| `formula_io::Error::UnsupportedOoxmlEncryption` / `formula_offcrypto::OffcryptoError::UnsupportedVersion` | `EncryptionInfo` version not recognized | Re-save without encryption; or add support |
+| `formula_offcrypto::OffcryptoError::UnsupportedEncryption { encryption_type: ... }` | Encryption type known but not supported by selected decrypt mode | Use correct decrypt mode / add support |
+| XML/structure errors (`InvalidEncryptionInfo`, base64 decode, ciphertext alignment) | Malformed/corrupt encrypted wrapper | Treat as corrupted file |
+
+For the exact user-facing strings, see:
+
+- `crates/formula-io/src/lib.rs` (`formula_io::Error`)
+- `crates/formula-offcrypto/src/lib.rs` (`formula_offcrypto::OffcryptoError`)
+
+## Test oracles / cross-validation
+
+When validating Agile encryption/decryption correctness, we rely on external “known good”
+implementations as oracles:
+
+- **`msoffcrypto-tool`** (Python): can decrypt Excel-encrypted OOXML OLE containers.
+  - Example: `msoffcrypto-tool -p 'password' encrypted.xlsx decrypted.zip`
+- **`ms-offcrypto-writer`** (Rust): can generate Agile-encrypted OOXML containers compatible with
+  Excel.
+  - Notable real-world quirk: Excel (and `ms-offcrypto-writer`) use an HMAC key whose length matches
+    the hash digest length (e.g. **64 bytes for SHA-512**) even when `keyData/@saltSize` is 16.
+
+These tools are useful for answering “is our implementation wrong, or is the file weird?” quickly.
+
+## References (MS-OFFCRYPTO sections)
+
+Microsoft Open Specifications (entrypoint):
+
+- MS-OFFCRYPTO — Office Document Cryptography Structure  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
+
+Deep links used frequently during development:
+
+- EncryptionInfo Stream (Agile header + XML)  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/87020a34-e73f-4139-99bc-bbdf6cf6fa55
+- EncryptedPackage Stream  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/b60c8b35-2db2-4409-8710-59d88a793f83
+- Agile password verification / key derivation  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/a57cb947-554f-4e5e-b150-3f2978225e92
+- Data integrity (HMAC)  
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/63d9c262-82b9-4fa3-a06d-d087b93e3b00

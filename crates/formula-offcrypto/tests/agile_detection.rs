@@ -8,7 +8,8 @@
 //!
 //! We only use this fixture for **detection** and **negative tests**. This crate's
 //! "standard-only" entrypoint must reject Agile encryption with
-//! `UnsupportedEncryption`, not misreport it as `InvalidPassword`.
+//! `UnsupportedEncryption { encryption_type: EncryptionType::Agile }`, not misreport it as
+//! `InvalidPassword`.
 
 use std::io::{Cursor, Read};
 use std::path::PathBuf;

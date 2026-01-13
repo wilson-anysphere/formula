@@ -132,6 +132,8 @@ Implementation notes:
   and implements Standard password→key derivation + verifier checks.
 - `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
   `EncryptedPackage` stream once you have the derived file key and verifier salt.
+- For Agile (4.4) decryption details (HMAC target bytes + IV/salt usage gotchas), see
+  [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 
 ### Supported OOXML encryption schemes
 
@@ -192,8 +194,10 @@ At a high level, opening a password-encrypted OOXML workbook is:
      `EncryptedPackage`.
 5. **(Recommended) Verify integrity**
    - Agile encryption can include a package-level HMAC (`dataIntegrity` /
-     `encryptedHmacKey`+`encryptedHmacValue`). Verifying this detects tampering and wrong passwords
-     earlier than “does the ZIP parse”.
+      `encryptedHmacKey`+`encryptedHmacValue`). Verifying this detects tampering and wrong passwords
+      earlier than “does the ZIP parse”.
+   - For the exact HMAC target bytes and IV derivation rules (common source of bugs), see
+     [`docs/22-ooxml-encryption.md`](./22-ooxml-encryption.md).
 6. **Hand off to the normal workbook readers**
    - Once decrypted, `EncryptedPackage` yields the plaintext OPC ZIP. Route that ZIP through the
      existing `.xlsx`/`.xlsm`/`.xlsb` readers as if it were an unencrypted file.
@@ -225,6 +229,8 @@ Useful entrypoints when working on encrypted workbook support:
     `crates/formula-io/src/offcrypto/encrypted_package.rs`
   - Segment framing helper (size prefix + 0x1000 segment boundaries):
     `crates/formula-offcrypto/src/encrypted_package.rs`
+- **Agile (4.4) OOXML decryption details (HMAC target bytes + IV usage gotchas):**
+  - `docs/22-ooxml-encryption.md`
 - **Standard (CryptoAPI) developer notes:**
   - Key derivation + verifier validation: `docs/offcrypto-standard-cryptoapi.md`
   - `EncryptedPackage` stream framing/segmenting: `docs/offcrypto-standard-encryptedpackage.md`
