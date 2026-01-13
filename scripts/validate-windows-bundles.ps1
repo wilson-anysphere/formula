@@ -83,7 +83,7 @@ function Expand-FileInputs {
     if (Test-Path -LiteralPath $candidatePath) {
       $item = Get-Item -LiteralPath $candidatePath
       if ($item.PSIsContainer) {
-        $files = Get-ChildItem -LiteralPath $item.FullName -File -Filter "*$Extension" -ErrorAction SilentlyContinue
+        $files = Get-ChildItem -LiteralPath $item.FullName -Recurse -File -Filter "*$Extension" -ErrorAction SilentlyContinue
         foreach ($f in $files) { $out.Add($f) }
       } else {
         if ($item.Extension -ieq $Extension) {
