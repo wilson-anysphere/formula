@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{io::Read, ops::Range as ByteRange};
@@ -61,6 +62,10 @@ fn workbook_globals_filepass_payload_range(workbook_stream: &[u8]) -> Option<Byt
     None
 }
 
+mod common;
+
+use common::xls_fixture_builder;
+
 #[test]
 fn errors_on_encrypted_xls_fixtures() {
     let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -115,4 +120,25 @@ fn errors_on_encrypted_xls_fixtures() {
             &filepass_payload[..filepass_payload.len().min(expected_filepass_prefix.len())]
         );
     }
+}
+
+#[test]
+fn import_with_password_surfaces_decrypt_error_for_malformed_filepass() {
+    // This fixture contains a FILEPASS record with an empty payload. The decryptor should treat it
+    // as an invalid FILEPASS record (not as an opaque calamine error, and never via a panic).
+    let bytes = xls_fixture_builder::build_encrypted_filepass_fixture_xls();
+    let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
+    tmp.write_all(&bytes).expect("write xls bytes");
+
+    let err = formula_xls::import_xls_path_with_password(tmp.path(), "pw")
+        .expect_err("expected decrypt failure");
+
+    assert!(matches!(
+        err,
+        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::InvalidFormat(_))
+    ));
+    assert!(
+        !matches!(err, formula_xls::ImportError::Xls(_)),
+        "decrypt failures should not be surfaced as ImportError::Xls: {err:?}"
+    );
 }

@@ -1273,6 +1273,21 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    const RECORD_BOF_BIFF8: u16 = 0x0809;
+    const RECORD_EOF: u16 = 0x000A;
+
+    fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&record_id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    // Minimal BIFF8 workbook-globals BOF payload: BIFF8 version + workbook globals subtype.
+    const BOF_GLOBALS: [u8; 4] = [0x00, 0x06, 0x05, 0x00];
 
     #[test]
     fn filepass_xor_is_reported_as_unsupported_encryption() {
@@ -1313,5 +1328,101 @@ mod tests {
         let payload = [0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00];
         let err = parse_filepass_record_payload(&payload).expect_err("expected error");
         assert!(matches!(err, DecryptError::InvalidFormat(_)));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            rng_seed: proptest::test_runner::RngSeed::Fixed(0),
+            failure_persistence: None,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn decryptor_handles_truncated_stream(prefix in proptest::collection::vec(any::<u8>(), 0..4)) {
+            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&prefix, "pw");
+            prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
+        }
+
+        #[test]
+        fn decryptor_handles_truncated_record_header_after_bof(trailing in proptest::collection::vec(any::<u8>(), 0..4)) {
+            let mut stream = record(RECORD_BOF_BIFF8, &BOF_GLOBALS);
+            stream.extend_from_slice(&trailing);
+
+            let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&stream, "pw");
+            prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
+        }
+
+        #[test]
+        fn decryptor_rejects_too_short_cryptoapi_filepass_payload(len in 0u16..8u16) {
+            // CryptoAPI FILEPASS requires at least:
+            //   wEncryptionType (2) + wEncryptionSubType (2) + dwEncryptionInfoLen (4) = 8 bytes.
+            let mut payload = vec![0u8; len as usize];
+            if payload.len() >= 2 {
+                payload[0..2].copy_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+            }
+            if payload.len() >= 4 {
+                payload[2..4].copy_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+            }
+
+            let stream = [
+                record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+                record(RECORD_FILEPASS, &payload),
+                record(RECORD_EOF, &[]),
+            ].concat();
+
+            let res = decrypt_biff_workbook_stream(&stream, "pw");
+            prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
+        }
+
+        #[test]
+        fn decryptor_rejects_declared_encryptioninfo_len_that_exceeds_payload(enc_info_len in 1u16..512u16) {
+            // FILEPASS declares a dwEncryptionInfoLen but does not provide enough bytes.
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+            payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+            payload.extend_from_slice(&(enc_info_len as u32).to_le_bytes());
+            // Intentionally omit EncryptionInfo bytes.
+
+            let stream = [
+                record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+                record(RECORD_FILEPASS, &payload),
+                record(RECORD_EOF, &[]),
+            ].concat();
+
+            let res = decrypt_biff_workbook_stream(&stream, "pw");
+            prop_assert!(matches!(res, Err(DecryptError::InvalidFormat(_))));
+        }
+    }
+
+    #[test]
+    fn decryptor_rejects_huge_record_len_that_exceeds_stream_end() {
+        // BIFF record declaring a huge payload but missing bytes should not panic or read OOB.
+        let mut bogus = Vec::new();
+        bogus.extend_from_slice(&RECORD_FILEPASS.to_le_bytes());
+        bogus.extend_from_slice(&u16::MAX.to_le_bytes());
+        bogus.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // truncated payload
+
+        let stream = [record(RECORD_BOF_BIFF8, &BOF_GLOBALS), bogus].concat();
+        let res = decrypt_biff8_workbook_stream_rc4_cryptoapi(&stream, "pw");
+        assert!(matches!(res, Err(DecryptError::InvalidFormat(_))), "res={res:?}");
+    }
+
+    #[test]
+    fn decryptor_reports_unsupported_encryption_type() {
+        // FILEPASS with an unknown encryption type should surface UnsupportedEncryption.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x0002u16.to_le_bytes()); // unknown wEncryptionType
+        payload.extend_from_slice(&0u16.to_le_bytes()); // padding
+
+        let stream = [
+            record(RECORD_BOF_BIFF8, &BOF_GLOBALS),
+            record(RECORD_FILEPASS, &payload),
+            record(RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let res = decrypt_biff_workbook_stream(&stream, "pw");
+        assert!(matches!(res, Err(DecryptError::UnsupportedEncryption)), "res={res:?}");
     }
 }
