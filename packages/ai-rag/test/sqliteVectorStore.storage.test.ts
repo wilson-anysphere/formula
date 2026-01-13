@@ -292,6 +292,58 @@ maybeTest("SqliteVectorStore can reset dimension mismatch even when storage.remo
   await store3.close();
 });
 
+maybeTest("SqliteVectorStore can reset dimension mismatch even when storage.remove() throws", async () => {
+  class ThrowingRemoveBinaryStorage {
+    removedCalls = 0;
+    saveByteLengths: number[] = [];
+    #data: Uint8Array | null = null;
+
+    async load(): Promise<Uint8Array | null> {
+      return this.#data ? new Uint8Array(this.#data) : null;
+    }
+
+    async save(data: Uint8Array): Promise<void> {
+      this.saveByteLengths.push(data.byteLength);
+      this.#data = new Uint8Array(data);
+    }
+
+    async remove(): Promise<void> {
+      this.removedCalls += 1;
+      throw new Error("remove failed");
+    }
+  }
+
+  const storage = new ThrowingRemoveBinaryStorage();
+
+  const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  // Reopen with a different dimension; reset path should tolerate remove() throwing
+  // and fall back to overwriting storage.
+  const store2 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: true,
+  });
+  expect(storage.removedCalls).toBe(1);
+  expect(storage.saveByteLengths.some((len) => len === 0)).toBe(true);
+  expect(storage.saveByteLengths.some((len) => len > 0)).toBe(true);
+  expect(await store2.list()).toEqual([]);
+  await store2.close();
+
+  // Ensure the fresh DB was persisted and can be opened without reset.
+  const store3 = await SqliteVectorStore.create({
+    storage,
+    dimension: 4,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+  });
+  expect(await store3.list()).toEqual([]);
+  await store3.close();
+});
+
 maybeTest("SqliteVectorStore can reset dimension mismatch when using ChunkedLocalStorageBinaryStorage", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag.sqlite",
