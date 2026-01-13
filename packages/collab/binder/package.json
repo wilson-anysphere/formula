@@ -1,0 +1,16 @@
+{
+  "name": "@formula/collab-binder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "main": "index.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "@formula/collab-yjs-utils": "workspace:*",
+    "yjs": "^13.6.27"
+  }
+}
+

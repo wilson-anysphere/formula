@@ -1,0 +1,14 @@
+{
+  "name": "@formula/collab-branching",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "@formula/collab-yjs-utils": "workspace:*"
+  }
+}
+
