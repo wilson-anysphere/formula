@@ -116,6 +116,25 @@ def _assert(condition: bool, message: str) -> None:
         raise SystemExit(f"[strip-check] ERROR: {message}")
 
 
+def _append_step_summary(markdown: str) -> None:
+    """
+    Best-effort GitHub Actions step summary integration.
+
+    We keep this optional so the script remains usable locally.
+    """
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+    if not summary_path:
+        return
+    try:
+        Path(summary_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "a", encoding="utf-8") as f:
+            f.write(markdown.rstrip() + "\n")
+    except Exception:
+        # Don't fail the verification if step-summary writing fails.
+        return
+
+
 def _check_unix_stripped(binary: Path) -> None:
     # `file` output includes "not stripped" when symbols/debug info remain.
     proc = _run(["file", str(binary)])
@@ -215,9 +234,10 @@ def main() -> None:
     repo_root = _repo_root()
     binary = _find_desktop_binary(repo_root)
     runner_os = os.environ.get("RUNNER_OS") or platform.system()
+    binary_display = binary.relative_to(repo_root) if binary.is_relative_to(repo_root) else binary
 
     print(f"[strip-check] Runner: {runner_os}")
-    print(f"[strip-check] Checking binary: {binary.relative_to(repo_root) if binary.is_relative_to(repo_root) else binary}")
+    print(f"[strip-check] Checking binary: {binary_display}")
 
     if sys.platform == "win32":
         # On Windows, debug symbols are primarily shipped via `.pdb` sidecar files. We verify that
@@ -225,6 +245,18 @@ def main() -> None:
         # its debug directory; that is not shipped to users as long as the PDB itself isn't bundled.)
         _check_no_symbol_sidecars(repo_root)
         print("[strip-check] OK (Windows): no PDB/dSYM sidecars in bundle output")
+        _append_step_summary(
+            "\n".join(
+                [
+                    "### Desktop binary strip verification",
+                    "",
+                    f"- Platform: **Windows**",
+                    f"- Binary: `{binary_display}`",
+                    "- Check: no `.pdb`/`.dSYM`/`.dwp` sidecars in `**/release/bundle/**`",
+                    "",
+                ]
+            )
+        )
         return
 
     _check_unix_stripped(binary)
@@ -232,12 +264,36 @@ def main() -> None:
         _check_linux_no_debug_sections(binary)
         _check_no_symbol_sidecars(repo_root)
         print("[strip-check] OK (Linux): binary stripped, no .debug_* sections, no symbol sidecars")
+        _append_step_summary(
+            "\n".join(
+                [
+                    "### Desktop binary strip verification",
+                    "",
+                    f"- Platform: **Linux**",
+                    f"- Binary: `{binary_display}`",
+                    "- Checks: `file` (stripped), `readelf -S` (no `.debug_*`), no symbol sidecars in `**/release/bundle/**`",
+                    "",
+                ]
+            )
+        )
         return
 
     if sys.platform == "darwin":
         _check_macos_no_dwarf_segment(binary)
         _check_no_symbol_sidecars(repo_root)
         print("[strip-check] OK (macOS): binary stripped, no __DWARF segment, no symbol sidecars")
+        _append_step_summary(
+            "\n".join(
+                [
+                    "### Desktop binary strip verification",
+                    "",
+                    f"- Platform: **macOS**",
+                    f"- Binary: `{binary_display}`",
+                    "- Checks: `file` (stripped), `otool -l` (no `__DWARF`), no symbol sidecars in `**/release/bundle/**`",
+                    "",
+                ]
+            )
+        )
         return
 
     print(f"[strip-check] WARNING: unsupported platform {sys.platform}; skipping additional checks.")
