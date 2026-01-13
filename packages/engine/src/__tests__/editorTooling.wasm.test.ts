@@ -194,6 +194,32 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
     }
   });
 
+  it("parseFormulaPartial strips _xlfn. prefix from function context names", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const formula = "=_xlfn.SEQUENCE(1,";
+      const cursor = formula.length;
+      const result = await engine.parseFormulaPartial(formula, cursor);
+      expect(result.context.function).toEqual({ name: "SEQUENCE", argIndex: 1 });
+      expect(result.error?.span).toEqual({ start: cursor, end: cursor });
+
+      const localized = "=_xlfn.SEQUENZ(1;";
+      const localizedCursor = localized.length;
+      const localizedResult = await engine.parseFormulaPartial(localized, localizedCursor, { localeId: "de-DE" });
+      expect(localizedResult.context.function).toEqual({ name: "SEQUENCE", argIndex: 1 });
+      expect(localizedResult.error?.span).toEqual({ start: localizedCursor, end: localizedCursor });
+    } finally {
+      engine.terminate();
+    }
+  });
+
   it("parseFormulaPartial cursor is UTF-16 indexed (surrogate pairs before cursor)", async () => {
     const wasm = await loadFormulaWasm();
     const worker = new WasmBackedWorker(wasm);

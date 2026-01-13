@@ -86,11 +86,17 @@ struct ParseOptionsJsDto {
     reference_style: Option<formula_engine::ReferenceStyle>,
 }
 fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsValue> {
+    parse_options_and_locale_from_js(options).map(|(opts, _)| opts)
+}
+
+fn parse_options_and_locale_from_js(
+    options: Option<JsValue>,
+) -> Result<(ParseOptions, Option<&'static FormulaLocale>), JsValue> {
     let Some(value) = options else {
-        return Ok(ParseOptions::default());
+        return Ok((ParseOptions::default(), None));
     };
     if value.is_undefined() || value.is_null() {
-        return Ok(ParseOptions::default());
+        return Ok((ParseOptions::default(), None));
     }
 
     // Prefer a small JS-friendly options object. This keeps callers from having to construct
@@ -105,7 +111,7 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         .map_err(|_| js_err("options must be an object".to_string()))?;
     let keys = js_sys::Object::keys(&obj);
     if keys.length() == 0 {
-        return Ok(ParseOptions::default());
+        return Ok((ParseOptions::default(), None));
     }
 
     let has_locale_id = Reflect::has(&obj, &JsValue::from_str("localeId")).unwrap_or(false);
@@ -114,15 +120,17 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         let dto: ParseOptionsJsDto =
             serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()))?;
         let mut opts = ParseOptions::default();
+        let mut locale: Option<&'static FormulaLocale> = None;
         if let Some(locale_id) = dto.locale_id {
-            let locale = get_locale(&locale_id)
+            let formula_locale = get_locale(&locale_id)
                 .ok_or_else(|| js_err(format!("unknown localeId: {locale_id}")))?;
-            opts.locale = locale.config.clone();
+            opts.locale = formula_locale.config.clone();
+            locale = Some(formula_locale);
         }
         if let Some(style) = dto.reference_style {
             opts.reference_style = style;
         }
-        return Ok(opts);
+        return Ok((opts, locale));
     }
 
     let looks_like_parse_options = Reflect::has(&obj, &JsValue::from_str("locale"))
@@ -131,7 +139,9 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         || Reflect::has(&obj, &JsValue::from_str("normalize_relative_to")).unwrap_or(false);
     if looks_like_parse_options {
         // Fall back to the full ParseOptions struct for advanced callers.
-        return serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()));
+        return serde_wasm_bindgen::from_value(obj.into())
+            .map(|opts| (opts, None))
+            .map_err(|err| js_err(err.to_string()));
     }
 
     Err(js_err(
@@ -162,6 +172,19 @@ struct GoalSeekRequestDto {
     recalc_mode: Option<GoalSeekRecalcModeDto>,
 }
 
+fn normalize_function_context_name(name: &str, locale: Option<&FormulaLocale>) -> String {
+    let canonical = match locale {
+        Some(locale) => locale.canonical_function_name(name),
+        None => name.to_ascii_uppercase(),
+    };
+
+    const XL_FN_PREFIX: &str = "_xlfn.";
+    canonical
+        .get(..XL_FN_PREFIX.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(XL_FN_PREFIX))
+        .map(|_| canonical[XL_FN_PREFIX.len()..].to_string())
+        .unwrap_or(canonical)
+}
 fn edit_error_to_string(err: EngineEditError) -> String {
     match err {
         EngineEditError::SheetNotFound(sheet) => format!("sheet not found: {sheet}"),
@@ -2719,7 +2742,7 @@ pub fn parse_formula_partial(
 ) -> Result<JsValue, JsValue> {
     ensure_rust_constructors_run();
 
-    let opts = parse_options_from_js(opts)?;
+    let (opts, locale) = parse_options_and_locale_from_js(opts)?;
 
     // Cursor is expressed in UTF-16 code units by JS callers.
     let formula_utf16_len = formula.encode_utf16().count() as u32;
@@ -2751,7 +2774,7 @@ pub fn parse_formula_partial(
 
     let context = WasmParseContext {
         function: parsed.context.function.map(|ctx| WasmFunctionContext {
-            name: ctx.name.to_ascii_uppercase(),
+            name: normalize_function_context_name(&ctx.name, locale),
             arg_index: ctx.arg_index,
         }),
     };
