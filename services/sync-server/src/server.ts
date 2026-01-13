@@ -59,7 +59,7 @@ import {
 } from "./introspection.js";
 import { statusCodeForIntrospectionReason } from "./introspection-reasons.js";
 
-const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
+const { setupWSConnection, setPersistence, getYDoc, docs: ywsDocs } = ywsUtils as {
   setupWSConnection: (
     conn: WebSocket,
     req: IncomingMessage,
@@ -67,6 +67,7 @@ const { setupWSConnection, setPersistence, getYDoc } = ywsUtils as {
   ) => void;
   setPersistence: (persistence: unknown) => void;
   getYDoc: (docName: string, gc?: boolean) => any;
+  docs: Map<string, any>;
 };
 
 function pickIp(req: IncomingMessage, trustProxy: boolean): string {
@@ -435,6 +436,22 @@ export function createSyncServer(
   const triggerPersistenceOverload = (docName: string, scope: PersistenceOverloadScope) => {
     metrics.persistenceOverloadTotal.inc({ scope });
     closeActiveSocketsForDoc(docName, 1013, "persistence overloaded");
+  };
+
+  const cleanupOrphanedYwsDoc = (docName: string) => {
+    try {
+      const doc = ywsDocs.get(docName);
+      if (!doc) return;
+      const conns = (doc as any)?.conns;
+      const connCount = conns && typeof conns.size === "number" ? conns.size : 0;
+      if (connCount > 0) return;
+      ywsDocs.delete(docName);
+      if (typeof (doc as any)?.destroy === "function") {
+        (doc as any).destroy();
+      }
+    } catch (err) {
+      logger.warn({ err, docName }, "yws_doc_cleanup_failed");
+    }
   };
 
   const tombstones = new TombstoneStore(config.dataDir, logger);
@@ -1927,6 +1944,7 @@ export function createSyncServer(
           getYDoc(docName, config.gc);
           await waitForDocLoaded?.(docName);
         } catch (err) {
+          cleanupOrphanedYwsDoc(docName);
           connectionTracker.unregister(ip);
           docConnectionTracker.unregister(persistedName);
           if (leveldbDocNameHashingEnabled) {
@@ -1952,6 +1970,7 @@ export function createSyncServer(
             wss.emit("connection", ws, req);
           });
         } catch (err) {
+          cleanupOrphanedYwsDoc(docName);
           connectionTracker.unregister(ip);
           docConnectionTracker.unregister(persistedName);
           if (leveldbDocNameHashingEnabled) {

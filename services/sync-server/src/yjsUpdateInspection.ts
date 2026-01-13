@@ -838,7 +838,9 @@ export function inspectUpdateForAllowedRoots(params: {
 
         let violation: InspectUpdateAllowedRootsResult | null = null;
 
-        const processStructArray = (structs: readonly unknown[]) => {
+        const processStructArray = (
+          structs: readonly unknown[]
+        ): InspectUpdateAllowedRootsResult | null => {
           let index = lowerBoundByClock(structs, clock);
           if (index > 0 && structRangeContains(structs[index - 1], clock)) {
             index -= 1;
@@ -858,10 +860,10 @@ export function inspectUpdateForAllowedRoots(params: {
               throw new Error(`${rootRes.kind}:${rootRes.reason}`);
             }
             if (!isAllowed(rootRes.root)) {
-              violation = recordViolation(s, "delete");
-              return;
+              return recordViolation(s, "delete");
             }
           }
+          return null;
         };
 
         const startId: IDLike = { client, clock };
@@ -876,8 +878,8 @@ export function inspectUpdateForAllowedRoots(params: {
         }
 
         try {
-          if (storeStructs) processStructArray(storeStructs);
-          if (!violation && decodedStructs) processStructArray(decodedStructs);
+          if (storeStructs) violation = processStructArray(storeStructs);
+          if (!violation && decodedStructs) violation = processStructArray(decodedStructs);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           if (msg.startsWith("gc:")) {

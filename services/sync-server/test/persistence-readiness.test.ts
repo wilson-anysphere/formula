@@ -40,6 +40,41 @@ async function waitForFileSize(filePath: string, minBytes: number): Promise<void
   }, 10_000);
 }
 
+function expectWebSocketUpgradeStatus(url: string, expectedStatusCode: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let finished = false;
+
+    const finish = (cb: () => void) => {
+      if (finished) return;
+      finished = true;
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+      cb();
+    };
+
+    ws.on("open", () => {
+      finish(() => reject(new Error("Expected WebSocket upgrade rejection")));
+    });
+    ws.on("unexpected-response", (_req, res) => {
+      try {
+        assert.equal(res.statusCode, expectedStatusCode);
+        res.resume();
+        finish(resolve);
+      } catch (err) {
+        finish(() => reject(err));
+      }
+    });
+    ws.on("error", (err) => {
+      if (finished) return;
+      reject(err);
+    });
+  });
+}
+
 function seedUpdate(contents: string): Uint8Array {
   const doc = new Y.Doc();
   doc.getText("t").insert(0, contents);
@@ -272,3 +307,64 @@ test("loads LevelDB persistence before initial client sync", async (t) => {
   assert.equal(textAtSync, "hello");
 });
 
+test("rejects websocket upgrade with 503 when encrypted file persistence can't be loaded", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-ready-encrypted-fail-"));
+
+  let server = await startSyncServer({
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "keyring",
+      SYNC_SERVER_ENCRYPTION_KEYRING_JSON: TEST_KEYRING_JSON,
+    },
+  });
+  const port = server.port;
+  const docName = "ready-encrypted-fail";
+
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const doc = new Y.Doc();
+  const provider = new WebsocketProvider(server.wsUrl, docName, doc, {
+    WebSocketPolyfill: WebSocket,
+    disableBc: true,
+    params: { token: "test-token" },
+  });
+  t.after(() => {
+    provider.destroy();
+    doc.destroy();
+  });
+
+  await waitForProviderSync(provider);
+  doc.getText("t").insert(0, "hello");
+
+  // Ensure the encrypted header exists on disk.
+  await waitForFileSize(yjsFilePathForDoc(dataDir, docName), 12);
+
+  provider.destroy();
+  doc.destroy();
+
+  await server.stop();
+  server = await startSyncServer({
+    port,
+    dataDir,
+    auth: { mode: "opaque", token: "test-token" },
+    env: {
+      // Now start without encryption; the persisted encrypted file should fail closed.
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION: "off",
+      // Ensure no external keyring env vars leak into this test.
+      SYNC_SERVER_ENCRYPTION_KEYRING_JSON: "",
+      SYNC_SERVER_ENCRYPTION_KEYRING_PATH: "",
+      SYNC_SERVER_PERSISTENCE_ENCRYPTION_KEY_B64: "",
+    },
+  });
+
+  await expectWebSocketUpgradeStatus(
+    `${server.wsUrl}/${encodeURIComponent(docName)}?token=test-token`,
+    503
+  );
+});
