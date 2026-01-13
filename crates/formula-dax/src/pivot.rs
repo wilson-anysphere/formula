@@ -1,6 +1,6 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
-use crate::model::{RelationshipPathDirection, RowSet};
+use crate::model::{Cardinality, RelationshipPathDirection, RowSet};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
 use std::borrow::Cow;
@@ -1301,7 +1301,7 @@ fn pivot_columnar_star_schema_group_by(
         // This fast path assumes each foreign-key value maps to at most one row on the related
         // table (i.e. "one" side). Many-to-many relationships can map to multiple rows and require
         // full row-wise evaluation.
-        if rel_info.rel.cardinality == crate::model::Cardinality::ManyToMany {
+        if rel_info.rel.cardinality == Cardinality::ManyToMany {
             return Ok(None);
         }
 

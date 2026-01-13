@@ -2378,6 +2378,89 @@ fn values_and_distinctcount_include_virtual_blank_row_for_unmatched_relationship
 }
 
 #[test]
+fn allnoblankrow_excludes_relationship_blank_member() {
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
+    customers.push_row(vec![1.into(), "East".into()]).unwrap();
+    customers.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(customers).unwrap();
+
+    let mut orders = Table::new("Orders", vec!["OrderId", "CustomerId", "Amount"]);
+    orders
+        .push_row(vec![100.into(), 1.into(), 10.0.into()])
+        .unwrap();
+    orders
+        .push_row(vec![101.into(), 999.into(), 7.0.into()])
+        .unwrap();
+    model.add_table(orders).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Orders_Customers".into(),
+            from_table: "Orders".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: false,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let empty = FilterContext::empty();
+
+    // `ALL` includes the relationship-generated blank member (unknown customer) when it exists.
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALL(Customers[Region]))",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        3.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "COUNTROWS(ALLNOBLANKROW(Customers[Region]))",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        2.into()
+    );
+
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "SUM(Orders[Amount])",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        17.0.into()
+    );
+    assert_eq!(
+        engine
+            .evaluate(
+                &model,
+                "CALCULATE(SUM(Orders[Amount]), ALLNOBLANKROW(Customers[Region]))",
+                &empty,
+                &RowContext::default(),
+            )
+            .unwrap(),
+        10.0.into()
+    );
+}
+
+#[test]
 fn relationship_filter_including_all_real_dimension_rows_can_exclude_blank_member() {
     let mut model = DataModel::new();
 

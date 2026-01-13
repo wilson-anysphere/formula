@@ -1854,6 +1854,49 @@ impl DaxEngine {
                         }
                     }
                 }
+                Expr::Call { name, args } if name.eq_ignore_ascii_case("ALLNOBLANKROW") => {
+                    let [inner] = args.as_slice() else {
+                        return Err(DaxError::Eval(
+                            "ALLNOBLANKROW expects 1 argument".into(),
+                        ));
+                    };
+                    match inner {
+                        Expr::TableName(table) => {
+                            if !keep_filters {
+                                clear_tables.insert(table.clone());
+                            }
+                            let table_ref = model
+                                .table(table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            // Apply an explicit row filter containing all physical rows. This
+                            // matches `ALL(Table)` while ensuring the relationship-generated blank
+                            // member is excluded (`blank_row_allowed` is false when a row filter is
+                            // present).
+                            row_filters.push((
+                                table.clone(),
+                                (0..table_ref.row_count()).collect::<HashSet<_>>(),
+                            ));
+                        }
+                        Expr::ColumnRef { table, column } => {
+                            let key = (table.clone(), column.clone());
+                            if !keep_filters {
+                                clear_columns.insert(key.clone());
+                            }
+
+                            let mut base_filter = eval_filter.clone();
+                            base_filter.clear_column_filter(table, column);
+                            let mut values =
+                                self.distinct_column_values(model, inner, &base_filter)?;
+                            values.retain(|v| !v.is_blank());
+                            column_filters.push((key, values));
+                        }
+                        other => {
+                            return Err(DaxError::Type(format!(
+                                "ALLNOBLANKROW expects a table name or column reference, got {other:?}"
+                            )))
+                        }
+                    }
+                }
                 // Boolean filter expressions like:
                 //   Orders[Amount] > 10 && Orders[Amount] < 20
                 //   NOT(Orders[Amount] > 10)
@@ -2364,6 +2407,65 @@ impl DaxEngine {
                         }
                         other => Err(DaxError::Type(format!(
                             "ALL expects a table name or column reference, got {other:?}"
+                        ))),
+                    }
+                }
+                "ALLNOBLANKROW" => {
+                    let [arg] = args.as_slice() else {
+                        return Err(DaxError::Eval(
+                            "ALLNOBLANKROW expects 1 argument".into(),
+                        ));
+                    };
+                    match arg {
+                        Expr::TableName(name) => {
+                            // Like `ALL(Table)`, return all physical rows (excluding any
+                            // relationship-generated blank member).
+                            let table_ref = model
+                                .table(name)
+                                .ok_or_else(|| DaxError::UnknownTable(name.clone()))?;
+                            Ok(TableResult {
+                                table: name.clone(),
+                                rows: (0..table_ref.row_count()).collect(),
+                            })
+                        }
+                        Expr::ColumnRef { table, column } => {
+                            // Like `ALL(Table[Column])`, but exclude both:
+                            //   - physical blank values in the column
+                            //   - the relationship-generated "unknown" (blank) member
+                            let table_ref = model
+                                .table(table)
+                                .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                            let idx = table_ref.column_idx(column).ok_or_else(|| {
+                                DaxError::UnknownColumn {
+                                    table: table.clone(),
+                                    column: column.clone(),
+                                }
+                            })?;
+
+                            let mut modified_filter = filter.clone();
+                            modified_filter.clear_column_filter(table, column);
+                            let rows_in_ctx = resolve_table_rows(model, &modified_filter, table)?;
+
+                            let mut seen = HashSet::new();
+                            let mut rows = Vec::new();
+                            for row in rows_in_ctx {
+                                let value =
+                                    table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                                if value.is_blank() {
+                                    continue;
+                                }
+                                if seen.insert(value) {
+                                    rows.push(row);
+                                }
+                            }
+
+                            Ok(TableResult {
+                                table: table.clone(),
+                                rows,
+                            })
+                        }
+                        other => Err(DaxError::Type(format!(
+                            "ALLNOBLANKROW expects a table name or column reference, got {other:?}"
                         ))),
                     }
                 }
