@@ -10,8 +10,9 @@ describe("startup metrics bootstrap wiring", () => {
     const mainUrl = new URL("../../main.ts", import.meta.url);
     const source = readFileSync(mainUrl, "utf8");
 
-    const firstImport = source.match(/^\s*import\s+.*$/m)?.[0] ?? "";
+    // Only consider runtime imports: `import type ...` is erased and does not affect module
+    // evaluation order in the built JS bundle.
+    const firstImport = source.match(/^\s*import(?!\s+type\b)\s+.*$/m)?.[0] ?? "";
     expect(firstImport).toMatch(/import\s+["']\.\/tauri\/startupMetricsBootstrap\.js["']\s*;/);
   });
 });
-
