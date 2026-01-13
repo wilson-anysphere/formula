@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fail if merge conflict markers are present
         run: bash scripts/ci/check-merge-conflict-markers.sh
-      - name: Guard: Rust toolchain pins match rust-toolchain.toml
+      - name: "Guard: Rust toolchain pins match rust-toolchain.toml"
         run: bash scripts/ci/check-rust-toolchain-pins.sh
 
   public-corpus:
@@ -102,20 +102,35 @@ jobs:
             --leak-scan \
             "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard
-        run: python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
+        if: always()
+        run: |
+          if [ -d tools/corpus/out/public ]; then
+            python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
+          else
+            echo "No triage output found at tools/corpus/out/public; skipping dashboard generation."
+          fi
       - name: Publish summary
-        run: cat tools/corpus/out/public/summary.md >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        run: |
+          if [ -f tools/corpus/out/public/summary.md ]; then
+            cat tools/corpus/out/public/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No corpus summary found at tools/corpus/out/public/summary.md"
+          fi
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: corpus-public-${{ github.sha }}
           path: tools/corpus/out/public
       - name: Upload corpus public summary (stable paths)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: corpus-public-summary
           path: |
             tools/corpus/out/public/summary.json
             tools/corpus/out/public/summary.md
+          if-no-files-found: ignore
 
   private-corpus:
     name: Private corpus triage (scheduled)
@@ -176,12 +191,12 @@ jobs:
           if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
             EXTRA_FLAGS+=(--render-smoke)
           fi
-          JOBS="$(python - <<'PY'
-import os
-cpu = os.cpu_count() or 1
-print(min(4, cpu))
-PY
-)"
+          JOBS="$(python - <<-'PY'
+          	import os
+          	cpu = os.cpu_count() or 1
+          	print(min(4, cpu))
+          	PY
+          )"
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
             --input-scope sanitized \
