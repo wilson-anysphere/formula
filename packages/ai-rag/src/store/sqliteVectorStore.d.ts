@@ -69,3 +69,8 @@ export type SqliteVectorStoreDimensionMismatchError = Error & {
   dbDimension: number;
   requestedDimension: number;
 };
+
+export type SqliteVectorStoreInvalidMetadataError = Error & {
+  name: "SqliteVectorStoreInvalidMetadataError";
+  rawDimension: unknown;
+};

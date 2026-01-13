@@ -81,6 +81,16 @@ function createDimensionMismatchError(existingDim, requestedDim) {
   return err;
 }
 
+function createInvalidDimensionMetadataError(rawValue) {
+  const err = new Error(
+    `SqliteVectorStore invalid dimension metadata: expected positive number, got ${JSON.stringify(rawValue)}`
+  );
+  err.name = "SqliteVectorStoreInvalidMetadataError";
+  // Non-standard field for programmatic handling/debugging.
+  err.rawDimension = rawValue;
+  return err;
+}
+
 /**
  * @param {Float32Array} vec
  * @param {number} expectedDim
@@ -399,11 +409,7 @@ export class SqliteVectorStore {
 
     const existingDim = Number(existing);
     if (!Number.isFinite(existingDim) || existingDim <= 0) {
-      const err = new Error(
-        `SqliteVectorStore invalid dimension metadata: expected positive number, got ${JSON.stringify(existing)}`
-      );
-      err.name = "SqliteVectorStoreInvalidMetadataError";
-      throw err;
+      throw createInvalidDimensionMetadataError(existing);
     }
     if (existingDim !== dimension) {
       throw createDimensionMismatchError(existingDim, dimension);

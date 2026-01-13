@@ -3,7 +3,10 @@ export { HashEmbedder } from "./embedding/hashEmbedder.js";
 export { InMemoryVectorStore } from "./store/inMemoryVectorStore.js";
 export { JsonVectorStore } from "./store/jsonVectorStore.js";
 export { SqliteVectorStore } from "./store/sqliteVectorStore.js";
-export type { SqliteVectorStoreDimensionMismatchError } from "./store/sqliteVectorStore.js";
+export type {
+  SqliteVectorStoreDimensionMismatchError,
+  SqliteVectorStoreInvalidMetadataError,
+} from "./store/sqliteVectorStore.js";
 
 export {
   InMemoryBinaryStorage,
