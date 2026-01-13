@@ -131,6 +131,14 @@ jobs:
         if: steps.desktop_bench.outputs.run == 'true'
         run: pnpm build:desktop
 
+      - name: Desktop dist asset report
+        if: steps.desktop_bench.outputs.run == 'true'
+        run: node scripts/desktop_dist_asset_report.mjs
+        env:
+          # Optional: set as GitHub Actions variables to enable gating.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
       - name: Build desktop binary (release, desktop feature)
         if: steps.desktop_bench.outputs.run == 'true'
         run: |

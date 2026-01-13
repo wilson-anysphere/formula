@@ -81,6 +81,13 @@ jobs:
       - name: Build desktop frontend (Vite + WASM)
         run: pnpm build:desktop
 
+      - name: Desktop dist asset report
+        run: node scripts/desktop_dist_asset_report.mjs
+        env:
+          # Optional: set as GitHub Actions variables to enable gating.
+          FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB }}
+          FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB: ${{ vars.FORMULA_DESKTOP_DIST_SINGLE_FILE_BUDGET_MB }}
+
       - name: Build desktop binary (release)
         shell: bash
         run: |
