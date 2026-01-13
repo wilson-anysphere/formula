@@ -408,7 +408,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "AI",
           buttons: [
             {
-              id: "open-panel-ai-chat",
+              id: "view.togglePanel.aiChat",
               label: "AI",
               ariaLabel: "Toggle AI panel",
               iconId: "sparkles",
@@ -423,8 +423,14 @@ export const defaultRibbonSchema: RibbonSchema = {
               testId: "open-inline-ai-edit",
               size: "icon",
             },
+          ],
+        },
+        {
+          id: "home.debug.aiLegacy",
+          label: "AI (legacy)",
+          buttons: [
             {
-              id: "open-ai-panel",
+              id: "view.togglePanel.aiChat",
               label: "AI (legacy)",
               ariaLabel: "Toggle AI panel",
               iconId: "sparkles",
@@ -837,7 +843,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Panels",
           buttons: [
             {
-              id: "open-panel-ai-audit",
+              id: "view.togglePanel.aiAudit",
               label: "Audit log (alt)",
               ariaLabel: "Toggle AI audit log panel",
               iconId: "file",
@@ -845,15 +851,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-ai-audit-panel",
-              label: "Audit log (legacy)",
-              ariaLabel: "Toggle AI audit log panel",
-              iconId: "file",
-              testId: "open-ai-audit-panel",
-              size: "icon",
-            },
-            {
-              id: "open-data-queries-panel",
+              id: "view.togglePanel.dataQueries",
               label: "Queries",
               ariaLabel: "Toggle Queries panel",
               iconId: "search",
@@ -861,7 +859,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-macros-panel",
+              id: "view.togglePanel.macros",
               label: "Macros",
               ariaLabel: "Toggle Macros panel",
               iconId: "file",
@@ -869,7 +867,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-script-editor-panel",
+              id: "view.togglePanel.scriptEditor",
               label: "Scripts",
               ariaLabel: "Toggle Script editor panel",
               iconId: "code",
@@ -877,7 +875,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-python-panel",
+              id: "view.togglePanel.python",
               label: "Python",
               ariaLabel: "Toggle Python panel",
               iconId: "code",
@@ -885,7 +883,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-extensions-panel",
+              id: "view.togglePanel.extensions",
               label: "Extensions",
               ariaLabel: "Toggle Extensions panel",
               iconId: "puzzle",
@@ -901,11 +899,25 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-comments-panel",
+              id: "comments.togglePanel",
               label: "Comments",
               ariaLabel: "Toggle Comments panel",
               iconId: "comment",
               testId: "open-comments-panel",
+              size: "icon",
+            },
+          ],
+        },
+        {
+          id: "home.debug.panelsLegacy",
+          label: "Panels (legacy)",
+          buttons: [
+            {
+              id: "view.togglePanel.aiAudit",
+              label: "Audit log (legacy)",
+              ariaLabel: "Toggle AI audit log panel",
+              iconId: "file",
+              testId: "open-ai-audit-panel",
               size: "icon",
             },
           ],
@@ -2060,21 +2072,21 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Panels",
           buttons: [
             {
-              id: "open-marketplace-panel",
+              id: "view.togglePanel.marketplace",
               label: "Marketplace",
               ariaLabel: "Marketplace",
               iconId: "puzzle",
               testId: "open-marketplace-panel",
             },
             {
-              id: "open-version-history-panel",
+              id: "view.togglePanel.versionHistory",
               label: "Version History",
               ariaLabel: "Toggle Version History panel",
               iconId: "clock",
               testId: "open-version-history-panel",
             },
             {
-              id: "open-branch-manager-panel",
+              id: "view.togglePanel.branchManager",
               label: "Branches",
               ariaLabel: "Toggle Branch Manager panel",
               iconId: "shuffle",

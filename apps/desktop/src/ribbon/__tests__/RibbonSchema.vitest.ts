@@ -34,12 +34,12 @@ describe("defaultRibbonSchema", () => {
     expect(panelsGroup, "Expected View → Panels group to exist").toBeTruthy();
     if (!panelsGroup) return;
 
-    const versionHistory = panelsGroup.buttons.find((button) => button.id === "open-version-history-panel");
-    expect(versionHistory, "Expected open-version-history-panel button").toBeTruthy();
+    const versionHistory = panelsGroup.buttons.find((button) => button.id === "view.togglePanel.versionHistory");
+    expect(versionHistory, "Expected view.togglePanel.versionHistory button").toBeTruthy();
     expect(versionHistory?.testId).toBe("open-version-history-panel");
 
-    const branchManager = panelsGroup.buttons.find((button) => button.id === "open-branch-manager-panel");
-    expect(branchManager, "Expected open-branch-manager-panel button").toBeTruthy();
+    const branchManager = panelsGroup.buttons.find((button) => button.id === "view.togglePanel.branchManager");
+    expect(branchManager, "Expected view.togglePanel.branchManager button").toBeTruthy();
     expect(branchManager?.testId).toBe("open-branch-manager-panel");
   });
 

@@ -2083,6 +2083,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const perfStats = app.getGridPerfStats() as any;
     const perfStatsSupported = perfStats != null;
     const perfStatsEnabled = Boolean(perfStats?.enabled);
+    const isPanelOpen = (panelId: string): boolean =>
+      ribbonLayoutController != null && getPanelPlacement(ribbonLayoutController.layout, panelId).kind !== "closed";
 
     const pressedById = {
       "format.toggleBold": formatState.bold,
@@ -2098,9 +2100,18 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.toggleShowFormulas": app.getShowFormulas(),
       "view.show.performanceStats": perfStatsEnabled,
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
-      "data.queriesConnections.queriesConnections":
-        ribbonLayoutController != null &&
-        getPanelPlacement(ribbonLayoutController.layout, PanelIds.DATA_QUERIES).kind !== "closed",
+      "view.togglePanel.aiChat": isPanelOpen(PanelIds.AI_CHAT),
+      "view.togglePanel.aiAudit": isPanelOpen(PanelIds.AI_AUDIT),
+      "view.togglePanel.versionHistory": isPanelOpen(PanelIds.VERSION_HISTORY),
+      "view.togglePanel.branchManager": isPanelOpen(PanelIds.BRANCH_MANAGER),
+      "view.togglePanel.dataQueries": isPanelOpen(PanelIds.DATA_QUERIES),
+      "view.togglePanel.macros": isPanelOpen(PanelIds.MACROS),
+      "view.togglePanel.scriptEditor": isPanelOpen(PanelIds.SCRIPT_EDITOR),
+      "view.togglePanel.python": isPanelOpen(PanelIds.PYTHON),
+      "view.togglePanel.marketplace": isPanelOpen(PanelIds.MARKETPLACE),
+      "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
+      "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
+      "review.comments.showComments": app.isCommentsPanelVisible(),
       "comments.togglePanel": app.isCommentsPanelVisible(),
       "home.clipboard.formatPainter": Boolean(formatPainterState),
     };
@@ -9710,70 +9721,11 @@ mountRibbon(ribbonReactRoot, {
         executeBuiltinCommand(commandId);
         return;
 
-      // --- Debug / dev controls migrated from the legacy status bar ---------------
-      // Keep these command ids stable because Playwright e2e depends on their `data-testid`s.
-      case "open-ai-panel":
-      case "open-panel-ai-chat":
-        toggleDockPanel(PanelIds.AI_CHAT);
-        return;
       case "open-inline-ai-edit":
-        void commandRegistry.executeCommand("ai.inlineEdit").catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
+        executeBuiltinCommand("ai.inlineEdit");
         return;
-      case "open-ai-audit-panel":
-      case "open-panel-ai-audit":
-        toggleDockPanel(PanelIds.AI_AUDIT);
-        return;
-      case "open-version-history-panel":
-        toggleDockPanel(PanelIds.VERSION_HISTORY);
-        return;
-      case "open-branch-manager-panel":
-        toggleDockPanel(PanelIds.BRANCH_MANAGER);
-        return;
-      case "open-data-queries-panel":
-        toggleDockPanel(PanelIds.DATA_QUERIES);
-        return;
-      case "open-macros-panel":
-        toggleDockPanel(PanelIds.MACROS);
-        return;
-      case "open-script-editor-panel":
-        toggleDockPanel(PanelIds.SCRIPT_EDITOR);
-        return;
-      case "open-python-panel":
-        toggleDockPanel(PanelIds.PYTHON);
-        return;
-      case "open-marketplace-panel": {
-        // Opening the Marketplace panel should not eagerly start the extension host; users can
-        // browse/search/install extensions without spinning up the extension runtime. Extensions
-        // are loaded lazily when the user opens the Extensions panel or executes an extension
-        // command (see `ensureExtensionsLoaded()`).
-        toggleDockPanel(PanelIds.MARKETPLACE);
-        return;
-      }
-      case "open-extensions-panel": {
-        // Extensions are lazy-loaded to keep startup light. Opening the Extensions panel
-        // should trigger the host to load + sync contributed panels/commands.
-        void ensureExtensionsLoadedRef?.()
-          .then(() => {
-            updateKeybindingsRef?.();
-            syncContributedCommandsRef?.();
-            syncContributedPanelsRef?.();
-          })
-          .catch(() => {
-            // ignore; panel open/close should still work
-          });
-        // "Open Extensions" should be idempotent: if the panel is already open (for example,
-        // restored from layout persistence after a reload), focus it instead of toggling
-        // it closed. Closing remains available via the panel's close control.
-        ribbonLayoutController?.openPanel(PanelIds.EXTENSIONS);
-        return;
-      }
       case "open-vba-migrate-panel":
         toggleDockPanel(PanelIds.VBA_MIGRATE);
-        return;
-      case "open-comments-panel":
-        app.toggleCommentsPanel();
         return;
       case "audit-precedents":
         app.toggleAuditingPrecedents();
