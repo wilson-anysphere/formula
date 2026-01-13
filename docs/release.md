@@ -376,7 +376,7 @@ install WebView2 automatically if it is missing by using Tauri's WebView2 instal
 - Config: `apps/desktop/src-tauri/tauri.conf.json` → `bundle.windows.webviewInstallMode.type = "downloadBootstrapper"`
   (Evergreen **bootstrapper**; we also set `silent: true`; requires an internet connection to download/install the runtime).
 - Alternative: `bundle.windows.webviewInstallMode.type = "embedBootstrapper"` bundles the bootstrapper into the installer
-  (slightly larger installer; still requires internet to install the runtime; can be more reliable on older Windows versions).
+  (~1.8 MB larger installer; still requires internet to install the runtime; can be more reliable on older Windows versions).
 - Note: Tauri defaults to `downloadBootstrapper` if `webviewInstallMode` is omitted, but we keep it **explicit** in config
   (and guardrailed in CI/tests) so the behavior is obvious and doesn't regress silently.
 - CI verification:
@@ -398,7 +398,8 @@ To verify on a clean Windows VM (no preinstalled WebView2 Runtime):
 3. Confirm the app launches successfully (the installer should bootstrap WebView2 automatically).
 
 If you need an offline-friendly installer, change `bundle.windows.webviewInstallMode` to `offlineInstaller` or
-`fixedRuntime` (at the cost of a much larger installer).
+`fixedRuntime` (at the cost of a much larger installer: roughly **+127 MB** for `offlineInstaller` or **+180 MB** for
+`fixedRuntime`).
 
 For the full set of options, see the Tauri docs:
 https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options
