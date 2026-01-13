@@ -921,6 +921,29 @@ test("Typing =PERCENTILE(A suggests a range but does not auto-close parens (need
   );
 });
 
+test("Typing =DSUM(A suggests a range but does not auto-close parens (needs more args)", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=DSUM(A";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on row 11 (0-based 10), below the data.
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=DSUM(A1:A10"),
+    `Expected a DSUM range suggestion without closing paren, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =TEXTJOIN(\",\",TRUE,A suggests a range and auto-closes (min args satisfied)", async () => {
   const engine = new TabCompletionEngine();
 

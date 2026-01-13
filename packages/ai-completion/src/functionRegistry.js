@@ -228,6 +228,114 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "DAVERAGE",
+    description: "Averages values in a list or database that match conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DCOUNT",
+    description: "Counts the cells that contain numbers in a list or database that match conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DCOUNTA",
+    description: "Counts nonblank cells in a list or database that match conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DGET",
+    description: "Extracts a single value from a list or database that matches conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DMAX",
+    description: "Returns the largest number in a list or database that matches conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DMIN",
+    description: "Returns the smallest number in a list or database that matches conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DPRODUCT",
+    description: "Multiplies values in a list or database that match conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DSTDEV",
+    description: "Estimates standard deviation based on a sample from selected database entries.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DSTDEVP",
+    description: "Calculates standard deviation based on the entire population of selected database entries.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DSUM",
+    description: "Adds numbers in a list or database that match conditions you specify.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DVAR",
+    description: "Estimates variance based on a sample from selected database entries.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
+    name: "DVARP",
+    description: "Calculates variance based on the entire population of selected database entries.",
+    args: [
+      { name: "database", type: "range" },
+      { name: "field", type: "value" },
+      { name: "criteria", type: "range" },
+    ],
+  },
+  {
     name: "COUNT",
     description: "Counts the number of cells that contain numbers.",
     args: [

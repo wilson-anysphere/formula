@@ -132,4 +132,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Legacy varargs
   assert.ok(registry.isRangeArg("STDEV", 0), "Expected STDEV arg1 to be a range");
   assert.ok(registry.isRangeArg("VAR", 0), "Expected VAR arg1 to be a range");
+
+  // Database functions (database + criteria are ranges)
+  assert.ok(registry.isRangeArg("DSUM", 0), "Expected DSUM database to be a range");
+  assert.ok(registry.isRangeArg("DSUM", 2), "Expected DSUM criteria to be a range");
+  assert.ok(registry.isRangeArg("DCOUNT", 0), "Expected DCOUNT database to be a range");
+  assert.ok(registry.isRangeArg("DCOUNT", 2), "Expected DCOUNT criteria to be a range");
 });
