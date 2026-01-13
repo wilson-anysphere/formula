@@ -225,6 +225,59 @@ test("Range suggestions work for subsequent args when ';' is used as the argumen
   );
 });
 
+test("Typing =SUM( suggests a contiguous range above the current cell using the active column", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) {
+    values[`A${r}`] = r; // A1..A10 contain numbers
+  }
+
+  const currentInput = "=SUM(";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    // Pretend we're on A11 (0-based row 10), below the data in column A.
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A1:A10)"),
+    `Expected a SUM range suggestion from an empty arg, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Empty-arg range defaults have slightly lower confidence than explicit prefixes", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`A${r}`] = r;
+
+  const fromPrefix = await engine.getSuggestions({
+    currentInput: "=SUM(A",
+    cursorPosition: 6,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+  const prefixSuggestion = fromPrefix.find((s) => s.text === "=SUM(A1:A10)");
+  assert.ok(prefixSuggestion, "Expected explicit-prefix suggestion to exist");
+
+  const fromEmpty = await engine.getSuggestions({
+    currentInput: "=SUM(",
+    cursorPosition: 5,
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+  const emptySuggestion = fromEmpty.find((s) => s.text === "=SUM(A1:A10)");
+  assert.ok(emptySuggestion, "Expected empty-arg suggestion to exist");
+
+  assert.ok(
+    (emptySuggestion.confidence ?? 0) < (prefixSuggestion.confidence ?? 0),
+    `Expected empty-arg confidence to be lower (empty=${emptySuggestion.confidence}, typed=${prefixSuggestion.confidence})`
+  );
+});
+
 test("Typing =TAKE(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 
@@ -528,6 +581,22 @@ test("Range suggestions do not auto-close parens when the function needs more ar
   for (let r = 1; r <= 10; r++) {
     values[`A${r}`] = r; // A1..A10 contain numbers
   }
+
+  const emptyArgInput = "=VLOOKUP(A1, ";
+  const emptyArgSuggestions = await engine.getSuggestions({
+    currentInput: emptyArgInput,
+    cursorPosition: emptyArgInput.length,
+    // Pretend we're on A11 (0-based row 10), below the data in column A.
+    cellRef: { row: 10, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    emptyArgSuggestions.some((s) => s.text === "=VLOOKUP(A1, A1:A10"),
+    `Expected a VLOOKUP range suggestion from an empty arg without closing paren, got: ${emptyArgSuggestions
+      .map((s) => s.text)
+      .join(", ")}`
+  );
 
   const currentInput = "=VLOOKUP(A1, A";
   const suggestions = await engine.getSuggestions({

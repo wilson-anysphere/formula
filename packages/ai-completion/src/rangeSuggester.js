@@ -30,12 +30,25 @@ import { columnIndexToLetter, columnLetterToIndex, isEmptyCell, normalizeCellRef
  */
 export function suggestRanges(params) {
   const { currentArgText, surroundingCells } = params;
-  const cellRef = normalizeCellRef(params.cellRef);
+  /** @type {{row:number,col:number} | null} */
+  let cellRef = null;
+  try {
+    cellRef = normalizeCellRef(params.cellRef);
+  } catch {
+    return [];
+  }
   const sheetName = params.sheetName;
   const maxScanRows = params.maxScanRows ?? 500;
   const maxScanCols = params.maxScanCols ?? 50;
 
   if (!surroundingCells || typeof surroundingCells.getCellValue !== "function") {
+    return [];
+  }
+
+  // If we don't know where the user is editing (or the ref is clearly invalid),
+  // avoid emitting range suggestions. The heuristics in this module are based
+  // on scanning "near" the active cell.
+  if (!Number.isInteger(cellRef.row) || !Number.isInteger(cellRef.col) || cellRef.row < 0 || cellRef.col < 0) {
     return [];
   }
 

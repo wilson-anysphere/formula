@@ -275,8 +275,21 @@ export class TabCompletionEngine {
     const argSpecName = fnSpec?.args?.[argIndex]?.name;
     const functionCouldBeComplete = functionCouldBeCompleteAfterArg(fnSpec, argIndex);
 
+    // When the user has typed a function call and the current argument is still
+    // empty (e.g. "=SUM("), we can still offer a useful range suggestion by
+    // assuming the current column as the prefix token.
+    //
+    // If we don't have a valid active cell ref (e.g. cursor is detached from a
+    // cell), avoid suggesting ranges entirely.
+    const hasValidCellRef = Number.isInteger(cellRef?.row) && Number.isInteger(cellRef?.col) && cellRef.row >= 0 && cellRef.col >= 0;
+    if (!hasValidCellRef) return [];
+
+    const typedArgText = parsed.currentArg.text ?? "";
+    const isEmptyArg = typedArgText.trim().length === 0;
+    const currentArgText = isEmptyArg ? columnIndexToLetter(cellRef.col) : typedArgText;
+
     const rangeCandidates = suggestRanges({
-      currentArgText: parsed.currentArg.text,
+      currentArgText,
       cellRef,
       surroundingCells: context.surroundingCells,
     });
@@ -304,6 +317,12 @@ export class TabCompletionEngine {
         ) {
           confidence = clamp01(confidence - 0.1);
         }
+      }
+
+      // "Empty arg defaults" are helpful, but slightly less confident than when
+      // the user has explicitly typed a prefix.
+      if (isEmptyArg) {
+        confidence = clamp01((confidence ?? 0) - 0.05);
       }
 
       let newText = replaceSpan(input, parsed.currentArg.start, parsed.currentArg.end, candidate.range);
