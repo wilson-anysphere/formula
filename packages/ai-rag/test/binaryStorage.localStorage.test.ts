@@ -180,6 +180,43 @@ test("ChunkedLocalStorageBinaryStorage overwrites and removes old chunks when sa
   expect(Array.from(loaded ?? [])).toEqual(Array.from(small));
 });
 
+test("ChunkedLocalStorageBinaryStorage round-trips multi-MB payloads via browser base64 streaming path", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "large-chunked",
+    chunkSizeChars: 16_384,
+  });
+
+  // ~1MB payload; large enough to exercise the chunked btoa/atob code-path without
+  // creating excessive test runtime.
+  const size = 1024 * 1024;
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = i % 256;
+
+  const originalBuffer = (globalThis as any).Buffer;
+  try {
+    // Force the browser code-path (streaming btoa/atob conversion).
+    (globalThis as any).Buffer = undefined;
+
+    await storage.save(bytes);
+    const loaded = await storage.load();
+
+    expect(loaded).toBeInstanceOf(Uint8Array);
+    expect(loaded?.byteLength).toBe(bytes.byteLength);
+
+    // Compare without creating huge intermediate arrays / diffs.
+    const a = loaded as Uint8Array;
+    let equal = a.length === bytes.length;
+    for (let i = 0; equal && i < a.length; i += 1) {
+      if (a[i] !== bytes[i]) equal = false;
+    }
+    expect(equal).toBe(true);
+  } finally {
+    getTestLocalStorage().clear();
+    (globalThis as any).Buffer = originalBuffer;
+  }
+});
+
 test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag",
