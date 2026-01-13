@@ -173,6 +173,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
+import { sortSelection } from "./sort-filter/sortSelection.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import {
   getDefaultSeedStoreStorage,
@@ -8659,6 +8660,16 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
+        return;
+      case "home.editing.sortFilter.sortAtoZ":
+      case "data.sortFilter.sortAtoZ":
+      case "data.sortFilter.sort.sortAtoZ":
+        sortSelection(app, { order: "ascending" });
+        return;
+      case "home.editing.sortFilter.sortZtoA":
+      case "data.sortFilter.sortZtoA":
+      case "data.sortFilter.sort.sortZtoA":
+        sortSelection(app, { order: "descending" });
         return;
       case "view.freezePanes":
       case "view.freezeTopRow":
