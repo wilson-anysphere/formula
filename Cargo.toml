@@ -4,7 +4,6 @@ members = [
   "apps/desktop/src-tauri",
   "crates/formula-biff",
   "crates/formula-columnar",
-  "crates/formula-offcrypto",
   "crates/formula-dax",
   "crates/formula-corpus-triage",
   "crates/formula-engine",
