@@ -43,7 +43,7 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 | File type | Encryption marker | Schemes (common) | Current behavior | Planned/target behavior |
 |---|---|---|---|---|
-| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedEncryptionScheme` |
+| `.xlsx` / `.xlsm` / `.xlsb` (OOXML) | OLE/CFB streams `EncryptionInfo` + `EncryptedPackage` | Agile (4.4), Standard (3.2) | `PasswordRequired` (and `UnsupportedOoxmlEncryption` for unknown versions; `open_workbook_with_password` surfaces `InvalidPassword`) | Decrypt + open; surface `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption` (or a more specific “unsupported scheme” error) |
 | `.xls` (BIFF) | BIFF `FILEPASS` record in workbook stream | XOR, RC4, CryptoAPI | `formula-io`: detect + `Error::EncryptedWorkbook` (no password plumbing yet). `formula-xls`: supports BIFF8 RC4 CryptoAPI when a password is provided. | Plumb password into `formula-io` and expand scheme coverage as needed (see [Legacy `.xls` encryption](#legacy-xls-encryption-biff-filepass)) |
 
 ---
@@ -340,31 +340,13 @@ workbooks when a correct password is provided (and optionally verify Agile `data
 Today, the password-aware entrypoints exist primarily to enable better UX/error handling
 (`PasswordRequired` vs `InvalidPassword`) while decryption support is still landing.
 
-#### Planned API: `open_workbook_with_options` + `OpenOptions.password`
-
-Once password plumbing exists, callers should be able to pass an *open password* directly on the
-open call:
-
-```rust
-use formula_io::{open_workbook_with_options, OpenOptions};
-
-let workbook = open_workbook_with_options(
-    "book.xlsx",
-    OpenOptions {
-        password: Some("correct horse battery staple".into()),
-        ..Default::default()
-    },
-)?;
-```
-
-Notes:
+#### API notes
 
 - Passwords are treated as **UTF-8 strings at the API boundary** and encoded internally according
   to the relevant spec requirements (typically UTF-16LE for key derivation).
 - Callers should avoid logging passwords or embedding them in error messages.
-
-Until password support lands, callers can use `detect_workbook_encryption` to decide whether to
-prompt the user or show an “encryption not supported” message.
+- `detect_workbook_encryption` can be used to decide whether to prompt for a password before
+  attempting a full open (see below).
 
 #### Preflight detection (optional)
 
@@ -422,11 +404,14 @@ Encrypted workbook handling should distinguish at least these cases:
    - UI action: allow retry; do not treat as a “corrupt file” error.
 
 3. **Unsupported encryption scheme** (recognized encrypted container, but scheme not implemented)
-   - Surface as: `UnsupportedEncryptionScheme { scheme: … }`
+   - Surface as: `Error::UnsupportedOoxmlEncryption { version_major, version_minor }` (for OOXML),
+     and/or a future more specific “unsupported scheme” error once we plumb lower-level crypto
+     errors through.
    - UI action: explain limitation and suggest re-saving without encryption in Excel.
 
 4. **Corrupt encrypted wrapper** (missing streams, malformed `EncryptionInfo`, truncated payload)
-   - Surface as: `InvalidEncryptedContainer` / `CorruptFile`
+   - Surface as: a dedicated “corrupt encrypted container” error (future); today this may surface
+     as a generic parse/IO error depending on where it fails.
 
 These distinctions matter for UX and telemetry: “needs password” is a normal user workflow, while
 “unsupported scheme” is an engineering coverage gap.
