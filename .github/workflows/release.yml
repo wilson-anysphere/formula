@@ -13,7 +13,7 @@ permissions:
 # manual re-runs or tag updates can overlap and clobber/partially overwrite the
 # release asset set.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: desktop-release-${{ github.ref }}
   # Queue (don't cancel) subsequent runs so each tag's release assets are written
   # atomically by a single workflow run.
   cancel-in-progress: false
@@ -22,7 +22,6 @@ env:
   # Keep release builds on the same Node.js major as CI (see ci.yml) to avoid
   # "works in CI, breaks in release" drift.
   NODE_VERSION: 22
-
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
