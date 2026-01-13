@@ -341,12 +341,6 @@ export function convertModelDrawingObjectToUiDrawingObject(
   const anchor = convertModelAnchorToUiAnchor((modelObjJson as JsonRecord).anchor);
   const sheetId = parseSheetId(context?.sheetId);
   const kind = convertModelDrawingObjectKind((modelObjJson as JsonRecord).kind, { sheetId, drawingObjectId: id });
-  const transform = (() => {
-    if (kind.type !== "shape") return undefined;
-    const rawXml = (kind as any).rawXml ?? (kind as any).raw_xml;
-    if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
-    return parseDrawingTransformFromRawXml(rawXml) ?? undefined;
-  })();
 
   const zOrderValue = pick(modelObjJson, ["z_order", "zOrder"]);
   const zOrder = zOrderValue == null ? 0 : readNumber(zOrderValue, "DrawingObject.z_order");
@@ -365,7 +359,26 @@ export function convertModelDrawingObjectToUiDrawingObject(
     if (Object.keys(out).length > 0) preserved = out;
   }
 
-  return { id, kind, anchor, zOrder, size, preserved, transform };
+  const transform = (() => {
+    if (kind.type === "image") {
+      const picXml = preserved?.["xlsx.pic_xml"];
+      if (typeof picXml !== "string" || picXml.length === 0) return undefined;
+      const parsed = parseDrawingTransformFromRawXml(picXml);
+      if (!parsed) return undefined;
+      return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+    }
+
+    const rawXml = (kind as any).rawXml ?? (kind as any).raw_xml;
+    if (typeof rawXml !== "string" || rawXml.length === 0) return undefined;
+    const parsed = parseDrawingTransformFromRawXml(rawXml);
+    if (!parsed) return undefined;
+    return parsed.rotationDeg !== 0 || parsed.flipH || parsed.flipV ? parsed : undefined;
+  })();
+
+  const out: DrawingObject = { id, kind, anchor, zOrder, size };
+  if (preserved) out.preserved = preserved;
+  if (transform) out.transform = transform;
+  return out;
 }
 
 class MapImageStore implements ImageStore {

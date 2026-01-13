@@ -121,6 +121,36 @@ describe("drawings/modelAdapters", () => {
     expect(ui.kind.label).toContain("rId5");
   });
 
+  it("extracts DrawingML transform metadata from preserved pic_xml for images", () => {
+    const model = {
+      id: 1,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        Absolute: {
+          pos: { x_emu: 0, y_emu: 0 },
+          ext: { cx: 1000, cy: 500 },
+        },
+      },
+      z_order: 0,
+      preserved: {
+        "xlsx.pic_xml": `
+          <xdr:pic xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+                   xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+            <xdr:spPr>
+              <a:xfrm rot="5400000" flipV="1">
+                <a:off x="0" y="0"/>
+                <a:ext cx="1000" cy="500"/>
+              </a:xfrm>
+            </xdr:spPr>
+          </xdr:pic>
+        `,
+      },
+    };
+
+    const ui = convertModelDrawingObjectToUiDrawingObject(model);
+    expect(ui.transform).toEqual({ rotationDeg: 90, flipH: false, flipV: true });
+  });
+
   it("converts ImageStore bytes + content_type into a UI ImageStore", () => {
     const modelImages = {
       images: {

@@ -229,7 +229,23 @@ export class DrawingOverlay {
               if (signal?.aborted) return;
               if (seq !== this.renderSeq) return;
               withClip(() => {
-                ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                if (hasNonIdentityTransform(obj.transform)) {
+                  withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                    ctx.save();
+                    try {
+                      // Clip to the (possibly rotated/flipped) image bounds so we don't
+                      // overdraw neighboring cells when transforms extend beyond the anchor.
+                      ctx.beginPath();
+                      ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                      ctx.clip();
+                      ctx.drawImage(bitmap, localRect.x, localRect.y, localRect.width, localRect.height);
+                    } finally {
+                      ctx.restore();
+                    }
+                  });
+                } else {
+                  ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                }
               });
               continue;
             } catch (err) {
@@ -247,11 +263,26 @@ export class DrawingOverlay {
             withClip(() => {
               ctx.save();
               try {
-                ctx.beginPath();
-                ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-                ctx.clip();
-                this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
-                rendered = true;
+                if (hasNonIdentityTransform(obj.transform)) {
+                  withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
+                    ctx.save();
+                    try {
+                      ctx.beginPath();
+                      ctx.rect(localRect.x, localRect.y, localRect.width, localRect.height);
+                      ctx.clip();
+                      this.chartRenderer!.renderToCanvas(ctx, chartId, localRect);
+                      rendered = true;
+                    } finally {
+                      ctx.restore();
+                    }
+                  });
+                } else {
+                  ctx.beginPath();
+                  ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+                  ctx.clip();
+                  this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
+                  rendered = true;
+                }
               } catch {
                 rendered = false;
               } finally {
