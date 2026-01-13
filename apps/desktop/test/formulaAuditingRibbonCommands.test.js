@@ -64,24 +64,44 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
     );
   }
 
-  // These commands should be routed through the command registry (not hardcoded ribbon-only
-  // switch cases in main.ts).
-  for (const commandId of [
-    "formulas.formulaAuditing.tracePrecedents",
-    "formulas.formulaAuditing.traceDependents",
-    "formulas.formulaAuditing.removeArrows",
-  ]) {
-    assert.doesNotMatch(
-      main,
-      new RegExp(`case\\s+["']${escapeRegExp(commandId)}["']:`),
-      `Expected main.ts to not include a ribbon-only switch case for ${commandId}`,
-    );
-  }
+  // Desktop main.ts still handles the ribbon ids directly (ribbon command switch), matching
+  // the Excel-style behavior used by the legacy auditing UI.
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.tracePrecedents["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.toggleAuditingPrecedents\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);\\s*\\n` +
+        `\\s*return;`,
+      "m",
+    ),
+    "Expected main.ts to handle formulas.formulaAuditing.tracePrecedents via clearAuditing/toggleAuditingPrecedents/focus",
+  );
 
   assert.match(
     main,
-    /executeBuiltinCommand\(commandId\);/,
-    "Expected main.ts ribbon onCommand handler to route registered builtins via executeBuiltinCommand(commandId)",
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.traceDependents["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.toggleAuditingDependents\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);\\s*\\n` +
+        `\\s*return;`,
+      "m",
+    ),
+    "Expected main.ts to handle formulas.formulaAuditing.traceDependents via clearAuditing/toggleAuditingDependents/focus",
+  );
+
+  assert.match(
+    main,
+    new RegExp(
+      `case\\s+["']formulas\\.formulaAuditing\\.removeArrows["']:\\s*\\n` +
+        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
+        `\\s*app\\.focus\\(\\);\\s*\\n` +
+        `\\s*return;`,
+      "m",
+    ),
+    "Expected main.ts to handle formulas.formulaAuditing.removeArrows via clearAuditing/focus",
   );
 
   assert.match(
