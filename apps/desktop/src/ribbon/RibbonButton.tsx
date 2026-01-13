@@ -28,6 +28,13 @@ export interface RibbonButtonProps {
    * Optional lookup table for dropdown menu items (keyed by menu item `id`).
    */
   ariaKeyShortcutsById?: Record<string, string>;
+  /**
+   * Per-menu-item disabled overrides, aligned with `button.menuItems`.
+   *
+   * This is passed as an array (instead of the full `disabledById` record) to avoid
+   * invalidating `React.memo(...)` on every ribbon UI state update.
+   */
+  menuItemDisabledOverrides?: ReadonlyArray<boolean | undefined>;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -87,6 +94,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   shortcutById,
   ariaKeyShortcutsOverride,
   ariaKeyShortcutsById,
+  menuItemDisabledOverrides,
   onActivate,
 }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
@@ -294,7 +302,10 @@ export const RibbonButton = React.memo(function RibbonButton({
             }
           }}
         >
-          {button.menuItems?.map((item) => {
+          {button.menuItems?.map((item, idx) => {
+            const menuItemDisabledOverride = menuItemDisabledOverrides?.[idx];
+            const menuItemDisabled =
+              typeof menuItemDisabledOverride === "boolean" ? menuItemDisabledOverride : Boolean(item.disabled);
             const itemShortcut = shortcutById?.[item.id];
             const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
             const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
@@ -310,7 +321,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                 title={itemTitle}
                 data-shortcut={itemShortcut || undefined}
                 tabIndex={-1}
-                disabled={item.disabled}
+                disabled={menuItemDisabled}
                 data-testid={item.testId}
                 data-command-id={item.id}
                 onClick={() => {
@@ -323,7 +334,7 @@ export const RibbonButton = React.memo(function RibbonButton({
                     kind: "button",
                     size: "small",
                     testId: item.testId,
-                    disabled: item.disabled,
+                    disabled: menuItemDisabled,
                   });
                   buttonRef.current?.focus();
                 }}
@@ -344,6 +355,27 @@ export const RibbonButton = React.memo(function RibbonButton({
       ) : null}
     </div>
   );
+},
+function areRibbonButtonPropsEqual(prev, next) {
+  if (prev.button !== next.button) return false;
+  if (prev.pressed !== next.pressed) return false;
+  if (prev.labelOverride !== next.labelOverride) return false;
+  if (prev.disabledOverride !== next.disabledOverride) return false;
+  if (prev.shortcutOverride !== next.shortcutOverride) return false;
+  if (prev.shortcutById !== next.shortcutById) return false;
+  if (prev.ariaKeyShortcutsOverride !== next.ariaKeyShortcutsOverride) return false;
+  if (prev.ariaKeyShortcutsById !== next.ariaKeyShortcutsById) return false;
+  if (prev.onActivate !== next.onActivate) return false;
+
+  const prevOverrides = prev.menuItemDisabledOverrides;
+  const nextOverrides = next.menuItemDisabledOverrides;
+  if (prevOverrides === nextOverrides) return true;
+  if (!prevOverrides || !nextOverrides) return false;
+  if (prevOverrides.length !== nextOverrides.length) return false;
+  for (let i = 0; i < prevOverrides.length; i += 1) {
+    if (prevOverrides[i] !== nextOverrides[i]) return false;
+  }
+  return true;
 });
 
 RibbonButton.displayName = "RibbonButton";

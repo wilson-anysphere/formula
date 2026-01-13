@@ -39,6 +39,7 @@ export function RibbonGroup({
             shortcutById={shortcutById}
             ariaKeyShortcutsOverride={ariaKeyShortcutsById?.[button.id]}
             ariaKeyShortcutsById={ariaKeyShortcutsById}
+            menuItemDisabledOverrides={button.menuItems?.map((item) => disabledById?.[item.id])}
             onActivate={onActivateButton}
           />
         ))}

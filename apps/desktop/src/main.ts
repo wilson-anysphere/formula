@@ -41,6 +41,7 @@ import { ThemeController } from "./theme/themeController.js";
 import { createRibbonActionsFromCommands, mountRibbon } from "./ribbon/index.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
+import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 
@@ -2045,6 +2046,7 @@ let ribbonFormatStateUpdateScheduled = false;
 let ribbonFormatStateUpdateRequested = false;
 let ribbonShortcutById: Record<string, string> = Object.create(null);
 let ribbonAriaKeyShortcutsById: Record<string, string> = Object.create(null);
+let ribbonCommandRegistryDisabledById: Record<string, boolean> = Object.create(null);
 
 function scheduleRibbonSelectionFormatStateUpdate(): void {
   ribbonFormatStateUpdateRequested = true;
@@ -2163,7 +2165,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const zoomDisabled = !app.supportsZoom();
     const outlineDisabled = app.getGridMode() === "shared";
     const canComment = app.getCollabSession()?.canComment() ?? true;
-    const disabledById = {
+    const dynamicDisabledById = {
       ...(isEditing || isReadOnly
         ? {
             // Formatting commands are disabled while editing (Excel-style behavior), and in
@@ -2256,6 +2258,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
           }
         : null),
     };
+
+    const disabledById = Object.assign(Object.create(ribbonCommandRegistryDisabledById), dynamicDisabledById) as Record<
+      string,
+      boolean
+    >;
 
     setRibbonUiState({
       pressedById,
@@ -2472,6 +2479,34 @@ function currentSelectionRect(): SelectionRect {
 
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
+
+// --- Ribbon: auto-disable unimplemented CommandRegistry-backed controls ----------
+//
+// Many ribbon controls exist for Excel parity but are not implemented yet. When clicked, they
+// fall back to a noisy `showToast("Ribbon: <id>")`. Use the CommandRegistry as the source of
+// truth for which command ids exist, and disable missing ids by default.
+//
+// The allowlist lives in `ribbonCommandRegistryDisabling.ts` for controls intentionally handled
+// outside the registry (AutoSave, view/layout toggles, etc).
+let ribbonCommandRegistryRefreshScheduled = false;
+const scheduleRibbonCommandRegistryDisabledRefresh = (): void => {
+  if (ribbonCommandRegistryRefreshScheduled) return;
+  ribbonCommandRegistryRefreshScheduled = true;
+
+  const schedule = typeof queueMicrotask === "function" ? queueMicrotask : (cb: () => void) => Promise.resolve().then(cb);
+  schedule(() => {
+    ribbonCommandRegistryRefreshScheduled = false;
+    ribbonCommandRegistryDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry);
+    scheduleRibbonSelectionFormatStateUpdate();
+  });
+};
+
+scheduleRibbonCommandRegistryDisabledRefresh();
+const unsubscribeRibbonCommandRegistry = commandRegistry.subscribe(() => scheduleRibbonCommandRegistryDisabledRefresh());
+window.addEventListener("unload", () => {
+  unsubscribeRibbonCommandRegistry();
+});
+
 const disposeCommandPaletteRecentsTracking = (() => {
   try {
     return installCommandPaletteRecentsTracking(commandRegistry, localStorage);

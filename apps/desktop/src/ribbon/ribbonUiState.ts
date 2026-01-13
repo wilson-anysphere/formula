@@ -29,6 +29,10 @@ export function subscribeRibbonUiState(listener: Listener): () => void {
 
 function shallowEqualRecord(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   if (a === b) return true;
+  // Treat prototype changes as meaningful. This allows callers to use prototype chains
+  // (e.g. a large baseline object with small per-frame overrides) without losing update
+  // notifications when the baseline prototype changes.
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
   if (aKeys.length !== bKeys.length) return false;
