@@ -1,7 +1,7 @@
 import type { AnchorPoint, DrawingObject } from "./types";
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
-import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "./hitTest";
+import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
 import { extractXfrmOff, patchXfrmExt, patchXfrmOff } from "./drawingml/patch";
 
@@ -227,7 +227,7 @@ export class DrawingInteractionController {
       }
     }
 
-    const hit = hitTestDrawings(index, viewport, x, y, this.geom);
+    const hit = hitTestDrawingsObject(index, viewport, x, y, this.geom);
     if (hit) {
       this.canvas.style.cursor = "move";
       return;
