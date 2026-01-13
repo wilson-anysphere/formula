@@ -117,7 +117,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                   onChange={(e) => updateInput(idx, { cell: e.target.value })}
                   disabled={running}
                   placeholder="A1"
-                  aria-label="Input cell"
+                  aria-label={t("whatIf.monteCarlo.inputs.cellAriaLabel")}
                 />
               </div>
 
@@ -145,7 +145,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                     updateInput(idx, { distribution });
                   }}
                   disabled={running}
-                  aria-label="Distribution type"
+                  aria-label={t("whatIf.monteCarlo.inputs.distributionTypeAriaLabel")}
                 >
                   <option value="normal">{t("whatIf.distribution.normal")}</option>
                   <option value="uniform">{t("whatIf.distribution.uniform")}</option>
@@ -169,7 +169,7 @@ export function MonteCarloWizard({ api }: MonteCarloWizardProps) {
                     }
                   }}
                   disabled={running}
-                  aria-label="Distribution JSON"
+                  aria-label={t("whatIf.monteCarlo.inputs.distributionJsonAriaLabel")}
                 />
               </div>
 
