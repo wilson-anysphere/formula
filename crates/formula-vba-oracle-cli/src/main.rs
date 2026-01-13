@@ -1,9 +1,12 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use formula_vba_runtime::{parse_program, row_col_to_a1, ExecutionResult, Spreadsheet, VbaError, VbaRuntime, VbaValue};
+use formula_vba_runtime::{
+    parse_program, row_col_to_a1, ExecutionResult, Spreadsheet, VbaError, VbaRuntime, VbaValue,
+};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use serde::{Deserialize, Serialize};
@@ -39,6 +42,12 @@ struct RunArgs {
     #[arg(long, default_value = "auto")]
     format: String,
 
+    /// Password for encrypted (OLE `EncryptedPackage`) XLSM inputs.
+    ///
+    /// If the input workbook is encrypted, `--password` is required.
+    #[arg(long)]
+    password: Option<String>,
+
     /// Macro arguments as a JSON array (e.g. `[1, \"foo\"]`).
     #[arg(long)]
     args: Option<String>,
@@ -53,6 +62,12 @@ struct ExtractArgs {
     /// Input format hint: `auto`, `json`, or `xlsm`.
     #[arg(long, default_value = "auto")]
     format: String,
+
+    /// Password for encrypted (OLE `EncryptedPackage`) XLSM inputs.
+    ///
+    /// If the input workbook is encrypted, `--password` is required.
+    #[arg(long)]
+    password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,6 +245,78 @@ mod leading_slash_zip_entries_tests {
     }
 }
 
+#[cfg(test)]
+mod encrypted_xlsm_tests {
+    use super::{extract_from_xlsm, is_ole_encrypted_ooxml, maybe_decrypt_encrypted_xlsm};
+    use std::io::Write;
+
+    #[test]
+    fn extract_from_encrypted_xlsm_with_password() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let base = std::fs::read(fixture_path).expect("read basic.xlsm fixture");
+
+        let password = "Password1234_";
+
+        // Encrypt the XLSM bytes into the OLE `EncryptedPackage` wrapper.
+        let mut rng = rand::rng();
+        let cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let mut writer =
+            ms_offcrypto_writer::Ecma376AgileWriter::create(&mut rng, password, cursor)
+                .expect("create encryptor");
+        writer.write_all(&base).expect("write plaintext");
+        let cursor = writer.into_inner().expect("finalize encryptor");
+        let encrypted = cursor.into_inner();
+
+        assert!(
+            is_ole_encrypted_ooxml(&encrypted),
+            "expected ms-offcrypto-writer to emit an OLE EncryptedPackage wrapper"
+        );
+
+        let decrypted =
+            maybe_decrypt_encrypted_xlsm(&encrypted, Some(password)).expect("decrypt fixture");
+
+        let (workbook, procedures) =
+            extract_from_xlsm(decrypted.as_ref()).expect("extract decrypted");
+
+        assert!(
+            !workbook.vba_modules.is_empty(),
+            "expected at least one VBA module"
+        );
+        assert!(
+            !procedures.is_empty(),
+            "expected at least one discovered procedure"
+        );
+    }
+
+    #[test]
+    fn encrypted_xlsm_requires_password() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let base = std::fs::read(fixture_path).expect("read basic.xlsm fixture");
+
+        let password = "Password1234_";
+        let mut rng = rand::rng();
+        let cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let mut writer =
+            ms_offcrypto_writer::Ecma376AgileWriter::create(&mut rng, password, cursor)
+                .expect("create encryptor");
+        writer.write_all(&base).expect("write plaintext");
+        let cursor = writer.into_inner().expect("finalize encryptor");
+        let encrypted = cursor.into_inner();
+
+        let err = maybe_decrypt_encrypted_xlsm(&encrypted, None).expect_err("expected error");
+        assert!(
+            err.to_lowercase().contains("password required"),
+            "expected a clear password-required error, got: {err}"
+        );
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SheetState {
     name: String,
@@ -257,7 +344,10 @@ impl ExecutionWorkbook {
                     formula: cell.formula.clone(),
                     format: cell.format.clone(),
                 };
-                if !matches!(state.value, VbaValue::Empty) || state.formula.is_some() || state.format.is_some() {
+                if !matches!(state.value, VbaValue::Empty)
+                    || state.formula.is_some()
+                    || state.format.is_some()
+                {
                     cells.insert((row, col), state);
                 }
             }
@@ -277,7 +367,11 @@ impl ExecutionWorkbook {
         let active_sheet = wb
             .active_sheet
             .as_deref()
-            .and_then(|name| sheets.iter().position(|s| s.name.eq_ignore_ascii_case(name)))
+            .and_then(|name| {
+                sheets
+                    .iter()
+                    .position(|s| s.name.eq_ignore_ascii_case(name))
+            })
             .unwrap_or(0);
 
         Ok(Self {
@@ -361,7 +455,9 @@ impl Spreadsheet for ExecutionWorkbook {
 
     fn set_active_sheet(&mut self, sheet: usize) -> Result<(), VbaError> {
         if sheet >= self.sheets.len() {
-            return Err(VbaError::Runtime(format!("Sheet index out of range: {sheet}")));
+            return Err(VbaError::Runtime(format!(
+                "Sheet index out of range: {sheet}"
+            )));
         }
         self.active_sheet = sheet;
         Ok(())
@@ -408,7 +504,12 @@ impl Spreadsheet for ExecutionWorkbook {
         Ok(())
     }
 
-    fn get_cell_formula(&self, sheet: usize, row: u32, col: u32) -> Result<Option<String>, VbaError> {
+    fn get_cell_formula(
+        &self,
+        sheet: usize,
+        row: u32,
+        col: u32,
+    ) -> Result<Option<String>, VbaError> {
         let sh = self
             .sheets
             .get(sheet)
@@ -519,7 +620,10 @@ impl Spreadsheet for ExecutionWorkbook {
             .min()
     }
 
-    fn used_cells_in_range(&self, range: formula_vba_runtime::VbaRangeRef) -> Option<Vec<(u32, u32)>> {
+    fn used_cells_in_range(
+        &self,
+        range: formula_vba_runtime::VbaRangeRef,
+    ) -> Option<Vec<(u32, u32)>> {
         let sh = self.sheets.get(range.sheet)?;
         let mut out = Vec::new();
         for (&(row, col), cell) in &sh.cells {
@@ -573,10 +677,126 @@ fn read_all_input(input: &Option<PathBuf>) -> Result<Vec<u8>, String> {
     }
 }
 
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
+fn ole_stream_exists<R: Read + Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
+}
+
+fn is_ole_encrypted_ooxml(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(&OLE_MAGIC) {
+        return false;
+    }
+    let cursor = std::io::Cursor::new(bytes);
+    let Ok(mut ole) = cfb::CompoundFile::open(cursor) else {
+        return false;
+    };
+    ole_stream_exists(&mut ole, "EncryptionInfo") && ole_stream_exists(&mut ole, "EncryptedPackage")
+}
+
+fn maybe_decrypt_encrypted_xlsm<'a>(
+    bytes: &'a [u8],
+    password: Option<&str>,
+) -> Result<Cow<'a, [u8]>, String> {
+    if !is_ole_encrypted_ooxml(bytes) {
+        return Ok(Cow::Borrowed(bytes));
+    }
+
+    let password =
+        password.ok_or_else(|| "password required for encrypted workbook".to_string())?;
+
+    // `office-crypto` currently assumes the decrypted package size is at least one full
+    // 4096-byte segment when decrypting OOXML (`EncryptedPackage`). Some tiny XLSM fixtures are
+    // smaller than that, which can trigger a panic inside the dependency.
+    //
+    // Work around this by:
+    // - parsing the real decrypted package size from the first 8 bytes of the `EncryptedPackage`
+    //   stream (u64 LE, per MS-OFFCRYPTO),
+    // - patching the first 4 bytes (u32 LE) to be at least 4096 so the dependency's segment loop
+    //   doesn't underflow,
+    // - decrypting, then truncating back to the real size.
+    //
+    // This keeps the decrypted bytes in-memory and avoids writing anything to disk.
+    const SEGMENT_LENGTH: usize = 4096;
+
+    fn read_encrypted_package_size(bytes: &[u8]) -> Result<usize, String> {
+        let cursor = std::io::Cursor::new(bytes);
+        let mut ole =
+            cfb::CompoundFile::open(cursor).map_err(|e| format!("Invalid OLE container: {e}"))?;
+        let mut stream = ole
+            .open_stream("EncryptedPackage")
+            .or_else(|_| ole.open_stream("/EncryptedPackage"))
+            .map_err(|e| format!("Missing EncryptedPackage stream: {e}"))?;
+        let mut hdr = [0u8; 8];
+        stream
+            .read_exact(&mut hdr)
+            .map_err(|e| format!("Failed to read EncryptedPackage header: {e}"))?;
+        let size = u64::from_le_bytes(hdr);
+        usize::try_from(size).map_err(|_| "EncryptedPackage size too large".to_string())
+    }
+
+    fn patch_encrypted_package_size(bytes: &[u8], patched_size: u32) -> Result<Vec<u8>, String> {
+        use std::io::{Seek as _, SeekFrom, Write as _};
+
+        let cursor = std::io::Cursor::new(bytes.to_vec());
+        let mut ole =
+            cfb::CompoundFile::open(cursor).map_err(|e| format!("Invalid OLE container: {e}"))?;
+        {
+            let mut stream = ole
+                .open_stream("EncryptedPackage")
+                .or_else(|_| ole.open_stream("/EncryptedPackage"))
+                .map_err(|e| format!("Missing EncryptedPackage stream: {e}"))?;
+            stream
+                .seek(SeekFrom::Start(0))
+                .map_err(|e| format!("Failed to seek EncryptedPackage stream: {e}"))?;
+            stream
+                .write_all(&patched_size.to_le_bytes())
+                .map_err(|e| format!("Failed to patch EncryptedPackage header: {e}"))?;
+        }
+        ole.flush()
+            .map_err(|e| format!("Failed to flush OLE container: {e}"))?;
+        Ok(ole.into_inner().into_inner())
+    }
+
+    fn decrypt_with_office_crypto(bytes: Vec<u8>, password: &str) -> Result<Vec<u8>, String> {
+        let res = std::panic::catch_unwind(|| office_crypto::decrypt_from_bytes(bytes, password));
+        match res {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(format!("Failed to decrypt workbook: {e}")),
+            Err(panic) => {
+                let msg = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                Err(format!("Failed to decrypt workbook (panic): {msg}"))
+            }
+        }
+    }
+
+    let real_size = read_encrypted_package_size(bytes)?;
+    let input = if real_size < SEGMENT_LENGTH {
+        patch_encrypted_package_size(bytes, SEGMENT_LENGTH as u32)?
+    } else {
+        bytes.to_vec()
+    };
+
+    let mut decrypted = decrypt_with_office_crypto(input, password)?;
+    if decrypted.len() > real_size {
+        decrypted.truncate(real_size);
+    }
+
+    Ok(Cow::Owned(decrypted))
+}
+
 fn detect_format(bytes: &[u8], hint: &str) -> Result<InputFormat, String> {
     match hint {
         "auto" => {
-            if bytes.starts_with(b"PK") {
+            if bytes.starts_with(b"PK") || is_ole_encrypted_ooxml(bytes) {
                 Ok(InputFormat::Xlsm)
             } else {
                 Ok(InputFormat::Json)
@@ -601,7 +821,8 @@ fn extract_from_xlsm(bytes: &[u8]) -> Result<(OracleWorkbook, Vec<ProcedureSumma
     let cursor = std::io::Cursor::new(bytes);
     let mut zip = ZipArchive::new(cursor).map_err(|e| format!("Invalid XLSM zip: {e}"))?;
 
-    let sheet_names = read_sheet_names_from_workbook_xml(&mut zip).unwrap_or_else(|| vec!["Sheet1".to_string()]);
+    let sheet_names =
+        read_sheet_names_from_workbook_xml(&mut zip).unwrap_or_else(|| vec!["Sheet1".to_string()]);
     let vba_modules = read_vba_modules_from_xlsm(&mut zip)?;
 
     let workbook = OracleWorkbook {
@@ -621,7 +842,10 @@ fn extract_from_xlsm(bytes: &[u8]) -> Result<(OracleWorkbook, Vec<ProcedureSumma
     Ok((workbook, procedures))
 }
 
-fn find_zip_entry_case_insensitive<R: Read + Seek>(zip: &ZipArchive<R>, name: &str) -> Option<String> {
+fn find_zip_entry_case_insensitive<R: Read + Seek>(
+    zip: &ZipArchive<R>,
+    name: &str,
+) -> Option<String> {
     let target = name.trim_start_matches('/').replace('\\', "/");
 
     for candidate in zip.file_names() {
@@ -644,17 +868,16 @@ fn read_zip_entry_bytes<R: Read + Seek>(
     zip: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, String> {
-    let read_entry =
-        |zip: &mut ZipArchive<R>, entry_name: &str| -> Result<Vec<u8>, String> {
-            let mut entry = zip
-                .by_name(entry_name)
-                .map_err(|e| format!("Failed to open zip entry {entry_name}: {e}"))?;
-            let mut buf = Vec::with_capacity(entry.size() as usize);
-            entry
-                .read_to_end(&mut buf)
-                .map_err(|e| format!("Failed to read zip entry {entry_name}: {e}"))?;
-            Ok(buf)
-        };
+    let read_entry = |zip: &mut ZipArchive<R>, entry_name: &str| -> Result<Vec<u8>, String> {
+        let mut entry = zip
+            .by_name(entry_name)
+            .map_err(|e| format!("Failed to open zip entry {entry_name}: {e}"))?;
+        let mut buf = Vec::with_capacity(entry.size() as usize);
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("Failed to read zip entry {entry_name}: {e}"))?;
+        Ok(buf)
+    };
 
     // Fast path: exact entry name.
     match zip.by_name(name) {
@@ -683,18 +906,24 @@ fn read_vba_modules_from_xlsm(
         return Err("Missing xl/vbaProject.bin".to_string());
     };
 
-    let project = formula_vba::VBAProject::parse(&buf).map_err(|e| format!("Failed to parse vbaProject.bin: {e}"))?;
+    let project = formula_vba::VBAProject::parse(&buf)
+        .map_err(|e| format!("Failed to parse vbaProject.bin: {e}"))?;
     Ok(project
         .modules
         .into_iter()
-        .map(|m| VbaModule { name: m.name, code: m.code })
+        .map(|m| VbaModule {
+            name: m.name,
+            code: m.code,
+        })
         .collect())
 }
 
 fn read_sheet_names_from_workbook_xml(
     zip: &mut ZipArchive<std::io::Cursor<&[u8]>>,
 ) -> Option<Vec<String>> {
-    let buf = read_zip_entry_bytes(zip, "xl/workbook.xml").ok().flatten()?;
+    let buf = read_zip_entry_bytes(zip, "xl/workbook.xml")
+        .ok()
+        .flatten()?;
 
     let mut reader = XmlReader::from_reader(buf.as_slice());
     reader.config_mut().trim_text(true);
@@ -718,7 +947,11 @@ fn read_sheet_names_from_workbook_xml(
         temp.clear();
     }
 
-    if names.is_empty() { None } else { Some(names) }
+    if names.is_empty() {
+        None
+    } else {
+        Some(names)
+    }
 }
 
 fn list_procedures(modules: &[VbaModule]) -> Result<Vec<ProcedureSummary>, String> {
@@ -744,8 +977,11 @@ fn parse_args_json(args: &Option<String>) -> Result<Vec<VbaValue>, String> {
     let Some(raw) = args else {
         return Ok(Vec::new());
     };
-    let json: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("Invalid --args JSON: {e}"))?;
-    let arr = json.as_array().ok_or_else(|| "--args must be a JSON array".to_string())?;
+    let json: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("Invalid --args JSON: {e}"))?;
+    let arr = json
+        .as_array()
+        .ok_or_else(|| "--args must be a JSON array".to_string())?;
     Ok(arr.iter().map(|v| json_value_to_vba(Some(v))).collect())
 }
 
@@ -800,7 +1036,8 @@ fn run_macro(workbook: &OracleWorkbook, macro_name: &str, args: &[VbaValue]) -> 
     };
 
     let mut after_exec = before_exec.clone();
-    let exec_result: Result<ExecutionResult, VbaError> = runtime.execute(&mut after_exec, macro_name, args);
+    let exec_result: Result<ExecutionResult, VbaError> =
+        runtime.execute(&mut after_exec, macro_name, args);
     let logs = after_exec.logs.clone();
 
     let ok = match exec_result {
@@ -852,16 +1089,22 @@ fn diff_execution_workbooks(
 
         let mut sheet_diffs: BTreeMap<String, OracleCellDiff> = BTreeMap::new();
         for addr in addr_set {
-            let before_cell = before_cells.get(&addr).cloned().unwrap_or(OracleCellSnapshot {
-                value: None,
-                formula: None,
-                format: None,
-            });
-            let after_cell = after_cells.get(&addr).cloned().unwrap_or(OracleCellSnapshot {
-                value: None,
-                formula: None,
-                format: None,
-            });
+            let before_cell = before_cells
+                .get(&addr)
+                .cloned()
+                .unwrap_or(OracleCellSnapshot {
+                    value: None,
+                    formula: None,
+                    format: None,
+                });
+            let after_cell = after_cells
+                .get(&addr)
+                .cloned()
+                .unwrap_or(OracleCellSnapshot {
+                    value: None,
+                    formula: None,
+                    format: None,
+                });
 
             if before_cell.value == after_cell.value
                 && before_cell.formula == after_cell.formula
@@ -964,28 +1207,54 @@ fn main() {
                         std::process::exit(1);
                     }
                 },
-                InputFormat::Xlsm => match extract_from_xlsm(&bytes) {
-                    Ok((wb, procs)) => (wb, procs),
-                    Err(e) => {
-                        let report = RunReport {
-                            ok: false,
-                            macro_name: args.macro_name,
-                            logs: Vec::new(),
-                            warnings: Vec::new(),
-                            error: Some(e),
-                            exit_status: 1,
-                            cell_diffs: BTreeMap::new(),
-                            workbook_after: OracleWorkbook {
-                                schema_version: 1,
-                                active_sheet: None,
-                                sheets: Vec::new(),
-                                vba_modules: Vec::new(),
-                            },
+                InputFormat::Xlsm => {
+                    let decrypted =
+                        match maybe_decrypt_encrypted_xlsm(&bytes, args.password.as_deref()) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                let report = RunReport {
+                                    ok: false,
+                                    macro_name: args.macro_name,
+                                    logs: Vec::new(),
+                                    warnings: Vec::new(),
+                                    error: Some(e),
+                                    exit_status: 1,
+                                    cell_diffs: BTreeMap::new(),
+                                    workbook_after: OracleWorkbook {
+                                        schema_version: 1,
+                                        active_sheet: None,
+                                        sheets: Vec::new(),
+                                        vba_modules: Vec::new(),
+                                    },
+                                };
+                                println!("{}", serde_json::to_string(&report).unwrap());
+                                std::process::exit(1);
+                            }
                         };
-                        println!("{}", serde_json::to_string(&report).unwrap());
-                        std::process::exit(1);
+
+                    match extract_from_xlsm(decrypted.as_ref()) {
+                        Ok((wb, procs)) => (wb, procs),
+                        Err(e) => {
+                            let report = RunReport {
+                                ok: false,
+                                macro_name: args.macro_name,
+                                logs: Vec::new(),
+                                warnings: Vec::new(),
+                                error: Some(e),
+                                exit_status: 1,
+                                cell_diffs: BTreeMap::new(),
+                                workbook_after: OracleWorkbook {
+                                    schema_version: 1,
+                                    active_sheet: None,
+                                    sheets: Vec::new(),
+                                    vba_modules: Vec::new(),
+                                },
+                            };
+                            println!("{}", serde_json::to_string(&report).unwrap());
+                            std::process::exit(1);
+                        }
                     }
-                },
+                }
             };
 
             let args_values = match parse_args_json(&args.args) {
@@ -1008,7 +1277,10 @@ fn main() {
 
             // Warn if macro isn't even in the parsed program; this helps humans, but we keep running
             // so we still get a deterministic error from the runtime.
-            if !procedures.iter().any(|p| p.name.eq_ignore_ascii_case(&args.macro_name)) {
+            if !procedures
+                .iter()
+                .any(|p| p.name.eq_ignore_ascii_case(&args.macro_name))
+            {
                 // Don't treat as hard error; VBA is case-insensitive and runtime error message is good enough.
             }
 
@@ -1085,25 +1357,40 @@ fn main() {
                         procedures: Vec::new(),
                     },
                 },
-                InputFormat::Xlsm => match extract_from_xlsm(&bytes) {
-                    Ok((workbook, procedures)) => ExtractReport {
-                        ok: true,
-                        error: None,
-                        workbook,
-                        procedures,
-                    },
-                    Err(e) => ExtractReport {
-                        ok: false,
-                        error: Some(e),
-                        workbook: OracleWorkbook {
-                            schema_version: 1,
-                            active_sheet: None,
-                            sheets: Vec::new(),
-                            vba_modules: Vec::new(),
+                InputFormat::Xlsm => {
+                    match maybe_decrypt_encrypted_xlsm(&bytes, args.password.as_deref()) {
+                        Ok(decrypted) => match extract_from_xlsm(decrypted.as_ref()) {
+                            Ok((workbook, procedures)) => ExtractReport {
+                                ok: true,
+                                error: None,
+                                workbook,
+                                procedures,
+                            },
+                            Err(e) => ExtractReport {
+                                ok: false,
+                                error: Some(e),
+                                workbook: OracleWorkbook {
+                                    schema_version: 1,
+                                    active_sheet: None,
+                                    sheets: Vec::new(),
+                                    vba_modules: Vec::new(),
+                                },
+                                procedures: Vec::new(),
+                            },
                         },
-                        procedures: Vec::new(),
-                    },
-                },
+                        Err(e) => ExtractReport {
+                            ok: false,
+                            error: Some(e),
+                            workbook: OracleWorkbook {
+                                schema_version: 1,
+                                active_sheet: None,
+                                sheets: Vec::new(),
+                                vba_modules: Vec::new(),
+                            },
+                            procedures: Vec::new(),
+                        },
+                    }
+                }
             };
 
             println!("{}", serde_json::to_string(&report).unwrap());
