@@ -1007,6 +1007,105 @@ fn values_and_summarize_support_basic_grouping() {
 }
 
 #[test]
+fn summarizecolumns_supports_basic_grouping() {
+    let model = build_model();
+    let engine = DaxEngine::new();
+
+    let summarizecolumns = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    let distinct = engine
+        .evaluate(
+            &model,
+            "DISTINCTCOUNT(Customers[Region])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(summarizecolumns, distinct);
+}
+
+#[test]
+fn summarizecolumns_star_schema_groups_by_multiple_dimensions() {
+    let mut model = DataModel::new();
+
+    let mut customers = Table::new("Customers", vec!["CustomerId", "Region"]);
+    customers.push_row(vec![1.into(), "East".into()]).unwrap();
+    customers.push_row(vec![2.into(), "West".into()]).unwrap();
+    model.add_table(customers).unwrap();
+
+    let mut products = Table::new("Products", vec!["ProductId", "Category"]);
+    products.push_row(vec![10.into(), "A".into()]).unwrap();
+    products.push_row(vec![11.into(), "B".into()]).unwrap();
+    model.add_table(products).unwrap();
+
+    let mut sales = Table::new("Sales", vec!["SaleId", "CustomerId", "ProductId", "Amount"]);
+    sales
+        .push_row(vec![100.into(), 1.into(), 10.into(), 10.0.into()])
+        .unwrap(); // East, A
+    sales
+        .push_row(vec![101.into(), 1.into(), 11.into(), 5.0.into()])
+        .unwrap(); // East, B
+    sales
+        .push_row(vec![102.into(), 2.into(), 10.into(), 7.0.into()])
+        .unwrap(); // West, A
+    sales
+        .push_row(vec![103.into(), 2.into(), 11.into(), 3.0.into()])
+        .unwrap(); // West, B
+    sales
+        .push_row(vec![104.into(), 1.into(), 10.into(), 2.0.into()])
+        .unwrap(); // East, A
+    model.add_table(sales).unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Customers".into(),
+            from_table: "Sales".into(),
+            from_column: "CustomerId".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Products".into(),
+            from_table: "Sales".into(),
+            from_column: "ProductId".into(),
+            to_table: "Products".into(),
+            to_column: "ProductId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    let engine = DaxEngine::new();
+    let groups = engine
+        .evaluate(
+            &model,
+            "COUNTROWS(SUMMARIZECOLUMNS(Customers[Region], Products[Category]))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    // Distinct combinations in Sales are:
+    //   (East, A), (East, B), (West, A), (West, B)
+    assert_eq!(groups, 4.into());
+}
+
+#[test]
 fn calculate_all_can_remove_column_filters() {
     let mut model = build_model();
     model
