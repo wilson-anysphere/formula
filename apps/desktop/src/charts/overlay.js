@@ -1,9 +1,6 @@
-const EMUS_PER_INCH = 914400;
-const CSS_PX_PER_INCH = 96;
+import { emuToPx } from "../shared/emu.js";
 
-export function emuToPx(emu) {
-  return (emu / EMUS_PER_INCH) * CSS_PX_PER_INCH;
-}
+export { emuToPx };
 
 function sumUpTo(index, sizes, defaultSize) {
   if (!Number.isFinite(index) || index <= 0) return 0;

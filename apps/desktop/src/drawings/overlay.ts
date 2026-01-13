@@ -1,8 +1,9 @@
 import type { Anchor, DrawingObject, ImageStore, Rect } from "./types";
 import { ImageBitmapCache } from "./imageBitmapCache";
 
-export const EMU_PER_INCH = 914_400;
-export const PX_PER_INCH = 96;
+import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
+
+export { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu };
 export const EMU_PER_PX = EMU_PER_INCH / PX_PER_INCH;
 
 function resolveOverlayColorTokens(): {
@@ -64,14 +65,6 @@ export interface Viewport {
 
 export interface ChartRenderer {
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void;
-}
-
-export function emuToPx(emu: number): number {
-  return emu / EMU_PER_PX;
-}
-
-export function pxToEmu(px: number): number {
-  return px * EMU_PER_PX;
 }
 
 export function anchorToRectPx(anchor: Anchor, geom: GridGeometry): Rect {
