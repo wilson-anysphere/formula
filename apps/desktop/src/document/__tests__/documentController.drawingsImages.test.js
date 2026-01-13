@@ -21,9 +21,10 @@ test("encodeState/applyState roundtrip preserves images + drawings", () => {
   const parsed = JSON.parse(new TextDecoder().decode(snapshot));
 
   assert.deepEqual(parsed.images, [{ id: "img1", mimeType: "image/png", bytesBase64: "AQID" }]);
-  assert.ok(parsed.drawingsBySheet);
-  assert.ok(Array.isArray(parsed.drawingsBySheet.Sheet1));
-  assert.equal(parsed.drawingsBySheet.Sheet1.length, 1);
+  const sheet = parsed.sheets.find((s) => s.id === "Sheet1");
+  assert.ok(sheet);
+  assert.ok(Array.isArray(sheet.drawings));
+  assert.equal(sheet.drawings.length, 1);
 
   const restored = new DocumentController();
   restored.applyState(snapshot);
@@ -73,7 +74,7 @@ test("undo/redo restores drawings + images", () => {
   assert.equal(doc.getSheetDrawings("Sheet1").length, 1);
 });
 
-test("change event includes drawingDeltas + imageDeltas", () => {
+test("change event includes sheetViewDeltas (drawings) + imageDeltas", () => {
   const doc = new DocumentController();
   /** @type {any} */
   let lastChange = null;
@@ -96,10 +97,11 @@ test("change event includes drawingDeltas + imageDeltas", () => {
       kind: { type: "image", imageId: "img1" },
     },
   ]);
-  assert.ok(Array.isArray(lastChange.drawingDeltas));
-  assert.equal(lastChange.drawingDeltas.length, 1);
-  assert.equal(lastChange.drawingDeltas[0].sheetId, "Sheet1");
-  assert.equal(lastChange.drawingDeltas[0].after[0].id, "d1");
+  assert.ok(Array.isArray(lastChange.sheetViewDeltas));
+  assert.equal(lastChange.sheetViewDeltas.length, 1);
+  assert.equal(lastChange.sheetViewDeltas[0].sheetId, "Sheet1");
+  assert.ok(Array.isArray(lastChange.sheetViewDeltas[0].after.drawings));
+  assert.equal(lastChange.sheetViewDeltas[0].after.drawings[0].id, "d1");
 });
 
 test("drawing helpers support numeric ids (overlay-compatible)", () => {
@@ -168,6 +170,41 @@ test("applyState accepts formula-model style image + drawings payloads", () => {
   assert.equal(drawings[0].zOrder, 3);
   assert.ok(drawings[0].anchor);
   assert.ok(drawings[0].kind);
+});
+
+test("applyExternalDrawingDeltas updates sheet drawings without creating undo history", () => {
+  const doc = new DocumentController();
+  let lastChange = null;
+  doc.on("change", (payload) => {
+    lastChange = payload;
+  });
+
+  assert.equal(doc.canUndo, false);
+  assert.equal(doc.isDirty, false);
+
+  const drawing = {
+    id: "d_external",
+    zOrder: 0,
+    kind: { type: "image", imageId: "img_external.png" },
+    anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+  };
+
+  doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [], after: [drawing] }], { source: "collab" });
+
+  assert.equal(doc.canUndo, false);
+  assert.equal(doc.isDirty, true);
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), [drawing]);
+  assert.ok(Array.isArray(doc.getSheetView("Sheet1").drawings));
+
+  assert.ok(lastChange);
+  assert.equal(lastChange.source, "collab");
+  assert.ok(Array.isArray(lastChange.sheetViewDeltas));
+  assert.equal(lastChange.sheetViewDeltas.length, 1);
+  assert.equal(lastChange.sheetViewDeltas[0].sheetId, "Sheet1");
+  assert.deepEqual(lastChange.sheetViewDeltas[0].after.drawings, [drawing]);
+
+  doc.applyExternalDrawingDeltas([{ sheetId: "Sheet1", before: [drawing], after: [] }], { source: "collab" });
+  assert.deepEqual(doc.getSheetDrawings("Sheet1"), []);
 });
 
 test("applyExternalImageDeltas updates image store without creating undo history", () => {

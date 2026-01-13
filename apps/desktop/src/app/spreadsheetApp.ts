@@ -6032,6 +6032,7 @@ export class SpreadsheetApp {
     this.renderGrid();
     this.renderDrawings();
     this.renderCharts(true);
+    this.renderDrawings();
     this.renderReferencePreview();
     if (this.sharedGrid) {
       // Switching sheets updates the provider data source but does not emit document
@@ -6082,6 +6083,7 @@ export class SpreadsheetApp {
       }
       this.renderGrid();
       this.renderCharts(true);
+      this.renderDrawings();
       this.sharedProvider?.invalidateAll();
       sheetChanged = true;
     }
@@ -9821,7 +9823,6 @@ export class SpreadsheetApp {
       ctx.scale(this.dpr, this.dpr);
     }
     this.auditingNeedsClear = true;
-
     const didClamp = this.clampScroll();
     if (didClamp) this.hideCommentTooltip();
     this.syncScrollbars();
@@ -10249,7 +10250,6 @@ export class SpreadsheetApp {
     if (direct !== undefined) return direct;
     return this.lowerBound(this.colIndexByVisual, col);
   }
-
   private chartAnchorToViewportRect(anchor: ChartRecord["anchor"]): { left: number; top: number; width: number; height: number } | null {
     if (!anchor || !("kind" in anchor)) return null;
 
@@ -11536,7 +11536,6 @@ export class SpreadsheetApp {
 
     // Sheet meta/order changes can change the active sheet or invalidate cached geometry.
     if (touchesSheet(payload?.sheetMetaDeltas) || payload?.sheetOrderDelta) return true;
-
     // Drawing deltas are usually per-sheet.
     if (
       touchesSheet(payload?.drawingsDeltas) ||

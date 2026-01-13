@@ -178,6 +178,14 @@ test("CollabSession sheet view binder does not write view state into Yjs when se
       frozenCols: 1,
       colWidths: { "0": 120 },
       rowHeights: { "1": 40 },
+      drawings: [
+        {
+          id: "drawing-local",
+          zOrder: 0,
+          kind: { type: "image", imageId: "img-local" },
+          anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: 1, cy: 1 } },
+        },
+      ],
     });
     assert.deepEqual(dc.getSheetDrawings("Sheet1"), [
       {

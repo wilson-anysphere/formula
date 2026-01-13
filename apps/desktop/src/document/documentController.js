@@ -1070,6 +1070,11 @@ function shiftFormatRunsByColForRowBandColumnShift(formatRunsByCol, params) {
  *    * Sparse row height overrides (base units, zoom=1), keyed by 0-based row index.
  *    *\/
  *   rowHeights?: Record<string, number>,
+ *   /**
+ *    * Optional list of JSON-serializable drawing metadata records (pictures/shapes/etc),
+ *    * stored in z-order order.
+ *    *\/
+ *   drawings?: any[],
  * }} SheetViewState
  */
 
@@ -1171,6 +1176,97 @@ function normalizeFrozenCount(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 0;
   return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * @param {any} raw
+ * @returns {any[] | null}
+ */
+function normalizeDrawings(raw) {
+  if (!Array.isArray(raw)) return null;
+  /** @type {any[]} */
+  const out = [];
+  for (const entry of raw) {
+    if (!isJsonObject(entry)) continue;
+    let cloned;
+    try {
+      cloned = cloneJsonSerializable(entry);
+    } catch {
+      // Best-effort: ignore non-serializable entries so snapshots/undo history remain valid.
+      continue;
+    }
+
+    // Normalize ids: accept strings (trimmed) and safe integers. Preserve numeric ids as-is
+    // so formula-model snapshots can round-trip without schema transforms.
+    const rawId = cloned.id;
+    if (typeof rawId === "string") {
+      const trimmed = rawId.trim();
+      if (!trimmed) continue;
+      cloned.id = trimmed;
+    } else if (typeof rawId === "number") {
+      if (!Number.isSafeInteger(rawId)) continue;
+      cloned.id = rawId;
+    } else {
+      continue;
+    }
+
+    // Normalize z-order: support both `zOrder` and `z_order` (formula-model).
+    const zOrderRaw = cloned.zOrder ?? cloned.z_order;
+    const zOrder = zOrderRaw == null ? out.length : Number(zOrderRaw);
+    if (!Number.isFinite(zOrder)) continue;
+    cloned.zOrder = zOrder;
+    if ("z_order" in cloned) delete cloned.z_order;
+
+    // Drawing entries must at least include `anchor` and `kind` blobs.
+    if (!("anchor" in cloned) || !("kind" in cloned)) continue;
+
+    out.push(cloned);
+  }
+
+  return out.length > 0 ? out : null;
+}
+
+/**
+ * Stable deep equality for JSON-serializable values.
+ *
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+function stableDeepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  if (typeof a !== typeof b) return false;
+
+  if (typeof a === "number") {
+    if (Number.isNaN(a) && Number.isNaN(b)) return true;
+    return Math.abs(a - b) <= 1e-9;
+  }
+
+  if (typeof a !== "object") return false;
+
+  const aIsArray = Array.isArray(a);
+  const bIsArray = Array.isArray(b);
+  if (aIsArray || bIsArray) {
+    if (!aIsArray || !bIsArray) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!stableDeepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  aKeys.sort();
+  bKeys.sort();
+  for (let i = 0; i < aKeys.length; i++) {
+    const key = aKeys[i];
+    if (key !== bKeys[i]) return false;
+    if (!stableDeepEqual(a[key], b[key])) return false;
+  }
+  return true;
 }
 
 /**
@@ -1303,6 +1399,7 @@ function normalizeSheetViewState(view) {
       view?.merged_cells,
   );
   const backgroundImageId = normalizeBackgroundImageId(view?.backgroundImageId ?? view?.background_image_id);
+  const drawings = normalizeDrawings(view?.drawings);
 
   return {
     frozenRows: normalizeFrozenCount(view?.frozenRows),
@@ -1311,6 +1408,7 @@ function normalizeSheetViewState(view) {
     ...(mergedRanges ? { mergedRanges } : {}),
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
+    ...(drawings ? { drawings } : {}),
   };
 }
 
@@ -1339,6 +1437,10 @@ function cloneSheetViewState(view) {
   }
   if (view.colWidths) next.colWidths = { ...view.colWidths };
   if (view.rowHeights) next.rowHeights = { ...view.rowHeights };
+  if (Array.isArray(view.drawings)) {
+    const cloned = cloneJsonSerializable(view.drawings);
+    if (Array.isArray(cloned) && cloned.length > 0) next.drawings = cloned;
+  }
   return next;
 }
 
@@ -1383,13 +1485,24 @@ function sheetViewStateEquals(a, b) {
     return true;
   };
 
+  const drawingsEquals = (left, right) => {
+    const l = Array.isArray(left) ? left : [];
+    const r = Array.isArray(right) ? right : [];
+    if (l.length !== r.length) return false;
+    for (let i = 0; i < l.length; i++) {
+      if (!stableDeepEqual(l[i], r[i])) return false;
+    }
+    return true;
+  };
+
   return (
     a.frozenRows === b.frozenRows &&
     a.frozenCols === b.frozenCols &&
     (a.backgroundImageId ?? null) === (b.backgroundImageId ?? null) &&
     mergedRangesEqual(a.mergedRanges, b.mergedRanges) &&
     axisEquals(a.colWidths, b.colWidths) &&
-    axisEquals(a.rowHeights, b.rowHeights)
+    axisEquals(a.rowHeights, b.rowHeights) &&
+    drawingsEquals(a.drawings, b.drawings)
   );
 }
 
@@ -3251,8 +3364,8 @@ export class DocumentController {
   getSheetDrawings(sheetId) {
     const id = String(sheetId ?? "").trim();
     if (!id) return [];
-    const drawings = this.drawingsBySheet.get(id);
-    return Array.isArray(drawings) ? cloneJsonSerializable(drawings) : [];
+    const view = this.model.getSheetView(id);
+    return Array.isArray(view?.drawings) ? cloneJsonSerializable(view.drawings) : [];
   }
 
   /**
@@ -3267,15 +3380,16 @@ export class DocumentController {
   setSheetDrawings(sheetId, nextDrawings, options = {}) {
     const id = String(sheetId ?? "").trim();
     if (!id) throw new Error("Sheet id cannot be empty");
+    if (!this.#canEditSheetView(id)) return;
     // Ensure the sheet exists (DocumentController historically materializes sheets lazily).
     this.model.getCell(id, 0, 0);
 
-    const beforeRaw = this.drawingsBySheet.get(id) ?? [];
-    const before = Array.isArray(beforeRaw) ? cloneJsonSerializable(beforeRaw) : [];
+    const before = this.model.getSheetView(id);
+    const after = cloneSheetViewState(before);
 
     const rawList = Array.isArray(nextDrawings) ? nextDrawings : [];
     /** @type {any[]} */
-    const after = [];
+    const drawings = [];
     for (const raw of rawList) {
       if (!isJsonObject(raw)) {
         throw new Error("Drawings must be JSON objects");
@@ -3301,11 +3415,17 @@ export class DocumentController {
       cloned.id = drawingId;
       cloned.zOrder = zOrder;
       if ("z_order" in cloned) delete cloned.z_order;
-      after.push(cloned);
+      drawings.push(cloned);
+    }
+    if (drawings.length > 0) {
+      after.drawings = drawings;
+    } else {
+      delete after.drawings;
     }
 
-    if (jsonSerializableEquals(before, after)) return;
-    this.#applyUserWorkbookEdits({ drawingDeltas: [{ sheetId: id, before, after }] }, options);
+    const normalized = normalizeSheetViewState(after);
+    if (sheetViewStateEquals(before, normalized)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId: id, before, after: normalized }], options);
   }
 
   /**
@@ -5708,6 +5828,7 @@ export class DocumentController {
           endCol: r.endCol,
         }));
       }
+      if (Array.isArray(view.drawings) && view.drawings.length > 0) out.drawings = view.drawings;
 
       // Layered formatting (sheet/col/row).
       out.defaultFormat = sheet && sheet.defaultStyleId !== 0 ? this.styleTable.get(sheet.defaultStyleId) : null;
@@ -5759,15 +5880,6 @@ export class DocumentController {
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     if (images.length > 0) snapshot.images = images;
 
-    /** @type {Record<string, any[]>} */
-    const drawingsBySheet = {};
-    for (const sheetId of sheetIds) {
-      const drawings = this.drawingsBySheet.get(sheetId);
-      if (!Array.isArray(drawings) || drawings.length === 0) continue;
-      drawingsBySheet[sheetId] = cloneJsonSerializable(drawings);
-    }
-    if (Object.keys(drawingsBySheet).length > 0) snapshot.drawingsBySheet = drawingsBySheet;
-
     return encodeUtf8(JSON.stringify(snapshot));
   }
 
@@ -5793,10 +5905,15 @@ export class DocumentController {
     let nextRangeRuns = new Map();
     /** @type {Map<string, SheetMetaState>} */
     const nextSheetMeta = new Map();
-    /** @type {Map<string, any[]>} */
-    let nextDrawingsBySheet = new Map();
     /** @type {Map<string, ImageEntry>} */
     const nextImages = new Map();
+
+    // Legacy snapshot support: older snapshots stored drawings in a top-level `drawingsBySheet` map.
+    /** @type {Record<string, any[]> | null} */
+    const legacyDrawingsBySheet = (() => {
+      const raw = parsed?.drawingsBySheet ?? parsed?.metadata?.drawingsBySheet ?? parsed?.drawings_by_sheet;
+      return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+    })();
 
     const parseBytes = (value) => {
       if (value instanceof Uint8Array) return value.slice();
@@ -5903,35 +6020,6 @@ export class DocumentController {
       }
     }
 
-    const normalizeDrawingsList = (rawList) => {
-      if (!Array.isArray(rawList)) return [];
-      /** @type {any[]} */
-      const out = [];
-      for (const raw of rawList) {
-        if (!isJsonObject(raw)) continue;
-        const rawId = raw.id;
-        let drawingId;
-        if (typeof rawId === "string") {
-          drawingId = rawId.trim();
-          if (!drawingId) continue;
-        } else if (typeof rawId === "number") {
-          if (!Number.isSafeInteger(rawId)) continue;
-          drawingId = rawId;
-        } else {
-          continue;
-        }
-        if (!("anchor" in raw) || !("kind" in raw)) continue;
-        const zOrder = Number(raw.zOrder ?? raw.z_order);
-        if (!Number.isFinite(zOrder)) continue;
-        const cloned = cloneJsonSerializable(raw);
-        cloned.id = drawingId;
-        cloned.zOrder = zOrder;
-        if ("z_order" in cloned) delete cloned.z_order;
-        out.push(cloned);
-      }
-      return out;
-    };
-
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
       const out = new Map();
@@ -6026,6 +6114,11 @@ export class DocumentController {
       nextSheetMeta.set(sheetId, { name, visibility, ...(tabColor ? { tabColor } : {}) });
 
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
+      const rawDrawings = Array.isArray(sheet?.drawings)
+        ? sheet.drawings
+        : Array.isArray(legacyDrawingsBySheet?.[sheetId])
+          ? legacyDrawingsBySheet[sheetId]
+          : null;
       const view = normalizeSheetViewState({
         frozenRows: sheet?.frozenRows,
         frozenCols: sheet?.frozenCols,
@@ -6040,6 +6133,7 @@ export class DocumentController {
           // Backwards compatibility with earlier snapshots.
           sheet?.mergedCells ??
           sheet?.merged_cells,
+        drawings: rawDrawings,
       });
       /** @type {Map<string, CellState>} */
       const cellMap = new Map();
@@ -6064,23 +6158,7 @@ export class DocumentController {
         colStyleIds: normalizeFormatOverrides(sheet?.colFormats, "col"),
       });
       nextRangeRuns.set(sheetId, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
-
-      // Backwards/interop: accept per-sheet `drawings` arrays (formula-model workbook JSON).
-      const sheetDrawings = normalizeDrawingsList(sheet?.drawings);
-      if (sheetDrawings.length > 0) nextDrawingsBySheet.set(sheetId, sheetDrawings);
     }
-
-    const rawDrawingsBySheet = parsed?.drawingsBySheet ?? parsed?.metadata?.drawingsBySheet ?? parsed?.drawings_by_sheet;
-    if (rawDrawingsBySheet && typeof rawDrawingsBySheet === "object" && !Array.isArray(rawDrawingsBySheet)) {
-      for (const [rawSheetId, rawList] of Object.entries(rawDrawingsBySheet)) {
-        const sheetId = typeof rawSheetId === "string" ? rawSheetId.trim() : "";
-        if (!sheetId) continue;
-        if (!nextSheets.has(sheetId)) continue;
-        const drawings = normalizeDrawingsList(rawList);
-        if (drawings.length > 0) nextDrawingsBySheet.set(sheetId, drawings);
-      }
-    }
-
     // Prefer an explicit sheet order field when present, falling back to the ordering
     // of the `sheets` array itself (legacy behavior).
     const rawSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder : [];
@@ -6116,7 +6194,6 @@ export class DocumentController {
         nextViews = reorderBySheetIds(nextViews);
         nextFormats = reorderBySheetIds(nextFormats);
         nextRangeRuns = reorderBySheetIds(nextRangeRuns);
-        nextDrawingsBySheet = reorderBySheetIds(nextDrawingsBySheet);
       }
     }
 
@@ -6219,16 +6296,6 @@ export class DocumentController {
 
     /** @type {DrawingDelta[]} */
     const drawingDeltas = [];
-    const drawingSheetIds = new Set([...this.drawingsBySheet.keys(), ...nextDrawingsBySheet.keys()]);
-    for (const sheetId of drawingSheetIds) {
-      const beforeRaw = this.drawingsBySheet.get(sheetId) ?? [];
-      const afterRaw = nextDrawingsBySheet.get(sheetId) ?? [];
-      const before = Array.isArray(beforeRaw) ? cloneJsonSerializable(beforeRaw) : [];
-      const after = Array.isArray(afterRaw) ? cloneJsonSerializable(afterRaw) : [];
-      if (jsonSerializableEquals(before, after)) continue;
-      drawingDeltas.push({ sheetId, before, after });
-    }
-    drawingDeltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
 
     /** @type {ImageDelta[]} */
     const imageDeltas = [];
@@ -6398,12 +6465,35 @@ export class DocumentController {
   applyExternalDrawingDeltas(deltas, options = {}) {
     if (!deltas || deltas.length === 0) return;
 
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = [];
+    for (const delta of deltas) {
+      if (!delta) continue;
+      const sheetId = String(delta.sheetId ?? "").trim();
+      if (!sheetId) continue;
+
+      const before = this.model.getSheetView(sheetId);
+      const after = cloneSheetViewState(before);
+      if (Array.isArray(delta.after) && delta.after.length > 0) {
+        // Store drawings in sheet view state so the update is visible to undo/redo + snapshot
+        // consumers and so SpreadsheetApp can treat the controller as the source of truth.
+        after.drawings = delta.after;
+      } else {
+        delete after.drawings;
+      }
+      const normalized = normalizeSheetViewState(after);
+      if (sheetViewStateEquals(before, normalized)) continue;
+      sheetViewDeltas.push({ sheetId, before, after: normalized });
+    }
+
+    if (sheetViewDeltas.length === 0) return;
+
     // External updates should never merge with user edits.
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], [], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], sheetViewDeltas, [], [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -7653,9 +7743,17 @@ export class DocumentController {
     // `sheetStructureChanged` covers:
     // - applyState sheet add/remove
     // - undoable sheet add/delete operations
+    const drawingsChangedViaSheetView = Array.isArray(sheetViewDeltas)
+      ? sheetViewDeltas.some((delta) => {
+          const before = Array.isArray(delta?.before?.drawings) ? delta.before.drawings : [];
+          const after = Array.isArray(delta?.after?.drawings) ? delta.after.drawings : [];
+          return !stableDeepEqual(before, after);
+        })
+      : false;
     const shouldBumpContentVersion =
       Boolean(options?.sheetStructureChanged) ||
       contentChangedSheetIds.size > 0 ||
+      drawingsChangedViaSheetView ||
       (Array.isArray(drawingDeltas) && drawingDeltas.length > 0) ||
       (Array.isArray(imageDeltas) && imageDeltas.length > 0);
 

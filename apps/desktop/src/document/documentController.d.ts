@@ -24,6 +24,7 @@ export class DocumentController {
     colWidths?: Record<string, number>;
     rowHeights?: Record<string, number>;
     mergedRanges?: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }>;
+    drawings?: any[];
   };
   getSheetBackgroundImageId(sheetId: string): string | null;
   setSheetBackgroundImageId(sheetId: string, imageId: string | null, options?: unknown): void;
