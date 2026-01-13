@@ -70,6 +70,9 @@ Owns the **serialization-friendly, stable workbook schema** for pivots and relat
 
 Non-goal: `formula-model` MUST NOT contain a pivot engine, cache builder, or worksheet cell evaluation logic.
 
+Rationale: pivot caches can be extremely large and may mirror source data. The model should persist the *definition*
+(what to compute), not an embedded copy of the source records.
+
 #### `formula-engine` — worksheet/range pivot computation + cache building
 
 Owns the runtime computation for pivots whose source is a worksheet/range/table:
