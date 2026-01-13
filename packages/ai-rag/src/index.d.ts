@@ -19,3 +19,4 @@ export { workbookFromSpreadsheetApi } from "./workbook/fromSpreadsheetApi.js";
 export { indexWorkbook, approximateTokenCount } from "./pipeline/indexWorkbook.js";
 
 export { searchWorkbookRag } from "./retrieval/searchWorkbookRag.js";
+export { rerankWorkbookResults, dedupeOverlappingResults } from "./retrieval/rankResults.js";
