@@ -125,6 +125,28 @@ class DashboardTrendTests(unittest.TestCase):
             self.assertEqual(len(on_disk), 2)
             self.assertEqual(on_disk[0]["timestamp"], "t2")
 
+    def test_append_trend_file_treats_whitespace_only_file_as_empty_list(self) -> None:
+        summary = {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "commit": "abc",
+            "run_url": "https://example.invalid/run/1",
+            "counts": {"total": 1, "open_ok": 1, "round_trip_ok": 1},
+            "rates": {"open": 1.0, "round_trip": 1.0},
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            trend_path = Path(td) / "trend.json"
+            trend_path.write_text("\n   \n", encoding="utf-8")
+
+            entries, prev = _append_trend_file(trend_path, summary=summary, max_entries=90)
+
+            self.assertIsNone(prev)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["timestamp"], summary["timestamp"])
+
+            on_disk = json.loads(trend_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(on_disk), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
