@@ -174,6 +174,28 @@ test("IndexedDbCollabPersistence flush skips compaction rewrite when already com
   doc.destroy();
 });
 
+test("IndexedDbCollabPersistence flush resolves if doc is destroyed during compaction", async () => {
+  const docId = `doc-${randomUUID()}`;
+
+  const doc = new Y.Doc({ guid: docId });
+  const persistence = new IndexedDbCollabPersistence();
+  persistence.bind(docId, doc);
+  await persistence.load(docId, doc);
+
+  doc.getMap("root").set("k", "v");
+  await sleep(10);
+
+  const flushPromise = persistence.flush(docId);
+  doc.destroy();
+
+  await Promise.race([
+    flushPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Timed out waiting for flush to settle")), 2_000)),
+  ]);
+
+  await persistence.clear(docId);
+});
+
 test("IndexedDbCollabPersistence compaction does not hang when load() is in-flight", async () => {
   const docId = `doc-${randomUUID()}`;
   const doc = new Y.Doc({ guid: docId });

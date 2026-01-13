@@ -278,8 +278,8 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
 
     await this.enqueue(docId, async () => {
       const ready = await Promise.race([
-        Promise.resolve(entry.persistence.whenSynced).then(() => "synced" as const),
         entry.destroyed.then(() => "destroyed" as const),
+        Promise.resolve(entry.persistence.whenSynced).then(() => "synced" as const),
       ]);
       if (ready === "destroyed") return;
 
@@ -304,13 +304,20 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
         }
       });
       const outcome = await Promise.race([
-        txPromise.then(() => "ok" as const),
-        entry.destroyed.then(() => "destroyed" as const),
+        entry.destroyed.then(() => ({ kind: "destroyed" as const })),
+        txPromise.then(() => ({ kind: "ok" as const })).catch((err) => ({ kind: "error" as const, err })),
       ]);
-      if (outcome === "destroyed") {
+      if (outcome.kind === "destroyed") {
         void txPromise.catch(() => {
           // ignore
         });
+        return;
+      }
+      if (outcome.kind === "error") {
+        // If the doc was destroyed while starting the transaction (e.g. DB closed),
+        // treat as best-effort success.
+        if (!this.entries.has(docId)) return;
+        throw outcome.err;
       }
     });
   }
@@ -329,8 +336,8 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
 
     await this.enqueue(docId, async () => {
       const ready = await Promise.race([
-        Promise.resolve(entry.persistence.whenSynced).then(() => "synced" as const),
         entry.destroyed.then(() => "destroyed" as const),
+        Promise.resolve(entry.persistence.whenSynced).then(() => "synced" as const),
       ]);
       if (ready === "destroyed") return;
 
@@ -403,14 +410,18 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
         }
       });
       const outcome = await Promise.race([
-        txPromise.then(() => "ok" as const),
-        entry.destroyed.then(() => "destroyed" as const),
+        entry.destroyed.then(() => ({ kind: "destroyed" as const })),
+        txPromise.then(() => ({ kind: "ok" as const })).catch((err) => ({ kind: "error" as const, err })),
       ]);
-      if (outcome === "destroyed") {
+      if (outcome.kind === "destroyed") {
         void txPromise.catch(() => {
           // ignore
         });
         return;
+      }
+      if (outcome.kind === "error") {
+        if (!this.entries.has(docId)) return;
+        throw outcome.err;
       }
 
       this.updateCounts.set(docId, 0);
