@@ -1257,6 +1257,66 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
     // basis
     5: DAY_COUNT_BASIS_ENUM_0_TO_4,
   },
+  PRICEDISC: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  PRICEMAT: {
+    // basis
+    5: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  YIELDDISC: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  YIELDMAT: {
+    // basis
+    5: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  DISC: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  RECEIVED: {
+    // basis
+    4: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPDAYBS: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPDAYS: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPDAYSNC: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPNCD: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPNUM: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
+  COUPPCD: {
+    // frequency
+    2: BOND_FREQUENCY_ENUM_1_2_4,
+    // basis
+    3: DAY_COUNT_BASIS_ENUM_0_TO_4,
+  },
   LINEST: {
     // const (TRUE = calculate intercept, FALSE = force intercept=0)
     2: [

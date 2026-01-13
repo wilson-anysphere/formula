@@ -2378,6 +2378,63 @@ test("ACCRINT frequency suggests 2, 1, 4", async () => {
   }
 });
 
+test("PRICEDISC basis suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=PRICEDISC(A1, B1, 0.05, 100, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const basis of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=PRICEDISC(A1, B1, 0.05, 100, ${basis}`),
+      `Expected PRICEDISC to suggest basis=${basis}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("COUPDAYBS frequency suggests 2, 1, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=COUPDAYBS(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const f of ["2", "1", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=COUPDAYBS(A1, B1, ${f}`),
+      `Expected COUPDAYBS to suggest frequency=${f}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("COUPDAYBS basis suggests 0, 1, 2, 3, 4", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=COUPDAYBS(A1, B1, 2, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const basis of ["0", "1", "2", "3", "4"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=COUPDAYBS(A1, B1, 2, ${basis}`),
+      `Expected COUPDAYBS to suggest basis=${basis}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("FORECAST.ETS seasonality suggests 0, 1, 12, 4", async () => {
   const engine = new TabCompletionEngine();
 
