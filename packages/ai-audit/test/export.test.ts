@@ -133,5 +133,55 @@ describe("serializeAuditEntries", () => {
     expect(outA).toBe(outB);
     expect(outA).toContain(`"input":{"a":2,"b":1}`);
   });
-});
 
+  it("serializes BigInt values without throwing (deterministic)", () => {
+    const big = 12345678901234567890n;
+
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input: { big },
+        model: "unit-test-model",
+        tool_calls: [
+          {
+            name: "tool",
+            parameters: { big },
+            audit_result_summary: big,
+          },
+        ],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries, { format: "json", redactToolResults: true, maxToolResultChars: 10_000 });
+    const parsed = JSON.parse(output) as any[];
+
+    expect(parsed[0].input).toEqual({ big: big.toString() });
+    expect(parsed[0].tool_calls[0].parameters).toEqual({ big: big.toString() });
+    expect(parsed[0].tool_calls[0].audit_result_summary).toBe(big.toString());
+  });
+
+  it("replaces circular references with a stable placeholder", () => {
+    const input: any = { a: 1 };
+    input.self = input;
+
+    const entries: AIAuditEntry[] = [
+      {
+        id: "audit-1",
+        timestamp_ms: 1,
+        session_id: "session",
+        mode: "chat",
+        input,
+        model: "unit-test-model",
+        tool_calls: [],
+      },
+    ];
+
+    const output = serializeAuditEntries(entries, { format: "json", redactToolResults: false });
+    const parsed = JSON.parse(output) as any[];
+
+    expect(parsed[0].input).toEqual({ a: 1, self: "[Circular]" });
+  });
+});

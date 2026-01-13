@@ -90,17 +90,27 @@ function truncateTo(input: string, maxChars: number): string {
  * stable object key ordering across runs.
  */
 function stableStringify(value: unknown): string {
-  return JSON.stringify(stableJsonValue(value));
+  // JSON.stringify can return `undefined` for unsupported top-level inputs
+  // (e.g. `undefined`). Since our public API returns `string`, normalize those
+  // cases to `"null"` for deterministic output.
+  return JSON.stringify(stableJsonValue(value, new WeakSet())) ?? "null";
 }
 
-function stableJsonValue(value: unknown): unknown {
+function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unknown {
   if (value === null) return null;
 
   const t = typeof value;
   if (t === "string" || t === "number" || t === "boolean") return value;
+  if (t === "bigint") return value.toString();
   if (t === "undefined" || t === "function" || t === "symbol") return undefined;
 
-  if (Array.isArray(value)) return value.map((item) => stableJsonValue(item));
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) return "[Circular]";
+    ancestors.add(value);
+    const out = value.map((item) => stableJsonValue(item, ancestors));
+    ancestors.delete(value);
+    return out;
+  }
 
   if (t !== "object") return undefined;
 
@@ -108,12 +118,16 @@ function stableJsonValue(value: unknown): unknown {
 
   // Preserve JSON.stringify behavior for objects with toJSON (e.g. Date).
   if (typeof (obj as { toJSON?: unknown }).toJSON === "function") {
-    return stableJsonValue((obj as { toJSON: () => unknown }).toJSON());
+    return stableJsonValue((obj as { toJSON: () => unknown }).toJSON(), ancestors);
   }
+
+  if (ancestors.has(obj)) return "[Circular]";
+  ancestors.add(obj);
 
   const sorted: Record<string, unknown> = {};
   for (const key of Object.keys(obj).sort()) {
-    sorted[key] = stableJsonValue(obj[key]);
+    sorted[key] = stableJsonValue(obj[key], ancestors);
   }
+  ancestors.delete(obj);
   return sorted;
 }
