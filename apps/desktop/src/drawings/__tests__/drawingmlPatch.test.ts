@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { patchNvPrId, patchXfrmExt, patchXfrmOff } from "../drawingml/patch";
+import {
+  patchAnchorExt,
+  patchAnchorPoint,
+  patchAnchorPos,
+  patchNvPrId,
+  patchXfrmExt,
+  patchXfrmOff,
+} from "../drawingml/patch";
 import { duplicateDrawingObject } from "../duplicate";
 import { DrawingInteractionController } from "../interaction";
 import { pxToEmu } from "../overlay";
@@ -63,6 +70,37 @@ describe("DrawingML patch helpers", () => {
     const out = patchXfrmOff(input, 10, 20);
     // No-op because there is no plain `x=`/`y=` attribute to patch.
     expect(out).toBe(input);
+  });
+
+  it("patchAnchorPoint patches <from>/<to> blocks in full anchor XML", () => {
+    const input =
+      `<xdr:twoCellAnchor>` +
+      `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+      `<xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+      `</xdr:twoCellAnchor>`;
+
+    const out = patchAnchorPoint(input, "from", { col: 2, row: 3, colOffEmu: 10, rowOffEmu: 20 });
+    expect(out).toContain(`<xdr:from><xdr:col>2</xdr:col>`);
+    expect(out).toContain(`<xdr:row>3</xdr:row>`);
+    expect(out).toContain(`<xdr:colOff>10</xdr:colOff>`);
+    expect(out).toContain(`<xdr:rowOff>20</xdr:rowOff>`);
+    // Ensure we don't accidentally patch the <to> block.
+    expect(out).toContain(`<xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff>`);
+  });
+
+  it("patchAnchorPos/Ext patch absoluteAnchor wrapper fields without touching xfrm ext", () => {
+    const input =
+      `<xdr:absoluteAnchor>` +
+      `<xdr:pos x="0" y="0"/><xdr:ext cx="1" cy="2"/>` +
+      `<xdr:sp><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="200"/></a:xfrm></xdr:spPr></xdr:sp>` +
+      `</xdr:absoluteAnchor>`;
+
+    let out = patchAnchorPos(input, 10, 20);
+    out = patchAnchorExt(out, 7, 8);
+    expect(out).toContain(`<xdr:pos x="10" y="20"/>`);
+    expect(out).toContain(`<xdr:ext cx="7" cy="8"/>`);
+    // Inner xfrm ext should remain unchanged (patched elsewhere).
+    expect(out).toContain(`<a:ext cx="100" cy="200"/>`);
   });
 });
 
@@ -139,9 +177,11 @@ describe("DrawingInteractionController commit-time patching", () => {
     return canvas as HTMLCanvasElement & { dispatch(type: string, event: any): void };
   }
 
+  const CELL_W = 100;
+  const CELL_H = 100;
   const geom: GridGeometry = {
-    cellOriginPx: () => ({ x: 0, y: 0 }),
-    cellSizePx: () => ({ width: 0, height: 0 }),
+    cellOriginPx: (cell) => ({ x: cell.col * CELL_W, y: cell.row * CELL_H }),
+    cellSizePx: () => ({ width: CELL_W, height: CELL_H }),
   };
 
   const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
@@ -230,5 +270,102 @@ describe("DrawingInteractionController commit-time patching", () => {
     const xml = (objects[0]!.kind as any).rawXml as string;
     expect(xml).toContain(`x="${pxToEmu(15)}"`);
     expect(xml).toContain(`y="${pxToEmu(27)}"`);
+  });
+
+  it("patches full-anchor wrapper <from>/<to> blocks on move commit for unknown objects", () => {
+    const obj: DrawingObject = {
+      id: 1,
+      kind: {
+        type: "unknown",
+        rawXml:
+          `<xdr:twoCellAnchor>` +
+          `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+          `<xdr:to><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+          `<xdr:clientData/>` +
+          `</xdr:twoCellAnchor>`,
+      },
+      anchor: {
+        type: "twoCell",
+        from: { cell: { row: 0, col: 0 }, offset: { xEmu: 0, yEmu: 0 } },
+        to: { cell: { row: 1, col: 1 }, offset: { xEmu: 0, yEmu: 0 } },
+      },
+      zOrder: 0,
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const canvas = createStubCanvas();
+
+    new DrawingInteractionController(canvas, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    canvas.dispatch("pointerdown", { offsetX: 50, offsetY: 50, pointerId: 3 });
+    canvas.dispatch("pointermove", { offsetX: 60, offsetY: 70, pointerId: 3 });
+
+    // Pointermove updates anchor but should not patch xml yet.
+    const before = (objects[0]!.kind as any).rawXml as string;
+    expect(before).toContain(`<xdr:colOff>0</xdr:colOff>`);
+    expect(before).toContain(`<xdr:rowOff>0</xdr:rowOff>`);
+
+    canvas.dispatch("pointerup", { offsetX: 60, offsetY: 70, pointerId: 3 });
+
+    const xml = (objects[0]!.kind as any).rawXml as string;
+    // Both from + to should have the same shifted offsets.
+    expect(xml.match(new RegExp(`<xdr:colOff>${pxToEmu(10)}</xdr:colOff>`, "g"))?.length).toBe(2);
+    expect(xml.match(new RegExp(`<xdr:rowOff>${pxToEmu(20)}</xdr:rowOff>`, "g"))?.length).toBe(2);
+  });
+
+  it("patches full-anchor wrapper <pos>/<ext> on resize commit for unknown objects", () => {
+    const startCx = pxToEmu(100);
+    const startCy = pxToEmu(100);
+    const obj: DrawingObject = {
+      id: 1,
+      kind: {
+        type: "unknown",
+        rawXml:
+          `<xdr:absoluteAnchor>` +
+          `<xdr:pos x="0" y="0"/><xdr:ext cx="${startCx}" cy="${startCy}"/>` +
+          `<xdr:sp><xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${startCx}" cy="${startCy}"/></a:xfrm></xdr:spPr></xdr:sp>` +
+          `<xdr:clientData/>` +
+          `</xdr:absoluteAnchor>`,
+      },
+      anchor: { type: "absolute", pos: { xEmu: 0, yEmu: 0 }, size: { cx: startCx, cy: startCy } },
+      zOrder: 0,
+    };
+
+    let objects: DrawingObject[] = [obj];
+    const canvas = createStubCanvas();
+
+    new DrawingInteractionController(canvas, geom, {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next) => {
+        objects = next;
+      },
+    });
+
+    canvas.dispatch("pointerdown", { offsetX: 100, offsetY: 100, pointerId: 4 });
+    canvas.dispatch("pointermove", { offsetX: 120, offsetY: 130, pointerId: 4 });
+
+    // Pointermove updates anchor but should not patch xml yet.
+    expect(objects[0]!.anchor).toMatchObject({
+      type: "absolute",
+      size: { cx: pxToEmu(120), cy: pxToEmu(130) },
+    });
+    const before = (objects[0]!.kind as any).rawXml as string;
+    expect(before).toContain(`cx="${startCx}"`);
+    expect(before).toContain(`cy="${startCy}"`);
+
+    canvas.dispatch("pointerup", { offsetX: 120, offsetY: 130, pointerId: 4 });
+
+    const xml = (objects[0]!.kind as any).rawXml as string;
+    // Outer anchor wrapper ext updated.
+    expect(xml).toContain(`<xdr:ext cx="${pxToEmu(120)}" cy="${pxToEmu(130)}"/>`);
+    // Inner xfrm ext updated too.
+    expect(xml).toContain(`<a:ext cx="${pxToEmu(120)}" cy="${pxToEmu(130)}"/>`);
   });
 });

@@ -3,7 +3,14 @@ import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
 import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
-import { extractXfrmOff, patchXfrmExt, patchXfrmOff } from "./drawingml/patch";
+import {
+  extractXfrmOff,
+  patchAnchorExt,
+  patchAnchorPoint,
+  patchAnchorPos,
+  patchXfrmExt,
+  patchXfrmOff,
+} from "./drawingml/patch";
 import { applyTransformVector, inverseTransformVector } from "./transform";
 
 export interface DrawingInteractionCallbacks {
@@ -417,7 +424,46 @@ function patchDrawingInnerXml(obj: DrawingObject, patch: (xml: string) => string
   const kindAny = obj.kind as any;
   const rawXml: unknown = kindAny.rawXml ?? kindAny.raw_xml;
   if (typeof rawXml !== "string") return obj;
-  const patched = patch(rawXml);
+  let patched = patch(rawXml);
+
+  // Some DrawingML payloads (e.g. `DrawingObjectKind::Unknown` in the Rust model)
+  // preserve the *entire* anchor subtree (`<xdr:twoCellAnchor>…</xdr:twoCellAnchor>`).
+  // If the UI edits the anchor, we must patch those anchor fields too; otherwise
+  // export will keep the stale wrapper.
+  const isFullAnchorXml =
+    /^\s*<(?:[A-Za-z_][\w.-]*:)?(?:oneCellAnchor|twoCellAnchor|absoluteAnchor)\b/.test(patched);
+  if (isFullAnchorXml) {
+    switch (obj.anchor.type) {
+      case "oneCell":
+        patched = patchAnchorPoint(patched, "from", {
+          col: obj.anchor.from.cell.col,
+          row: obj.anchor.from.cell.row,
+          colOffEmu: obj.anchor.from.offset.xEmu,
+          rowOffEmu: obj.anchor.from.offset.yEmu,
+        });
+        patched = patchAnchorExt(patched, obj.anchor.size.cx, obj.anchor.size.cy);
+        break;
+      case "twoCell":
+        patched = patchAnchorPoint(patched, "from", {
+          col: obj.anchor.from.cell.col,
+          row: obj.anchor.from.cell.row,
+          colOffEmu: obj.anchor.from.offset.xEmu,
+          rowOffEmu: obj.anchor.from.offset.yEmu,
+        });
+        patched = patchAnchorPoint(patched, "to", {
+          col: obj.anchor.to.cell.col,
+          row: obj.anchor.to.cell.row,
+          colOffEmu: obj.anchor.to.offset.xEmu,
+          rowOffEmu: obj.anchor.to.offset.yEmu,
+        });
+        break;
+      case "absolute":
+        patched = patchAnchorPos(patched, obj.anchor.pos.xEmu, obj.anchor.pos.yEmu);
+        patched = patchAnchorExt(patched, obj.anchor.size.cx, obj.anchor.size.cy);
+        break;
+    }
+  }
+
   if (patched === rawXml) return obj;
   return {
     ...obj,

@@ -118,3 +118,86 @@ export function extractXfrmOff(xml: string): { xEmu: number; yEmu: number } | nu
   if (!Number.isFinite(xEmu) || !Number.isFinite(yEmu)) return null;
   return { xEmu, yEmu };
 }
+
+function patchFirstBlock(xml: string, localName: string, patch: (block: string) => string): string {
+  const blockRe = new RegExp(
+    `<(?:[A-Za-z_][\\w.-]*:)?${localName}\\b[^>]*>[\\s\\S]*?<\\/(?:[A-Za-z_][\\w.-]*:)?${localName}>`,
+  );
+  const m = blockRe.exec(xml);
+  if (!m) return xml;
+  const block = m[0];
+  const patched = patch(block);
+  if (patched === block) return xml;
+  return xml.slice(0, m.index) + patched + xml.slice(m.index + block.length);
+}
+
+function patchFirstChildTextInt(parentXml: string, childLocalName: string, value: number): string {
+  const n = String(Math.trunc(value));
+  const re = new RegExp(
+    `(<(?:[A-Za-z_][\\w.-]*:)?${childLocalName}\\b[^>]*>\\s*)(-?\\d+)(\\s*<\\/(?:[A-Za-z_][\\w.-]*:)?${childLocalName}>)`,
+  );
+  if (!re.test(parentXml)) return parentXml;
+  return parentXml.replace(re, `$1${n}$3`);
+}
+
+function patchFirstChildTextEmu(parentXml: string, childLocalName: string, value: number): string {
+  const n = formatEmu(value);
+  const re = new RegExp(
+    `(<(?:[A-Za-z_][\\w.-]*:)?${childLocalName}\\b[^>]*>\\s*)(-?\\d+)(\\s*<\\/(?:[A-Za-z_][\\w.-]*:)?${childLocalName}>)`,
+  );
+  if (!re.test(parentXml)) return parentXml;
+  return parentXml.replace(re, `$1${n}$3`);
+}
+
+/**
+ * Patch an anchor `<from>` / `<to>` block inside a full anchor subtree (e.g. when
+ * preserving an unknown DrawingML anchor verbatim).
+ *
+ * No-op when the target block or expected children are not present.
+ */
+export function patchAnchorPoint(
+  xml: string,
+  which: "from" | "to",
+  point: { col: number; row: number; colOffEmu: number; rowOffEmu: number },
+): string {
+  return patchFirstBlock(xml, which, (block) => {
+    let out = block;
+    out = patchFirstChildTextInt(out, "col", point.col);
+    out = patchFirstChildTextEmu(out, "colOff", point.colOffEmu);
+    out = patchFirstChildTextInt(out, "row", point.row);
+    out = patchFirstChildTextEmu(out, "rowOff", point.rowOffEmu);
+    return out;
+  });
+}
+
+/**
+ * Patch the first `<*:pos x="…" y="…"/>` element. Intended for absoluteAnchor
+ * payloads where the full anchor subtree is preserved.
+ */
+export function patchAnchorPos(xml: string, xEmu: number, yEmu: number): string {
+  const posRe = /<(?:[A-Za-z_][\w.-]*:)?pos\b[^>]*\/?>/;
+  const m = posRe.exec(xml);
+  if (!m) return xml;
+  const tag = m[0];
+  let patched = tag;
+  patched = patchAttr(patched, "x", formatEmu(xEmu));
+  patched = patchAttr(patched, "y", formatEmu(yEmu));
+  if (patched === tag) return xml;
+  return xml.slice(0, m.index) + patched + xml.slice(m.index + tag.length);
+}
+
+/**
+ * Patch the first `<*:ext cx="…" cy="…"/>` element. Intended for oneCellAnchor /
+ * absoluteAnchor payloads where the full anchor subtree is preserved.
+ */
+export function patchAnchorExt(xml: string, cxEmu: number, cyEmu: number): string {
+  const extRe = /<(?:[A-Za-z_][\w.-]*:)?ext\b[^>]*\/?>/;
+  const m = extRe.exec(xml);
+  if (!m) return xml;
+  const tag = m[0];
+  let patched = tag;
+  patched = patchAttr(patched, "cx", formatEmu(cxEmu));
+  patched = patchAttr(patched, "cy", formatEmu(cyEmu));
+  if (patched === tag) return xml;
+  return xml.slice(0, m.index) + patched + xml.slice(m.index + tag.length);
+}
