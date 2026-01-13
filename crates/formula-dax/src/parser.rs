@@ -5,6 +5,9 @@ pub enum Expr {
     Number(f64),
     Text(String),
     Boolean(bool),
+    TableLiteral {
+        rows: Vec<Vec<Expr>>,
+    },
     TableName(String),
     Measure(String),
     Let {
@@ -48,6 +51,7 @@ pub enum BinaryOp {
     LessEquals,
     Greater,
     GreaterEquals,
+    In,
     And,
     Or,
 }
@@ -61,8 +65,11 @@ enum Token {
     Var,
     Return,
     Comma,
+    Semicolon,
     LParen,
     RParen,
+    LBrace,
+    RBrace,
     Plus,
     Minus,
     Star,
@@ -74,6 +81,7 @@ enum Token {
     LessEquals,
     Greater,
     GreaterEquals,
+    In,
     AndAnd,
     OrOr,
     Eof,
@@ -140,9 +148,21 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 Ok(Token::RParen)
             }
+            '{' => {
+                self.bump();
+                Ok(Token::LBrace)
+            }
+            '}' => {
+                self.bump();
+                Ok(Token::RBrace)
+            }
             ',' => {
                 self.bump();
                 Ok(Token::Comma)
+            }
+            ';' => {
+                self.bump();
+                Ok(Token::Semicolon)
             }
             '+' => {
                 self.bump();
@@ -283,6 +303,8 @@ impl<'a> Lexer<'a> {
                     Ok(Token::Var)
                 } else if ident.eq_ignore_ascii_case("RETURN") {
                     Ok(Token::Return)
+                } else if ident.eq_ignore_ascii_case("IN") {
+                    Ok(Token::In)
                 } else {
                     Ok(Token::Identifier(ident))
                 }
@@ -398,6 +420,7 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RParen)?;
                 Ok(expr)
             }
+            Token::LBrace => self.parse_table_literal(),
             other => Err(DaxError::Parse(format!(
                 "unexpected token in expression: {other:?}"
             ))),
@@ -431,6 +454,32 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn parse_table_literal(&mut self) -> DaxResult<Expr> {
+        self.expect(Token::LBrace)?;
+        let mut rows: Vec<Vec<Expr>> = Vec::new();
+        if self.lookahead != Token::RBrace {
+            loop {
+                let expr = self.parse_expr(0)?;
+                if matches!(expr, Expr::TableLiteral { .. }) {
+                    return Err(DaxError::Parse(
+                        "nested table constructors are not supported".into(),
+                    ));
+                }
+                rows.push(vec![expr]);
+
+                match self.lookahead {
+                    Token::Comma | Token::Semicolon => {
+                        self.bump()?;
+                        continue;
+                    }
+                    _ => break,
+                }
+            }
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::TableLiteral { rows })
+    }
+
     fn parse_ident_like(&mut self) -> DaxResult<Expr> {
         let Token::Identifier(ident) = self.bump()? else {
             unreachable!();
@@ -443,7 +492,7 @@ impl<'a> Parser<'a> {
                 if self.lookahead != Token::RParen {
                     loop {
                         args.push(self.parse_expr(0)?);
-                        if self.lookahead == Token::Comma {
+                        if matches!(self.lookahead, Token::Comma | Token::Semicolon) {
                             self.bump()?;
                             continue;
                         }
@@ -475,6 +524,7 @@ impl<'a> Parser<'a> {
             Token::LessEquals => Some((BinaryOp::LessEquals, 3)),
             Token::Greater => Some((BinaryOp::Greater, 3)),
             Token::GreaterEquals => Some((BinaryOp::GreaterEquals, 3)),
+            Token::In => Some((BinaryOp::In, 3)),
             // DAX operator precedence (higher binds tighter):
             //   * /  >  + -  >  &  >  comparisons  >  &&  >  ||
             Token::Ampersand => Some((BinaryOp::Concat, 4)),

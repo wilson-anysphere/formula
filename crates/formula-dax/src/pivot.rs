@@ -610,6 +610,7 @@ fn eval_planned(expr: &PlannedExpr, agg_values: &[Value]) -> Value {
                         _ => unreachable!(),
                     })
                 }
+                BinaryOp::In => Value::Blank,
             }
         }
         PlannedExpr::Not(inner) => {
@@ -778,6 +779,7 @@ fn plan_pivot_expr(
                     right: Box::new(right),
                 }))
             }
+            BinaryOp::In => Ok(None),
         },
         Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
             "BLANK" if args.is_empty() => Ok(Some(PlannedExpr::Const(Value::Blank))),

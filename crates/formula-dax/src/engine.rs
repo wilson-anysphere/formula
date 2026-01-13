@@ -399,6 +399,9 @@ impl DaxEngine {
             Expr::Number(n) => Ok(Value::from(*n)),
             Expr::Text(s) => Ok(Value::from(s.clone())),
             Expr::Boolean(b) => Ok(Value::from(*b)),
+            Expr::TableLiteral { .. } => Err(DaxError::Type(
+                "table constructor used in scalar context".into(),
+            )),
             Expr::Measure(name) => {
                 let normalized = DataModel::normalize_measure_name(name).to_string();
                 if let Some(measure) = model.measures().get(&normalized) {
@@ -494,6 +497,21 @@ impl DaxEngine {
                     }
                 }
             }
+            Expr::BinaryOp {
+                op: BinaryOp::In,
+                left,
+                right,
+            } => {
+                let lhs = self.eval_scalar(model, left, filter, row_ctx, env)?;
+                let rhs_values =
+                    self.eval_one_column_table_literal(model, right, filter, row_ctx, env)?;
+                for candidate in rhs_values {
+                    if compare_values(&BinaryOp::Equals, &lhs, &candidate)? {
+                        return Ok(Value::Boolean(true));
+                    }
+                }
+                Ok(Value::Boolean(false))
+            }
             Expr::BinaryOp { op, left, right } => {
                 let left = self.eval_scalar(model, left, filter, row_ctx, env)?;
                 let right = self.eval_scalar(model, right, filter, row_ctx, env)?;
@@ -568,7 +586,37 @@ impl DaxEngine {
                     _ => unreachable!(),
                 }))
             }
+            BinaryOp::In => Err(DaxError::Type(
+                "IN operator is only supported with a table constructor on the right-hand side"
+                    .into(),
+            )),
         }
+    }
+
+    fn eval_one_column_table_literal(
+        &self,
+        model: &DataModel,
+        expr: &Expr,
+        filter: &FilterContext,
+        row_ctx: &RowContext,
+        env: &mut VarEnv,
+    ) -> DaxResult<Vec<Value>> {
+        let Expr::TableLiteral { rows } = expr else {
+            return Err(DaxError::Type(format!(
+                "expected a one-column table constructor, got {expr:?}"
+            )));
+        };
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let [cell] = row.as_slice() else {
+                return Err(DaxError::Type(
+                    "only one-column table constructors are supported".into(),
+                ));
+            };
+            out.push(self.eval_scalar(model, cell, filter, row_ctx, env)?);
+        }
+        Ok(out)
     }
 
     fn eval_call_scalar(
@@ -2083,14 +2131,24 @@ impl DaxEngine {
                         ));
                     };
 
-                    let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
                     let key = (table.clone(), column.clone());
                     if !keep_filters {
                         clear_columns.insert(key.clone());
                     }
 
                     match op {
+                        BinaryOp::In => {
+                            let values = self.eval_one_column_table_literal(
+                                model,
+                                right,
+                                &eval_filter,
+                                row_ctx,
+                                env,
+                            )?;
+                            column_filters.push((key, values.into_iter().collect()));
+                        }
                         BinaryOp::Equals => {
+                            let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
                             column_filters.push((key, HashSet::from([rhs])));
                         }
                         BinaryOp::NotEquals
@@ -2098,6 +2156,7 @@ impl DaxEngine {
                         | BinaryOp::LessEquals
                         | BinaryOp::Greater
                         | BinaryOp::GreaterEquals => {
+                            let rhs = self.eval_scalar(model, right, &eval_filter, row_ctx, env)?;
                             let mut base_filter = eval_filter.clone();
                             base_filter.column_filters.remove(&key);
                             let candidate_rows = resolve_table_rows(model, &base_filter, table)?;

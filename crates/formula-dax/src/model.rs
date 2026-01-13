@@ -1668,6 +1668,13 @@ impl DataModel {
                 self.collect_same_table_column_dependencies_inner(left, current_table, out);
                 self.collect_same_table_column_dependencies_inner(right, current_table, out);
             }
+            Expr::TableLiteral { rows } => {
+                for row in rows {
+                    for cell in row {
+                        self.collect_same_table_column_dependencies_inner(cell, current_table, out);
+                    }
+                }
+            }
             Expr::Number(_) | Expr::Text(_) | Expr::Boolean(_) | Expr::TableName(_) => {}
         }
     }
