@@ -141,3 +141,85 @@ fn standard_verify_key_accepts_correct_key_and_rejects_incorrect_key() {
     );
 }
 
+#[test]
+fn standard_derive_key_rejects_non_sha1_alg_id_hash() {
+    let info = StandardEncryptionInfo {
+        header: StandardEncryptionHeader {
+            flags: 0,
+            size_extra: 0,
+            alg_id: 0x0000_660E,
+            alg_id_hash: 0, // not CALG_SHA1
+            key_size_bits: 128,
+            provider_type: 0x0000_0018, // PROV_RSA_AES
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: String::new(),
+        },
+        verifier: StandardEncryptionVerifier {
+            salt: SALT.to_vec(),
+            encrypted_verifier: [0u8; 16],
+            verifier_hash_size: 20,
+            encrypted_verifier_hash: vec![0u8; 32],
+        },
+    };
+
+    let err = standard_derive_key(&info, PASSWORD).unwrap_err();
+    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0));
+}
+
+#[test]
+fn standard_derive_key_rejects_key_size_mismatch() {
+    let info = StandardEncryptionInfo {
+        header: StandardEncryptionHeader {
+            flags: 0,
+            size_extra: 0,
+            alg_id: 0x0000_660E,
+            alg_id_hash: 0x0000_8004, // CALG_SHA1
+            key_size_bits: 256,       // mismatched
+            provider_type: 0x0000_0018, // PROV_RSA_AES
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: String::new(),
+        },
+        verifier: StandardEncryptionVerifier {
+            salt: SALT.to_vec(),
+            encrypted_verifier: [0u8; 16],
+            verifier_hash_size: 20,
+            encrypted_verifier_hash: vec![0u8; 32],
+        },
+    };
+
+    let err = standard_derive_key(&info, PASSWORD).unwrap_err();
+    assert_eq!(err, OffcryptoError::UnsupportedAlgorithm(0x0000_660E));
+}
+
+#[test]
+fn standard_verify_key_rejects_invalid_salt_len() {
+    let info = StandardEncryptionInfo {
+        header: StandardEncryptionHeader {
+            flags: 0,
+            size_extra: 0,
+            alg_id: 0x0000_660E,
+            alg_id_hash: 0x0000_8004, // CALG_SHA1
+            key_size_bits: 128,
+            provider_type: 0x0000_0018, // PROV_RSA_AES
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: String::new(),
+        },
+        verifier: StandardEncryptionVerifier {
+            salt: vec![0u8; 15],
+            encrypted_verifier: [0u8; 16],
+            verifier_hash_size: 20,
+            encrypted_verifier_hash: vec![0u8; 32],
+        },
+    };
+
+    let err = standard_verify_key(&info, &[0u8; 16]).unwrap_err();
+    assert_eq!(
+        err,
+        OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionVerifier.saltSize must be 16 for Standard encryption"
+        }
+    );
+}
