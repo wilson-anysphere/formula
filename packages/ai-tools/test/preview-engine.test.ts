@@ -77,6 +77,10 @@ describe("PreviewEngine", () => {
 
     expect(preview.requires_approval).toBe(true);
     expect(preview.approval_reasons).toContain("External data access requested");
+    expect(preview.tool_results[0]?.ok).toBe(true);
+    expect(preview.tool_results[0]?.tool).toBe("fetch_external_data");
+    expect(preview.tool_results[0]?.warnings).toEqual(["fetch_external_data skipped during preview"]);
+    expect(preview.warnings).toEqual([]);
   });
 
   it("never performs network access during preview, even when executor options enable it", async () => {
@@ -105,8 +109,12 @@ describe("PreviewEngine", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(preview.requires_approval).toBe(true);
-    expect(preview.tool_results[0]?.ok).toBe(false);
-    expect(preview.tool_results[0]?.error?.code).toBe("permission_denied");
+    expect(preview.approval_reasons).toContain("External data access requested");
+    expect(preview.approval_reasons).not.toContain("Tool execution warnings");
+    expect(preview.tool_results[0]?.ok).toBe(true);
+    expect(preview.tool_results[0]?.tool).toBe("fetch_external_data");
+    expect(preview.tool_results[0]?.warnings).toEqual(["fetch_external_data skipped during preview"]);
+    expect(preview.warnings).toEqual([]);
   });
 
   it("supports create_chart previews when the SpreadsheetApi exposes createChart", async () => {

@@ -57,8 +57,10 @@ export class PreviewEngine {
     const before = spreadsheet.clone();
     const simulated = spreadsheet.clone();
 
-    // Hard-disable external data fetches during preview to avoid side effects.
-    const executor = new ToolExecutor(simulated, { ...executorOptions, allow_external_data: false });
+    // Hard-disable external data fetches during preview to avoid side effects. When a plan
+    // requests external data, ToolExecutor runs in `preview_mode` so `fetch_external_data`
+    // returns a "skipped" result instead of surfacing a misleading permission error.
+    const executor = new ToolExecutor(simulated, { ...executorOptions, allow_external_data: false, preview_mode: true });
     const toolResults = await executor.executePlan(toolCalls);
 
     const changes = diffSpreadsheets(before, simulated);

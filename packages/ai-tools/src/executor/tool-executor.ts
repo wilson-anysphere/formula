@@ -154,6 +154,14 @@ export interface ToolExecutorOptions {
     getSheetNameById(id: string): string | null;
   } | null;
   allow_external_data?: boolean;
+  /**
+   * When true, ToolExecutor should behave as if it is running in a side-effect-free
+   * preview/simulation environment.
+   *
+   * Preview mode MUST NOT perform network access or mutate the provided SpreadsheetApi.
+   * Instead, tools should return deterministic "skipped" results where appropriate.
+   */
+  preview_mode?: boolean;
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
   /**
@@ -300,6 +308,7 @@ export class ToolExecutor {
       default_sheet: canonicalDefaultSheet || "Sheet1",
       sheet_name_resolver: sheetNameResolver,
       allow_external_data: options.allow_external_data ?? false,
+      preview_mode: options.preview_mode ?? false,
       allowed_external_hosts: (options.allowed_external_hosts ?? [])
         .map((host) => String(host).trim().toLowerCase())
         .filter((host) => host.length > 0),
@@ -376,12 +385,13 @@ export class ToolExecutor {
     const startedAt = nowMs();
     try {
       const validated = validateToolCall(call);
-      const data = await this.executeValidated(validated);
+      const { data, warnings } = await this.executeValidated(validated);
       return {
         tool: validated.name,
         ok: true,
         timing: { started_at_ms: startedAt, duration_ms: nowMs() - startedAt },
-        ...(data ? { data } : {})
+        ...(data !== undefined ? { data } : {}),
+        ...(warnings && warnings.length > 0 ? { warnings } : {})
       } as ToolExecutionResult;
     } catch (error) {
       const tool = ToolNameOrUnknown(call.name);
@@ -402,30 +412,32 @@ export class ToolExecutor {
     return results;
   }
 
-  private async executeValidated(call: ToolCall): Promise<ToolResultDataByName[ToolName]> {
+  private async executeValidated(
+    call: ToolCall
+  ): Promise<{ data?: ToolResultDataByName[ToolName]; warnings?: string[] }> {
     switch (call.name) {
       case "read_range":
-        return this.readRange(call.parameters);
+        return { data: this.readRange(call.parameters) };
       case "write_cell":
-        return this.writeCell(call.parameters);
+        return { data: this.writeCell(call.parameters) };
       case "set_range":
-        return this.setRange(call.parameters);
+        return { data: this.setRange(call.parameters) };
       case "apply_formula_column":
-        return this.applyFormulaColumn(call.parameters);
+        return { data: this.applyFormulaColumn(call.parameters) };
       case "create_pivot_table":
-        return this.createPivotTable(call.parameters);
+        return { data: this.createPivotTable(call.parameters) };
       case "create_chart":
-        return this.createChart(call.parameters);
+        return { data: this.createChart(call.parameters) };
       case "sort_range":
-        return this.sortRange(call.parameters);
+        return { data: this.sortRange(call.parameters) };
       case "filter_range":
-        return this.filterRange(call.parameters);
+        return { data: this.filterRange(call.parameters) };
       case "apply_formatting":
-        return this.applyFormatting(call.parameters);
+        return { data: this.applyFormatting(call.parameters) };
       case "detect_anomalies":
-        return this.detectAnomalies(call.parameters);
+        return { data: this.detectAnomalies(call.parameters) };
       case "compute_statistics":
-        return this.computeStatistics(call.parameters);
+        return { data: this.computeStatistics(call.parameters) };
       case "fetch_external_data":
         return this.fetchExternalData(call.parameters);
       default: {
@@ -1518,7 +1530,28 @@ export class ToolExecutor {
     });
   }
 
-  private async fetchExternalData(params: any): Promise<ToolResultDataByName["fetch_external_data"]> {
+  private async fetchExternalData(
+    params: any
+  ): Promise<{ data: ToolResultDataByName["fetch_external_data"]; warnings?: string[] }> {
+    // PreviewEngine must never perform network access. Instead, return a deterministic
+    // stub result so previews reflect "external data requested" (approval gating) rather
+    // than a misleading "tool disabled" permission error.
+    if (this.options.preview_mode) {
+      const requestedUrl = new URL(params.url);
+      const destination = this.parseCell(params.destination, this.options.default_sheet);
+      return {
+        data: {
+          url: safeUrlForProvenance(requestedUrl),
+          destination: this.formatCellForUser(destination),
+          written_cells: 0,
+          shape: { rows: 0, cols: 0 },
+          fetched_at_ms: Date.now(),
+          status_code: 0
+        },
+        warnings: ["fetch_external_data skipped during preview"]
+      };
+    }
+
     if (!this.options.allow_external_data) {
       throw toolError("permission_denied", "fetch_external_data is disabled by default.");
     }
@@ -1629,14 +1662,16 @@ export class ToolExecutor {
         endCol: destination.col
       });
       return {
-        url: safeUrlForProvenance(currentUrl),
-        destination: this.formatCellForUser(destination),
-        written_cells: 1,
-        shape: { rows: 1, cols: 1 },
-        fetched_at_ms: fetchedAtMs,
-        content_type: contentType,
-        content_length_bytes: contentLengthBytes,
-        status_code: statusCode
+        data: {
+          url: safeUrlForProvenance(currentUrl),
+          destination: this.formatCellForUser(destination),
+          written_cells: 1,
+          shape: { rows: 1, cols: 1 },
+          fetched_at_ms: fetchedAtMs,
+          content_type: contentType,
+          content_length_bytes: contentLengthBytes,
+          status_code: statusCode
+        }
       };
     }
 
@@ -1656,14 +1691,16 @@ export class ToolExecutor {
     this.refreshPivotsForRange(range);
 
     return {
-      url: safeUrlForProvenance(currentUrl),
-      destination: this.formatCellForUser(destination),
-      written_cells: table.length * (table[0]?.length ?? 0),
-      shape: { rows: table.length, cols: table[0]?.length ?? 0 },
-      fetched_at_ms: fetchedAtMs,
-      content_type: contentType,
-      content_length_bytes: contentLengthBytes,
-      status_code: statusCode
+      data: {
+        url: safeUrlForProvenance(currentUrl),
+        destination: this.formatCellForUser(destination),
+        written_cells: table.length * (table[0]?.length ?? 0),
+        shape: { rows: table.length, cols: table[0]?.length ?? 0 },
+        fetched_at_ms: fetchedAtMs,
+        content_type: contentType,
+        content_length_bytes: contentLengthBytes,
+        status_code: statusCode
+      }
     };
   }
 
