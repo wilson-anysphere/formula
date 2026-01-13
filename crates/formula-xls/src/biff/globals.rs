@@ -1545,6 +1545,13 @@ fn parse_biff_palette_record(data: &[u8]) -> Option<Vec<u32>> {
         return None;
     }
     let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+    // `PALETTE` payload is `[ccv: u16]` followed by repeated `LongRGB` entries (4 bytes each).
+    //
+    // Cap the allocation based on the actual number of bytes available to avoid allocating large
+    // vectors for corrupt/truncated records where `ccv` does not match the payload length.
+    let max_colors = (data.len().saturating_sub(2)) / 4;
+    let count = count.min(max_colors);
+
     let mut out = Vec::with_capacity(count);
     let mut offset = 2usize;
     for _ in 0..count {
@@ -2582,5 +2589,17 @@ mod tests {
             "expected external-supbook warning, got {:?}",
             globals.warnings
         );
+    }
+
+    #[test]
+    fn palette_count_is_capped_by_available_bytes() {
+        // Declares 1000 colors but only provides a single `LongRGB` entry (4 bytes).
+        let mut data = Vec::new();
+        data.extend_from_slice(&1000u16.to_le_bytes());
+        data.extend_from_slice(&[0x10, 0x20, 0x30, 0x00]);
+
+        let palette = parse_biff_palette_record(&data).expect("palette");
+        assert_eq!(palette.len(), 1);
+        assert_eq!(palette[0], 0xFF102030);
     }
 }
