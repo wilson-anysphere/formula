@@ -111,6 +111,7 @@ import { EncryptedRangeManager } from "../collab/encryption-ui/encryptedRangeMan
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
+import { ImageBitmapCache } from "../drawings/imageBitmapCache";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
@@ -672,6 +673,12 @@ export class SpreadsheetApp {
   private readonly commentThreadsByCellRef = new Map<string, Comment[]>();
   private sharedGridSelectionSyncInProgress = false;
   private sharedGridZoom = 1;
+
+  private readonly workbookImageBitmaps = new ImageBitmapCache();
+  private readonly sheetBackgroundImageIdBySheet = new Map<string, string | null>();
+  private activeSheetBackgroundImageId: string | null = null;
+  private activeSheetBackgroundBitmap: ImageBitmap | null = null;
+  private activeSheetBackgroundLoadToken = 0;
 
   private wasmEngine: EngineClient | null = null;
   private wasmSyncSuspended = false;
@@ -3393,6 +3400,49 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Update the in-memory workbook image store.
+   *
+   * This is currently used by:
+   * - in-cell images (shared-grid mode via `CanvasGridImageResolver`)
+   * - worksheet background images (tiled pattern behind the grid)
+   *
+   * Note: this is currently an app-local store (not persisted in DocumentController snapshots).
+   */
+  setWorkbookImages(images: ImageEntry[]): void {
+    this.imageStore.clear();
+    for (const entry of images) {
+      if (!entry?.id) continue;
+      this.imageStore.set(entry.id, { bytes: entry.bytes, mimeType: entry.mimeType });
+    }
+
+    // Image bytes may have changed; invalidate decoded bitmaps.
+    this.workbookImageBitmaps.clear();
+    // Force a reload even when the active sheet points at the same image id.
+    this.activeSheetBackgroundImageId = null;
+    this.activeSheetBackgroundBitmap = null;
+    this.syncActiveSheetBackgroundImage();
+  }
+
+  /**
+   * Set (or clear) a sheet-level tiled background image.
+   */
+  setSheetBackgroundImageId(sheetId: string, imageId: string | null): void {
+    const key = String(sheetId ?? "").trim();
+    if (!key) return;
+    const normalized = imageId ? String(imageId).trim() : null;
+    this.sheetBackgroundImageIdBySheet.set(key, normalized || null);
+    if (key === this.sheetId) {
+      this.syncActiveSheetBackgroundImage();
+    }
+  }
+
+  getSheetBackgroundImageId(sheetId: string): string | null {
+    const key = String(sheetId ?? "").trim();
+    if (!key) return null;
+    return this.sheetBackgroundImageIdBySheet.get(key) ?? null;
+  }
+
+  /**
    * Resolve a sheet display name (as written in formula text) to a stable sheet id.
    *
    * Matching is case-insensitive. When provided, the app's `sheetNameResolver`
@@ -3631,6 +3681,61 @@ export class SpreadsheetApp {
     this.refresh();
   }
 
+  private syncActiveSheetBackgroundImage(): void {
+    const desiredId = this.sheetBackgroundImageIdBySheet.get(this.sheetId) ?? null;
+    if (desiredId === this.activeSheetBackgroundImageId && this.activeSheetBackgroundBitmap) {
+      return;
+    }
+
+    // If the background id changed, clear current state and repaint immediately so stale
+    // patterns disappear (even if the new image is still decoding).
+    if (desiredId !== this.activeSheetBackgroundImageId) {
+      this.activeSheetBackgroundImageId = desiredId;
+      this.activeSheetBackgroundBitmap = null;
+      this.activeSheetBackgroundLoadToken += 1;
+      if (this.sharedGrid) {
+        this.sharedGrid.renderer.setBackgroundPatternImage(null);
+      } else {
+        this.refresh();
+      }
+    }
+
+    if (!desiredId) return;
+
+    const stored = this.imageStore.get(desiredId);
+    if (!stored) return;
+    const entry: ImageEntry = { id: desiredId, bytes: stored.bytes, mimeType: stored.mimeType };
+
+    const token = ++this.activeSheetBackgroundLoadToken;
+    const promise = this.workbookImageBitmaps
+      .get(entry)
+      .then((bitmap) => {
+        if (this.disposed) return;
+        if (token !== this.activeSheetBackgroundLoadToken) return;
+        if (this.activeSheetBackgroundImageId !== desiredId) return;
+        this.activeSheetBackgroundBitmap = bitmap;
+        if (this.sharedGrid) {
+          this.sharedGrid.renderer.setBackgroundPatternImage(bitmap);
+        } else {
+          this.refresh();
+        }
+      })
+      .catch(() => {
+        // Ignore decode failures; treat as "no background image".
+        if (token !== this.activeSheetBackgroundLoadToken) return;
+        if (this.activeSheetBackgroundImageId !== desiredId) return;
+        this.activeSheetBackgroundBitmap = null;
+        if (this.sharedGrid) {
+          this.sharedGrid.renderer.setBackgroundPatternImage(null);
+        } else {
+          this.refresh();
+        }
+      });
+
+    // Track in the idle monitor so tests can deterministically await image decode + repaint.
+    this.idle.track(promise);
+  }
+
   private syncSharedGridAxisSizesFromDocument(): void {
     if (!this.sharedGrid) return;
 
@@ -3799,6 +3904,7 @@ export class SpreadsheetApp {
         this.reindexCommentCells();
         this.chartStore.setDefaultSheet(this.sheetId);
       }
+      this.syncActiveSheetBackgroundImage();
       // In collab mode, comment indicators/tooltips are indexed per active sheet (to avoid
       // collisions between `SheetA!A1` and `SheetB!A1`). If a restore changes the active sheet
       // (or just changes the sheet list used for legacy comment fallback), ensure the comment
@@ -3983,6 +4089,7 @@ export class SpreadsheetApp {
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
     this.drawingObjectsCache = null;
+    this.syncActiveSheetBackgroundImage();
     if (this.collabMode) this.reindexCommentCells();
     const presence = this.collabSession?.presence;
     if (presence) {
@@ -4032,6 +4139,7 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
@@ -4091,6 +4199,7 @@ export class SpreadsheetApp {
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
       this.drawingObjectsCache = null;
+      this.syncActiveSheetBackgroundImage();
       if (this.collabMode) this.reindexCommentCells();
       this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
@@ -6453,6 +6562,67 @@ export class SpreadsheetApp {
 
     const startXScroll = originX + this.visibleColStart * this.cellWidth - this.scrollX;
     const startYScroll = originY + this.visibleRowStart * this.cellHeight - this.scrollY;
+
+    const backgroundBitmap = this.activeSheetBackgroundBitmap;
+    if (backgroundBitmap) {
+      const pattern = ctx.createPattern(backgroundBitmap, "repeat");
+      if (pattern) {
+        const fillPattern = (options: {
+          clipX: number;
+          clipY: number;
+          clipWidth: number;
+          clipHeight: number;
+          translateX: number;
+          translateY: number;
+        }) => {
+          const { clipX, clipY, clipWidth, clipHeight, translateX, translateY } = options;
+          if (clipWidth <= 0 || clipHeight <= 0) return;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipX, clipY, clipWidth, clipHeight);
+          ctx.clip();
+          ctx.translate(translateX, translateY);
+          ctx.fillStyle = pattern;
+          ctx.fillRect(clipX - translateX, clipY - translateY, clipWidth, clipHeight);
+          ctx.restore();
+        };
+
+        // Render beneath the cell area (not underneath row/col headers). For frozen panes, draw per quadrant
+        // so pinned regions don't scroll their background pattern.
+        fillPattern({
+          clipX: originX,
+          clipY: originY,
+          clipWidth: frozenWidth,
+          clipHeight: frozenHeight,
+          translateX: originX,
+          translateY: originY
+        });
+        fillPattern({
+          clipX: originX + frozenWidth,
+          clipY: originY,
+          clipWidth: scrollableWidth,
+          clipHeight: frozenHeight,
+          translateX: originX - this.scrollX,
+          translateY: originY
+        });
+        fillPattern({
+          clipX: originX,
+          clipY: originY + frozenHeight,
+          clipWidth: frozenWidth,
+          clipHeight: scrollableHeight,
+          translateX: originX,
+          translateY: originY - this.scrollY
+        });
+        fillPattern({
+          clipX: originX + frozenWidth,
+          clipY: originY + frozenHeight,
+          clipWidth: scrollableWidth,
+          clipHeight: scrollableHeight,
+          translateX: originX - this.scrollX,
+          translateY: originY - this.scrollY
+        });
+      }
+    }
 
     ctx.strokeStyle = resolveCssVar("--formula-grid-line", { fallback: resolveCssVar("--grid-line", { fallback: "CanvasText" }) });
     ctx.lineWidth = 1;

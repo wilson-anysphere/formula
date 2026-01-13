@@ -96,6 +96,12 @@ export interface CanvasGridRendererOptions {
    * Defaults to `defaultCellFontFamily` (or `"system-ui"` when unset).
    */
   defaultHeaderFontFamily?: string;
+  /**
+   * Optional tiled background image rendered behind cell fills/gridlines.
+   *
+   * Callers can update this later via `setBackgroundPatternImage()`.
+   */
+  backgroundPatternImage?: CanvasImageSource | null;
 }
 
 export type GridViewportChangeReason = "axisSize" | "frozen" | "resize" | "zoom";
@@ -181,6 +187,31 @@ function clampIndex(value: number, min: number, max: number): number {
 function resolveTextIndentPx(textIndentPx: number | undefined, zoom: number): number {
   if (typeof textIndentPx !== "number" || !Number.isFinite(textIndentPx) || textIndentPx <= 0) return 0;
   return textIndentPx * zoom;
+}
+
+function getCanvasImageSourceDimensions(source: CanvasImageSource): { width: number; height: number } | null {
+  const anySource = source as any;
+  const width =
+    typeof anySource.width === "number"
+      ? anySource.width
+      : typeof anySource.naturalWidth === "number"
+        ? anySource.naturalWidth
+        : typeof anySource.videoWidth === "number"
+          ? anySource.videoWidth
+          : null;
+  const height =
+    typeof anySource.height === "number"
+      ? anySource.height
+      : typeof anySource.naturalHeight === "number"
+        ? anySource.naturalHeight
+        : typeof anySource.videoHeight === "number"
+          ? anySource.videoHeight
+          : null;
+
+  if (typeof width !== "number" || typeof height !== "number") return null;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
 }
 
 // Keep zoom bounds aligned with the desktop layout pane zoom clamp so the app can
@@ -508,6 +539,15 @@ export class CanvasGridRenderer {
   private presenceFont: string;
   private theme: GridTheme;
 
+  // Optional worksheet-level background pattern (tiled) rendered behind cell fills.
+  //
+  // This is intentionally *not* part of GridTheme because:
+  // - the theme is serializable CSS colors only
+  // - the background image is workbook data, not a styling token
+  private backgroundPatternImage: CanvasImageSource | null = null;
+  private backgroundPatternTile: HTMLCanvasElement | null = null;
+  private backgroundPatternTileKey: { image: CanvasImageSource; zoom: number } | null = null;
+
   private readonly perfStats: GridPerfStats = {
     enabled: false,
     lastFrameMs: 0,
@@ -605,6 +645,7 @@ export class CanvasGridRenderer {
     this.defaultHeaderFontFamily = sanitizeFontFamily(options.defaultHeaderFontFamily) ?? defaultCellFontFamily;
     this.presenceFont = `${12 * this.zoom}px ${this.defaultHeaderFontFamily}, sans-serif`;
 
+    this.backgroundPatternImage = options.backgroundPatternImage ?? null;
     this.baseDefaultRowHeight = options.defaultRowHeight ?? 21;
     this.baseDefaultColWidth = options.defaultColWidth ?? 100;
     this.scroll = new VirtualScrollManager({
@@ -680,6 +721,21 @@ export class CanvasGridRenderer {
   }
 
   /**
+   * Update the optional worksheet-level tiled background image rendered behind cell fills.
+   *
+   * The background is painted on the grid/background layer and clipped so it does not render
+   * underneath header rows/cols.
+   */
+  setBackgroundPatternImage(image: CanvasImageSource | null): void {
+    const next = image ?? null;
+    if (next === this.backgroundPatternImage) return;
+    this.backgroundPatternImage = next;
+    this.backgroundPatternTile = null;
+    this.backgroundPatternTileKey = null;
+    this.markAllDirty();
+  }
+
+  /**
    * Configure the number of header rows/cols for styling.
    *
    * - When set (including `0`), header styling is determined solely by these counts.
@@ -707,6 +763,42 @@ export class CanvasGridRenderer {
     if (this.gridCtx) {
       this.markAllDirty();
     }
+  }
+
+  private getBackgroundPatternTile(): HTMLCanvasElement | null {
+    const image = this.backgroundPatternImage;
+    if (!image) return null;
+
+    const zoom = this.zoom;
+    const key = this.backgroundPatternTileKey;
+    if (key && key.image === image && key.zoom === zoom && this.backgroundPatternTile) {
+      return this.backgroundPatternTile;
+    }
+
+    const dims = getCanvasImageSourceDimensions(image);
+    if (!dims) return null;
+
+    const width = Math.max(1, Math.round(dims.width * zoom));
+    const height = Math.max(1, Math.round(dims.height * zoom));
+
+    const tile = document.createElement("canvas");
+    tile.width = width;
+    tile.height = height;
+
+    const ctx = tile.getContext("2d");
+    if (!ctx) return null;
+    // Background images look better with smoothing when zoomed/scaled; keep this separate
+    // from the grid layer's `imageSmoothingEnabled=false` setting.
+    ctx.imageSmoothingEnabled = true;
+    try {
+      ctx.drawImage(image, 0, 0, width, height);
+    } catch {
+      return null;
+    }
+
+    this.backgroundPatternTile = tile;
+    this.backgroundPatternTileKey = { image, zoom };
+    return tile;
   }
 
   getZoom(): number {
@@ -2743,6 +2835,14 @@ export class CanvasGridRenderer {
     const gridCtx = this.gridCtx;
     const contentCtx = this.contentCtx;
 
+    const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
+    const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
+    const dataOriginXSheet = headerCols > 0 ? this.scroll.cols.positionOf(headerCols) : 0;
+    const dataOriginYSheet = headerRows > 0 ? this.scroll.rows.positionOf(headerRows) : 0;
+
+    const backgroundTile = this.getBackgroundPatternTile();
+    const backgroundPattern = backgroundTile ? gridCtx.createPattern(backgroundTile, "repeat") : null;
+
     for (const quadrant of quadrants) {
       if (quadrant.rect.width <= 0 || quadrant.rect.height <= 0) continue;
       if (quadrant.maxRowExclusive <= quadrant.minRow || quadrant.maxColExclusive <= quadrant.minCol) continue;
@@ -2796,8 +2896,25 @@ export class CanvasGridRenderer {
       contentCtx.rect(intersection.x, intersection.y, intersection.width, intersection.height);
       contentCtx.clip();
 
-      const headerRows = this.headerRowsOverride ?? (viewport.frozenRows > 0 ? 1 : 0);
-      const headerCols = this.headerColsOverride ?? (viewport.frozenCols > 0 ? 1 : 0);
+      if (backgroundPattern) {
+        const bodyX = Math.max(intersection.x, quadrant.originX + (dataOriginXSheet - quadrant.scrollBaseX));
+        const bodyY = Math.max(intersection.y, quadrant.originY + (dataOriginYSheet - quadrant.scrollBaseY));
+        const bodyW = intersection.x + intersection.width - bodyX;
+        const bodyH = intersection.y + intersection.height - bodyY;
+        if (bodyW > 0 && bodyH > 0) {
+          // Align the pattern to the sheet data origin (A1), excluding header rows/cols.
+          // We shift the pattern by applying a translate, then offsetting the draw rect
+          // back so the filled pixels land in the same viewport rect.
+          const tx = quadrant.originX + dataOriginXSheet - quadrant.scrollBaseX;
+          const ty = quadrant.originY + dataOriginYSheet - quadrant.scrollBaseY;
+          gridCtx.save();
+          gridCtx.translate(tx, ty);
+          gridCtx.fillStyle = backgroundPattern;
+          gridCtx.fillRect(bodyX - tx, bodyY - ty, bodyW, bodyH);
+          gridCtx.restore();
+        }
+      }
+
       this.renderGridQuadrant(
         quadrant,
         mergedIndex,
@@ -2844,6 +2961,7 @@ export class CanvasGridRenderer {
     const contentCtx = this.contentCtx;
     const theme = this.theme;
     const gridBg = theme.gridBg;
+    const hasBackgroundPattern = this.backgroundPatternImage !== null;
     const textColor = theme.cellText;
     const headerBg = theme.headerBg;
     const headerTextColor = theme.headerText;
@@ -4149,7 +4267,7 @@ export class CanvasGridRenderer {
       }
 
       const fill = anchorStyle?.fill ?? (isHeader ? headerBg : undefined);
-      const fillToDraw = fill && fill !== gridBg ? fill : null;
+      const fillToDraw = fill && (fill !== gridBg || (hasBackgroundPattern && !isHeader)) ? fill : null;
       if (fillToDraw) {
         if (fillToDraw !== currentGridFill) {
           gridCtx.fillStyle = fillToDraw;
@@ -4218,7 +4336,7 @@ export class CanvasGridRenderer {
 
         // Background fill (grid layer).
         const fill = style?.fill ?? (isHeader ? headerBg : undefined);
-        const fillToDraw = fill && fill !== gridBg ? fill : null;
+        const fillToDraw = fill && (fill !== gridBg || (hasBackgroundPattern && !isHeader)) ? fill : null;
         if (fillToDraw) {
           if (fillToDraw !== fillRunColor) {
             if (fillRunColor && fillRunWidth > 0) {

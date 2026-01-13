@@ -10,6 +10,10 @@ export type StoredImage = { bytes: Uint8Array; mimeType: string };
 export class DesktopImageStore {
   private readonly images = new Map<string, StoredImage>();
 
+  clear(): void {
+    this.images.clear();
+  }
+
   set(imageId: string, entry: StoredImage): void {
     this.images.set(String(imageId), entry);
   }
@@ -29,4 +33,3 @@ export class DesktopImageStore {
     }
   }
 }
-
