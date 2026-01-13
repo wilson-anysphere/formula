@@ -1130,17 +1130,24 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    # Expected output includes both: x86_64 arm64
    ```
 
-   If you only have a `.dmg`, mount it and inspect the `.app` inside:
+    If you only have a `.dmg`, mount it and inspect the `.app` inside:
 
-   ```bash
-   dmg="$(ls *.dmg | head -n 1)"
-   mnt="$(mktemp -d)"
-   hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
-   lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
-   hdiutil detach "$mnt"
-   ```
+    ```bash
+    dmg="$(ls *.dmg | head -n 1)"
+    mnt="$(mktemp -d)"
+    hdiutil attach "$dmg" -nobrowse -mountpoint "$mnt"
+    lipo -info "$mnt/Formula.app/Contents/MacOS/formula-desktop"
+    hdiutil detach "$mnt"
+    ```
 
-   ### Windows: confirm x64 vs arm64 + signatures (if enabled)
+    Tip: on macOS, you can run the repo helper to validate the DMG (and the `.app.tar.gz` updater
+    payload if present), including a universal `lipo` check:
+
+    ```bash
+    bash scripts/validate-macos-bundle.sh --dmg "$dmg"
+    ```
+
+    ### Windows: confirm x64 vs arm64 + signatures (if enabled)
 
    Check the machine type of the installed/bundled executable using `dumpbin` (Visual Studio tools):
 

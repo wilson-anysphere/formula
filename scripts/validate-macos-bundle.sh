@@ -6,6 +6,7 @@
 # - Missing `.dmg` artifacts
 # - DMG does not contain the expected `.app`
 # - Missing/incorrect Info.plist metadata (URL scheme, file associations)
+# - Missing universal binary slices (Intel + Apple Silicon)
 # - Invalid code signing / Gatekeeper assessment when signing is enabled
 # - Missing stapled notarization tickets when notarization is configured
 #
@@ -291,6 +292,82 @@ PY
   fi
 }
 
+plist_get_string() {
+  local plist_path="$1"
+  local key="$2"
+  [ -f "$plist_path" ] || return 1
+
+  local out
+  set +e
+  out="$(
+    python3 - "$plist_path" "$key" <<'PY'
+import plistlib
+import sys
+
+plist_path = sys.argv[1]
+key = sys.argv[2]
+try:
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+except Exception as e:
+    print(str(e))
+    raise SystemExit(2)
+
+val = data.get(key)
+if isinstance(val, str) and val.strip():
+    print(val.strip())
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+  )"
+  local status=$?
+  set -e
+
+  if [ "$status" -eq 2 ]; then
+    die "failed to parse Info.plist at ${plist_path}: ${out}"
+  elif [ "$status" -ne 0 ] || [ -z "$out" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$out"
+}
+
+validate_universal_binary() {
+  local app_path="$1"
+  local plist_path="${app_path}/Contents/Info.plist"
+  [ -f "$plist_path" ] || die "missing Contents/Info.plist in app bundle: $app_path"
+
+  command -v lipo >/dev/null || die "lipo not found (required to validate macOS universal binaries)"
+
+  local exe_name=""
+  exe_name="$(plist_get_string "$plist_path" "CFBundleExecutable" 2>/dev/null || true)"
+  if [ -z "$exe_name" ]; then
+    exe_name="formula-desktop"
+  fi
+
+  local macos_dir="${app_path}/Contents/MacOS"
+  [ -d "$macos_dir" ] || die "missing Contents/MacOS in app bundle: $app_path"
+
+  local bin_path="${macos_dir}/${exe_name}"
+  if [ ! -f "$bin_path" ]; then
+    # Fall back to the first executable file under Contents/MacOS (avoid non-binaries).
+    bin_path="$(find "$macos_dir" -maxdepth 1 -type f -perm -0100 -print | head -n 1 || true)"
+  fi
+  if [ -z "$bin_path" ] || [ ! -f "$bin_path" ]; then
+    die "could not locate app executable under ${macos_dir} (CFBundleExecutable=${exe_name})"
+  fi
+
+  echo "bundle: validating universal slices with lipo: ${bin_path}"
+  local info
+  if ! info="$(lipo -info "$bin_path" 2>&1)"; then
+    die "lipo failed on ${bin_path}: ${info}"
+  fi
+  echo "$info"
+  echo "$info" | grep -qw "x86_64" || die "macOS binary is missing x86_64 slice: ${bin_path}"
+  echo "$info" | grep -qw "arm64" || die "macOS binary is missing arm64 slice: ${bin_path}"
+}
+
 validate_app_bundle() {
   local app_path="$1"
 
@@ -304,6 +381,8 @@ validate_app_bundle() {
 
   validate_plist_file_associations "$plist_path" "xlsx" "xls" "csv"
   echo "bundle: Info.plist OK (file associations include .xlsx)"
+
+  validate_universal_binary "$app_path"
 
   validate_codesign "$app_path"
   validate_app_notarization "$app_path"
