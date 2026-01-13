@@ -1,5 +1,7 @@
 # Canonical	Localized
 # Source: Microsoft Excel function translation tables (fr-FR).
+# See `src/locale/data/README.md` for format + generators.
+
 ABS	ABS
 ACCRINT	ACCRINT
 ACCRINTM	ACCRINTM
