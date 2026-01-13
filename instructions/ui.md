@@ -35,6 +35,7 @@ Build the presentation layer: canvas-based grid renderer, formula bar, command p
 - **Primary:** [`docs/03-rendering-ui.md`](../docs/03-rendering-ui.md) — canvas rendering, virtualization, overlays
 - **UX Design:** [`docs/12-ux-design.md`](../docs/12-ux-design.md) — interface design, keyboard shortcuts
 - **Ribbon wiring:** [`docs/21-ribbon-commands.md`](../docs/21-ribbon-commands.md) — ribbon schema ids, CommandRegistry, keybindings, and keybinding barriers
+- **Pivot UX + ownership boundaries:** [`docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md`](../docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md)
 
 ### Design Reference
 
