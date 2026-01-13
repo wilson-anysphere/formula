@@ -317,11 +317,15 @@ export class YjsBranchStore {
     if (this.#payloadEncoding !== "json" && this.#payloadEncoding !== "gzip-chunks") {
       throw new Error(`YjsBranchStore: invalid payloadEncoding: ${String(this.#payloadEncoding)}`);
     }
-    if (!Number.isFinite(this.#chunkSize) || this.#chunkSize <= 0) {
-      throw new Error("YjsBranchStore: chunkSize must be > 0");
+    if (!Number.isFinite(this.#chunkSize) || !Number.isSafeInteger(this.#chunkSize) || this.#chunkSize <= 0) {
+      throw new Error("YjsBranchStore: chunkSize must be a positive integer");
     }
-    if (!Number.isFinite(this.#maxChunksPerTransaction) || this.#maxChunksPerTransaction <= 0) {
-      throw new Error("YjsBranchStore: maxChunksPerTransaction must be > 0");
+    if (
+      !Number.isFinite(this.#maxChunksPerTransaction) ||
+      !Number.isSafeInteger(this.#maxChunksPerTransaction) ||
+      this.#maxChunksPerTransaction <= 0
+    ) {
+      throw new Error("YjsBranchStore: maxChunksPerTransaction must be a positive integer");
     }
   }
 
