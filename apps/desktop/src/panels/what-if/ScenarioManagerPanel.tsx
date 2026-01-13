@@ -217,7 +217,7 @@ export function ScenarioManagerPanel({ api }: ScenarioManagerPanelProps) {
               <tbody>
                 {Object.entries(report.results).map(([scenarioName, row]) => (
                   <tr key={scenarioName}>
-                    <td>{scenarioName}</td>
+                    <th scope="row">{scenarioName}</th>
                     {report.resultCells.map((cell) => (
                       <td key={cell}>{formatWhatIfCellValue(row[cell])}</td>
                     ))}

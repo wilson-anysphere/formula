@@ -191,7 +191,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         ) : null}
 
         {progress ? (
-          <div className="what-if__mono-block" role="status" data-testid="goal-seek-progress">
+          <div className="what-if__message what-if__mono-block" role="status" data-testid="goal-seek-progress">
             <div>
               {t("whatIf.goalSeek.progress.iteration")}: {progress.iteration}
             </div>
@@ -208,9 +208,9 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         ) : null}
 
         {result ? (
-          <div data-testid="goal-seek-result">
+          <div className="what-if__section" data-testid="goal-seek-result">
             <h4 className="what-if__section-title">{t("whatIf.goalSeek.result.title")}</h4>
-            <div className="what-if__mono-block">
+            <div className="what-if__message what-if__mono-block">
               <div>
                 {t("whatIf.goalSeek.result.status")}: {t(`whatIf.goalSeek.status.${result.status}`)}
               </div>
