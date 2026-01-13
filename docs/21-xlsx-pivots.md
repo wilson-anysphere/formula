@@ -30,7 +30,7 @@ In this doc:
 - **Pivot tables** live under `xl/pivotTables/pivotTable*.xml` and are attached to worksheets via
   `xl/worksheets/_rels/sheetN.xml.rels` relationships (`…/pivotTable`) and/or `<pivotTables>` blocks
   in `xl/worksheets/sheetN.xml`.
-- **Pivot caches** typically live under:
+- **Pivot caches** (OpenXML PivotCaches, per ADR-0005 terminology) typically live under:
   - `xl/pivotCache/pivotCacheDefinition*.xml`
   - `xl/pivotCache/pivotCacheRecords*.xml`
   and are wired from `xl/workbook.xml` via `<pivotCaches>` + `xl/_rels/workbook.xml.rels`
