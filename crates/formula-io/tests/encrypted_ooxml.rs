@@ -10,13 +10,13 @@ fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
 }
 
-fn encrypted_ooxml_bytes() -> Vec<u8> {
+fn encrypted_ooxml_bytes_with_stream_names(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
         let mut stream = ole
-            .create_stream("EncryptionInfo")
-            .expect("create EncryptionInfo stream");
+            .create_stream(encryption_info)
+            .unwrap_or_else(|_| panic!("create {encryption_info} stream"));
         // Minimal EncryptionInfo header:
         // - VersionMajor = 4
         // - VersionMinor = 4 (Agile encryption)
@@ -25,8 +25,8 @@ fn encrypted_ooxml_bytes() -> Vec<u8> {
             .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
             .expect("write EncryptionInfo header");
     }
-    ole.create_stream("EncryptedPackage")
-        .expect("create EncryptedPackage stream");
+    ole.create_stream(encrypted_package)
+        .unwrap_or_else(|_| panic!("create {encrypted_package} stream"));
     ole.into_inner().into_inner()
 }
 
@@ -34,86 +34,92 @@ fn encrypted_ooxml_bytes() -> Vec<u8> {
 fn detects_encrypted_ooxml_xlsx_container() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
-    let bytes = encrypted_ooxml_bytes();
+    for (info_stream, package_stream) in [
+        ("EncryptionInfo", "EncryptedPackage"),
+        ("encryptioninfo", "encryptedpackage"),
+        ("/encryptioninfo", "/encryptedpackage"),
+    ] {
+        let bytes = encrypted_ooxml_bytes_with_stream_names(info_stream, package_stream);
 
-    // Test both correct and incorrect extensions to ensure content sniffing detects encryption
-    // before attempting to open as legacy BIFF.
-    for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
-        let path = tmp.path().join(filename);
-        std::fs::write(&path, &bytes).expect("write encrypted fixture");
+        // Test both correct and incorrect extensions to ensure content sniffing detects encryption
+        // before attempting to open as legacy BIFF.
+        for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
+            let path = tmp.path().join(filename);
+            std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-        let info = detect_workbook_encryption(&path)
-            .expect("detect encryption")
-            .expect("expected encrypted workbook to be detected");
-        assert_eq!(info.kind, WorkbookEncryptionKind::OoxmlOleEncryptedPackage);
+            let info = detect_workbook_encryption(&path)
+                .expect("detect encryption")
+                .expect("expected encrypted workbook to be detected");
+            assert_eq!(info.kind, WorkbookEncryptionKind::OoxmlOleEncryptedPackage);
 
-        let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
-        assert!(
-            matches!(err, Error::PasswordRequired { .. }),
-            "expected Error::PasswordRequired, got {err:?}"
-        );
-
-        let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
-        assert!(
-            matches!(err, Error::PasswordRequired { .. }),
-            "expected Error::PasswordRequired, got {err:?}"
-        );
-        let msg = err.to_string().to_lowercase();
-        assert!(
-            msg.contains("password") || msg.contains("encrypt"),
-            "expected error message to mention encryption/password protection, got: {msg}"
-        );
-
-        let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
-        assert!(
-            matches!(err, Error::PasswordRequired { .. }),
-            "expected Error::PasswordRequired, got {err:?}"
-        );
-
-        // Providing a password should either surface a distinct "invalid password" error (when
-        // decryption support is not enabled) or a more specific decryption/compatibility error (when
-        // `encrypted-workbooks` is enabled, because this fixture does not contain a valid encrypted
-        // payload).
-        let err = open_workbook_with_password(&path, Some("wrong"))
-            .expect_err("expected password-protected open to error");
-        if cfg!(feature = "encrypted-workbooks") {
+            let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
             assert!(
-                matches!(
-                    err,
-                    Error::UnsupportedOoxmlEncryption {
-                        version_major: 4,
-                        version_minor: 4,
-                        ..
-                    }
-                ),
-                "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
             );
-        } else {
-            assert!(
-                matches!(err, Error::InvalidPassword { .. }),
-                "expected Error::InvalidPassword, got {err:?}"
-            );
-        }
 
-        let err = open_workbook_model_with_password(&path, Some("wrong"))
-            .expect_err("expected password-protected open to error");
-        if cfg!(feature = "encrypted-workbooks") {
+            let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
             assert!(
-                matches!(
-                    err,
-                    Error::UnsupportedOoxmlEncryption {
-                        version_major: 4,
-                        version_minor: 4,
-                        ..
-                    }
-                ),
-                "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
             );
-        } else {
+            let msg = err.to_string().to_lowercase();
             assert!(
-                matches!(err, Error::InvalidPassword { .. }),
-                "expected Error::InvalidPassword, got {err:?}"
+                msg.contains("password") || msg.contains("encrypt"),
+                "expected error message to mention encryption/password protection, got: {msg}"
             );
+
+            let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+
+            // Providing a password should either surface a distinct "invalid password" error (when
+            // decryption support is not enabled) or a more specific decryption/compatibility error
+            // (when `encrypted-workbooks` is enabled, because this fixture does not contain a valid
+            // encrypted payload).
+            let err = open_workbook_with_password(&path, Some("wrong"))
+                .expect_err("expected password-protected open to error");
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(
+                        err,
+                        Error::UnsupportedOoxmlEncryption {
+                            version_major: 4,
+                            version_minor: 4,
+                            ..
+                        }
+                    ),
+                    "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
+                );
+            }
+
+            let err = open_workbook_model_with_password(&path, Some("wrong"))
+                .expect_err("expected password-protected open to error");
+            if cfg!(feature = "encrypted-workbooks") {
+                assert!(
+                    matches!(
+                        err,
+                        Error::UnsupportedOoxmlEncryption {
+                            version_major: 4,
+                            version_minor: 4,
+                            ..
+                        }
+                    ),
+                    "expected UnsupportedOoxmlEncryption(4,4), got {err:?}"
+                );
+            } else {
+                assert!(
+                    matches!(err, Error::InvalidPassword { .. }),
+                    "expected Error::InvalidPassword, got {err:?}"
+                );
+            }
         }
     }
 }
@@ -121,17 +127,24 @@ fn detects_encrypted_ooxml_xlsx_container() {
 #[test]
 fn detects_encrypted_ooxml_xlsx_container_for_model_loader() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let bytes = encrypted_ooxml_bytes();
 
-    for filename in ["encrypted.xlsx", "encrypted.xls"] {
-        let path = tmp.path().join(filename);
-        std::fs::write(&path, &bytes).expect("write encrypted fixture");
+    for (info_stream, package_stream) in [
+        ("EncryptionInfo", "EncryptedPackage"),
+        ("encryptioninfo", "encryptedpackage"),
+        ("/encryptioninfo", "/encryptedpackage"),
+    ] {
+        let bytes = encrypted_ooxml_bytes_with_stream_names(info_stream, package_stream);
 
-        let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
-        assert!(
-            matches!(err, Error::PasswordRequired { .. }),
-            "expected Error::PasswordRequired, got {err:?}"
-        );
+        for filename in ["encrypted.xlsx", "encrypted.xls"] {
+            let path = tmp.path().join(filename);
+            std::fs::write(&path, &bytes).expect("write encrypted fixture");
+
+            let err = open_workbook_model(&path).expect_err("expected encrypted workbook to error");
+            assert!(
+                matches!(err, Error::PasswordRequired { .. }),
+                "expected Error::PasswordRequired, got {err:?}"
+            );
+        }
     }
 }
 

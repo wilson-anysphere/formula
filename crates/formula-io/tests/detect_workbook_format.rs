@@ -19,20 +19,20 @@ fn xls_fixture_path(rel: &str) -> PathBuf {
         .join(rel)
 }
 
-fn encrypted_ooxml_bytes() -> Vec<u8> {
+fn encrypted_ooxml_bytes_with_stream_names(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
     {
         let mut stream = ole
-            .create_stream("EncryptionInfo")
-            .expect("create EncryptionInfo stream");
+            .create_stream(encryption_info)
+            .unwrap_or_else(|_| panic!("create {encryption_info} stream"));
         // Minimal EncryptionInfo header for Agile encryption (4.4).
         stream
             .write_all(&[4, 0, 4, 0, 0, 0, 0, 0])
             .expect("write EncryptionInfo header");
     }
-    ole.create_stream("EncryptedPackage")
-        .expect("create EncryptedPackage stream");
+    ole.create_stream(encrypted_package)
+        .unwrap_or_else(|_| panic!("create {encrypted_package} stream"));
     ole.into_inner().into_inner()
 }
 
@@ -159,12 +159,19 @@ fn detects_unknown_format() {
 #[test]
 fn detects_encrypted_ooxml_container() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let path = tmp.path().join("encrypted.xlsx");
-    std::fs::write(&path, encrypted_ooxml_bytes()).expect("write encrypted fixture");
+    for (info, package) in [
+        ("EncryptionInfo", "EncryptedPackage"),
+        ("encryptioninfo", "encryptedpackage"),
+        ("/encryptioninfo", "/encryptedpackage"),
+    ] {
+        let path = tmp.path().join("encrypted.xlsx");
+        std::fs::write(&path, encrypted_ooxml_bytes_with_stream_names(info, package))
+            .expect("write encrypted fixture");
 
-    let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
-    assert!(
-        matches!(err, Error::PasswordRequired { .. }),
-        "expected Error::PasswordRequired, got {err:?}"
-    );
+        let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
+        assert!(
+            matches!(err, Error::PasswordRequired { .. }),
+            "expected Error::PasswordRequired, got {err:?}"
+        );
+    }
 }

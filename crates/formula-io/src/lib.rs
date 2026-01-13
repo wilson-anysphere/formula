@@ -1478,25 +1478,65 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
-    }
-    let with_leading_slash = format!("/{name}");
-    if ole.open_stream(&with_leading_slash).is_ok() {
-        return true;
+    open_stream_best_effort(ole, name).is_some()
+}
+
+fn open_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> Option<cfb::Stream<R>> {
+    if let Ok(stream) = ole.open_stream(name) {
+        return Some(stream);
     }
 
-    // Best-effort: some producers (or intermediate tools) can vary stream casing. Walk the
-    // directory tree and compare paths case-insensitively.
-    let target = name.trim_start_matches('/');
-    ole.walk().any(|entry| {
+    let trimmed = name.trim_start_matches('/');
+    if trimmed != name {
+        if let Ok(stream) = ole.open_stream(trimmed) {
+            return Some(stream);
+        }
+    }
+
+    let with_leading_slash = format!("/{trimmed}");
+    if let Ok(stream) = ole.open_stream(&with_leading_slash) {
+        return Some(stream);
+    }
+
+    // Some real-world producers vary casing for the `EncryptionInfo`/`EncryptedPackage` streams (and
+    // some `cfb` implementations appear to treat `open_stream` as case-sensitive). Walk the
+    // directory tree and locate a matching entry case-insensitively, then open the *exact*
+    // discovered path so downstream reads are deterministic.
+    let mut found_path: Option<String> = None;
+    for entry in ole.walk() {
         if !entry.is_stream() {
-            return false;
+            continue;
         }
         let path = entry.path().to_string_lossy();
-        let normalized = path.strip_prefix('/').unwrap_or(&path);
-        normalized.eq_ignore_ascii_case(target)
-    })
+        let normalized = path.as_ref().strip_prefix('/').unwrap_or(path.as_ref());
+        if normalized.eq_ignore_ascii_case(trimmed) {
+            found_path = Some(path.into_owned());
+            break;
+        }
+    }
+
+    let found_path = found_path?;
+    if let Ok(stream) = ole.open_stream(&found_path) {
+        return Some(stream);
+    }
+
+    // Be defensive: some implementations accept the walk()-returned path but reject a leading slash
+    // (or vice versa).
+    let stripped = found_path.strip_prefix('/').unwrap_or(found_path.as_str());
+    if stripped != found_path {
+        if let Ok(stream) = ole.open_stream(stripped) {
+            return Some(stream);
+        }
+        let with_slash = format!("/{stripped}");
+        if let Ok(stream) = ole.open_stream(&with_slash) {
+            return Some(stream);
+        }
+    }
+
+    None
 }
 
 fn read_ole_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
@@ -1522,13 +1562,18 @@ fn read_ole_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek
     if let Some(buf) = read_candidate(ole, name)? {
         return Ok(Some(buf));
     }
-    let with_leading_slash = format!("/{name}");
+    let target = name.trim_start_matches('/');
+    if target != name {
+        if let Some(buf) = read_candidate(ole, target)? {
+            return Ok(Some(buf));
+        }
+    }
+    let with_leading_slash = format!("/{target}");
     if let Some(buf) = read_candidate(ole, &with_leading_slash)? {
         return Ok(Some(buf));
     }
 
     let candidate = {
-        let target = name.trim_start_matches('/');
         ole.walk().find_map(|entry| {
             if !entry.is_stream() {
                 return None;
@@ -1564,41 +1609,12 @@ fn open_stream_case_insensitive<R: std::io::Read + std::io::Write + std::io::See
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> std::io::Result<cfb::Stream<R>> {
-    // Fast path: try exact name + leading slash variants.
-    if let Ok(stream) = ole.open_stream(name) {
-        return Ok(stream);
-    }
-    let stripped = name.strip_prefix('/').unwrap_or(name);
-    if let Ok(stream) = ole.open_stream(stripped) {
-        return Ok(stream);
-    }
-    let with_slash = format!("/{stripped}");
-    if let Ok(stream) = ole.open_stream(&with_slash) {
-        return Ok(stream);
-    }
-
-    // Slow path: case-insensitive scan over available streams.
-    let mut found: Option<std::path::PathBuf> = None;
-    for entry in ole.walk() {
-        if !entry.is_stream() {
-            continue;
-        }
-        let path = entry.path().to_string_lossy();
-        let path = path.as_ref();
-        let normalized = path.strip_prefix('/').unwrap_or(path);
-        if normalized.eq_ignore_ascii_case(stripped) {
-            found = Some(entry.path().to_path_buf());
-            break;
-        }
-    }
-
-    match found {
-        Some(path) => ole.open_stream(path),
-        None => Err(std::io::Error::new(
+    open_stream_best_effort(ole, name).ok_or_else(|| {
+        std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("stream not found: {name}"),
-        )),
-    }
+        )
+    })
 }
 
 #[cfg(feature = "encrypted-workbooks")]

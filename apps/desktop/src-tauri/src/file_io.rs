@@ -455,11 +455,42 @@ fn cfb_stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     ole: &mut cfb::CompoundFile<R>,
     name: &str,
 ) -> bool {
-    if ole.open_stream(name).is_ok() {
-        return true;
+    open_stream_best_effort(ole, name).is_some()
+}
+
+fn open_stream_best_effort<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> Option<cfb::Stream<R>> {
+    if let Ok(stream) = ole.open_stream(name) {
+        return Some(stream);
     }
-    let with_leading_slash = format!("/{name}");
-    ole.open_stream(&with_leading_slash).is_ok()
+
+    let trimmed = name.strip_prefix('/').unwrap_or(name);
+    let with_leading_slash = format!("/{trimmed}");
+    if let Ok(stream) = ole.open_stream(&with_leading_slash) {
+        return Some(stream);
+    }
+
+    // The `cfb` crate's `open_stream` implementation is case-sensitive; some real-world producers
+    // appear to vary the casing of the `EncryptionInfo`/`EncryptedPackage` streams. Walk the
+    // directory and locate the stream path case-insensitively, then open the exact discovered
+    // entry name.
+    let mut found_path: Option<String> = None;
+    for entry in ole.walk() {
+        if !entry.is_stream() {
+            continue;
+        }
+        let path = entry.path().to_string_lossy();
+        let normalized = path.as_ref().strip_prefix('/').unwrap_or(path.as_ref());
+        if normalized.eq_ignore_ascii_case(trimmed) {
+            found_path = Some(path.into_owned());
+            break;
+        }
+    }
+
+    let found_path = found_path?;
+    ole.open_stream(&found_path).ok()
 }
 
 fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
@@ -3095,24 +3126,34 @@ mod tests {
     fn read_xlsx_blocking_errors_on_encrypted_ooxml_container() {
         let tmp = tempfile::tempdir().expect("temp dir");
 
-        let cursor = Cursor::new(Vec::new());
-        let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-        ole.create_stream("EncryptionInfo")
-            .expect("create EncryptionInfo stream");
-        ole.create_stream("EncryptedPackage")
-            .expect("create EncryptedPackage stream");
-        let bytes = ole.into_inner().into_inner();
+        fn encrypted_ooxml_bytes(encryption_info: &str, encrypted_package: &str) -> Vec<u8> {
+            let cursor = Cursor::new(Vec::new());
+            let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+            ole.create_stream(encryption_info)
+                .unwrap_or_else(|_| panic!("create {encryption_info} stream"));
+            ole.create_stream(encrypted_package)
+                .unwrap_or_else(|_| panic!("create {encrypted_package} stream"));
+            ole.into_inner().into_inner()
+        }
 
-        for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
-            let path = tmp.path().join(filename);
-            std::fs::write(&path, &bytes).expect("write encrypted fixture");
+        for (info, package) in [
+            ("EncryptionInfo", "EncryptedPackage"),
+            ("encryptioninfo", "encryptedpackage"),
+            ("/encryptioninfo", "/encryptedpackage"),
+        ] {
+            let bytes = encrypted_ooxml_bytes(info, package);
+            for filename in ["encrypted.xlsx", "encrypted.xls", "encrypted.xlsb"] {
+                let path = tmp.path().join(filename);
+                std::fs::write(&path, &bytes).expect("write encrypted fixture");
 
-            let err = read_xlsx_blocking(&path).expect_err("expected encrypted workbook to error");
-            let msg = err.to_string().to_lowercase();
-            assert!(
-                msg.contains("encrypted") || msg.contains("password"),
-                "expected error message to mention encryption/password protection, got: {msg}"
-            );
+                let err =
+                    read_xlsx_blocking(&path).expect_err("expected encrypted workbook to error");
+                let msg = err.to_string().to_lowercase();
+                assert!(
+                    msg.contains("encrypted") || msg.contains("password"),
+                    "expected error message to mention encryption/password protection, got: {msg}"
+                );
+            }
         }
     }
 
