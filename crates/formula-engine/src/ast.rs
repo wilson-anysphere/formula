@@ -131,6 +131,25 @@ impl LocaleConfig {
         }
     }
 
+    #[must_use]
+    pub const fn fr_fr() -> Self {
+        // French (France) uses the same separators as `de-DE` for formulas, but commonly uses a
+        // non-breaking space for thousands grouping (e.g. `1 234,56`).
+        //
+        // Unlike an ASCII space, NBSP does not collide with the range intersection operator
+        // (which is represented by a normal space in the formula language).
+        Self {
+            thousands_separator: Some('\u{00A0}'),
+            ..Self::de_de()
+        }
+    }
+
+    #[must_use]
+    pub const fn es_es() -> Self {
+        // Spanish (Spain) matches the same punctuation settings as `de-DE`.
+        Self::de_de()
+    }
+
     /// Parse a number from a locale-aware string in a deterministic, Excel-like way.
     ///
     /// This is primarily intended for parsing numbers that appear in string literals, such

@@ -272,17 +272,7 @@ pub static DE_DE: FormulaLocale = FormulaLocale {
 /// French (France).
 pub static FR_FR: FormulaLocale = FormulaLocale {
     id: "fr-FR",
-    config: LocaleConfig {
-        decimal_separator: ',',
-        arg_separator: ';',
-        array_col_separator: '\\',
-        array_row_separator: ';',
-        // French Excel commonly uses a non-breaking space for thousands grouping (e.g. `1 234,56`).
-        //
-        // Unlike an ASCII space, NBSP does not collide with the range intersection operator
-        // (which is represented by a normal space in the formula language).
-        thousands_separator: Some('\u{00A0}'),
-    },
+    config: LocaleConfig::fr_fr(),
     is_rtl: false,
     boolean_true: "VRAI",
     boolean_false: "FAUX",
@@ -303,13 +293,7 @@ pub static FR_FR: FormulaLocale = FormulaLocale {
 /// Spanish (Spain).
 pub static ES_ES: FormulaLocale = FormulaLocale {
     id: "es-ES",
-    config: LocaleConfig {
-        decimal_separator: ',',
-        arg_separator: ';',
-        array_col_separator: '\\',
-        array_row_separator: ';',
-        thousands_separator: Some('.'),
-    },
+    config: LocaleConfig::es_es(),
     is_rtl: false,
     boolean_true: "VERDADERO",
     boolean_false: "FALSO",
