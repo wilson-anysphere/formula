@@ -98,6 +98,21 @@ function main() {
   }
 
   const repoRoot = process.cwd();
+  const rootManifest = path.join(repoRoot, "latest.json");
+
+  /**
+   * `tauri-apps/tauri-action` writes `latest.json` to the workflow working directory (the repo
+   * root in GitHub Actions) before uploading it to the GitHub Release.
+   *
+   * Prefer that file when present, but keep scanning Cargo bundle directories as a fallback in
+   * case upstream tooling/layouts change.
+   */
+  if (fs.existsSync(rootManifest)) {
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.copyFileSync(rootManifest, outPath);
+    console.log(`export-updater-manifest: copied ${rootManifest} -> ${outPath}`);
+    return;
+  }
   /** @type {string[]} */
   const candidates = [];
 
