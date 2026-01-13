@@ -13,7 +13,7 @@
  * Usage:
  *   node scripts/ci/verify-updater-manifest-signature.mjs path/to/latest.json path/to/latest.json.sig
  */
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verify } from "node:crypto";
@@ -180,6 +180,19 @@ function main() {
   }
 
   console.log("signature OK");
+
+  // If running in GitHub Actions, append a short note to the step summary so the
+  // signature check result is visible alongside the manifest target table written
+  // by the upstream validator.
+  const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (stepSummaryPath) {
+    try {
+      appendFileSync(stepSummaryPath, `- Manifest signature: OK\n`, "utf8");
+    } catch {
+      // Non-fatal: the signature verification already passed; don't fail the release
+      // workflow just because the step summary could not be updated.
+    }
+  }
 }
 
 main();
