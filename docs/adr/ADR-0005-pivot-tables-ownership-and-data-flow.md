@@ -27,6 +27,17 @@ Without an explicit ownership boundary, future work tends to:
 
 This ADR defines **one canonical pivot schema** and the **single intended data flow** so we don’t regress into duplicate implementations.
 
+### Terminology (to avoid “pivot cache” confusion)
+
+- **OpenXML PivotCache**: the XLSX parts under `xl/pivotCache/` (definition + records) that Excel uses
+  to persist pivot state in a file. These are owned by `formula-xlsx` (import/export + round-trip
+  fidelity) and are *not* the canonical in-app computation cache.
+- **Engine PivotCache**: the runtime cache used to compute worksheet/range pivots (e.g.
+  `formula_engine::pivot::PivotCache`). This is owned by `formula-engine` and is treated as
+  **runtime-only** (rebuildable from the worksheet source).
+- **Data Model pivot**: a pivot whose source is the PowerPivot/Data Model; computed by `formula-dax`
+  (group-by + measures under a filter context).
+
 ## Decision
 
 ### 1) Crate ownership (single source of truth)
