@@ -55,7 +55,7 @@ export function PrintPreviewOverlay({
     <svg
       width={width}
       height={height}
-      style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}
+      className="print-preview-overlay"
     >
       {rects.map((r, idx) => (
         <rect

@@ -1,0 +1,123 @@
+/*
+  Print-related UI (page setup + print preview overlays).
+
+  This file intentionally avoids hardcoded colors and relies on design tokens from
+  `tokens.css` (enforced by `apps/desktop/test/noHardcodedColors.test.js`).
+*/
+
+/* --- Page setup dialog --------------------------------------------------- */
+
+dialog.page-setup-dialog .page-setup-dialog__body {
+  padding: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__title {
+  margin: 0 0 12px;
+  font-weight: 700;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__row:last-of-type {
+  margin-bottom: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin: 12px 0 0;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__radio-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin: 0 0 8px;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__radio-row:last-child {
+  margin-bottom: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__margins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 12px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__margin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input,
+dialog.page-setup-dialog .page-setup-dialog__select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-width: 0;
+  font: inherit;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input:focus-visible,
+dialog.page-setup-dialog .page-setup-dialog__select:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input--paper-size {
+  width: 10ch;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input--percent {
+  width: 7ch;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input--pages {
+  width: 6ch;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__input--margin {
+  width: 8ch;
+}
+
+dialog.page-setup-dialog .page-setup-dialog__controls {
+  margin-top: 12px;
+}
+
+/* --- Print preview overlay ------------------------------------------------ */
+
+.print-preview-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+

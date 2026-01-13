@@ -1,3 +1,5 @@
+import "../styles/print.css";
+
 export * from "./types";
 export * from "./pageBreaks";
 export * from "./printArea";
