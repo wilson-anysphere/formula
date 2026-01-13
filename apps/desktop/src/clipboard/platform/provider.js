@@ -471,6 +471,70 @@ async function readClipboardItemPng(item, type, maxBytes) {
 }
 
 /**
+ * Best-effort rich clipboard read via `navigator.clipboard.read()` without falling back to
+ * `navigator.clipboard.readText()`.
+ *
+ * This is used by the Tauri provider when native IPC already returned `text/html` and we only
+ * want to merge in missing rich formats (e.g. `text/rtf`, `image/png`) without triggering
+ * permission-gated plaintext reads.
+ *
+ * @param {{ wantRtf?: boolean, wantImagePng?: boolean }} wants
+ * @returns {Promise<ClipboardContent | undefined>}
+ */
+async function readWebClipboardRichOnly(wants = {}) {
+  const wantRtf = Boolean(wants && typeof wants === "object" && wants.wantRtf);
+  const wantImagePng = Boolean(wants && typeof wants === "object" && wants.wantImagePng);
+  if (!wantRtf && !wantImagePng) return undefined;
+
+  const clipboard = globalThis.navigator?.clipboard;
+  if (typeof clipboard?.read !== "function") return undefined;
+
+  try {
+    const items = await clipboard.read();
+    /** @type {any} */
+    const out = {};
+
+    const matchMime = (value, exact) => {
+      if (typeof value !== "string") return false;
+      const normalized = value.trim().toLowerCase();
+      return normalized === exact || normalized.startsWith(`${exact};`);
+    };
+
+    for (const item of items) {
+      if (!item || typeof item !== "object" || !Array.isArray(item.types)) continue;
+
+      if (wantRtf && typeof out.rtf !== "string") {
+        const rtfType = item.types.find(
+          (t) =>
+            matchMime(t, "text/rtf") || matchMime(t, "application/rtf") || matchMime(t, "application/x-rtf")
+        );
+        if (rtfType) {
+          const rtf = await readClipboardItemText(item, rtfType, MAX_RICH_TEXT_BYTES);
+          if (typeof rtf === "string") out.rtf = rtf;
+        }
+      }
+
+      if (wantImagePng && !(out.imagePng instanceof Uint8Array)) {
+        const imagePngType = item.types.find((t) => matchMime(t, "image/png"));
+        if (imagePngType) {
+          const imagePng = await readClipboardItemPng(item, imagePngType, MAX_IMAGE_BYTES);
+          if (imagePng instanceof Uint8Array) out.imagePng = imagePng;
+        }
+      }
+
+      if ((!wantRtf || typeof out.rtf === "string") && (!wantImagePng || out.imagePng instanceof Uint8Array)) {
+        break;
+      }
+    }
+
+    if (typeof out.rtf === "string" || out.imagePng instanceof Uint8Array) return out;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * @returns {Promise<ClipboardProvider>}
  */
 export async function createClipboardProvider() {
@@ -503,20 +567,20 @@ function createTauriClipboardProvider() {
       // 1) Prefer rich reads via the native clipboard command when available (Tauri IPC).
       if (typeof tauriInvoke === "function") {
         try {
-            const result = await tauriInvoke("clipboard_read");
-            if (result && typeof result === "object") {
-              if (path) path.push("native-ipc:clipboard_read");
-              /** @type {any} */
-              const r = result;
-              if (typeof r.text === "string" && !utf8WithinLimit(r.text, MAX_RICH_TEXT_BYTES)) {
-                skippedOversizedPlainText = true;
-              }
-              native = {};
-              if (isStringWithinUtf8Limit(r.text, MAX_RICH_TEXT_BYTES)) native.text = r.text;
-              if (isStringWithinUtf8Limit(r.html, MAX_RICH_TEXT_BYTES)) native.html = r.html;
-              if (isStringWithinUtf8Limit(r.rtf, MAX_RICH_TEXT_BYTES)) native.rtf = r.rtf;
+          const result = await tauriInvoke("clipboard_read");
+          if (result && typeof result === "object") {
+            if (path) path.push("native-ipc:clipboard_read");
+            /** @type {any} */
+            const r = result;
+            if (typeof r.text === "string" && !utf8WithinLimit(r.text, MAX_RICH_TEXT_BYTES)) {
+              skippedOversizedPlainText = true;
+            }
+            native = {};
+            if (isStringWithinUtf8Limit(r.text, MAX_RICH_TEXT_BYTES)) native.text = r.text;
+            if (isStringWithinUtf8Limit(r.html, MAX_RICH_TEXT_BYTES)) native.html = r.html;
+            if (isStringWithinUtf8Limit(r.rtf, MAX_RICH_TEXT_BYTES)) native.rtf = r.rtf;
 
-              const pngBase64 = readPngBase64(r);
+            const pngBase64 = readPngBase64(r);
             if (pngBase64) {
               const imagePng = coerceUint8Array(pngBase64);
               if (imagePng) {
@@ -528,18 +592,33 @@ function createTauriClipboardProvider() {
               }
             }
 
-            // If we successfully read HTML from the native clipboard, we can return
-            // immediately (it already includes rich spreadsheet formats on supported
-             // platforms). If we *only* have plain text, still fall through to the
-             // WebView Clipboard API so we can pick up richer formats (rtf/image) when
-             // available.
-             if (typeof native.html === "string") {
+            // If we successfully read HTML from the native clipboard, we can often return
+            // immediately (it already includes rich spreadsheet formats on supported platforms).
+            //
+            // However: native HTML reads can miss other rich formats (e.g. RTF / image/png) that
+            // may be present via `navigator.clipboard.read()`. Only attempt a rich merge when:
+            // - native HTML is present
+            // - we're missing at least one useful rich format
+            // - `navigator.clipboard.read` exists (no `readText()` fallback / permission prompt)
+            if (typeof native.html === "string") {
+              const missingRtf = typeof native.rtf !== "string";
+              const missingImagePng = !(native.imagePng instanceof Uint8Array);
+
+              if ((missingRtf || missingImagePng) && typeof globalThis.navigator?.clipboard?.read === "function") {
+                if (path) path.push("web-clipboard:clipboard.read(rich-only)");
+                const webRich = await readWebClipboardRichOnly({
+                  wantRtf: missingRtf,
+                  wantImagePng: missingImagePng,
+                });
+                if (webRich) mergeClipboardContent(native, webRich);
+              }
+
               if (path) clipboardDebug(true, "read path:", path.join(" -> "));
               return native;
-             }
+            }
 
-             // Keep `native` around to merge into web reads below (e.g. rtf-only/image-only reads).
-             if (Object.keys(native).length === 0) native = undefined;
+            // Keep `native` around to merge into web reads below (e.g. rtf-only/image-only reads).
+            if (Object.keys(native).length === 0) native = undefined;
           }
         } catch {
           // Ignore; command may not exist on older builds.

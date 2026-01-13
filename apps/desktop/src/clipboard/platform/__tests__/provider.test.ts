@@ -86,6 +86,63 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(readText).not.toHaveBeenCalled();
   });
 
+  it("read() returns native html without calling navigator.clipboard.readText when rich web read is unavailable", async () => {
+    const invoke = vi.fn().mockResolvedValue({ html: "<p>native</p>" });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    // Intentionally omit `navigator.clipboard.read` to ensure we don't fall back to readText.
+    setMockNavigatorClipboard({ readText });
+
+    const provider = await createClipboardProvider();
+    const content = await provider.read();
+
+    expect(content).toEqual({ html: "<p>native</p>" });
+    expect(readText).not.toHaveBeenCalled();
+  });
+
+  it("read() merges missing rtf/imagePng from navigator.clipboard.read when native IPC returns html", async () => {
+    const invoke = vi.fn().mockResolvedValue({ html: "<p>native</p>" });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const rtfPayload = "{\\\\rtf1\\\\ansi native-web}";
+
+    const getType = vi.fn(async (type: string) => {
+      if (type === "text/rtf") return new Blob([rtfPayload], { type: "text/rtf" });
+      if (type === "image/png") return new Blob([pngBytes], { type: "image/png" });
+      throw new Error(`unexpected type: ${type}`);
+    });
+
+    const read = vi.fn().mockResolvedValue([{ types: ["text/rtf", "image/png"], getType }]);
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    setMockNavigatorClipboard({ read, readText });
+
+    const provider = await createClipboardProvider();
+    const content = await provider.read();
+
+    expect(content).toEqual({ html: "<p>native</p>", rtf: rtfPayload, imagePng: pngBytes });
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(readText).not.toHaveBeenCalled();
+  });
+
+  it("read() returns native html when navigator.clipboard.read throws (best-effort rich merge)", async () => {
+    const invoke = vi.fn().mockResolvedValue({ html: "<p>native</p>" });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const read = vi.fn().mockRejectedValue(new Error("permission denied"));
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    setMockNavigatorClipboard({ read, readText });
+
+    const provider = await createClipboardProvider();
+    const content = await provider.read();
+
+    expect(content).toEqual({ html: "<p>native</p>" });
+    expect(read).toHaveBeenCalledTimes(1);
+    // Rich merge failures must not fall back to `readText()` (permission gated / redundant).
+    expect(readText).not.toHaveBeenCalled();
+  });
+
   it("read() merges a text-only Tauri payload with richer WebView clipboard HTML", async () => {
     const invoke = vi.fn().mockResolvedValue({ text: "native-text" });
     (globalThis as any).__TAURI__ = { core: { invoke } };
