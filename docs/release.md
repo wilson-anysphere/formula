@@ -128,6 +128,11 @@ CI behavior note:
 
 ### macOS (Developer ID + notarization)
 
+Note: `apps/desktop/src-tauri/tauri.conf.json` intentionally does **not** hardcode
+`bundle.macOS.signingIdentity`. This keeps local `tauri build` working on macOS machines without
+Developer ID certificates installed, and ensures CI uses the explicit `APPLE_SIGNING_IDENTITY`
+provided as a secret (avoids ambiguous identity selection when multiple certs exist).
+
 Secrets used by `tauri-apps/tauri-action`:
 
 - `APPLE_CERTIFICATE` – base64-encoded `.p12` Developer ID certificate
