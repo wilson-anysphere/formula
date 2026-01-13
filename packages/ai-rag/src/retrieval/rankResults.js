@@ -24,10 +24,7 @@ function tokenize(text) {
     .replace(/([A-Za-z])([0-9])/g, "$1 $2")
     .replace(/([0-9])([A-Za-z])/g, "$1 $2");
 
-  const tokens = separated
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter(Boolean);
+  const tokens = separated.toLowerCase().split(/[^a-z0-9]+/g).filter(Boolean);
   if (tokens.length === 0) return [];
   // De-dupe while preserving first-seen order.
   const seen = new Set();

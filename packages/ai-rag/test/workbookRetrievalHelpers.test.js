@@ -105,6 +105,27 @@ test("rerankWorkbookResults tokenizes underscores/camelCase for lexical matching
   assert.deepEqual(reranked.map((r) => r.id), ["match", "no-match"]);
 });
 
+test("rerankWorkbookResults tokenizes identifier-style queries (camelCase/PascalCase)", () => {
+  const query = "RevenueByRegion";
+  const results = [
+    {
+      id: "a",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "Salaries", sheetName: "Sheet1", tokenCount: 10 },
+    },
+    {
+      id: "b",
+      score: 0.5,
+      metadata: { kind: "dataRegion", title: "Revenue By Region", sheetName: "Sheet1", tokenCount: 10 },
+    },
+  ];
+
+  const reranked = rerankWorkbookResults(query, results);
+  // Token matches in the title should boost the relevant result above the
+  // unrelated one even when base scores tie.
+  assert.deepEqual(reranked.map((r) => r.id), ["b", "a"]);
+});
+
 test("rerankWorkbookResults penalizes very large chunks to favor concise context", () => {
   const query = "";
   const results = [
