@@ -119,12 +119,14 @@ jobs:
               fi
               artifact_label="${release_tag}"
             elif [[ -n "${version}" ]]; then
+              # `version` is primarily for labeling dry-run artifacts. When `upload=true`, we
+              # still need a GitHub Release tag, so we normalize it to a `v*` tag.
+              artifact_label="${version}"
               if [[ "${version}" == v* ]]; then
                 release_tag="${version}"
               else
                 release_tag="v${version}"
               fi
-              artifact_label="${release_tag}"
             else
               short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
               artifact_label="manual-${short_sha}"
