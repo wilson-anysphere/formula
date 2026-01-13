@@ -373,7 +373,7 @@
 
 .query-editor-add-step__menu-popover {
   border: 1px solid var(--border);
-  background: var(--bg-primary);
+  background: var(--bg-elevated);
   border-radius: var(--radius);
   padding: 8px;
   margin-bottom: 8px;
