@@ -392,6 +392,13 @@ This requires the Visual Studio **MSVC ARM64** toolchain to be present on the ru
 
 - Visual Studio component: `Microsoft.VisualStudio.Component.VC.Tools.ARM64`
 
+You also need the Rust standard library for the ARM64 target installed (CI does this automatically
+in the release workflow):
+
+```bash
+rustup target add aarch64-pc-windows-msvc
+```
+
 GitHub-hosted runner images do not always include this workload by default. The release workflow
 checks for `VC\\Tools\\MSVC\\*\\lib\\arm64` and installs the component via `vs_installer.exe` when it
 is missing.
