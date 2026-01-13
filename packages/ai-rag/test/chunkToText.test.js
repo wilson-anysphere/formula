@@ -205,6 +205,23 @@ test("chunkToText includes formulas in labeled sample rows for header tables", (
   assert.match(text, /Revenue\(=B2\*2\)=200/);
 });
 
+test("chunkToText omits trailing '=' when a formula cell has no computed value", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
+    cells: [
+      [{ v: "Region" }, { v: "Revenue" }],
+      [{ v: "North" }, { f: "=B2*2", v: null }],
+    ],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Revenue\(=B2\*2\)/);
+  assert.doesNotMatch(text, /Revenue\(=B2\*2\)=/);
+});
+
 test("chunkToText falls back to Column<N> when a header cell is empty", () => {
   const chunk = {
     kind: "table",

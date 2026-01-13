@@ -25,9 +25,15 @@ function formatScalar(value) {
     if (typeof text === "string") return formatScalar(text);
     try {
       const json = JSON.stringify(value);
-      if (typeof json === "string" && json !== "{}") return formatScalar(json);
+      if (typeof json === "string") {
+        // Empty objects are rarely useful in cell context; treat as blank.
+        if (json === "{}") return "";
+        return formatScalar(json);
+      }
     } catch {
-      // fall through
+      // Some objects (circular refs, BigInt, etc) aren't JSON stringifiable.
+      // Fall back to a stable placeholder rather than "[object Object]".
+      return "Object";
     }
   }
   if (typeof value === "string") {
@@ -316,7 +322,7 @@ export function chunkToText(chunk, opts) {
           if (cell.f) {
             const formula = formatScalar(cell.f);
             const value = formatScalar(cell.v);
-            row.push(`${header}(${formula})=${value}`);
+            row.push(value ? `${header}(${formula})=${value}` : `${header}(${formula})`);
           } else {
             row.push(`${header}=${formatScalar(cell.v)}`);
           }
