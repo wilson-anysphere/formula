@@ -142,6 +142,12 @@ Secrets used by `tauri-apps/tauri-action`:
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
 
+CI guardrail (tagged releases when secrets are configured):
+
+- The release workflow validates that the produced macOS artifacts are **notarized + stapled** so they pass Gatekeeper:
+  - `xcrun stapler validate` (requires a stapled notarization ticket)
+  - `spctl --assess` (Gatekeeper evaluation)
+
 #### Hardened runtime entitlements (WKWebView / WASM)
 
 The macOS app is signed with the **hardened runtime**. WKWebView (Tauri/Wry) needs explicit JIT entitlements in the signed binary so that JavaScript and WebAssembly can execute reliably.
