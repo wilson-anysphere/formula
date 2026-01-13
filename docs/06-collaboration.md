@@ -279,10 +279,10 @@ Implementation reference: desktop JWT decode helpers live in [`apps/desktop/src/
 
 Roles apply both at the sync-server layer *and* in the desktop UX.
 
-For `viewer` and `commenter` roles, the desktop app behaves as “read-only” for workbook mutations:
+For `viewer` and `commenter` roles, the desktop app behaves as “read-only” for *shared* workbook mutations:
 
 - **Cell edits are blocked**: the binder installs `DocumentController.canEditCell` guards (via `session.canEditCell(...)`) and will reject/revert disallowed deltas if they slip through (e.g. via programmatic calls).
-- **Workbook-editing operations are disabled**: actions that would write to shared workbook state (formatting, structural ops, sheet view state like freeze panes / row+col sizes, etc) should be disabled in the UI when the effective role cannot edit. Most editing paths consult `DocumentController.canEditCell` and are therefore gated automatically in collab mode.
+- **Shared-state writes are suppressed (defense in depth)**: `bindCollabSessionToDocumentController` passes `canWriteSharedState: () => !session.isReadOnly()` into the binder, so sheet-level view/format deltas (freeze panes, row/col sizes, sheet/row/col format defaults, etc) are *not* written into Yjs for read-only roles. Some of these mutations may still apply locally in `DocumentController` (view/UI convenience), but they will not sync to other collaborators and can be overwritten by remote state.
 - **Comments:**
   - `commenter` can add/edit replies and resolve threads (see `roleCanComment` in `@formula/collab-permissions`).
   - `viewer` can only read comments.
@@ -407,8 +407,8 @@ Useful lifecycle helpers:
 
 Two important operational details:
 
-- **`flush(docId)` is implemented as a snapshot write.** `y-indexeddb` persists incremental Yjs updates asynchronously and does not expose a reliable “await all pending writes” API. To satisfy Formula’s `CollabPersistence.flush` contract, `IndexedDbCollabPersistence.flush` writes a full-document snapshot (`Y.encodeStateAsUpdate(doc)`) into the same IndexedDB `updates` object store. This guarantees that the full in-memory document state at the time of the call can be recovered on the next load, even if some incremental writes are still in flight.
-- **`compact(docId)` rewrites the update log to keep load time and disk usage bounded.** Without compaction, a long-lived document can accumulate a large number of incremental updates, which increases IndexedDB size and slows down `load()` (replay cost). Compaction replaces many small updates with a single snapshot update by clearing the `updates` store and writing `Y.encodeStateAsUpdate(doc)`.
+- **`flush(docId)` is implemented as a snapshot update (and compacts by default).** `y-indexeddb` persists incremental Yjs updates asynchronously and does not expose a reliable “await all pending writes” API. To satisfy Formula’s `CollabPersistence.flush` contract, `IndexedDbCollabPersistence.flush` writes a full-document snapshot (`Y.encodeStateAsUpdate(doc)`) into the IndexedDB `updates` object store so the in-memory document state at the time of the call can be recovered on the next load, even if some incremental writes are still in flight. By default, `flush()` calls `compact()` (so repeated flushes do not grow IndexedDB without bound). To opt out and append a snapshot record instead, call `flush(docId, { compact: false })`.
+- **`compact(docId)` rewrites the update log to keep load time and disk usage bounded.** Without compaction, a long-lived document can accumulate a large number of incremental updates, which increases IndexedDB size and slows down `load()` (replay cost). Compaction replaces many small updates with a single snapshot update by reading the existing update records, merging them with `Y.encodeStateAsUpdate(doc)` (via `Y.mergeUpdates(...)`), clearing the `updates` store, and writing the merged update. This is important to avoid clobbering updates written by other tabs/processes (or in-flight writes) that may not have been applied to the current in-memory `Y.Doc`.
   - Knobs:
     - `new IndexedDbCollabPersistence({ maxUpdates })` (defaults to `500`) enables automatic background compaction once more than `maxUpdates` incremental updates have been observed (`0` disables auto-compaction).
     - `compactDebounceMs` controls how long compaction is debounced during bursts of edits (defaults to `250ms`).
