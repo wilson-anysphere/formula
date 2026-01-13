@@ -404,6 +404,31 @@ Workflow: `.github/workflows/corpus.yml`
 - **Compatibility gates (scheduled only)** enforce aggregate targets (e.g. "97%+ round-trip preservation")
   for the private corpus using `tools/corpus/compat_gate.py`.
 
+### Unified compatibility scorecard (CI)
+
+The project tracks:
+
+- L1 Read compatibility (corpus open rate)
+- L2 Calculate fidelity (Excel-oracle mismatch rate → pass rate)
+- L4 Round-trip preservation (corpus round-trip rate)
+
+To produce a single view in CI, the repo includes an aggregator workflow:
+
+- `.github/workflows/compat-scorecard.yml` (trigger: `workflow_run` of `corpus` and `Excel Compatibility (Oracle)`)
+
+This workflow downloads the two summary artifacts (by matching `head_sha`), runs
+`python tools/compat_scorecard.py --allow-missing-inputs`, uploads a `compat-scorecard` artifact, and appends the
+markdown to the job summary.
+
+Corpus summary artifacts:
+
+- `corpus-public-summary` → `tools/corpus/out/public/summary.json` + `tools/corpus/out/public/summary.md`
+- `corpus-private-summary` → `tools/corpus/out/private/summary.json` + `tools/corpus/out/private/summary.md`
+
+Excel-oracle artifacts:
+
+- `excel-oracle-artifacts` → includes `tests/compatibility/excel-oracle/reports/mismatch-report.json`
+
 ### Workflow dispatch knobs (Calculate/Render coverage)
 
 The `corpus` workflow supports `workflow_dispatch` inputs so you can opt into heavier checks without code
