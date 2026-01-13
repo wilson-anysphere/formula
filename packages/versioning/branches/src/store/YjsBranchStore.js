@@ -977,7 +977,7 @@ export class YjsBranchStore {
       }
     }
 
-    /** @type {{ id: string, createdAt: number, hasPayload: boolean }[]} */
+    /** @type {{ id: string, createdAt: number, hasPayload: boolean, isComplete: boolean }[]} */
     const candidates = [];
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
@@ -990,10 +990,14 @@ export class YjsBranchStore {
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
+      const isComplete = this.#isCommitComplete(commitMap);
+      if (typeof key === "string" && key.length > 0) {
+        candidates.push({ id: key, createdAt, hasPayload, isComplete });
+      }
     });
 
     candidates.sort((a, b) => {
+      if (a.isComplete !== b.isComplete) return a.isComplete ? -1 : 1;
       if (a.hasPayload !== b.hasPayload) return a.hasPayload ? -1 : 1;
       return a.createdAt - b.createdAt || a.id.localeCompare(b.id);
     });
@@ -1007,7 +1011,7 @@ export class YjsBranchStore {
    * @returns {string | null}
    */
   #inferLatestCommitId(docId) {
-    /** @type {{ id: string, createdAt: number, hasPayload: boolean }[]} */
+    /** @type {{ id: string, createdAt: number, hasPayload: boolean, isComplete: boolean }[]} */
     const candidates = [];
     this.#commits.forEach((value, key) => {
       const commitMap = getYMap(value);
@@ -1017,10 +1021,14 @@ export class YjsBranchStore {
       const hasPayload = this.#commitHasPatch(commitMap) || this.#commitHasSnapshot(commitMap);
       if (!this.#isCommitComplete(commitMap) && !hasPayload) return;
       const createdAt = Number(commitMap.get("createdAt") ?? 0);
-      if (typeof key === "string" && key.length > 0) candidates.push({ id: key, createdAt, hasPayload });
+      const isComplete = this.#isCommitComplete(commitMap);
+      if (typeof key === "string" && key.length > 0) {
+        candidates.push({ id: key, createdAt, hasPayload, isComplete });
+      }
     });
 
     candidates.sort((a, b) => {
+      if (a.isComplete !== b.isComplete) return a.isComplete ? -1 : 1;
       if (a.hasPayload !== b.hasPayload) return a.hasPayload ? -1 : 1;
       return b.createdAt - a.createdAt || a.id.localeCompare(b.id);
     });
