@@ -72,6 +72,32 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("does not commit on Alt+Enter (reserved for newline/indent)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const { cancel, commit } = queryActions(host);
+
+    view.textarea.focus();
+    view.textarea.value = "line1";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true }));
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(cancel.disabled).toBe(false);
+    expect(commit.hidden).toBe(false);
+    expect(commit.disabled).toBe(false);
+
+    host.remove();
+  });
+
   it("cancels on Escape, restores the active cell input, and exits edit mode", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
