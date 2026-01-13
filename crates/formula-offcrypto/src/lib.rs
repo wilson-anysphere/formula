@@ -2354,6 +2354,7 @@ pub fn decrypt_standard_ooxml_from_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes::cipher::BlockEncrypt;
 
     #[test]
     fn decode_b64_attr_padded() {
@@ -2724,6 +2725,56 @@ mod tests {
             })
         );
         assert!(summary.agile.is_none());
+    }
+
+    #[test]
+    fn standard_verify_key_mismatch_uses_constant_time_compare() {
+        // Ensure the Standard verifier hash comparison uses the shared constant-time helper.
+        util::reset_ct_eq_calls();
+
+        let key = [0u8; 16];
+
+        fn aes128_ecb_encrypt_in_place(key: &[u8; 16], buf: &mut [u8]) {
+            let cipher = Aes128::new_from_slice(key).expect("valid AES-128 key");
+            for block in buf.chunks_mut(16) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+
+        // Choose plaintext verifier and verifierHash that are guaranteed to mismatch after hashing.
+        let mut encrypted_verifier = [0u8; 16]; // plaintext verifier = all zeros
+        let mut encrypted_verifier_hash = vec![0u8; 32]; // plaintext verifierHash = all zeros
+
+        aes128_ecb_encrypt_in_place(&key, &mut encrypted_verifier);
+        aes128_ecb_encrypt_in_place(&key, &mut encrypted_verifier_hash);
+
+        let info = StandardEncryptionInfo {
+            header: StandardEncryptionHeader {
+                flags: 0,
+                size_extra: 0,
+                alg_id: CALG_AES_128,
+                alg_id_hash: CALG_SHA1,
+                key_size_bits: 128,
+                provider_type: 0,
+                reserved1: 0,
+                reserved2: 0,
+                csp_name: String::new(),
+            },
+            verifier: StandardEncryptionVerifier {
+                salt: vec![0u8; 16],
+                encrypted_verifier,
+                verifier_hash_size: 20,
+                encrypted_verifier_hash,
+            },
+        };
+
+        let err = standard_verify_key(&info, &key).expect_err("expected verifier mismatch");
+        assert!(matches!(err, OffcryptoError::InvalidPassword));
+
+        assert!(
+            util::ct_eq_call_count() >= 1,
+            "expected ct_eq helper to be invoked"
+        );
     }
 
     #[test]
