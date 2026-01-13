@@ -13,9 +13,9 @@ describe("CollaboratorsListUiController", () => {
 
     const ui = new CollaboratorsListUiController({ container });
     ui.setCollaborators([
-      { key: "u1:1", name: "Ada", color: "var(--accent)" },
-      { key: "u2:2", name: "Grace", color: "var(--success)" },
-      { key: "u3:3", name: "Linus", color: "var(--warning)" },
+      { key: "u1:1", name: "Ada", color: "var(--formula-grid-remote-presence-1)" },
+      { key: "u2:2", name: "Grace", color: "var(--formula-grid-remote-presence-2)" },
+      { key: "u3:3", name: "Linus", color: "var(--formula-grid-remote-presence-3)" },
     ]);
 
     const items = container.querySelectorAll('[data-testid="presence-collaborator"]');
@@ -31,9 +31,9 @@ describe("CollaboratorsListUiController", () => {
 
     const ui = new CollaboratorsListUiController({ container, maxVisible: 2 });
     ui.setCollaborators([
-      { key: "u1:1", name: "Ada", color: "var(--accent)" },
-      { key: "u2:2", name: "Grace", color: "var(--success)" },
-      { key: "u3:3", name: "Linus", color: "var(--warning)" },
+      { key: "u1:1", name: "Ada", color: "var(--formula-grid-remote-presence-1)" },
+      { key: "u2:2", name: "Grace", color: "var(--formula-grid-remote-presence-2)" },
+      { key: "u3:3", name: "Linus", color: "var(--formula-grid-remote-presence-3)" },
     ]);
 
     expect(container.querySelector('[data-testid="presence-collaborators"]')?.getAttribute("aria-label")).toBe(

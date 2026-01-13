@@ -2,7 +2,7 @@
  * @typedef {object} CollaboratorListEntry
  * @property {string} key Stable identifier for diffing (e.g. `${id}:${clientId}`).
  * @property {string} name Display name.
- * @property {string} color CSS color value (e.g. "var(--accent)" or "#RRGGBB").
+ * @property {string} color CSS color value (e.g. "var(--formula-grid-remote-presence-1)" or "#RRGGBB").
  * @property {string | null | undefined} [sheetName] Optional sheet label (e.g. when viewing a different sheet).
  */
 

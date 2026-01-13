@@ -87,7 +87,7 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
   assert.equal(
     /\bstyle=\{\{/.test(versionHistorySource),
     false,
-    "CollabVersionHistoryPanel should not use React inline styles; use CSS classes in workspace.css instead",
+    "CollabVersionHistoryPanel.tsx should not use React inline styles; use CSS classes in workspace.css instead",
   );
   assert.equal(
     /\.style\./.test(versionHistorySource),

@@ -38,7 +38,6 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
   const commandsPath = path.join(__dirname, "..", "src", "commands", "registerDataQueriesCommands.ts");
   const commands = fs.readFileSync(commandsPath, "utf8");
 
-  // Ensure all ribbon ids have corresponding built-in command registrations.
   const commandIds = [
     "data.queriesConnections.queriesConnections",
     "data.queriesConnections.refreshAll",
@@ -46,6 +45,8 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
     "data.queriesConnections.refreshAll.refreshAllConnections",
     "data.queriesConnections.refreshAll.refreshAllQueries",
   ];
+
+  // Ensure all ribbon ids have corresponding built-in command registrations.
   for (const id of commandIds) {
     assert.match(
       commands,
@@ -54,6 +55,14 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
     );
   }
   assert.match(commands, /\bregisterBuiltinCommand\(/);
+
+  // Toggle command should open/close the DATA_QUERIES panel based on layout placement.
+  assert.match(commands, /\bgetPanelPlacement\(/);
+  assert.match(commands, /\bopenPanel\(PanelIds\.DATA_QUERIES\)/);
+  assert.match(commands, /\bclosePanel\(PanelIds\.DATA_QUERIES\)/);
+
+  // Refresh commands should ultimately call PowerQueryService.refreshAll().
+  assert.match(commands, /\bservice\.refreshAll\(\)/);
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const main = fs.readFileSync(mainPath, "utf8");
@@ -69,6 +78,6 @@ test("Data → Queries & Connections ribbon commands are registered in CommandRe
     );
   }
 
-  // Pressed state sync should still reflect whether the Data Queries panel is open.
+  // Pressed state sync should reflect whether the Data Queries panel is open.
   assert.match(main, /"data\.queriesConnections\.queriesConnections":\s*isPanelOpen\(\s*PanelIds\.DATA_QUERIES\s*\)/);
 });
