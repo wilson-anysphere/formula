@@ -12,6 +12,7 @@ const extensionMarketplaceEntry = fileURLToPath(
 );
 const marketplaceSharedEntry = fileURLToPath(new URL("../../shared", import.meta.url));
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
+const collabCommentsEntry = fileURLToPath(new URL("../../packages/collab/comments/src/index.ts", import.meta.url));
 const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/src/index.ts", import.meta.url));
 const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
 const collabPersistenceEntry = fileURLToPath(new URL("../../packages/collab/persistence/src/index.ts", import.meta.url));
@@ -107,6 +108,7 @@ export default defineConfig({
       // can have stale node_modules (cached installs) that miss the pnpm workspace link, so keep an
       // explicit alias to ensure Vite can resolve browser-only marketplace helpers during e2e runs.
       { find: /^@formula\/marketplace-shared/, replacement: marketplaceSharedEntry },
+      { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },

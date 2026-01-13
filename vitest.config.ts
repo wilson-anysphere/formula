@@ -12,6 +12,7 @@ const repoRoot = fileURLToPath(new URL(".", import.meta.url));
 // to resolve newly-added workspace dependencies. Alias the collab workspace entrypoints directly so
 // cross-package integration suites (apps/desktop) remain resilient.
 const collabUndoEntry = resolve(repoRoot, "packages/collab/undo/index.js");
+const collabCommentsEntry = resolve(repoRoot, "packages/collab/comments/src/index.ts");
 const collabSessionEntry = resolve(repoRoot, "packages/collab/session/src/index.ts");
 const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/index.ts");
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
@@ -57,6 +58,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
+      { find: "@formula/collab-comments", replacement: collabCommentsEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
