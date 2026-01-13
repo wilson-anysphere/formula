@@ -366,8 +366,10 @@ targets **WebKitGTK 4.1 + GTK3**, so the distro-native packages (`.deb` / `.rpm`
 compatible with distros that ship those versions.
 
 - Prefer **`.deb` / `.rpm`** when the target distro provides WebKitGTK 4.1 (Debian/Ubuntu:
-  `libwebkit2gtk-4.1-0`; Fedora/RHEL: `webkit2gtk4.1`). These integrate with the system package
-  manager and are the expected “happy path” on modern distros.
+  `libwebkit2gtk-4.1-0`; Fedora: `webkit2gtk4.1`). These integrate with the system package manager
+  and are the expected “happy path” on modern distros.
+  - Note: some RHEL 9-family distros ship `webkit2gtk3` (WebKitGTK 4.0) instead of WebKitGTK 4.1;
+    in that case prefer the `.AppImage`.
 - Prefer the **`.AppImage`** when installing the `.deb`/`.rpm` fails due to missing or incompatible
   system libraries (commonly WebKitGTK/GTK3). The AppImage bundles more runtime libraries and tends
   to run on a wider range of distros.
@@ -377,7 +379,8 @@ compatible with distros that ship those versions.
 On the target distro, confirm a WebKitGTK 4.1 runtime package is available via the package manager:
 
 - Debian/Ubuntu: `apt-cache policy libwebkit2gtk-4.1-0` (or `apt search libwebkit2gtk-4.1`)
-- Fedora/RHEL: `dnf info webkit2gtk4.1`
+- Fedora: `dnf info webkit2gtk4.1`
+- RHEL 9-family: `dnf info webkit2gtk3` (WebKitGTK 4.0; expect to use the `.AppImage` if 4.1 is unavailable)
 
 If the distro cannot install a WebKitGTK 4.1 package, recommend the `.AppImage` instead of the
 `.deb`/`.rpm`.
@@ -438,15 +441,16 @@ docker run --rm -it \
 CI guardrail: tagged releases run `bash scripts/ci/verify-linux-package-deps.sh`, which inspects the produced `.deb` with
 `dpkg -I` / `dpkg-deb -f` and fails the workflow if the **core runtime dependencies** are missing from `Depends:`.
 
-## Linux: `.rpm` runtime dependencies (Fedora/RHEL)
+## Linux: `.rpm` runtime dependencies (Fedora/RHEL-family)
 
 For RPM-based distros (Fedora/RHEL/CentOS derivatives), the same GTK3/WebKitGTK/AppIndicator stack
 must be present at runtime.
 
 These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` under
-`bundle.linux.rpm.depends` (Fedora/RHEL package names):
+`bundle.linux.rpm.depends` (Fedora package names; other RPM distros may differ):
 
-- `webkit2gtk4.1` – WebKitGTK system WebView used by Tauri on Linux.
+- `webkit2gtk4.1` – WebKitGTK system WebView used by Tauri on Linux (Fedora). Some RHEL-family
+  distros ship WebKitGTK 4.0 as `webkit2gtk3` and may not be compatible with this build.
 - `gtk3` – GTK3 (windowing/event loop; also required by WebKitGTK).
 - `(libayatana-appindicator-gtk3 or libappindicator-gtk3)` – tray icon backend.
 - `librsvg2` – SVG rendering used by parts of the GTK icon stack / common icon themes.
