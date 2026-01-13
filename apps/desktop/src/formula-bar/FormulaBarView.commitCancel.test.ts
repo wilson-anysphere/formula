@@ -18,6 +18,12 @@ function queryActions(host: HTMLElement): {
   return { cancel, commit };
 }
 
+function queryFxButton(host: HTMLElement): HTMLButtonElement {
+  const fx = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]');
+  if (!fx) throw new Error("Expected fx button to exist");
+  return fx;
+}
+
 describe("FormulaBarView commit/cancel UX", () => {
   it("ignores commit/cancel actions while not editing", () => {
     const host = document.createElement("div");
@@ -74,6 +80,68 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(cancel.disabled).toBe(false);
     expect(commit.hidden).toBe(false);
     expect(commit.disabled).toBe(false);
+
+    host.remove();
+  });
+
+  it("closes the function picker when canceling via ✕", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { cancel } = queryActions(host);
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "start", value: null });
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    cancel.click();
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("start");
+    expect(view.textarea.value).toBe("start");
+    expect(picker?.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("closes the function picker when committing via ✓", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    const { commit } = queryActions(host);
+    const fx = queryFxButton(host);
+
+    view.setActiveCell({ address: "A1", input: "", value: null });
+    fx.click();
+
+    // Edit the draft while the picker is open.
+    view.textarea.value = "=1+2";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]');
+    expect(picker?.hidden).toBe(false);
+
+    commit.click();
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=1+2", { reason: "command", shift: false });
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("=1+2");
+    expect(view.model.activeCell.input).toBe("=1+2");
+    expect(picker?.hidden).toBe(true);
 
     host.remove();
   });
