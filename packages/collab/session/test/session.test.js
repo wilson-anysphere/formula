@@ -115,6 +115,75 @@ test("CollabSession.setPermissions rejects non-array rangeRestrictions", () => {
   );
 });
 
+test("CollabSession.setPermissions supports legacy { range: ... } restriction shape", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+
+  session.setPermissions({
+    role: "editor",
+    userId: "u-editor",
+    rangeRestrictions: [
+      {
+        range: {
+          sheetName: "Sheet1",
+          startRow: 0,
+          startCol: 0,
+          endRow: 0,
+          endCol: 0,
+        },
+        readAllowlist: [],
+        editAllowlist: [],
+      },
+    ],
+  });
+
+  const stored = session.getPermissions()?.rangeRestrictions ?? null;
+  assert.ok(Array.isArray(stored));
+  assert.equal(stored.length, 1);
+  const restriction = stored[0];
+  assert.ok(restriction && typeof restriction === "object");
+  assert.ok(restriction.range && typeof restriction.range === "object");
+  assert.equal(restriction.range.sheetId, "Sheet1");
+});
+
+test("CollabSession.setPermissions error message includes the failing restriction index", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+
+  assert.throws(
+    () => {
+      session.setPermissions({
+        role: "editor",
+        userId: "u-editor",
+        rangeRestrictions: [
+          {
+            sheetName: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 0,
+            endCol: 0,
+            readAllowlist: [],
+            editAllowlist: [],
+          },
+          {
+            sheetName: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 0,
+            endCol: 0,
+            // Invalid: should be an array.
+            editAllowlist: "u-owner",
+          },
+        ],
+      });
+    },
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /rangeRestrictions\[1\] invalid:/);
+      assert.match(err.message, /restriction\.editAllowlist must be an array when provided/);
+      return true;
+    },
+  );
+});
+
 test("CollabSession.setPermissions stores normalized rangeRestrictions (sheetName → range.sheetId)", () => {
   const session = createCollabSession({ doc: new Y.Doc() });
 
