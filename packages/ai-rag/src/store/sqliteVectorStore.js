@@ -373,13 +373,13 @@ export class SqliteVectorStore {
         SELECT id, metadata_json, dot(vector, ?) AS score
         FROM vectors
         WHERE workbook_id = ?
-        ORDER BY score DESC
+        ORDER BY score DESC, id ASC
         LIMIT ?;
       `
       : `
         SELECT id, metadata_json, dot(vector, ?) AS score
         FROM vectors
-        ORDER BY score DESC
+        ORDER BY score DESC, id ASC
         LIMIT ?;
       `;
 

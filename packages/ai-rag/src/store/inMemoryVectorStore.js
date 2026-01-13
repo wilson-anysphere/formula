@@ -104,8 +104,8 @@ export class InMemoryVectorStore {
     // proportional to the number of records (which can be very large) when callers only
     // need a small set of nearest neighbors.
     //
-    // We preserve the old `Array#sort` semantics by tracking scan order and using it as
-    // a tie-breaker when scores are identical (stable sort behavior).
+    // When cosine scores tie, break ties deterministically by id (ascending) so result
+    // ordering is stable across store implementations.
     /**
      * Normalize `topK` the same way `Array.prototype.slice(0, topK)` did in the previous
      * implementation:
@@ -127,19 +127,18 @@ export class InMemoryVectorStore {
     }
 
     /**
-     * Heap item. `_idx` is a stable tie-breaker based on scan order so results match
-     * the previous full-sort implementation when scores are equal.
-     * @type {Array<{ id: string, score: number, metadata: any, _idx: number }>}
+     * Heap items (min-heap of the "worse" result so we can keep only the topK).
+     * @type {Array<{ id: string, score: number, metadata: any }>}
      */
     const heap = [];
 
     /**
      * Return true if `a` should come before `b` in the min-heap (i.e. `a` is "worse").
-     * Lower score is worse; for equal scores, later scan order is worse.
+     * Lower score is worse; for equal scores, larger id is worse.
      */
     function isWorse(a, b) {
       if (a.score !== b.score) return a.score < b.score;
-      return a._idx > b._idx;
+      return a.id > b.id;
     }
 
     function heapSwap(i, j) {
@@ -170,55 +169,43 @@ export class InMemoryVectorStore {
       }
     }
 
-    /** @type {number} */
-    let idx = 0;
     for (const [id, rec] of this._records) {
       throwIfAborted(signal);
-      if (workbookId && rec.metadata?.workbookId !== workbookId) {
-        idx += 1;
-        continue;
-      }
-      if (filter && !filter(rec.metadata, id)) {
-        idx += 1;
-        continue;
-      }
+      if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
+      if (filter && !filter(rec.metadata, id)) continue;
 
       // Fast path: if `topK` is 0/null/negative, keep nothing.
-      if (k <= 0) {
-        idx += 1;
-        continue;
-      }
+      if (k <= 0) continue;
 
       const score = cosineSimilarity(q, rec.vector);
 
       if (heap.length < k) {
-        heap.push({ id, score, metadata: rec.metadata, _idx: idx });
+        heap.push({ id, score, metadata: rec.metadata });
         heapifyUp(heap.length - 1);
-        idx += 1;
         continue;
       }
 
       // Heap is full; evict the worst item if this candidate is better.
       const worst = heap[0];
-      if (score > worst.score || (score === worst.score && idx < worst._idx)) {
+      if (score > worst.score || (score === worst.score && id < worst.id)) {
         // Reuse the existing object to avoid per-record allocations when the corpus is large.
         worst.id = id;
         worst.score = score;
         worst.metadata = rec.metadata;
-        worst._idx = idx;
         heapifyDown(0);
       }
-      idx += 1;
     }
 
     throwIfAborted(signal);
-
-    // Sort the retained results descending (stable tie-breaker via scan index) to
-    // match the previous behavior of sorting the full scored list.
-    heap.sort((a, b) => b.score - a.score || a._idx - b._idx);
+    heap.sort((a, b) => {
+      const scoreCmp = b.score - a.score;
+      if (scoreCmp !== 0) return scoreCmp;
+      if (a.id < b.id) return -1;
+      if (a.id > b.id) return 1;
+      return 0;
+    });
     throwIfAborted(signal);
 
-    // Strip internal bookkeeping before returning.
     return heap.map(({ id, score, metadata }) => ({ id, score, metadata }));
   }
 
