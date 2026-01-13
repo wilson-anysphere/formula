@@ -123,24 +123,6 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   // --- Pivot table (panel) ----------------------------------------------------
   "insert.tables.pivotTable",
 
-  // --- Page Layout / Print ----------------------------------------------------
-  "pageLayout.pageSetup.pageSetupDialog",
-  "pageLayout.pageSetup.margins.normal",
-  "pageLayout.pageSetup.margins.wide",
-  "pageLayout.pageSetup.margins.narrow",
-  "pageLayout.pageSetup.margins.custom",
-  "pageLayout.pageSetup.orientation.portrait",
-  "pageLayout.pageSetup.orientation.landscape",
-  "pageLayout.pageSetup.size.letter",
-  "pageLayout.pageSetup.size.a4",
-  "pageLayout.pageSetup.size.more",
-  "pageLayout.printArea.setPrintArea",
-  "pageLayout.pageSetup.printArea.set",
-  "pageLayout.printArea.clearPrintArea",
-  "pageLayout.pageSetup.printArea.clear",
-  "pageLayout.pageSetup.printArea.addTo",
-  "pageLayout.export.exportPdf",
-
   // --- View -------------------------------------------------------------------
   "view.macros.viewMacros",
   "view.macros.viewMacros.run",
