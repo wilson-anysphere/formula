@@ -26,6 +26,12 @@ For details, see:
 
 ## Development
 
+### Data model / DAX engine (Power Pivot)
+
+The in-repo DAX engine lives in `crates/formula-dax`. Contributor docs:
+
+- [`docs/21-dax-engine.md`](./docs/21-dax-engine.md) — supported DAX syntax/functions, relationships + filter propagation, calculated columns, and the pivot API.
+
 ### Built-in function catalog (tab completion + hints)
 
 The set of built-in Excel-like functions is owned by the Rust formula engine (`crates/formula-engine`)
