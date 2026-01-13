@@ -11,7 +11,15 @@ fn load_fixture(name: &str) -> Vec<u8> {
 
 #[test]
 fn detects_chart_ex_parts_and_parses_kind() {
-    for (name, expected_title) in [("waterfall", "Waterfall"), ("histogram", "Histogram")] {
+    for (name, expected_title) in [
+        ("waterfall", "Waterfall"),
+        ("histogram", "Histogram"),
+        ("treemap", "Treemap"),
+        ("sunburst", "Sunburst"),
+        ("funnel", "Funnel"),
+        ("box-whisker", "Box & Whisker"),
+        ("pareto", "Pareto"),
+    ] {
         let bytes = load_fixture(name);
         let pkg = XlsxPackage::from_bytes(&bytes).expect("parse package");
 
@@ -46,6 +54,43 @@ fn detects_chart_ex_parts_and_parses_kind() {
             }
             other => panic!("expected ChartKind::Unknown for ChartEx, got {other:?}"),
         }
+
+        assert!(
+            !model.series.is_empty(),
+            "expected ChartEx model to include at least one series for {name}.xlsx"
+        );
+        let series = &model.series[0];
+        let categories = series
+            .categories
+            .as_ref()
+            .expect("expected series categories parsed from ChartEx caches");
+        assert!(
+            categories
+                .formula
+                .as_deref()
+                .is_some_and(|f| !f.trim().is_empty()),
+            "expected categories formula to be present for {name}.xlsx"
+        );
+        assert!(
+            categories.cache.as_ref().is_some_and(|c| !c.is_empty()),
+            "expected categories cache to be present for {name}.xlsx"
+        );
+
+        let values = series
+            .values
+            .as_ref()
+            .expect("expected series values parsed from ChartEx caches");
+        assert!(
+            values
+                .formula
+                .as_deref()
+                .is_some_and(|f| !f.trim().is_empty()),
+            "expected values formula to be present for {name}.xlsx"
+        );
+        assert!(
+            values.cache.as_ref().is_some_and(|c| !c.is_empty()),
+            "expected values cache to be present for {name}.xlsx"
+        );
 
         // Ensure round-tripping preserves ChartEx parts byte-for-byte.
         let roundtrip = pkg.write_to_bytes().expect("round-trip write");

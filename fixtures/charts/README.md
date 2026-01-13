@@ -25,6 +25,11 @@ fixtures/charts/
   a `xl/charts/chartEx1.xml` part and a `xl/charts/_rels/chart1.xml.rels`
   relationship so we have representative modern-chart OPC graphs in-repo even
   before full ChartEx parsing/rendering lands.
+  - Note: these `fixtures/charts/xlsx/*` ChartEx parts are intentionally small
+    and may not include the full `cx:*Chart` plot/series structure.
+  - For parser development fixtures that **do** include `cx:plotArea`, concrete
+    `cx:*Chart` elements, and series caches (`cx:strCache` / `cx:numCache`), see
+    `fixtures/xlsx/charts-ex/`.
 
 ## Golden image size
 
