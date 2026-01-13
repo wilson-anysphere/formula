@@ -42,6 +42,10 @@ fn dax_function_golden_suite() {
         ("ISBLANK(0)", false.into()),
         ("ISBLANK(\"\")", false.into()),
         ("ISBLANK([Total Sales])", false.into()),
+        (
+            "ISBLANK(CALCULATE([Total Sales], Customers[Region] = \"Nowhere\"))",
+            true.into(),
+        ),
     ];
 
     for (expr, expected) in cases {
