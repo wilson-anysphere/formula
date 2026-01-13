@@ -1106,6 +1106,12 @@ pub fn roundtrip_zip_copy(original: &Path, out_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Collect `.xlsx` / `.xlsm` / `.xlsb` fixture paths under `root`.
+///
+/// Note: this helper is used by round-trip test harnesses that treat each file as a ZIP/OPC
+/// package. Password-protected/encrypted OOXML workbooks that use an OLE/CFB wrapper
+/// (`EncryptionInfo` + `EncryptedPackage`) must not be placed under `fixtures/xlsx/`; they live
+/// under `fixtures/encrypted/ooxml/` instead.
 pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
     if !root.exists() {
         return Err(anyhow!("fixtures root {} does not exist", root.display()));
