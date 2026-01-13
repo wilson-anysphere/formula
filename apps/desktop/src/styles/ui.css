@@ -501,11 +501,13 @@
 }
 
 .formula-bar-hint.formula-bar-hint--syntax-error {
-  color: var(--error);
+  /* Keep normal hint styling; the error message itself is styled separately. */
+  color: var(--text-secondary);
 }
 
 .formula-bar-hint-error {
   margin-bottom: 4px;
+  color: var(--error);
 }
 
 .formula-bar-hint-panel {
