@@ -21,6 +21,7 @@
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
  *   PERF_INCLUDE_GUARDS=0     # set to 0 to disable canRead/canEdit hooks (default: enabled)
+ *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
  */
 
 import test from "node:test";
@@ -32,7 +33,14 @@ const perfTest = RUN_PERF ? test : test.skip;
 
 const INCLUDE_GUARDS = process.env.PERF_INCLUDE_GUARDS !== "0";
 
-async function waitForCondition(fn, timeoutMs = 120_000) {
+function readPositiveInt(value, fallback) {
+  const n = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const PERF_TIMEOUT_MS = readPositiveInt(process.env.PERF_TIMEOUT_MS, 10 * 60_000);
+
+async function waitForCondition(fn, timeoutMs = PERF_TIMEOUT_MS) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -180,7 +188,7 @@ class DocumentControllerPerfStub {
 
 perfTest(
   "perf: binder applies many cell updates without pathological scaling",
-  { timeout: 10 * 60_000 },
+  { timeout: PERF_TIMEOUT_MS },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
@@ -279,7 +287,7 @@ perfTest(
 
 perfTest(
   "perf: binder writes many DocumentController deltas to Yjs without pathological scaling",
-  { timeout: 10 * 60_000 },
+  { timeout: PERF_TIMEOUT_MS },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);

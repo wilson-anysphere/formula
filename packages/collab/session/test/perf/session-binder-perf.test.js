@@ -23,6 +23,7 @@
  *   PERF_CELL_UPDATES=50000   # total updates to apply (default: 50000)
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction / DC emit batch (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
+ *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
  */
 
 import test from "node:test";
@@ -32,7 +33,14 @@ import { performance } from "node:perf_hooks";
 const RUN_PERF = process.env.FORMULA_RUN_COLLAB_SESSION_BINDER_PERF === "1";
 const perfTest = RUN_PERF ? test : test.skip;
 
-async function waitForCondition(fn, timeoutMs = 120_000) {
+function readPositiveInt(value, fallback) {
+  const n = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+const PERF_TIMEOUT_MS = readPositiveInt(process.env.PERF_TIMEOUT_MS, 10 * 60_000);
+
+async function waitForCondition(fn, timeoutMs = PERF_TIMEOUT_MS) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -195,7 +203,7 @@ class DocumentControllerPerfStub {
 
 perfTest(
   "perf: session binder applies many Yjs cell updates (Yjs -> binder -> DocumentController)",
-  { timeout: 10 * 60_000 },
+  { timeout: PERF_TIMEOUT_MS },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
@@ -281,7 +289,7 @@ perfTest(
 
 perfTest(
   "perf: session binder writes many DocumentController deltas (DocumentController -> binder -> Yjs)",
-  { timeout: 10 * 60_000 },
+  { timeout: PERF_TIMEOUT_MS },
   async () => {
     const totalUpdates = Number.parseInt(process.env.PERF_CELL_UPDATES ?? "50000", 10);
     const batchSize = Number.parseInt(process.env.PERF_BATCH_SIZE ?? "1000", 10);
@@ -365,4 +373,3 @@ perfTest(
     ydoc.destroy();
   },
 );
-
