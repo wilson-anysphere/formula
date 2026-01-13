@@ -2,7 +2,7 @@ import type { VectorSearchResult } from "../store/inMemoryVectorStore.js";
 
 export function searchWorkbookRag(params: {
   queryText: string;
-  workbookId: string;
+  workbookId?: string;
   topK?: number;
   vectorStore: {
     query(
