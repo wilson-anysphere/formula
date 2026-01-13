@@ -14,17 +14,18 @@ default = ["vba"]
 vba = ["dep:formula-vba"]
 
 [dependencies]
-base64 = "0.22"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
 aes = "0.8"
+base64 = "0.22"
 cbc = "0.1"
 cipher = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 digest = "0.10"
 formula-engine = { path = "../formula-engine" }
 formula-format = { path = "../formula-format" }
 formula-columnar = { path = "../formula-columnar" }
 formula-model = { path = "../formula-model" }
 formula-vba = { path = "../formula-vba", optional = true }
+hmac = "0.12"
 quick-xml = { version = "0.37", features = ["serialize"] }
 roxmltree = "0.20"
 serde = { version = "1.0", features = ["derive"] }
@@ -39,6 +40,8 @@ formula-fs = { path = "../formula-fs" }
 
 [dev-dependencies]
 cfb = "0.10"
+ms-offcrypto-writer = "1.0.7"
+rand = "0.9"
 openssl = "0.10"
 pretty_assertions = "1"
 insta = "1.46"
