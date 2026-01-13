@@ -15,7 +15,12 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+// Test hook: allow overriding the Tauri config path so unit tests can operate on a temp copy
+// instead of mutating the real repo config.
+const defaultConfigPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+const configPath = process.env.FORMULA_TAURI_CONF_PATH
+  ? path.resolve(repoRoot, process.env.FORMULA_TAURI_CONF_PATH)
+  : defaultConfigPath;
 const relConfigPath = path.relative(repoRoot, configPath);
 
 /**
