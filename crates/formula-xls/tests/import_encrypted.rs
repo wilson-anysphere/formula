@@ -69,7 +69,10 @@ fn errors_on_encrypted_xls_fixtures() {
         .join("encrypted");
 
     let fixtures = [
-        ("biff8_xor_pw_open.xls", &[0x00, 0x00, 0x34, 0x12, 0x78, 0x56][..]),
+        // XOR FILEPASS payload includes a password-derived `key` + `verifier`, but those bytes are
+        // intentionally treated as opaque here. We only assert the scheme selector
+        // (`wEncryptionType=0x0000`).
+        ("biff8_xor_pw_open.xls", &[0x00, 0x00][..]),
         (
             "biff8_rc4_standard_pw_open.xls",
             &[0x01, 0x00, 0x01, 0x00][..],

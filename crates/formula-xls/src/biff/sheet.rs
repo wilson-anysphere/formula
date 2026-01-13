@@ -905,9 +905,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 let num_hdr = f64::from_le_bytes(data[16..24].try_into().unwrap());
                 let num_ftr = f64::from_le_bytes(data[24..32].try_into().unwrap());
 
-                setup_fit_width = Some(i_fit_width);
-                setup_fit_height = Some(i_fit_height);
-
                 // grbit flags:
                 // - fPortrait (bit1): 0=landscape, 1=portrait
                 // - fNoPls (bit2): if set, printer-related fields are undefined and must be ignored
@@ -921,6 +918,8 @@ pub(crate) fn parse_biff_sheet_print_settings(
                 let f_portrait = (grbit & GRBIT_F_PORTRAIT) != 0;
 
                 if !f_no_pls {
+                    setup_fit_width = Some(i_fit_width);
+                    setup_fit_height = Some(i_fit_height);
                     page_setup.paper_size.code = i_paper_size;
                     setup_scale = Some(i_scale);
 
@@ -1017,7 +1016,12 @@ pub(crate) fn parse_biff_sheet_print_settings(
         }
     }
 
-    let fit_to_page = wsbool_fit_to_page.unwrap_or(false);
+    // Best-effort: WSBOOL.fFitToPage is the canonical indicator of whether SETUP's iFit* fields
+    // apply, but some producers omit WSBOOL from the worksheet stream. In that case, fall back to
+    // treating non-zero iFitWidth/iFitHeight as a signal that fit-to-page scaling is active.
+    let fit_to_page = wsbool_fit_to_page.unwrap_or_else(|| {
+        setup_fit_width.unwrap_or(0) != 0 || setup_fit_height.unwrap_or(0) != 0
+    });
     if fit_to_page {
         if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
             page_setup.scaling = Scaling::FitTo { width, height };
@@ -3470,7 +3474,7 @@ mod tests {
                     77,     // iScale (ignored when fit-to-page)
                     2,      // iFitWidth
                     3,      // iFitHeight
-                    0x0000, // landscape (fPortrait=0)
+                    0x0000, // fPortrait=0 => landscape
                     0.5,    // header inches
                     0.6,    // footer inches
                 ),
@@ -3505,7 +3509,7 @@ mod tests {
 
     #[test]
     fn parses_percent_scaling_when_fit_to_page_disabled() {
-        let grbit = 0x0002u16; // fPortrait=1
+        let grbit = 0x0000u16; // fPortrait=0 => landscape
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
             record(
