@@ -78,6 +78,20 @@ Formula’s encrypted-workbook support targets these two schemes:
 Everything else should fail with a specific “unsupported encryption scheme” error (see
 [Error semantics](#error-semantics)).
 
+### Implementation pointers (Formula code)
+
+Useful entrypoints when working on encrypted workbook support:
+
+- **Encryption detection / classification (OLE vs ZIP vs BIFF):**
+  - `crates/formula-io/src/lib.rs`:
+    - `detect_workbook_encryption`
+    - `WorkbookEncryptionKind`
+    - `Error::EncryptedWorkbook` (legacy “not supported” umbrella error)
+- **Standard (CryptoAPI) `EncryptionInfo` parsing + `EncryptedPackage` AES decrypt helper:**
+  - `crates/formula-offcrypto/src/lib.rs`
+- **Agile encryption primitives (password hash / key+IV derivation):**
+  - `crates/formula-xlsx/src/offcrypto/crypto.rs`
+
 ---
 
 ## Legacy `.xls` encryption (BIFF `FILEPASS`)

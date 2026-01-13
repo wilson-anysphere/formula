@@ -17,7 +17,12 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 
 ## XLSX File Format Structure
 
-XLSX is a ZIP archive following Open Packaging Conventions (ECMA-376):
+XLSX is a ZIP archive following Open Packaging Conventions (ECMA-376).
+
+**Exception:** Excel “Encrypt with Password” / “Password to open” files are **not ZIP** archives even
+when they use a `.xlsx`/`.xlsm` extension. Excel wraps the encrypted workbook in an **OLE/CFB**
+container with `EncryptionInfo` + `EncryptedPackage` streams. See
+[`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md).
 
 ```
 workbook.xlsx (ZIP archive)
