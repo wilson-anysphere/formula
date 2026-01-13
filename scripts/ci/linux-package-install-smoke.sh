@@ -49,6 +49,9 @@ require_docker() {
 find_pkg_dirs() {
   local pkg_type="$1" # deb|rpm
   local ext="$2" # .deb|.rpm
+  local out_var="$3" # name of array var to populate
+  # shellcheck disable=SC2178 # (used via nameref)
+  local -n out_dirs="$out_var"
 
   local -a files
   mapfile -t files < <(
@@ -79,7 +82,7 @@ find_pkg_dirs() {
     dirs+=("${d}")
   done
 
-  printf '%s\n' "${dirs[@]}"
+  out_dirs=("${dirs[@]}")
 }
 
 deb_smoke_test_dir() {
@@ -165,14 +168,16 @@ rpm_smoke_test_dir() {
 require_docker
 
 if [[ "${kind}" == "deb" || "${kind}" == "all" ]]; then
-  mapfile -t deb_dirs < <(find_pkg_dirs "deb" ".deb")
+  deb_dirs=()
+  find_pkg_dirs "deb" ".deb" deb_dirs
   for d in "${deb_dirs[@]}"; do
     deb_smoke_test_dir "${d}"
   done
 fi
 
 if [[ "${kind}" == "rpm" || "${kind}" == "all" ]]; then
-  mapfile -t rpm_dirs < <(find_pkg_dirs "rpm" ".rpm")
+  rpm_dirs=()
+  find_pkg_dirs "rpm" ".rpm" rpm_dirs
   for d in "${rpm_dirs[@]}"; do
     rpm_smoke_test_dir "${d}"
   done
