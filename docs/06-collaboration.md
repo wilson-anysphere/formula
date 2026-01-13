@@ -876,9 +876,13 @@ Source: [`packages/collab/versioning/src/index.ts`](../packages/collab/versionin
 > `versions`, `versionsMeta`, or `branching:*`.
 >
 > - Env var: `SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED` (defaults to **enabled** when `NODE_ENV=production`, **disabled** otherwise)
+> - Optional env vars:
+>   - `SYNC_SERVER_RESERVED_ROOT_NAMES` (comma-separated; defaults to `versions,versionsMeta`)
+>   - `SYNC_SERVER_RESERVED_ROOT_PREFIXES` (comma-separated; defaults to `branching:`)
 > - Implementation: [`services/sync-server/src/server.ts`](../services/sync-server/src/server.ts) + [`services/sync-server/src/ywsSecurity.ts`](../services/sync-server/src/ywsSecurity.ts)
 >
 > If this guard is enabled, in-doc stores like `YjsVersionStore` and `YjsBranchStore` will not work unless you disable it (or use non-Yjs stores).
+> If you customize the branching root name (non-default `rootName`), note that the guard only blocks configured prefixes; you may need to extend `SYNC_SERVER_RESERVED_ROOT_PREFIXES` accordingly.
 
 ### “Use this in collaborative mode” snippet
 
