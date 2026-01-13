@@ -122,7 +122,6 @@ describe("extractFormulaReferences", () => {
     // Caret at end of token should still count as inside.
     expect(extractFormulaReferences(input, tokenEnd, tokenEnd, { resolveName }).activeIndex).toBe(0);
   });
-  });
 
   it("extracts structured table references (data rows only)", () => {
     const tables = new Map([

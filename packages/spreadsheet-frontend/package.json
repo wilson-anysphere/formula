@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./a1": "./src/a1.ts",
     "./cache": "./src/cache.ts",
+    "./formula/tokenizeFormula": "./src/formula/tokenizeFormula.ts",
     "./grid": "./src/grid-provider.ts"
   },
   "dependencies": {
