@@ -192,6 +192,13 @@ This produces a privacy-safe summary:
 - `rels_critical_ids`: for `.rels` parts, the relationship Ids (`rId...`) involved in critical diffs
 
 The tool always writes a JSON summary file (default: `tools/corpus/out/minimize/<sha16>.json`).
+
+To also attempt to write a smaller workbook that still reproduces the critical diffs:
+
+```bash
+python -m tools.corpus.minimize --input /path/to/workbook.xlsx --out-xlsx minimized.xlsx
+```
+
 To fail fast on suspicious plaintext in a corpus directory:
 
 ```bash

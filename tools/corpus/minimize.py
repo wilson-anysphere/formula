@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
+import posixpath
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, DefaultDict
@@ -18,6 +21,8 @@ from .util import (
     utc_now_iso,
     write_json,
 )
+
+from xml.etree import ElementTree as ET
 
 
 def _relationship_id_from_diff_path(path: str) -> str | None:
@@ -59,8 +64,8 @@ def _ensure_full_diff_entries(
     *,
     diff_ignore: set[str],
     diff_limit: int,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Run the Rust triage helper and return (diff_details, differences).
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Run the Rust triage helper and return (rust_out, diff_details, differences).
 
     The Rust helper always computes the full diff, but it only *emits* up to `diff_limit`
     entries in `top_differences`. For per-part counts we need the complete set of emitted
@@ -96,7 +101,7 @@ def _ensure_full_diff_entries(
         if not isinstance(diffs, list):
             diffs = []
 
-    return details, diffs
+    return rust_out, details, diffs
 
 
 def summarize_differences(
@@ -158,7 +163,7 @@ def minimize_workbook(
     diff_ignore: set[str],
     diff_limit: int,
 ) -> dict[str, Any]:
-    diff_details, diffs = _ensure_full_diff_entries(
+    rust_out, diff_details, diffs = _ensure_full_diff_entries(
         rust_exe,
         workbook,
         diff_ignore=diff_ignore,
@@ -172,6 +177,10 @@ def minimize_workbook(
     if not isinstance(overall_counts, dict):
         overall_counts = {}
 
+    result = rust_out.get("result") or {}
+    if not isinstance(result, dict):
+        result = {}
+
     return {
         "display_name": workbook.display_name,
         "sha256": sha256_hex(workbook.data),
@@ -179,6 +188,8 @@ def minimize_workbook(
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
         "run_url": github_run_url(),
+        "open_ok": result.get("open_ok"),
+        "round_trip_ok": result.get("round_trip_ok"),
         "diff_ignore": sorted(diff_ignore),
         "diff_counts": {
             "critical": int(overall_counts.get("critical") or 0),
@@ -190,6 +201,282 @@ def minimize_workbook(
         "part_counts": per_part_counts,
         "rels_critical_ids": rels_ids,
     }
+
+
+def _normalize_part_name(name: str) -> str:
+    return name.replace("\\", "/").lstrip("/")
+
+
+def _normalize_opc_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    out: list[str] = []
+    for seg in normalized.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if out:
+                out.pop()
+            continue
+        out.append(seg)
+    return "/".join(out)
+
+
+def _source_part_from_rels_part(rels_part: str) -> str:
+    rels_part = _normalize_part_name(rels_part)
+    if rels_part == "_rels/.rels":
+        return ""
+    if rels_part.startswith("_rels/"):
+        rels_file = rels_part[len("_rels/") :]
+        return _normalize_opc_path(rels_file[: -len(".rels")] if rels_file.endswith(".rels") else rels_file)
+    if "/_rels/" in rels_part:
+        dir_part, rels_file = rels_part.rsplit("/_rels/", 1)
+        rels_file = rels_file[: -len(".rels")] if rels_file.endswith(".rels") else rels_file
+        if dir_part:
+            return _normalize_opc_path(f"{dir_part}/{rels_file}")
+        return _normalize_opc_path(rels_file)
+    return _normalize_opc_path(rels_part[: -len(".rels")] if rels_part.endswith(".rels") else rels_part)
+
+
+def _resolve_relationship_target(rels_part: str, target: str) -> str:
+    target = (target or "").strip().replace("\\", "/")
+    if "#" in target:
+        target = target.split("#", 1)[0]
+    if not target:
+        return _source_part_from_rels_part(rels_part)
+    if target.startswith("/"):
+        return _normalize_opc_path(target.lstrip("/"))
+    # Be tolerant of producers that include an `xl/` prefix without a leading `/`, even though
+    # relationship targets are supposed to be relative to the source part.
+    if target.casefold().startswith("xl/"):
+        return _normalize_opc_path(target)
+
+    source_part = _source_part_from_rels_part(rels_part)
+    base_dir = f"{posixpath.dirname(source_part)}/" if source_part and "/" in source_part else ""
+    return _normalize_opc_path(f"{base_dir}{target}")
+
+
+def _read_zip_parts(data: bytes) -> dict[str, bytes]:
+    parts: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(data), "r") as z:
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            normalized = _normalize_part_name(info.filename)
+            if normalized in parts:
+                raise ValueError(f"duplicate part after normalization: {normalized}")
+            parts[normalized] = z.read(info.filename)
+    return parts
+
+
+def _write_zip_parts(parts: dict[str, bytes]) -> bytes:
+    # Deterministic-ish ZIP output: stable ordering + stable timestamps.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for name in sorted(parts):
+            info = zipfile.ZipInfo(name)
+            info.date_time = (1980, 1, 1, 0, 0, 0)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, parts[name])
+    return buf.getvalue()
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.split("}", 1)[-1]
+
+
+def _prune_content_types_xml(content_types: bytes, keep_parts: set[str]) -> bytes:
+    try:
+        root = ET.fromstring(content_types)
+    except Exception:
+        return content_types
+
+    ns = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    if ns:
+        ET.register_namespace("", ns)
+
+    removed = []
+    for child in list(root):
+        if _xml_local_name(child.tag) != "Override":
+            continue
+        part_name = child.attrib.get("PartName") or ""
+        normalized = _normalize_part_name(part_name)
+        if normalized not in keep_parts:
+            root.remove(child)
+            removed.append(normalized)
+
+    if not removed:
+        return content_types
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _prune_rels_xml(rels_bytes: bytes, rels_part: str, keep_parts: set[str]) -> bytes:
+    try:
+        root = ET.fromstring(rels_bytes)
+    except Exception:
+        return rels_bytes
+
+    ns = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+    if ns:
+        ET.register_namespace("", ns)
+
+    changed = False
+    for child in list(root):
+        if _xml_local_name(child.tag) != "Relationship":
+            continue
+        target_mode = (child.attrib.get("TargetMode") or "").strip()
+        if target_mode and target_mode.casefold() == "external":
+            continue
+        target = child.attrib.get("Target") or ""
+        resolved = _resolve_relationship_target(rels_part, target)
+        if resolved and resolved not in keep_parts:
+            root.remove(child)
+            changed = True
+
+    if not changed:
+        return rels_bytes
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def prune_xlsx_parts(
+    workbook_bytes: bytes,
+    *,
+    keep_parts: set[str],
+    prune_content_types: bool = True,
+    prune_rels: bool = True,
+) -> bytes:
+    parts = _read_zip_parts(workbook_bytes)
+    keep_parts_normalized = {_normalize_part_name(p) for p in keep_parts}
+    kept: dict[str, bytes] = {k: v for k, v in parts.items() if k in keep_parts_normalized}
+
+    if prune_content_types and "[Content_Types].xml" in kept:
+        kept["[Content_Types].xml"] = _prune_content_types_xml(
+            kept["[Content_Types].xml"], set(kept.keys())
+        )
+
+    if prune_rels:
+        for name in list(kept.keys()):
+            if not name.endswith(".rels"):
+                continue
+            kept[name] = _prune_rels_xml(kept[name], name, set(kept.keys()))
+
+    return _write_zip_parts(kept)
+
+
+def _required_core_parts(parts: dict[str, bytes]) -> set[str]:
+    required: set[str] = {
+        "[Content_Types].xml",
+        "_rels/.rels",
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+    }
+    # These are often required for formula-xlsx to parse cells correctly. Keep them when present.
+    for name in ("xl/styles.xml", "xl/sharedStrings.xml"):
+        if name in parts:
+            required.add(name)
+
+    # Keep all worksheets referenced by workbook.xml.rels.
+    rels_bytes = parts.get("xl/_rels/workbook.xml.rels")
+    if rels_bytes:
+        try:
+            root = ET.fromstring(rels_bytes)
+            for child in root.iter():
+                if _xml_local_name(child.tag) != "Relationship":
+                    continue
+                ty = (child.attrib.get("Type") or "").strip()
+                if not ty.endswith("/worksheet"):
+                    continue
+                target = child.attrib.get("Target") or ""
+                resolved = _resolve_relationship_target("xl/_rels/workbook.xml.rels", target)
+                if resolved and resolved in parts:
+                    required.add(resolved)
+        except Exception:
+            pass
+    return required
+
+
+def minimize_workbook_package(
+    workbook: WorkbookInput,
+    *,
+    rust_exe: Path,
+    diff_ignore: set[str],
+    diff_limit: int,
+    out_xlsx: Path,
+    max_steps: int = 500,
+    baseline: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str], bytes]:
+    """Attempt to remove non-critical parts while still reproducing the original critical diffs.
+
+    This is a best-effort "Phase 2" minimizer. It is intentionally conservative:
+    - never removes required core parts needed for loadability
+    - only removes parts *not* in the initial critical part set
+    - after each removal, reruns triage and only accepts the change if the original critical
+      parts are still present in the new critical set.
+    """
+
+    baseline_summary = baseline or minimize_workbook(
+        workbook,
+        rust_exe=rust_exe,
+        diff_ignore=diff_ignore,
+        diff_limit=diff_limit,
+    )
+    baseline_critical = set(baseline_summary.get("critical_parts") or [])
+    if not baseline_critical:
+        raise RuntimeError("workbook has no critical diffs; nothing to minimize")
+
+    parts = _read_zip_parts(workbook.data)
+    required = _required_core_parts(parts)
+    # Keep all `.rels` parts by default to avoid introducing new CRITICAL extra_part diffs.
+    rels_parts = {p for p in parts if p.endswith(".rels")}
+    always_keep = required | baseline_critical | rels_parts
+
+    candidates = [
+        p
+        for p in parts
+        if p not in always_keep
+        and not p.endswith("/")  # defensive; parts dict excludes dirs anyway
+    ]
+    candidates.sort(key=lambda p: (-len(parts.get(p, b"")), p))
+
+    removed: list[str] = []
+    current_bytes = workbook.data
+    current_summary = baseline_summary
+    steps = 0
+    for part in candidates:
+        if steps >= max_steps:
+            break
+        steps += 1
+
+        keep = set(_read_zip_parts(current_bytes).keys())
+        if part not in keep:
+            continue
+        keep.remove(part)
+
+        # Always keep baseline critical parts and required core parts.
+        keep |= baseline_critical | required | rels_parts
+
+        trial_bytes = prune_xlsx_parts(
+            current_bytes,
+            keep_parts=keep,
+            prune_content_types=True,
+            prune_rels=True,
+        )
+        trial_summary = minimize_workbook(
+            WorkbookInput(display_name=workbook.display_name, data=trial_bytes),
+            rust_exe=rust_exe,
+            diff_ignore=diff_ignore,
+            diff_limit=diff_limit,
+        )
+
+        trial_open_ok = trial_summary.get("open_ok") is True
+        trial_critical = set(trial_summary.get("critical_parts") or [])
+        if trial_open_ok and baseline_critical.issubset(trial_critical):
+            removed.append(part)
+            current_bytes = trial_bytes
+            current_summary = trial_summary
+
+    out_xlsx.parent.mkdir(parents=True, exist_ok=True)
+    out_xlsx.write_bytes(current_bytes)
+    return current_summary, removed, current_bytes
 
 
 def main() -> int:
@@ -222,6 +509,20 @@ def main() -> int:
             "auto-rerun with the exact total if truncation is detected."
         ),
     )
+    parser.add_argument(
+        "--out-xlsx",
+        type=Path,
+        help=(
+            "Optional: write a minimized workbook variant that attempts to remove parts not needed "
+            "to reproduce the original critical diffs."
+        ),
+    )
+    parser.add_argument(
+        "--minimize-max-steps",
+        type=int,
+        default=500,
+        help="Maximum number of part-removal attempts when --out-xlsx is used.",
+    )
     args = parser.parse_args()
 
     fernet_key = os.environ.get(args.fernet_key_env)
@@ -240,6 +541,33 @@ def main() -> int:
 
     workbook_id = summary["sha256"][:16]
     out_path = args.out or (Path("tools/corpus/out/minimize") / f"{workbook_id}.json")
+
+    out_xlsx = args.out_xlsx
+    if out_xlsx is not None:
+        # Allow passing a directory for convenience.
+        if out_xlsx.exists() and out_xlsx.is_dir():
+            out_xlsx = out_xlsx / f"{workbook_id}.min.xlsx"
+        try:
+            min_summary, removed_parts, min_bytes = minimize_workbook_package(
+                workbook,
+                rust_exe=rust_exe,
+                diff_ignore=diff_ignore,
+                diff_limit=max(0, int(args.diff_limit)),
+                out_xlsx=out_xlsx,
+                max_steps=max(0, int(args.minimize_max_steps)),
+                baseline=summary,
+            )
+            summary["minimized"] = {
+                "path": str(out_xlsx),
+                "sha256": sha256_hex(min_bytes),
+                "size_bytes": len(min_bytes),
+                "removed_parts": removed_parts,
+                "diff_counts": min_summary.get("diff_counts"),
+                "critical_parts": min_summary.get("critical_parts"),
+            }
+        except Exception as e:  # noqa: BLE001 (tooling)
+            summary["minimized"] = {"error": str(e)}
+
     write_json(out_path, summary)
 
     # Privacy-safe stdout summary: parts + counts only (no raw XML/text).
@@ -253,6 +581,12 @@ def main() -> int:
                 print(f"    rel_ids: {', '.join(ids)}")
 
     print(f"Wrote summary: {out_path}")
+    if out_xlsx is not None:
+        minimized = summary.get("minimized")
+        if isinstance(minimized, dict) and "path" in minimized:
+            print(f"Wrote minimized workbook: {out_xlsx}")
+        elif isinstance(minimized, dict) and "error" in minimized:
+            print(f"Minimized workbook not written: {minimized['error']}")
     return 0
 
 

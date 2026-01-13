@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+import zipfile
+from xml.etree import ElementTree as ET
 
 import tools.corpus.minimize as minimize_mod
 from tools.corpus.util import WorkbookInput
@@ -163,6 +165,99 @@ class CorpusMinimizeTests(unittest.TestCase):
         finally:
             minimize_mod.triage_mod._build_rust_helper = orig_build  # type: ignore[assignment]
             minimize_mod.triage_mod._run_rust_triage = orig_run  # type: ignore[assignment]
+
+    def test_prune_xlsx_parts_removes_content_types_and_rels_references(self) -> None:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+</Types>
+""",
+            )
+            z.writestr(
+                "_rels/.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+            )
+            z.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>
+""",
+            )
+            z.writestr(
+                "xl/_rels/workbook.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
+</Relationships>
+""",
+            )
+            z.writestr(
+                "xl/styles.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+""",
+            )
+            z.writestr(
+                "xl/worksheets/sheet1.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>
+""",
+            )
+            z.writestr(
+                "xl/theme/theme1.xml",
+                """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"/>
+""",
+            )
+
+        original_bytes = buf.getvalue()
+        keep = {
+            "[Content_Types].xml",
+            "_rels/.rels",
+            "xl/workbook.xml",
+            "xl/_rels/workbook.xml.rels",
+            "xl/styles.xml",
+            "xl/worksheets/sheet1.xml",
+        }
+        pruned = minimize_mod.prune_xlsx_parts(original_bytes, keep_parts=keep)
+
+        with zipfile.ZipFile(io.BytesIO(pruned), "r") as z:
+            names = {info.filename for info in z.infolist() if not info.is_dir()}
+            self.assertNotIn("xl/theme/theme1.xml", names)
+
+            ct = ET.fromstring(z.read("[Content_Types].xml"))
+            overrides = [
+                el.attrib.get("PartName", "")
+                for el in ct
+                if el.tag.split("}")[-1] == "Override"
+            ]
+            self.assertNotIn("/xl/theme/theme1.xml", overrides)
+
+            rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            targets = [
+                el.attrib.get("Target", "")
+                for el in rels
+                if el.tag.split("}")[-1] == "Relationship"
+            ]
+            self.assertNotIn("theme/theme1.xml", targets)
 
 
 if __name__ == "__main__":
