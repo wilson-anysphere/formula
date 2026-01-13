@@ -1711,13 +1711,17 @@ fn main() {
             tray::init(app)?;
             menu::init(app)?;
 
-            // Register the `formula://` deep-link URL scheme with the OS so OAuth PKCE redirects
+            // Register deep-link URL schemes with the OS (Linux/Windows) so OAuth PKCE redirects
             // can round-trip back into the running desktop app instance.
             //
-            // This is best-effort because some platforms may deny registration (e.g. sandboxed
-            // environments) and we still want the app to launch normally.
-            if let Err(err) = app.handle().deep_link().register("formula") {
-                eprintln!("[deep-link] failed to register formula:// handler: {err}");
+            // On macOS, schemes are registered via `Info.plist` (`CFBundleURLTypes`) and cannot be
+            // installed dynamically at runtime.
+            //
+            // This is best-effort because some environments may deny registration and we still want
+            // the app to launch normally.
+            #[cfg(any(target_os = "linux", windows))]
+            if let Err(err) = app.handle().deep_link().register_all() {
+                eprintln!("[deep-link] failed to register deep link handlers: {err}");
             }
 
             // Register global shortcuts (handled by the frontend via the Tauri plugin).
