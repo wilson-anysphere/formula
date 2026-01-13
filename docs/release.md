@@ -264,6 +264,8 @@ install WebView2 automatically if it is missing by using Tauri's WebView2 instal
 
 - Config: `apps/desktop/src-tauri/tauri.conf.json` → `bundle.windows.webviewInstallMode.type = "downloadBootstrapper"`
   (Evergreen **bootstrapper**; we also set `silent: true`; requires an internet connection to download/install the runtime).
+- Alternative: `bundle.windows.webviewInstallMode.type = "embedBootstrapper"` bundles the bootstrapper into the installer
+  (slightly larger installer; still requires internet to install the runtime; can be more reliable on older Windows versions).
 - CI verification: the release workflow runs `scripts/ci/check-windows-webview2-installer.py`, which inspects the produced
   Windows installer(s) and asserts they contain a reference to `MicrosoftEdgeWebview2Setup.exe` (or an offline runtime
   installer), failing the release build if this regresses.
@@ -276,6 +278,9 @@ python scripts/ci/check-windows-webview2-installer.py
 
 If you need an offline-friendly installer, change `bundle.windows.webviewInstallMode` to `offlineInstaller` or
 `fixedRuntime` (at the cost of a much larger installer).
+
+For the full set of options, see the Tauri docs:
+https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options
 
 ## 4) Hosting updater endpoints
 
