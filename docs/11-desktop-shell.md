@@ -96,6 +96,9 @@ pnpm perf:desktop-memory
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
 sampled after the app becomes interactive and a short "settle" delay.
 
+Note: when running headless via Xvfb, the runner attempts to exclude the Xvfb server process from the RSS total (it is not
+part of the app’s steady-state memory footprint).
+
 The CI performance suite (`pnpm benchmark`) also reports this as a tracked benchmark metric:
 
 - `desktop.memory.idle_rss_mb.p95` (unit: `mb`)
