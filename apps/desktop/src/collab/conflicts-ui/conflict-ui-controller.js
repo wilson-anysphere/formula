@@ -141,8 +141,11 @@ export class ConflictUiController {
     const maybeFormulaDiff =
       conflict.kind === "formula"
         ? { before: conflict.localFormula ?? null, after: conflict.remoteFormula ?? null }
-        : conflict.kind === "content" && conflict.local?.type === "formula" && conflict.remote?.type === "formula"
-          ? { before: conflict.local.formula ?? null, after: conflict.remote.formula ?? null }
+        : conflict.kind === "content" && (conflict.local?.type === "formula" || conflict.remote?.type === "formula")
+          ? {
+              before: conflict.local?.type === "formula" ? conflict.local.formula ?? null : null,
+              after: conflict.remote?.type === "formula" ? conflict.remote.formula ?? null : null,
+            }
           : null;
     if (maybeFormulaDiff) {
       dialog.appendChild(renderFormulaDiffDom(maybeFormulaDiff.before, maybeFormulaDiff.after, { testid: "conflict-formula-diff" }));

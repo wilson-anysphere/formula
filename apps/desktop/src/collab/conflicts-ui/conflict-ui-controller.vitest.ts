@@ -215,4 +215,36 @@ describe("ConflictUiController", () => {
     ui.destroy();
     container.remove();
   });
+
+  it("renders a token diff view for content conflicts when one side is a formula", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const resolveConflict = vi.fn(() => true);
+
+    const ui = new ConflictUiController({
+      container,
+      monitor: { resolveConflict },
+    });
+
+    ui.addConflict({
+      id: "c6",
+      kind: "content",
+      cell: { sheetId: "Sheet1", row: 0, col: 0 },
+      cellKey: "Sheet1:0:0",
+      local: { type: "value", value: 123 },
+      remote: { type: "formula", formula: "=A1" },
+      remoteUserId: "u2",
+      detectedAt: 0,
+    });
+
+    container.querySelector<HTMLButtonElement>('[data-testid="conflict-toast-open"]')?.click();
+
+    const diff = container.querySelector<HTMLElement>('[data-testid="conflict-formula-diff"]');
+    expect(diff).not.toBeNull();
+    expect(diff!.querySelector(".formula-diff-op--insert")).not.toBeNull();
+
+    ui.destroy();
+    container.remove();
+  });
 });
