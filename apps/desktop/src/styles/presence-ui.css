@@ -9,7 +9,8 @@
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 40;
+  /* Keep above canvas overlays but below larger interactive panels (e.g. comments). */
+  z-index: 15;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -70,4 +71,3 @@
   color: var(--text-secondary);
   font-size: 11px;
 }
-
