@@ -2057,6 +2057,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "formula-columnar",
+ "formula-model",
  "ordered-float 4.6.0",
  "pretty_assertions",
  "thiserror 2.0.17",

@@ -63,6 +63,20 @@ pub struct PivotResultGrid {
     pub data: Vec<Vec<Value>>,
 }
 
+impl PivotResultGrid {
+    /// Convert this grid into the workbook model's pivot scalar values.
+    ///
+    /// This is provided as an optional convenience for consumers that ultimately need to render
+    /// the grid via `formula-model` pivot structures.
+    #[cfg(feature = "pivot-model")]
+    pub fn to_pivot_scalars(&self) -> Vec<Vec<formula_model::pivots::ScalarValue>> {
+        self.data
+            .iter()
+            .map(|row| row.iter().map(|v| v.to_pivot_scalar()).collect())
+            .collect()
+    }
+}
+
 /// Options controlling how [`pivot_crosstab`] shapes the output grid.
 ///
 /// This is intentionally small for MVP rendering. Future flags (grand totals, subtotals, compact
@@ -588,7 +602,6 @@ fn plan_pivot_expr(
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
-            | BinaryOp::Concat
             | BinaryOp::Equals
             | BinaryOp::NotEquals
             | BinaryOp::Less

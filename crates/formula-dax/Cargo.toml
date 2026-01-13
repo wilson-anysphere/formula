@@ -3,10 +3,16 @@ name = "formula-dax"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Enable lightweight conversions into `formula-model` pivot scalar values without forcing all
+# `formula-dax` users to pull in the (larger) workbook model crate.
+pivot-model = ["dep:formula-model"]
+
 [dependencies]
 ordered-float = "4.2.0"
 thiserror = "2"
 formula-columnar = { path = "../formula-columnar" }
+formula-model = { path = "../formula-model", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.0"

@@ -30,6 +30,21 @@ impl Value {
             Value::Text(_) => Err("cannot interpret text as boolean"),
         }
     }
+
+    /// Convert this DAX scalar into the workbook model's pivot scalar representation.
+    ///
+    /// This is behind the `pivot-model` feature to avoid forcing all `formula-dax` users to depend
+    /// on `formula-model`.
+    #[cfg(feature = "pivot-model")]
+    pub fn to_pivot_scalar(&self) -> formula_model::pivots::ScalarValue {
+        use formula_model::pivots::ScalarValue;
+        match self {
+            Value::Blank => ScalarValue::Blank,
+            Value::Number(n) => ScalarValue::Number(*n),
+            Value::Text(s) => ScalarValue::Text(s.to_string()),
+            Value::Boolean(b) => ScalarValue::Bool(*b),
+        }
+    }
 }
 
 impl fmt::Display for Value {
