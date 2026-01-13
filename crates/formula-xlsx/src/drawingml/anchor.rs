@@ -1,12 +1,17 @@
 use formula_model::charts::ChartAnchor;
 use formula_model::drawings::{Anchor, AnchorPoint, CellOffset, EmuSize};
 use formula_model::CellRef;
+use roxmltree::Node;
 
 /// Parse a DrawingML anchor (`xdr:absoluteAnchor`, `xdr:oneCellAnchor`, `xdr:twoCellAnchor`).
 ///
 /// This is shared between the legacy chart extractor (`ChartAnchor`) and the newer drawing
 /// pipeline (`drawings::Anchor`) to ensure they stay in lockstep.
-pub(crate) fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
+///
+/// Notes:
+/// - `<xdr:colOff>` / `<xdr:rowOff>` are optional in the wild; when missing they default to 0.
+/// - Whitespace around numeric values is tolerated.
+pub(crate) fn parse_anchor(anchor: &Node<'_, '_>) -> Option<Anchor> {
     match anchor.tag_name().name() {
         "absoluteAnchor" => {
             let pos = anchor
@@ -17,14 +22,8 @@ pub(crate) fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
 
             Some(Anchor::Absolute {
-                pos: CellOffset::new(
-                    pos.attribute("x")?.trim().parse().ok()?,
-                    pos.attribute("y")?.trim().parse().ok()?,
-                ),
-                ext: EmuSize::new(
-                    ext.attribute("cx")?.trim().parse().ok()?,
-                    ext.attribute("cy")?.trim().parse().ok()?,
-                ),
+                pos: CellOffset::new(parse_attr_i64(pos, "x")?, parse_attr_i64(pos, "y")?),
+                ext: EmuSize::new(parse_attr_i64(ext, "cx")?, parse_attr_i64(ext, "cy")?),
             })
         }
         "oneCellAnchor" => {
@@ -36,11 +35,8 @@ pub(crate) fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "ext")?;
 
             Some(Anchor::OneCell {
-                from: parse_anchor_point(&from)?,
-                ext: EmuSize::new(
-                    ext.attribute("cx")?.trim().parse().ok()?,
-                    ext.attribute("cy")?.trim().parse().ok()?,
-                ),
+                from: parse_anchor_point(from)?,
+                ext: EmuSize::new(parse_attr_i64(ext, "cx")?, parse_attr_i64(ext, "cy")?),
             })
         }
         "twoCellAnchor" => {
@@ -52,8 +48,8 @@ pub(crate) fn parse_anchor(anchor: &roxmltree::Node<'_, '_>) -> Option<Anchor> {
                 .find(|n| n.is_element() && n.tag_name().name() == "to")?;
 
             Some(Anchor::TwoCell {
-                from: parse_anchor_point(&from)?,
-                to: parse_anchor_point(&to)?,
+                from: parse_anchor_point(from)?,
+                to: parse_anchor_point(to)?,
             })
         }
         _ => None,
@@ -89,19 +85,12 @@ pub(crate) fn anchor_to_chart_anchor(anchor: Anchor) -> ChartAnchor {
     }
 }
 
-fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Option<AnchorPoint> {
-    let col: u32 = descendant_text(*node, "col")?.trim().parse().ok()?;
-    let row: u32 = descendant_text(*node, "row")?.trim().parse().ok()?;
-    let col_off: i64 = descendant_text(*node, "colOff")
-        .unwrap_or("0")
-        .trim()
-        .parse()
-        .ok()?;
-    let row_off: i64 = descendant_text(*node, "rowOff")
-        .unwrap_or("0")
-        .trim()
-        .parse()
-        .ok()?;
+pub(crate) fn parse_anchor_point(node: Node<'_, '_>) -> Option<AnchorPoint> {
+    let col: u32 = child_text(node, "col")?.trim().parse().ok()?;
+    let row: u32 = child_text(node, "row")?.trim().parse().ok()?;
+
+    let col_off: i64 = parse_optional_i64_child(node, "colOff").unwrap_or(0);
+    let row_off: i64 = parse_optional_i64_child(node, "rowOff").unwrap_or(0);
 
     Some(AnchorPoint::new(
         CellRef::new(row, col),
@@ -109,7 +98,15 @@ fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Option<AnchorPoint> {
     ))
 }
 
-fn descendant_text<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> Option<&'a str> {
+fn parse_attr_i64(node: Node<'_, '_>, attr: &str) -> Option<i64> {
+    node.attribute(attr)?.trim().parse::<i64>().ok()
+}
+
+fn parse_optional_i64_child(node: Node<'_, '_>, tag: &str) -> Option<i64> {
+    child_text(node, tag)?.trim().parse::<i64>().ok()
+}
+
+fn child_text<'a>(node: Node<'a, 'a>, tag: &str) -> Option<&'a str> {
     node.children()
         .find(|n| n.is_element() && n.tag_name().name() == tag)
         .and_then(|n| n.text())

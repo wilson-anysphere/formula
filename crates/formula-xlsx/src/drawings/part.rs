@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
 use formula_model::drawings::{
-    Anchor, AnchorPoint, CellOffset, DrawingObject, DrawingObjectId, DrawingObjectKind, Emu,
-    EmuSize, ImageData, ImageId,
+    Anchor, AnchorPoint, DrawingObject, DrawingObjectId, DrawingObjectKind, EmuSize, ImageData,
+    ImageId,
 };
-use formula_model::CellRef;
 use roxmltree::Document;
 
 use crate::path::resolve_target;
@@ -340,125 +339,12 @@ fn drawing_rels_path(drawing_path: &str) -> String {
 }
 
 fn parse_anchor(anchor_node: &roxmltree::Node<'_, '_>) -> Result<Anchor> {
-    let tag = anchor_node.tag_name().name();
-
-    match tag {
-        "oneCellAnchor" => {
-            let from = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")
-                .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
-            let from = parse_anchor_point(&from)?;
-
-            let ext_node = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")
-                .ok_or_else(|| XlsxError::Invalid("oneCellAnchor missing <ext>".to_string()))?;
-            let cx = parse_attr_i64(&ext_node, "cx")?;
-            let cy = parse_attr_i64(&ext_node, "cy")?;
-            Ok(Anchor::OneCell {
-                from,
-                ext: EmuSize::new(cx, cy),
-            })
-        }
-        "twoCellAnchor" => {
-            let from = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "from")
-                .ok_or_else(|| XlsxError::Invalid(format!("{tag} missing <from>")))?;
-            let from = parse_anchor_point(&from)?;
-
-            let to = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "to")
-                .ok_or_else(|| XlsxError::Invalid("twoCellAnchor missing <to>".to_string()))?;
-            let to = parse_anchor_point(&to)?;
-            Ok(Anchor::TwoCell { from, to })
-        }
-        "absoluteAnchor" => {
-            let pos = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "pos")
-                .ok_or_else(|| XlsxError::Invalid("absoluteAnchor missing <pos>".to_string()))?;
-            let x = parse_attr_i64(&pos, "x")?;
-            let y = parse_attr_i64(&pos, "y")?;
-
-            let ext_node = anchor_node
-                .children()
-                .find(|n| n.is_element() && n.tag_name().name() == "ext")
-                .ok_or_else(|| XlsxError::Invalid("absoluteAnchor missing <ext>".to_string()))?;
-            let cx = parse_attr_i64(&ext_node, "cx")?;
-            let cy = parse_attr_i64(&ext_node, "cy")?;
-
-            Ok(Anchor::Absolute {
-                pos: CellOffset::new(x, y),
-                ext: EmuSize::new(cx, cy),
-            })
-        }
-        other => Err(XlsxError::Invalid(format!(
-            "unsupported anchor tag: {other}"
-        ))),
-    }
-}
-
-fn parse_anchor_point(node: &roxmltree::Node<'_, '_>) -> Result<AnchorPoint> {
-    let col = parse_child_text_i64(node, "col")? as u32;
-    let row = parse_child_text_i64(node, "row")? as u32;
-    // Some producers omit `colOff`/`rowOff`; default to 0 for best-effort parsing.
-    let col_off = parse_child_text_i64_or_zero(node, "colOff")?;
-    let row_off = parse_child_text_i64_or_zero(node, "rowOff")?;
-
-    Ok(AnchorPoint::new(
-        CellRef::new(row, col),
-        CellOffset::new(col_off, row_off),
-    ))
-}
-
-fn parse_child_text_i64_or_zero(node: &roxmltree::Node<'_, '_>, child: &str) -> Result<Emu> {
-    let child_node = node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == child);
-    let Some(child_node) = child_node else {
-        return Ok(0);
-    };
-
-    let value = child_node.text().unwrap_or_default();
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(0);
-    }
-
-    trimmed
-        .parse::<i64>()
-        .map_err(|e| XlsxError::Invalid(format!("invalid {child} value {value:?}: {e}")))
-}
-
-fn parse_child_text_i64(node: &roxmltree::Node<'_, '_>, child: &str) -> Result<Emu> {
-    let child_tag = child;
-    let child_node = node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == child_tag)
-        .ok_or_else(|| XlsxError::Invalid(format!("missing <{child_tag}>")))?;
-    let value = child_node
-        .text()
-        .ok_or_else(|| XlsxError::Invalid(format!("<{child_tag}> missing text")))?;
-    value
-        .trim()
-        .parse::<i64>()
-        .map_err(|e| XlsxError::Invalid(format!("invalid {child} value {value:?}: {e}")))
-}
-
-fn parse_attr_i64(node: &roxmltree::Node<'_, '_>, attr: &str) -> Result<Emu> {
-    let value = node.attribute(attr).ok_or_else(|| {
+    crate::drawingml::anchor::parse_anchor(anchor_node).ok_or_else(|| {
         XlsxError::Invalid(format!(
-            "missing attribute {attr} on <{}>",
-            node.tag_name().name()
+            "failed to parse anchor <{}>",
+            anchor_node.tag_name().name()
         ))
-    })?;
-    value
-        .trim()
-        .parse::<i64>()
-        .map_err(|e| XlsxError::Invalid(format!("invalid attr {attr} value {value:?}: {e}")))
+    })
 }
 
 fn parse_pic(

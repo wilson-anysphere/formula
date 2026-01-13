@@ -3,7 +3,7 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
-mod anchor;
+pub(crate) mod anchor;
 pub mod charts;
 mod preserve;
 pub mod style;
