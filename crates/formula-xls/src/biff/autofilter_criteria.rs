@@ -376,12 +376,34 @@ fn resolve_col_id(
 fn parse_doper(bytes: &[u8]) -> ParsedDoper {
     // DOPER [MS-XLS 2.5.69] (best-effort).
     //
-    // The exact vt/op encoding differs across BIFF producers and record variants. We treat the
-    // first two bytes as (vt, op) but attempt to auto-detect swapped layouts.
-    let b0 = *bytes.first().unwrap_or(&0);
-    let b1 = *bytes.get(1).unwrap_or(&0);
+    // The canonical BIFF8 layout is:
+    // - vt (1 byte)
+    // - grbit (1 byte)
+    // - wOper (2 bytes, little-endian)
+    // - operand value (4 bytes, type-dependent; numbers are typically stored as RK)
+    //
+    // Some producers have been observed to store the operator in the second byte instead of
+    // `wOper`; decode both forms best-effort.
+    let vt = *bytes.first().unwrap_or(&0);
+    let op_u16 = u16::from_le_bytes([
+        *bytes.get(2).unwrap_or(&0),
+        *bytes.get(3).unwrap_or(&0),
+    ]);
+    let op_byte = *bytes.get(1).unwrap_or(&0);
 
-    let (vt, op_code) = classify_doper_header(b0, b1);
+    let op_code = if op_u16 <= 8 {
+        let op = op_u16 as u8;
+        // If `wOper` is unset but the second byte looks like an operator, fall back.
+        if op == 0 && op_byte != 0 && op_byte <= 8 {
+            op_byte
+        } else {
+            op
+        }
+    } else if op_byte <= 8 {
+        op_byte
+    } else {
+        0
+    };
 
     let value_raw = u32::from_le_bytes([
         *bytes.get(4).unwrap_or(&0),
@@ -397,22 +419,6 @@ fn parse_doper(bytes: &[u8]) -> ParsedDoper {
         vt,
         value: decode_doper_value(vt, value_raw),
     }
-}
-
-fn classify_doper_header(b0: u8, b1: u8) -> (u8, u8) {
-    let op_set = b0 <= 8;
-    let op_set_b1 = b1 <= 8;
-
-    // Prefer treating the byte that looks like an operator (0..=8) as the operator.
-    if op_set && !op_set_b1 {
-        return (b1, b0);
-    }
-    if op_set_b1 && !op_set {
-        return (b0, b1);
-    }
-
-    // Ambiguous: default to (vt=b0, op=b1) which matches the [MS-XLS] ordering.
-    (b0, b1)
 }
 
 fn decode_doper_value(vt: u8, raw: u32) -> DoperValue {
@@ -471,7 +477,7 @@ fn attach_string_to_doper(
         // known (text filter). When we attach it only as a best-effort fallback (e.g. vt is
         // unknown but a trailing string exists), mark it as unknown so we can preserve the
         // operator/value pair as `OpaqueCustom` instead of forcing it into a text equality filter.
-        let type_known = matches!(doper.vt, 4);
+        let type_known = matches!(doper.vt, 4 | 8);
         doper.value = DoperValue::Text {
             value: s,
             type_known,
@@ -790,15 +796,15 @@ mod tests {
     fn parses_equals_text_filter() {
         let range = Range::new(CellRef::new(0, 0), CellRef::new(10, 2)); // A..C
 
-        // AUTOFILTER col=1 (B), grbit=0, doper1 = (vt=4 string, op=3 equal), doper2 unused.
+        // AUTOFILTER col=1 (B), grbit=0, doper1 = (vt=8 string, wOper=3 equal), doper2 unused.
         let mut af = Vec::new();
         af.extend_from_slice(&1u16.to_le_bytes()); // col
         af.extend_from_slice(&0u16.to_le_bytes()); // grbit
 
         // DOPER1.
-        af.push(4); // vt (string)
-        af.push(3); // op (equal)
-        af.extend_from_slice(&0u16.to_le_bytes()); // reserved
+        af.push(8); // vt (string)
+        af.push(0); // grbit
+        af.extend_from_slice(&3u16.to_le_bytes()); // wOper (equal)
         af.extend_from_slice(&0u32.to_le_bytes()); // value_raw
 
         // DOPER2 (unused).
@@ -842,16 +848,16 @@ mod tests {
         af.extend_from_slice(&0u16.to_le_bytes()); // col
         af.extend_from_slice(&AUTOFILTER_FLAG_AND.to_le_bytes()); // grbit (AND)
 
-        // DOPER1: vt=1 (number), op=7 (>=), rk=2.
-        af.push(1);
-        af.push(7);
-        af.extend_from_slice(&0u16.to_le_bytes());
+        // DOPER1: vt=1 (number), wOper=7 (>=), rk=2.
+        af.push(1); // vt
+        af.push(0); // grbit
+        af.extend_from_slice(&7u16.to_le_bytes()); // wOper
         af.extend_from_slice(&rk_number(2).to_le_bytes());
 
-        // DOPER2: vt=1 (number), op=8 (<=), rk=5.
-        af.push(1);
-        af.push(8);
-        af.extend_from_slice(&0u16.to_le_bytes());
+        // DOPER2: vt=1 (number), wOper=8 (<=), rk=5.
+        af.push(1); // vt
+        af.push(0); // grbit
+        af.extend_from_slice(&8u16.to_le_bytes()); // wOper
         af.extend_from_slice(&rk_number(5).to_le_bytes());
 
         let stream = [
@@ -893,9 +899,9 @@ mod tests {
         af_full.extend_from_slice(&0u16.to_le_bytes()); // grbit
 
         // DOPER1.
-        af_full.push(4); // vt string
-        af_full.push(3); // op equal
-        af_full.extend_from_slice(&0u16.to_le_bytes());
+        af_full.push(8); // vt string
+        af_full.push(0); // grbit
+        af_full.extend_from_slice(&3u16.to_le_bytes()); // wOper equal
         af_full.extend_from_slice(&0u32.to_le_bytes());
         // DOPER2 unused.
         af_full.extend_from_slice(&[0u8; 8]);
@@ -957,9 +963,9 @@ mod tests {
         af.extend_from_slice(&0u16.to_le_bytes()); // grbit
 
         // DOPER1: string equals "X".
-        af.push(4);
-        af.push(3);
-        af.extend_from_slice(&0u16.to_le_bytes());
+        af.push(8);
+        af.push(0);
+        af.extend_from_slice(&3u16.to_le_bytes());
         af.extend_from_slice(&0u32.to_le_bytes());
         af.extend_from_slice(&[0u8; 8]); // DOPER2 unused
         af.extend_from_slice(&xl_unicode_string_compressed("X"));
@@ -995,9 +1001,9 @@ mod tests {
         af.extend_from_slice(&0u16.to_le_bytes()); // grbit
 
         // DOPER1: string equals "X".
-        af.push(4);
-        af.push(3);
-        af.extend_from_slice(&0u16.to_le_bytes());
+        af.push(8);
+        af.push(0);
+        af.extend_from_slice(&3u16.to_le_bytes());
         af.extend_from_slice(&0u32.to_le_bytes());
         af.extend_from_slice(&[0u8; 8]); // DOPER2 unused
         af.extend_from_slice(&xl_unicode_string_compressed("X"));
