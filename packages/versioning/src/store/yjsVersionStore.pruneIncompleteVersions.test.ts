@@ -375,4 +375,55 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
     expect(doc.getMap("versions").get("missingChunksArr")).toBeUndefined();
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
   });
+
+  it("uses incompleteSinceMs to avoid clock skew preventing pruning", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    const future = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "skewed");
+      record.set("kind", "snapshot");
+      // Writer clock is far in the future.
+      record.set("timestampMs", future);
+      record.set("createdAtMs", future);
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 2);
+      record.set("snapshotComplete", false);
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([1])]);
+      record.set("snapshotChunks", chunks);
+      versions.set("skewed", record);
+      order.push(["skewed"]);
+    }, "test");
+
+    // First pass should mark incompleteSinceMs (based on local time), not prune.
+    await store.pruneIncompleteVersions({ olderThanMs: 10_000 });
+    const raw = doc.getMap("versions").get("skewed") as any;
+    expect(raw).toBeDefined();
+    expect(typeof raw?.get?.("incompleteSinceMs")).toBe("number");
+    expect(raw.get("incompleteSinceMs")).toBeLessThanOrEqual(Date.now());
+
+    // If we later decide it's old based on incompleteSinceMs, it should prune even though createdAtMs/timestampMs are future.
+    doc.transact(() => {
+      const r = doc.getMap("versions").get("skewed") as any;
+      r?.set?.("incompleteSinceMs", 1);
+    }, "test");
+    await store.pruneIncompleteVersions({ olderThanMs: 1 });
+    expect(doc.getMap("versions").get("skewed")).toBeUndefined();
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
+  });
 });

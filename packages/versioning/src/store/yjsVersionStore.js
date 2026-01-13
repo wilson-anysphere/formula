@@ -713,6 +713,8 @@ export class YjsVersionStore {
     const staleIds = new Set();
     /** @type {Set<string>} */
     const finalizeIds = new Set();
+    /** @type {Map<string, number>} */
+    const markIncompleteSince = new Map();
 
     this.versions.forEach((value, key) => {
       if (typeof key !== "string") return;
@@ -767,28 +769,46 @@ export class YjsVersionStore {
         }
       }
 
-      // Prefer `createdAtMs` if present (newer schema), falling back to the
-      // version timestamp for backwards compatibility.
-      const createdAtMs = value.get("createdAtMs");
-      let ts =
-        typeof createdAtMs === "number"
-          ? createdAtMs
-          : typeof value.get("timestampMs") === "number"
-            ? value.get("timestampMs")
-            : 0;
+      // Staleness tracking for incomplete records:
+      //
+      // - Prefer a dedicated `incompleteSinceMs` field (set once, by the first reader that notices the record is
+      //   incomplete). This makes staleness resilient to clock skew across collaborators.
+      // - Fall back to `createdAtMs` (newer records) or `timestampMs` (legacy).
+      const incompleteSinceMsRaw = value.get("incompleteSinceMs");
+      const incompleteSinceMsValid =
+        typeof incompleteSinceMsRaw === "number" && Number.isFinite(incompleteSinceMsRaw) && incompleteSinceMsRaw <= nowMs;
+      let ts = incompleteSinceMsValid ? incompleteSinceMsRaw : null;
 
-      // Defensive: clamp timestamps to avoid "future" records never becoming stale
-      // (can happen with clock skew or older clients without createdAtMs).
-      if (!Number.isFinite(ts) || ts < 0) ts = 0;
-      if (ts > nowMs) ts = nowMs;
+      if (ts == null) {
+        const createdAtMs = value.get("createdAtMs");
+        const timestampMs = value.get("timestampMs");
+        let candidate =
+          typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
+            ? createdAtMs
+            : typeof timestampMs === "number" && Number.isFinite(timestampMs)
+              ? timestampMs
+              : nowMs;
+        if (!Number.isFinite(candidate) || candidate < 0 || candidate > nowMs) candidate = nowMs;
+        ts = candidate;
+        // Persist `incompleteSinceMs` so future cleanup doesn't depend on any writer-provided wall-clock timestamps.
+        markIncompleteSince.set(key, ts);
+      }
 
       if (nowMs - ts >= olderThanMs) staleIds.add(key);
     });
 
-    if (staleIds.size === 0 && finalizeIds.size === 0) return { prunedIds: [] };
+    if (staleIds.size === 0 && finalizeIds.size === 0 && markIncompleteSince.size === 0) return { prunedIds: [] };
 
     const prunedIds = Array.from(staleIds);
     this.doc.transact(() => {
+      for (const [id, ts] of markIncompleteSince) {
+        const raw = this.versions.get(id);
+        if (!isYMap(raw)) continue;
+        // If the record completed after we scanned, don't write a stale marker.
+        if (raw.get("snapshotComplete") === true) continue;
+        raw.set("incompleteSinceMs", ts);
+      }
+
       for (const id of finalizeIds) {
         const raw = this.versions.get(id);
         if (!isYMap(raw)) continue;
