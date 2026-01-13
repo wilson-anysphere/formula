@@ -63,11 +63,24 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     let mut style_table = workbook.styles.clone();
     let mut styles_part = StylesPart::parse_or_default(None, &mut style_table)
         .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
-    let style_ids = workbook
-        .sheets
-        .iter()
-        .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
-        .filter(|style_id| *style_id != 0);
+    let style_ids = workbook.sheets.iter().flat_map(|sheet| {
+        sheet
+            .iter_cells()
+            .map(|(_, cell)| cell.style_id)
+            .filter(|style_id| *style_id != 0)
+            .chain(
+                sheet
+                    .row_properties
+                    .values()
+                    .filter_map(|props| props.style_id),
+            )
+            .chain(
+                sheet
+                    .col_properties
+                    .values()
+                    .filter_map(|props| props.style_id),
+            )
+    });
     let style_to_xf = styles_part
         .xf_indices_for_style_ids(style_ids, &style_table)
         .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
@@ -571,9 +584,10 @@ struct ColXmlProps {
     hidden: bool,
     outline_level: u8,
     collapsed: bool,
+    style_xf: Option<u32>,
 }
 
-fn render_cols(sheet: &Worksheet, outline: &Outline) -> String {
+fn render_cols(sheet: &Worksheet, outline: &Outline, style_to_xf: &HashMap<u32, u32>) -> String {
     let mut col_xml_props: BTreeMap<u32, ColXmlProps> = BTreeMap::new();
 
     // Column properties are stored 0-based in the model; OOXML uses 1-based indices.
@@ -582,6 +596,9 @@ fn render_cols(sheet: &Worksheet, outline: &Outline) -> String {
         if col_1 == 0 || col_1 > formula_model::EXCEL_MAX_COLS {
             continue;
         }
+        let style_xf = props
+            .style_id
+            .map(|style_id| style_to_xf.get(&style_id).copied().unwrap_or(0));
         col_xml_props.insert(
             col_1,
             ColXmlProps {
@@ -589,6 +606,7 @@ fn render_cols(sheet: &Worksheet, outline: &Outline) -> String {
                 hidden: props.hidden,
                 outline_level: 0,
                 collapsed: false,
+                style_xf,
             },
         );
     }
@@ -613,6 +631,7 @@ fn render_cols(sheet: &Worksheet, outline: &Outline) -> String {
                 hidden: entry.hidden.is_hidden(),
                 outline_level: entry.level,
                 collapsed: entry.collapsed,
+                style_xf: None,
             });
     }
 
@@ -651,6 +670,9 @@ fn render_col_range(start_col_1: u32, end_col_1: u32, props: &ColXmlProps) -> St
     if let Some(width) = props.width {
         s.push_str(&format!(r#" width="{width}""#));
         s.push_str(r#" customWidth="1""#);
+    }
+    if let Some(style_xf) = props.style_xf {
+        s.push_str(&format!(r#" style="{style_xf}" customFormat="1""#));
     }
     if props.hidden {
         s.push_str(r#" hidden="1""#);
@@ -735,7 +757,7 @@ fn sheet_xml(
     } else {
         String::new()
     };
-    let cols_xml = render_cols(sheet, &outline);
+    let cols_xml = render_cols(sheet, &outline, style_to_xf);
 
     struct ColumnarInfo<'a> {
         origin: CellRef,
@@ -771,7 +793,9 @@ fn sheet_xml(
     let row_props_rows: Vec<u32> = sheet
         .row_properties
         .iter()
-        .filter_map(|(&row, props)| (props.height.is_some() || props.hidden).then_some(row))
+        .filter_map(|(&row, props)| {
+            (props.height.is_some() || props.hidden || props.style_id.is_some()).then_some(row)
+        })
         .collect();
 
     let outline_rows: Vec<u32> = outline
@@ -926,13 +950,15 @@ fn sheet_xml(
         let outline_entry = outline.rows.entry(row_number);
         let row_props = sheet.row_properties.get(&row_idx);
         let has_row_height = row_props.is_some_and(|props| props.height.is_some());
+        let row_style_id = row_props.and_then(|props| props.style_id);
         let is_row_hidden =
             outline_entry.hidden.is_hidden() || row_props.is_some_and(|props| props.hidden);
         let needs_row = wrote_any_cell
             || outline_entry.level > 0
             || is_row_hidden
             || outline_entry.collapsed
-            || has_row_height;
+            || has_row_height
+            || row_style_id.is_some();
         if !needs_row {
             continue;
         }
@@ -941,6 +967,10 @@ fn sheet_xml(
         if let Some(height) = row_props.and_then(|props| props.height) {
             let ht = trim_float(height as f64);
             row_attrs.push_str(&format!(r#" ht="{ht}" customHeight="1""#));
+        }
+        if let Some(style_id) = row_style_id {
+            let xf_index = style_to_xf.get(&style_id).copied().unwrap_or(0);
+            row_attrs.push_str(&format!(r#" s="{xf_index}" customFormat="1""#));
         }
         if outline_entry.level > 0 {
             row_attrs.push_str(&format!(r#" outlineLevel="{}""#, outline_entry.level));

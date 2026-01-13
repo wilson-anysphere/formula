@@ -642,8 +642,10 @@ fn build_parts(
         "xl/styles.xml".to_string(),
         "xl/sharedStrings.xml".to_string(),
     );
+    let mut has_styles_relationship = false;
     if let Some(rels) = parts.get(WORKBOOK_RELS_PART).map(|b| b.as_slice()) {
         if let Some(target) = relationship_target_by_type(rels, REL_TYPE_STYLES)? {
+            has_styles_relationship = true;
             styles_part_name = resolve_target(WORKBOOK_PART, &target);
         }
         if let Some(target) = relationship_target_by_type(rels, REL_TYPE_SHARED_STRINGS)? {
@@ -679,7 +681,14 @@ fn build_parts(
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
     // Preserve workbooks that omit a `styles.xml` part: if the source package didn't have one and
     // the model doesn't reference any non-default style IDs, keep the part absent on round-trip.
-    if is_new || !style_to_xf.is_empty() || parts.contains_key(&styles_part_name) {
+    //
+    // Exception: if `workbook.xml.rels` is missing the styles relationship, synthesize a default
+    // `styles.xml` and add the relationship so the saved package is structurally complete.
+    if is_new
+        || !style_to_xf.is_empty()
+        || parts.contains_key(&styles_part_name)
+        || !has_styles_relationship
+    {
         parts.insert(
             styles_part_name.clone(),
             styles_editor.to_styles_xml_bytes(),
