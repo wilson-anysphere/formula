@@ -41,6 +41,8 @@ mod model;
 mod parser;
 mod pivot;
 #[cfg(feature = "pivot-model")]
+mod pivot_config;
+#[cfg(feature = "pivot-model")]
 mod pivot_value;
 mod value;
 
@@ -56,7 +58,8 @@ pub use crate::pivot::{
 };
 #[cfg(feature = "pivot-model")]
 pub use crate::pivot::measures_from_pivot_model_value_fields;
-
+#[cfg(feature = "pivot-model")]
+pub use crate::pivot_config::{pivot_crosstab_from_config, pivot_inputs_from_config, PivotInputs};
 #[cfg(feature = "pivot-model")]
 pub use crate::pivot::{PivotResultGridPivotValues, PivotResultPivotValues};
 #[cfg(feature = "pivot-model")]

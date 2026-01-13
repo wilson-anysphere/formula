@@ -330,7 +330,6 @@ impl RowContext {
             })
             .nth(level_from_inner)
     }
-
     fn physical_row_for_outermost(&self, table: &str) -> Option<(usize, Option<&[usize]>)> {
         let table = normalize_ident(table);
         self.stack.iter().find_map(|frame| match frame {
