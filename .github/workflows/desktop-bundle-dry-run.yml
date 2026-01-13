@@ -160,24 +160,8 @@ jobs:
             exit 1
           fi
 
-          appimage_count=0
-          for root in "${roots[@]}"; do
-            while IFS= read -r img; do
-              appimage_count=$((appimage_count + 1))
-              echo "linux-validate: AppImage -> $img"
-              img_abs="$PWD/$img"
-              chmod +x "$img_abs"
-              tmpdir="$(mktemp -d)"
-              (cd "$tmpdir" && "$img_abs" --appimage-extract >/dev/null)
-              test -f "$tmpdir/squashfs-root/usr/bin/formula-desktop"
-              rm -rf "$tmpdir"
-            done < <(find "$root" -type f -path '*/release/bundle/appimage/*.AppImage' -print)
-          done
-
-          if [ "$appimage_count" -eq 0 ]; then
-            echo "linux-validate: ERROR: No AppImage bundles found." >&2
-            exit 1
-          fi
+          # Validate the AppImage structure + desktop integration metadata (no GUI).
+          bash scripts/validate-linux-appimage.sh
 
           deb_count=0
           for root in "${roots[@]}"; do
