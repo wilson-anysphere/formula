@@ -177,10 +177,34 @@ pub struct XlsImportResult {
 pub enum ImportError {
     #[error("failed to read `.xls`: {0}")]
     Xls(#[from] calamine::XlsError),
+    #[error("internal panic while reading `.xls`: {0}")]
+    CalaminePanic(String),
     #[error("encrypted workbook not supported: workbook is password-protected/encrypted; remove password protection in Excel and try again")]
     EncryptedWorkbook,
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
+}
+
+fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+/// Catch panics from `calamine` (or other third-party parsing paths) and convert them into a
+/// structured [`ImportError`].
+///
+/// This should only be used at third-party boundaries: a panic inside our own importer logic is
+/// still a bug and should crash in tests.
+fn catch_calamine_panic<T>(f: impl FnOnce() -> T) -> Result<T, ImportError> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(v) => Ok(v),
+        Err(payload) => Err(ImportError::CalaminePanic(panic_payload_to_string(payload.as_ref()))),
+    }
 }
 
 /// Import a legacy `.xls` workbook from disk.
@@ -293,21 +317,21 @@ fn import_xls_path_with_biff_reader(
                 biff::BiffVersion::Biff5 => None,
             };
             let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
-            Xls::new(Cursor::new(xls_bytes))?
+            catch_calamine_panic(|| Xls::new(Cursor::new(xls_bytes)))?.map_err(ImportError::Xls)?
         }
         None => {
             let bytes =
                 std::fs::read(path).map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
-            Xls::new(Cursor::new(bytes))?
+            catch_calamine_panic(|| Xls::new(Cursor::new(bytes)))?.map_err(ImportError::Xls)?
         }
     };
 
     // We need to snapshot metadata (names, visibility, type) up-front because we
     // need mutable access to the workbook while iterating over ranges.
-    let sheets: Vec<Sheet> = workbook.sheets_metadata().to_vec();
+    let sheets: Vec<Sheet> = catch_calamine_panic(|| workbook.sheets_metadata().to_vec())?;
     // Snapshot defined names up-front because we need mutable access to the workbook while
     // iterating over ranges.
-    let calamine_defined_names = workbook.defined_names().to_vec();
+    let calamine_defined_names = catch_calamine_panic(|| workbook.defined_names().to_vec())?;
 
     let mut out = Workbook::new();
     let mut used_sheet_names: Vec<String> = Vec::new();
@@ -557,7 +581,8 @@ fn import_xls_path_with_biff_reader(
             || sheet_has_out_of_range_xf
             || sheet_xf_parse_failed;
 
-        let value_range = match workbook.worksheet_range(&source_sheet_name) {
+        let value_range =
+            match catch_calamine_panic(|| workbook.worksheet_range(&source_sheet_name))? {
             Ok(range) => Some(range),
             Err(err) => {
                 warnings.push(ImportWarning::new(format!(
@@ -757,7 +782,9 @@ fn import_xls_path_with_biff_reader(
         // Merged regions: prefer calamine's parsed merge metadata, but fall back to scanning the
         // worksheet BIFF substream for `MERGEDCELLS` records when calamine provides none.
         let mut merge_ranges: Vec<Range> = Vec::new();
-        if let Some(merge_cells) = workbook.worksheet_merge_cells(&source_sheet_name) {
+        if let Some(merge_cells) =
+            catch_calamine_panic(|| workbook.worksheet_merge_cells(&source_sheet_name))?
+        {
             for dim in merge_cells {
                 merge_ranges.push(Range::new(
                     CellRef::new(dim.start.0, dim.start.1),
@@ -1007,7 +1034,7 @@ fn import_xls_path_with_biff_reader(
             }
         }
 
-        match workbook.worksheet_formula(&source_sheet_name) {
+        match catch_calamine_panic(|| workbook.worksheet_formula(&source_sheet_name))? {
             Ok(formula_range) => {
                 let formula_start = formula_range.start().unwrap_or((0, 0));
                 for (row, col, formula) in formula_range.used_cells() {
@@ -3225,6 +3252,19 @@ mod tests {
 
     const XF_FLAG_LOCKED: u16 = 0x0001;
     const XF_FLAG_STYLE: u16 = 0x0004;
+
+    #[test]
+    fn catch_calamine_panic_converts_panic_to_import_error() {
+        let err = catch_calamine_panic(|| panic!("boom"))
+            .expect_err("expected panic to be converted to ImportError");
+        let ImportError::CalaminePanic(message) = err else {
+            panic!("unexpected error variant: {err:?}");
+        };
+        assert!(
+            message.contains("boom"),
+            "expected panic payload in message, got: {message}"
+        );
+    }
 
     fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
         out.extend_from_slice(&id.to_le_bytes());
