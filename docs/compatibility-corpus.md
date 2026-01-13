@@ -125,6 +125,12 @@ python -m tools.corpus.triage \
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
+For large private corpora, you can speed up triage by running workbooks in parallel:
+
+```bash
+python -m tools.corpus.triage --corpus-dir tools/corpus/private --out-dir tools/corpus/out/private --jobs 4
+```
+
 For the **private** corpus (or any environment where triage JSON is uploaded as an artifact), prefer
 `--privacy-mode private` to avoid leaking original filenames or custom URI domains.
 

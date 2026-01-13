@@ -1210,7 +1210,10 @@ def _report_filename_for_path(
         rel = path.relative_to(corpus_dir).as_posix()
     except Exception:  # noqa: BLE001
         rel = path.name
-    path_hash = sha256_hex(rel.encode("utf-8"))[:8]
+    # Include a hash of the workbook's relative path to avoid filename collisions when the same
+    # workbook content appears multiple times in the corpus. Use a 64-bit prefix (16 hex chars)
+    # to make collisions vanishingly unlikely even in very large corpora.
+    path_hash = sha256_hex(rel.encode("utf-8"))[:16]
     return f"{report_id}-{path_hash}.json"
 
 
