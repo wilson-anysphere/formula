@@ -80,6 +80,7 @@ pub fn parse_chart_ex(
         title,
         legend,
         plot_area: PlotAreaModel::Unknown { name: chart_name },
+        plot_area_layout: None,
         axes: Vec::new(),
         series,
         style_id: None,
@@ -567,6 +568,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             formula,
             style: None,
             box_style: None,
+            layout: None,
         });
     }
 
@@ -579,6 +581,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             formula: None,
             style: None,
             box_style: None,
+            layout: None,
         })
 }
 

@@ -1,9 +1,9 @@
 use formula_model::charts::{
     AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
     ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel,
-    DataLabelsModel, LegendModel, LegendPosition, LineChartModel, NumberFormatModel, PieChartModel,
-    PlotAreaModel, ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData,
-    SeriesPointStyle, SeriesTextData, TextModel,
+    DataLabelsModel, LegendModel, LegendPosition, LineChartModel, ManualLayoutModel,
+    NumberFormatModel, PieChartModel, PlotAreaModel, ScatterChartModel, SeriesData,
+    SeriesIndexRange, SeriesModel, SeriesNumberData, SeriesPointStyle, SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -116,6 +116,7 @@ pub fn parse_chart_space(
             plot_area: PlotAreaModel::Unknown {
                 name: "missingPlotArea".to_string(),
             },
+            plot_area_layout: None,
             axes: Vec::new(),
             series: Vec::new(),
             style_id,
@@ -139,6 +140,8 @@ pub fn parse_chart_space(
         .find(|n| n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
+    let plot_area_layout = parse_layout_manual(plot_area_node);
+
     let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, &mut diagnostics);
     let axes = parse_axes(plot_area_node, &mut diagnostics);
 
@@ -147,6 +150,7 @@ pub fn parse_chart_space(
         title,
         legend,
         plot_area,
+        plot_area_layout,
         axes,
         series,
         style_id,
@@ -791,6 +795,11 @@ fn parse_title(
         text.box_style = Some(box_style);
     }
 
+    let layout = parse_layout_manual(title_node);
+    if let (Some(layout), Some(text)) = (layout, parsed.as_mut()) {
+        text.layout = Some(layout);
+    }
+
     if auto_deleted && parsed.is_none() {
         return None;
     }
@@ -830,11 +839,14 @@ fn parse_legend(
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
+    let layout = parse_layout_manual(legend_node);
+
     Some(LegendModel {
         position,
         overlay,
         text_style,
         style,
+        layout,
     })
 }
 
@@ -870,6 +882,7 @@ fn parse_text_from_tx(
             formula: None,
             style: None,
             box_style: None,
+            layout: None,
         });
     }
 
@@ -889,6 +902,7 @@ fn parse_text_from_tx(
             formula,
             style: None,
             box_style: None,
+            layout: None,
         });
     }
 
@@ -902,6 +916,7 @@ fn parse_text_from_tx(
             formula: None,
             style: None,
             box_style: None,
+            layout: None,
         });
     }
 
@@ -1400,4 +1415,30 @@ fn descendant_text<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
     node.descendants()
         .find(|n| n.is_element() && n.tag_name().name() == name)
         .and_then(|n| n.text())
+}
+
+fn parse_layout_manual(node: Node<'_, '_>) -> Option<ManualLayoutModel> {
+    let layout_node = node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "layout")?;
+    let manual_node = layout_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "manualLayout")?;
+
+    let model = ManualLayoutModel {
+        x: child_attr(manual_node, "x", "val").and_then(|v| v.parse::<f64>().ok()),
+        y: child_attr(manual_node, "y", "val").and_then(|v| v.parse::<f64>().ok()),
+        w: child_attr(manual_node, "w", "val").and_then(|v| v.parse::<f64>().ok()),
+        h: child_attr(manual_node, "h", "val").and_then(|v| v.parse::<f64>().ok()),
+        x_mode: child_attr(manual_node, "xMode", "val").map(str::to_string),
+        y_mode: child_attr(manual_node, "yMode", "val").map(str::to_string),
+        w_mode: child_attr(manual_node, "wMode", "val").map(str::to_string),
+        h_mode: child_attr(manual_node, "hMode", "val").map(str::to_string),
+    };
+
+    if model == ManualLayoutModel::default() {
+        None
+    } else {
+        Some(model)
+    }
 }

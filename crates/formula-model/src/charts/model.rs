@@ -4,6 +4,27 @@ use crate::RichText;
 
 use super::{ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualLayoutModel {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub w: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub w_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h_mode: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChartModel {
@@ -11,6 +32,9 @@ pub struct ChartModel {
     pub title: Option<TextModel>,
     pub legend: Option<LegendModel>,
     pub plot_area: PlotAreaModel,
+    /// Plot area position and size (`c:plotArea/c:layout/c:manualLayout`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plot_area_layout: Option<ManualLayoutModel>,
     pub axes: Vec<AxisModel>,
     pub series: Vec<SeriesModel>,
     /// Built-in chart style index (`c:chartSpace/c:style/@val`).
@@ -72,6 +96,9 @@ pub struct TextModel {
     pub style: Option<TextRunStyle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub box_style: Option<ShapeStyle>,
+    /// Manual layout (used by chart titles and other chart text elements).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<ManualLayoutModel>,
 }
 
 impl TextModel {
@@ -81,11 +108,12 @@ impl TextModel {
             formula: None,
             style: None,
             box_style: None,
+            layout: None,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LegendModel {
     pub position: LegendPosition,
@@ -94,6 +122,9 @@ pub struct LegendModel {
     pub text_style: Option<TextRunStyle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<ShapeStyle>,
+    /// Manual layout (`c:legend/c:layout/c:manualLayout`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<ManualLayoutModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
