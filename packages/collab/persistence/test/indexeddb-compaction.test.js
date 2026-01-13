@@ -86,6 +86,49 @@ test("IndexedDbCollabPersistence flush compacts the updates store (bounded size 
   restartedDoc.destroy();
 });
 
+test("IndexedDbCollabPersistence compaction preserves updates written by other persistence instances", async () => {
+  const docId = `doc-${randomUUID()}`;
+
+  // Instance A writes an update after instance B has already loaded state. When B compacts,
+  // it must not drop A's persisted update even though B's in-memory doc doesn't include it.
+  const docA = new Y.Doc({ guid: docId });
+  const persistenceA = new IndexedDbCollabPersistence();
+  persistenceA.bind(docId, docA);
+  await persistenceA.load(docId, docA);
+
+  docA.getMap("root").set("a", "one");
+  await sleep(25);
+
+  const docB = new Y.Doc({ guid: docId });
+  const persistenceB = new IndexedDbCollabPersistence();
+  persistenceB.bind(docId, docB);
+  await persistenceB.load(docId, docB);
+
+  // Write another update from A after B is synced/loaded. B won't see this update in-memory.
+  docA.getMap("root").set("b", "two");
+  await sleep(25);
+
+  // Compaction should merge existing persisted updates (including A's) with B's snapshot.
+  await persistenceB.flush(docId);
+  await sleep(25);
+
+  const docC = new Y.Doc({ guid: docId });
+  const persistenceC = new IndexedDbCollabPersistence();
+  persistenceC.bind(docId, docC);
+  await persistenceC.load(docId, docC);
+
+  const rootC = docC.getMap("root");
+  assert.equal(rootC.get("a"), "one");
+  assert.equal(rootC.get("b"), "two");
+
+  docA.destroy();
+  docB.destroy();
+  await sleep(25);
+
+  await persistenceC.clear(docId);
+  docC.destroy();
+});
+
 test("IndexedDbCollabPersistence compaction does not hang when load() is in-flight", async () => {
   const docId = `doc-${randomUUID()}`;
   const doc = new Y.Doc({ guid: docId });
@@ -103,4 +146,3 @@ test("IndexedDbCollabPersistence compaction does not hang when load() is in-flig
   await persistence.clear(docId);
   doc.destroy();
 });
-
