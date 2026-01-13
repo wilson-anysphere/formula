@@ -25,6 +25,7 @@ members = [
   "crates/xlsb-diff",
   "crates/xlsx-diff",
   "crates/formula-wasm",
+  "crates/formula-offcrypto",
 ]
 
 # Release build settings for shipped artifacts.

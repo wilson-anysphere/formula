@@ -19,4 +19,5 @@ subtle = "2.6"
 zeroize = "1.8"
 
 [dev-dependencies]
+cfb = "0.10"
 hex = "0.4"

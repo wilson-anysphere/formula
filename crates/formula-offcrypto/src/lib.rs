@@ -221,6 +221,11 @@ pub enum OffcryptoError {
     EncryptedPackageAllocationFailed { total_size: u64 },
     /// The `EncryptionInfo` version is not supported by the current parser.
     UnsupportedVersion { major: u16, minor: u16 },
+    /// The encryption schema is known but not supported by the selected decryption mode.
+    ///
+    /// This is primarily used by the "Standard-only" decrypt entrypoint to reject Agile inputs
+    /// before attempting any password verification (avoiding misreporting `InvalidPassword`).
+    UnsupportedEncryption { encryption_type: EncryptionType },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
     InvalidCiphertextLength { len: usize },
     /// Invalid AES key length (expected 16, 24, or 32 bytes).
@@ -344,6 +349,9 @@ impl fmt::Display for OffcryptoError {
             }
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
+            }
+            OffcryptoError::UnsupportedEncryption { encryption_type } => {
+                write!(f, "unsupported encryption type {encryption_type:?}")
             }
             OffcryptoError::InvalidCiphertextLength { len } => write!(
                 f,
@@ -589,6 +597,43 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
         header,
         verifier,
     })
+}
+
+/// Decrypt an `EncryptedPackage` stream in **Standard-only** mode.
+///
+/// This helper is intended for callers that only implement ECMA-376 Standard encryption.
+/// If the provided `EncryptionInfo` stream describes Agile encryption, this returns
+/// [`OffcryptoError::UnsupportedEncryption`] (even if the password is correct).
+///
+/// Inputs are the raw `EncryptionInfo` and `EncryptedPackage` *stream bytes* extracted from the
+/// OLE/CFB wrapper.
+pub fn decrypt_standard_only(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let info = parse_encryption_info(encryption_info)?;
+    match info {
+        EncryptionInfo::Standard {
+            header, verifier, ..
+        } => {
+            let info = StandardEncryptionInfo { header, verifier };
+            let key = standard_derive_key(&info, password)?;
+            standard_verify_key(&info, &key)?;
+
+            decrypt_encrypted_package(encrypted_package, |_idx, ct, pt| {
+                pt.copy_from_slice(ct);
+                aes_ecb_decrypt_in_place(&key, pt)
+            })
+        }
+        EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Agile,
+        }),
+        EncryptionInfo::Unsupported { version } => Err(OffcryptoError::UnsupportedVersion {
+            major: version.major,
+            minor: version.minor,
+        }),
+    }
 }
 
 #[derive(Debug, Clone)]
