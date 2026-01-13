@@ -51,6 +51,25 @@ describe.each(SOURCES)("$label permission-aware workbook managers", (source) => 
     expect(session.namedRanges.get("MyRange")).toBe("A1:B2");
   });
 
+  it("respects dynamic permission changes (viewer→editor→viewer)", () => {
+    const doc = new Y.Doc();
+    const session = createCollabSession({ doc });
+    session.setPermissions({ role: "viewer", userId: "u1", rangeRestrictions: [] });
+
+    const metadataMgr = source.createMetadataManagerForSessionWithPermissions(session);
+
+    expect(() => metadataMgr.set("k", "v1")).toThrow(/read-?only/i);
+    expect(metadataMgr.get("k")).toBeUndefined();
+
+    session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
+    metadataMgr.set("k", "v2");
+    expect(metadataMgr.get("k")).toBe("v2");
+
+    session.setPermissions({ role: "viewer", userId: "u1", rangeRestrictions: [] });
+    expect(() => metadataMgr.set("k", "v3")).toThrow(/read-?only/i);
+    expect(metadataMgr.get("k")).toBe("v2");
+  });
+
   it.each(["viewer", "commenter"] as const)("prevents %s from mutating workbook sheets", (role) => {
     const doc = new Y.Doc();
     const session = createCollabSession({ doc });
