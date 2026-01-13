@@ -172,7 +172,8 @@
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
-    color var(--motion-duration-fast) var(--motion-ease);
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .dock-panel__tab:hover {
@@ -192,8 +193,13 @@
 }
 
 .dock-panel__tab:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.dock-panel__tab[aria-selected="true"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--selection-bg), var(--shadow-surface);
 }
 
 .dock-panel__controls {
@@ -219,7 +225,8 @@
   transition:
     background-color var(--motion-duration-fast) var(--motion-ease),
     border-color var(--motion-duration-fast) var(--motion-ease),
-    color var(--motion-duration-fast) var(--motion-ease);
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
 .dock-panel__control:hover {
@@ -232,8 +239,9 @@
 }
 
 .dock-panel__control:focus-visible {
-  outline: 2px solid var(--selection-border);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .dock-panel__control svg {
