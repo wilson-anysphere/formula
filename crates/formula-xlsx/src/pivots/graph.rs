@@ -67,7 +67,7 @@ impl XlsxPackage {
 
             let rels_part = rels_for_part(&sheet_part);
             let relationships = match self.part(&rels_part) {
-                Some(xml) => parse_relationships(xml)?,
+                Some(xml) => parse_relationships(xml).unwrap_or_default(),
                 None => Vec::new(),
             };
             let rel_map: HashMap<_, _> = relationships
@@ -202,7 +202,7 @@ fn sheet_name_by_part(package: &XlsxPackage) -> Result<HashMap<String, String>, 
 
     let rels_part = rels_for_part(workbook_part);
     let workbook_rels = match package.part(&rels_part) {
-        Some(bytes) => parse_relationships(bytes)?,
+        Some(bytes) => parse_relationships(bytes).unwrap_or_default(),
         None => return Ok(HashMap::new()),
     };
     let rel_map: HashMap<_, _> = workbook_rels
@@ -232,7 +232,7 @@ fn cache_parts_by_id(package: &XlsxPackage) -> Result<HashMap<u32, CacheParts>, 
 
     let rels_part = rels_for_part(workbook_part);
     let workbook_rels = match package.part(&rels_part) {
-        Some(bytes) => parse_relationships(bytes)?,
+        Some(bytes) => parse_relationships(bytes).unwrap_or_default(),
         None => Vec::new(),
     };
     let rel_map: HashMap<_, _> = workbook_rels
