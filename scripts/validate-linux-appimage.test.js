@@ -75,11 +75,7 @@ function runValidator(appImagePath) {
     {
       cwd: repoRoot,
       encoding: "utf8",
-      env: {
-        ...process.env,
-        // Keep tests stable even if `mainBinaryName` changes or python isn't available.
-        FORMULA_APPIMAGE_MAIN_BINARY: "formula-desktop",
-      },
+      env: { ...process.env },
     },
   );
   if (proc.error) throw proc.error;
@@ -114,4 +110,3 @@ test("validate-linux-appimage fails when .desktop lacks xlsx integration", { ski
   assert.notEqual(proc.status, 0, "expected non-zero exit status");
   assert.match(proc.stderr, /xlsx support/i);
 });
-
