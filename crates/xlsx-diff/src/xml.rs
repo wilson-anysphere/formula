@@ -50,9 +50,13 @@ impl NormalizedXml {
             .with_context(|| format!("part {part_name} is not valid UTF-8"))?;
         let doc = Document::parse(text).with_context(|| format!("parse xml for {part_name}"))?;
         let root = doc.root_element();
+        // `diff_archives` passes normalized OPC part names, but `NormalizedXml::parse` is public and
+        // can be used directly by tests/consumers. Normalize here so our ordering rules are applied
+        // consistently even if callers pass leading slashes, backslashes, or `..` segments.
+        let normalized_part_name = crate::normalize_opc_part_name(part_name);
 
         Ok(Self {
-            root: build_node(root, false, part_name),
+            root: build_node(root, false, &normalized_part_name),
         })
     }
 }
