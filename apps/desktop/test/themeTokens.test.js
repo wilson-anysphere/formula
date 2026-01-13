@@ -6,6 +6,17 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function parseVarsFromBlock(blockBody) {
+  /** @type {Record<string, string>} */
+  const vars = {};
+  const regex = /--([a-z0-9-]+)\s*:\s*([^;]+);/gi;
+  let match = null;
+  while ((match = regex.exec(blockBody))) {
+    vars[match[1]] = match[2].trim();
+  }
+  return vars;
+}
+
 test("tokens.css defines required design tokens", () => {
   const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
   const css = fs.readFileSync(tokensPath, "utf8");
@@ -50,4 +61,16 @@ test("tokens.css defines required design tokens", () => {
   for (const token of required) {
     assert.ok(defined.has(token), `Expected tokens.css to define --${token}`);
   }
+});
+
+test("tokens.css uses tight radius tokens (4px/3px) per mockups", () => {
+  const tokensPath = path.join(__dirname, "..", "src", "styles", "tokens.css");
+  const css = fs.readFileSync(tokensPath, "utf8");
+
+  const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
+  assert.ok(rootMatch, "tokens.css missing :root block");
+
+  const vars = parseVarsFromBlock(rootMatch[1]);
+  assert.equal(vars["radius"], "4px");
+  assert.equal(vars["radius-sm"], "3px");
 });
