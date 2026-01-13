@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,6 +142,20 @@ function main() {
   }
 
   const relativeEntitlementsPath = path.relative(repoRoot, entitlementsPath);
+
+  // On macOS runners, validate the plist is syntactically valid using the system tool.
+  // (On other platforms, we avoid depending on `plutil`.)
+  if (process.platform === "darwin") {
+    const lint = spawnSync("plutil", ["-lint", entitlementsPath], { encoding: "utf8" });
+    if (lint.status !== 0) {
+      const output = `${lint.stdout ?? ""}\n${lint.stderr ?? ""}`.trim();
+      errBlock(`Invalid entitlements plist (${relativeEntitlementsPath})`, [
+        `plutil -lint failed.`,
+        ...(output ? [`Output:\n${output}`] : []),
+      ]);
+      return;
+    }
+  }
 
   let xml;
   try {
