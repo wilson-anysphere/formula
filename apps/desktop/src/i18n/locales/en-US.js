@@ -119,6 +119,8 @@ export const enUS = {
   "print.pageSetup.close": "Close",
   "branchManager.title": "Branches",
   "branchManager.current": "Current",
+  "branchManager.compressionFallbackWarning":
+    "Branch payload compression is unavailable in this environment. Falling back to JSON payloads; large branch commits may fail to sync.",
   "branchManager.permissionWarning": "Branch operations require owner/admin permissions.",
   "branchManager.newBranch.placeholder": "new branch name",
   "branchManager.newBranch.create": "Create",

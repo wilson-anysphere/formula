@@ -57,17 +57,26 @@ function CollabBranchManagerPanel({
   const docId = session.doc.guid;
 
   const { store, storeWarning } = useMemo(() => {
-    const chunkSize = 64 * 1024;
-    const maxChunksPerTransaction = 8;
+    // Conservative defaults so large branching commits don't exceed common sync-server
+    // websocket message limits (close code 1009). Smaller chunks mean more Yjs updates,
+    // but keeps the feature usable even when `SYNC_SERVER_MAX_MESSAGE_BYTES` is tuned low.
+    const chunkSize = 8 * 1024;
+    const maxChunksPerTransaction = 2;
 
     const proc = (globalThis as any).process;
     const isNodeRuntime = Boolean(proc?.versions?.node);
-    const hasCompressionStream = typeof (globalThis as any).CompressionStream !== "undefined";
-    const hasDecompressionStream = typeof (globalThis as any).DecompressionStream !== "undefined";
+    const CompressionStreamCtor = (globalThis as any).CompressionStream as any;
+    const DecompressionStreamCtor = (globalThis as any).DecompressionStream as any;
 
     try {
-      if (!isNodeRuntime && (!hasCompressionStream || !hasDecompressionStream)) {
-        throw new Error("CompressionStream is unavailable");
+      if (!isNodeRuntime) {
+        if (typeof CompressionStreamCtor === "undefined" || typeof DecompressionStreamCtor === "undefined") {
+          throw new Error("CompressionStream is unavailable");
+        }
+        // Some runtimes expose the constructor but don't support gzip.
+        // (If either throws, fall back to JSON payloads.)
+        void new CompressionStreamCtor("gzip");
+        void new DecompressionStreamCtor("gzip");
       }
       return {
         store: new YjsBranchStore({
@@ -81,8 +90,7 @@ function CollabBranchManagerPanel({
     } catch (e) {
       return {
         store: new YjsBranchStore({ ydoc: session.doc, payloadEncoding: "json" }),
-        storeWarning:
-          "Branch payload compression is unavailable in this environment. Falling back to JSON payloads; large branch commits may fail to sync.",
+        storeWarning: t("branchManager.compressionFallbackWarning"),
       };
     }
   }, [session.doc]);
