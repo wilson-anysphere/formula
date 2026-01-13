@@ -70,7 +70,7 @@ Excel-produced encrypted workbooks primarily use:
 - **Agile Encryption** (modern; Office 2010+)
 - **Standard Encryption** (older; Office 2007 era)
 
-Formula supports decrypting OOXML-encrypted workbooks when they use:
+Formula’s encrypted-workbook support targets these two schemes:
 
 - **Agile** (`EncryptionInfo` version 4.4; XML-based descriptor inside `EncryptionInfo`)
 - **Standard** (`EncryptionInfo` version 3.2; CryptoAPI-style header/verifier)
@@ -223,4 +223,3 @@ When implementing (or calling) encrypted-workbook support:
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/
 - **MS-XLSX** — Office Open XML SpreadsheetML Package Structure  
   https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-xlsx/
-
