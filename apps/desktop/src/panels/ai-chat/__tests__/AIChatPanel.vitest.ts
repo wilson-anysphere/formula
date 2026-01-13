@@ -444,6 +444,56 @@ describe("AIChatPanel attachments UI", () => {
     });
   });
 
+  it("shows a toast warning when attaching a clamped selection", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getSelectionAttachment = vi.fn(() => ({
+      type: "range" as const,
+      reference: "Sheet1!A1:D10",
+      data: {
+        clamped: { originalCellCount: 1_000_000, attachedCellCount: 200_000, maxCells: 200_000 },
+      },
+    }));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getSelectionAttachment,
+        }),
+      );
+    });
+
+    const attachSelectionBtn = container.querySelector('[data-testid="ai-chat-attach-selection"]') as HTMLButtonElement | null;
+    expect(attachSelectionBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachSelectionBtn!.click();
+    });
+
+    const toast = toastRoot.querySelector('[data-testid="toast"]');
+    expect(toast?.textContent).toContain("Selection is too large");
+    expect(toast?.textContent).toContain("Attached 200000");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("can attach and remove a selection before sending (and includes attachments on the user message)", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
