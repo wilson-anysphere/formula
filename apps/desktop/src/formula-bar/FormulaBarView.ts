@@ -10,12 +10,10 @@ import {
 } from "@formula/spreadsheet-frontend";
 import type { EngineClient, FormulaParseOptions } from "@formula/engine";
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
-import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
-import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
-import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
 import { getActiveArgumentSpan } from "./highlight/activeArgument.js";
 import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
 import { computeFormulaIndentation } from "./computeFormulaIndentation.js";
+import { buildFunctionPickerItems, renderFunctionPickerList, type FunctionPickerItem } from "./functionPicker.js";
 
 export type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -49,61 +47,6 @@ export type NameBoxMenuItem = {
   reference?: string | null;
   enabled?: boolean;
 };
-
-type FunctionPickerItem = {
-  name: string;
-  signature?: string;
-  summary?: string;
-};
-
-type CatalogFunction = { name?: string | null };
-
-const ALL_FUNCTION_NAMES_SORTED: string[] = ((FUNCTION_CATALOG as { functions?: CatalogFunction[] } | null)?.functions ?? [])
-  .map((fn) => String(fn?.name ?? "").trim())
-  .filter((name) => name.length > 0)
-  .sort((a, b) => a.localeCompare(b));
-
-const COMMON_FUNCTION_NAMES = [
-  "SUM",
-  "AVERAGE",
-  "COUNT",
-  "MIN",
-  "MAX",
-  "IF",
-  "IFERROR",
-  "XLOOKUP",
-  "VLOOKUP",
-  "INDEX",
-  "MATCH",
-  "TODAY",
-  "NOW",
-  "ROUND",
-  "CONCAT",
-  "SEQUENCE",
-  "FILTER",
-  "TEXTSPLIT",
-];
-
-const DEFAULT_FUNCTION_NAMES: string[] = (() => {
-  const byName = new Map(ALL_FUNCTION_NAMES_SORTED.map((name) => [name.toUpperCase(), name]));
-  const out: string[] = [];
-  const seen = new Set<string>();
-
-  for (const name of COMMON_FUNCTION_NAMES) {
-    const resolved = byName.get(name.toUpperCase());
-    if (!resolved) continue;
-    out.push(resolved);
-    seen.add(resolved.toUpperCase());
-  }
-  for (const name of ALL_FUNCTION_NAMES_SORTED) {
-    if (out.length >= 50) break;
-    const key = name.toUpperCase();
-    if (seen.has(key)) continue;
-    out.push(name);
-    seen.add(key);
-  }
-  return out;
-})();
 
 const FORMULA_BAR_EXPANDED_STORAGE_KEY = "formula:ui:formulaBarExpanded";
 const FORMULA_BAR_MIN_HEIGHT = 24;
@@ -1316,79 +1259,18 @@ export class FormulaBarView {
   }
 
   #renderFunctionPickerResults(): void {
-    const query = this.#functionPickerInputEl.value;
     const limit = 50;
-
-    const items: FunctionPickerItem[] = query.trim()
-      ? searchFunctionResults(query, { limit }).map((res) => ({
-          name: res.name,
-          signature: res.signature,
-          summary: res.summary,
-        }))
-      : DEFAULT_FUNCTION_NAMES.slice(0, limit).map((name) => functionPickerItemFromName(name));
+    const query = this.#functionPickerInputEl.value;
+    const items: FunctionPickerItem[] = buildFunctionPickerItems(query, limit);
 
     this.#functionPickerItems = items;
-    this.#functionPickerItemEls = [];
-    this.#functionPickerListEl.innerHTML = "";
-
-    if (items.length === 0) {
-      const empty = document.createElement("li");
-      empty.className = "command-palette__empty";
-      empty.textContent = query.trim() ? "No matching functions" : "Type to search functions";
-      empty.setAttribute("role", "presentation");
-      this.#functionPickerListEl.appendChild(empty);
-      return;
-    }
-
-    for (let i = 0; i < items.length; i += 1) {
-      const fn = items[i]!;
-      const li = document.createElement("li");
-      li.className = "command-palette__item";
-      li.dataset.testid = `formula-function-picker-item-${fn.name}`;
-      li.setAttribute("role", "option");
-      li.setAttribute("aria-selected", i === this.#functionPickerSelectedIndex ? "true" : "false");
-
-      const icon = document.createElement("div");
-      icon.className = "command-palette__item-icon command-palette__item-icon--function";
-      icon.textContent = "fx";
-
-      const main = document.createElement("div");
-      main.className = "command-palette__item-main";
-
-      const label = document.createElement("div");
-      label.className = "command-palette__item-label";
-      label.textContent = fn.name;
-
-      main.appendChild(label);
-
-      const signatureOrSummary = (() => {
-        const summary = fn.summary?.trim?.() ?? "";
-        const signature = fn.signature?.trim?.() ?? "";
-        if (signature && summary) return `${signature} — ${summary}`;
-        if (signature) return signature;
-        if (summary) return summary;
-        return "";
-      })();
-
-      if (signatureOrSummary) {
-        const desc = document.createElement("div");
-        desc.className = "command-palette__item-description command-palette__item-description--mono";
-        desc.textContent = signatureOrSummary;
-        main.appendChild(desc);
-      }
-
-      li.appendChild(icon);
-      li.appendChild(main);
-
-      li.addEventListener("mousedown", (e) => {
-        // Keep focus in the search input so we can handle selection consistently.
-        e.preventDefault();
-      });
-      li.addEventListener("click", () => this.#selectFunctionPickerItem(i));
-
-      this.#functionPickerListEl.appendChild(li);
-      this.#functionPickerItemEls.push(li);
-    }
+    this.#functionPickerItemEls = renderFunctionPickerList({
+      listEl: this.#functionPickerListEl,
+      query,
+      items,
+      selectedIndex: this.#functionPickerSelectedIndex,
+      onSelect: (index) => this.#selectFunctionPickerItem(index),
+    });
 
     // Ensure selection is valid after query changes.
     this.#updateFunctionPickerSelection(this.#functionPickerSelectedIndex);
@@ -2026,16 +1908,4 @@ function computeReferenceHighlights(text: string): FormulaReferenceHighlight[] {
     index: ref.index,
     active: false
   }));
-}
-
-function functionPickerItemFromName(name: string): FunctionPickerItem {
-  const sig = getFunctionSignature(name);
-  const signature = sig ? formatSignature(sig) : undefined;
-  const summary = sig?.summary?.trim?.() ? sig.summary.trim() : undefined;
-  return { name, signature, summary };
-}
-
-function formatSignature(sig: FunctionSignature): string {
-  const params = sig.params.map((param) => (param.optional ? `[${param.name}]` : param.name)).join(", ");
-  return `${sig.name}(${params})`;
 }
