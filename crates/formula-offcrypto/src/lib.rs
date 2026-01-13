@@ -1480,7 +1480,7 @@ pub fn standard_derive_key(
     // h = sha1(salt || password_utf16)
     let mut hasher = Sha1::new();
     hasher.update(&info.verifier.salt);
-    hasher.update(&password_utf16);
+    hasher.update(password_utf16.as_slice());
     let mut h: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(hasher.finalize().into());
 
     // for i in 0..ITER_COUNT-1: h = sha1(u32le(i) || h)
@@ -1504,12 +1504,12 @@ pub fn standard_derive_key(
         buf1[i] ^= hfinal[i];
         buf2[i] ^= hfinal[i];
     }
-    let x1 = sha1(&buf1[..]);
-    let x2 = sha1(&buf2[..]);
+    let x1: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf1[..]));
+    let x2: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&buf2[..]));
 
     let mut out: Zeroizing<[u8; SHA1_LEN * 2]> = Zeroizing::new([0u8; SHA1_LEN * 2]);
-    out[..SHA1_LEN].copy_from_slice(&x1);
-    out[SHA1_LEN..].copy_from_slice(&x2);
+    out[..SHA1_LEN].copy_from_slice(&x1[..]);
+    out[SHA1_LEN..].copy_from_slice(&x2[..]);
 
     if key_len > out.len() {
         return Err(OffcryptoError::DerivedKeyTooLong {
@@ -1528,12 +1528,13 @@ pub fn standard_derive_key(
 pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
     validate_standard_encryption_info(info)?;
 
-    let mut verifier = Zeroizing::new(info.verifier.encrypted_verifier);
+    let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
     aes_ecb_decrypt_in_place(key, &mut verifier[..])?;
-    let expected_hash: [u8; SHA1_LEN] = sha1(&verifier[..]);
+    let expected_hash: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&verifier[..]));
 
-    let mut verifier_hash = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
-    aes_ecb_decrypt_in_place(key, &mut verifier_hash)?;
+    let mut verifier_hash: Zeroizing<Vec<u8>> =
+        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    aes_ecb_decrypt_in_place(key, &mut verifier_hash[..])?;
     if verifier_hash.len() < SHA1_LEN {
         return Err(OffcryptoError::InvalidVerifierHashLength {
             len: verifier_hash.len(),
