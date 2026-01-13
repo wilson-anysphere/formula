@@ -43,6 +43,16 @@ fn is_standard_cryptoapi_version(major: u16, minor: u16) -> bool {
     minor == STANDARD_MINOR_VERSION && matches!(major, 2 | 3 | 4)
 }
 const ENCRYPTION_HEADER_FIXED_LEN: usize = 8 * 4;
+/// Conservative upper bound on `EncryptionHeader` size to avoid attacker-controlled allocations.
+///
+/// The only variable-length field in the Standard header is `CSPName` (UTF-16LE). Real-world files
+/// typically include a short provider name. 64KiB is far larger than any legitimate value.
+pub const MAX_STANDARD_HEADER_SIZE: usize = 64 * 1024;
+/// Conservative upper bound on `EncryptionVerifier.salt` size.
+///
+/// MS-OFFCRYPTO Standard uses a 16-byte salt, but keep the limit loose to avoid rejecting unusual
+/// producers while still preventing large allocations.
+pub const MAX_STANDARD_SALT_SIZE: usize = 1024;
 /// MS-OFFCRYPTO Standard uses a fixed spin count of 50,000 iterations for password hashing.
 const STANDARD_SPIN_COUNT: u32 = 50_000;
 
@@ -71,6 +81,9 @@ pub enum OffcryptoError {
 
     #[error("invalid CSPName length {len}: must be even (UTF-16LE)")]
     InvalidCspNameLength { len: usize },
+
+    #[error("invalid CSPName UTF-16")]
+    InvalidCspNameUtf16,
 
     #[error("unsupported external Standard encryption (fExternal flag set)")]
     UnsupportedExternalEncryption,
@@ -265,12 +278,18 @@ pub fn parse_encryption_info_standard(bytes: &[u8]) -> Result<StandardEncryption
             min_size: ENCRYPTION_HEADER_FIXED_LEN,
         });
     }
+    if header_size_u32 as usize > MAX_STANDARD_HEADER_SIZE || header_size_u32 as usize > r.remaining() {
+        return Err(OffcryptoError::InvalidHeaderSize {
+            header_size: header_size_u32,
+            min_size: ENCRYPTION_HEADER_FIXED_LEN,
+        });
+    }
     let header_size = header_size_u32 as usize;
     let header_bytes = r.read_bytes(header_size, "EncryptionHeader")?;
     let header = parse_encryption_header(header_bytes)?;
 
     let verifier_bytes = r.read_bytes(r.remaining(), "EncryptionVerifier")?;
-    let verifier = parse_encryption_verifier(verifier_bytes)?;
+    let verifier = parse_encryption_verifier(verifier_bytes, header.alg_id, header.alg_id_hash)?;
 
     validate_parsed_standard_encryption_info(&header, &verifier)?;
 
@@ -355,6 +374,11 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
     let alg_id = r.read_u32_le("EncryptionHeader.algId")?;
     let alg_id_hash = r.read_u32_le("EncryptionHeader.algIdHash")?;
     let key_size = r.read_u32_le("EncryptionHeader.keySize")?;
+    if key_size == 0 || key_size % 8 != 0 {
+        return Err(OffcryptoError::InvalidKeySize {
+            key_size_bits: key_size,
+        });
+    }
     let provider_type = r.read_u32_le("EncryptionHeader.providerType")?;
     let reserved1 = r.read_u32_le("EncryptionHeader.reserved1")?;
     let reserved2 = r.read_u32_le("EncryptionHeader.reserved2")?;
@@ -385,10 +409,14 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
-    while utf16.last() == Some(&0) {
-        utf16.pop();
+    if let Some(nul_pos) = utf16.iter().position(|c| *c == 0) {
+        utf16.truncate(nul_pos);
+    } else {
+        while utf16.last() == Some(&0) {
+            utf16.pop();
+        }
     }
-    let csp_name = String::from_utf16_lossy(&utf16);
+    let csp_name = String::from_utf16(&utf16).map_err(|_| OffcryptoError::InvalidCspNameUtf16)?;
 
     Ok(EncryptionHeader {
         flags,
@@ -403,12 +431,16 @@ fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoEr
     })
 }
 
-fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, OffcryptoError> {
+fn parse_encryption_verifier(
+    bytes: &[u8],
+    alg_id: u32,
+    alg_id_hash: u32,
+) -> Result<EncryptionVerifier, OffcryptoError> {
     let mut r = Reader::new(bytes);
 
     let salt_size_u32 = r.read_u32_le("EncryptionVerifier.saltSize")?;
     let salt_size = salt_size_u32 as usize;
-    if r.remaining() < salt_size {
+    if salt_size > MAX_STANDARD_SALT_SIZE || r.remaining() < salt_size {
         return Err(OffcryptoError::InvalidSaltSize {
             salt_size: salt_size_u32,
         });
@@ -417,8 +449,30 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Offcryp
 
     let encrypted_verifier = r.read_array::<16>("EncryptionVerifier.encryptedVerifier")?;
     let verifier_hash_size = r.read_u32_le("EncryptionVerifier.verifierHashSize")?;
+
+    let digest_len = digest_len(alg_id_hash)?;
+    if verifier_hash_size == 0 || (verifier_hash_size as usize) > digest_len {
+        return Err(OffcryptoError::InvalidVerifierHashSize { verifier_hash_size });
+    }
+
+    let verifier_hash_size_usize = verifier_hash_size as usize;
+    let encrypted_verifier_hash_len = match alg_id {
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            // AES-CBC ciphertext is block aligned; the verifier hash is padded to the next block.
+            let n = verifier_hash_size_usize
+                .checked_add(AES_BLOCK_SIZE - 1)
+                .ok_or_else(|| OffcryptoError::InvalidVerifierHashSize { verifier_hash_size })?;
+            (n / AES_BLOCK_SIZE) * AES_BLOCK_SIZE
+        }
+        CALG_RC4 => verifier_hash_size_usize,
+        other => return Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
+    };
+
     let encrypted_verifier_hash = r
-        .read_bytes(r.remaining(), "EncryptionVerifier.encryptedVerifierHash")?
+        .read_bytes(
+            encrypted_verifier_hash_len,
+            "EncryptionVerifier.encryptedVerifierHash",
+        )?
         .to_vec();
 
     Ok(EncryptionVerifier {
@@ -427,6 +481,16 @@ fn parse_encryption_verifier(bytes: &[u8]) -> Result<EncryptionVerifier, Offcryp
         verifier_hash_size,
         encrypted_verifier_hash,
     })
+}
+
+fn digest_len(alg_id_hash: u32) -> Result<usize, OffcryptoError> {
+    match alg_id_hash {
+        CALG_SHA1 => Ok(20),
+        CALG_MD5 => Ok(16),
+        other => Err(OffcryptoError::UnsupportedAlgIdHash {
+            alg_id_hash: other,
+        }),
+    }
 }
 
 /// Verify a password against the Standard (CryptoAPI) `EncryptionVerifier` structure.
@@ -746,7 +810,7 @@ mod tests {
         let mut out = Vec::new();
         out.extend_from_slice(&STANDARD_MAJOR_VERSION.to_le_bytes());
         out.extend_from_slice(&STANDARD_MINOR_VERSION.to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags (ignored)
 
         let mut header_bytes = Vec::new();
         header_bytes.extend_from_slice(&header.flags.raw.to_le_bytes());
@@ -768,6 +832,142 @@ mod tests {
         out.extend_from_slice(&verifier.verifier_hash_size.to_le_bytes());
         out.extend_from_slice(&verifier.encrypted_verifier_hash);
         out
+    }
+
+    fn build_minimal_valid_encryption_info() -> Vec<u8> {
+        let header = EncryptionHeader {
+            flags: EncryptionHeaderFlags::from_raw(EncryptionHeaderFlags::F_CRYPTOAPI),
+            size_extra: 0,
+            alg_id: CALG_RC4,
+            alg_id_hash: CALG_SHA1,
+            key_size: 40,
+            provider_type: 0,
+            reserved1: 0,
+            reserved2: 0,
+            csp_name: "Microsoft Base Cryptographic Provider".to_string(),
+        };
+        let verifier = EncryptionVerifier {
+            salt: vec![0x11u8; 16],
+            encrypted_verifier: [0x22u8; 16],
+            verifier_hash_size: 20,
+            encrypted_verifier_hash: vec![0x33u8; 20],
+        };
+        build_standard_encryption_info_bytes(&header, &verifier)
+    }
+
+    #[test]
+    fn parse_standard_rejects_header_size_over_remaining_bytes() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        // headerSize is at offset 8 (major+minor+flags).
+        bytes[8..12].copy_from_slice(&(10_000u32).to_le_bytes());
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidHeaderSize { .. }),
+            "expected InvalidHeaderSize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_rejects_header_size_over_max() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        let header_size = (MAX_STANDARD_HEADER_SIZE as u32) + 1;
+        bytes[8..12].copy_from_slice(&header_size.to_le_bytes());
+
+        // Ensure the declared header size fits in the buffer so we exercise the max-limit check.
+        bytes.resize(12 + header_size as usize, 0);
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidHeaderSize { .. }),
+            "expected InvalidHeaderSize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_rejects_header_size_too_small() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        bytes[8..12].copy_from_slice(&(8u32).to_le_bytes());
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidHeaderSize { .. }),
+            "expected InvalidHeaderSize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_rejects_salt_size_over_max() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        let header_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        let salt_size_offset = 12 + header_size;
+
+        // Make sure remaining bytes are >= salt_size so this exercises the max cap, not "remaining".
+        bytes.resize(salt_size_offset + 4 + (MAX_STANDARD_SALT_SIZE + 1) + 16 + 4 + 20, 0);
+        bytes[salt_size_offset..salt_size_offset + 4].copy_from_slice(&(2048u32).to_le_bytes());
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidSaltSize { salt_size: 2048 }),
+            "expected InvalidSaltSize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_rejects_invalid_key_size() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        // keySize is the 5th DWORD of the EncryptionHeader fixed portion.
+        let key_size_offset = 12 + (4 * 4);
+        bytes[key_size_offset..key_size_offset + 4].copy_from_slice(&(7u32).to_le_bytes());
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidKeySize { key_size_bits: 7 }),
+            "expected InvalidKeySize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_rejects_verifier_hash_size_larger_than_digest_len() {
+        let mut bytes = build_minimal_valid_encryption_info();
+        let header_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        let salt_size_offset = 12 + header_size;
+        let salt_size =
+            u32::from_le_bytes(bytes[salt_size_offset..salt_size_offset + 4].try_into().unwrap())
+                as usize;
+        let verifier_hash_size_offset = salt_size_offset + 4 + salt_size + 16;
+        bytes[verifier_hash_size_offset..verifier_hash_size_offset + 4]
+            .copy_from_slice(&(32u32).to_le_bytes()); // > SHA1 digest len (20)
+
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::InvalidVerifierHashSize { verifier_hash_size: 32 }),
+            "expected InvalidVerifierHashSize, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_standard_truncated_input_never_panics() {
+        let bytes = vec![0u8; 3];
+        let res = std::panic::catch_unwind(|| parse_encryption_info_standard(&bytes));
+        assert!(res.is_ok(), "parser should not panic");
+        let err = res.unwrap().expect_err("expected error");
+        assert!(
+            matches!(err, OffcryptoError::Truncated { .. }),
+            "expected Truncated, got {err:?}"
+        );
     }
 
     #[test]

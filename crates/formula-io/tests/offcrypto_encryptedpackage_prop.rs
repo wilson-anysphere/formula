@@ -6,8 +6,8 @@ use proptest::prelude::*;
 use sha1::{Digest as _, Sha1};
 
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
-const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 const AES_BLOCK_LEN: usize = 16;
+const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
 
 const KEY: [u8; 16] = [0x42; 16];
 const SALT: [u8; 16] = [0x24; 16];
