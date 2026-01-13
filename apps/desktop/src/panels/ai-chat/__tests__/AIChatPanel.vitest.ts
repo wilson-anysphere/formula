@@ -494,6 +494,86 @@ describe("AIChatPanel attachments UI", () => {
     });
   });
 
+  it("disables attach table when no tables are available and exposes tooltip text", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getTableOptions = vi.fn(() => []);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getTableOptions,
+        }),
+      );
+    });
+
+    const attachTableBtn = container.querySelector('[data-testid="ai-chat-attach-table"]') as HTMLButtonElement | null;
+    expect(attachTableBtn).toBeInstanceOf(HTMLButtonElement);
+    expect(attachTableBtn?.disabled).toBe(true);
+
+    const wrap = attachTableBtn?.parentElement;
+    expect(wrap?.classList.contains("ai-chat-panel__attachment-button-wrap")).toBe(true);
+    expect(wrap?.getAttribute("title")).toBe("No tables available");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
+  it("shows a toast when attach formula is clicked but no formula is available", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
+
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const sendMessage = vi.fn(async () => {
+      return { messages: [], final: "Ok" };
+    });
+
+    const getFormulaAttachment = vi.fn(() => null);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        React.createElement(AIChatPanel, {
+          systemPrompt: "system",
+          sendMessage,
+          getFormulaAttachment,
+        }),
+      );
+    });
+
+    const attachFormulaBtn = container.querySelector('[data-testid="ai-chat-attach-formula"]') as HTMLButtonElement | null;
+    expect(attachFormulaBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      attachFormulaBtn!.click();
+    });
+
+    const toast = toastRoot.querySelector('[data-testid="toast"]');
+    expect(toast?.textContent).toContain("No active cell formula");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("disables attach chart with a no-charts tooltip when there are no charts", async () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("crypto", { randomUUID: () => "uuid-1" } as any);
