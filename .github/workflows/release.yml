@@ -881,9 +881,10 @@ jobs:
         run: |
           set -euo pipefail
           # Preferred location (matches docs/release.md), but fall back to scanning common Cargo target dirs.
+          #
+          # Use globs instead of `find` to avoid traversing the entire Cargo target directory (which can be large).
           shopt -s nullglob
           debs=(apps/desktop/src-tauri/target/release/bundle/deb/*.deb)
-          shopt -u nullglob
 
           if ((${#debs[@]} == 0)); then
             roots=()
@@ -895,11 +896,14 @@ jobs:
             debs=()
             for root in "${roots[@]}"; do
               [[ -d "${root}" ]] || continue
-              while IFS= read -r -d '' f; do
-                debs+=("$f")
-              done < <(find "${root}" -type f -path '*/release/bundle/deb/*.deb' -print0 2>/dev/null || true)
+              debs+=("${root}"/release/bundle/deb/*.deb)
+              debs+=("${root}"/*/release/bundle/deb/*.deb)
             done
           fi
+
+          # De-dupe for deterministic logs (and to avoid double-validating when roots overlap).
+          if ((${#debs[@]} > 0)); then mapfile -t debs < <(printf '%s\n' "${debs[@]}" | sort -u); fi
+          shopt -u nullglob
 
           if ((${#debs[@]} == 0)); then
             echo "::error::could not find any .deb artifacts under apps/desktop/src-tauri/target/release/bundle/deb or target/**/release/bundle/deb" >&2
