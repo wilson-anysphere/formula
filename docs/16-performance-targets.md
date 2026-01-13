@@ -15,7 +15,8 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Cold start to interactive | <1.0s | Time from launch to first input accepted |
 | Warm start | <0.5s | Time from launch with cached data |
 | Time to first render | <0.3s | Time from launch to grid visible |
-| Bundle size | <10MB | Compressed application download |
+| Frontend asset download size (compressed JS/CSS/WASM) | <10MB | Guardrailed via `pnpm -C apps/desktop check:bundle-size` (gzip JS budgets) and tracked via `python scripts/desktop_size_report.py` (Vite `dist/` size + tar.gz approximation) |
+| Desktop installer artifact size (DMG/MSI/EXE/AppImage) | <50MB per artifact | `python scripts/desktop_bundle_size_report.py` on Tauri build output (`target/**/release/bundle`) |
 
 ### File Operations
 

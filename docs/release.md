@@ -858,11 +858,15 @@ CI note: tagged releases run this check on macOS/Windows/Linux before uploading 
 check on macOS/Windows (e.g. a hosted-runner regression makes it flaky), set the GitHub Actions variable
 `FORMULA_COI_CHECK_ALL_PLATFORMS=0` to keep the Linux check while disabling the non-Linux ones.
 
-## 6) Bundle size reporting + size gate (tagged releases enforced)
+## 6) Installer/bundle artifact size reporting + size gate (tagged releases enforced)
 
-The release workflow reports the size of each generated installer/bundle (DMG / MSI / EXE /
+The release workflow reports the size of each generated installer/bundle artifact (DMG / MSI / EXE /
 AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails tagged releases** if
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
+
+Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
+download size** budget (compressed JS/CSS/WASM; see `pnpm -C apps/desktop check:bundle-size` and
+`python scripts/desktop_size_report.py`).
 
 ### Rust binary size controls (Cargo release profile)
 
