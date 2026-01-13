@@ -9820,62 +9820,62 @@ try {
 
   // Native menu bar integration (desktop shell emits menu-open/menu-save/... events).
   void listen("menu-open", () => {
-    void promptOpenWorkbook().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.openWorkbook).catch((err) => {
       console.error("Failed to open workbook:", err);
       void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-new", () => {
-    void handleNewWorkbook().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.newWorkbook).catch((err) => {
       console.error("Failed to create workbook:", err);
       void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-save", () => {
-    void handleSave().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbook).catch((err) => {
       console.error("Failed to save workbook:", err);
       void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-save-as", () => {
-    void handleSaveAs().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.saveWorkbookAs).catch((err) => {
       console.error("Failed to save workbook:", err);
       void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-print", () => {
-    void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.print).catch((err) => {
       console.error("Failed to print:", err);
       showToast(`Failed to print: ${String(err)}`, "error");
     });
   });
 
   void listen("menu-print-preview", () => {
-    void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.printPreview).catch((err) => {
       console.error("Failed to open print preview:", err);
       showToast(`Failed to open print preview: ${String(err)}`, "error");
     });
   });
 
   void listen("menu-export-pdf", () => {
-    void handleRibbonExportPdf().catch((err) => {
+    void commandRegistry.executeCommand(PAGE_LAYOUT_COMMANDS.exportPdf).catch((err) => {
       console.error("Failed to export PDF:", err);
       showToast(`Failed to export PDF: ${String(err)}`, "error");
     });
   });
 
   void listen("menu-close-window", () => {
-    void handleCloseRequest({ quit: false }).catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.closeWorkbook).catch((err) => {
       console.error("Failed to close window:", err);
     });
   });
 
   void listen("menu-quit", () => {
-    void requestAppQuit().catch((err) => {
+    void commandRegistry.executeCommand(WORKBENCH_FILE_COMMANDS.quit).catch((err) => {
       console.error("Failed to quit app:", err);
     });
   });
