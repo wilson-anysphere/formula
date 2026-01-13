@@ -25,6 +25,26 @@ describe("drawings transform parsing", () => {
       flipV: false,
     });
   });
+
+  it("parses single-quoted attributes (common in some OOXML payloads)", () => {
+    const rawXml = `
+      <xdr:sp xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <xdr:spPr>
+          <a:xfrm rot='-5400000' flipV='true'>
+            <a:off x='0' y='0'/>
+            <a:ext cx='100' cy='200'/>
+          </a:xfrm>
+        </xdr:spPr>
+      </xdr:sp>
+    `;
+
+    expect(parseDrawingTransformFromRawXml(rawXml)).toEqual({
+      rotationDeg: -90,
+      flipH: false,
+      flipV: true,
+    });
+  });
 });
 
 describe("drawings hit testing with rotation", () => {

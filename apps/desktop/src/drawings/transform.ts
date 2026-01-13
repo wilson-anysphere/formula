@@ -30,11 +30,13 @@ function parseAttributes(source: string): Record<string, string> {
   // The DrawingML snippets we preserve are machine-generated and typically use
   // straightforward `key="value"` attributes.
   const attrs: Record<string, string> = {};
-  const attrRe = /([A-Za-z_][\w:.-]*)\s*=\s*"([^"]*)"/g;
+  // Support both single and double quotes to match real-world OOXML payloads
+  // (Excel can emit either, and some round-trip fixtures use single quotes).
+  const attrRe = /([A-Za-z_][\w:.-]*)\s*=\s*(['"])([^'"]*)\2/g;
   for (;;) {
     const match = attrRe.exec(source);
     if (!match) break;
-    const [, key, value] = match;
+    const [, key, _quote, value] = match;
     attrs[key] = value;
   }
   return attrs;
@@ -100,4 +102,3 @@ export function applyTransformVector(
   const scaled = { x: dx * sx, y: dy * sy };
   return rotateVector(scaled.x, scaled.y, degToRad(transform.rotationDeg));
 }
-
