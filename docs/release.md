@@ -283,6 +283,15 @@ Expected `{{target}}` values for this repo’s release matrix:
   Windows installer used by the updater, typically `.msi` or `.exe`).
 - **Linux:** `linux-x86_64` (points at the updater payload, typically the `.AppImage`).
 
+For reference, this is how the release workflow’s Tauri build targets map to updater targets:
+
+| Workflow build | Tauri build args | Rust target triple | `latest.json` platform key(s) |
+| --- | --- | --- | --- |
+| macOS universal | `--target universal-apple-darwin` | `aarch64-apple-darwin` + `x86_64-apple-darwin` | `darwin-aarch64`, `darwin-x86_64` |
+| Windows x64 | _(default)_ | `x86_64-pc-windows-msvc` | `windows-x86_64` |
+| Windows ARM64 | `--target aarch64-pc-windows-msvc` | `aarch64-pc-windows-msvc` | `windows-aarch64` |
+| Linux x64 | `--bundles appimage,deb,rpm` | `x86_64-unknown-linux-gnu` | `linux-x86_64` |
+
 Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not typically used by the
 Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
 platform/arch will not work even if the GitHub Release has other assets attached.
@@ -398,8 +407,14 @@ After the workflow completes:
    - Windows **ARM64**: installer (NSIS `.exe` and/or `.msi`)
    - Linux: `.AppImage` + `.deb` + `.rpm`
 
-   For each updater payload (`.app.tar.gz`, Windows installer, `.AppImage`), expect a corresponding
-   `.sig` signature file uploaded alongside the artifact.
+   If the release was built with updater signing secrets (`TAURI_PRIVATE_KEY`, `TAURI_KEY_PASSWORD`),
+   expect a corresponding `.sig` signature file uploaded alongside the updater-consumed artifacts:
+   - macOS: `.app.tar.gz.sig`
+   - Windows: installer `.sig` (`.msi.sig` and/or `.exe.sig`)
+   - Linux: `.AppImage.sig`
+
+   Note: this repo also uploads `.sig` files for the Linux `.deb` and `.rpm` bundles (used for
+   manual install/downgrade), even though the Tauri updater typically uses the `.AppImage` on Linux.
 
    If an expected platform/arch is missing entirely, start with the GitHub Actions run for that tag
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
