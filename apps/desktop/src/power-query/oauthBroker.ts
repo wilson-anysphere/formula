@@ -126,7 +126,8 @@ export class DesktopOAuthBroker implements OAuthBroker {
     this.lastAuthState = parsed.searchParams.get("state") || null;
 
     // Loopback redirect capture (RFC 8252). When the auth URL uses a redirect URI
-    // like `http://127.0.0.1:<port>/callback`, start a local listener in the Rust
+    // like `http://127.0.0.1:<port>/callback`, `http://localhost:<port>/callback`,
+    // or `http://[::1]:<port>/callback`, start a local listener in the Rust
     // host *before* opening the system browser so the redirect doesn't race ahead
     // of server startup.
     if (redirectUri) {
