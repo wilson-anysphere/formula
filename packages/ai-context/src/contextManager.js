@@ -314,6 +314,21 @@ export class ContextManager {
    *   maxContextRows?: number,
    *   maxContextCells?: number,
    *   maxChunkRows?: number,
+   *   /**
+   *    * Split tall regions into multiple row windows for better retrieval quality.
+   *    * Defaults to false (opt-in).
+   *    *\/
+   *   splitRegions?: boolean,
+   *   /**
+   *    * Row overlap between region windows (only when splitRegions is enabled).
+   *    * Defaults to 3.
+   *    *\/
+   *   chunkRowOverlap?: number,
+   *   /**
+   *    * Maximum number of windows per region (only when splitRegions is enabled).
+   *    * Defaults to 50.
+   *    *\/
+   *   maxChunksPerRegion?: number,
    *   sheetRagTopK?: number,
    *   redactor?: (text: string) => string,
    *   tokenEstimator?: import("./tokenBudget.js").TokenEstimator
@@ -333,6 +348,9 @@ export class ContextManager {
     this.maxContextCells = normalizeNonNegativeInt(options.maxContextCells, 200_000);
     // `maxChunkRows` controls how many TSV rows are included in each RAG chunk's text.
     this.maxChunkRows = normalizeNonNegativeInt(options.maxChunkRows, 30);
+    this.splitRegions = options.splitRegions === true;
+    this.chunkRowOverlap = normalizeNonNegativeInt(options.chunkRowOverlap, DEFAULT_RAG_CHUNK_ROW_OVERLAP);
+    this.maxChunksPerRegion = normalizeNonNegativeInt(options.maxChunksPerRegion, DEFAULT_RAG_MAX_CHUNKS_PER_REGION);
     // Top-K retrieved regions for sheet-level (non-workbook) RAG.
     this.sheetRagTopK = normalizeNonNegativeInt(options.sheetRagTopK, 5);
 
@@ -487,9 +505,13 @@ export class ContextManager {
   async _ensureSheetIndexed(sheet, options = {}) {
     const signal = options.signal;
     const maxChunkRows = options.maxChunkRows;
-    const splitRegions = options.splitRegions;
-    const chunkRowOverlap = options.chunkRowOverlap;
-    const maxChunksPerRegion = options.maxChunksPerRegion;
+    const splitRegions = (options.splitRegions ?? this.splitRegions) === true;
+    const chunkRowOverlap = splitRegions
+      ? normalizeNonNegativeInt(options.chunkRowOverlap, this.chunkRowOverlap)
+      : undefined;
+    const maxChunksPerRegion = splitRegions
+      ? normalizeNonNegativeInt(options.maxChunksPerRegion, this.maxChunksPerRegion)
+      : undefined;
     throwIfAborted(signal);
     const sheetName = typeof sheet?.name === "string" ? sheet.name : String(sheet?.name ?? "");
 
@@ -635,12 +657,12 @@ export class ContextManager {
     // extraction / RAG chunking can't OOM the worker.
     const safeCellCap = normalizeNonNegativeInt(params.limits?.maxContextCells, this.maxContextCells);
     const maxChunkRows = normalizeNonNegativeInt(params.limits?.maxChunkRows, this.maxChunkRows);
-    const splitRegions = params.limits?.splitRegions === true;
+    const splitRegions = (params.limits?.splitRegions ?? this.splitRegions) === true;
     const chunkRowOverlap = splitRegions
-      ? normalizeOptionalNonNegativeInt(params.limits?.chunkRowOverlap) ?? DEFAULT_RAG_CHUNK_ROW_OVERLAP
+      ? normalizeNonNegativeInt(params.limits?.chunkRowOverlap, this.chunkRowOverlap)
       : undefined;
     const maxChunksPerRegion = splitRegions
-      ? normalizeOptionalNonNegativeInt(params.limits?.maxChunksPerRegion) ?? DEFAULT_RAG_MAX_CHUNKS_PER_REGION
+      ? normalizeNonNegativeInt(params.limits?.maxChunksPerRegion, this.maxChunksPerRegion)
       : undefined;
     const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
     // Respect both the row cap and the total cell cap.

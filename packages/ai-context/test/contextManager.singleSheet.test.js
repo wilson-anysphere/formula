@@ -511,6 +511,24 @@ test("buildContext: splitRegions indexes multiple row windows for tall sheets", 
   assert.match(out.retrieved[0].preview, /\bspecialtoken\b/);
 });
 
+test("buildContext: splitRegions constructor option enables row-window retrieval without per-call limits", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000,
+    maxChunkRows: 10,
+    splitRegions: true,
+    chunkRowOverlap: 0,
+    maxChunksPerRegion: 20,
+  });
+  const values = [];
+  for (let r = 0; r < 100; r++) values.push([r === 99 ? "specialtoken" : "filler"]);
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({ sheet, query: "specialtoken" });
+  assert.ok(out.retrieved.length > 0);
+  assert.equal(out.retrieved[0].range, "Sheet1!A91:A100");
+  assert.match(out.retrieved[0].preview, /\bspecialtoken\b/);
+});
+
 test("buildContext: splitRegions default overlap/maxChunks match explicit values for cache signatures", async () => {
   const ragIndex = new RagIndex();
   let indexCalls = 0;

@@ -238,6 +238,20 @@ export class ContextManager {
      */
     maxChunkRows?: number;
     /**
+     * Split tall sheet regions into multiple row windows for better retrieval quality.
+     *
+     * Defaults to `false` (opt-in).
+     */
+    splitRegions?: boolean;
+    /**
+     * Row overlap between region windows (only when splitting). Defaults to 3.
+     */
+    chunkRowOverlap?: number;
+    /**
+     * Maximum number of chunks per region (only when splitting). Defaults to 50.
+     */
+    maxChunksPerRegion?: number;
+    /**
      * Top-K retrieved regions for sheet-level (non-workbook) RAG. Defaults to 5.
      */
     sheetRagTopK?: number;
