@@ -6,6 +6,7 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 
 ## Related docs
 
+- [adr/ADR-0005-pivot-tables-ownership-and-data-flow.md](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md) — PivotTables ownership + data flow across crates (schema vs compute vs XLSX IO)
 - [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”; naming varies: `richValue*` vs `rdrichvalue*`)
 - [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables used by images-in-cells
