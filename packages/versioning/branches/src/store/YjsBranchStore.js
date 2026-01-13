@@ -382,9 +382,12 @@ export class YjsBranchStore {
    * @param {any} commitMap
    */
   #commitHasPatch(commitMap) {
-    if (commitMap.get("patch") !== undefined) return true;
-    if (!this.#isCommitComplete(commitMap)) return false;
-    return getYArray(commitMap.get("patchChunks")) !== null;
+    const patchEncoding = commitMap.get("patchEncoding");
+    if (patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined) {
+      if (!this.#isCommitComplete(commitMap)) return false;
+      return getYArray(commitMap.get("patchChunks")) !== null;
+    }
+    return commitMap.get("patch") !== undefined;
   }
 
   /**
@@ -546,7 +549,7 @@ export class YjsBranchStore {
         // Snapshot payloads are an optimization; if the patch is stored inline we
         // can still reconstruct the commit state by replaying patches even while
         // an interrupted snapshot chunk write is being repaired.
-        if (commitMap.get("patch") !== undefined) return null;
+        if (this.#commitHasPatch(commitMap)) return null;
         throw new Error(`Commit not fully written yet: ${commitId}`);
       }
       const chunksArr = getYArray(commitMap.get("snapshotChunks"));
@@ -593,9 +596,9 @@ export class YjsBranchStore {
         // mid-write, `commitComplete=false` may linger even though the commit still
         // contains an inline JSON patch/snapshot that lets us safely proceed and
         // finish the migration.
-        const hasInlinePayload =
-          rootCommitMap.get("patch") !== undefined || rootCommitMap.get("snapshot") !== undefined;
-        if (!hasInlinePayload) {
+        const hasReadablePayload =
+          this.#commitHasPatch(rootCommitMap) || this.#commitHasSnapshot(rootCommitMap);
+        if (!hasReadablePayload) {
           const inferredRoot = this.#inferRootCommitId(docId);
           if (
             typeof inferredRoot === "string" &&
