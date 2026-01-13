@@ -4,6 +4,8 @@ import * as Y from "yjs";
 import { createCollabSession, makeCellKey } from "@formula/collab-session";
 
 import { resolveDevCollabEncryptionFromSearch } from "../devEncryption";
+import { DocumentController } from "../../document/documentController.js";
+import { bindDocumentControllerWithCollabUndo } from "../documentControllerCollabUndo";
 
 beforeAll(async () => {
   // `@formula/collab-encryption` relies on WebCrypto being present (Node 18+ provides this).
@@ -13,6 +15,14 @@ beforeAll(async () => {
     Object.defineProperty(globalThis, "crypto", { value: webcrypto });
   }
 });
+
+async function flushBinderWork(): Promise<void> {
+  // The Yjs↔DocumentController binder serializes work through promise chains.
+  // Awaiting a couple ticks ensures both the DocumentController→Yjs write chain
+  // and the Yjs→DocumentController apply chain have a chance to run.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
 
 describe("dev collab encryption toggle", () => {
   it("encrypts cells in the configured range and masks reads without the key", async () => {
@@ -122,5 +132,47 @@ describe("dev collab encryption toggle", () => {
     expect(masked).not.toBeNull();
     expect(masked?.value).toBe("###");
     expect(masked?.encrypted).toBe(true);
+  });
+
+  it("encrypts DocumentController-driven edits via the binder", async () => {
+    const docId = "doc-dev-encryption-binder";
+    const doc = new Y.Doc({ guid: docId });
+
+    const encryption = resolveDevCollabEncryptionFromSearch({
+      search: "?collabEncrypt=1&collabEncryptRange=Sheet1!A1:A1",
+      docId,
+      defaultSheetId: "Sheet1",
+    });
+    expect(encryption).not.toBeNull();
+
+    const sessionWithKey = createCollabSession({ docId, doc, encryption: encryption! });
+    const documentWithKey = new DocumentController();
+    const { binder } = await bindDocumentControllerWithCollabUndo({
+      session: sessionWithKey,
+      documentController: documentWithKey,
+      defaultSheetId: "Sheet1",
+    });
+
+    documentWithKey.setCellValue("Sheet1", { row: 0, col: 0 }, "secret");
+    await flushBinderWork();
+
+    const cellKey = makeCellKey({ sheetId: "Sheet1", row: 0, col: 0 });
+    const yCell = sessionWithKey.cells.get(cellKey) as any;
+    expect(yCell?.get("enc")).toBeTruthy();
+    expect(yCell?.get("value")).toBeUndefined();
+    expect(yCell?.get("formula")).toBeUndefined();
+
+    binder.destroy();
+
+    const sessionWithoutKey = createCollabSession({ docId, doc });
+    const documentWithoutKey = new DocumentController();
+    const { binder: binder2 } = await bindDocumentControllerWithCollabUndo({
+      session: sessionWithoutKey,
+      documentController: documentWithoutKey,
+      defaultSheetId: "Sheet1",
+    });
+    await flushBinderWork();
+    expect(documentWithoutKey.getCell("Sheet1", { row: 0, col: 0 }).value).toBe("###");
+    binder2.destroy();
   });
 });
