@@ -489,6 +489,60 @@ describe("ToolExecutor include_formula_values", () => {
     expect(event.redactedCellCount).toBe(0);
   });
 
+  it("pivot refresh continues to use formula values under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Category" });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: "Value" });
+    workbook.setCell(parseA1Cell("Sheet1!C1"), { value: "Unused" });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: "A" });
+    workbook.setCell(parseA1Cell("Sheet1!B2"), { formula: "=1+9", value: "10" });
+    workbook.setCell(parseA1Cell("Sheet1!C2"), { value: 0 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: "A" });
+    workbook.setCell(parseA1Cell("Sheet1!B3"), { value: "20" });
+    workbook.setCell(parseA1Cell("Sheet1!C3"), { value: 0 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "create_pivot_table",
+      parameters: {
+        source_range: "Sheet1!A1:C3",
+        destination: "Sheet1!D1",
+        rows: ["Category"],
+        columns: [],
+        values: [{ field: "Value", aggregation: "sum" }],
+      },
+    });
+    expect(result.ok).toBe(true);
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!E2")).value).toBe(30);
+    expect(workbook.getCell(parseA1Cell("Sheet1!E3")).value).toBe(30);
+
+    // Mutate an unused column in the pivot source range to trigger pivot refresh.
+    await executor.execute({ name: "write_cell", parameters: { cell: "Sheet1!C2", value: 1 } });
+
+    expect(workbook.getCell(parseA1Cell("Sheet1!E2")).value).toBe(30);
+    expect(workbook.getCell(parseA1Cell("Sheet1!E3")).value).toBe(30);
+  });
+
   it("does not surface formula values under DLP REDACT decisions even when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
