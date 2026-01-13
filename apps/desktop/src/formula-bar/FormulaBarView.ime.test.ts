@@ -40,5 +40,74 @@ describe("FormulaBarView IME composition safety", () => {
 
     host.remove();
   });
-});
 
+  it("does not accept an AI suggestion on Tab during composition", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "=1+";
+    view.textarea.setSelectionRange(3, 3);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.setAiSuggestion("=1+2");
+
+    view.textarea.dispatchEvent(new Event("compositionstart"));
+    const tabDuringComposition = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    view.textarea.dispatchEvent(tabDuringComposition);
+
+    expect(tabDuringComposition.defaultPrevented).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("=1+");
+
+    view.textarea.dispatchEvent(new Event("compositionend"));
+    const tabAfterComposition = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
+    view.textarea.dispatchEvent(tabAfterComposition);
+
+    expect(tabAfterComposition.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("=1+2");
+
+    host.remove();
+  });
+
+  it("does not cancel on Escape during composition", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit, onCancel });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "editing";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new Event("compositionstart"));
+    const escDuringComposition = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(escDuringComposition);
+
+    expect(escDuringComposition.defaultPrevented).toBe(false);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(true);
+
+    view.textarea.dispatchEvent(new Event("compositionend"));
+    const escAfterComposition = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(escAfterComposition);
+
+    expect(escAfterComposition.defaultPrevented).toBe(true);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+
+    host.remove();
+  });
+});
