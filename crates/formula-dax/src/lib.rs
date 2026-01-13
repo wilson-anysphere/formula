@@ -10,6 +10,14 @@
 //! [`formula_columnar::ColumnarTable`] as the storage backend. The engine can use column
 //! statistics and dictionary encoding to speed up common aggregations.
 //!
+//! Calculated columns created via [`DataModel::add_calculated_column`] work for both in-memory and
+//! columnar-backed tables. For columnar tables, calculated columns are computed eagerly and
+//! materialized by appending a new encoded column to the underlying
+//! [`formula_columnar::ColumnarTable`].
+//!
+//! Columnar tables are treated as immutable snapshots; internally this is implemented via
+//! `Arc` copy-on-write and the table may be cloned when the `Arc` is not uniquely owned.
+//!
 //! ## Quick example
 //! ```rust
 //! use formula_dax::{pivot, DataModel, FilterContext, GroupByColumn, PivotMeasure, Table, Value};

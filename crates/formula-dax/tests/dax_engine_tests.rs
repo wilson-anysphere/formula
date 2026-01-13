@@ -1745,6 +1745,42 @@ fn persisted_columnar_table_can_register_calculated_column_definition_without_re
 }
 
 #[test]
+fn columnar_tables_support_calculated_columns() {
+    let mut model = DataModel::new();
+
+    let schema = vec![ColumnSchema {
+        name: "Amount".to_string(),
+        column_type: ColumnType::Number,
+    }];
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+    let mut fact = ColumnarTableBuilder::new(schema, options);
+    fact.append_row(&[formula_columnar::Value::Number(10.0)]);
+    fact.append_row(&[formula_columnar::Value::Number(5.0)]);
+    model
+        .add_table(Table::from_columnar("Fact", fact.finalize()))
+        .unwrap();
+
+    model
+        .add_calculated_column("Fact", "DoubleAmount", "[Amount] * 2")
+        .unwrap();
+
+    let fact = model.table("Fact").unwrap();
+    assert_eq!(
+        fact.columns(),
+        &["Amount".to_string(), "DoubleAmount".to_string()]
+    );
+    assert_eq!(fact.value(0, "DoubleAmount"), Some(20.0.into()));
+    assert_eq!(fact.value(1, "DoubleAmount"), Some(10.0.into()));
+
+    let columnar = fact.columnar_table().unwrap();
+    assert_eq!(columnar.column_count(), 2);
+    assert_eq!(columnar.row_count(), 2);
+}
+
+#[test]
 fn measure_in_row_context_performs_implicit_context_transition() {
     let mut model = build_model();
     model

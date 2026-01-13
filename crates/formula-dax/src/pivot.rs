@@ -1242,6 +1242,13 @@ fn pivot_columnar_star_schema_group_by(
             .get(path[0])
             .expect("relationship index from path");
 
+        // This fast path assumes each foreign-key value maps to at most one row on the related
+        // table (i.e. "one" side). Many-to-many relationships can map to multiple rows and require
+        // full row-wise evaluation.
+        if rel_info.rel.cardinality == crate::model::Cardinality::ManyToMany {
+            return Ok(None);
+        }
+
         let from_idx = table_ref
             .column_idx(&rel_info.rel.from_column)
             .ok_or_else(|| DaxError::UnknownColumn {
@@ -1339,7 +1346,9 @@ fn pivot_columnar_star_schema_group_by(
                 AggregationKind::Sum => RollupAggState::Sum { sum: 0.0, count: 0 },
                 AggregationKind::Min => RollupAggState::Min { best: None },
                 AggregationKind::Max => RollupAggState::Max { best: None },
-                AggregationKind::CountRows => RollupAggState::CountRows { count: 0 },
+                AggregationKind::CountRows
+                | AggregationKind::CountNonBlank
+                | AggregationKind::CountNumbers => RollupAggState::CountRows { count: 0 },
                 AggregationKind::DistinctCount => RollupAggState::DistinctCountConst { any: false },
                 AggregationKind::Average => return None,
             })

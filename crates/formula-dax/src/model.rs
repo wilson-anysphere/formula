@@ -2,6 +2,9 @@ use crate::backend::{AggregationSpec, ColumnarTableBackend, InMemoryTableBackend
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
+use formula_columnar::{
+    ColumnSchema as ColumnarColumnSchema, ColumnType as ColumnarColumnType, Value as ColumnarValue,
+};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -193,10 +196,51 @@ impl Table {
         let name = name.into();
         match &mut self.storage {
             TableStorage::InMemory(backend) => backend.add_column(&self.name, name, values),
-            TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
-                "cannot add calculated columns to columnar table {}",
-                self.name
-            ))),
+            TableStorage::Columnar(backend) => {
+                if backend.column_index.contains_key(&name) {
+                    return Err(DaxError::DuplicateColumn {
+                        table: self.name.clone(),
+                        column: name,
+                    });
+                }
+
+                if values.len() != backend.table.row_count() {
+                    return Err(DaxError::ColumnLengthMismatch {
+                        table: self.name.clone(),
+                        column: name,
+                        expected: backend.table.row_count(),
+                        actual: values.len(),
+                    });
+                }
+
+                // Columnar columns have a single physical type. For now we require that all
+                // non-blank values in the calculated column share the same type.
+                let column_type = Self::infer_columnar_type(&self.name, &name, &values)?;
+                let column_values: Vec<ColumnarValue> =
+                    values.iter().map(Self::dax_to_columnar_value).collect();
+                let schema = ColumnarColumnSchema {
+                    name: name.clone(),
+                    column_type,
+                };
+
+                // The columnar backend is stored behind an Arc. Using `Arc::make_mut` preserves
+                // immutability semantics for shared tables, while avoiding a clone when the Arc is
+                // uniquely owned.
+                let table = Arc::make_mut(&mut backend.table);
+                let options = table.options();
+                let placeholder =
+                    formula_columnar::ColumnarTable::from_encoded(Vec::new(), Vec::new(), 0, options);
+                let existing = std::mem::replace(table, placeholder);
+                let updated = existing
+                    .with_appended_column(schema, column_values)
+                    .expect("column append should succeed after pre-validation");
+                *table = updated;
+
+                let idx = backend.columns.len();
+                backend.columns.push(name.clone());
+                backend.column_index.insert(name, idx);
+                Ok(())
+            }
         }
     }
 
@@ -246,6 +290,44 @@ impl Table {
         match &self.storage {
             TableStorage::InMemory(backend) => backend,
             TableStorage::Columnar(backend) => backend,
+        }
+    }
+
+    fn infer_columnar_type(
+        table: &str,
+        column: &str,
+        values: &[Value],
+    ) -> DaxResult<ColumnarColumnType> {
+        let mut ty: Option<ColumnarColumnType> = None;
+        for v in values {
+            let this = match v {
+                Value::Blank => continue,
+                Value::Number(_) => ColumnarColumnType::Number,
+                Value::Text(_) => ColumnarColumnType::String,
+                Value::Boolean(_) => ColumnarColumnType::Boolean,
+            };
+            match ty {
+                Some(existing) if existing != this => {
+                    return Err(DaxError::Type(format!(
+                        "calculated column {table}[{column}] must have a single type; saw both {existing:?} and {this:?}"
+                    )));
+                }
+                None => ty = Some(this),
+                _ => {}
+            }
+        }
+
+        // If the column is entirely blank, the physical type is unobservable. Default to `Number`
+        // since it tends to be the most permissive for aggregations.
+        Ok(ty.unwrap_or(ColumnarColumnType::Number))
+    }
+
+    fn dax_to_columnar_value(value: &Value) -> ColumnarValue {
+        match value {
+            Value::Blank => ColumnarValue::Null,
+            Value::Number(n) => ColumnarValue::Number(n.0),
+            Value::Text(s) => ColumnarValue::String(s.clone()),
+            Value::Boolean(b) => ColumnarValue::Boolean(*b),
         }
     }
 }
@@ -813,15 +895,13 @@ impl DataModel {
                 return Err(DaxError::UnknownTable(table.clone()));
             };
 
-            // Columnar tables are immutable; calculated columns are computed eagerly into
-            // the stored table in Power Pivot. For now we support calculated columns only
-            // for the in-memory backend used in tests.
-            if !matches!(table_ref.storage, TableStorage::InMemory(_)) {
-                return Err(DaxError::Eval(format!(
-                    "calculated columns are only supported for in-memory tables ({} is columnar)",
-                    table_ref.name
-                )));
-            }
+            // Power Pivot stores calculated column values physically in the table. We mirror that
+            // behavior by evaluating the expression eagerly for every existing row and then
+            // materializing the resulting values into the table backend (including columnar
+            // tables).
+            //
+            // Note: columnar-backed tables require a single physical column type; expressions that
+            // produce mixed value types across rows will currently return a type error.
 
             let mut results = Vec::with_capacity(table_ref.row_count());
             for row in 0..table_ref.row_count() {

@@ -244,13 +244,19 @@ impl ColumnarTable {
 
     /// Return a new [`ColumnarTable`] with `schema` and `values` appended as a new column.
     ///
-    /// This is primarily intended for materializing calculated columns (e.g. produced by a DAX
-    /// engine) into a columnar snapshot that can be persisted or queried efficiently.
+    /// This is primarily intended for:
+    /// - **Calculated columns**: query engines (e.g. `formula-dax`) can compute the column values
+    ///   eagerly and then materialize them into a columnar snapshot.
+    /// - **Persisted / incremental models**: a storage layer can load an existing encoded table and
+    ///   append additional derived columns without rewriting the existing encoded pages.
     ///
     /// Notes:
     /// - Existing columns are *reused as-is*: they are not decoded, re-encoded, or rewritten.
     /// - Only the new column is encoded, using the normal [`ColumnarTableBuilder`] path.
     /// - The decoded-page cache is preserved so cached pages for existing columns remain valid.
+    ///
+    /// Returns [`ColumnAppendError`] if the column length does not match `row_count()` or if a
+    /// column with the same name already exists.
     pub fn with_appended_column(
         mut self,
         schema: ColumnSchema,
