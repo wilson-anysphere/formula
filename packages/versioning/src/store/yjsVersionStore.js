@@ -352,9 +352,10 @@ export class YjsVersionStore {
       if (
         typeof this.maxChunksPerTransaction !== "number" ||
         !Number.isFinite(this.maxChunksPerTransaction) ||
+        !Number.isSafeInteger(this.maxChunksPerTransaction) ||
         this.maxChunksPerTransaction <= 0
       ) {
-        throw new Error("YjsVersionStore: maxChunksPerTransaction must be a positive number");
+        throw new Error("YjsVersionStore: maxChunksPerTransaction must be a positive integer");
       }
     }
 

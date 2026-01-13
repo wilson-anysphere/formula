@@ -164,3 +164,20 @@ test("YjsVersionStore: rejects invalid chunkSize values", async () => {
   // @ts-expect-error - runtime validation
   assert.throws(() => new YjsVersionStore({ doc, chunkSize: Number.POSITIVE_INFINITY }), /chunkSize/i);
 });
+
+test("YjsVersionStore: rejects invalid maxChunksPerTransaction values", async () => {
+  const doc = new Y.Doc();
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, maxChunksPerTransaction: 0 }), /maxChunksPerTransaction/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, maxChunksPerTransaction: -1 }), /maxChunksPerTransaction/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, maxChunksPerTransaction: Number.NaN }), /maxChunksPerTransaction/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(() => new YjsVersionStore({ doc, maxChunksPerTransaction: 1.5 }), /maxChunksPerTransaction/i);
+  // @ts-expect-error - runtime validation
+  assert.throws(
+    () => new YjsVersionStore({ doc, maxChunksPerTransaction: Number.POSITIVE_INFINITY }),
+    /maxChunksPerTransaction/i,
+  );
+});
