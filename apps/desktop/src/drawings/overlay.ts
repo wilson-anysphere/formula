@@ -266,6 +266,24 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number 
   }
 }
 
+export function effectiveScrollForAnchor(
+  anchor: Anchor,
+  viewport: Pick<Viewport, "scrollX" | "scrollY" | "frozenRows" | "frozenCols">,
+): { scrollX: number; scrollY: number } {
+  const frozenRows = viewport.frozenRows ?? 0;
+  const frozenCols = viewport.frozenCols ?? 0;
+
+  if (anchor.type === "absolute") {
+    return { scrollX: viewport.scrollX, scrollY: viewport.scrollY };
+  }
+
+  const from = anchor.from.cell;
+  return {
+    scrollX: from.col < frozenCols ? 0 : viewport.scrollX,
+    scrollY: from.row < frozenRows ? 0 : viewport.scrollY,
+  };
+}
+
 export class DrawingOverlay {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly bitmapCache = new ImageBitmapCache({ negativeCacheMs: 250 });

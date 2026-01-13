@@ -1,5 +1,5 @@
 import type { DrawingObject, DrawingTransform, Rect } from "./types";
-import { anchorToRectPx } from "./overlay";
+import { anchorToRectPx, effectiveScrollForAnchor } from "./overlay";
 import type { GridGeometry, Viewport } from "./overlay";
 
 export interface HitTestResult {
@@ -15,6 +15,20 @@ export interface HitTestResult {
 
 const EMPTY_LIST: number[] = [];
 const CELL_SCRATCH = { row: 0, col: 0 };
+
+export function drawingObjectToViewportRect(object: DrawingObject, viewport: Viewport, geom: GridGeometry): Rect {
+  const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+  const rect = anchorToRectPx(object.anchor, geom, zoom);
+  const { scrollX, scrollY } = effectiveScrollForAnchor(object.anchor, viewport);
+  const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+  const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+  return {
+    x: rect.x - scrollX + headerOffsetX,
+    y: rect.y - scrollY + headerOffsetY,
+    width: rect.width,
+    height: rect.height,
+  };
+}
 
 export interface HitTestIndex {
   /**

@@ -16,24 +16,25 @@ import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../
 import type { ChartModel } from "../charts/renderChart";
 import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
+import { buildHitTestIndex, drawingObjectToViewportRect, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
+import { DrawingInteractionController, resizeAnchor, shiftAnchor, type DrawingInteractionCallbacks } from "../drawings/interaction";
+import {
+  cursorForResizeHandle,
+  getResizeHandleCenters,
+  hitTestResizeHandle,
+  RESIZE_HANDLE_SIZE_PX,
+  type ResizeHandle,
+} from "../drawings/selectionHandles";
 import {
   DrawingOverlay,
   anchorToRectPx,
+  effectiveScrollForAnchor,
   pxToEmu,
   type GridGeometry as DrawingGridGeometry,
   type Viewport as DrawingViewport,
 } from "../drawings/overlay";
-import { DrawingInteractionController, type DrawingInteractionCallbacks } from "../drawings/interaction";
-import { buildHitTestIndex, hitTestDrawings, type HitTestIndex } from "../drawings/hitTest";
-import { cursorForResizeHandle, hitTestResizeHandle, type ResizeHandle } from "../drawings/selectionHandles";
 import { insertImageFromFile } from "../drawings/insertImage";
-import {
-  createDrawingObjectId,
-  type Anchor as DrawingAnchor,
-  type DrawingObject,
-  type ImageEntry,
-  type ImageStore,
-} from "../drawings/types";
+import { createDrawingObjectId, type Anchor as DrawingAnchor, type DrawingObject, type ImageEntry, type ImageStore } from "../drawings/types";
 import { convertDocumentSheetDrawingsToUiDrawingObjects, convertModelWorksheetDrawingsToUiDrawingObjects } from "../drawings/modelAdapters";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
@@ -512,6 +513,25 @@ type DragState =
       activeRangeIndex: number;
     };
 
+type DrawingGestureState =
+  | {
+      pointerId: number;
+      mode: "drag";
+      objectId: number;
+      startSheetX: number;
+      startSheetY: number;
+      startAnchor: DrawingAnchor;
+    }
+  | {
+      pointerId: number;
+      mode: "resize";
+      objectId: number;
+      handle: ResizeHandle;
+      startSheetX: number;
+      startSheetY: number;
+      startAnchor: DrawingAnchor;
+    };
+
 export interface SpreadsheetAppStatusElements {
   activeCell: HTMLElement;
   selectionRange: HTMLElement;
@@ -847,6 +867,8 @@ export class SpreadsheetApp {
   private readonly rowHeaderWidth = 48;
   private readonly colHeaderHeight = 24;
 
+  private readonly drawingGeom: DrawingGridGeometry;
+
   // Precomputed "visual" (i.e. not hidden) row/col indices.
   // Rebuilt only when outline visibility changes.
   private rowIndexByVisual: number[] = [];
@@ -946,6 +968,9 @@ export class SpreadsheetApp {
   private dragState: DragState | null = null;
   private dragPointerPos: { x: number; y: number } | null = null;
   private dragAutoScrollRaf: number | null = null;
+
+  private selectedDrawingId: number | null = null;
+  private drawingGesture: DrawingGestureState | null = null;
 
   private resizeObserver: ResizeObserver;
   private disposed = false;
@@ -9486,6 +9511,42 @@ export class SpreadsheetApp {
       }
     }
 
+    if (this.selectedDrawingId != null) {
+      const objects = this.listDrawingObjectsForSheet();
+      const selected = objects.find((obj) => obj.id === this.selectedDrawingId) ?? null;
+      if (selected) {
+        const viewport = this.getDrawingInteractionViewport();
+        const rootRect = drawingObjectToViewportRect(selected, viewport, this.drawingGeom);
+
+        const stroke = resolveCssVar("--selection-border", { fallback: "CanvasText" });
+        const handleFill = resolveCssVar("--bg-primary", { fallback: "Canvas" });
+        const handleSize = RESIZE_HANDLE_SIZE_PX;
+        const half = handleSize / 2;
+
+        this.selectionCtx.save();
+        this.selectionCtx.beginPath();
+        this.selectionCtx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+        this.selectionCtx.clip();
+
+        this.selectionCtx.strokeStyle = stroke;
+        this.selectionCtx.lineWidth = 2;
+        this.selectionCtx.setLineDash([]);
+        this.selectionCtx.strokeRect(rootRect.x, rootRect.y, rootRect.width, rootRect.height);
+
+        this.selectionCtx.fillStyle = handleFill;
+        this.selectionCtx.strokeStyle = stroke;
+        this.selectionCtx.lineWidth = 1;
+        for (const c of getResizeHandleCenters(rootRect)) {
+          this.selectionCtx.beginPath();
+          this.selectionCtx.rect(c.x - half, c.y - half, handleSize, handleSize);
+          this.selectionCtx.fill();
+          this.selectionCtx.stroke();
+        }
+
+        this.selectionCtx.restore();
+      }
+    }
+
     // If scrolling/resizing happened during editing, keep the editor aligned.
     if (this.editor.isOpen()) {
       const rect = this.getCellRect(this.selection.active);
@@ -11019,6 +11080,67 @@ export class SpreadsheetApp {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    const primaryButton = e.pointerType !== "mouse" || e.button === 0;
+
+    // Drawing hit testing must happen before cell-selection logic so clicks on
+    // overlaid objects (charts/images/shapes) behave like Excel.
+    const drawingViewport = this.getDrawingInteractionViewport();
+    const drawings = this.listDrawingObjectsForSheet();
+    const zoom =
+      Number.isFinite(drawingViewport.zoom) && (drawingViewport.zoom as number) > 0 ? (drawingViewport.zoom as number) : 1;
+    const hitIndex = buildHitTestIndex(drawings, this.drawingGeom, { zoom });
+    const hit = hitTestDrawings(hitIndex, drawingViewport, x, y, this.drawingGeom);
+    if (hit) {
+      this.selectedDrawingId = hit.object.id;
+      this.renderSelection();
+      this.focus();
+
+      // Begin drag/resize gesture for primary-button interactions.
+      if (primaryButton) {
+        e.preventDefault();
+        const handle = hitTestResizeHandle(hit.bounds, x, y);
+        const scroll = effectiveScrollForAnchor(hit.object.anchor, drawingViewport);
+        const headerOffsetX = Number.isFinite(drawingViewport.headerOffsetX)
+          ? Math.max(0, drawingViewport.headerOffsetX!)
+          : 0;
+        const headerOffsetY = Number.isFinite(drawingViewport.headerOffsetY)
+          ? Math.max(0, drawingViewport.headerOffsetY!)
+          : 0;
+        const startSheetX = x - headerOffsetX + scroll.scrollX;
+        const startSheetY = y - headerOffsetY + scroll.scrollY;
+        this.drawingGesture = handle
+          ? {
+              pointerId: e.pointerId,
+              mode: "resize",
+              objectId: hit.object.id,
+              handle,
+              startSheetX,
+              startSheetY,
+              startAnchor: hit.object.anchor,
+            }
+          : {
+              pointerId: e.pointerId,
+              mode: "drag",
+              objectId: hit.object.id,
+              startSheetX,
+              startSheetY,
+              startAnchor: hit.object.anchor,
+            };
+        try {
+          this.root.setPointerCapture(e.pointerId);
+        } catch {
+          // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+        }
+      }
+
+      return;
+    }
+
+    // Clicking outside any drawing clears drawing selection.
+    if (primaryButton && this.selectedDrawingId != null) {
+      this.selectedDrawingId = null;
+    }
+
     // Right/middle clicks should not start drag selection, but we still want right-click to
     // apply to the cell under the cursor when the click happens outside the current selection.
     // (Excel keeps selection when right-clicking inside it, but moves selection when right-clicking
@@ -11193,6 +11315,39 @@ export class SpreadsheetApp {
       return;
     }
 
+    if (this.drawingGesture) {
+      if (e.pointerId !== this.drawingGesture.pointerId) return;
+      if (this.editor.isOpen()) return;
+
+      const x = e.clientX - this.rootLeft;
+      const y = e.clientY - this.rootTop;
+
+      const viewport = this.getDrawingInteractionViewport();
+      const scroll = effectiveScrollForAnchor(this.drawingGesture.startAnchor, viewport);
+      const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+      const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+      const sheetX = x - headerOffsetX + scroll.scrollX;
+      const sheetY = y - headerOffsetY + scroll.scrollY;
+
+      const dxPx = sheetX - this.drawingGesture.startSheetX;
+      const dyPx = sheetY - this.drawingGesture.startSheetY;
+
+      const nextAnchor =
+        this.drawingGesture.mode === "resize"
+          ? resizeAnchor(this.drawingGesture.startAnchor, this.drawingGesture.handle, dxPx, dyPx, this.drawingGeom)
+          : shiftAnchor(this.drawingGesture.startAnchor, dxPx, dyPx, this.drawingGeom);
+
+      const objects = this.listDrawingObjectsForSheet();
+      const nextObjects = objects.map((obj) => (obj.id === this.drawingGesture!.objectId ? { ...obj, anchor: nextAnchor } : obj));
+      const doc = this.document as any;
+      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
+      this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
+      this.renderDrawings();
+
+      this.renderSelection();
+      return;
+    }
+
     const target = e.target as HTMLElement | null;
     const useOffsetCoords =
       target === this.root ||
@@ -11362,6 +11517,46 @@ export class SpreadsheetApp {
   private onPointerUp(e: PointerEvent): void {
     if (this.scrollbarDrag) {
       this.onScrollbarThumbPointerUp(e);
+      return;
+    }
+
+    if (this.drawingGesture) {
+      if (e.pointerId !== this.drawingGesture.pointerId) return;
+      const gesture = this.drawingGesture;
+
+      const x = e.clientX - this.rootLeft;
+      const y = e.clientY - this.rootTop;
+
+      const viewport = this.getDrawingInteractionViewport();
+      const scroll = effectiveScrollForAnchor(gesture.startAnchor, viewport);
+      const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+      const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+      const sheetX = x - headerOffsetX + scroll.scrollX;
+      const sheetY = y - headerOffsetY + scroll.scrollY;
+
+      const dxPx = sheetX - gesture.startSheetX;
+      const dyPx = sheetY - gesture.startSheetY;
+
+      const nextAnchor =
+        gesture.mode === "resize"
+          ? resizeAnchor(gesture.startAnchor, gesture.handle, dxPx, dyPx, this.drawingGeom)
+          : shiftAnchor(gesture.startAnchor, dxPx, dyPx, this.drawingGeom);
+
+      const objects = this.listDrawingObjectsForSheet();
+      const nextObjects = objects.map((obj) => (obj.id === gesture.objectId ? { ...obj, anchor: nextAnchor } : obj));
+      const doc = this.document as any;
+      const drawingsGetter = typeof doc.getSheetDrawings === "function" ? doc.getSheetDrawings : null;
+      this.drawingObjectsCache = { sheetId: this.sheetId, objects: nextObjects, source: drawingsGetter };
+      this.renderDrawings();
+
+      this.drawingGesture = null;
+      try {
+        this.root.releasePointerCapture(e.pointerId);
+      } catch {
+        // Best-effort; some environments (tests/jsdom) may not implement pointer capture.
+      }
+      // Ensure selection handles reflect the final position.
+      this.renderSelection();
       return;
     }
 
