@@ -2264,6 +2264,13 @@ impl DaxEngine {
                             })
                         }
                         Expr::ColumnRef { table, column } => {
+                            // `ALL(Table[Column])` removes filters from the target column but
+                            // preserves other filters on the same table.
+                            let mut modified_filter = filter.clone();
+                            modified_filter.clear_column_filter(table, column);
+                            let candidate_rows =
+                                resolve_table_rows(model, &modified_filter, table)?;
+
                             let table_ref = model
                                 .table(table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
@@ -2276,12 +2283,23 @@ impl DaxEngine {
 
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
-                            for row in 0..table_ref.row_count() {
+                            for row in candidate_rows {
                                 let value =
                                     table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
                                 if seen.insert(value) {
                                     rows.push(row);
                                 }
+                            }
+
+                            // If the table participates as the one-side of a relationship and has
+                            // unmatched fact-side keys, tabular models materialize an "unknown"
+                            // (blank) member. Include that member when it exists and is not
+                            // excluded by the remaining filters.
+                            if !seen.contains(&Value::Blank)
+                                && blank_row_allowed(&modified_filter, table)
+                                && virtual_blank_row_exists(model, &modified_filter, table)?
+                            {
+                                rows.push(table_ref.row_count());
                             }
                             Ok(TableResult {
                                 table: table.clone(),
