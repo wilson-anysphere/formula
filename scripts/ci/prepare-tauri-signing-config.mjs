@@ -176,6 +176,45 @@ function main() {
 
   let changed = false;
 
+  // Optional override: allow CI/workflows to switch timestamp servers for a single run without
+  // committing a config change (useful if a timestamp server is down or blocked by a network proxy).
+  //
+  // This is intentionally only applied on Windows runners, since it only affects Authenticode signing.
+  if (isWindowsRunner) {
+    const overrideTimestampUrl = process.env.FORMULA_WINDOWS_TIMESTAMP_URL?.trim() ?? "";
+    if (overrideTimestampUrl.length > 0) {
+      let parsed;
+      try {
+        parsed = new URL(overrideTimestampUrl);
+      } catch {
+        errBlock("Invalid Windows timestamp URL override", [
+          `FORMULA_WINDOWS_TIMESTAMP_URL must be a valid absolute URL.`,
+          `Got: ${JSON.stringify(overrideTimestampUrl)}`,
+        ]);
+        return;
+      }
+
+      if (parsed.protocol !== "https:") {
+        errBlock("Invalid Windows timestamp URL override", [
+          `FORMULA_WINDOWS_TIMESTAMP_URL must use https:// (no plaintext HTTP timestamping).`,
+          `Got: ${JSON.stringify(overrideTimestampUrl)}`,
+        ]);
+        return;
+      }
+
+      const currentTimestampUrl = config?.bundle?.windows?.timestampUrl;
+      if (currentTimestampUrl !== overrideTimestampUrl) {
+        config.bundle ??= {};
+        config.bundle.windows ??= {};
+        config.bundle.windows.timestampUrl = overrideTimestampUrl;
+        changed = true;
+        log(`Overriding bundle.windows.timestampUrl for this run: ${overrideTimestampUrl}`);
+      } else {
+        log(`FORMULA_WINDOWS_TIMESTAMP_URL matches bundle.windows.timestampUrl; leaving timestampUrl unchanged.`);
+      }
+    }
+  }
+
   if (isMacRunner) {
     if (!hasMacSigningSecrets) {
       const currentIdentity = config?.bundle?.macOS?.signingIdentity;

@@ -24,6 +24,10 @@ on:
         required: false
         type: boolean
         default: false
+      windows_timestamp_url:
+        description: "Override Windows Authenticode timestamp server URL for this run (optional; must be https://). Example: https://timestamp.digicert.com"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -88,6 +92,7 @@ jobs:
       release_tag: ${{ steps.params.outputs.release_tag }}
       artifact_label: ${{ steps.params.outputs.artifact_label }}
       should_validate_version: ${{ steps.params.outputs.should_validate_version }}
+      windows_timestamp_url: ${{ steps.params.outputs.windows_timestamp_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -101,12 +106,14 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.tag }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_UPLOAD: ${{ github.event.inputs.upload }}
+          INPUT_WINDOWS_TIMESTAMP_URL: ${{ github.event.inputs.windows_timestamp_url }}
         run: |
           set -euo pipefail
 
           # Defaults:
           upload="false"
           release_tag=""
+          windows_timestamp_url=""
 
           # Derive the release tag / artifact label.
           if [[ "${EVENT_NAME}" == "push" ]]; then
@@ -121,10 +128,14 @@ jobs:
 
             tag="${INPUT_TAG:-}"
             version="${INPUT_VERSION:-}"
+            windows_timestamp_url="${INPUT_WINDOWS_TIMESTAMP_URL:-}"
 
             # Some users may paste full ref names. Normalize to a bare tag/version string.
             tag="${tag#refs/tags/}"
             version="${version#refs/tags/}"
+            windows_timestamp_url="${windows_timestamp_url#refs/tags/}"
+            # Strip common whitespace/newlines from the URL input (copy/paste hygiene).
+            windows_timestamp_url="$(echo "${windows_timestamp_url}" | tr -d '\r\n' | xargs || true)"
 
             if [[ -n "${tag}" ]]; then
               if [[ "${tag}" == v* ]]; then
@@ -169,6 +180,7 @@ jobs:
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
           echo "artifact_label=${artifact_label_sanitized}" >> "${GITHUB_OUTPUT}"
           echo "should_validate_version=${should_validate_version}" >> "${GITHUB_OUTPUT}"
+          echo "windows_timestamp_url=${windows_timestamp_url}" >> "${GITHUB_OUTPUT}"
 
       - name: Guard: tag must be on main
         if: steps.params.outputs.upload == 'true'
@@ -210,6 +222,8 @@ jobs:
 
       - name: Validate Windows Authenticode timestamp URL (HTTPS)
         run: node scripts/ci/check-windows-timestamp-url.mjs
+        env:
+          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ steps.params.outputs.windows_timestamp_url }}
 
       - name: Validate Windows downgrade / rollback support (allowDowngrades)
         run: node scripts/ci/check-windows-allow-downgrades.mjs
@@ -360,6 +374,8 @@ jobs:
           # Optional: set as a GitHub Actions "Variable" to enforce platform code signing.
           # - FORMULA_REQUIRE_CODESIGN=1 to fail when required signing secrets are missing
           FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
+          # Optional override: allow re-runs to switch timestamp servers without changing the repo.
+          FORMULA_WINDOWS_TIMESTAMP_URL: ${{ needs.validate-version.outputs.windows_timestamp_url }}
 
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

@@ -466,6 +466,9 @@ Timestamping:
   - Release CI preflight enforces this uses HTTPS (see `scripts/ci/check-windows-timestamp-url.mjs`).
 - If a release fails due to timestamping/network issues, switch `timestampUrl` to another **HTTPS**
   timestamp server provided/recommended by your signing certificate vendor and re-run the workflow.
+  - For a one-off fallback without committing a config change, re-run the release workflow via
+    **Actions → Desktop Release → Run workflow** and set the `windows_timestamp_url` input (must be
+    `https://...`).
 
 ## Windows ARM64 build prerequisites (MSVC)
 

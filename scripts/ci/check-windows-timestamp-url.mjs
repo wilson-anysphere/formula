@@ -80,6 +80,32 @@ function main() {
     return;
   }
 
+  // Optional override (used by CI/workflows for emergency fallback without committing config changes).
+  const overrideRaw = process.env.FORMULA_WINDOWS_TIMESTAMP_URL;
+  if (typeof overrideRaw === "string" && overrideRaw.trim().length > 0) {
+    const overrideNormalized = overrideRaw.trim();
+    let overrideParsed;
+    try {
+      overrideParsed = new URL(overrideNormalized);
+    } catch {
+      die(
+        `windows-timestamp: ERROR FORMULA_WINDOWS_TIMESTAMP_URL must be a valid absolute URL.\n` +
+          `Got: ${JSON.stringify(overrideNormalized)}`,
+      );
+      return;
+    }
+
+    if (overrideParsed.protocol !== "https:") {
+      die(
+        `windows-timestamp: ERROR FORMULA_WINDOWS_TIMESTAMP_URL must use HTTPS.\n` +
+          `Got: ${JSON.stringify(overrideNormalized)}`,
+      );
+      return;
+    }
+
+    console.log(`windows-timestamp: OK override FORMULA_WINDOWS_TIMESTAMP_URL=${overrideNormalized}`);
+  }
+
   console.log(`windows-timestamp: OK bundle.windows.timestampUrl=${normalized}`);
 }
 
