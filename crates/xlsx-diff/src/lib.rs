@@ -7,6 +7,7 @@
 
 mod part_kind;
 mod xml;
+mod rels;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -303,18 +304,32 @@ pub fn diff_archives_with_options(
                     } else {
                         RelationshipIgnoreMaps::default()
                     };
-                    for diff in diff_xml(&expected_xml, &actual_xml, base) {
+                    let mut diffs = diff_xml(&expected_xml, &actual_xml, base);
+                    if part.ends_with(".rels") {
+                        diffs = postprocess_relationship_id_renumbering(
+                            part,
+                            expected_bytes,
+                            actual_bytes,
+                            diffs,
+                            &ignore,
+                        );
+                    }
+                    for diff in diffs {
                         if should_ignore_xml_diff(part, &diff.path, &ignored_rel_ids, &ignore) {
                             continue;
                         }
-                        let severity = adjust_xml_diff_severity(
-                            part,
-                            diff.severity,
-                            &diff.path,
-                            diff.expected.as_deref(),
-                            diff.actual.as_deref(),
-                            &calc_chain_rel_ids,
-                        );
+                        let severity = if diff.kind == "relationship_id_changed" {
+                            Severity::Critical
+                        } else {
+                            adjust_xml_diff_severity(
+                                part,
+                                diff.severity,
+                                &diff.path,
+                                diff.expected.as_deref(),
+                                diff.actual.as_deref(),
+                                &calc_chain_rel_ids,
+                            )
+                        };
                         report.differences.push(Difference::new(
                             severity,
                             part.to_string(),
@@ -388,6 +403,94 @@ pub fn diff_archives_with_options(
     }
 
     report
+}
+
+fn postprocess_relationship_id_renumbering(
+    rels_part: &str,
+    expected_bytes: &[u8],
+    actual_bytes: &[u8],
+    diffs: Vec<xml::XmlDiff>,
+    ignore: &IgnoreMatcher,
+) -> Vec<xml::XmlDiff> {
+    let changes = match rels::detect_relationship_id_changes(rels_part, expected_bytes, actual_bytes)
+    {
+        Ok(changes) => changes,
+        Err(_) => return diffs,
+    };
+
+    if changes.is_empty() {
+        return diffs;
+    }
+
+    let mut missing_ids: BTreeSet<String> = BTreeSet::new();
+    let mut added_ids: BTreeSet<String> = BTreeSet::new();
+    for diff in &diffs {
+        match diff.kind.as_str() {
+            "child_missing" => {
+                if let Some(id) = relationship_id_from_path(&diff.path) {
+                    missing_ids.insert(id.to_string());
+                }
+            }
+            "child_added" => {
+                if let Some(id) = relationship_id_from_path(&diff.path) {
+                    added_ids.insert(id.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut suppress_missing: BTreeSet<String> = BTreeSet::new();
+    let mut suppress_added: BTreeSet<String> = BTreeSet::new();
+    let mut synthesized: Vec<xml::XmlDiff> = Vec::new();
+
+    for change in changes {
+        // Only treat it as a "pure" Id renumbering if the XML diff algorithm already
+        // classified it as a missing + added relationship. This avoids double-reporting
+        // cases like Id reuse/swaps where the key-by-Id algorithm will instead surface
+        // attribute changes.
+        if !missing_ids.contains(&change.expected_id) || !added_ids.contains(&change.actual_id) {
+            continue;
+        }
+
+        suppress_missing.insert(change.expected_id.clone());
+        suppress_added.insert(change.actual_id.clone());
+
+        // If the relationship target points to an ignored part, suppress the noisy
+        // child_missing/child_added diffs but don't synthesize a new actionable diff.
+        if ignore.matches(&change.key.resolved_target) {
+            continue;
+        }
+
+        synthesized.push(xml::XmlDiff {
+            severity: Severity::Critical,
+            path: change.key.to_diff_path(),
+            kind: "relationship_id_changed".to_string(),
+            expected: Some(change.expected_id),
+            actual: Some(change.actual_id),
+        });
+    }
+
+    if suppress_missing.is_empty() && suppress_added.is_empty() {
+        return diffs;
+    }
+
+    let mut out: Vec<xml::XmlDiff> = diffs
+        .into_iter()
+        .filter(|diff| match diff.kind.as_str() {
+            "child_missing" => match relationship_id_from_path(&diff.path) {
+                Some(id) => !suppress_missing.contains(id),
+                None => true,
+            },
+            "child_added" => match relationship_id_from_path(&diff.path) {
+                Some(id) => !suppress_added.contains(id),
+                None => true,
+            },
+            _ => true,
+        })
+        .collect();
+    out.extend(synthesized);
+    out
 }
 
 fn is_xml_extension(name: &str) -> bool {
