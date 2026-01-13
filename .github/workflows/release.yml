@@ -1360,7 +1360,7 @@ jobs:
           # Set both token env vars so it works whether it looks for GH_TOKEN or GITHUB_TOKEN.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/ci/validate-updater-manifest.mjs "${{ needs.validate-version.outputs.release_tag }}"
+        run: node scripts/verify-tauri-latest-json.mjs "${{ needs.validate-version.outputs.release_tag }}"
 
       - name: Verify updater asset set (installers + signatures)
         env:
@@ -1368,7 +1368,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/verify-tauri-updater-assets.mjs "${{ needs.validate-version.outputs.release_tag }}"
-
   verify-release-assets:
     name: Verify GitHub Release assets (multi-arch safe)
     needs: [build, validate-version]
