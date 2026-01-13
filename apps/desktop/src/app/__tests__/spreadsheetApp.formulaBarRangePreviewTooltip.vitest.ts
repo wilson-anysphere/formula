@@ -352,6 +352,65 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     formulaBar.remove();
   });
 
+  it("renders a preview for structured table reference specifiers (Table1[#All])", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1:B1 and data rows at A2:B4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 0, col: 1 }, "Other");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 1, col: 1 }, 10);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 2);
+    doc.setCellValue("Sheet1", { row: 2, col: 1 }, 20);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 3);
+    doc.setCellValue("Sheet1", { row: 3, col: 1 }, 30);
+
+    app.getSearchWorkbook().addTable({
+      name: "Table1",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 1,
+      columns: ["Amount", "Other"],
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(Table1[#All])", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    const refSpan = refSpans.find((s) => s.textContent === "Table1[#All]") ?? null;
+    expect(refSpan?.textContent).toBe("Table1[#All]");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    const header = tooltip!.querySelector<HTMLElement>(".formula-range-preview-tooltip__header");
+    expect(header?.textContent).toBe("Table1[#All] (A1:B4)");
+
+    const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    // Sample grid is capped to 3 rows; includes header row for #All.
+    expect(cells).toEqual(["Amount", "Other", "1", "10", "2", "20"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("renders a preview for structured table references with #All (Table1[[#All],[Amount]])", () => {
     const root = createRoot();
     const formulaBar = document.createElement("div");

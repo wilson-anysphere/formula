@@ -35,6 +35,7 @@ export function stableJsonValue(value: unknown, ancestors: WeakSet<object>): unk
   const t = typeof value;
   if (t === "string" || t === "number" || t === "boolean") return value;
   // `t` is derived from `typeof value`, but TypeScript can't use that to narrow `value` here.
+  // Use an explicit cast so bigint values remain serializable under strict TS settings.
   if (t === "bigint") return (value as bigint).toString();
   if (t === "undefined" || t === "function" || t === "symbol") return undefined;
 
