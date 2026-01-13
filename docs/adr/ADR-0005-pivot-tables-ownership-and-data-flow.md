@@ -326,3 +326,5 @@ These are present in the schema in some form but are not fully evaluated end-to-
 - OpenXML slicer/timeline parsing + mapping helpers: `crates/formula-xlsx/src/pivots/slicers/mod.rs`
 - Data Model pivot computation: `crates/formula-dax/src/pivot.rs`
 - WASM/JS API crate: `crates/formula-wasm/`
+- XLSX pivot compatibility + roadmap (I/O-level): `docs/21-xlsx-pivots.md`
+- DAX engine details (Data Model pivots): `docs/21-dax-engine.md`
