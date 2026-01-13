@@ -102,7 +102,8 @@ pub use workbook::{
     DeleteSheetError, DuplicateSheetError, RenameSheetError, Workbook, WorkbookId,
 };
 pub use worksheet::{
-    ColProperties, RangeBatch, RowProperties, SheetVisibility, TabColor, Worksheet, WorksheetId,
+    ColProperties, RangeBatch, RangeBatchBuffer, RangeBatchRef, RowProperties, SheetVisibility,
+    TabColor, Worksheet, WorksheetId,
 };
 
 /// Current serialization schema version.

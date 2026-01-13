@@ -559,9 +559,31 @@ impl Worksheet {
         self.cells.len()
     }
 
-    /// Get the current used range (bounding box of stored cells).
+    /// Get the current used range for *sparse stored cells*.
+    ///
+    /// This is the bounding box of the worksheet's in-memory cell map (edits, formulas,
+    /// formatting overrides), and does **not** include any attached columnar backing table
+    /// (see [`Worksheet::set_columnar_table`]).
+    ///
+    /// If the worksheet is backed by a columnar table and you want the effective extent of
+    /// visible data, use [`Worksheet::effective_used_range`].
     pub fn used_range(&self) -> Option<Range> {
         self.used_range
+    }
+
+    /// Get the effective used range for this worksheet.
+    ///
+    /// This accounts for both:
+    /// - sparse stored cells (see [`Worksheet::used_range`])
+    /// - the optional columnar backing table (see [`Worksheet::columnar_range`])
+    ///
+    /// If both are present, the returned range is the bounding union of the two extents.
+    pub fn effective_used_range(&self) -> Option<Range> {
+        match (self.used_range(), self.columnar_range()) {
+            (None, None) => None,
+            (Some(r), None) | (None, Some(r)) => Some(r),
+            (Some(a), Some(b)) => Some(a.bounding_box(&b)),
+        }
     }
 
     /// Attach a columnar table as the backing store for this worksheet.
@@ -1027,13 +1049,37 @@ impl Worksheet {
     /// Fetch a rectangular region as a column-major payload suitable for
     /// virtualized grid rendering.
     pub fn get_range_batch(&self, range: Range) -> RangeBatch {
+        let mut buffer = RangeBatchBuffer::default();
+        self.get_range_batch_into(range, &mut buffer);
+        RangeBatch {
+            start: range.start,
+            columns: buffer.columns,
+        }
+    }
+
+    /// Fetch a rectangular region into a reusable output buffer.
+    ///
+    /// This is the allocation-friendly variant of [`Worksheet::get_range_batch`]. Callers can
+    /// retain a [`RangeBatchBuffer`] across frames/requests to avoid repeated allocation of
+    /// nested `Vec<Vec<CellValue>>` buffers.
+    ///
+    /// The returned [`RangeBatchRef`] borrows from `out`.
+    pub fn get_range_batch_into<'a>(
+        &self,
+        range: Range,
+        out: &'a mut RangeBatchBuffer,
+    ) -> RangeBatchRef<'a> {
         let rows = (range.end.row - range.start.row + 1) as usize;
         let cols = (range.end.col - range.start.col + 1) as usize;
-        let mut columns = vec![vec![CellValue::Empty; rows]; cols];
+        out.columns.resize_with(cols, Vec::new);
+        for column in &mut out.columns {
+            column.clear();
+            column.resize(rows, CellValue::Empty);
+        }
 
         // Bulk fill from columnar backing (if present).
         if let Some(backend) = &self.columnar {
-            fill_from_columnar(&mut columns, range, backend);
+            fill_from_columnar(&mut out.columns, range, backend);
         }
 
         // Overlay sparse cells (edits / formulas / formatting) on top.
@@ -1043,14 +1089,14 @@ impl Worksheet {
                 let col = range.start.col + c_off as u32;
                 let cell_ref = CellRef::new(row, col);
                 if let Some(cell) = self.cell(cell_ref) {
-                    columns[c_off][r_off] = cell.value.clone();
+                    out.columns[c_off][r_off] = cell.value.clone();
                 }
             }
         }
 
-        RangeBatch {
+        RangeBatchRef {
             start: range.start,
-            columns,
+            columns: &out.columns,
         }
     }
 
@@ -1603,6 +1649,29 @@ impl Worksheet {
 pub struct RangeBatch {
     pub start: CellRef,
     pub columns: Vec<Vec<CellValue>>,
+}
+
+/// Reusable output buffer for [`Worksheet::get_range_batch_into`].
+#[derive(Clone, Debug, Default)]
+pub struct RangeBatchBuffer {
+    pub columns: Vec<Vec<CellValue>>,
+}
+
+/// Borrowed view into a range batch produced by [`Worksheet::get_range_batch_into`].
+#[derive(Copy, Clone, Debug)]
+pub struct RangeBatchRef<'a> {
+    pub start: CellRef,
+    pub columns: &'a [Vec<CellValue>],
+}
+
+impl<'a> RangeBatchRef<'a> {
+    /// Convert this borrowed range payload into an owned [`RangeBatch`].
+    pub fn to_owned(self) -> RangeBatch {
+        RangeBatch {
+            start: self.start,
+            columns: self.columns.to_vec(),
+        }
+    }
 }
 
 fn columnar_to_cell_value(value: ColumnarValue, column_type: ColumnarType) -> CellValue {
