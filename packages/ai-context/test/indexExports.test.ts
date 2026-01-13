@@ -13,11 +13,13 @@ describe("ai-context TS entrypoint", () => {
     writeFileSync(
       tmpFile,
       [
-        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, parseA1Range, summarizeRegion, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
+        'import { ContextManager, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, RagIndex, classifyText, chunkSheetByRegions, chunkSheetByRegionsWithSchema, extractSheetSchema, extractWorkbookSchema, isLikelyHeaderRow, parseA1Range, summarizeRegion, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
         'import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows, tailSampleRows } from "../src/index.js";',
         "",
         "EXCEL_MAX_ROWS satisfies number;",
         "EXCEL_MAX_COLS satisfies number;",
+        "",
+        'isLikelyHeaderRow(["Header"], ["Value"]) satisfies boolean;',
         "",
         'const range = parseA1Range("Sheet1!A1:B2");',
         "range.startRow satisfies number;",

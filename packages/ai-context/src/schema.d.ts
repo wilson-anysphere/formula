@@ -36,6 +36,7 @@ export interface SheetSchema {
 
 export function inferCellType(value: unknown): InferredType;
 export function inferColumnType(values: unknown[], options?: { signal?: AbortSignal }): InferredType;
+export function isLikelyHeaderRow(rowValues: unknown[], nextRowValues?: unknown[]): boolean;
 export function detectDataRegions(
   values: unknown[][],
   options?: { maxCells?: number; signal?: AbortSignal },

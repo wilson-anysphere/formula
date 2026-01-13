@@ -18,6 +18,7 @@ import {
   extractWorkbookSchema,
   parseA1Range,
   RagIndex,
+  isLikelyHeaderRow,
   headSampleRows,
   tailSampleRows,
   systematicSampleRows,
@@ -55,7 +56,11 @@ type DlpFinding = DlpResult["findings"][number];
 type _DlpFinding_HasPhone = Assert<"phone_number" extends DlpFinding ? true : false>;
 type _DlpFinding_HasApiKey = Assert<"api_key" extends DlpFinding ? true : false>;
 type _DlpFinding_HasIban = Assert<"iban" extends DlpFinding ? true : false>;
-  
+
+// --- Header heuristics ---
+type _HeaderRow_NotAny = Assert<IsAny<ReturnType<typeof isLikelyHeaderRow>> extends false ? true : false>;
+type _HeaderRow_Return = Assert<ReturnType<typeof isLikelyHeaderRow> extends boolean ? true : false>;
+
 // --- RAG indexing ---
 type IndexSheetResult = Awaited<ReturnType<RagIndex["indexSheet"]>>;
 type _IndexSheet_NotAny = Assert<IsAny<IndexSheetResult> extends false ? true : false>;
