@@ -71,6 +71,61 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("attaches the pivot source_range when the assistant omits the range", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Average is 2.",
+      userText: "",
+      toolCalls: [
+        {
+          name: "create_pivot_table",
+          parameters: {
+            source_range: "Sheet1!A1:A3",
+            destination: "Sheet1!C1",
+            rows: ["X"],
+            values: [{ field: "Y", aggregation: "sum" }]
+          }
+        }
+      ]
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet1!A1:A3",
+        expected: 2,
+        source: "Average is 2"
+      }
+    ]);
+  });
+
+  it("attaches the chart data_range when the assistant omits the range", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Average is 2.",
+      userText: "",
+      toolCalls: [
+        {
+          name: "create_chart",
+          parameters: {
+            chart_type: "bar",
+            data_range: "Sheet1!B1:B3",
+            position: "Sheet1!D1"
+          }
+        }
+      ]
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "mean",
+        reference: "Sheet1!B1:B3",
+        expected: 2,
+        source: "Average is 2"
+      }
+    ]);
+  });
+
   it("extracts sum/total claims (comma-separated numbers)", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Total for range Sheet1!B1:B2 = 1,200.",

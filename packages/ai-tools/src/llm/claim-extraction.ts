@@ -361,6 +361,28 @@ function extractA1ReferencesFromToolCalls(toolCalls: Array<{ name: string; param
       continue;
     }
 
+    if (typeof obj.source_range === "string") {
+      // create_pivot_table
+      out.push(...extractA1ReferencesFromText(obj.source_range));
+      continue;
+    }
+    if (typeof obj.sourceRange === "string") {
+      // create_pivot_table (camelCase alias; common in some tool-call payloads)
+      out.push(...extractA1ReferencesFromText(obj.sourceRange));
+      continue;
+    }
+
+    if (typeof obj.data_range === "string") {
+      // create_chart
+      out.push(...extractA1ReferencesFromText(obj.data_range));
+      continue;
+    }
+    if (typeof obj.dataRange === "string") {
+      // create_chart (camelCase alias; common in some tool-call payloads)
+      out.push(...extractA1ReferencesFromText(obj.dataRange));
+      continue;
+    }
+
     if (typeof obj.cell === "string") {
       // write_cell, etc.
       out.push(...extractA1ReferencesFromText(obj.cell));
@@ -369,6 +391,12 @@ function extractA1ReferencesFromToolCalls(toolCalls: Array<{ name: string; param
 
     if (typeof obj.destination === "string") {
       out.push(...extractA1ReferencesFromText(obj.destination));
+      continue;
+    }
+
+    if (typeof obj.position === "string") {
+      // create_chart placement anchor (optional)
+      out.push(...extractA1ReferencesFromText(obj.position));
     }
   }
   return out;
