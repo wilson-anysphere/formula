@@ -138,6 +138,36 @@ describe("FormulaBarView fx function picker", () => {
     host.remove();
   });
 
+  it("replaces the current selection when inserting a function", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "=1+2", value: null });
+
+    // Start editing and select the trailing "2".
+    view.focus({ cursor: "end" });
+    view.textarea.setSelectionRange(3, 4);
+    view.textarea.dispatchEvent(new Event("select"));
+
+    const fxButton = host.querySelector<HTMLButtonElement>('[data-testid="formula-fx-button"]')!;
+    // Preserve the textarea selection (the fx button's handler relies on mousedown preventDefault).
+    fxButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    fxButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    pickerInput.value = "sum";
+    pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    expect(view.textarea.value).toBe("=1+SUM(");
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+
+    host.remove();
+  });
+
   it("closes on Escape and restores focus to the formula input", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
