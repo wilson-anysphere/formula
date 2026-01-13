@@ -120,8 +120,15 @@ pub fn decrypt_standard_encrypted_package_stream(
 
     // Decrypt segment-by-segment until we have produced `orig_size` bytes (or run out of input).
     //
-    // Allocate based on ciphertext length (bounded by input size), not the untrusted `orig_size`.
-    let mut out = Vec::with_capacity(ciphertext.len());
+    // Allocate at most `orig_size` bytes.
+    //
+    // We validated above that:
+    // - `orig_size` fits in `usize`
+    // - the ciphertext is long enough to plausibly contain `orig_size` bytes
+    //
+    // Using `orig_size` avoids allocating based on trailing ciphertext/padding bytes when the
+    // `EncryptedPackage` stream is larger than the declared original size.
+    let mut out = Vec::with_capacity(orig_size_usize);
     let mut offset = 0usize;
     let mut segment_index: u32 = 0;
     while offset < ciphertext.len() && out.len() < orig_size_usize {

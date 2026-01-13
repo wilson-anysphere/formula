@@ -118,28 +118,6 @@ fn pivot_key_display_string(value: PivotValue) -> String {
     }
 }
 
-fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
-    fn canonical_number_bits(n: f64) -> u64 {
-        if n == 0.0 {
-            // Treat -0.0 and 0.0 as the same pivot item (Excel displays them identically).
-            return 0.0_f64.to_bits();
-        }
-        if n.is_nan() {
-            // Canonicalize all NaNs to a single representation so we don't emit multiple "NaN" rows.
-            return f64::NAN.to_bits();
-        }
-        n.to_bits()
-    }
-
-    match value {
-        PivotValue::Blank => PivotKeyPart::Blank,
-        PivotValue::Number(n) => PivotKeyPart::Number(canonical_number_bits(n)),
-        PivotValue::Date(d) => PivotKeyPart::Date(d),
-        PivotValue::Text(s) => PivotKeyPart::Text(s),
-        PivotValue::Bool(b) => PivotKeyPart::Bool(b),
-    }
-}
-
 /// Convert a parsed pivot table definition into a pivot-engine config.
 ///
 /// This is a best-effort conversion; unsupported layout / display options are
