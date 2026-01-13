@@ -109,7 +109,7 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
     };
   });
 
-  it("mounts the drawing canvas, resizes with DPR, and re-renders on shared-grid scroll", () => {
+  it("mounts the drawing canvas, resizes with DPR, and re-renders on shared-grid scroll + sheet change", () => {
     const prior = process.env.DESKTOP_GRID_MODE;
     process.env.DESKTOP_GRID_MODE = "shared";
     try {
@@ -143,6 +143,14 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       renderSpy.mockClear();
       const sharedGrid = (app as any).sharedGrid;
       sharedGrid.scrollTo(0, 100);
+      expect(renderSpy).toHaveBeenCalled();
+
+      // Switching sheets should trigger a drawings overlay rerender so objects can refresh.
+      const doc = app.getDocument();
+      doc.addSheet({ sheetId: "sheet_2", name: "Sheet2" });
+      doc.setCellValue("sheet_2", { row: 0, col: 0 }, "Seed2");
+      renderSpy.mockClear();
+      app.activateSheet("sheet_2");
       expect(renderSpy).toHaveBeenCalled();
 
       app.destroy();
