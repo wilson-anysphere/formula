@@ -63,6 +63,26 @@ fn opens_fixture_from_vec_without_copy() {
 }
 
 #[test]
+fn save_as_roundtrips_when_opened_from_bytes() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
+    let bytes = std::fs::read(path).expect("read fixture bytes");
+
+    let wb = XlsbWorkbook::from_bytes(Arc::from(bytes), OpenOptions::default())
+        .expect("open xlsb from bytes");
+
+    let tmpdir = tempfile::tempdir().expect("temp dir");
+    let out_path = tmpdir.path().join("roundtrip.xlsb");
+    wb.save_as(&out_path).expect("save_as from bytes");
+
+    let wb2 = XlsbWorkbook::open(&out_path).expect("open saved workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    assert!(
+        sheet.cells.iter().any(|c| c.row == 0 && c.col == 0),
+        "expected to find A1 in roundtripped workbook"
+    );
+}
+
+#[test]
 fn in_memory_save_as_to_writer_is_lossless_at_opc_part_level() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/simple.xlsb");
     let bytes = std::fs::read(path).expect("read fixture bytes");
