@@ -295,6 +295,9 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             None,
             metadata_part.as_ref(),
         )?;
+
+        // Best-effort outline/grouping metadata.
+        apply_outline_from_worksheet_xml_str(ws, sheet_xml_str);
     }
 
     if let Some(active_tab) = workbook_view.active_tab {
@@ -887,6 +890,9 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
                 metadata_part.as_ref(),
             )?;
 
+            // Best-effort outline/grouping metadata.
+            apply_outline_from_worksheet_xml_str(ws, sheet_xml_str);
+
             expand_shared_formulas(ws, ws_id, &cell_meta);
 
             // Capture a normalized comment snapshot after load so the writer can detect edits.
@@ -1061,6 +1067,93 @@ fn comment_kind_rank(kind: CommentKind) -> u8 {
     match kind {
         CommentKind::Note => 0,
         CommentKind::Threaded => 1,
+    }
+}
+
+fn apply_outline_from_worksheet_xml_str(worksheet: &mut formula_model::Worksheet, sheet_xml: &str) {
+    let Ok(outline) = crate::outline::read_outline_from_worksheet_xml(sheet_xml) else {
+        return;
+    };
+
+    worksheet.outline = outline;
+
+    // `Worksheet::set_row_hidden` / `set_col_hidden` keep the persisted "user hidden" flag
+    // (`row_properties.hidden` / `col_properties.hidden`) in sync with
+    // `Worksheet::outline.{rows,cols}[*].hidden.user`.
+    //
+    // `parse_worksheet_into_model` currently treats `row/@hidden` and `col/@hidden` as
+    // user-hidden. However, Excel also uses those attributes for rows/columns hidden by outline
+    // collapse. After parsing the full outline, reconcile the persisted flags so outline-hidden
+    // rows/cols are *not* treated as user-hidden.
+    reconcile_user_hidden_with_outline(worksheet);
+}
+
+fn reconcile_user_hidden_with_outline(worksheet: &mut formula_model::Worksheet) {
+    // Outline indices are 1-based, while row/col properties are 0-based.
+    let mut rows_to_check: HashSet<u32> = HashSet::new();
+    for (&row0, props) in &worksheet.row_properties {
+        if props.hidden {
+            rows_to_check.insert(row0);
+        }
+    }
+    for (row1, entry) in worksheet.outline.rows.iter() {
+        if entry.hidden.user && row1 > 0 {
+            rows_to_check.insert(row1 - 1);
+        }
+    }
+
+    let mut rows_to_check: Vec<u32> = rows_to_check.into_iter().collect();
+    rows_to_check.sort_unstable();
+    for row0 in rows_to_check {
+        let desired = worksheet
+            .outline
+            .rows
+            .entry(row0.saturating_add(1))
+            .hidden
+            .user;
+        let current = worksheet
+            .row_properties
+            .get(&row0)
+            .map(|p| p.hidden)
+            .unwrap_or(false);
+        if current != desired {
+            worksheet.set_row_hidden(row0, desired);
+        }
+    }
+
+    let mut cols_to_check: HashSet<u32> = HashSet::new();
+    for (&col0, props) in &worksheet.col_properties {
+        if props.hidden {
+            cols_to_check.insert(col0);
+        }
+    }
+    for (col1, entry) in worksheet.outline.cols.iter() {
+        if !entry.hidden.user || col1 == 0 {
+            continue;
+        }
+        let col0 = col1 - 1;
+        if col0 < formula_model::EXCEL_MAX_COLS {
+            cols_to_check.insert(col0);
+        }
+    }
+
+    let mut cols_to_check: Vec<u32> = cols_to_check.into_iter().collect();
+    cols_to_check.sort_unstable();
+    for col0 in cols_to_check {
+        let desired = worksheet
+            .outline
+            .cols
+            .entry(col0.saturating_add(1))
+            .hidden
+            .user;
+        let current = worksheet
+            .col_properties
+            .get(&col0)
+            .map(|p| p.hidden)
+            .unwrap_or(false);
+        if current != desired {
+            worksheet.set_col_hidden(col0, desired);
+        }
     }
 }
 
