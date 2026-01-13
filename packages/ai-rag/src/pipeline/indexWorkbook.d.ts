@@ -13,6 +13,12 @@ export function indexWorkbook(params: {
    */
   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> };
   sampleRows?: number;
+  /**
+   * Custom token estimator used to populate `metadata.tokenCount` for each chunk.
+   *
+   * Defaults to {@link approximateTokenCount}.
+   */
+  tokenCount?: (text: string) => number;
   transform?: (
     record: { id: string; text: string; metadata: any }
   ) => { text?: string; metadata?: any } | null | Promise<{ text?: string; metadata?: any } | null>;

@@ -66,6 +66,7 @@ export function approximateTokenCount(text) {
  *   vectorStore: any,
  *   embedder: { embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
+ *   tokenCount?: (text: string) => number,
  *   transform?: (record: { id: string, text: string, metadata: any }) => ({ text?: string, metadata?: any } | null | Promise<{ text?: string, metadata?: any } | null>)
  *   signal?: AbortSignal,
  * }} params
@@ -75,6 +76,7 @@ export async function indexWorkbook(params) {
   throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;
   const sampleRows = params.sampleRows ?? 5;
+  const tokenCount = params.tokenCount ?? approximateTokenCount;
   const chunks = chunkWorkbook(workbook, { signal });
   throwIfAborted(signal);
 
@@ -144,7 +146,7 @@ export async function indexWorkbook(params) {
       metadata: {
         ...(record.metadata ?? {}),
         contentHash: chunkHash,
-        tokenCount: approximateTokenCount(record.text),
+        tokenCount: tokenCount(record.text),
       },
     });
   }
