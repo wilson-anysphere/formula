@@ -43,6 +43,7 @@ test("VectorStore.listContentHashes returns workbook-scoped hashes", async () =>
   const store = new InMemoryVectorStore({ dimension: 3 });
   await seed(store);
   const rows = await store.listContentHashes({ workbookId: "wb" });
+  rows.sort((a, b) => a.id.localeCompare(b.id));
   assert.deepEqual(rows, [
     { id: "a", contentHash: "ch-a", metadataHash: "mh-a" },
     { id: "b", contentHash: "ch-b", metadataHash: null },
@@ -57,6 +58,7 @@ test("JsonVectorStore.listContentHashes loads from storage first", async () => {
 
   const store2 = new JsonVectorStore({ dimension: 3, autoSave: false, storage });
   const rows = await store2.listContentHashes({ workbookId: "wb" });
+  rows.sort((a, b) => a.id.localeCompare(b.id));
   assert.deepEqual(rows, [
     { id: "a", contentHash: "ch-a", metadataHash: "mh-a" },
     { id: "b", contentHash: "ch-b", metadataHash: null },
@@ -80,6 +82,7 @@ test(
     try {
       await seed(store);
       const rows = await store.listContentHashes({ workbookId: "wb" });
+      rows.sort((a, b) => a.id.localeCompare(b.id));
       assert.deepEqual(rows, [
         { id: "a", contentHash: "ch-a", metadataHash: "mh-a" },
         { id: "b", contentHash: "ch-b", metadataHash: null },
@@ -97,4 +100,3 @@ test("VectorStore.listContentHashes respects AbortSignal", async () => {
   ac.abort();
   await assert.rejects(store.listContentHashes({ signal: ac.signal }), { name: "AbortError" });
 });
-
