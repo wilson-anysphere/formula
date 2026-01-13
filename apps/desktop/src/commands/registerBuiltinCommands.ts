@@ -4,10 +4,26 @@ import type { LayoutController } from "../layout/layoutController.js";
 import { getPanelPlacement } from "../layout/layoutState.js";
 import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
-import { showQuickPick } from "../extensions/ui.js";
+import { showQuickPick, showToast } from "../extensions/ui.js";
 import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 import type { ThemeController } from "../theme/themeController.js";
 import { cycleWorkbenchFocusRegion, type WorkbenchFocusCycleDeps } from "./workbenchFocusCycle.js";
+import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
+import type { GridLimits, Range } from "../selection/types";
+import { DEFAULT_DESKTOP_LOAD_MAX_COLS, DEFAULT_DESKTOP_LOAD_MAX_ROWS } from "../workbook/load/clampUsedRange.js";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "../formatting/selectionSizeGuard.js";
+import {
+  applyNumberFormatPreset,
+  NUMBER_FORMATS,
+  setFillColor,
+  setFontColor,
+  setFontSize,
+  toggleBold,
+  toggleItalic,
+  toggleUnderline,
+  toggleWrap,
+  type CellRange,
+} from "../formatting/toolbar.js";
 
 export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
@@ -50,6 +66,8 @@ export function registerBuiltinCommands(params: {
     themeController = null,
     refreshRibbonUiState = null,
   } = params;
+
+  const commandCategoryFormat = t("commandCategory.format");
 
   const toggleDockPanel = (panelId: string) => {
     const placement = getPanelPlacement(layoutController.layout, panelId);
@@ -159,6 +177,183 @@ export function registerBuiltinCommands(params: {
       getSecondaryGridRoot: () => document.getElementById("grid-secondary") as HTMLElement | null,
       getSheetTabsRoot: () => document.getElementById("sheet-tabs") as HTMLElement | null,
     };
+  };
+
+  const getGridLimitsForFormatting = (): GridLimits => {
+    const raw = typeof (app as any)?.getGridLimits === "function" ? (app as any).getGridLimits() : null;
+    const maxRows =
+      Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : DEFAULT_DESKTOP_LOAD_MAX_ROWS;
+    const maxCols =
+      Number.isInteger(raw?.maxCols) && raw.maxCols > 0 ? raw.maxCols : DEFAULT_DESKTOP_LOAD_MAX_COLS;
+    return { maxRows, maxCols };
+  };
+
+  const selectionRangesForFormatting = (): CellRange[] => {
+    const limits = getGridLimitsForFormatting();
+    const selection = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
+    if (!Array.isArray(selection) || selection.length === 0) {
+      const cell = typeof (app as any)?.getActiveCell === "function" ? (app as any).getActiveCell() : { row: 0, col: 0 };
+      return [{ start: { row: cell.row, col: cell.col }, end: { row: cell.row, col: cell.col } }];
+    }
+
+    return selection.map((range: Range) => {
+      const r = normalizeSelectionRange(range);
+      const isFullColBand = r.startRow === 0 && r.endRow === limits.maxRows - 1;
+      const isFullRowBand = r.startCol === 0 && r.endCol === limits.maxCols - 1;
+
+      return {
+        start: { row: r.startRow, col: r.startCol },
+        end: {
+          row: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : r.endRow,
+          col: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : r.endCol,
+        },
+      };
+    });
+  };
+
+  const applyFormattingToSelection = (
+    label: string,
+    fn: (doc: any, sheetId: string, ranges: CellRange[]) => void | boolean,
+    options: { forceBatch?: boolean } = {},
+  ): void => {
+    // Match SpreadsheetApp guards: formatting commands should never mutate the sheet while the user is
+    // actively editing (cell editor / formula bar / inline edit).
+    if (typeof (app as any)?.isEditing === "function" && (app as any).isEditing()) return;
+
+    const doc = typeof (app as any)?.getDocument === "function" ? (app as any).getDocument() : null;
+    const sheetId = typeof (app as any)?.getCurrentSheetId === "function" ? (app as any).getCurrentSheetId() : null;
+    if (!doc || !sheetId) return;
+
+    const selection = typeof (app as any)?.getSelectionRanges === "function" ? (app as any).getSelectionRanges() : [];
+    const limits = getGridLimitsForFormatting();
+    const decision = evaluateFormattingSelectionSize(selection, limits, { maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT });
+
+    if (!decision.allowed) {
+      try {
+        showToast("Selection is too large to format. Try selecting fewer cells or an entire row/column.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return;
+    }
+
+    const ranges = selectionRangesForFormatting();
+    const shouldBatch = Boolean(options.forceBatch) || ranges.length > 1;
+
+    if (shouldBatch) doc.beginBatch?.({ label });
+    let committed = false;
+    let applied = true;
+    try {
+      const result = fn(doc, sheetId, ranges);
+      if (result === false) applied = false;
+      committed = true;
+    } finally {
+      if (!shouldBatch) {
+        // no-op
+      } else if (committed) {
+        doc.endBatch?.();
+      } else {
+        doc.cancelBatch?.();
+      }
+    }
+    if (!applied) {
+      try {
+        showToast("Formatting could not be applied to the full selection. Try selecting fewer cells/rows.", "warning");
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+    }
+    (app as any).focus?.();
+  };
+
+  const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
+
+  const activeCellFontSizePt = (): number => {
+    try {
+      const sheetId = (app as any).getCurrentSheetId?.();
+      const cell = (app as any).getActiveCell?.();
+      const docAny = (app as any).getDocument?.();
+      if (!sheetId || !cell || !docAny) return 11;
+      const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
+      const state = docAny.getCell?.(sheetId, cell);
+      const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
+      const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
+      return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
+    } catch {
+      return 11;
+    }
+  };
+
+  const stepFontSize = (current: number, direction: "increase" | "decrease"): number => {
+    const value = Number(current);
+    const resolved = Number.isFinite(value) && value > 0 ? value : 11;
+    if (direction === "increase") {
+      for (const step of FONT_SIZE_STEPS) {
+        if (step > resolved + 1e-6) return step;
+      }
+      return resolved;
+    }
+
+    for (let i = FONT_SIZE_STEPS.length - 1; i >= 0; i -= 1) {
+      const step = FONT_SIZE_STEPS[i]!;
+      if (step < resolved - 1e-6) return step;
+    }
+    return resolved;
+  };
+
+  const rgbHexToArgb = (rgb: string): string | null => {
+    if (typeof rgb !== "string") return null;
+    if (!/^#[0-9A-Fa-f]{6}$/.test(rgb)) return null;
+    // DocumentController formatting expects #AARRGGBB.
+    return `#FF${rgb.slice(1).toUpperCase()}`;
+  };
+
+  const normalizeArgb = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    // #RRGGBB
+    if (/^#?[0-9a-f]{6}$/i.test(trimmed)) {
+      const normalized = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+      return rgbHexToArgb(normalized);
+    }
+    // #AARRGGBB
+    if (/^#?[0-9a-f]{8}$/i.test(trimmed)) {
+      const hex = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+      return `#${hex.toUpperCase()}`;
+    }
+    return null;
+  };
+
+  const createHiddenColorInput = (): HTMLInputElement => {
+    const input = document.createElement("input");
+    input.type = "color";
+    input.tabIndex = -1;
+    input.className = "hidden-color-input shell-hidden-input";
+    document.body.appendChild(input);
+    return input;
+  };
+
+  let fontColorPicker: HTMLInputElement | null = null;
+  let fillColorPicker: HTMLInputElement | null = null;
+
+  const openColorPicker = (
+    input: HTMLInputElement,
+    label: string,
+    apply: (doc: any, sheetId: string, ranges: CellRange[], argb: string) => void,
+  ): void => {
+    // Avoid `addEventListener({ once: true })` here.
+    //
+    // `<input type="color">` does *not* emit a `change` event when the user cancels the native
+    // picker. If we used `addEventListener`, we'd accumulate listeners across cancels and the next
+    // successful pick would apply formatting multiple times (multiple history entries).
+    input.onchange = () => {
+      input.onchange = null;
+      const argb = rgbHexToArgb(input.value);
+      if (!argb) return;
+      applyFormattingToSelection(label, (doc, sheetId, ranges) => apply(doc, sheetId, ranges, argb));
+    };
+    input.click();
   };
 
   commandRegistry.registerBuiltinCommand(
@@ -1039,6 +1234,322 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.clipboard.pasteSpecial"),
       keywords: ["paste", "paste special", "clipboard"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleBold",
+    t("command.format.toggleBold"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleBold"),
+        (doc, sheetId, ranges) => toggleBold(doc, sheetId, ranges, typeof next === "boolean" ? { next } : {}),
+        { forceBatch: true },
+      ),
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["bold", "formatting", "font"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleItalic",
+    t("command.format.toggleItalic"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleItalic"),
+        (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges, typeof next === "boolean" ? { next } : {}),
+        { forceBatch: true },
+      ),
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["italic", "formatting", "font"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleUnderline",
+    t("command.format.toggleUnderline"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleUnderline"),
+        (doc, sheetId, ranges) => toggleUnderline(doc, sheetId, ranges, typeof next === "boolean" ? { next } : {}),
+        { forceBatch: true },
+      ),
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["underline", "formatting", "font"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleWrapText",
+    t("command.format.toggleWrapText"),
+    (next?: boolean) =>
+      applyFormattingToSelection(
+        t("command.format.toggleWrapText"),
+        (doc, sheetId, ranges) => toggleWrap(doc, sheetId, ranges, typeof next === "boolean" ? { next } : {}),
+        { forceBatch: true },
+      ),
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["wrap", "wrap text", "formatting", "alignment"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.fontSize.set",
+    t("command.format.fontSize.set"),
+    async (size?: number) => {
+      const resolvedSize = (() => {
+        if (typeof size === "number") return size;
+        if (typeof size === "string") return Number(size);
+        return null;
+      })();
+      if (resolvedSize == null) {
+        const picked = await showQuickPick(
+          FONT_SIZE_STEPS.map((value) => ({ label: String(value), value })),
+          { placeHolder: t("command.format.fontSize.set") },
+        );
+        if (picked == null) return;
+        applyFormattingToSelection(t("command.format.fontSize.set"), (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
+        return;
+      }
+
+      if (!Number.isFinite(resolvedSize) || resolvedSize <= 0) return;
+      applyFormattingToSelection(t("command.format.fontSize.set"), (doc, sheetId, ranges) =>
+        setFontSize(doc, sheetId, ranges, resolvedSize),
+      );
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["font size", "formatting", "size"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.fontSize.increase",
+    t("command.format.fontSize.increase"),
+    () => {
+      const current = activeCellFontSizePt();
+      const next = stepFontSize(current, "increase");
+      if (next === current) return;
+      applyFormattingToSelection(t("command.format.fontSize.increase"), (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["font size", "increase", "grow font"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.fontSize.decrease",
+    t("command.format.fontSize.decrease"),
+    () => {
+      const current = activeCellFontSizePt();
+      const next = stepFontSize(current, "decrease");
+      if (next === current) return;
+      applyFormattingToSelection(t("command.format.fontSize.decrease"), (doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["font size", "decrease", "shrink font"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.fontColor",
+    t("command.format.fontColor"),
+    (color?: string | null) => {
+      if (typeof document === "undefined") return;
+      if (color === undefined) {
+        if (!fontColorPicker) fontColorPicker = createHiddenColorInput();
+        openColorPicker(fontColorPicker, t("command.format.fontColor"), (doc, sheetId, ranges, argb) =>
+          setFontColor(doc, sheetId, ranges, argb),
+        );
+        return;
+      }
+
+      if (color === null) {
+        applyFormattingToSelection(t("command.format.fontColor"), (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      }
+
+      const argb = normalizeArgb(color);
+      if (!argb) return;
+      applyFormattingToSelection(t("command.format.fontColor"), (doc, sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["font color", "text color", "formatting"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.fillColor",
+    t("command.format.fillColor"),
+    (color?: string | null) => {
+      if (typeof document === "undefined") return;
+      if (color === undefined) {
+        if (!fillColorPicker) fillColorPicker = createHiddenColorInput();
+        openColorPicker(fillColorPicker, t("command.format.fillColor"), (doc, sheetId, ranges, argb) =>
+          setFillColor(doc, sheetId, ranges, argb),
+        );
+        return;
+      }
+
+      if (color === null) {
+        applyFormattingToSelection(t("command.format.fillColor"), (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      }
+
+      const argb = normalizeArgb(color);
+      if (!argb) return;
+      applyFormattingToSelection(t("command.format.fillColor"), (doc, sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["fill color", "cell color", "formatting"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.currency",
+    t("command.format.numberFormat.currency"),
+    () =>
+      applyFormattingToSelection(
+        t("command.format.numberFormat.currency"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat, icon: null, keywords: ["currency", "number format"] },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.percent",
+    t("command.format.numberFormat.percent"),
+    () =>
+      applyFormattingToSelection(
+        t("command.format.numberFormat.percent"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat, icon: null, keywords: ["percent", "number format"] },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.date",
+    t("command.format.numberFormat.date"),
+    () =>
+      applyFormattingToSelection(
+        t("command.format.numberFormat.date"),
+        (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"),
+        { forceBatch: true },
+      ),
+    { category: commandCategoryFormat, icon: null, keywords: ["date", "number format"] },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.openFormatCells",
+    t("command.format.openFormatCells"),
+    async () => {
+      type Choice = "general" | "currency" | "percent" | "date";
+      const choice = await showQuickPick<Choice>(
+        [
+          { label: "General", description: "Clear number format", value: "general" },
+          { label: "Currency", description: NUMBER_FORMATS.currency, value: "currency" },
+          { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
+          { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
+        ],
+        { placeHolder: "Format Cells" },
+      );
+      if (!choice) return;
+
+      const patch =
+        choice === "general"
+          ? { numberFormat: null }
+          : {
+              numberFormat: NUMBER_FORMATS[choice],
+            };
+
+      applyFormattingToSelection(
+        "Format Cells",
+        (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        },
+        { forceBatch: true },
+      );
+    },
+    {
+      category: commandCategoryFormat,
+      icon: null,
+      keywords: ["format cells", "number format", "font"],
+    },
+  );
+
+  // Find/Replace/Go To commands are registered here so they are discoverable early (e.g. command palette),
+  // but are expected to be overridden by the UI host (apps/desktop/src/main.ts) once dialogs are mounted.
+  commandRegistry.registerBuiltinCommand(
+    "edit.find",
+    t("command.edit.find"),
+    () => {},
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.find"),
+      keywords: ["find", "search"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.replace",
+    t("command.edit.replace"),
+    () => {},
+    {
+      category: t("commandCategory.editing"),
+      icon: null,
+      description: t("commandDescription.edit.replace"),
+      keywords: ["replace", "find"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "navigation.goTo",
+    t("command.navigation.goTo"),
+    () => {},
+    {
+      category: t("commandCategory.navigation"),
+      icon: null,
+      description: t("commandDescription.navigation.goTo"),
+      keywords: ["go to", "goto", "reference", "name box"],
     },
   );
 

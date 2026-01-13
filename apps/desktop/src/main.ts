@@ -152,9 +152,6 @@ import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import {
   applyAllBorders,
   NUMBER_FORMATS,
-  setFillColor,
-  setFontColor,
-  setFontSize,
   setHorizontalAlign,
   toggleBold,
   toggleItalic,
@@ -1318,12 +1315,6 @@ function selectionRangesForFormatting(): CellRange[] {
   });
 }
 
-function rgbHexToArgb(rgb: string): string | null {
-  if (!/^#[0-9A-Fa-f]{6}$/.test(rgb)) return null;
-  // DocumentController formatting expects #AARRGGBB.
-  return ["#", "FF", rgb.slice(1)].join("");
-}
-
 function applyFormattingToSelection(
   label: string,
   fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void | boolean,
@@ -1565,51 +1556,6 @@ function handleFormatPainterSelectionChange(selection: SelectionState): void {
   }, FORMAT_PAINTER_APPLY_DEBOUNCE_MS);
 }
 
-function createHiddenColorInput(): HTMLInputElement {
-  const input = document.createElement("input");
-  input.type = "color";
-  input.tabIndex = -1;
-  input.className = "hidden-color-input shell-hidden-input";
-  document.body.appendChild(input);
-  return input;
-}
-
-const fontColorPicker = createHiddenColorInput();
-const fillColorPicker = createHiddenColorInput();
-
-function openColorPicker(
-  input: HTMLInputElement,
-  label: string,
-  apply: (sheetId: string, ranges: CellRange[], argb: string) => void,
-): void {
-  // Avoid `addEventListener({ once: true })` here.
-  //
-  // `<input type="color">` does *not* emit a `change` event when the user cancels the native
-  // picker. If we used `addEventListener`, we'd accumulate listeners across cancels and the next
-  // successful pick would apply formatting multiple times (multiple history entries).
-  input.onchange = () => {
-    input.onchange = null;
-    const argb = rgbHexToArgb(input.value);
-    if (!argb) return;
-    applyFormattingToSelection(label, (_doc, sheetId, ranges) => apply(sheetId, ranges, argb));
-  };
-  input.click();
-}
-
-const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
-
-function activeCellFontSizePt(): number {
-  const sheetId = app.getCurrentSheetId();
-  const cell = app.getActiveCell();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const docAny = app.getDocument() as any;
-  const effectiveSize = docAny.getCellFormat?.(sheetId, cell)?.font?.size;
-  const state = docAny.getCell?.(sheetId, cell);
-  const style = docAny.styleTable?.get?.(state?.styleId ?? 0) ?? {};
-  const size = typeof effectiveSize === "number" ? effectiveSize : style.font?.size;
-  return typeof size === "number" && Number.isFinite(size) && size > 0 ? size : 11;
-}
-
 function activeCellNumberFormat(): string | null {
   const sheetId = app.getCurrentSheetId();
   const cell = app.getActiveCell();
@@ -1628,22 +1574,38 @@ function activeCellIndentLevel(): number {
   const value = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : 0;
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 }
-
-function stepFontSize(current: number, direction: "increase" | "decrease"): number {
-  const value = Number(current);
-  const resolved = Number.isFinite(value) && value > 0 ? value : 11;
-  if (direction === "increase") {
-    for (const step of FONT_SIZE_STEPS) {
-      if (step > resolved + 1e-6) return step;
-    }
-    return resolved;
+function parseDecimalPlaces(format: string): number {
+  const dot = format.indexOf(".");
+  if (dot === -1) return 0;
+  let count = 0;
+  for (let i = dot + 1; i < format.length; i++) {
+    const ch = format[i];
+    if (ch === "0" || ch === "#") count += 1;
+    else break;
   }
+  return count;
+}
 
-  for (let i = FONT_SIZE_STEPS.length - 1; i >= 0; i -= 1) {
-    const step = FONT_SIZE_STEPS[i]!;
-    if (step < resolved - 1e-6) return step;
-  }
-  return resolved;
+function stepDecimalPlacesInNumberFormat(format: string | null, direction: "increase" | "decrease"): string | null {
+  const raw = (format ?? "").trim();
+  const section = (raw.split(";")[0] ?? "").trim();
+  const lower = section.toLowerCase();
+  // Avoid trying to manipulate date/time format codes.
+  if (lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd")) return null;
+
+  const currencyMatch = /[$€£¥]/.exec(section);
+  const prefix = currencyMatch?.[0] ?? "";
+  const suffix = section.includes("%") ? "%" : "";
+  const useThousands = section.includes(",");
+  const decimals = parseDecimalPlaces(section);
+
+  const nextDecimals =
+    direction === "increase" ? Math.min(10, decimals + 1) : Math.max(0, decimals - 1);
+  if (nextDecimals === decimals) return null;
+
+  const integer = useThousands ? "#,##0" : "0";
+  const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
+  return `${prefix}${integer}${fraction}${suffix}`;
 }
 if (collabStatus) installCollabStatusIndicator(app, collabStatus);
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
@@ -5059,7 +5021,6 @@ if (
     app.focusAfterSheetNavigation();
   };
   focusAfterSheetNavigationFromCommandRef = focusAfterSheetNavigationFromCommand;
-
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
     panelRegistry,
@@ -8291,7 +8252,7 @@ function handleRibbonCommand(commandId: string): void {
     if (commandId.startsWith(fontSizePrefix)) {
       const size = Number(commandId.slice(fontSizePrefix.length));
       if (!Number.isFinite(size) || size <= 0) return;
-      applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, size));
+      executeBuiltinCommand("format.fontSize.set", size);
       return;
     }
 
@@ -8299,7 +8260,7 @@ function handleRibbonCommand(commandId: string): void {
     if (commandId.startsWith(fillColorPrefix)) {
       const preset = commandId.slice(fillColorPrefix.length);
       if (preset === "moreColors") {
-        openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) => setFillColor(doc, sheetId, ranges, argb));
+        executeBuiltinCommand("format.fillColor");
         return;
       }
       const argb = (() => {
@@ -8320,19 +8281,12 @@ function handleRibbonCommand(commandId: string): void {
       })();
 
       if (preset === "none" || preset === "noFill") {
-        applyFormattingToSelection("Fill color", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
+        executeBuiltinCommand("format.fillColor", null);
         return;
       }
 
       if (argb) {
-        applyFormattingToSelection("Fill color", (_doc, sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
+        executeBuiltinCommand("format.fillColor", argb);
       }
       return;
     }
@@ -8341,7 +8295,7 @@ function handleRibbonCommand(commandId: string): void {
     if (commandId.startsWith(fontColorPrefix)) {
       const preset = commandId.slice(fontColorPrefix.length);
       if (preset === "moreColors") {
-        openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) => setFontColor(doc, sheetId, ranges, argb));
+        executeBuiltinCommand("format.fontColor");
         return;
       }
       const argb = (() => {
@@ -8360,19 +8314,12 @@ function handleRibbonCommand(commandId: string): void {
       })();
 
       if (preset === "automatic") {
-        applyFormattingToSelection("Font color", (doc, sheetId, ranges) => {
-          let applied = true;
-          for (const range of ranges) {
-            const ok = doc.setRangeFormat(sheetId, range, { font: { color: null } }, { label: "Font color" });
-            if (ok === false) applied = false;
-          }
-          return applied;
-        });
+        executeBuiltinCommand("format.fontColor", null);
         return;
       }
 
       if (argb) {
-        applyFormattingToSelection("Font color", (_doc, sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+        executeBuiltinCommand("format.fontColor", argb);
       }
       return;
     }
@@ -8766,56 +8713,22 @@ function handleRibbonCommand(commandId: string): void {
         applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
         return;
       case "home.font.fontColor":
-        openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) =>
-          setFontColor(doc, sheetId, ranges, argb),
-        );
+        executeBuiltinCommand("format.fontColor");
         return;
       case "home.font.fillColor":
-        openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) =>
-          setFillColor(doc, sheetId, ranges, argb),
-        );
+        executeBuiltinCommand("format.fillColor");
         return;
       case "home.font.fontSize":
-        void (async () => {
-          const picked = await showQuickPick(
-            [
-              { label: "8", value: 8 },
-              { label: "9", value: 9 },
-              { label: "10", value: 10 },
-              { label: "11", value: 11 },
-              { label: "12", value: 12 },
-              { label: "14", value: 14 },
-              { label: "16", value: 16 },
-              { label: "18", value: 18 },
-              { label: "20", value: 20 },
-              { label: "24", value: 24 },
-              { label: "28", value: 28 },
-              { label: "36", value: 36 },
-              { label: "48", value: 48 },
-              { label: "72", value: 72 },
-            ],
-            { placeHolder: "Font size" },
-          );
-          if (picked == null) return;
-          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, picked));
-        })();
+        executeBuiltinCommand("format.fontSize.set");
         return;
 
       case "home.font.increaseFont": {
-        const current = activeCellFontSizePt();
-        const next = stepFontSize(current, "increase");
-        if (next !== current) {
-          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
-        }
+        executeBuiltinCommand("format.fontSize.increase");
         return;
       }
 
       case "home.font.decreaseFont": {
-        const current = activeCellFontSizePt();
-        const next = stepFontSize(current, "decrease");
-        if (next !== current) {
-          applyFormattingToSelection("Font size", (_doc, sheetId, ranges) => setFontSize(doc, sheetId, ranges, next));
-        }
+        executeBuiltinCommand("format.fontSize.decrease");
         return;
       }
 

@@ -105,6 +105,44 @@ describe("registerBuiltinCommands: panel toggles", () => {
   });
 });
 
+describe("registerBuiltinCommands: Home tab core commands", () => {
+  it("registers clipboard, formatting, and find/replace/go-to commands", () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(_panelId: string) {},
+      closePanel(_panelId: string) {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+
+    const required = [
+      "clipboard.cut",
+      "clipboard.copy",
+      "clipboard.paste",
+      "clipboard.pasteSpecial",
+      "format.toggleBold",
+      "format.toggleItalic",
+      "format.toggleUnderline",
+      "format.toggleWrapText",
+      "format.fontSize.increase",
+      "format.fontSize.decrease",
+      "format.fontColor",
+      "format.fillColor",
+      "format.numberFormat.currency",
+      "format.numberFormat.percent",
+      "format.numberFormat.date",
+      "edit.find",
+      "edit.replace",
+      "navigation.goTo",
+    ];
+
+    for (const commandId of required) {
+      expect(commandRegistry.getCommand(commandId)).toBeTruthy();
+    }
+  });
+});
+
 describe("registerBuiltinCommands: sheet navigation", () => {
   it("uses DocumentController.getVisibleSheetIds when UI sheet-store order is not provided", async () => {
     const commandRegistry = new CommandRegistry();
