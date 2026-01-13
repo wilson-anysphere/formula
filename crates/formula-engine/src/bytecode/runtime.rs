@@ -6,6 +6,7 @@ use super::value::{
 };
 use crate::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
 use crate::error::ExcelError;
+use crate::eval::MAX_MATERIALIZED_ARRAY_CELLS;
 use crate::functions::lookup;
 use crate::functions::math::criteria::Criteria as EngineCriteria;
 use crate::functions::wildcard::WildcardPattern;
@@ -1168,11 +1169,15 @@ fn numeric_binary(op: BinaryOp, left: &Value, right: &Value) -> Value {
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
         Value::Array(arr) => {
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut out = Vec::new();
-            if out
-                .try_reserve_exact(arr.rows.saturating_mul(arr.cols))
-                .is_err()
-            {
+            if out.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for v in arr.iter() {
@@ -1209,8 +1214,11 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
 
             let total = match out_rows.checked_mul(out_cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut out = Vec::new();
             if out.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -1231,11 +1239,15 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
             Value::Array(ArrayValue::new(out_rows, out_cols, out))
         }
         (Value::Array(left_arr), right_scalar) => {
+            let total = match left_arr.rows.checked_mul(left_arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut out = Vec::new();
-            if out
-                .try_reserve_exact(left_arr.rows.saturating_mul(left_arr.cols))
-                .is_err()
-            {
+            if out.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for v in left_arr.iter() {
@@ -1244,11 +1256,15 @@ fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) ->
             Value::Array(ArrayValue::new(left_arr.rows, left_arr.cols, out))
         }
         (left_scalar, Value::Array(right_arr)) => {
+            let total = match right_arr.rows.checked_mul(right_arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut out = Vec::new();
-            if out
-                .try_reserve_exact(right_arr.rows.saturating_mul(right_arr.cols))
-                .is_err()
-            {
+            if out.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for v in right_arr.iter() {
@@ -1269,10 +1285,6 @@ struct LiftShape {
 impl LiftShape {
     fn is_1x1(self) -> bool {
         self.rows == 1 && self.cols == 1
-    }
-
-    fn len(self) -> usize {
-        self.rows.saturating_mul(self.cols)
     }
 }
 
@@ -1357,7 +1369,13 @@ fn lift2(a: &Value, b: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let len = shape.len();
+    let len = match shape.rows.checked_mul(shape.cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if len > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
     let mut out = Vec::new();
     if out.try_reserve_exact(len).is_err() {
         return Value::Error(ErrorKind::Num);
@@ -1384,16 +1402,19 @@ fn deref_range_dynamic(grid: &dyn Grid, range: ResolvedRange) -> Value {
 
     let rows = match usize::try_from(range.rows()) {
         Ok(v) => v,
-        Err(_) => return Value::Error(ErrorKind::Num),
+        Err(_) => return Value::Error(ErrorKind::Spill),
     };
     let cols = match usize::try_from(range.cols()) {
         Ok(v) => v,
-        Err(_) => return Value::Error(ErrorKind::Num),
+        Err(_) => return Value::Error(ErrorKind::Spill),
     };
     let total = match rows.checked_mul(cols) {
         Some(v) => v,
-        None => return Value::Error(ErrorKind::Num),
+        None => return Value::Error(ErrorKind::Spill),
     };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
     let mut values = Vec::new();
     if values.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
@@ -1423,16 +1444,19 @@ fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRa
 
     let rows = match usize::try_from(range.rows()) {
         Ok(v) => v,
-        Err(_) => return Value::Error(ErrorKind::Num),
+        Err(_) => return Value::Error(ErrorKind::Spill),
     };
     let cols = match usize::try_from(range.cols()) {
         Ok(v) => v,
-        Err(_) => return Value::Error(ErrorKind::Num),
+        Err(_) => return Value::Error(ErrorKind::Spill),
     };
     let total = match rows.checked_mul(cols) {
         Some(v) => v,
-        None => return Value::Error(ErrorKind::Num),
+        None => return Value::Error(ErrorKind::Spill),
     };
+    if total > MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
     let mut values = Vec::new();
     if values.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
@@ -1901,8 +1925,11 @@ fn engine_value_to_bytecode(value: EngineValue) -> Value {
         EngineValue::Array(arr) => {
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -4132,11 +4159,15 @@ where
 {
     match value {
         Value::Array(arr) => {
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut out = Vec::new();
-            if out
-                .try_reserve_exact(arr.rows.saturating_mul(arr.cols))
-                .is_err()
-            {
+            if out.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
             }
             for v in arr.iter() {
@@ -4177,8 +4208,11 @@ where
             };
             let total = match rows.checked_mul(cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -4226,8 +4260,11 @@ where
             };
             let total = match rows.checked_mul(cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -4425,6 +4462,9 @@ fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
 
             if spans_all_cols || spans_all_rows {
+                if rows > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Value::Error(ErrorKind::Spill);
+                }
                 let mut values = Vec::new();
                 if values.try_reserve_exact(rows).is_err() {
                     return Value::Error(ErrorKind::Num);
@@ -4440,8 +4480,11 @@ fn fn_row(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
             let total = match rows.checked_mul(cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -4488,6 +4531,9 @@ fn fn_column(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 && reference.row_end == (EXCEL_MAX_ROWS as i32).saturating_sub(1);
 
             if spans_all_cols || spans_all_rows {
+                if cols > MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Value::Error(ErrorKind::Spill);
+                }
                 let mut values = Vec::new();
                 if values.try_reserve_exact(cols).is_err() {
                     return Value::Error(ErrorKind::Num);
@@ -4503,8 +4549,11 @@ fn fn_column(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 
             let total = match rows.checked_mul(cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
                 return Value::Error(ErrorKind::Num);
@@ -11148,6 +11197,43 @@ mod tests {
         fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
             self.bounds
         }
+    }
+
+    struct PanicGetGrid {
+        bounds: (i32, i32),
+    }
+
+    impl Grid for PanicGetGrid {
+        fn get_value(&self, _coord: CellCoord) -> Value {
+            panic!("unexpected get_value call (materialization should have been guarded)");
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            self.bounds
+        }
+    }
+
+    #[test]
+    fn bytecode_materialization_limit() {
+        // Construct a range whose resolved cell count is just over the engine's materialization
+        // limit and ensure the bytecode runtime returns #SPILL! without allocating or visiting
+        // individual cells.
+        let end_row = i32::try_from(MAX_MATERIALIZED_ARRAY_CELLS).expect("limit fits in i32");
+        let range = RangeRef::new(
+            Ref::new(0, 0, true, true),
+            Ref::new(end_row, 0, true, true),
+        );
+
+        let grid = PanicGetGrid {
+            bounds: (end_row + 1, 1),
+        };
+        let origin = CellCoord::new(0, 0);
+        let value = deref_value_dynamic(Value::Range(range), &grid, origin);
+        assert_eq!(value, Value::Error(ErrorKind::Spill));
     }
 
     #[test]

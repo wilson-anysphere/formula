@@ -6899,7 +6899,7 @@ pub trait ExternalDataProvider: Send + Sync {
 
 const EXCEL_MAX_ROWS_I32: i32 = EXCEL_MAX_ROWS as i32;
 const EXCEL_MAX_COLS_I32: i32 = EXCEL_MAX_COLS as i32;
-const BYTECODE_MAX_RANGE_CELLS: i64 = 5_000_000;
+const BYTECODE_MAX_RANGE_CELLS: i64 = crate::eval::MAX_MATERIALIZED_ARRAY_CELLS as i64;
 
 fn engine_error_to_bytecode(err: ErrorKind) -> bytecode::ErrorKind {
     err.into()
@@ -6948,15 +6948,18 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Array(arr) => {
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
-                None => return bytecode::Value::Error(bytecode::ErrorKind::Num),
+                None => return bytecode::Value::Error(bytecode::ErrorKind::Spill),
             };
             if total != arr.values.len() {
                 return bytecode::Value::Error(bytecode::ErrorKind::Num);
             }
+            if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return bytecode::Value::Error(bytecode::ErrorKind::Spill);
+            }
 
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
-                return bytecode::Value::Error(bytecode::ErrorKind::Num);
+                return bytecode::Value::Error(bytecode::ErrorKind::Spill);
             }
             for v in arr.iter() {
                 values.push(array_element_to_bytecode(v));
@@ -6986,11 +6989,14 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Array(arr) => {
             let total = match arr.rows.checked_mul(arr.cols) {
                 Some(v) => v,
-                None => return Value::Error(ErrorKind::Num),
+                None => return Value::Error(ErrorKind::Spill),
             };
+            if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
             let mut values = Vec::new();
             if values.try_reserve_exact(total).is_err() {
-                return Value::Error(ErrorKind::Num);
+                return Value::Error(ErrorKind::Spill);
             }
             match Arc::try_unwrap(arr.values) {
                 Ok(values_vec) => {
