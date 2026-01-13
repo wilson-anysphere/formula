@@ -12,6 +12,7 @@ use crate::package::{XlsxError, XlsxPackage};
 use crate::pivots::cache_records::PivotCacheValue;
 use crate::pivots::PivotCacheSourceType;
 use crate::shared_strings::parse_shared_strings_xml;
+use crate::tables::{parse_table, TABLE_REL_TYPE};
 use crate::xml::{QName, XmlElement, XmlNode};
 use crate::DateSystem;
 
@@ -23,7 +24,7 @@ const REL_TYPE_STYLES: &str =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct WorksheetSource {
-    sheet: String,
+    sheet: Option<String>,
     reference: String,
 }
 
@@ -83,16 +84,8 @@ impl XlsxPackage {
             .ok_or_else(|| XlsxError::MissingPart(cache_definition_part.to_string()))?
             .to_vec();
 
-        let worksheet_source =
-            parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
-        let range = Range::from_a1(&worksheet_source.reference).map_err(|e| {
-            XlsxError::Invalid(format!(
-                "invalid worksheetSource ref {ref_:?}: {e}",
-                ref_ = worksheet_source.reference
-            ))
-        })?;
-
-        let worksheet_part = resolve_worksheet_part(self, &worksheet_source.sheet)?;
+        let worksheet_source = parse_worksheet_source_from_cache_definition(&cache_definition_bytes)?;
+        let (worksheet_part, range) = resolve_source_worksheet_and_range(self, &worksheet_source)?;
         let worksheet_xml = self
             .part(&worksheet_part)
             .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
@@ -189,6 +182,7 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
     let mut buf = Vec::new();
     let mut sheet = None;
     let mut reference = None;
+    let mut name = None;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -199,6 +193,7 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
                         match local_name(attr.key.as_ref()) {
                             b"sheet" => sheet = Some(attr.unescape_value()?.into_owned()),
                             b"ref" => reference = Some(attr.unescape_value()?.into_owned()),
+                            b"name" => name = Some(attr.unescape_value()?.into_owned()),
                             _ => {}
                         }
                     }
@@ -212,7 +207,9 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
     }
 
     let mut sheet = sheet;
-    let mut reference = reference.ok_or(XlsxError::MissingAttr("worksheetSource@ref"))?;
+    let mut reference = reference
+        .or(name)
+        .ok_or(XlsxError::MissingAttr("worksheetSource@ref or worksheetSource@name"))?;
 
     // Some non-standard producers omit `worksheetSource@sheet` and embed the sheet name in the
     // ref (e.g. `Sheet1!A1:C5` or `'Sheet 1'!A1:C5`).
@@ -225,9 +222,378 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
         }
         reference = parsed_ref;
     }
-
-    let sheet = sheet.ok_or(XlsxError::MissingAttr("worksheetSource@sheet"))?;
     Ok(WorksheetSource { sheet, reference })
+}
+
+fn resolve_source_worksheet_and_range(
+    package: &XlsxPackage,
+    worksheet_source: &WorksheetSource,
+) -> Result<(String, Range), XlsxError> {
+    // `worksheetSource` can point at:
+    //   - a literal A1 range (e.g. `A1:D10` or `'Sheet 1'!$A$1:$D$10`)
+    //   - a workbook/sheet-scoped defined name
+    //   - an Excel Table (ListObject) name (`Table1`)
+    //
+    // Table sources are tricky because the `<table>` part doesn't encode the worksheet identity;
+    // it's referenced from a worksheet's relationship file. Best-effort strategy:
+    //   1) Prefer a sheet specified in the reference itself (`Sheet1!Table1`) or the
+    //      `worksheetSource/@sheet` attribute.
+    //   2) Otherwise, scan worksheets for relationships that target the matching table part.
+
+    let (sheet_from_ref, token) = split_sheet_qualified_reference(&worksheet_source.reference);
+
+    // 1) Literal A1 range.
+    if let Ok(range) = Range::from_a1(token) {
+        let sheet_name = sheet_from_ref
+            .as_deref()
+            .or_else(|| worksheet_source.sheet.as_deref())
+            .ok_or_else(|| {
+                XlsxError::Invalid(format!(
+                    "worksheetSource reference {ref_:?} is an A1 range but no sheet was provided",
+                    ref_ = worksheet_source.reference
+                ))
+            })?;
+        let worksheet_part = resolve_worksheet_part(package, sheet_name)?;
+        return Ok((worksheet_part, range));
+    }
+
+    // 2) Defined name.
+    if let Some((defined_sheet, range)) = resolve_defined_name_reference(
+        package,
+        token,
+        sheet_from_ref.as_deref().or_else(|| worksheet_source.sheet.as_deref()),
+    )? {
+        let sheet_name = defined_sheet
+            .as_deref()
+            .or_else(|| sheet_from_ref.as_deref())
+            .or_else(|| worksheet_source.sheet.as_deref())
+            .ok_or_else(|| {
+                XlsxError::Invalid(format!(
+                    "defined name {name:?} does not specify a sheet and worksheetSource has no sheet attribute",
+                    name = token
+                ))
+            })?;
+        let worksheet_part = resolve_worksheet_part(package, sheet_name)?;
+        return Ok((worksheet_part, range));
+    }
+
+    // 3) Table name.
+    resolve_table_reference(
+        package,
+        token,
+        sheet_from_ref.as_deref().or_else(|| worksheet_source.sheet.as_deref()),
+    )?
+    .ok_or_else(|| {
+        XlsxError::Invalid(format!(
+            "unable to resolve worksheetSource reference {ref_:?} as an A1 range, defined name, or table name",
+            ref_ = worksheet_source.reference
+        ))
+    })
+}
+
+fn split_sheet_qualified_reference(input: &str) -> (Option<String>, &str) {
+    let s = input.trim();
+    if s.is_empty() {
+        return (None, s);
+    }
+    let bytes = s.as_bytes();
+    if bytes[0] == b'\'' {
+        // Quoted sheet name: `'My Sheet'!A1:B2`. Inside the quotes, `''` escapes a literal `'`.
+        let mut sheet = String::new();
+        let mut i = 1usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\'' => {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        sheet.push('\'');
+                        i += 2;
+                        continue;
+                    }
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'!' {
+                        return (Some(sheet), &s[(i + 2)..]);
+                    }
+                    // Not actually a sheet-qualified reference; treat the whole string as the token.
+                    return (None, s);
+                }
+                other => sheet.push(other as char),
+            }
+            i += 1;
+        }
+        // Unterminated quote; treat as unqualified.
+        return (None, s);
+    }
+
+    match s.find('!') {
+        Some(idx) => (Some(s[..idx].to_string()), &s[(idx + 1)..]),
+        None => (None, s),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ParsedDefinedName {
+    name: String,
+    local_sheet_id: Option<u32>,
+    value: String,
+}
+
+fn resolve_defined_name_reference(
+    package: &XlsxPackage,
+    name: &str,
+    sheet_hint: Option<&str>,
+) -> Result<Option<(Option<String>, Range)>, XlsxError> {
+    let workbook_xml = package
+        .part(WORKBOOK_PART)
+        .ok_or_else(|| XlsxError::MissingPart(WORKBOOK_PART.to_string()))?;
+
+    let mut reader = Reader::from_reader(Cursor::new(workbook_xml));
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    let mut matches: Vec<ParsedDefinedName> = Vec::new();
+    let mut current: Option<ParsedDefinedName> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) if local_name(e.name().as_ref()) == b"definedName" => {
+                let mut dn_name: Option<String> = None;
+                let mut local_sheet_id: Option<u32> = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match local_name(attr.key.as_ref()) {
+                        b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
+                        b"localSheetId" => {
+                            local_sheet_id = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
+                        _ => {}
+                    }
+                }
+
+                let Some(dn_name) = dn_name else {
+                    current = None;
+                    continue;
+                };
+                if dn_name.eq_ignore_ascii_case(name) {
+                    current = Some(ParsedDefinedName {
+                        name: dn_name,
+                        local_sheet_id,
+                        value: String::new(),
+                    });
+                } else {
+                    current = None;
+                }
+            }
+            Event::Empty(e) if local_name(e.name().as_ref()) == b"definedName" => {
+                let mut dn_name: Option<String> = None;
+                let mut local_sheet_id: Option<u32> = None;
+                for attr in e.attributes().with_checks(false) {
+                    let attr = attr?;
+                    match local_name(attr.key.as_ref()) {
+                        b"name" => dn_name = Some(attr.unescape_value()?.into_owned()),
+                        b"localSheetId" => {
+                            local_sheet_id = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
+                        _ => {}
+                    }
+                }
+                let Some(dn_name) = dn_name else {
+                    continue;
+                };
+                if dn_name.eq_ignore_ascii_case(name) {
+                    matches.push(ParsedDefinedName {
+                        name: dn_name,
+                        local_sheet_id,
+                        value: String::new(),
+                    });
+                }
+            }
+            Event::Text(e) if current.is_some() => {
+                if let Some(ref mut dn) = current {
+                    dn.value.push_str(&e.unescape()?.into_owned());
+                }
+            }
+            Event::CData(e) if current.is_some() => {
+                if let Some(ref mut dn) = current {
+                    dn.value.push_str(std::str::from_utf8(e.as_ref()).map_err(|err| {
+                        XlsxError::Invalid(format!(
+                            "defined name {name:?} contains invalid utf-8: {err}",
+                            name = dn.name
+                        ))
+                    })?);
+                }
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"definedName" => {
+                if let Some(dn) = current.take() {
+                    matches.push(dn);
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+
+    // If multiple definitions exist (sheet-scoped names), try selecting one based on the
+    // `worksheetSource/@sheet` hint.
+    let selected = if matches.len() == 1 {
+        matches.remove(0)
+    } else {
+        let Some(sheet_hint) = sheet_hint else {
+            return Err(XlsxError::Invalid(format!(
+                "defined name {name:?} is ambiguous (found {count} matches) and worksheetSource did not specify a sheet",
+                count = matches.len()
+            )));
+        };
+
+        let sheets = package.workbook_sheets()?;
+        let hint_idx = sheets
+            .iter()
+            .position(|s| s.name.eq_ignore_ascii_case(sheet_hint))
+            .map(|idx| idx as u32);
+
+        let mut filtered: Vec<ParsedDefinedName> = matches
+            .into_iter()
+            .filter(|dn| match (dn.local_sheet_id, hint_idx) {
+                (Some(local), Some(hint)) => local == hint,
+                _ => false,
+            })
+            .collect();
+
+        if filtered.len() == 1 {
+            filtered.remove(0)
+        } else {
+            return Err(XlsxError::Invalid(format!(
+                "defined name {name:?} is ambiguous for sheet {sheet_hint:?}",
+            )));
+        }
+    };
+
+    let mut formula = selected.value.trim();
+    if let Some(stripped) = formula.strip_prefix('=') {
+        formula = stripped.trim();
+    }
+    if formula.contains(',') {
+        return Err(XlsxError::Invalid(format!(
+            "defined name {name:?} refers to multiple areas ({formula:?}); only single-area ranges are supported",
+            name = selected.name
+        )));
+    }
+
+    let (sheet_from_value, ref_str) = split_sheet_qualified_reference(formula);
+    let range = Range::from_a1(ref_str).map_err(|e| {
+        XlsxError::Invalid(format!(
+            "defined name {name:?} does not resolve to an A1 range ({ref_str:?}): {e}",
+            name = selected.name
+        ))
+    })?;
+
+    let sheet = if sheet_from_value.is_some() {
+        sheet_from_value
+    } else if let Some(local_id) = selected.local_sheet_id {
+        let sheets = package.workbook_sheets()?;
+        sheets.get(local_id as usize).map(|s| s.name.clone())
+    } else {
+        None
+    };
+
+    Ok(Some((sheet, range)))
+}
+
+fn resolve_table_reference(
+    package: &XlsxPackage,
+    name: &str,
+    sheet_hint: Option<&str>,
+) -> Result<Option<(String, Range)>, XlsxError> {
+    let mut matched: Option<(String, Range)> = None;
+    for (part_name, bytes) in package.parts() {
+        let canonical = part_name.strip_prefix('/').unwrap_or(part_name);
+        if !canonical.starts_with("xl/tables/table") || !canonical.ends_with(".xml") {
+            continue;
+        }
+        let Ok(xml) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        let Ok(table) = parse_table(xml) else {
+            continue;
+        };
+        if !table.name.eq_ignore_ascii_case(name) && !table.display_name.eq_ignore_ascii_case(name) {
+            continue;
+        }
+
+        let worksheet_part = if let Some(sheet_name) = sheet_hint {
+            resolve_worksheet_part(package, sheet_name)?
+        } else {
+            resolve_worksheet_part_for_table(package, canonical)?.ok_or_else(|| {
+                XlsxError::Invalid(format!(
+                    "table {name:?} found in {part:?} but worksheetSource did not specify a sheet and no worksheet relationship targets the table part",
+                    name = table.name,
+                    part = canonical
+                ))
+            })?
+        };
+
+        matched = Some((worksheet_part, table.range));
+        break;
+    }
+    Ok(matched)
+}
+
+fn resolve_worksheet_part_for_table(
+    package: &XlsxPackage,
+    table_part: &str,
+) -> Result<Option<String>, XlsxError> {
+    let mut candidates = Vec::new();
+    for part_name in package.part_names() {
+        let worksheet_part = part_name.strip_prefix('/').unwrap_or(part_name);
+        if !worksheet_part.starts_with("xl/worksheets/") || !worksheet_part.ends_with(".xml") {
+            continue;
+        }
+        let rels_part = rels_part_name(worksheet_part);
+        let Some(rels_bytes) = package.part(&rels_part) else {
+            continue;
+        };
+        let rels = match parse_relationships(rels_bytes) {
+            Ok(rels) => rels,
+            Err(_) => continue,
+        };
+        for rel in rels {
+            if rel.type_uri != TABLE_REL_TYPE {
+                continue;
+            }
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            let target = resolve_target(worksheet_part, &rel.target);
+            let target = target.strip_prefix('/').unwrap_or(target.as_str());
+            if target == table_part {
+                candidates.push(worksheet_part.to_string());
+                break;
+            }
+        }
+    }
+
+    match candidates.len() {
+        0 => Ok(None),
+        1 => Ok(Some(candidates.remove(0))),
+        _ => Err(XlsxError::Invalid(format!(
+            "table part {table_part:?} is referenced from multiple worksheets ({candidates:?})",
+        ))),
+    }
 }
 
 fn resolve_worksheet_part(package: &XlsxPackage, sheet_name: &str) -> Result<String, XlsxError> {
@@ -1053,6 +1419,7 @@ mod tests {
     use super::*;
     use crate::XlsxPackage;
     use std::io::{Cursor, Write};
+    use roxmltree::Document;
 
     #[test]
     fn parse_inline_string_ignores_phonetic_text() {
@@ -1130,5 +1497,142 @@ mod tests {
             super::resolve_shared_strings_part_name(&pkg).expect("resolve shared strings"),
             Some("xl/sharedStrings.xml".to_string())
         );
+    }
+
+    #[test]
+    fn refresh_pivot_cache_resolves_table_name_source() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        // Table range is A1:B3 (header + 2 records).
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Header1</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Header2</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2"><v>1</v></c>
+      <c r="B2" t="inlineStr"><is><t>Alpha</t></is></c>
+    </row>
+    <row r="3">
+      <c r="A3"><v>2</v></c>
+      <c r="B3" t="inlineStr"><is><t>Beta</t></is></c>
+    </row>
+  </sheetData>
+  <tableParts count="1">
+    <tablePart r:id="rIdTable1"/>
+  </tableParts>
+</worksheet>"#;
+
+        let worksheet_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdTable1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>
+</Relationships>"#;
+
+        let table_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="Table1" displayName="Table1" ref="A1:B3" headerRowCount="1" totalsRowCount="0">
+  <tableColumns count="2">
+    <tableColumn id="1" name="Header1"/>
+    <tableColumn id="2" name="Header2"/>
+  </tableColumns>
+</table>"#;
+
+        // `worksheetSource/@ref` points at the table name (not an A1 range).
+        let cache_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" recordCount="0">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="Table1"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
+        let cache_definition_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords" Target="pivotCacheRecords1.xml"/>
+</Relationships>"#;
+
+        let cache_records_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheRecords xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+            .unwrap();
+        zip.write_all(worksheet_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/tables/table1.xml", options).unwrap();
+        zip.write_all(table_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheDefinition1.xml", options)
+            .unwrap();
+        zip.write_all(cache_definition_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels", options)
+            .unwrap();
+        zip.write_all(cache_definition_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/pivotCache/pivotCacheRecords1.xml", options)
+            .unwrap();
+        zip.write_all(cache_records_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+            .expect("refresh");
+
+        let updated_def =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheDefinition1.xml").unwrap())
+                .unwrap();
+        let doc = Document::parse(updated_def).expect("parse updated cache definition");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("recordCount"), Some("2"));
+        let cache_fields = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "cacheFields")
+            .expect("cacheFields");
+        assert_eq!(cache_fields.attribute("count"), Some("2"));
+        let field_names: Vec<_> = cache_fields
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "cacheField")
+            .filter_map(|n| n.attribute("name"))
+            .collect();
+        assert_eq!(field_names, vec!["Header1", "Header2"]);
+
+        let updated_records =
+            std::str::from_utf8(pkg.part("xl/pivotCache/pivotCacheRecords1.xml").unwrap()).unwrap();
+        let doc = Document::parse(updated_records).expect("parse updated cache records");
+        let root = doc.root_element();
+        assert_eq!(root.attribute("count"), Some("2"));
+        let record_count = root
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "r")
+            .count();
+        assert_eq!(record_count, 2);
     }
 }
