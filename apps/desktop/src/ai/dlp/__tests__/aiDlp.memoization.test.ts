@@ -2,6 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultOrgPolicy } from "../../../../../../packages/security/dlp/src/policy.js";
 
+vi.mock("../dlpCacheKey.js", async () => {
+  const actual = await vi.importActual<any>("../dlpCacheKey.js");
+  return {
+    ...actual,
+    computeDlpCacheKey: vi.fn(actual.computeDlpCacheKey),
+  };
+});
+
+import { computeDlpCacheKey } from "../dlpCacheKey.js";
 import { getAiCloudDlpOptions } from "../aiDlp.js";
 
 function createInMemoryLocalStorage(): Storage {
@@ -60,10 +69,12 @@ describe("getAiCloudDlpOptions memoization", () => {
     const parseSpy = vi.spyOn(JSON, "parse");
 
     const first = getAiCloudDlpOptions({ documentId, orgId });
+    expect(computeDlpCacheKey).toHaveBeenCalledTimes(1);
     const callsAfterFirst = parseSpy.mock.calls.length;
 
     const second = getAiCloudDlpOptions({ documentId, orgId });
     expect(parseSpy).toHaveBeenCalledTimes(callsAfterFirst);
+    expect(computeDlpCacheKey).toHaveBeenCalledTimes(1);
     expect(second.policy).toBe(first.policy);
     expect(second.classificationStore).toBe(first.classificationStore);
     expect(second.classificationRecords).toBe(first.classificationRecords);
@@ -82,9 +93,9 @@ describe("getAiCloudDlpOptions memoization", () => {
 
     const callsBeforeThird = parseSpy.mock.calls.length;
     const third = getAiCloudDlpOptions({ documentId, orgId });
+    expect(computeDlpCacheKey).toHaveBeenCalledTimes(2);
     expect(parseSpy.mock.calls.length).toBeGreaterThan(callsBeforeThird);
     expect(third.classificationStore).toBe(first.classificationStore);
     expect(third.classificationRecords).not.toBe(first.classificationRecords);
   });
 });
-
