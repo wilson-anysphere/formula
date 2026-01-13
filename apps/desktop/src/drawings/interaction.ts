@@ -18,6 +18,14 @@ export interface DrawingInteractionCallbacks {
  */
 export class DrawingInteractionController {
   private readonly scratchRect: Rect = { x: 0, y: 0, width: 0, height: 0 };
+  private readonly scratchPaneLayout: PaneLayout = {
+    frozenRows: 0,
+    frozenCols: 0,
+    headerOffsetX: 0,
+    headerOffsetY: 0,
+    frozenBoundaryX: 0,
+    frozenBoundaryY: 0,
+  };
   private hitTestIndex: HitTestIndex | null = null;
   private hitTestIndexObjects: readonly DrawingObject[] | null = null;
   private dragging:
@@ -56,7 +64,7 @@ export class DrawingInteractionController {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
     const index = this.getHitTestIndex(objects);
-    const paneLayout = resolveViewportPaneLayout(viewport, this.geom);
+    const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     const inHeader = e.offsetX < paneLayout.headerOffsetX || e.offsetY < paneLayout.headerOffsetY;
     const pointInFrozenCols = !inHeader && e.offsetX < paneLayout.frozenBoundaryX;
     const pointInFrozenRows = !inHeader && e.offsetY < paneLayout.frozenBoundaryY;
@@ -206,7 +214,7 @@ export class DrawingInteractionController {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
     const index = this.getHitTestIndex(objects);
-    const paneLayout = resolveViewportPaneLayout(viewport, this.geom);
+    const paneLayout = resolveViewportPaneLayout(viewport, this.geom, this.scratchPaneLayout);
     if (x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY) {
       this.canvas.style.cursor = "default";
       return;
@@ -659,7 +667,7 @@ function clampNumber(value: number, min: number, max: number): number {
   return value;
 }
 
-function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry): PaneLayout {
+function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry, out: PaneLayout): PaneLayout {
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
@@ -700,7 +708,13 @@ function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry): Pane
     frozenBoundaryY = clampNumber(raw as number, headerOffsetY, viewport.height);
   }
 
-  return { frozenRows, frozenCols, headerOffsetX, headerOffsetY, frozenBoundaryX, frozenBoundaryY };
+  out.frozenRows = frozenRows;
+  out.frozenCols = frozenCols;
+  out.headerOffsetX = headerOffsetX;
+  out.headerOffsetY = headerOffsetY;
+  out.frozenBoundaryX = frozenBoundaryX;
+  out.frozenBoundaryY = frozenBoundaryY;
+  return out;
 }
 
 // NOTE: Call sites avoid allocating pane objects by computing frozen-row/col membership inline.
