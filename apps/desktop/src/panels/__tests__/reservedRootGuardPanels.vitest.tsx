@@ -94,12 +94,12 @@ describe("sync-server reserved root guard disconnect UX", () => {
     });
 
     await act(async () => {
-      await waitFor(() => container.textContent?.includes("Create checkpoint") ?? false);
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
     });
 
-    const createBtnBefore = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Create checkpoint");
-    expect(createBtnBefore).toBeInstanceOf(HTMLButtonElement);
-    expect((createBtnBefore as HTMLButtonElement).disabled).toBe(false);
+    const nameInputBefore = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+    expect(nameInputBefore).toBeInstanceOf(HTMLInputElement);
+    expect(nameInputBefore?.disabled).toBe(false);
 
     await act(async () => {
       ws.emitClose(1008, "reserved root mutation");
@@ -114,9 +114,9 @@ describe("sync-server reserved root guard disconnect UX", () => {
     expect(container.textContent).toContain("ApiVersionStore");
     expect(container.textContent).toContain("SQLite");
 
-    const createBtnAfter = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Create checkpoint");
-    expect(createBtnAfter).toBeInstanceOf(HTMLButtonElement);
-    expect((createBtnAfter as HTMLButtonElement).disabled).toBe(true);
+    const nameInputAfter = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+    expect(nameInputAfter).toBeInstanceOf(HTMLInputElement);
+    expect(nameInputAfter?.disabled).toBe(true);
 
     await act(async () => {
       root.unmount();
@@ -164,4 +164,3 @@ describe("sync-server reserved root guard disconnect UX", () => {
     });
   });
 });
-
