@@ -20,10 +20,7 @@ describe("oauthRedirectIpc wiring", () => {
       .join("\n");
 
     // 1) Ensure we listen for Rust -> JS oauth redirect events.
-    const hasOauthRedirectListener =
-      /^\s*(?:const|let)\s+\w+(?:\s*:\s*[^=]+)?\s*=\s*listen\s*\(\s*["']oauth-redirect["']/m.test(code) ||
-      /^\s*(?:void\s+)?listen\s*\(\s*["']oauth-redirect["']/m.test(code);
-    expect(hasOauthRedirectListener).toBe(true);
+    expect(code).toMatch(/\blisten\s*\(\s*["']oauth-redirect["']/);
 
     // 2) Ensure we only emit readiness after the listener promise resolves.
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
@@ -33,7 +30,7 @@ describe("oauthRedirectIpc wiring", () => {
 
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const assignment =
-      /^(?:\s*)(?:const|let)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*\(\s*["']oauth-redirect["']/m.exec(code);
+      /^(?:\s*)(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*\(\s*["']oauth-redirect["']/m.exec(code);
     if (assignment) {
       const varName = escapeForRegExp(assignment[1]!);
       const hasThen =
