@@ -54,3 +54,25 @@ decrypting produces identical bytes.
 Alternative regeneration tooling also exists under `tools/encrypted-ooxml-fixtures/` (Apache POI
 5.2.5), but was not used to generate the committed fixture bytes above.
 
+## Regenerating with Apache POI (alternative)
+
+To generate encrypted OOXML fixtures **without Excel**, you can use the Apache POI-based generator:
+
+- Source: `tools/encrypted-ooxml-fixtures/GenerateEncryptedXlsx.java`
+- Wrapper script (downloads pinned jars + verifies SHA-256): `tools/encrypted-ooxml-fixtures/generate.sh`
+
+Example (from repo root):
+
+```bash
+PLAINTEXT=fixtures/encrypted/ooxml/plaintext.xlsx
+
+tools/encrypted-ooxml-fixtures/generate.sh agile password "$PLAINTEXT" /tmp/agile.xlsx
+tools/encrypted-ooxml-fixtures/generate.sh standard password "$PLAINTEXT" /tmp/standard.xlsx
+tools/encrypted-ooxml-fixtures/generate.sh agile "" "$PLAINTEXT" /tmp/agile-empty-password.xlsx
+```
+
+Notes:
+- The generated encrypted files are not expected to be byte-for-byte stable across runs (random
+  salts/IVs).
+- POI's `standard` mode currently emits an `EncryptionInfo` header version of `4.2`
+  (still Standard/CryptoAPI encryption).

@@ -115,7 +115,9 @@ MAIN_CLASSFILE="${CLASSES_DIR}/${MAIN_CLASS}.class"
 
 if [[ ! -f "${MAIN_CLASSFILE}" || "${SOURCE}" -nt "${MAIN_CLASSFILE}" ]]; then
   echo "Compiling ${SOURCE}..." >&2
-  javac -classpath "${CP_JARS}" -d "${CLASSES_DIR}" "${SOURCE}"
+  # Some jars on the classpath include annotation processors; disable annotation processing to avoid
+  # noisy warnings (this tool doesn't rely on annotation processing).
+  javac -proc:none -classpath "${CP_JARS}" -d "${CLASSES_DIR}" "${SOURCE}"
 fi
 
 java -classpath "${CLASSES_DIR}:${CP_JARS}" "${MAIN_CLASS}" "${MODE}" "${PASSWORD}" "${IN_PLAINTEXT_XLSX}" "${OUT_ENCRYPTED_XLSX}"

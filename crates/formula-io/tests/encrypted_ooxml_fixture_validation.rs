@@ -68,7 +68,7 @@ fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
     }
 
     let (major, minor, flags) = read_encryption_info_header(&standard);
-    if (major, minor) == (3, 2) {
+    if matches!((major, minor), (3, 2) | (4, 2)) {
         // Real Office-encrypted (Standard/CryptoAPI) EncryptionInfo header.
     } else {
         assert_eq!(
