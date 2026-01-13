@@ -124,6 +124,38 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("begins editing when clicking the highlight in view mode (click-to-edit)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const { cancel, commit } = queryActions(host);
+
+    view.setActiveCell({ address: "A1", input: "hello", value: null });
+    expect(view.model.isEditing).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    expect(commit.hidden).toBe(true);
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    expect(highlight).toBeTruthy();
+
+    const e = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    highlight!.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(view.model.isEditing).toBe(true);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(commit.hidden).toBe(false);
+    expect(document.activeElement).toBe(view.textarea);
+    expect(view.textarea.value).toBe("hello");
+    // Click-to-edit should focus with caret at end (see highlight mousedown handler).
+    expect(view.textarea.selectionStart).toBe(5);
+    expect(view.textarea.selectionEnd).toBe(5);
+
+    host.remove();
+  });
+
   it("keeps edit mode active when the textarea blurs (Excel-style range selection mode)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
