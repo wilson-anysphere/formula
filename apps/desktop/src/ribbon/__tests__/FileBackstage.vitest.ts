@@ -5,8 +5,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Ribbon } from "../Ribbon";
 import type { RibbonActions } from "../ribbonSchema";
+import { setRibbonUiState } from "../ribbonUiState";
 
 afterEach(() => {
+  act(() => {
+    setRibbonUiState({
+      pressedById: Object.create(null),
+      labelById: Object.create(null),
+      disabledById: Object.create(null),
+      shortcutById: Object.create(null),
+      ariaKeyShortcutsById: Object.create(null),
+    });
+  });
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -74,6 +84,33 @@ describe("FileBackstage", () => {
     const firstItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-new"]');
     expect(firstItem).toBeInstanceOf(HTMLButtonElement);
     expect(document.activeElement).toBe(firstItem);
+
+    act(() => root.unmount());
+  });
+
+  it("uses RibbonUiState shortcut overrides for workbench file commands", () => {
+    vi.stubGlobal("requestAnimationFrame", ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 0 as any;
+    }) as any);
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: Object.create(null),
+        shortcutById: { "workbench.newWorkbook": "Ctrl+Alt+N" },
+        ariaKeyShortcutsById: { "workbench.newWorkbook": "Control+Alt+N" },
+      });
+    });
+
+    const { container, root } = renderRibbon(enableFileActions());
+    const { overlay } = openFileBackstage(container);
+
+    const firstItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-new"]');
+    expect(firstItem).toBeInstanceOf(HTMLButtonElement);
+    expect(firstItem?.getAttribute("aria-keyshortcuts")).toBe("Control+Alt+N");
+    expect(firstItem?.querySelector(".ribbon-backstage__hint")?.textContent?.trim()).toBe("Ctrl+Alt+N");
 
     act(() => root.unmount());
   });
