@@ -1,5 +1,5 @@
 use crate::openxml::{
-    local_name, parse_relationships, resolve_relationship_target, resolve_target,
+    local_name, parse_relationships, rels_part_name, resolve_relationship_target, resolve_target,
 };
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
@@ -10,7 +10,7 @@ use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelecti
 use formula_model::pivots::ScalarValue;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
 
 /// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
@@ -161,6 +161,8 @@ pub struct SlicerDefinition {
     pub cache_name: Option<String>,
     pub source_name: Option<String>,
     pub connected_pivot_tables: Vec<String>,
+    /// Table parts (`xl/tables/table*.xml`) referenced by the slicer cache relationships.
+    pub connected_tables: Vec<String>,
     pub placed_on_drawings: Vec<String>,
     /// Worksheet parts that host any drawing containing this slicer (e.g. `xl/worksheets/sheet1.xml`).
     pub placed_on_sheets: Vec<String>,
@@ -301,16 +303,17 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             None => None,
         };
 
-        let (cache_name, source_name, connected_pivot_tables) =
+        let (cache_name, source_name, connected_pivot_tables, connected_tables) =
             if let Some(cache_part) = cache_part.as_deref() {
                 let resolved = resolve_slicer_cache_definition(package, cache_part)?;
                 (
                     resolved.cache_name,
                     resolved.source_name,
                     resolved.connected_pivot_tables,
+                    resolved.connected_tables,
                 )
             } else {
-                (None, None, Vec::new())
+                (None, None, Vec::new(), Vec::new())
             };
 
         let placed_on_drawings = slicer_to_drawings
@@ -338,6 +341,7 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             cache_name,
             source_name,
             connected_pivot_tables,
+            connected_tables,
             placed_on_drawings,
             placed_on_sheets,
             placed_on_sheet_names,
@@ -961,6 +965,7 @@ struct ResolvedSlicerCacheDefinition {
     cache_name: Option<String>,
     source_name: Option<String>,
     connected_pivot_tables: Vec<String>,
+    connected_tables: Vec<String>,
 }
 
 fn resolve_slicer_cache_definition(
@@ -971,14 +976,80 @@ fn resolve_slicer_cache_definition(
         .part(cache_part)
         .ok_or_else(|| XlsxError::MissingPart(cache_part.to_string()))?;
     let parsed = parse_slicer_cache_xml(cache_bytes)?;
-    let connected_pivot_tables =
-        resolve_relationship_targets(package, cache_part, parsed.pivot_table_rids)?;
+
+    // Slicer caches can connect to both pivot tables and Excel Tables (ListObjects). Pivot table
+    // connections are referenced by relationship id inside the cache XML, while table connections
+    // are typically represented solely by relationships of type `.../table`.
+    //
+    // Excel generally emits `xl/slicerCaches/_rels/slicerCache*.xml.rels`, but the part can be
+    // missing or malformed in real-world files. This code is best-effort: if relationships cannot
+    // be parsed we fall back to empty connection lists rather than failing slicer discovery.
+    let (rel_by_id, connected_tables) = parse_slicer_cache_rels_best_effort(package, cache_part);
+
+    let mut connected_pivot_tables = BTreeSet::new();
+    for rid in parsed.pivot_table_rids {
+        let Some(rel) = rel_by_id.get(&rid) else {
+            continue;
+        };
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        let resolved = resolve_target(cache_part, &rel.target);
+        if !resolved.is_empty() {
+            connected_pivot_tables.insert(resolved);
+        }
+    }
 
     Ok(ResolvedSlicerCacheDefinition {
         cache_name: parsed.cache_name,
         source_name: parsed.source_name,
-        connected_pivot_tables,
+        connected_pivot_tables: connected_pivot_tables.into_iter().collect(),
+        connected_tables,
     })
+}
+
+fn parse_slicer_cache_rels_best_effort(
+    package: &XlsxPackage,
+    cache_part: &str,
+) -> (HashMap<String, crate::openxml::Relationship>, Vec<String>) {
+    const TABLE_REL_TYPE: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
+
+    let rels_name = rels_part_name(cache_part);
+    let relationships = match package.part(&rels_name) {
+        Some(bytes) => parse_relationships(bytes).unwrap_or_else(|_| Vec::new()),
+        None => Vec::new(),
+    };
+
+    let mut rel_by_id = HashMap::with_capacity(relationships.len());
+    let mut connected_tables = BTreeSet::new();
+
+    for rel in relationships {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            // External relationships are not OPC parts.
+            continue;
+        }
+
+        let type_uri = rel.type_uri.trim();
+        if type_uri == TABLE_REL_TYPE || type_uri.ends_with("/table") {
+            let resolved = resolve_target(cache_part, &rel.target);
+            if !resolved.is_empty() {
+                connected_tables.insert(resolved);
+            }
+        }
+
+        rel_by_id.insert(rel.id.clone(), rel);
+    }
+
+    (rel_by_id, connected_tables.into_iter().collect())
 }
 
 #[derive(Debug)]
