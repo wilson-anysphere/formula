@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getYMap } from "@formula/collab-yjs-utils";
 
 import type { CollabSession } from "@formula/collab-session";
 import type { ImageEntry, ImageStore } from "../drawings/types";
@@ -26,21 +27,6 @@ const DEFAULT_MAX_IMAGES = 100;
 
 function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function getYMap(value: unknown): Y.Map<any> | null {
-  if (value instanceof Y.Map) return value;
-
-  // Duck-type to handle multiple `yjs` module instances.
-  if (!value || typeof value !== "object") return null;
-  const maybe = value as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Map<any>;
 }
 
 function ensureNestedYMap(parent: any, key: string): Y.Map<any> | null {
