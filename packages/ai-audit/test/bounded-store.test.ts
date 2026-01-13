@@ -98,4 +98,40 @@ describe("BoundedAIAuditStore", () => {
     expect(typeof summary?.audit_original_chars).toBe("number");
     expect(summary.audit_original_chars).toBeGreaterThan((summary.audit_json as string).length);
   });
+
+  it("derives workbook_id during compaction when missing/blank", async () => {
+    const underlying = new MemoryAIAuditStore();
+    const store = new BoundedAIAuditStore(underlying, { max_entry_chars: 2_000 });
+
+    const huge = "x".repeat(50_000);
+
+    // Case 1: derive from input.workbookId when workbook_id is missing/blank.
+    await store.logEntry({
+      id: "entry-derive-1",
+      timestamp_ms: Date.now(),
+      session_id: "session-derive-1",
+      workbook_id: "   ",
+      mode: "chat",
+      input: { workbookId: "workbook-from-input", prompt: huge },
+      model: "unit-test-model",
+      tool_calls: [{ name: "tool", parameters: { payload: huge } }]
+    });
+
+    // Case 2: derive from session_id prefix when input has no workbook id.
+    await store.logEntry({
+      id: "entry-derive-2",
+      timestamp_ms: Date.now(),
+      session_id: "workbook-from-session:550e8400-e29b-41d4-a716-446655440000",
+      mode: "chat",
+      input: { prompt: huge },
+      model: "unit-test-model",
+      tool_calls: [{ name: "tool", parameters: { payload: huge } }]
+    });
+
+    const entries = await underlying.listEntries();
+    const byId = new Map(entries.map((e) => [e.id, e]));
+
+    expect(byId.get("entry-derive-1")!.workbook_id).toBe("workbook-from-input");
+    expect(byId.get("entry-derive-2")!.workbook_id).toBe("workbook-from-session");
+  });
 });
