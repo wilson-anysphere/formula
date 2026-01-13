@@ -1862,6 +1862,14 @@ fn file_path_to_uri(path: &str) -> String {
     encoded
 }
 
+// Keep hyperlink-related string caps consistent across the various encodings we parse.
+//
+// `parse_hyperlink_string` already caps at 1_000_000 UTF-16 code units. Hyperlink moniker strings
+// (URL/file monikers) use a length prefix that producers interpret inconsistently (bytes vs
+// characters), so we cap by the maximum number of bytes we might reasonably decode.
+const MAX_HLINK_UTF16_CHARS: usize = 1_000_000;
+const MAX_HLINK_UTF16_BYTES: usize = MAX_HLINK_UTF16_CHARS * 2;
+
 fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usize), String> {
     // Heuristic: `len` may be either a byte length or a character count.
     //
@@ -1875,10 +1883,22 @@ fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usiz
         return Ok((String::new(), 0));
     }
 
+    // BIFF hyperlink moniker length fields are untrusted. A corrupt file could declare a huge
+    // length and provide enough `CONTINUE` data to satisfy it, causing `decode_utf16le` to try to
+    // allocate an enormous `Vec<u16>`. Cap the maximum amount of UTF-16 we will ever decode.
+    let len_as_bytes_ok = len <= MAX_HLINK_UTF16_BYTES;
+    let len_as_chars_bytes = len.checked_mul(2);
+    let len_as_chars_ok =
+        len_as_chars_bytes.is_some_and(|byte_len| byte_len <= MAX_HLINK_UTF16_BYTES);
+
+    if !len_as_bytes_ok && !len_as_chars_ok {
+        return Err("implausible UTF-16 string length".to_string());
+    }
+
     let mut candidates: Vec<(String, usize, bool)> = Vec::new();
 
     // Candidate A: `len` as byte length.
-    if len % 2 == 0 && input.len() >= len {
+    if len_as_bytes_ok && len % 2 == 0 && input.len() >= len {
         let bytes = &input[..len];
         let ends_with_nul = bytes
             .chunks_exact(2)
@@ -1889,20 +1909,24 @@ fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usiz
     }
 
     // Candidate B: `len` as character count.
-    let byte_len = len
-        .checked_mul(2)
-        .ok_or_else(|| "string length overflow".to_string())?;
-    if byte_len % 2 == 0 && input.len() >= byte_len {
-        let bytes = &input[..byte_len];
-        let ends_with_nul = bytes
-            .chunks_exact(2)
-            .last()
-            .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
-        let s = decode_utf16le(bytes)?;
-        candidates.push((trim_trailing_nuls(s), byte_len, ends_with_nul));
+    if let Some(byte_len) = len_as_chars_bytes {
+        if len_as_chars_ok && byte_len % 2 == 0 && input.len() >= byte_len {
+            let bytes = &input[..byte_len];
+            let ends_with_nul = bytes
+                .chunks_exact(2)
+                .last()
+                .is_some_and(|chunk| chunk[0] == 0 && chunk[1] == 0);
+            let s = decode_utf16le(bytes)?;
+            candidates.push((trim_trailing_nuls(s), byte_len, ends_with_nul));
+        }
     }
 
     if candidates.is_empty() {
+        // If we rejected one or both interpretations for being implausibly large, surface that
+        // rather than a generic "truncated" error.
+        if !len_as_bytes_ok || !len_as_chars_ok {
+            return Err("implausible UTF-16 string length".to_string());
+        }
         return Err("truncated UTF-16 string".to_string());
     }
 
@@ -1920,7 +1944,7 @@ fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize)
         if cch == 0 {
             return Ok((String::new(), 4));
         }
-        if cch <= 1_000_000 {
+        if cch <= MAX_HLINK_UTF16_CHARS {
             if let Some(byte_len) = cch.checked_mul(2) {
                 if input.len() >= 4 + byte_len {
                     let bytes = &input[4..4 + byte_len];
@@ -2006,6 +2030,27 @@ mod tests {
         out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(data);
         out
+    }
+
+    #[test]
+    fn utf16_prefixed_string_rejects_implausible_length_small_input() {
+        let input = [0u8; 8];
+        let err = parse_utf16_prefixed_string(&input, u32::MAX as usize).unwrap_err();
+        assert!(
+            err.contains("implausible"),
+            "expected implausible-length error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn utf16_prefixed_string_rejects_implausible_length_even_when_buffer_is_large_enough() {
+        let len = MAX_HLINK_UTF16_BYTES + 2;
+        let input = vec![0u8; len];
+        let err = parse_utf16_prefixed_string(&input, len).unwrap_err();
+        assert!(
+            err.contains("implausible"),
+            "expected implausible-length error, got {err:?}"
+        );
     }
 
     #[test]
