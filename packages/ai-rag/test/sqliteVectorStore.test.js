@@ -286,6 +286,7 @@ test(
           rect: { r0: 0, c0: 0, r1: 1, c1: 1 },
           text: "hello",
           contentHash: "hash-a",
+          metadataHash: "meta-a",
           tokenCount: 5,
           label: "A",
         }),
@@ -324,6 +325,7 @@ test(
       assert.deepEqual(rec.metadata.rect, { r0: 0, c0: 0, r1: 1, c1: 1 });
       assert.equal(rec.metadata.text, "hello");
       assert.equal(rec.metadata.contentHash, "hash-a");
+      assert.equal(rec.metadata.metadataHash, "meta-a");
       assert.equal(rec.metadata.tokenCount, 5);
       assert.equal(rec.metadata.label, "A");
 
@@ -331,14 +333,17 @@ test(
       assert.equal(hits[0].id, "a");
 
       // metadata_json should now only contain the extra keys.
-      const stmt = store._db.prepare("SELECT sheet_name, content_hash, metadata_json FROM vectors WHERE id = ?;");
+      const stmt = store._db.prepare(
+        "SELECT sheet_name, content_hash, metadata_hash, metadata_json FROM vectors WHERE id = ?;"
+      );
       stmt.bind(["a"]);
       assert.ok(stmt.step());
       const migratedRow = stmt.get();
       stmt.free();
       assert.equal(migratedRow[0], "Sheet1");
       assert.equal(migratedRow[1], "hash-a");
-      assert.deepEqual(JSON.parse(migratedRow[2]), { label: "A" });
+      assert.equal(migratedRow[2], "meta-a");
+      assert.deepEqual(JSON.parse(migratedRow[3]), { label: "A" });
 
       await store.close();
 
