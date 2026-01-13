@@ -246,6 +246,15 @@ importers:
         specifier: ^13.6.27
         version: 13.6.29
 
+  packages/collab/encrypted-ranges:
+    dependencies:
+      '@formula/collab-workbook':
+        specifier: workspace:*
+        version: link:../workbook
+      yjs:
+        specifier: ^13.6.27
+        version: 13.6.29
+
   packages/collab/encryption: {}
 
   packages/collab/offline:
