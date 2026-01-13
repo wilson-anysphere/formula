@@ -42,6 +42,24 @@ DEFAULT_DIFF_IGNORE = {
 }
 
 
+def _normalize_diff_ignore_part(part: str) -> str:
+    """Normalize a diff-ignore part path to match the Rust helper's canonicalization."""
+
+    part = (part or "").strip().replace("\\", "/").lstrip("/")
+    return part
+
+
+def _compute_diff_ignore(*, diff_ignore: list[str], use_default: bool) -> set[str]:
+    ignore: set[str] = set()
+    if use_default:
+        ignore |= DEFAULT_DIFF_IGNORE
+    for part in diff_ignore:
+        normalized = _normalize_diff_ignore_part(part)
+        if normalized:
+            ignore.add(normalized)
+    return ignore
+
+
 @dataclass(frozen=True)
 class StepResult:
     status: str  # ok | failed | skipped
@@ -1021,7 +1039,7 @@ def _triage_paths(
     return [r for r in reports_by_index if r is not None]
 
 
-def main() -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run corpus workbook triage.")
     parser.add_argument("--corpus-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, required=True)
@@ -1078,18 +1096,33 @@ def main() -> int:
         help="Additional part path to ignore during diff (can be repeated).",
     )
     parser.add_argument(
+        "--no-default-diff-ignore",
+        action="store_true",
+        help=(
+            "Disable the built-in default ignore list (docProps/*). "
+            "When set, only explicit --diff-ignore entries are ignored."
+        ),
+    )
+    parser.add_argument(
         "--diff-limit",
         type=int,
         default=25,
         help="Maximum number of diff entries to include in reports (privacy-safe).",
     )
+    return parser
+
+
+def main() -> int:
+    parser = _build_arg_parser()
     args = parser.parse_args()
 
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
 
     rust_exe = _build_rust_helper()
-    diff_ignore = set(DEFAULT_DIFF_IGNORE) | {p for p in args.diff_ignore if p}
+    diff_ignore = _compute_diff_ignore(
+        diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
+    )
 
     ensure_dir(args.out_dir)
     reports_dir = args.out_dir / "reports"

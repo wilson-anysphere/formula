@@ -152,6 +152,15 @@ The `xlsx-diff` step classifies differences by severity:
 `tools/corpus/triage.py` ignores a small set of parts that are typically noisy across writers
 (`docProps/core.xml`, `docProps/app.xml`).
 
+To run a strict diff that includes those parts (useful for measuring full package stability), pass:
+
+```bash
+python -m tools.corpus.triage \
+  --corpus-dir tools/corpus/public \
+  --out-dir tools/corpus/out/public-strict \
+  --no-default-diff-ignore
+```
+
 #### calcChain (`xl/calcChain.xml`)
 
 Excel workbooks may include a **calculation chain** (`xl/calcChain.xml`) that records formula dependency order.
