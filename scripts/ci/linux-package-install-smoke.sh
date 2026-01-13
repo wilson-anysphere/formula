@@ -161,14 +161,13 @@ find_pkg_dirs() {
 
 deb_smoke_test_dir() {
   local deb_dir="$1"
-  local image="${FORMULA_DEB_SMOKE_IMAGE:-ubuntu:24.04}"
+  local image="$2"
 
   local deb_dir_abs
   deb_dir_abs="$(cd "${deb_dir}" && pwd)"
 
   echo "::group::.deb smoke test (${image}) - ${deb_dir}"
   echo "Mounting: ${deb_dir_abs} -> /mounted"
-  docker pull "${image}"
   docker run --rm \
     -v "${deb_dir_abs}:/mounted:ro" \
     "${image}" \
@@ -204,14 +203,13 @@ deb_smoke_test_dir() {
 
 rpm_smoke_test_dir() {
   local rpm_dir="$1"
-  local image="${FORMULA_RPM_SMOKE_IMAGE:-fedora:40}"
+  local image="$2"
 
   local rpm_dir_abs
   rpm_dir_abs="$(cd "${rpm_dir}" && pwd)"
 
   echo "::group::.rpm smoke test (${image}) - ${rpm_dir}"
   echo "Mounting: ${rpm_dir_abs} -> /mounted"
-  docker pull "${image}"
   docker run --rm \
     -v "${rpm_dir_abs}:/mounted:ro" \
     "${image}" \
@@ -261,17 +259,27 @@ rpm_smoke_test_dir() {
 require_docker
 
 if [[ "${kind}" == "deb" || "${kind}" == "all" ]]; then
+  deb_image="${FORMULA_DEB_SMOKE_IMAGE:-ubuntu:24.04}"
+  echo "::group::Pull .deb smoke test image (${deb_image})"
+  docker pull "${deb_image}"
+  echo "::endgroup::"
+
   deb_dirs=()
   find_pkg_dirs "deb" ".deb" deb_dirs
   for d in "${deb_dirs[@]}"; do
-    deb_smoke_test_dir "${d}"
+    deb_smoke_test_dir "${d}" "${deb_image}"
   done
 fi
 
 if [[ "${kind}" == "rpm" || "${kind}" == "all" ]]; then
+  rpm_image="${FORMULA_RPM_SMOKE_IMAGE:-fedora:40}"
+  echo "::group::Pull .rpm smoke test image (${rpm_image})"
+  docker pull "${rpm_image}"
+  echo "::endgroup::"
+
   rpm_dirs=()
   find_pkg_dirs "rpm" ".rpm" rpm_dirs
   for d in "${rpm_dirs[@]}"; do
-    rpm_smoke_test_dir "${d}"
+    rpm_smoke_test_dir "${d}" "${rpm_image}"
   done
 fi
