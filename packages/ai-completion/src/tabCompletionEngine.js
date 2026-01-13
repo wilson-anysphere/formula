@@ -1532,15 +1532,23 @@ function applyNameCase(name, typedPrefix) {
 function applyIdentifierCase(name, typedPrefix) {
   if (!typedPrefix) return name;
 
+  // Only treat the prefix as "uppercase" / "lowercase" when it actually contains
+  // letters. This avoids surprising behavior for prefixes like "'" (start of a
+  // quoted sheet name) where `typedPrefix === typedPrefix.toUpperCase()` would
+  // otherwise be true and we'd incorrectly uppercase the entire identifier.
+  const hasUpper = /[A-Z]/.test(typedPrefix);
+  const hasLower = /[a-z]/.test(typedPrefix);
+  const hasLetter = hasUpper || hasLower;
+
   // If the user is typing in uppercase, treat that as an explicit signal to
   // uppercase the full identifier (common for people who prefer Excel-style
   // uppercase references).
-  if (typedPrefix === typedPrefix.toUpperCase()) return name.toUpperCase();
+  if (hasLetter && hasUpper && !hasLower) return name.toUpperCase();
 
   // If the user is typing in lowercase, preserve internal capitalization for
   // CamelCase identifiers (e.g. named ranges), but avoid producing "suM"-style
   // completions for ALL-CAPS identifiers by downcasing them fully.
-  if (typedPrefix === typedPrefix.toLowerCase() && name === name.toUpperCase()) return name.toLowerCase();
+  if (hasLetter && hasLower && !hasUpper && name === name.toUpperCase()) return name.toLowerCase();
 
   return name;
 }

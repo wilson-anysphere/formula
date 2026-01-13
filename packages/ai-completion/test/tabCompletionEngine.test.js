@@ -3136,6 +3136,29 @@ test("Quoted sheet-name prefix completions escape apostrophes (Bob's Sheet → '
   );
 });
 
+test("Quoted sheet-name prefix completions preserve schema case when only \"'\" is typed", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM('";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM('My Sheet'!"),
+    `Expected sheet-prefix suggestion to preserve schema casing, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet prefixes are not suggested when the user hasn't started quotes for a sheet that needs them (=SUM(My Sheet)", async () => {
   const engine = new TabCompletionEngine({
     schemaProvider: {
