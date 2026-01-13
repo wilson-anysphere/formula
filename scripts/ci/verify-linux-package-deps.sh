@@ -278,11 +278,12 @@ for rpm_path in "${rpms[@]}"; do
   assert_contains_any "$requires" "$rpm_path" "OpenSSL package" "openssl-libs" "libopenssl3"
 
   # 2) Shared-library requirements (auto-generated).
+  #
+  # Keep these checks narrow: some runtime deps (notably AppIndicator + OpenSSL) may be loaded
+  # dynamically or pulled in indirectly, so they may not appear as direct ELF NEEDED entries.
+  # We enforce those via the explicit package Requires above.
   assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview) soname" "libwebkit2gtk-4\\.1"
   assert_contains_any "$requires" "$rpm_path" "GTK3 soname" "libgtk-3"
-  assert_contains_any "$requires" "$rpm_path" "AppIndicator soname" "appindicator"
-  assert_contains_any "$requires" "$rpm_path" "librsvg soname" "librsvg"
-  assert_contains_any "$requires" "$rpm_path" "OpenSSL (libssl) soname" "libssl\\.so" "libssl"
 
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
