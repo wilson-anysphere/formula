@@ -14,7 +14,7 @@ Commands:
            - default: full app startup (builds apps/desktop/dist + desktop binary)
            - CI default: shell startup only (skips frontend build; requires --startup-bench support in the binary)
   memory   Build the desktop app (dist + binary) and run the desktop idle memory benchmark.
-  size     Report desktop size: frontend dist + compressed asset download, binary, and (if present) installer artifacts.
+  size     Report desktop size: frontend dist + compressed asset download, binary (+ bloat breakdown), and (if present) installer artifacts.
 
 Environment (shared):
   FORMULA_PERF_HOME             Override the isolated HOME dir (default: target/perf-home)
