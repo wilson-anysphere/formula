@@ -8,8 +8,7 @@ describe("oauthRedirectIpc wiring", () => {
     // (lightly) that it wires the OAuth redirect listener and emits `oauth-redirect-ready`
     // *after* the listener is registered. The Rust host queues `oauth-redirect` URLs until this
     // handshake occurs; breaking it can drop deep-link redirects on cold start.
-    const mainUrl = new URL("../../main.ts", import.meta.url);
-    const source = readFileSync(mainUrl, "utf8");
+    const source = readFileSync(new URL("../../main.ts", import.meta.url), "utf8");
     const code = source
       // Strip block comments so commented-out wiring can't satisfy the guardrail.
       .replace(/\/\*[\s\S]*?\*\//g, "")
