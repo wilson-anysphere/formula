@@ -90,6 +90,10 @@ interface Row {
 
 For large datasets and analytical queries, use VertiPaq-style columnar compression:
 
+PivotTables that target the Data Model (PowerPivot) are computed via `formula-dax`; see
+[ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md)
+for the end-to-end ownership boundaries and refresh flows.
+
 ### Column Types
 
 ```typescript
