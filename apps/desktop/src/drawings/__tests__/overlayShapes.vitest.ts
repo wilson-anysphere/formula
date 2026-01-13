@@ -23,6 +23,8 @@ function createStubCanvasContext(): { ctx: CanvasRenderingContext2D; calls: Arra
     closePath: (...args: unknown[]) => calls.push({ method: "closePath", args }),
     fill: (...args: unknown[]) => calls.push({ method: "fill", args }),
     stroke: (...args: unknown[]) => calls.push({ method: "stroke", args }),
+    // Used by shape txBody text layout.
+    measureText: (text: string) => ({ width: text.length * 8 }),
   };
 
   return { ctx: ctx as CanvasRenderingContext2D, calls };
@@ -38,14 +40,16 @@ function createStubCanvas(ctx: CanvasRenderingContext2D): HTMLCanvasElement {
   return canvas as HTMLCanvasElement;
 }
 
-function createShapeObject(raw_xml: string): DrawingObject {
+function createShapeObject(raw_xml: string, opts?: { widthPx?: number; heightPx?: number }): DrawingObject {
+  const widthPx = opts?.widthPx ?? 20;
+  const heightPx = opts?.heightPx ?? 10;
   return {
     id: 1,
     kind: { type: "shape", raw_xml },
     anchor: {
       type: "absolute",
       pos: { xEmu: pxToEmu(5), yEmu: pxToEmu(7) },
-      size: { cx: pxToEmu(20), cy: pxToEmu(10) },
+      size: { cx: pxToEmu(widthPx), cy: pxToEmu(heightPx) },
     },
     zOrder: 0,
   };
@@ -184,16 +188,15 @@ describe("DrawingOverlay shapes", () => {
     `;
 
     const overlay = new DrawingOverlay(canvas, images, geom);
-    await overlay.render([createShapeObject(xml)], viewport);
+    // Ensure the text box has enough space (after the 4px padding on each side) for the
+    // label to be centered without being clamped to the padding bounds.
+    await overlay.render([createShapeObject(xml, { widthPx: 100, heightPx: 40 })], viewport);
 
-    expect(
-      calls.some(
-        (call) =>
-          call.method === "fillText" &&
-          call.args[0] === "Centered" &&
-          call.args[1] === 15 &&
-          call.args[2] === 12,
-      ),
-    ).toBe(true);
+    const call = calls.find((c) => c.method === "fillText" && c.args[0] === "Centered");
+    expect(call).toBeTruthy();
+    // `renderShapeText` uses a 4px padding inset and positions the text at the top-left
+    // baseline with center/middle alignment within that padded region.
+    expect(Number(call!.args[1])).toBeCloseTo(23, 5);
+    expect(Number(call!.args[2])).toBeCloseTo(17.4, 5);
   });
 });

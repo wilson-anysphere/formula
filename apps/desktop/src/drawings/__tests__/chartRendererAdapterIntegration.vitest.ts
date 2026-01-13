@@ -45,34 +45,52 @@ function createStubCanvas(ctx: CanvasRenderingContext2D): HTMLCanvasElement {
 
 function createNoopSurfaceContext(): CanvasRenderingContext2D {
   const noop = () => {};
-  const ctx: any = {
+  const gradient = { addColorStop: noop } as any;
+  // `charts/scene/color.ts` uses a Canvas context as a last-chance CSS parser by setting
+  // `fillStyle` and reading it back. Real canvas contexts *reject* unknown values (including
+  // CSS variables and many non-hex tokens) by leaving the prior fillStyle unchanged.
+  //
+  // In node tests we don't have a real canvas implementation, so mimic the relevant
+  // semantics to avoid infinite recursion in `parseColor()`.
+  const target: any = {
     globalAlpha: 1,
-    fillStyle: "black",
     strokeStyle: "black",
     lineWidth: 1,
-
-    save: noop,
-    restore: noop,
-    clearRect: noop,
-    beginPath: noop,
-    rect: noop,
-    moveTo: noop,
-    lineTo: noop,
-    ellipse: noop,
-    closePath: noop,
-    fill: noop,
-    stroke: noop,
-    setLineDash: noop,
-    arc: noop,
-    fillText: noop,
-    clip: noop,
-    translate: noop,
-    scale: noop,
-    rotate: noop,
-    quadraticCurveTo: noop,
-    bezierCurveTo: noop,
-    arcTo: noop,
+    measureText: (text: string) => ({ width: text.length * 8 }),
+    createLinearGradient: () => gradient,
+    createPattern: () => null,
+    getImageData: () => ({ data: new Uint8ClampedArray(), width: 0, height: 0 }),
+    putImageData: noop,
   };
+
+  let fillStyle = "#000000";
+  Object.defineProperty(target, "fillStyle", {
+    configurable: true,
+    get: () => fillStyle,
+    set: (value: unknown) => {
+      const next = String(value ?? "").trim();
+      if (!next) return;
+      // Accept values `parseColor()` can understand without needing the browser's
+      // CSS parser. Everything else is treated as invalid (leave prior value).
+      if (next === "transparent" || next.startsWith("#") || /^rgba?\(/i.test(next)) {
+        fillStyle = next;
+      }
+    },
+  });
+
+  const ctx: any = new Proxy(
+    target,
+    {
+      get(target, prop) {
+        if (prop in target) return (target as any)[prop];
+        return noop;
+      },
+      set(target, prop, value) {
+        (target as any)[prop] = value;
+        return true;
+      },
+    },
+  );
   return ctx as CanvasRenderingContext2D;
 }
 
@@ -165,4 +183,3 @@ describe("ChartRendererAdapter + DrawingOverlay", () => {
     expect(calls.some((call) => call.method === "strokeRect")).toBe(false);
   });
 });
-
