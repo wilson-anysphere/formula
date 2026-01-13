@@ -244,14 +244,14 @@ Notable keys:
 
 - `bundle.fileAssociations` registers spreadsheet file types with the OS:
   `.xlsx`, `.xls`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
- - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
- - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
-   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
- - `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros (e.g. `webkit2gtk4.1`, `gtk3`, `libappindicator-gtk3`,
-   `librsvg2`, `openssl-libs`).
- - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
-   - `bundle.macOS.entitlements` points at `apps/desktop/src-tauri/entitlements.plist`.
-     - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.
+  - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
+- `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
+  appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
+- `bundle.linux.rpm.depends` documents runtime deps for RPM-based distros (e.g. `webkit2gtk4.1`, `gtk3`, `libappindicator-gtk3`,
+  `librsvg2`, `openssl-libs`).
+- `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
+  - `bundle.macOS.entitlements` points at `apps/desktop/src-tauri/entitlements.plist`.
+    - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.
 
 ### Distribution (GitHub Releases)
 
