@@ -472,6 +472,26 @@ fn rgce_contains_area3d_relative_flags(rgce_bytes: &[u8]) -> bool {
     false
 }
 
+/// Materialize a BIFF8 `rgce` token stream from a base cell into a target cell by applying the
+/// row/col delta to tokens that embed absolute coordinates plus relative flags.
+///
+/// This is used by:
+/// - the `PtgExp` fallback (when `SHRFMLA`/`ARRAY` definition records are missing)
+/// - shared-formula decoding (when we need to expand `SHRFMLA` token streams into per-cell `rgce`)
+pub(crate) fn materialize_biff8_rgce_from_base(
+    base_rgce: &[u8],
+    base_cell: CellRef,
+    target_cell: CellRef,
+) -> Option<Vec<u8>> {
+    materialize_biff8_rgce(
+        base_rgce,
+        base_cell.row,
+        base_cell.col,
+        target_cell.row,
+        target_cell.col,
+    )
+}
+
 fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
     // BIFF8 PtgExp: [0x01][rw: u16][col: u16]
     if rgce.first().copied()? != 0x01 {

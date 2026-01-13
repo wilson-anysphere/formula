@@ -1577,20 +1577,25 @@ fn import_xls_path_with_biff_reader(
                             );
                         }
                     } else {
-                        // Provide a minimal rgce decode context: structured references and most
-                        // intra-sheet formulas don't require workbook-global metadata. Tokens that
-                        // require extra context (EXTERNSHEET/SUPBOOK/NAME table) are rendered
-                        // best-effort by the decoder.
-                        let empty_sheet_names: &[String] = &[];
-                        let empty_externsheet: &[biff::externsheet::ExternSheetEntry] = &[];
-                        let empty_supbooks: &[biff::supbook::SupBookInfo] = &[];
-                        let empty_defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+                        // Build a minimal rgce decode context. We provide sheet names (BoundSheet
+                        // order) and EXTERNSHEET entries so 3D references can be rendered; SUPBOOK and
+                        // defined-name metadata are left empty for best-effort decoding.
+                        let sheet_names_by_biff_idx: Vec<String> = biff_sheets
+                            .as_ref()
+                            .map(|sheets| sheets.iter().map(|s| s.name.clone()).collect())
+                            .unwrap_or_default();
+                        let externsheet_entries = biff_globals
+                            .as_ref()
+                            .map(|g| g.extern_sheets.as_slice())
+                            .unwrap_or(&[]);
+                        let supbooks: &[biff::supbook::SupBookInfo] = &[];
+                        let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
                         let ctx = biff::rgce::RgceDecodeContext {
                             codepage,
-                            sheet_names: empty_sheet_names,
-                            externsheet: empty_externsheet,
-                            supbooks: empty_supbooks,
-                            defined_names: empty_defined_names,
+                            sheet_names: &sheet_names_by_biff_idx,
+                            externsheet: externsheet_entries,
+                            supbooks,
+                            defined_names,
                         };
 
                         match biff::parse_biff8_sheet_formulas(
@@ -4136,10 +4141,15 @@ fn import_biff8_shared_formulas(
             // Best-effort: allow overriding formulas for PtgExp-backed cells when we can resolve the
             // backing SHRFMLA token stream.
             //
+            // Calamine can omit formulas for PtgExp follower cells entirely, or surface placeholder
+            // errors (`#UNKNOWN!` / `#REF!`) when it cannot resolve the shared formula definition.
+            //
             // For merged regions, only overwrite the anchor when it is currently unset or just a
-            // placeholder (`#UNKNOWN!`); otherwise preserve the existing anchor formula.
+            // placeholder; otherwise preserve the existing anchor formula.
             if anchor_cell != cell_ref
-                && existing.is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                && existing.is_some_and(|f| {
+                    f != ErrorValue::Unknown.as_str() && f != ErrorValue::Ref.as_str()
+                })
             {
                 continue;
             }

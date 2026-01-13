@@ -7,9 +7,9 @@ use formula_model::{
 };
 
 use super::records;
+use super::worksheet_formulas;
 use super::rgce;
 use super::strings;
-use super::worksheet_formulas;
 
 /// Hard cap on the number of per-cell XF indices tracked per worksheet.
 ///
@@ -1865,69 +1865,67 @@ pub(crate) fn parse_biff8_sheet_formulas(
 ) -> Result<SheetFormulas, String> {
     let mut out = SheetFormulas::default();
 
-    // FORMULA records can be split across one or more CONTINUE records when the formula payload is
-    // large. Use the logical iterator so we can decode long formulas (and stay aligned) even when
-    // the token stream crosses physical record boundaries.
-    let allows_continuation = |record_id: u16| record_id == RECORD_FORMULA;
-    let iter =
-        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+    // Prefer the richer worksheet formula parser so we can resolve shared-formula indirections
+    // (`PtgExp` via `SHRFMLA`/`ARRAY`) rather than always rendering `PtgExp` as `#UNKNOWN!`.
+    let parsed = worksheet_formulas::parse_biff8_worksheet_formulas(workbook_stream, start)?;
+    for w in &parsed.warnings {
+        out.warnings.push(w.message.clone());
+    }
 
-    for record in iter {
-        let record = match record {
-            Ok(r) => r,
-            Err(err) => {
-                out.warnings.push(format!("malformed BIFF record: {err}"));
-                break;
+    for cell in parsed.formula_cells.values() {
+        let mut resolved_rgce: Option<Vec<u8>> = None;
+        // Most BIFF8 `rgce` tokens are self-contained (row/col fields are absolute with separate
+        // relative/absolute flags). Some tokens (notably `PtgRefN`/`PtgAreaN`) require a "base cell"
+        // coordinate to interpret relative offsets. In those cases, the base cell is:
+        // - the current cell for normal/shared formulas
+        // - the *array anchor* cell for array formulas (Excel shows the same array formula text for
+        //   every cell in the group, anchored at the top-left/base cell).
+        let mut decode_base = rgce::CellCoord::new(cell.cell.row, cell.cell.col);
+
+        // Resolve PtgExp/PtgTbl when possible.
+        if matches!(cell.rgce.first().copied(), Some(0x01 | 0x02)) {
+            let mut resolve_warnings: Vec<crate::ImportWarning> = Vec::new();
+            let resolution = worksheet_formulas::resolve_ptgexp_or_ptgtbl_best_effort(
+                &parsed,
+                cell,
+                &mut resolve_warnings,
+            );
+            for w in resolve_warnings {
+                out.warnings.push(format!("cell {}: {}", cell.cell.to_a1(), w.message));
             }
-        };
 
-        // BOF indicates the start of a new substream; stop before consuming the next section so we
-        // don't attribute later formulas to this worksheet.
-        if record.offset != start && records::is_bof_record(record.record_id) {
-            break;
+            match resolution {
+                worksheet_formulas::PtgReferenceResolution::Shared { base } => {
+                    if let Some(def) = parsed.shrfmla.get(&base) {
+                        resolved_rgce =
+                            super::formulas::materialize_biff8_rgce_from_base(&def.rgce, base, cell.cell);
+                    }
+                }
+                worksheet_formulas::PtgReferenceResolution::Array { base } => {
+                    if let Some(def) = parsed.array.get(&base) {
+                        // ARRAY formulas are shared across the group and should not be materialized
+                        // per-cell (unlike SHRFMLA shared formulas). Excel displays the same array
+                        // formula text for every cell in the array range, anchored at `base`.
+                        resolved_rgce = Some(def.rgce.clone());
+                        decode_base = rgce::CellCoord::new(base.row, base.col);
+                    }
+                }
+                _ => {}
+            }
         }
 
-        match record.record_id {
-            RECORD_FORMULA => {
-                let parsed = match worksheet_formulas::parse_biff8_formula_record(&record) {
-                    Ok(parsed) => parsed,
-                    Err(err) => {
-                        out.warnings.push(format!(
-                            "failed to parse FORMULA record at offset {}: {err}",
-                            record.offset
-                        ));
-                        continue;
-                    }
-                };
-
-                let row = parsed.row as u32;
-                let col = parsed.col as u32;
-                if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
-                    out.warnings.push(format!(
-                        "skipping out-of-bounds FORMULA cell ({row},{col}) at offset {}",
-                        record.offset
-                    ));
-                    continue;
-                }
-
-                let cell_ref = CellRef::new(row, col);
-                let decoded = rgce::decode_biff8_rgce_with_base(
-                    &parsed.rgce,
-                    ctx,
-                    Some(rgce::CellCoord::new(row, col)),
-                );
-
-                for warning in decoded.warnings {
-                    out.warnings
-                        .push(format!("cell {}: {warning}", cell_ref.to_a1()));
-                }
-
-                if !decoded.text.trim().is_empty() {
-                    out.formulas.insert(cell_ref, decoded.text);
-                }
-            }
-            records::RECORD_EOF => break,
-            _ => {}
+        let rgce_bytes = resolved_rgce.as_deref().unwrap_or(&cell.rgce);
+        let decoded = rgce::decode_biff8_rgce_with_base(
+            rgce_bytes,
+            ctx,
+            Some(decode_base),
+        );
+        for warning in decoded.warnings {
+            out.warnings
+                .push(format!("cell {}: {warning}", cell.cell.to_a1()));
+        }
+        if !decoded.text.trim().is_empty() {
+            out.formulas.insert(cell.cell, decoded.text);
         }
     }
 

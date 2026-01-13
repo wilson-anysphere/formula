@@ -5,6 +5,7 @@ use std::io::{Cursor, Write};
 use formula_model::{
     indexed_color_argb, EXCEL_MAX_COLS, XLNM_FILTER_DATABASE, XLNM_PRINT_AREA, XLNM_PRINT_TITLES,
 };
+use sha1::{Digest as _, Sha1};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
 // commonly-used BIFF constants named so the intent stays readable.
@@ -642,6 +643,30 @@ pub fn build_continued_name_record_fixture_xls() -> Vec<u8> {
         let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
         stream
             .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture that combines:
+/// - BIFF8 RC4 CryptoAPI `FILEPASS` encryption, and
+/// - a defined name (`NAME` record) split across `CONTINUE` records.
+///
+/// This is used to ensure that after decryption, the workbook stream is still routed through the
+/// continued-NAME sanitizer before opening via `calamine` (preventing panics while building the
+/// `NAME` table needed for `PtgName` tokens).
+pub fn build_encrypted_continued_name_record_fixture_xls_rc4_cryptoapi(password: &str) -> Vec<u8> {
+    let workbook_stream = build_continued_name_record_workbook_stream();
+    let encrypted_workbook_stream =
+        encrypt_biff8_workbook_stream_rc4_cryptoapi(&workbook_stream, password);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole =
+        cfb::CompoundFile::create_with_version(cfb::Version::V3, cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&encrypted_workbook_stream)
             .expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
@@ -11803,5 +11828,311 @@ fn sst_record_single_string_with_phonetic(base_text: &str, phonetic_text: &str) 
     // Character bytes (compressed).
     out.extend_from_slice(base_text.as_bytes());
     out.extend_from_slice(&ext);
+    out
+}
+
+// -- Test-only BIFF8 RC4 CryptoAPI encryption helpers ---------------------------------------------
+//
+// These helpers are intentionally minimal and only cover the subset needed to generate encrypted
+// fixtures for integration tests. They are *not* a general `.xls` encryption implementation.
+//
+// The decryptor lives in `crates/formula-xls/src/decrypt.rs`.
+const ENCRYPTION_TYPE_RC4: u16 = 0x0001;
+const ENCRYPTION_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
+
+const CALG_RC4: u32 = 0x0000_6801;
+const CALG_SHA1: u32 = 0x0000_8004;
+
+const PAYLOAD_BLOCK_SIZE: usize = 1024;
+const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
+
+fn utf16le_bytes(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(|c| c.to_le_bytes()).collect()
+}
+
+fn sha1_bytes(chunks: &[&[u8]]) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    for chunk in chunks {
+        hasher.update(chunk);
+    }
+    let digest = hasher.finalize();
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&digest);
+    out
+}
+
+fn derive_key_material(password: &str, salt: &[u8]) -> [u8; 20] {
+    // Match `crates/formula-xls/src/decrypt.rs` (CryptoAPI RC4):
+    //   H0 = SHA1(salt || UTF16LE(password))
+    //   for i in 0..49999: H0 = SHA1(i_le32 || H0)
+    let pw_bytes = utf16le_bytes(password);
+    let mut hash = sha1_bytes(&[salt, &pw_bytes]);
+    for i in 0..PASSWORD_HASH_ITERATIONS {
+        let iter = i.to_le_bytes();
+        hash = sha1_bytes(&[&iter, &hash]);
+    }
+    hash
+}
+
+fn derive_block_key(key_material: &[u8; 20], block: u32, key_len: usize) -> Vec<u8> {
+    let block_bytes = block.to_le_bytes();
+    let digest = sha1_bytes(&[key_material, &block_bytes]);
+    if key_len == 5 {
+        // Match the decryptor's 40-bit padding behaviour: use a 16-byte key with the low 40 bits set.
+        let mut key = Vec::with_capacity(16);
+        key.extend_from_slice(&digest[..5]);
+        key.resize(16, 0);
+        key
+    } else {
+        digest[..key_len].to_vec()
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Rc4 {
+    s: [u8; 256],
+    i: u8,
+    j: u8,
+}
+
+impl Rc4 {
+    fn new(key: &[u8]) -> Self {
+        let mut s = [0u8; 256];
+        for (i, v) in s.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+
+        let mut j: u8 = 0;
+        for i in 0..256usize {
+            j = j.wrapping_add(s[i]).wrapping_add(key[i % key.len()]);
+            s.swap(i, j as usize);
+        }
+
+        Self { s, i: 0, j: 0 }
+    }
+
+    fn apply_keystream(&mut self, data: &mut [u8]) {
+        for b in data.iter_mut() {
+            self.i = self.i.wrapping_add(1);
+            self.j = self.j.wrapping_add(self.s[self.i as usize]);
+            self.s.swap(self.i as usize, self.j as usize);
+            let t = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
+            let k = self.s[t as usize];
+            *b ^= k;
+        }
+    }
+}
+
+struct PayloadRc4 {
+    key_material: [u8; 20],
+    key_len: usize,
+    block: u32,
+    pos_in_block: usize,
+    rc4: Rc4,
+}
+
+impl PayloadRc4 {
+    fn new(key_material: [u8; 20], key_len: usize) -> Self {
+        let key = derive_block_key(&key_material, 0, key_len);
+        let rc4 = Rc4::new(&key);
+        Self {
+            key_material,
+            key_len,
+            block: 0,
+            pos_in_block: 0,
+            rc4,
+        }
+    }
+
+    fn rekey(&mut self) {
+        self.block = self.block.wrapping_add(1);
+        let key = derive_block_key(&self.key_material, self.block, self.key_len);
+        self.rc4 = Rc4::new(&key);
+        self.pos_in_block = 0;
+    }
+
+    fn apply_keystream(&mut self, mut data: &mut [u8]) {
+        while !data.is_empty() {
+            if self.pos_in_block == PAYLOAD_BLOCK_SIZE {
+                self.rekey();
+            }
+
+            let remaining_in_block = PAYLOAD_BLOCK_SIZE.saturating_sub(self.pos_in_block);
+            let chunk_len = data.len().min(remaining_in_block);
+            let (chunk, rest) = data.split_at_mut(chunk_len);
+            self.rc4.apply_keystream(chunk);
+            self.pos_in_block += chunk_len;
+            data = rest;
+        }
+    }
+}
+
+struct CryptoApiFilepassRecord {
+    record_bytes: Vec<u8>,
+    key_material: [u8; 20],
+    key_len: usize,
+}
+
+fn build_filepass_record_rc4_cryptoapi(password: &str) -> CryptoApiFilepassRecord {
+    // Deterministic salt/verifier so the generated fixture is stable and diffable.
+    let salt: [u8; 16] = [
+        0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC,
+        0xAD, 0xAE, 0xAF,
+    ];
+    let verifier: [u8; 16] = [
+        0xF0, 0xE1, 0xD2, 0xC3, 0xB4, 0xA5, 0x96, 0x87, 0x78, 0x69, 0x5A, 0x4B, 0x3C,
+        0x2D, 0x1E, 0x0F,
+    ];
+
+    let verifier_hash = sha1_bytes(&[&verifier]);
+
+    let key_size_bits: u32 = 128;
+    let key_len: usize = (key_size_bits / 8) as usize;
+
+    let key_material = derive_key_material(password, &salt);
+    let key0 = derive_block_key(&key_material, 0, key_len);
+    let mut rc4 = Rc4::new(&key0);
+
+    let mut encrypted_verifier = verifier;
+    rc4.apply_keystream(&mut encrypted_verifier);
+    let mut encrypted_verifier_hash = verifier_hash;
+    rc4.apply_keystream(&mut encrypted_verifier_hash);
+
+    // Build an [MS-OFFCRYPTO] Standard `EncryptionInfo` payload that matches the subset parsed by
+    // `formula-xls`'s RC4 CryptoAPI decryptor.
+    //
+    // EncryptionHeader (fixed 8 DWORDs, no CSPName).
+    let mut encryption_header = Vec::with_capacity(32);
+    encryption_header.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    encryption_header.extend_from_slice(&0u32.to_le_bytes()); // SizeExtra
+    encryption_header.extend_from_slice(&CALG_RC4.to_le_bytes()); // AlgID
+    encryption_header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // AlgIDHash
+    encryption_header.extend_from_slice(&key_size_bits.to_le_bytes()); // KeySize
+    encryption_header.extend_from_slice(&0u32.to_le_bytes()); // ProviderType (ignored by decryptor)
+    encryption_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
+    encryption_header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+
+    // EncryptionVerifier.
+    let mut encryption_verifier = Vec::new();
+    encryption_verifier.extend_from_slice(&(salt.len() as u32).to_le_bytes()); // SaltSize
+    encryption_verifier.extend_from_slice(&salt);
+    encryption_verifier.extend_from_slice(&encrypted_verifier);
+    encryption_verifier
+        .extend_from_slice(&(encrypted_verifier_hash.len() as u32).to_le_bytes()); // VerifierHashSize
+    encryption_verifier.extend_from_slice(&encrypted_verifier_hash);
+
+    // EncryptionInfo.
+    let header_size = encryption_header.len() as u32;
+    let mut encryption_info = Vec::new();
+    encryption_info.extend_from_slice(&4u16.to_le_bytes()); // MajorVersion (opaque to decryptor)
+    encryption_info.extend_from_slice(&2u16.to_le_bytes()); // MinorVersion (opaque to decryptor)
+    encryption_info.extend_from_slice(&0u32.to_le_bytes()); // Flags
+    encryption_info.extend_from_slice(&header_size.to_le_bytes()); // HeaderSize
+    encryption_info.extend_from_slice(&encryption_header);
+    encryption_info.extend_from_slice(&encryption_verifier);
+
+    // FILEPASS payload (BIFF8 RC4 CryptoAPI).
+    let mut filepass_payload = Vec::new();
+    filepass_payload.extend_from_slice(&ENCRYPTION_TYPE_RC4.to_le_bytes());
+    filepass_payload.extend_from_slice(&ENCRYPTION_SUBTYPE_CRYPTOAPI.to_le_bytes());
+    filepass_payload.extend_from_slice(&(encryption_info.len() as u32).to_le_bytes());
+    filepass_payload.extend_from_slice(&encryption_info);
+
+    assert!(
+        filepass_payload.len() <= u16::MAX as usize,
+        "FILEPASS payload too large for BIFF record: len={}",
+        filepass_payload.len()
+    );
+
+    let mut record = Vec::with_capacity(4 + filepass_payload.len());
+    record.extend_from_slice(&RECORD_FILEPASS.to_le_bytes());
+    record.extend_from_slice(&(filepass_payload.len() as u16).to_le_bytes());
+    record.extend_from_slice(&filepass_payload);
+
+    CryptoApiFilepassRecord {
+        record_bytes: record,
+        key_material,
+        key_len,
+    }
+}
+
+fn patch_boundsheet_offsets_for_inserted_prefix(workbook_stream: &mut [u8], delta: u32) {
+    // BoundSheet8 record payload begins with `lbPlyPos` (u32), which is an absolute offset from the
+    // start of the workbook stream. When we insert a FILEPASS record near the start of the stream,
+    // all sheet substreams shift by `delta`.
+    let mut offset = 0usize;
+    while offset + 4 <= workbook_stream.len() {
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len = u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
+            as usize;
+        let data_start = offset + 4;
+        let data_end = data_start + len;
+        assert!(
+            data_end <= workbook_stream.len(),
+            "truncated record while patching boundsheets"
+        );
+
+        if record_id == RECORD_BOUNDSHEET {
+            assert!(len >= 4, "BOUNDSHEET record payload too short (len={len})");
+            let lb_ply_pos = u32::from_le_bytes([
+                workbook_stream[data_start],
+                workbook_stream[data_start + 1],
+                workbook_stream[data_start + 2],
+                workbook_stream[data_start + 3],
+            ]);
+            let patched = lb_ply_pos
+                .checked_add(delta)
+                .expect("lbPlyPos overflow while patching boundsheets");
+            workbook_stream[data_start..data_start + 4].copy_from_slice(&patched.to_le_bytes());
+        }
+
+        if record_id == RECORD_EOF {
+            break;
+        }
+        offset = data_end;
+    }
+}
+
+fn encrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream: &[u8], password: &str) -> Vec<u8> {
+    // Insert FILEPASS after the workbook globals BOF record.
+    assert!(workbook_stream.len() >= 4, "workbook stream too short");
+    let record_id = u16::from_le_bytes([workbook_stream[0], workbook_stream[1]]);
+    assert_eq!(record_id, RECORD_BOF, "expected workbook stream to start with BOF");
+    let bof_len = u16::from_le_bytes([workbook_stream[2], workbook_stream[3]]) as usize;
+    let bof_end = 4 + bof_len;
+    assert!(bof_end <= workbook_stream.len(), "truncated BOF record");
+
+    let filepass = build_filepass_record_rc4_cryptoapi(password);
+    let delta = filepass.record_bytes.len() as u32;
+
+    let mut out = Vec::with_capacity(workbook_stream.len() + filepass.record_bytes.len());
+    out.extend_from_slice(&workbook_stream[..bof_end]);
+    let filepass_offset = out.len();
+    out.extend_from_slice(&filepass.record_bytes);
+    out.extend_from_slice(&workbook_stream[bof_end..]);
+
+    patch_boundsheet_offsets_for_inserted_prefix(&mut out, delta);
+
+    // Encrypt record payload bytes after FILEPASS using the same record-payload-only stream model
+    // used by `decrypt_biff8_workbook_stream_rc4_cryptoapi`.
+    let mut cipher = PayloadRc4::new(filepass.key_material, filepass.key_len);
+    let mut offset = filepass_offset + filepass.record_bytes.len();
+    while offset < out.len() {
+        assert!(
+            offset + 4 <= out.len(),
+            "truncated BIFF record header while encrypting"
+        );
+        let len = u16::from_le_bytes([out[offset + 2], out[offset + 3]]) as usize;
+        let data_start = offset + 4;
+        let data_end = data_start + len;
+        assert!(
+            data_end <= out.len(),
+            "truncated BIFF record payload while encrypting"
+        );
+
+        cipher.apply_keystream(&mut out[data_start..data_end]);
+        offset = data_end;
+    }
+
     out
 }
