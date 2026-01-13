@@ -177,6 +177,7 @@ fn parse_legend(
         overlay,
         text_style: None,
         style: None,
+        layout: None,
     })
 }
 
@@ -586,6 +587,7 @@ fn parse_text_from_tx(tx_node: Node<'_, '_>) -> Option<TextModel> {
             formula: None,
             style: None,
             box_style: None,
+            layout: None,
         });
     }
 
