@@ -51,6 +51,8 @@ export class JsonVectorStore extends InMemoryVectorStore {
     this._resetOnCorrupt = opts.resetOnCorrupt ?? true;
     this._loaded = false;
     this._dirty = false;
+    /** @type {Promise<void> | null} */
+    this._loadPromise = null;
     // Serialize `storage.save()` calls to prevent lost updates when multiple
     // mutations trigger overlapping async persists.
     /** @type {Promise<void>} */
@@ -97,68 +99,92 @@ export class JsonVectorStore extends InMemoryVectorStore {
    */
   async load() {
     if (this._loaded) return;
-    this._loaded = true;
+    if (this._loadPromise) return await this._loadPromise;
 
-    let data;
-    try {
-      data = await this._storage.load();
-    } catch (err) {
-      await this._maybeResetOnCorrupt();
-      if (this._resetOnCorrupt) return;
-      throw err;
-    }
-    if (!data) return;
+    const promise = (async () => {
+      if (this._loaded) return;
 
-    let parsed;
-    try {
-      const raw = new TextDecoder().decode(data);
-      parsed = JSON.parse(raw);
-    } catch {
-      await this._maybeResetOnCorrupt();
-      return;
-    }
-
-    const version = parsed?.version;
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      (version !== 1 && version !== 2) ||
-      parsed.dimension !== this.dimension ||
-      !Array.isArray(parsed.records)
-    ) {
-      await this._maybeResetOnCorrupt();
-      return;
-    }
-
-    let records;
-    try {
-      records =
-        version === 1
-          ? parsed.records.map((r) => ({ id: r.id, vector: r.vector, metadata: r.metadata }))
-          : parsed.records.map((r) => ({
-              id: r.id,
-              vector: base64ToFloat32Vector(r.vector_b64),
-              metadata: r.metadata,
-            }));
-    } catch {
-      await this._maybeResetOnCorrupt();
-      return;
-    }
-
-    try {
-      await super.upsert(records);
-    } catch (err) {
-      await this._maybeResetOnCorrupt();
-      // Ensure we still proceed as an empty store when resetOnCorrupt is enabled.
-      if (this._resetOnCorrupt) {
-        this._records.clear();
+      let data;
+      try {
+        data = await this._storage.load();
+      } catch (err) {
+        await this._maybeResetOnCorrupt();
+        if (this._resetOnCorrupt) {
+          this._loaded = true;
+          return;
+        }
+        throw err;
+      }
+      if (!data) {
+        this._loaded = true;
         return;
       }
-      throw err;
+
+      let parsed;
+      try {
+        const raw = new TextDecoder().decode(data);
+        parsed = JSON.parse(raw);
+      } catch {
+        await this._maybeResetOnCorrupt();
+        this._loaded = true;
+        return;
+      }
+
+      const version = parsed?.version;
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        (version !== 1 && version !== 2) ||
+        parsed.dimension !== this.dimension ||
+        !Array.isArray(parsed.records)
+      ) {
+        await this._maybeResetOnCorrupt();
+        this._loaded = true;
+        return;
+      }
+
+      let records;
+      try {
+        records =
+          version === 1
+            ? parsed.records.map((r) => ({ id: r.id, vector: r.vector, metadata: r.metadata }))
+            : parsed.records.map((r) => ({
+                id: r.id,
+                vector: base64ToFloat32Vector(r.vector_b64),
+                metadata: r.metadata,
+              }));
+      } catch {
+        await this._maybeResetOnCorrupt();
+        this._loaded = true;
+        return;
+      }
+
+      try {
+        await super.upsert(records);
+      } catch (err) {
+        await this._maybeResetOnCorrupt();
+        // Ensure we still proceed as an empty store when resetOnCorrupt is enabled.
+        if (this._resetOnCorrupt) {
+          this._records.clear();
+          this._loaded = true;
+          return;
+        }
+        throw err;
+      }
+
+      this._loaded = true;
+    })();
+
+    this._loadPromise = promise;
+    try {
+      await promise;
+    } finally {
+      if (this._loadPromise === promise) this._loadPromise = null;
     }
   }
 
   async _persist() {
+    if (!this._dirty) return;
     const version = this._mutationVersion;
     const records = await super.list();
     const payload = JSON.stringify({
@@ -263,6 +289,8 @@ export class JsonVectorStore extends InMemoryVectorStore {
   }
 
   async close() {
+    // If a load is in-flight, wait for it before deciding whether we can return early.
+    if (this._loadPromise) await this.load();
     if (!this._loaded && !this._dirty) {
       // If nothing was ever loaded/mutated we can return early. Still ensure any
       // queued persists are drained (this is a no-op in the common case).

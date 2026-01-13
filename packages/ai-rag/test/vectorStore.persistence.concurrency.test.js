@@ -154,13 +154,20 @@ test("JsonVectorStore serializes deleteWorkbook persistence writes to prevent lo
   ]);
 
   const p1 = store.deleteWorkbook("wb1");
+  // Wait until deleteWorkbook has actually invoked `storage.save()` so its snapshot
+  // is taken before we start the concurrent upsert.
+  await storage.waitForSaves(2);
+
   const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
 
-  // Ensure the deleteWorkbook save is in-flight, then release the upsert save
-  // before it in buggy (non-serialized) implementations.
-  await storage.waitForSaves(2);
+  // Simulate out-of-order completion: allow "save #3" to complete before "save #2".
+  // In fixed implementations, save #3 won't even be invoked until save #2 completes,
+  // but pre-releasing it keeps the test deterministic.
   storage.release(3);
-  await Promise.resolve(); // allow upsert to enqueue its persist in buggy implementations
+  for (let i = 0; i < 25 && storage.saveCount < 3; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
   storage.release(2);
 
   await Promise.all([p1, p2]);
@@ -185,11 +192,17 @@ test("JsonVectorStore serializes clear persistence writes to prevent lost update
   ]);
 
   const p1 = store.clear();
+  // Wait until clear has invoked `storage.save()` so its snapshot is taken before
+  // starting the concurrent upsert.
+  await storage.waitForSaves(2);
+
   const p2 = store.upsert([{ id: "c", vector: [1, 1], metadata: { workbookId: "wb2" } }]);
 
-  await storage.waitForSaves(2);
   storage.release(3);
-  await Promise.resolve();
+  for (let i = 0; i < 25 && storage.saveCount < 3; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
   storage.release(2);
 
   await Promise.all([p1, p2]);
