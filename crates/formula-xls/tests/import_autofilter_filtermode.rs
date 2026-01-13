@@ -28,7 +28,7 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    let warning_substr = "sheet `Filtered` has FILTERMODE (filtered rows)";
+    let warning_substr = "failed to fully import `.xls` autofilter criteria for sheet `Filtered`";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -43,7 +43,7 @@ fn warns_on_filtermode_and_preserves_autofilter_dropdown_range() {
 }
 
 #[test]
-fn filtermode_converts_filtered_row_hidden_flags_to_filter_hidden() {
+fn filtermode_preserves_filtered_rows_as_filter_hidden() {
     let bytes = xls_fixture_builder::build_autofilter_filtermode_hidden_rows_fixture_xls();
     let result = import_fixture(&bytes);
 
@@ -58,18 +58,46 @@ fn filtermode_converts_filtered_row_hidden_flags_to_filter_hidden() {
         .expect("expected sheet.auto_filter to be set");
     assert_eq!(af.range, Range::from_a1("A1:B3").expect("valid range"));
 
-    // Row 2 (1-based) is hidden in the BIFF row metadata. When FILTERMODE is present we treat
-    // hidden data rows inside the AutoFilter range as filter-hidden (not user-hidden).
-    let entry = sheet.row_outline_entry(2);
+    // Row 2 (1-based) is hidden in the BIFF row metadata, but when FILTERMODE is present we do not
+    // preserve filtered-row visibility as user-hidden rows. Instead it is mapped to
+    // `OutlineEntry.hidden.filter`.
     assert!(
-        entry.hidden.filter,
-        "expected row 2 to be filter-hidden; entry={:?}; warnings={:?}",
-        entry, result.warnings
+        sheet.is_row_hidden_effective(2),
+        "expected row 2 to be hidden by filter; row_props={:?}; outline={:?}; warnings={:?}",
+        sheet.row_properties(1),
+        sheet.row_outline_entry(2),
+        result.warnings
+    );
+
+    let outline = sheet.row_outline_entry(2);
+    assert!(
+        outline.hidden.filter,
+        "expected row 2 to be filter-hidden; outline={outline:?}; warnings={:?}",
+        result.warnings
     );
     assert!(
-        !entry.hidden.user,
-        "expected row 2 to not be user-hidden; entry={:?}; warnings={:?}",
-        entry, result.warnings
+        !outline.hidden.user,
+        "expected row 2 to not be user-hidden; outline={outline:?}; warnings={:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn filtermode_sets_filter_hidden_flag_on_outline_entry() {
+    // Explicit regression test for `OutlineEntry.hidden.filter` when a BIFF ROW record is hidden
+    // inside an active FILTERMODE range.
+    let bytes = xls_fixture_builder::build_autofilter_filtermode_hidden_rows_fixture_xls();
+    let result = import_fixture(&bytes);
+    let sheet = result
+        .workbook
+        .sheet_by_name("FilteredHiddenRows")
+        .expect("FilteredHiddenRows missing");
+
+    assert!(
+        sheet.row_outline_entry(2).hidden.filter,
+        "expected row 2 to be filter-hidden; outline={:?}; warnings={:?}",
+        sheet.row_outline_entry(2),
+        result.warnings
     );
 }
 
@@ -95,12 +123,14 @@ fn filtermode_does_not_reclassify_user_hidden_rows_outside_final_autofilter_rang
     assert!(
         entry.hidden.user,
         "expected row 4 to remain user-hidden; entry={:?}; warnings={:?}",
-        entry, result.warnings
+        entry,
+        result.warnings
     );
     assert!(
         !entry.hidden.filter,
         "expected row 4 to not be filter-hidden; entry={:?}; warnings={:?}",
-        entry, result.warnings
+        entry,
+        result.warnings
     );
 }
 
@@ -129,7 +159,8 @@ fn warns_on_filtermode_and_sets_autofilter_from_sheet_stream_when_filterdatabase
         result.workbook.defined_names
     );
 
-    let warning_substr = "sheet `FilteredNoDb` has FILTERMODE (filtered rows)";
+    let warning_substr =
+        "failed to fully import `.xls` autofilter criteria for sheet `FilteredNoDb`";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -168,7 +199,8 @@ fn warns_on_filtermode_and_sets_autofilter_from_dimensions_when_autofilterinfo_m
         result.workbook.defined_names
     );
 
-    let warning_substr = "sheet `FilterModeOnly` has FILTERMODE (filtered rows)";
+    let warning_substr =
+        "failed to fully import `.xls` autofilter criteria for sheet `FilterModeOnly`";
     let matching: Vec<&formula_xls::ImportWarning> = result
         .warnings
         .iter()
@@ -207,12 +239,11 @@ fn sets_autofilter_from_sheet_stream_when_autofilterinfo_present_without_filterm
         result.workbook.defined_names
     );
 
+    let warning_substr =
+        "failed to fully import `.xls` autofilter criteria for sheet `AutoFilterInfoOnly`";
     assert!(
-        !result
-            .warnings
-            .iter()
-            .any(|w| w.message.contains("has FILTERMODE (filtered rows)")),
-        "unexpected FILTERMODE warning(s): {:?}",
+        !result.warnings.iter().any(|w| w.message.contains(warning_substr)),
+        "unexpected autofilter-criteria warning(s): {:?}",
         result.warnings
     );
 }

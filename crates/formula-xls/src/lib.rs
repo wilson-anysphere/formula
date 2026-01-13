@@ -488,6 +488,10 @@ fn import_xls_path_with_biff_reader(
     // parsing of sheet-local metadata like AutoFilter criteria.
     let mut sheet_stream_offsets_by_sheet_id: HashMap<formula_model::WorksheetId, usize> =
         HashMap::new();
+    // Map output worksheet ids to whether the sheet stream contained FILTERMODE. Used to decide
+    // warning policy when criteria records are missing/unsupported.
+    let mut sheet_filter_mode_by_sheet_id: HashMap<formula_model::WorksheetId, bool> =
+        HashMap::new();
     let mut sst_phonetics: Option<Vec<Option<String>>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
@@ -1090,6 +1094,7 @@ fn import_xls_path_with_biff_reader(
                 .as_ref()
                 .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
             {
+                sheet_filter_mode_by_sheet_id.insert(sheet.id, props.filter_mode);
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
                 apply_row_col_style_ids(
@@ -1102,21 +1107,6 @@ fn import_xls_path_with_biff_reader(
                 );
 
                 sheet_stream_autofilter_range = props.auto_filter_range;
-
-                if props.filter_mode {
-                    // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
-                    //
-                    // BIFF row metadata does not distinguish between user-hidden and filter-hidden
-                    // rows. We classify hidden rows best-effort after the canonical AutoFilter
-                    // range is finalized.
-                    push_import_warning(
-                        &mut warnings,
-                        format!(
-                            "sheet `{sheet_name}` has FILTERMODE (filtered rows); filter criteria and row visibility may not round-trip exactly on import"
-                        ),
-                        &mut warnings_suppressed,
-                    );
-                }
             }
 
             if sheet.auto_filter.is_none() {
@@ -3060,14 +3050,39 @@ fn import_xls_path_with_biff_reader(
                 af.range,
             ) {
                 Ok(mut parsed) => {
-                    if !parsed.filter_columns.is_empty() {
+                    let parsed_columns_empty = parsed.filter_columns.is_empty();
+                    let parsed_warnings_empty = parsed.warnings.is_empty();
+                    // Prefer AutoFilter criteria parsed from AutoFilter12 future records (when
+                    // available) and only fall back to legacy AUTOFILTER criteria when no other
+                    // filter-column metadata was recovered.
+                    if af.filter_columns.is_empty() && !parsed.filter_columns.is_empty() {
                         af.filter_columns = std::mem::take(&mut parsed.filter_columns);
                     }
+
+                    let filter_mode = sheet_filter_mode_by_sheet_id
+                        .get(&sheet.id)
+                        .copied()
+                        .unwrap_or(false);
+                    if filter_mode
+                        && af.filter_columns.is_empty()
+                        && parsed_columns_empty
+                        && parsed_warnings_empty
+                    {
+                        push_import_warning(
+                            &mut warnings,
+                            format!(
+                                "failed to fully import `.xls` autofilter criteria for sheet `{}`: FILTERMODE is set but no AutoFilter criteria records were found",
+                                sheet.name
+                            ),
+                            &mut warnings_suppressed,
+                        );
+                    }
+
                     for w in parsed.warnings.drain(..) {
                         push_import_warning(
                             &mut warnings,
                             format!(
-                                "failed to import `.xls` AutoFilter criteria for sheet `{}`: {w}",
+                                "failed to fully import `.xls` autofilter criteria for sheet `{}`: {w}",
                                 sheet.name
                             ),
                             &mut warnings_suppressed,
@@ -3077,7 +3092,7 @@ fn import_xls_path_with_biff_reader(
                 Err(err) => push_import_warning(
                     &mut warnings,
                     format!(
-                        "failed to import `.xls` AutoFilter criteria for sheet `{}`: {err}",
+                        "failed to fully import `.xls` autofilter criteria for sheet `{}`: {err}",
                         sheet.name
                     ),
                     &mut warnings_suppressed,
