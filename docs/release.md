@@ -456,17 +456,18 @@ Verification (signed artifacts):
   (CI does) — adjust the `target\\...` path accordingly.
   ```powershell
   # If you built without --target, bundles may land under src-tauri\\target\\release\\bundle\\...
-  signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
-  signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
-
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
+ 
   # If you built with --target (as CI does), bundles land under src-tauri\\target\\<triple>\\release\\bundle\\...
-  signtool verify /pa /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe
-  signtool verify /pa /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi
-  signtool verify /pa /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis\*.exe
-  signtool verify /pa /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\msi\*.msi
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis\*.exe
+  signtool verify /pa /all /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\msi\*.msi
   ```
-  - Release CI also runs `signtool verify /pa /v` on the produced installers when `WINDOWS_CERTIFICATE`
-    is configured (see `scripts/ci/check-windows-installer-signatures.py`).
+  - Release CI runs `pwsh scripts/validate-windows-bundles.ps1` on the produced installers when
+    `WINDOWS_CERTIFICATE` is configured. This validates that the expected installers were produced
+    and that they are Authenticode-signed and timestamped.
 
 Timestamping:
 
@@ -1098,8 +1099,8 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
    If Authenticode signing is enabled, verify signatures:
 
    ```bat
-   signtool verify /pa /v path\to\installer.exe
-   signtool verify /pa /v path\to\installer.msi
+   signtool verify /pa /all /v path\to\installer.exe
+   signtool verify /pa /all /v path\to\installer.msi
    ```
 
    ### Windows: WebView2 install smoke test (clean VM)
