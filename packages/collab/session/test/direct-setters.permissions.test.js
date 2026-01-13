@@ -191,7 +191,7 @@ test("CollabSession direct setter escape hatch can bypass permissions when reque
   doc.destroy();
 });
 
-test("CollabSession direct setter escape hatch allows writing to unparseable cell keys", async () => {
+test("CollabSession direct setter escape hatch allows writing to unparseable cell keys (when encryption does not require parsing)", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc, schema: { autoInit: false } });
   session.setPermissions({ role: "viewer", userId: "u-viewer", rangeRestrictions: [] });

@@ -2081,7 +2081,7 @@ export class CollabSession {
     // Fail closed: when permissions are configured, we must not allow callers to
     // bypass permission checks by providing an unparseable key.
     if (this.permissions && !ignorePermissions && !parsedMaybe) {
-      throw new Error(`Invalid cellKey: ${cellKey}`);
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
     }
 
     if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
@@ -2093,7 +2093,7 @@ export class CollabSession {
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
     if (needsCellAddress && !parsed) {
-      throw new Error(`Invalid cellKey "${cellKey}": expected "SheetId:row:col"`);
+      throw new Error(`Invalid cellKey "${String(cellKey)}": expected "SheetId:row:col"`);
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
@@ -2284,7 +2284,7 @@ export class CollabSession {
     // Fail closed: when permissions are configured, we must not allow callers to
     // bypass permission checks by providing an unparseable key.
     if (this.permissions && !ignorePermissions && !parsedMaybe) {
-      throw new Error(`Invalid cellKey: ${cellKey}`);
+      throw new Error(`Invalid cellKey: ${String(cellKey)}`);
     }
 
     if (this.permissions && !ignorePermissions && parsedMaybe && !this.canEditCell(parsedMaybe)) {
@@ -2296,7 +2296,7 @@ export class CollabSession {
     const needsCellAddress = this.encryption != null || existingEnc !== undefined;
     const parsed = needsCellAddress ? parsedMaybe : null;
     if (needsCellAddress && !parsed) {
-      throw new Error(`Invalid cellKey "${cellKey}": expected "SheetId:row:col"`);
+      throw new Error(`Invalid cellKey "${String(cellKey)}": expected "SheetId:row:col"`);
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
