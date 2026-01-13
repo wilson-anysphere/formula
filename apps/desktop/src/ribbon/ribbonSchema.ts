@@ -416,7 +416,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               size: "icon",
             },
             {
-              id: "open-inline-ai-edit",
+              id: "ai.inlineEdit",
               label: "Inline Edit",
               ariaLabel: "Inline AI Edit",
               iconId: "sparkles",

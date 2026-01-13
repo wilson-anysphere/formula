@@ -44,7 +44,6 @@ test("ribbon schema and File backstage expose stable, unique test ids", () => {
     // Home tab: core e2e hooks.
     "open-panel-ai-chat",
     "open-panel-ai-audit",
-    "open-ai-panel",
     "open-ai-audit-panel",
     "open-inline-ai-edit",
     "open-extensions-panel",
@@ -103,4 +102,3 @@ test("ribbon schema and File backstage expose stable, unique test ids", () => {
       .join("\n")}`,
   );
 });
-

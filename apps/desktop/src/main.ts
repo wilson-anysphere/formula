@@ -9632,9 +9632,54 @@ mountRibbon(ribbonReactRoot, {
         executeBuiltinCommand(commandId);
         return;
 
-      case "open-inline-ai-edit":
-        executeBuiltinCommand("ai.inlineEdit");
+      case "open-ai-audit-panel":
+      case "open-panel-ai-audit":
+        toggleDockPanel(PanelIds.AI_AUDIT);
         return;
+      case "open-version-history-panel":
+        toggleDockPanel(PanelIds.VERSION_HISTORY);
+        return;
+      case "open-branch-manager-panel":
+        toggleDockPanel(PanelIds.BRANCH_MANAGER);
+        return;
+      case "open-data-queries-panel":
+        toggleDockPanel(PanelIds.DATA_QUERIES);
+        return;
+      case "open-macros-panel":
+        toggleDockPanel(PanelIds.MACROS);
+        return;
+      case "open-script-editor-panel":
+        toggleDockPanel(PanelIds.SCRIPT_EDITOR);
+        return;
+      case "open-python-panel":
+        toggleDockPanel(PanelIds.PYTHON);
+        return;
+      case "open-marketplace-panel": {
+        // Opening the Marketplace panel should not eagerly start the extension host; users can
+        // browse/search/install extensions without spinning up the extension runtime. Extensions
+        // are loaded lazily when the user opens the Extensions panel or executes an extension
+        // command (see `ensureExtensionsLoaded()`).
+        toggleDockPanel(PanelIds.MARKETPLACE);
+        return;
+      }
+      case "open-extensions-panel": {
+        // Extensions are lazy-loaded to keep startup light. Opening the Extensions panel
+        // should trigger the host to load + sync contributed panels/commands.
+        void ensureExtensionsLoadedRef?.()
+          .then(() => {
+            updateKeybindingsRef?.();
+            syncContributedCommandsRef?.();
+            syncContributedPanelsRef?.();
+          })
+          .catch(() => {
+            // ignore; panel open/close should still work
+          });
+        // "Open Extensions" should be idempotent: if the panel is already open (for example,
+        // restored from layout persistence after a reload), focus it instead of toggling
+        // it closed. Closing remains available via the panel's close control.
+        ribbonLayoutController?.openPanel(PanelIds.EXTENSIONS);
+        return;
+      }
       case "open-vba-migrate-panel":
         toggleDockPanel(PanelIds.VBA_MIGRATE);
         return;
@@ -9689,6 +9734,9 @@ mountRibbon(ribbonReactRoot, {
         void openCustomZoomQuickPick();
         return;
       default:
+        // If the ribbon command matches a registered command id (builtin or extension),
+        // dispatch it through the shared CommandRegistry. This keeps ribbon buttons
+        // aligned with keybindings + command palette behavior.
         if (commandRegistry.getCommand(commandId)) {
           executeBuiltinCommand(commandId);
           return;
