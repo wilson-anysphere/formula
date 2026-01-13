@@ -6,6 +6,13 @@ use crate::util::{
 };
 use zeroize::Zeroizing;
 
+// CryptoAPI algorithm identifiers (MS-OFFCRYPTO Standard / CryptoAPI encryption).
+#[allow(dead_code)]
+const CALG_RC4: u32 = 0x0000_6801;
+const CALG_AES_128: u32 = 0x0000_660E;
+const CALG_AES_192: u32 = 0x0000_660F;
+const CALG_AES_256: u32 = 0x0000_6610;
+
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
     #[allow(dead_code)]
@@ -124,7 +131,7 @@ fn parse_encryption_verifier(
 
     // Basic algorithm sanity check: support AES only for now.
     match header.alg_id {
-        0x0000_660E | 0x0000_660F | 0x0000_6610 => {} // CALG_AES_128/192/256
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {}
         other => {
             return Err(OfficeCryptoError::UnsupportedEncryption(format!(
                 "unsupported cipher AlgID {other:#x}"
@@ -138,6 +145,76 @@ fn parse_encryption_verifier(
         verifier_hash_size,
         encrypted_verifier_hash: encrypted_verifier_hash.to_vec(),
     })
+}
+
+/// Verify an MS-OFFCRYPTO Standard password by decrypting the `EncryptionVerifier` fields.
+///
+/// This is a lightweight check that does **not** require decrypting the full `EncryptedPackage`.
+/// It is intended to be used as an early password validation step.
+#[allow(dead_code)]
+pub(crate) fn verify_password_standard(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+    password: &str,
+) -> Result<(), OfficeCryptoError> {
+    let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(header.alg_id_hash)?;
+    let deriver = StandardKeyDeriver::new(hash_alg, header.key_bits, &verifier.salt, password);
+    let key0 = deriver.derive_key_for_block(0)?;
+
+    let expected_hash_len = verifier.verifier_hash_size as usize;
+    let iv = [0u8; 16];
+
+    let (verifier_plain, verifier_hash_plain_full) = match header.alg_id {
+        CALG_RC4 => {
+            if verifier.encrypted_verifier.len() != 16 {
+                return Err(OfficeCryptoError::InvalidFormat(format!(
+                    "EncryptionVerifier.encryptedVerifier must be 16 bytes for RC4 (got {})",
+                    verifier.encrypted_verifier.len()
+                )));
+            }
+
+            let mut verifier_plain = verifier.encrypted_verifier.clone();
+            crate::crypto::rc4_xor_in_place(key0.as_slice(), &mut verifier_plain)?;
+
+            let mut verifier_hash_plain = verifier.encrypted_verifier_hash.clone();
+            crate::crypto::rc4_xor_in_place(key0.as_slice(), &mut verifier_hash_plain)?;
+            (verifier_plain, verifier_hash_plain)
+        }
+        CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
+            let verifier_plain = aes_cbc_decrypt(key0.as_slice(), &iv, &verifier.encrypted_verifier)?;
+            let verifier_hash_plain =
+                aes_cbc_decrypt(key0.as_slice(), &iv, &verifier.encrypted_verifier_hash)?;
+            (verifier_plain, verifier_hash_plain)
+        }
+        other => {
+            return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+                "unsupported cipher AlgID {other:#x}"
+            )))
+        }
+    };
+
+    let verifier_hash_plain = verifier_hash_plain_full.get(..expected_hash_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat(format!(
+            "decrypted verifier hash shorter than verifierHashSize (got {}, need {})",
+            verifier_hash_plain_full.len(),
+            expected_hash_len
+        ))
+    })?;
+
+    let verifier_hash = hash_alg.digest(verifier_plain.as_slice());
+    let verifier_hash = verifier_hash.get(..expected_hash_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat(format!(
+            "hash output shorter than verifierHashSize (got {}, need {})",
+            verifier_hash.len(),
+            expected_hash_len
+        ))
+    })?;
+
+    if !ct_eq(verifier_hash_plain, verifier_hash) {
+        return Err(OfficeCryptoError::InvalidPassword);
+    }
+
+    Ok(())
 }
 
 pub(crate) fn decrypt_standard_encrypted_package(
@@ -325,7 +402,10 @@ where
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::crypto::{aes_cbc_encrypt, HashAlgorithm, StandardKeyDeriver};
+    use crate::crypto::{
+        aes_cbc_encrypt, hash_password, password_to_utf16le, rc4_xor_in_place, HashAlgorithm,
+        StandardKeyDeriver,
+    };
     use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
 
     pub(crate) fn standard_encryption_info_fixture() -> Vec<u8> {
@@ -422,5 +502,158 @@ pub(crate) mod tests {
             ct_eq_call_count() > 0,
             "expected constant-time compare helper to be invoked"
         );
+    }
+
+    fn derive_key_ref(
+        hash_alg: HashAlgorithm,
+        key_bits: u32,
+        salt: &[u8],
+        password: &str,
+        block_index: u32,
+    ) -> Vec<u8> {
+        // Matches `StandardKeyDeriver` (50k spin) + CryptoAPI CryptDeriveKey behavior.
+        let pw = password_to_utf16le(password);
+        let pw_hash = hash_password(hash_alg, salt, &pw, 50_000);
+
+        let mut buf = Vec::with_capacity(pw_hash.len() + 4);
+        buf.extend_from_slice(&pw_hash);
+        buf.extend_from_slice(&block_index.to_le_bytes());
+        let h = hash_alg.digest(&buf);
+
+        let key_len = (key_bits as usize) / 8;
+        if key_len <= h.len() {
+            return h[..key_len].to_vec();
+        }
+
+        // CryptoAPI key expansion used by MS-OFFCRYPTO Standard encryption: pad `h` to 64 bytes
+        // with 0x36 and 0x5C, hash each, and concatenate.
+        let mut buf1 = h.clone();
+        buf1.resize(64, 0x36);
+        let mut buf2 = h.clone();
+        buf2.resize(64, 0x5c);
+        let mut out = hash_alg.digest(&buf1);
+        out.extend_from_slice(&hash_alg.digest(&buf2));
+        out.truncate(key_len);
+        out
+    }
+
+    #[test]
+    fn verify_password_standard_rc4_keysize_hash_matrix() {
+        // Synthetic (password, salt, verifier) fixture used across the parameter matrix.
+        let password = "correct horse battery staple";
+        let wrong_password = "not the password";
+        let salt: [u8; 16] = [
+            0x10, 0x32, 0x54, 0x76, 0x98, 0xba, 0xdc, 0xfe, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+            0xcd, 0xef,
+        ];
+        let verifier_plain: [u8; 16] = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ];
+
+        for (hash_alg, alg_id_hash) in [
+            (HashAlgorithm::Sha1, 0x0000_8004u32), // CALG_SHA1
+            (HashAlgorithm::Md5, 0x0000_8003u32),  // CALG_MD5
+        ] {
+            for key_bits in [40u32, 56u32, 128u32] {
+                // Derive the expected key for block 0 and validate truncation.
+                let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
+                let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+                let key0 = deriver.derive_key_for_block(0).expect("derive key");
+                assert_eq!(
+                    key0.as_slice(),
+                    key_ref.as_slice(),
+                    "StandardKeyDeriver should match the reference derivation"
+                );
+                assert_eq!(
+                    key_ref.len(),
+                    (key_bits / 8) as usize,
+                    "derived key length should be keySize/8"
+                );
+                assert!(
+                    key_ref.len() <= hash_alg.digest_len(),
+                    "for RC4, keyLen should be <= hashLen (truncation case)"
+                );
+
+                // Encrypt verifier + verifierHash with RC4 using a fresh cipher for each field.
+                let mut encrypted_verifier = verifier_plain.to_vec();
+                rc4_xor_in_place(&key_ref, &mut encrypted_verifier).expect("rc4 encrypt verifier");
+
+                let verifier_hash = hash_alg.digest(&verifier_plain);
+                let mut encrypted_verifier_hash = verifier_hash.clone();
+                rc4_xor_in_place(&key_ref, &mut encrypted_verifier_hash)
+                    .expect("rc4 encrypt verifier hash");
+
+                let header = EncryptionHeader {
+                    alg_id: CALG_RC4,
+                    alg_id_hash,
+                    key_bits,
+                    provider_type: 0,
+                    csp_name: String::new(),
+                };
+                let verifier = EncryptionVerifier {
+                    salt: salt.to_vec(),
+                    encrypted_verifier,
+                    verifier_hash_size: verifier_hash.len() as u32,
+                    encrypted_verifier_hash,
+                };
+
+                verify_password_standard(&header, &verifier, password)
+                    .expect("correct password should verify");
+                let err = verify_password_standard(&header, &verifier, wrong_password)
+                    .expect_err("wrong password should fail");
+                assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+            }
+        }
+    }
+
+    #[test]
+    fn cryptderivekey_expansion_is_exercised_for_aes256_sha1() {
+        let password = "correct horse battery staple";
+        let wrong_password = "not the password";
+        let salt: [u8; 16] = [0x42u8; 16];
+        let verifier_plain: [u8; 16] = *b"formula-std-test";
+
+        let key_bits = 256u32;
+        let hash_alg = HashAlgorithm::Sha1;
+        let key_ref = derive_key_ref(hash_alg, key_bits, &salt, password, 0);
+        let deriver = StandardKeyDeriver::new(hash_alg, key_bits, &salt, password);
+        let key0 = deriver.derive_key_for_block(0).expect("derive key");
+        assert_eq!(key0.as_slice(), key_ref.as_slice());
+        assert_eq!(key_ref.len(), 32);
+        assert!(
+            key_ref.len() > hash_alg.digest_len(),
+            "AES-256+SHA1 should require CryptDeriveKey expansion"
+        );
+
+        // Encrypt verifier and verifierHash with AES-CBC, IV=0.
+        let iv = [0u8; 16];
+        let encrypted_verifier =
+            aes_cbc_encrypt(&key_ref, &iv, &verifier_plain).expect("encrypt verifier");
+
+        let verifier_hash = hash_alg.digest(&verifier_plain);
+        let mut verifier_hash_padded = verifier_hash.clone();
+        verifier_hash_padded.resize(32, 0);
+        let encrypted_verifier_hash =
+            aes_cbc_encrypt(&key_ref, &iv, &verifier_hash_padded).expect("encrypt verifier hash");
+
+        let header = EncryptionHeader {
+            alg_id: CALG_AES_256,
+            alg_id_hash: 0x0000_8004u32, // CALG_SHA1
+            key_bits,
+            provider_type: 0,
+            csp_name: String::new(),
+        };
+        let verifier = EncryptionVerifier {
+            salt: salt.to_vec(),
+            encrypted_verifier,
+            verifier_hash_size: verifier_hash.len() as u32,
+            encrypted_verifier_hash,
+        };
+
+        verify_password_standard(&header, &verifier, password).expect("correct password should verify");
+        let err =
+            verify_password_standard(&header, &verifier, wrong_password).expect_err("wrong password");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
     }
 }

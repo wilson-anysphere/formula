@@ -2260,6 +2260,7 @@ dependencies = [
  "cipher",
  "getrandom 0.2.17",
  "hmac",
+ "md-5",
  "quick-xml 0.31.0",
  "rand 0.8.5",
  "rc4",

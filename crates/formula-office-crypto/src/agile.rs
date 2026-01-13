@@ -508,6 +508,11 @@ fn pad_zero(data: &[u8], block_size: usize) -> Vec<u8> {
 
 fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
     match hash_alg {
+        HashAlgorithm::Md5 => {
+            let mut mac: Hmac<md5::Md5> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            mac.update(data);
+            mac.finalize().into_bytes().to_vec()
+        }
         HashAlgorithm::Sha1 => {
             let mut mac: Hmac<Sha1> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);

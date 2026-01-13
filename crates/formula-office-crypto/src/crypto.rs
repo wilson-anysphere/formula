@@ -11,6 +11,7 @@ const MAX_DIGEST_LEN: usize = 64; // SHA-512
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HashAlgorithm {
+    Md5,
     Sha1,
     Sha256,
     Sha384,
@@ -20,6 +21,7 @@ pub enum HashAlgorithm {
 impl HashAlgorithm {
     pub fn as_ooxml_name(&self) -> &'static str {
         match self {
+            HashAlgorithm::Md5 => "MD5",
             HashAlgorithm::Sha1 => "SHA1",
             HashAlgorithm::Sha256 => "SHA256",
             HashAlgorithm::Sha384 => "SHA384",
@@ -29,6 +31,7 @@ impl HashAlgorithm {
 
     pub fn digest_len(&self) -> usize {
         match self {
+            HashAlgorithm::Md5 => 16,
             HashAlgorithm::Sha1 => 20,
             HashAlgorithm::Sha256 => 32,
             HashAlgorithm::Sha384 => 48,
@@ -42,6 +45,12 @@ impl HashAlgorithm {
             "hash output buffer too small"
         );
         match self {
+            HashAlgorithm::Md5 => {
+                let mut hasher = md5::Md5::new();
+                hasher.update(a);
+                hasher.update(b);
+                out[..16].copy_from_slice(&hasher.finalize());
+            }
             HashAlgorithm::Sha1 => {
                 let mut hasher = sha1::Sha1::new();
                 hasher.update(a);
@@ -71,6 +80,7 @@ impl HashAlgorithm {
 
     pub(crate) fn from_name(name: &str) -> Result<Self, OfficeCryptoError> {
         match name {
+            "MD5" => Ok(HashAlgorithm::Md5),
             "SHA1" | "SHA-1" => Ok(HashAlgorithm::Sha1),
             "SHA256" | "SHA-256" => Ok(HashAlgorithm::Sha256),
             "SHA384" | "SHA-384" => Ok(HashAlgorithm::Sha384),
@@ -84,6 +94,7 @@ impl HashAlgorithm {
     pub(crate) fn from_cryptoapi_alg_id_hash(alg_id: u32) -> Result<Self, OfficeCryptoError> {
         // https://learn.microsoft.com/en-us/windows/win32/seccrypto/alg-id
         match alg_id {
+            0x0000_8003 => Ok(HashAlgorithm::Md5),    // CALG_MD5
             0x0000_8004 => Ok(HashAlgorithm::Sha1),   // CALG_SHA1
             0x0000_800C => Ok(HashAlgorithm::Sha256), // CALG_SHA_256
             0x0000_800D => Ok(HashAlgorithm::Sha384), // CALG_SHA_384
@@ -96,6 +107,11 @@ impl HashAlgorithm {
 
     pub(crate) fn digest(&self, data: &[u8]) -> Vec<u8> {
         match self {
+            HashAlgorithm::Md5 => {
+                let mut hasher = md5::Md5::new();
+                hasher.update(data);
+                hasher.finalize().to_vec()
+            }
             HashAlgorithm::Sha1 => {
                 let mut hasher = sha1::Sha1::new();
                 hasher.update(data);
@@ -143,6 +159,14 @@ pub(crate) fn hash_password(
     hash_alg.digest_two_into(salt, password_utf16le, &mut h_buf[..digest_len]);
 
     match hash_alg {
+        HashAlgorithm::Md5 => {
+            for i in 0..spin_count {
+                let mut hasher = md5::Md5::new();
+                hasher.update(i.to_le_bytes());
+                hasher.update(&h_buf[..digest_len]);
+                h_buf[..digest_len].copy_from_slice(&hasher.finalize());
+            }
+        }
         HashAlgorithm::Sha1 => {
             for i in 0..spin_count {
                 let mut hasher = sha1::Sha1::new();
@@ -182,6 +206,7 @@ pub(crate) fn hash_password(
     Zeroizing::new(out)
 }
 
+#[cfg(test)]
 fn normalize_key_material_in_place(bytes: &mut Vec<u8>, out_len: usize) {
     if bytes.len() >= out_len {
         bytes.truncate(out_len);
@@ -356,6 +381,7 @@ pub(crate) fn aes_cbc_encrypt(
 /// Apply the RC4 keystream to `data` in-place using `key`.
 ///
 /// RC4 encryption and decryption are the same operation: `ciphertext = plaintext XOR keystream`.
+#[allow(dead_code)]
 pub(crate) fn rc4_xor_in_place(key: &[u8], data: &mut [u8]) -> Result<(), OfficeCryptoError> {
     use rc4::cipher::{KeyInit, StreamCipher};
     use rc4::Rc4;
