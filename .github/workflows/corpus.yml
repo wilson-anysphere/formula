@@ -125,6 +125,15 @@ jobs:
           if [ -f tools/corpus/out/private/summary.md ]; then
             cat tools/corpus/out/private/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Compatibility gate (private)
+        run: |
+          if [ ! -f tools/corpus/out/private/summary.json ]; then
+            echo "No private summary.json; skipping compatibility gate."
+            exit 0
+          fi
+          python -m tools.corpus.compat_gate \
+            --summary-json tools/corpus/out/private/summary.json \
+            --min-round-trip-rate 0.97
       - uses: actions/upload-artifact@v4
         if: always()
         with:

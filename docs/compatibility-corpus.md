@@ -170,6 +170,26 @@ Workflow: `.github/workflows/corpus.yml`
 - **PR CI** runs the public subset (`tools/corpus/public/`) and fails on regressions against
   `tools/corpus/public/expectations.json`.
 - **Scheduled CI** is intended to run the full private corpus when secrets are available.
+- **Compatibility gates (scheduled only)** enforce aggregate targets (e.g. "97%+ round-trip preservation")
+  for the private corpus using `tools/corpus/compat_gate.py`.
+
+### Compatibility gate thresholds
+
+After generating `tools/corpus/out/**/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
+pass rates:
+
+```bash
+python -m tools.corpus.compat_gate \
+  --triage-dir tools/corpus/out/private \
+  --min-round-trip-rate 0.97
+```
+
+Supported thresholds:
+
+- `--min-open-rate`
+- `--min-round-trip-rate`
+- `--min-calc-rate` *(when triage is run with `--recalc`)*
+- `--min-render-rate` *(when triage is run with `--render-smoke`)*
 
 ### Expected secrets (scheduled CI)
 
