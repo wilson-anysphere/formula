@@ -4928,7 +4928,7 @@ pub struct MarketplaceDownloadArgs {
     pub version: String,
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", test))]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceDownloadPayload {
@@ -4942,14 +4942,104 @@ pub struct MarketplaceDownloadPayload {
     pub files_sha256: Option<String>,
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn marketplace_bounded_header_string(
+    headers: &reqwest::header::HeaderMap,
+    header_name: &'static str,
+) -> Result<Option<String>, String> {
+    use crate::resource_limits::MAX_MARKETPLACE_HEADER_BYTES;
+
+    let Some(value) = headers.get(header_name) else {
+        return Ok(None);
+    };
+
+    let byte_len = value.as_bytes().len();
+    if byte_len > MAX_MARKETPLACE_HEADER_BYTES {
+        return Err(format!(
+            "Marketplace header '{header_name}' exceeded MAX_MARKETPLACE_HEADER_BYTES ({byte_len} > {MAX_MARKETPLACE_HEADER_BYTES} bytes)"
+        ));
+    }
+
+    Ok(value.to_str().ok().map(|s| s.to_string()))
+}
+
+#[cfg(any(feature = "desktop", test))]
+async fn marketplace_download_payload_from_response(
+    response: reqwest::Response,
+) -> Result<MarketplaceDownloadPayload, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use crate::resource_limits::MAX_MARKETPLACE_PACKAGE_BYTES;
+    use futures_util::StreamExt;
+
+    if let Some(len) = response.content_length() {
+        if len > MAX_MARKETPLACE_PACKAGE_BYTES as u64 {
+            return Err(format!(
+                "Marketplace package bytes (Content-Length={len}) exceeded MAX_MARKETPLACE_PACKAGE_BYTES ({MAX_MARKETPLACE_PACKAGE_BYTES} bytes)"
+            ));
+        }
+    }
+
+    let (signature_base64, sha256, format_version, publisher, publisher_key_id, scan_status, files_sha256) =
+        {
+            let headers = response.headers();
+
+            let signature_base64 = marketplace_bounded_header_string(headers, "x-package-signature")?;
+            let sha256 = marketplace_bounded_header_string(headers, "x-package-sha256")?;
+            let format_version = marketplace_bounded_header_string(headers, "x-package-format-version")?
+                .and_then(|s| s.parse::<u32>().ok());
+            let publisher = marketplace_bounded_header_string(headers, "x-publisher")?;
+            let publisher_key_id =
+                marketplace_bounded_header_string(headers, "x-publisher-key-id")?;
+            let scan_status = marketplace_bounded_header_string(headers, "x-package-scan-status")?;
+            let files_sha256 =
+                marketplace_bounded_header_string(headers, "x-package-files-sha256")?;
+
+            (
+                signature_base64,
+                sha256,
+                format_version,
+                publisher,
+                publisher_key_id,
+                scan_status,
+                files_sha256,
+            )
+        };
+
+    let mut bytes = Vec::new();
+    let mut seen = 0usize;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        let next = seen.saturating_add(chunk.len());
+        if next > MAX_MARKETPLACE_PACKAGE_BYTES {
+            return Err(format!(
+                "Marketplace package bytes exceeded MAX_MARKETPLACE_PACKAGE_BYTES ({MAX_MARKETPLACE_PACKAGE_BYTES} bytes)"
+            ));
+        }
+        seen = next;
+        bytes.extend_from_slice(&chunk);
+    }
+
+    let bytes_base64 = STANDARD.encode(&bytes);
+
+    Ok(MarketplaceDownloadPayload {
+        bytes_base64,
+        signature_base64,
+        sha256,
+        format_version,
+        publisher,
+        publisher_key_id,
+        scan_status,
+        files_sha256,
+    })
+}
+
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_download_package(
     window: tauri::WebviewWindow,
     args: MarketplaceDownloadArgs,
 ) -> Result<Option<MarketplaceDownloadPayload>, String> {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
-
     ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
     let origin_url = window.url().map_err(|err| err.to_string())?;
     ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
@@ -4980,63 +5070,162 @@ pub async fn marketplace_download_package(
         ));
     }
 
-    let signature_base64 = response
-        .headers()
-        .get("x-package-signature")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let sha256 = response
-        .headers()
-        .get("x-package-sha256")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let format_version = response
-        .headers()
-        .get("x-package-format-version")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u32>().ok());
-    let publisher = response
-        .headers()
-        .get("x-publisher")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let publisher_key_id = response
-        .headers()
-        .get("x-publisher-key-id")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let scan_status = response
-        .headers()
-        .get("x-package-scan-status")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let files_sha256 = response
-        .headers()
-        .get("x-package-files-sha256")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-    let bytes_base64 = STANDARD.encode(bytes);
-
-    Ok(Some(MarketplaceDownloadPayload {
-        bytes_base64,
-        signature_base64,
-        sha256,
-        format_version,
-        publisher,
-        publisher_key_id,
-        scan_status,
-        files_sha256,
-    }))
+    marketplace_download_payload_from_response(response)
+        .await
+        .map(Some)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use crate::file_io::read_xlsx_blocking;
+    use crate::resource_limits::{MAX_MARKETPLACE_HEADER_BYTES, MAX_MARKETPLACE_PACKAGE_BYTES};
     use std::io::Write;
     use std::path::Path;
     use tempfile::TempDir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn marketplace_download_payload_rejects_oversized_package_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let headers = "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n";
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write headers");
+
+            let mut remaining = MAX_MARKETPLACE_PACKAGE_BYTES + 1;
+            let chunk = vec![b'a'; 16 * 1024];
+            while remaining > 0 {
+                let n = remaining.min(chunk.len());
+                if stream.write_all(&chunk[..n]).await.is_err() {
+                    break;
+                }
+                remaining -= n;
+            }
+
+            let _ = stream.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/download");
+        let response = reqwest::Client::new()
+            .get(url)
+            .send()
+            .await
+            .expect("client request");
+
+        let err = marketplace_download_payload_from_response(response)
+            .await
+            .expect_err("expected package byte limit error");
+        assert!(
+            err.contains("MAX_MARKETPLACE_PACKAGE_BYTES"),
+            "unexpected error: {err}"
+        );
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn marketplace_download_payload_rejects_oversized_signature_header() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let signature = "a".repeat(MAX_MARKETPLACE_HEADER_BYTES + 1);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nx-package-signature: {signature}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+            let _ = stream.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/download");
+        let response = reqwest::Client::new()
+            .get(url)
+            .send()
+            .await
+            .expect("client request");
+
+        let err = marketplace_download_payload_from_response(response)
+            .await
+            .expect_err("expected header byte limit error");
+        assert!(
+            err.contains("MAX_MARKETPLACE_HEADER_BYTES"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains("x-package-signature"),
+            "unexpected error: {err}"
+        );
+
+        server.await.expect("server task");
+    }
+
+    #[tokio::test]
+    async fn marketplace_download_payload_roundtrips_small_response_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let body: Vec<u8> = b"hello marketplace".to_vec();
+        let expected = body.clone();
+        let body_len = body.len();
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).await;
+
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nx-package-signature: sig\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n"
+            );
+            stream
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write headers");
+            stream.write_all(&body).await.expect("write body");
+            let _ = stream.shutdown().await;
+        });
+
+        let url = format!("http://{addr}/download");
+        let response = reqwest::Client::new()
+            .get(url)
+            .send()
+            .await
+            .expect("client request");
+
+        let payload = marketplace_download_payload_from_response(response)
+            .await
+            .expect("expected download payload");
+        assert_eq!(payload.signature_base64, Some("sig".to_string()));
+
+        let decoded = STANDARD
+            .decode(payload.bytes_base64.as_bytes())
+            .expect("base64 decode payload");
+        assert_eq!(decoded, expected);
+
+        server.await.expect("server task");
+    }
 
     #[test]
     fn normalize_tab_color_rgb_normalizes_hex_strings() {

@@ -40,3 +40,17 @@ pub const MAX_PDF_CELLS_PER_CALL: usize = 250_000;
 /// Note: this is checked after generation, so it primarily protects against extremely large
 /// base64 responses rather than CPU time.
 pub const MAX_PDF_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
+
+/// Maximum size (in bytes) of a marketplace extension package download.
+///
+/// The desktop backend base64-encodes the downloaded package for IPC, which expands the payload by
+/// ~33%. This limit is applied to the *raw* bytes to keep memory usage bounded even if the
+/// marketplace server (or a network attacker) attempts to return an arbitrarily large response.
+pub const MAX_MARKETPLACE_PACKAGE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
+
+/// Maximum size (in bytes) of individual marketplace metadata headers (e.g. signatures/hashes).
+///
+/// Headers are expected to be small (an ed25519 signature is 64 bytes, SHA-256 is 32 bytes), but
+/// the backend still treats them as untrusted input and enforces a cap to avoid large string
+/// allocations.
+pub const MAX_MARKETPLACE_HEADER_BYTES: usize = 4 * 1024; // 4 KiB
