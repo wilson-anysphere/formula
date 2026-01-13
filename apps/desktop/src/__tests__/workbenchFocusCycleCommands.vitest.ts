@@ -129,4 +129,172 @@ describe("workbench focus region commands", () => {
     await commandRegistry.executeCommand("workbench.focusNextRegion");
     expect(document.activeElement).toBe(versionHistory);
   });
+
+  it("starts cycling from the ribbon when focus is outside any known region (and reverses to the status bar)", async () => {
+    document.body.innerHTML = `
+      <div id="ribbon">
+        <button class="ribbon__tab" role="tab" aria-selected="true">Home</button>
+      </div>
+      <div id="formula-bar">
+        <input data-testid="formula-address" />
+      </div>
+      <div id="grid">
+        <button id="grid-focus">Grid</button>
+      </div>
+      <div id="sheet-tabs">
+        <button role="tab" aria-selected="true">Sheet1</button>
+      </div>
+      <div class="statusbar">
+        <select data-testid="zoom-control">
+          <option value="100">100%</option>
+        </select>
+      </div>
+      <button id="outside">Outside</button>
+    `;
+
+    const ribbonTab = document.querySelector<HTMLElement>("#ribbon .ribbon__tab")!;
+    const zoomControl = document.querySelector<HTMLElement>('.statusbar [data-testid="zoom-control"]')!;
+    const outside = document.querySelector<HTMLButtonElement>("#outside")!;
+    const gridFocus = document.querySelector<HTMLButtonElement>("#grid-focus")!;
+
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      focus: () => {
+        gridFocus.focus();
+      },
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    await commandRegistry.executeCommand("workbench.focusNextRegion");
+    expect(document.activeElement).toBe(ribbonTab);
+
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+
+    await commandRegistry.executeCommand("workbench.focusPrevRegion");
+    expect(document.activeElement).toBe(zoomControl);
+  });
+
+  it("treats the secondary grid root as part of the grid region when cycling focus", async () => {
+    document.body.innerHTML = `
+      <div id="ribbon">
+        <button class="ribbon__tab" role="tab" aria-selected="true">Home</button>
+      </div>
+      <div id="formula-bar">
+        <input data-testid="formula-address" />
+      </div>
+      <div id="grid">
+        <button id="grid-focus">Grid</button>
+      </div>
+      <div id="grid-secondary">
+        <button id="grid-secondary-focus">Secondary</button>
+      </div>
+      <div id="sheet-tabs">
+        <button role="tab" aria-selected="true">Sheet1</button>
+      </div>
+      <div class="statusbar">
+        <select data-testid="zoom-control">
+          <option value="100">100%</option>
+        </select>
+      </div>
+    `;
+
+    const secondaryFocus = document.querySelector<HTMLButtonElement>("#grid-secondary-focus")!;
+    const sheetTab = document.querySelector<HTMLElement>('#sheet-tabs button[role="tab"]')!;
+    const gridFocus = document.querySelector<HTMLButtonElement>("#grid-focus")!;
+
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      focus: () => {
+        gridFocus.focus();
+      },
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    secondaryFocus.focus();
+    expect(document.activeElement).toBe(secondaryFocus);
+
+    await commandRegistry.executeCommand("workbench.focusNextRegion");
+    expect(document.activeElement).toBe(sheetTab);
+  });
+
+  it("does not steal focus when a modal dialog is open", async () => {
+    document.body.innerHTML = `
+      <div id="ribbon">
+        <button class="ribbon__tab" role="tab" aria-selected="true">Home</button>
+      </div>
+      <div id="formula-bar">
+        <input data-testid="formula-address" />
+      </div>
+      <div id="grid">
+        <button id="grid-focus">Grid</button>
+      </div>
+      <div id="sheet-tabs">
+        <button role="tab" aria-selected="true">Sheet1</button>
+      </div>
+      <div class="statusbar">
+        <select data-testid="zoom-control">
+          <option value="100">100%</option>
+        </select>
+      </div>
+    `;
+
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const gridFocus = document.querySelector<HTMLButtonElement>("#grid-focus")!;
+    const app = {
+      focus: () => {
+        gridFocus.focus();
+      },
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "true");
+    const input = document.createElement("input");
+    dialog.appendChild(input);
+    document.body.appendChild(dialog);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    await commandRegistry.executeCommand("workbench.focusNextRegion");
+    expect(document.activeElement).toBe(input);
+
+    dialog.remove();
+  });
 });

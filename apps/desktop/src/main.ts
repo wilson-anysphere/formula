@@ -2379,6 +2379,8 @@ window.addEventListener("keydown", (e) => {
   disarmFormatPainter();
 });
 
+// Excel-style focus cycling (F6 / Shift+F6) is handled via the keybinding pipeline:
+// KeybindingService -> CommandRegistry (`workbench.focusNextRegion` / `workbench.focusPrevRegion`).
 const ZOOM_PRESET_VALUES = new Set<number>(
   Array.from(zoomControlEl.querySelectorAll("option"))
     .map((opt) => Number(opt.value))
