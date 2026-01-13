@@ -222,6 +222,26 @@ impl Table {
         }
     }
 
+    pub(crate) fn pop_last_column(&mut self) -> DaxResult<Option<String>> {
+        match &mut self.storage {
+            TableStorage::InMemory(backend) => {
+                let name = match backend.columns.pop() {
+                    Some(name) => name,
+                    None => return Ok(None),
+                };
+                backend.column_index.remove(&name);
+                for row in &mut backend.rows {
+                    row.pop();
+                }
+                Ok(Some(name))
+            }
+            TableStorage::Columnar(_) => Err(DaxError::Eval(format!(
+                "cannot remove columns from columnar table {}",
+                self.name
+            ))),
+        }
+    }
+
     fn backend(&self) -> &dyn TableBackend {
         match &self.storage {
             TableStorage::InMemory(backend) => backend,
@@ -322,6 +342,7 @@ pub struct DataModel {
     pub(crate) relationships: Vec<RelationshipInfo>,
     pub(crate) measures: HashMap<String, Measure>,
     pub(crate) calculated_columns: Vec<CalculatedColumn>,
+    pub(crate) calculated_column_order: HashMap<String, Vec<usize>>,
 }
 
 /// A compact representation of the set of rows that share the same relationship key on the
@@ -393,6 +414,7 @@ impl DataModel {
             relationships: Vec::new(),
             measures: HashMap::new(),
             calculated_columns: Vec::new(),
+            calculated_column_order: HashMap::new(),
         }
     }
 
@@ -470,11 +492,19 @@ impl DataModel {
             row_ctx.push(table, row_index);
             let engine = crate::engine::DaxEngine::new();
 
-            let calc_defs: Vec<CalculatedColumn> = self
-                .calculated_columns
-                .iter()
-                .filter(|c| c.table == table)
-                .cloned()
+            let topo_order = match self.calculated_column_order.get(table) {
+                Some(order) if order.len() == calc_count => order.clone(),
+                _ => {
+                    let order = self.build_calculated_column_order(table)?;
+                    self.calculated_column_order
+                        .insert(table.to_string(), order.clone());
+                    order
+                }
+            };
+
+            let calc_defs: Vec<CalculatedColumn> = topo_order
+                .into_iter()
+                .filter_map(|idx| self.calculated_columns.get(idx).cloned())
                 .collect();
 
             for calc in calc_defs {
@@ -815,6 +845,19 @@ impl DataModel {
         table_mut.add_column(name, values)?;
 
         self.calculated_columns.push(calc);
+        // Recompute the evaluation order for calculated columns in this table so `insert_row`
+        // can honor intra-table dependencies (Power Pivot allows calculated columns to reference
+        // other calculated columns in the same table).
+        let table_name = table.clone();
+        if let Err(err) = self.refresh_calculated_column_order(&table_name) {
+            // Roll back the definition; the physical column was already added, but calculated
+            // columns are only supported for in-memory tables so we can remove the last column.
+            self.calculated_columns.pop();
+            if let Some(table_mut) = self.tables.get_mut(&table_name) {
+                let _ = table_mut.pop_last_column();
+            }
+            return Err(err);
+        }
         Ok(())
     }
 
@@ -862,6 +905,15 @@ impl DataModel {
             expression,
             parsed,
         });
+        let table_name = self
+            .calculated_columns
+            .last()
+            .map(|c| c.table.clone())
+            .unwrap_or_default();
+        if let Err(err) = self.refresh_calculated_column_order(&table_name) {
+            self.calculated_columns.pop();
+            return Err(err);
+        }
         Ok(())
     }
 
@@ -1038,5 +1090,182 @@ impl DataModel {
             .and_then(|n| n.strip_suffix(']'))
             .unwrap_or(name)
             .trim()
+    }
+
+    fn refresh_calculated_column_order(&mut self, table: &str) -> DaxResult<()> {
+        let order = self.build_calculated_column_order(table)?;
+        self.calculated_column_order
+            .insert(table.to_string(), order);
+        Ok(())
+    }
+
+    fn build_calculated_column_order(&self, table: &str) -> DaxResult<Vec<usize>> {
+        let calc_indices: Vec<usize> = self
+            .calculated_columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, c)| (c.table == table).then_some(idx))
+            .collect();
+
+        if calc_indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Map calculated column names to their global index in `self.calculated_columns`.
+        let mut name_to_idx: HashMap<String, usize> = HashMap::new();
+        for &idx in &calc_indices {
+            if let Some(calc) = self.calculated_columns.get(idx) {
+                name_to_idx.insert(calc.name.clone(), idx);
+            }
+        }
+
+        // Build dependency edges between calculated columns within the same table.
+        let mut deps_by_calc: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &idx in &calc_indices {
+            let Some(calc) = self.calculated_columns.get(idx) else {
+                continue;
+            };
+            let deps = self.collect_same_table_column_dependencies(&calc.parsed, table);
+            let mut calc_deps: Vec<usize> = deps
+                .into_iter()
+                .filter_map(|dep_name| name_to_idx.get(&dep_name).copied())
+                .collect();
+            // Keep ordering deterministic.
+            calc_deps.sort_unstable();
+            calc_deps.dedup();
+            deps_by_calc.insert(idx, calc_deps);
+        }
+
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        enum VisitState {
+            Visiting,
+            Visited,
+        }
+
+        let mut state: HashMap<usize, VisitState> = HashMap::new();
+        let mut stack: Vec<usize> = Vec::new();
+        let mut out: Vec<usize> = Vec::with_capacity(calc_indices.len());
+
+        let visit = |start: usize,
+                         state: &mut HashMap<usize, VisitState>,
+                         stack: &mut Vec<usize>,
+                         out: &mut Vec<usize>,
+                         deps_by_calc: &HashMap<usize, Vec<usize>>,
+                         this: &DataModel|
+         -> DaxResult<()> {
+            fn dfs(
+                node: usize,
+                state: &mut HashMap<usize, VisitState>,
+                stack: &mut Vec<usize>,
+                out: &mut Vec<usize>,
+                deps_by_calc: &HashMap<usize, Vec<usize>>,
+                table: &str,
+                model: &DataModel,
+            ) -> DaxResult<()> {
+                match state.get(&node) {
+                    Some(VisitState::Visited) => return Ok(()),
+                    Some(VisitState::Visiting) => {
+                        // Should only happen when we re-enter via an edge; handled by caller.
+                        return Ok(());
+                    }
+                    None => {}
+                }
+
+                state.insert(node, VisitState::Visiting);
+                stack.push(node);
+
+                if let Some(deps) = deps_by_calc.get(&node) {
+                    for &dep in deps {
+                        if matches!(state.get(&dep), Some(VisitState::Visiting)) {
+                            let start_pos = stack
+                                .iter()
+                                .position(|&n| n == dep)
+                                .unwrap_or(0);
+                            let mut cycle_nodes: Vec<usize> =
+                                stack[start_pos..].iter().copied().collect();
+                            cycle_nodes.push(dep);
+                            let cycle_names: Vec<String> = cycle_nodes
+                                .iter()
+                                .filter_map(|idx| model.calculated_columns.get(*idx))
+                                .map(|c| c.name.clone())
+                                .collect();
+                            return Err(DaxError::Eval(format!(
+                                "calculated column dependency cycle in {table}: {}",
+                                cycle_names.join(" -> ")
+                            )));
+                        }
+                        dfs(dep, state, stack, out, deps_by_calc, table, model)?;
+                    }
+                }
+
+                stack.pop();
+                state.insert(node, VisitState::Visited);
+                out.push(node);
+                Ok(())
+            }
+
+            dfs(start, state, stack, out, deps_by_calc, table, this)
+        };
+
+        // Use definition order as a stable traversal order.
+        for &idx in &calc_indices {
+            if matches!(state.get(&idx), Some(VisitState::Visited)) {
+                continue;
+            }
+            visit(idx, &mut state, &mut stack, &mut out, &deps_by_calc, self)?;
+        }
+
+        Ok(out)
+    }
+
+    fn collect_same_table_column_dependencies(
+        &self,
+        expr: &Expr,
+        current_table: &str,
+    ) -> HashSet<String> {
+        let mut out = HashSet::new();
+        self.collect_same_table_column_dependencies_inner(expr, current_table, &mut out);
+        out
+    }
+
+    fn collect_same_table_column_dependencies_inner(
+        &self,
+        expr: &Expr,
+        current_table: &str,
+        out: &mut HashSet<String>,
+    ) {
+        match expr {
+            Expr::ColumnRef { table, column } => {
+                if table == current_table {
+                    out.insert(column.clone());
+                }
+            }
+            Expr::Measure(name) => {
+                let normalized = Self::normalize_measure_name(name);
+                // In a calculated column (row context), `[Name]` can resolve to either a measure
+                // or a same-table column. Only treat it as a column dependency when no measure
+                // exists and the table contains a column with that name.
+                if !self.measures.contains_key(normalized) {
+                    if let Some(table_ref) = self.tables.get(current_table) {
+                        if table_ref.column_idx(normalized).is_some() {
+                            out.insert(normalized.to_string());
+                        }
+                    }
+                }
+            }
+            Expr::Call { args, .. } => {
+                for arg in args {
+                    self.collect_same_table_column_dependencies_inner(arg, current_table, out);
+                }
+            }
+            Expr::UnaryOp { expr, .. } => {
+                self.collect_same_table_column_dependencies_inner(expr, current_table, out);
+            }
+            Expr::BinaryOp { left, right, .. } => {
+                self.collect_same_table_column_dependencies_inner(left, current_table, out);
+                self.collect_same_table_column_dependencies_inner(right, current_table, out);
+            }
+            Expr::Number(_) | Expr::Text(_) | Expr::Boolean(_) | Expr::TableName(_) => {}
+        }
     }
 }
