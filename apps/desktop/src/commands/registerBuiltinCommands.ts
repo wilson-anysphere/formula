@@ -356,6 +356,24 @@ export function registerBuiltinCommands(params: {
     input.click();
   };
 
+  const applyThemePreference = (preference: "system" | "light" | "dark" | "high-contrast"): void => {
+    if (!themeController) return;
+    try {
+      themeController.setThemePreference(preference);
+    } catch {
+      // Best-effort only.
+    }
+    try {
+      refreshRibbonUiState?.();
+    } catch {
+      // ignore
+    }
+    try {
+      (app as any)?.focus?.();
+    } catch {
+      // ignore
+    }
+  };
   commandRegistry.registerBuiltinCommand(
     "edit.undo",
     t("command.edit.undo"),
@@ -405,6 +423,54 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.edit.redo"),
       keywords: ["redo", "history"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.theme.light",
+    t("command.view.theme.light"),
+    () => applyThemePreference("light"),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.theme.light"),
+      keywords: ["theme", "appearance", "light", "light mode", "color scheme"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.theme.dark",
+    t("command.view.theme.dark"),
+    () => applyThemePreference("dark"),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.theme.dark"),
+      keywords: ["theme", "appearance", "dark", "dark mode", "color scheme"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.theme.system",
+    t("command.view.theme.system"),
+    () => applyThemePreference("system"),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.theme.system"),
+      keywords: ["theme", "appearance", "system", "dark mode", "light mode", "auto"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.theme.highContrast",
+    t("command.view.theme.highContrast"),
+    () => applyThemePreference("high-contrast"),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.theme.highContrast"),
+      keywords: ["theme", "appearance", "high contrast", "contrast", "accessibility"],
     },
   );
 

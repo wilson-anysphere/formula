@@ -139,6 +139,31 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "cmd+`",
     when: WHEN_SPREADSHEET_READY,
   },
+  // Theme switching (safe defaults: avoid Excel shortcuts by using Ctrl/Cmd+Alt/Option+Shift+<key>).
+  {
+    command: "view.theme.light",
+    key: "ctrl+alt+shift+l",
+    mac: "cmd+option+shift+l",
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+  },
+  {
+    command: "view.theme.dark",
+    key: "ctrl+alt+shift+d",
+    mac: "cmd+option+shift+d",
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+  },
+  {
+    command: "view.theme.system",
+    key: "ctrl+alt+shift+s",
+    mac: "cmd+option+shift+s",
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+  },
+  {
+    command: "view.theme.highContrast",
+    key: "ctrl+alt+shift+h",
+    mac: "cmd+option+shift+h",
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+  },
   {
     command: "audit.togglePrecedents",
     key: "ctrl+[",

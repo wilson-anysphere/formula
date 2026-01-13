@@ -210,6 +210,7 @@ try {
 // default tokens before the user's preference is known.
 const themeController = new ThemeController();
 themeController.start();
+
 window.addEventListener("unload", () => {
   try {
     themeController.stop();
