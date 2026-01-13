@@ -418,8 +418,15 @@ Verification (signed artifacts):
   Note: bundle output paths can vary depending on whether you built with an explicit `--target <triple>`
   (CI does) — adjust the `target\\...` path accordingly.
   ```powershell
+  # If you built without --target, bundles may land under src-tauri\\target\\release\\bundle\\...
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\nsis\*.exe
   signtool verify /pa /v apps\desktop\src-tauri\target\release\bundle\msi\*.msi
+
+  # If you built with --target (as CI does), bundles land under src-tauri\\target\\<triple>\\release\\bundle\\...
+  signtool verify /pa /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe
+  signtool verify /pa /v apps\desktop\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi
+  signtool verify /pa /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\nsis\*.exe
+  signtool verify /pa /v apps\desktop\src-tauri\target\aarch64-pc-windows-msvc\release\bundle\msi\*.msi
   ```
   - Release CI also runs `signtool verify /pa /v` on the produced installers when `WINDOWS_CERTIFICATE`
     is configured (see `scripts/ci/check-windows-installer-signatures.py`).
@@ -457,6 +464,12 @@ Windows ARM64 builds also require a Windows SDK installation with **ARM64** libr
 When cross-compiling locally from an x64 Windows machine, run the build in a Visual Studio
 Developer Prompt configured for **amd64 → arm64** (CI uses `ilammy/msvc-dev-cmd` with `arch:
 amd64_arm64`).
+
+For example, in a Developer Command Prompt you can run:
+
+```powershell
+vcvarsall.bat amd64_arm64
+```
 
 Then build the ARM64 installers:
 
