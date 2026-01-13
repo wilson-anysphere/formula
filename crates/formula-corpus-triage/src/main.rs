@@ -1258,6 +1258,7 @@ mod tests {
             format: WorkbookFormat::Xlsx,
             ignore_parts: vec!["docProps/app.xml".to_string()],
             diff_limit: 100,
+            fail_on: RoundTripFailOn::Critical,
             recalc: false,
             render_smoke: false,
         };
