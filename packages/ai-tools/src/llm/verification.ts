@@ -79,7 +79,9 @@ export interface ClaimVerificationSummary {
 
 export { extractVerifiableClaims, type ExtractedSpreadsheetClaim, type SpreadsheetClaimMeasure } from "./claim-extraction.ts";
 
-const A1_REFERENCE_RE = /\b[A-Z]{1,3}\d+\b/i;
+// Match simple A1 references like `A1` plus mixed/absolute forms like `A$1`.
+// Note: `$A$1` will also be detected via the substring `A$1`.
+const A1_REFERENCE_RE = /\b[A-Z]{1,3}\$?\d+\b/i;
 
 // These keywords intentionally skew broad; false positives are acceptable
 // because the only consequence is "use tools or mark unverified".

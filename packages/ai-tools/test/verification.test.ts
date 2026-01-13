@@ -12,6 +12,11 @@ describe("classifyQueryNeedsTools", () => {
     expect(classifyQueryNeedsTools({ userText: "sum a1:b2 please", attachments: [] })).toBe(true);
   });
 
+  it("returns true when absolute/mixed A1-style references are present", () => {
+    expect(classifyQueryNeedsTools({ userText: "What's in $A$1?" })).toBe(true);
+    expect(classifyQueryNeedsTools({ userText: "sum A$1:A$3" })).toBe(true);
+  });
+
   it("returns true when spreadsheet keywords are present", () => {
     expect(classifyQueryNeedsTools({ userText: "Compute the average of column B", attachments: [] })).toBe(true);
     expect(classifyQueryNeedsTools({ userText: "Create a pivot table", attachments: [] })).toBe(true);
