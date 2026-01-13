@@ -323,6 +323,29 @@ Note: `.deb` and `.rpm` are shipped for manual install/downgrade, but are not ty
 Tauri updater on Linux. If a target entry is missing from `latest.json`, auto-update for that
 platform/arch will not work even if the GitHub Release has other assets attached.
 
+## Linux: compatibility expectations (`.AppImage` vs `.deb`/`.rpm`)
+
+The Linux desktop shell uses the system WebView provided by **WebKitGTK** (Tauri/Wry). This repo
+targets **WebKitGTK 4.1 + GTK3**, so the distro-native packages (`.deb` / `.rpm`) are most
+compatible with distros that ship those versions.
+
+- Prefer **`.deb` / `.rpm`** when the target distro provides WebKitGTK 4.1 (Debian/Ubuntu:
+  `libwebkit2gtk-4.1-0`; Fedora/RHEL: `webkit2gtk4.1`). These integrate with the system package
+  manager and are the expected “happy path” on modern distros.
+- Prefer the **`.AppImage`** when installing the `.deb`/`.rpm` fails due to missing or incompatible
+  system libraries (commonly WebKitGTK/GTK3). The AppImage bundles more runtime libraries and tends
+  to run on a wider range of distros.
+
+### Quick compatibility check
+
+On the target distro, confirm a WebKitGTK 4.1 runtime package is available via the package manager:
+
+- Debian/Ubuntu: `apt-cache policy libwebkit2gtk-4.1-0` (or `apt search libwebkit2gtk-4.1`)
+- Fedora/RHEL: `dnf info webkit2gtk4.1`
+
+If the distro cannot install a WebKitGTK 4.1 package, recommend the `.AppImage` instead of the
+`.deb`/`.rpm`.
+
 ## Linux: `.deb` runtime dependencies (WebView + tray)
 
 The Linux desktop shell is built on **GTK3 + WebKitGTK** (Tauri/Wry) and uses the **AppIndicator**
