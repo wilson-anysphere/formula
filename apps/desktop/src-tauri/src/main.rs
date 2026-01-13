@@ -17,7 +17,7 @@ use desktop::ipc_limits::{
     MAX_IPC_URL_BYTES,
 };
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
-use desktop::macros::MacroExecutionOptions;
+use desktop::macros::{workbook_before_close_timeout_ms, MacroExecutionOptions};
 use desktop::oauth_loopback::{
     acquire_oauth_loopback_listener, AcquireOauthLoopbackListener, OauthLoopbackState,
     SharedOauthLoopbackState,
@@ -1965,9 +1965,10 @@ fn main() {
                             return Ok::<_, String>(Vec::new());
                         }
 
+                        let timeout_ms = workbook_before_close_timeout_ms();
                         let options = MacroExecutionOptions {
                             permissions: Vec::new(),
-                            timeout_ms: None,
+                            timeout_ms: Some(timeout_ms),
                         };
 
                         match state.fire_workbook_before_close(options) {
@@ -1981,7 +1982,15 @@ fn main() {
                                     let msg = outcome
                                         .error
                                         .unwrap_or_else(|| "unknown macro error".to_string());
-                                    eprintln!("[macro] Workbook_BeforeClose failed: {msg}");
+                                    if msg == "Execution timed out" {
+                                        eprintln!(
+                                            "[macro] Workbook_BeforeClose exceeded {timeout_ms}ms and was terminated; continuing close flow."
+                                        );
+                                    } else {
+                                        eprintln!(
+                                            "[macro] Workbook_BeforeClose failed: {msg}; continuing close flow."
+                                        );
+                                    }
                                 }
                                 let updates = outcome
                                     .updates
@@ -1991,7 +2000,9 @@ fn main() {
                                 return Ok(updates);
                             }
                             Err(err) => {
-                                eprintln!("[macro] Workbook_BeforeClose failed: {err}");
+                                eprintln!(
+                                    "[macro] Workbook_BeforeClose failed: {err}; continuing close flow."
+                                );
                             }
                         }
 
@@ -2002,11 +2013,15 @@ fn main() {
                     let updates = match macro_outcome {
                         Ok(Ok(updates)) => updates,
                         Ok(Err(err)) => {
-                            eprintln!("[macro] Workbook_BeforeClose task failed: {err}");
+                            eprintln!(
+                                "[macro] Workbook_BeforeClose task failed: {err}; continuing close flow."
+                            );
                             Vec::new()
                         }
                         Err(err) => {
-                            eprintln!("[macro] Workbook_BeforeClose task panicked: {err}");
+                            eprintln!(
+                                "[macro] Workbook_BeforeClose task panicked: {err}; continuing close flow."
+                            );
                             Vec::new()
                         }
                     };

@@ -137,6 +137,7 @@ fn commands_rs_privileged_commands_enforce_origin_guards() {
         // Workbook-origin bytes extraction helpers (defense-in-depth against exfil if navigated).
         "list_imported_chart_objects",
         "list_imported_embedded_cell_images",
+        "list_imported_sheet_background_images",
         // Clipboard (command wrappers in commands.rs; `clipboard/mod.rs` has its own coverage).
         "read_clipboard",
         "write_clipboard",

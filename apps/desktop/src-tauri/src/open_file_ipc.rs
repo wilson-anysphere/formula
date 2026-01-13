@@ -179,4 +179,31 @@ mod tests {
             .collect();
         assert_eq!(flushed, expected);
     }
+
+    #[test]
+    fn tauri_main_close_requested_runs_before_close_macro_with_timeout() {
+        // `Workbook_BeforeClose` is invoked from the native window close flow. Guard against
+        // accidental removal of the macro execution timeout, which would allow a buggy/malicious
+        // macro to hang the close flow indefinitely.
+        let main_rs = include_str!("main.rs");
+
+        let close_start = main_rs
+            .find("tauri::WindowEvent::CloseRequested")
+            .expect("desktop main.rs missing CloseRequested handler");
+        let close_after = &main_rs[close_start..];
+        let close_end = close_after
+            .find("tauri::WindowEvent::DragDrop")
+            .map(|idx| close_start + idx)
+            .unwrap_or(main_rs.len());
+        let close_body = &main_rs[close_start..close_end];
+
+        assert!(
+            close_body.contains("timeout_ms: Some"),
+            "CloseRequested handler must run Workbook_BeforeClose with a bounded MacroExecutionOptions.timeout_ms"
+        );
+        assert!(
+            !close_body.contains("timeout_ms: None"),
+            "CloseRequested handler must not run Workbook_BeforeClose with an unbounded timeout_ms=None"
+        );
+    }
 }

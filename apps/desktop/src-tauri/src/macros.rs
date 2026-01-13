@@ -11,6 +11,42 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
+/// Default execution timeout for `Workbook_BeforeClose` when invoked from the native desktop
+/// window-close flow (see `src/main.rs`).
+///
+/// This does *not* affect user-invoked macros or the `fire_workbook_before_close` IPC command,
+/// which accept an explicit `timeout_ms` argument.
+pub const WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT: u64 = 2_000;
+
+const WORKBOOK_BEFORE_CLOSE_TIMEOUT_ENV_VAR: &str = "FORMULA_WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS";
+
+/// Timeout (in milliseconds) applied to the `Workbook_BeforeClose` macro when invoked by the
+/// native window close flow.
+///
+/// This can be overridden by `FORMULA_WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS`. In debug builds the
+/// override is honored as-is; in release builds we clamp the value to the default (or lower) to
+/// prevent relaxing the guardrails in production.
+pub fn workbook_before_close_timeout_ms() -> u64 {
+    parse_clamped_timeout_ms(
+        std::env::var(WORKBOOK_BEFORE_CLOSE_TIMEOUT_ENV_VAR)
+            .ok()
+            .as_deref(),
+        WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT,
+        cfg!(debug_assertions),
+    )
+}
+
+fn parse_clamped_timeout_ms(raw: Option<&str>, default: u64, allow_relax: bool) -> u64 {
+    let Some(value) = raw.and_then(|v| v.parse::<u64>().ok()) else {
+        return default;
+    };
+    if allow_relax {
+        value
+    } else {
+        value.min(default)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MacroInfo {
     pub id: String,
@@ -248,6 +284,55 @@ impl MacroHost {
     #[cfg(test)]
     pub fn program_compile_count(&self) -> u64 {
         self.program_compile_count
+    }
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn parse_clamped_timeout_ms_falls_back_to_default_on_missing_or_invalid() {
+        assert_eq!(
+            parse_clamped_timeout_ms(None, WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT, true),
+            WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT
+        );
+        assert_eq!(
+            parse_clamped_timeout_ms(
+                Some("not-a-number"),
+                WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT,
+                true
+            ),
+            WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT
+        );
+    }
+
+    #[test]
+    fn parse_clamped_timeout_ms_allows_relax_in_debug_like_mode() {
+        assert_eq!(
+            parse_clamped_timeout_ms(Some("5000"), WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT, true),
+            5000
+        );
+    }
+
+    #[test]
+    fn parse_clamped_timeout_ms_clamps_in_release_like_mode() {
+        assert_eq!(
+            parse_clamped_timeout_ms(
+                Some("5000"),
+                WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT,
+                false
+            ),
+            WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT
+        );
+        assert_eq!(
+            parse_clamped_timeout_ms(
+                Some("1000"),
+                WORKBOOK_BEFORE_CLOSE_TIMEOUT_MS_DEFAULT,
+                false
+            ),
+            1000
+        );
     }
 }
 
@@ -901,9 +986,9 @@ impl formula_vba_runtime::Spreadsheet for AppStateSpreadsheet<'_> {
             while end > 0 && !message.is_char_boundary(end) {
                 end -= 1;
             }
-            // Allocate the truncated string with a hard cap to ensure we never retain a large
-            // `String` capacity in the output buffer (even after appending the truncation
-            // suffix).
+            // Build the truncated string with a bounded capacity so appending the suffix doesn't
+            // trigger `String` growth (typically doubling capacity), which would cause us to
+            // retain allocations larger than `max_line_bytes`.
             let mut truncated = String::with_capacity(max_line_bytes);
             truncated.push_str(&message[..end]);
             if truncated.len() + suffix_len <= max_line_bytes {
