@@ -106,6 +106,9 @@ Notes:
   node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts --bin target/release/formula-desktop --runs 20
   ```
 
+  A scheduled cross-platform GitHub Actions workflow also runs this benchmark daily and uploads JSON + log artifacts per OS:
+  - `.github/workflows/desktop-perf-platform-matrix.yml`
+
 ### Idle memory benchmark (desktop process RSS)
 
 To measure idle memory for the desktop app (after TTI, with an empty workbook), run:
