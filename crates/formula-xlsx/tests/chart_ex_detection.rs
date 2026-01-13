@@ -11,14 +11,14 @@ fn load_fixture(name: &str) -> Vec<u8> {
 
 #[test]
 fn detects_chart_ex_parts_and_parses_kind() {
-    for (name, expected_title) in [
-        ("waterfall", "Waterfall"),
-        ("histogram", "Histogram"),
-        ("treemap", "Treemap"),
-        ("sunburst", "Sunburst"),
-        ("funnel", "Funnel"),
-        ("box-whisker", "Box & Whisker"),
-        ("pareto", "Pareto"),
+    for (name, expected_kind, expected_title) in [
+        ("waterfall", "waterfall", "Waterfall"),
+        ("histogram", "histogram", "Histogram"),
+        ("treemap", "treemap", "Treemap"),
+        ("sunburst", "sunburst", "Sunburst"),
+        ("funnel", "funnel", "Funnel"),
+        ("box-whisker", "boxWhisker", "Box & Whisker"),
+        ("pareto", "pareto", "Pareto"),
     ] {
         let bytes = load_fixture(name);
         let pkg = XlsxPackage::from_bytes(&bytes).expect("parse package");
@@ -83,6 +83,10 @@ fn detects_chart_ex_parts_and_parses_kind() {
                     !kind.trim().is_empty(),
                     "ChartEx kind should be non-empty for {name}.xlsx"
                 );
+                assert_eq!(
+                    kind, expected_kind,
+                    "ChartEx kind mismatch for {name}.xlsx"
+                );
             }
             other => panic!("expected ChartKind::Unknown for ChartEx, got {other:?}"),
         }
@@ -92,6 +96,15 @@ fn detects_chart_ex_parts_and_parses_kind() {
             "expected ChartEx model to include at least one series for {name}.xlsx"
         );
         let series = &model.series[0];
+        assert_eq!(
+            series
+                .name
+                .as_ref()
+                .map(|name| name.rich_text.plain_text()),
+            Some("Value"),
+            "expected series name cache to be present for {name}.xlsx"
+        );
+
         let categories = series
             .categories
             .as_ref()
@@ -106,6 +119,16 @@ fn detects_chart_ex_parts_and_parses_kind() {
         assert!(
             categories.cache.as_ref().is_some_and(|c| !c.is_empty()),
             "expected categories cache to be present for {name}.xlsx"
+        );
+        assert_eq!(
+            categories.formula.as_deref(),
+            Some("Sheet1!$A$2:$A$4"),
+            "expected categories formula to match fixture for {name}.xlsx"
+        );
+        assert_eq!(
+            categories.cache.as_deref(),
+            Some(&["A".to_string(), "B".to_string(), "C".to_string()][..]),
+            "expected categories cache to match fixture for {name}.xlsx"
         );
 
         let values = series
@@ -122,6 +145,16 @@ fn detects_chart_ex_parts_and_parses_kind() {
         assert!(
             values.cache.as_ref().is_some_and(|c| !c.is_empty()),
             "expected values cache to be present for {name}.xlsx"
+        );
+        assert_eq!(
+            values.formula.as_deref(),
+            Some("Sheet1!$B$2:$B$4"),
+            "expected values formula to match fixture for {name}.xlsx"
+        );
+        assert_eq!(
+            values.cache.as_deref(),
+            Some(&[10.0, 20.0, 30.0][..]),
+            "expected values cache to match fixture for {name}.xlsx"
         );
 
         // Ensure round-tripping preserves ChartEx parts byte-for-byte.
