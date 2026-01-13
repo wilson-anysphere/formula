@@ -21,6 +21,159 @@ import { DlpViolationError } from "../../security/dlp/src/errors.js";
 const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
 const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
+const DEFAULT_SHEET_INDEX_CACHE_LIMIT = 32;
+const DEFAULT_RAG_MAX_CHUNK_ROWS = 30;
+const SHEET_INDEX_SIGNATURE_VERSION = 1;
+
+const FNV_OFFSET_64 = 0xcbf29ce484222325n;
+const FNV_PRIME_64 = 0x100000001b3n;
+const FNV_MASK_64 = 0xffffffffffffffffn;
+
+/**
+ * @param {bigint} hash
+ * @param {string} input
+ */
+function fnv1a64Update(hash, input) {
+  let out = hash;
+  for (let i = 0; i < input.length; i++) {
+    out ^= BigInt(input.charCodeAt(i));
+    out = (out * FNV_PRIME_64) & FNV_MASK_64;
+  }
+  return out;
+}
+
+/**
+ * @param {unknown} origin
+ */
+function normalizeSheetOrigin(origin) {
+  const row = origin && typeof origin === "object" && Number.isInteger(origin.row) && origin.row >= 0 ? origin.row : 0;
+  const col = origin && typeof origin === "object" && Number.isInteger(origin.col) && origin.col >= 0 ? origin.col : 0;
+  return { row, col };
+}
+
+/**
+ * Cache key for a single-sheet RAG index, keyed by (sheet.name, sheet.origin?).
+ * @param {{ name?: unknown, origin?: any }} sheet
+ */
+function sheetIndexCacheKey(sheet) {
+  const name = sheet && typeof sheet === "object" && typeof sheet.name === "string" ? sheet.name : "";
+  const origin = normalizeSheetOrigin(sheet?.origin);
+  return `${name}::${origin.row},${origin.col}`;
+}
+
+/**
+ * @param {unknown} value
+ * @param {{ signal?: AbortSignal }} [options]
+ */
+function stableHashValue(value, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+
+  /**
+   * @param {bigint} hash
+   * @param {unknown} v
+   */
+  function walk(hash, v) {
+    throwIfAborted(signal);
+    if (v === undefined || v === null) return fnv1a64Update(hash, "null");
+    if (typeof v === "boolean") return fnv1a64Update(hash, v ? "true" : "false");
+
+    if (typeof v === "number") {
+      if (Number.isNaN(v)) return fnv1a64Update(hash, "num:NaN");
+      if (v === Infinity) return fnv1a64Update(hash, "num:Infinity");
+      if (v === -Infinity) return fnv1a64Update(hash, "num:-Infinity");
+      // Preserve the sign of -0.
+      if (Object.is(v, -0)) return fnv1a64Update(hash, "num:-0");
+      return fnv1a64Update(hash, `num:${String(v)}`);
+    }
+
+    if (typeof v === "string") {
+      hash = fnv1a64Update(hash, "str:");
+      hash = fnv1a64Update(hash, String(v.length));
+      hash = fnv1a64Update(hash, ":");
+      return fnv1a64Update(hash, v);
+    }
+
+    if (typeof v === "bigint") return fnv1a64Update(hash, `bigint:${v.toString()}`);
+    if (typeof v === "symbol") return fnv1a64Update(hash, `symbol:${v.toString()}`);
+    if (typeof v === "function") return fnv1a64Update(hash, `fn:${v.name || "anonymous"}`);
+    if (v instanceof Date) return fnv1a64Update(hash, `date:${v.toISOString()}`);
+
+    if (v instanceof Map) {
+      hash = fnv1a64Update(hash, "map{");
+      for (const [k, val] of v.entries()) {
+        hash = fnv1a64Update(hash, "k=");
+        hash = walk(hash, k);
+        hash = fnv1a64Update(hash, "v=");
+        hash = walk(hash, val);
+        hash = fnv1a64Update(hash, ";");
+      }
+      return fnv1a64Update(hash, "}");
+    }
+
+    if (v instanceof Set) {
+      hash = fnv1a64Update(hash, "set[");
+      for (const val of v.values()) {
+        hash = walk(hash, val);
+        hash = fnv1a64Update(hash, ";");
+      }
+      return fnv1a64Update(hash, "]");
+    }
+
+    if (Array.isArray(v)) {
+      hash = fnv1a64Update(hash, "[");
+      hash = fnv1a64Update(hash, String(v.length));
+      hash = fnv1a64Update(hash, ":");
+      for (const item of v) {
+        hash = walk(hash, item);
+        hash = fnv1a64Update(hash, ",");
+      }
+      return fnv1a64Update(hash, "]");
+    }
+
+    if (typeof v === "object") {
+      const obj = /** @type {Record<string, unknown>} */ (v);
+      const keys = Object.keys(obj).sort();
+      hash = fnv1a64Update(hash, "{");
+      for (const key of keys) {
+        hash = fnv1a64Update(hash, "k:");
+        hash = fnv1a64Update(hash, key);
+        hash = fnv1a64Update(hash, "v:");
+        hash = walk(hash, obj[key]);
+        hash = fnv1a64Update(hash, ";");
+      }
+      return fnv1a64Update(hash, "}");
+    }
+
+    return fnv1a64Update(hash, `other:${String(v)}`);
+  }
+
+  const hashed = walk(FNV_OFFSET_64, value);
+  return hashed.toString(16).padStart(16, "0");
+}
+
+/**
+ * Deterministic signature of inputs that affect RAG chunking/indexing.
+ *
+ * @param {{ name?: string, origin?: any, values?: unknown[][] }} sheet
+ * @param {{ maxChunkRows?: number, signal?: AbortSignal }} [options]
+ */
+function computeSheetIndexSignature(sheet, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
+  const origin = normalizeSheetOrigin(sheet?.origin);
+  const maxChunkRows = options.maxChunkRows ?? DEFAULT_RAG_MAX_CHUNK_ROWS;
+
+  let hash = FNV_OFFSET_64;
+  hash = fnv1a64Update(hash, `sig:v${SHEET_INDEX_SIGNATURE_VERSION}\n`);
+  hash = fnv1a64Update(hash, `name:${sheet?.name ?? ""}\n`);
+  hash = fnv1a64Update(hash, `origin:${origin.row},${origin.col}\n`);
+  hash = fnv1a64Update(hash, `maxChunkRows:${String(maxChunkRows)}\n`);
+  hash = fnv1a64Update(hash, "values:");
+  hash = fnv1a64Update(hash, stableHashValue(sheet?.values ?? [], { signal }));
+  return hash.toString(16).padStart(16, "0");
+}
+
 /**
  * @param {unknown} value
  * @param {number} fallback
@@ -140,6 +293,7 @@ export class ContextManager {
    * @param {{
    *   tokenBudgetTokens?: number,
    *   ragIndex?: RagIndex,
+   *   cacheSheetIndex?: boolean,
    *   workbookRag?: WorkbookRagOptions,
    *   maxContextRows?: number,
    *   maxContextCells?: number,
@@ -155,7 +309,6 @@ export class ContextManager {
     this.workbookRag = options.workbookRag;
     this.redactor = options.redactor ?? redactText;
     this.estimator = options.tokenEstimator ?? DEFAULT_TOKEN_ESTIMATOR;
-
     // These caps are primarily safety rails to prevent accidental Excel-scale context
     // selections from blowing up into multi-million-cell matrices in memory.
     //
@@ -166,6 +319,68 @@ export class ContextManager {
     this.maxChunkRows = normalizeNonNegativeInt(options.maxChunkRows, 30);
     // Top-K retrieved regions for sheet-level (non-workbook) RAG.
     this.sheetRagTopK = normalizeNonNegativeInt(options.sheetRagTopK, 5);
+
+    this.cacheSheetIndex = options.cacheSheetIndex ?? true;
+    /** @type {Map<string, { signature: string, schema: any, sheetName: string }>} */
+    this._sheetIndexCache = new Map();
+    this._sheetIndexCacheLimit = DEFAULT_SHEET_INDEX_CACHE_LIMIT;
+    /** @type {Map<string, string>} */
+    this._sheetNameToActiveCacheKey = new Map();
+  }
+
+  /**
+   * Index a sheet into the in-memory RAG store, with incremental caching by sheet signature.
+   *
+   * Returns the extracted schema (reused from chunking/indexing when possible).
+   *
+   * @param {{ name: string, values: unknown[][], origin?: any }} sheet
+   * @param {{ signal?: AbortSignal, maxChunkRows?: number }} [options]
+   * @returns {Promise<{ schema: any }>}
+   */
+  async _ensureSheetIndexed(sheet, options = {}) {
+    const signal = options.signal;
+    const maxChunkRows = options.maxChunkRows;
+    throwIfAborted(signal);
+
+    if (!this.cacheSheetIndex) {
+      const { schema } = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+      return { schema };
+    }
+
+    const cacheKey = sheetIndexCacheKey(sheet);
+    const signature = computeSheetIndexSignature(sheet, { signal, maxChunkRows });
+
+    const cached = this._sheetIndexCache.get(cacheKey);
+    if (cached) {
+      // Refresh LRU on access.
+      this._sheetIndexCache.delete(cacheKey);
+      this._sheetIndexCache.set(cacheKey, cached);
+    }
+
+    const activeKey = this._sheetNameToActiveCacheKey.get(sheet.name);
+    const upToDate = cached?.signature === signature && activeKey === cacheKey;
+    if (upToDate) return { schema: cached.schema };
+
+    const { schema } = await this.ragIndex.indexSheet(sheet, { signal, maxChunkRows });
+
+    // Update caches after successful indexing.
+    this._sheetNameToActiveCacheKey.set(sheet.name, cacheKey);
+    this._sheetIndexCache.delete(cacheKey);
+    this._sheetIndexCache.set(cacheKey, { signature, schema, sheetName: sheet.name });
+    while (this._sheetIndexCache.size > this._sheetIndexCacheLimit) {
+      const oldestKey = this._sheetIndexCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      const oldestEntry = this._sheetIndexCache.get(oldestKey);
+      this._sheetIndexCache.delete(oldestKey);
+      if (oldestEntry?.sheetName) {
+        const activeKeyForSheet = this._sheetNameToActiveCacheKey.get(oldestEntry.sheetName);
+        if (activeKeyForSheet === oldestKey) {
+          this._sheetNameToActiveCacheKey.delete(oldestEntry.sheetName);
+        }
+      }
+    }
+
+    return { schema };
   }
 
   /**
@@ -374,11 +589,11 @@ export class ContextManager {
     }
 
     throwIfAborted(signal);
-    // Index once per build for now; in the app this should be cached per sheet.
+    // Index sheet into the in-memory RAG store (cached by content signature).
     //
-    // `indexSheet()` extracts the schema as part of chunking; reuse the returned schema so we
-    // don't run schema extraction twice (once for prompt schema output + once for RAG chunks).
-    const { schema } = await this.ragIndex.indexSheet(sheetForContext, { signal, maxChunkRows });
+    // `RagIndex.indexSheet()` extracts the schema as part of chunking; `_ensureSheetIndexed()`
+    // reuses that work (or cached results) so we don't run schema extraction twice.
+    const { schema } = await this._ensureSheetIndexed(sheetForContext, { signal, maxChunkRows });
     throwIfAborted(signal);
     const retrieved = await this.ragIndex.search(params.query, this.sheetRagTopK, { signal });
     throwIfAborted(signal);

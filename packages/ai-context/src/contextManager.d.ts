@@ -51,6 +51,13 @@ export class ContextManager {
   constructor(options?: {
     tokenBudgetTokens?: number;
     ragIndex?: any;
+    /**
+     * Cache single-sheet RAG indexing by content signature.
+     *
+     * When enabled (default), repeated `buildContext()` calls for an unchanged sheet
+     * will reuse the previously indexed chunks instead of re-embedding.
+     */
+    cacheSheetIndex?: boolean;
     workbookRag?: WorkbookRagOptions;
     /**
      * Safety cap for the number of rows included from `sheet.values` when building

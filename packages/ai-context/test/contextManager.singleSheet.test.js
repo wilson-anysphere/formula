@@ -2,13 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ContextManager } from "../src/contextManager.js";
+import { RagIndex } from "../src/rag.js";
 
 function makeSheet(values, name = "Sheet1") {
   return { name, values };
 }
 
-test("buildContext: repeated calls do not duplicate RAG chunks for the same sheet", async () => {
-  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
+test("buildContext: repeated calls with identical data do not re-index the sheet", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
   const sheet = makeSheet([
     ["Region", "Revenue"],
     ["North", 1000],
@@ -18,13 +27,42 @@ test("buildContext: repeated calls do not duplicate RAG chunks for the same shee
   const out1 = await cm.buildContext({ sheet, query: "revenue by region" });
   const size1 = cm.ragIndex.store.size;
 
-  const out2 = await cm.buildContext({ sheet, query: "revenue by region" });
+  // Different query to ensure we still reuse the same indexed sheet.
+  const out2 = await cm.buildContext({ sheet, query: "north revenue" });
   const size2 = cm.ragIndex.store.size;
 
+  assert.equal(indexCalls, 1);
   assert.equal(size1, 1);
   assert.equal(size2, size1);
   assert.equal(out1.retrieved[0].range, "Sheet1!A1:B3");
   assert.equal(out2.retrieved[0].range, out1.retrieved[0].range);
+});
+
+test("buildContext: mutated sheet data triggers re-indexing and updates stored chunks", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, ragIndex });
+  const sheet = makeSheet([
+    ["Region", "Revenue"],
+    ["North", 1000],
+    ["South", 2000],
+  ]);
+
+  const out1 = await cm.buildContext({ sheet, query: "revenue by region" });
+  assert.equal(indexCalls, 1);
+  assert.match(out1.retrieved[0].preview, /\b1000\b/);
+
+  // Mutate a value in-place; signature should change and force re-indexing.
+  sheet.values[1][1] = 1111;
+  const out2 = await cm.buildContext({ sheet, query: "revenue by region" });
+  assert.equal(indexCalls, 2);
+  assert.match(out2.retrieved[0].preview, /\b1111\b/);
 });
 
 test("buildContext: stale RAG chunks are removed when a sheet shrinks", async () => {
