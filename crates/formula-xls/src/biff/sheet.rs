@@ -757,7 +757,11 @@ pub(crate) struct BiffSheetManualPageBreaks {
 ///
 /// In BIFF8, the `HorzBrk.row`/`VertBrk.col` fields store the **0-based index** of the first row/col
 /// *after* the break. The model stores page breaks as the 0-based row/col index **after which** the
-/// break occurs; we therefore subtract 1 (saturating) when importing.
+/// break occurs; we therefore subtract 1 when importing.
+///
+/// Some producers emit `row=0` / `col=0`, which would represent a break *before* the first row/col.
+/// Since `ManualPageBreaks` stores indices **after which** a break occurs, such breaks are not
+/// representable and are ignored (with a warning).
 ///
 /// This scan is resilient to malformed records: payload-level parse failures are surfaced as
 /// warnings and otherwise ignored.
@@ -848,9 +852,13 @@ fn parse_horizontal_page_breaks_record(
     for i in 0..iter_entries {
         let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
         let row = u16::from_le_bytes([data[base], data[base + 1]]);
-        manual_page_breaks
-            .row_breaks_after
-            .insert(row.saturating_sub(1) as u32);
+        if row == 0 {
+            // `row=0` would represent a break before the first row, which is not representable in
+            // `ManualPageBreaks` (it stores indices *after which* a break occurs).
+            push_warning_bounded(warnings, "ignoring horizontal page break with row=0");
+            continue;
+        }
+        manual_page_breaks.row_breaks_after.insert((row - 1) as u32);
     }
 }
 
@@ -893,9 +901,13 @@ fn parse_vertical_page_breaks_record(
     for i in 0..iter_entries {
         let base = 2usize.saturating_add(i.saturating_mul(ENTRY_LEN));
         let col = u16::from_le_bytes([data[base], data[base + 1]]);
-        manual_page_breaks
-            .col_breaks_after
-            .insert(col.saturating_sub(1) as u32);
+        if col == 0 {
+            // `col=0` would represent a break before the first column, which is not representable
+            // in `ManualPageBreaks` (it stores indices *after which* a break occurs).
+            push_warning_bounded(warnings, "ignoring vertical page break with col=0");
+            continue;
+        }
+        manual_page_breaks.col_breaks_after.insert((col - 1) as u32);
     }
 }
 #[derive(Debug, Clone, Copy)]

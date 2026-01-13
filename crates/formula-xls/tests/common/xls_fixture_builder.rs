@@ -1685,7 +1685,6 @@ fn build_page_setup_scaling_sheet_stream(xf_general: u16, fit_to_page: bool) -> 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
-
 fn setup_record(
     paper_size: u16,
     scale: u16,
@@ -3218,6 +3217,24 @@ pub fn build_view_state_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture that includes horizontal/vertical manual page breaks with edge
+/// cases:
+/// - horizontal break row=0 (invalid; represents a break before first row)
+/// - vertical break col=0 (invalid; represents a break before first col)
+pub fn build_page_break_edge_cases_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_break_edge_cases_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that includes a non-default workbook window geometry/state in the
 /// workbook-global `WINDOW1` record.
 pub fn build_workbook_window_fixture_xls() -> Vec<u8> {
@@ -4297,6 +4314,59 @@ fn build_note_comment_note_obj_id_swapped_workbook_stream() -> Vec<u8> {
         &build_note_comment_note_obj_id_swapped_sheet_stream(),
         1252,
     )
+}
+
+fn build_page_break_edge_cases_workbook_stream() -> Vec<u8> {
+    // build_single_sheet_workbook_stream constructs a minimal workbook with 16 style XFs followed by
+    // a single cell XF (General). That cell XF has index 16.
+    const XF_CELL: u16 = 16;
+    let sheet_stream = build_page_break_edge_cases_sheet_stream(XF_CELL);
+    build_single_sheet_workbook_stream("PageBreaks", &sheet_stream, 1252)
+}
+
+fn build_page_break_edge_cases_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 10) cols [0, 5) => A1:E10.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&10u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&5u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // HORIZONTALPAGEBREAKS: two breaks (row=0 is invalid, row=5 should import as break-after=4).
+    let mut hpb = Vec::<u8>::new();
+    hpb.extend_from_slice(&2u16.to_le_bytes()); // cbrk
+    hpb.extend_from_slice(&0u16.to_le_bytes()); // row
+    hpb.extend_from_slice(&0u16.to_le_bytes()); // colStart
+    hpb.extend_from_slice(&0u16.to_le_bytes()); // colEnd
+    hpb.extend_from_slice(&5u16.to_le_bytes()); // row
+    hpb.extend_from_slice(&0u16.to_le_bytes()); // colStart
+    hpb.extend_from_slice(&0u16.to_le_bytes()); // colEnd
+    push_record(&mut sheet, RECORD_HORIZONTALPAGEBREAKS, &hpb);
+
+    // VERTICALPAGEBREAKS: two breaks (col=0 is invalid, col=3 should import as break-after=2).
+    let mut vpb = Vec::<u8>::new();
+    vpb.extend_from_slice(&2u16.to_le_bytes()); // cbrk
+    vpb.extend_from_slice(&0u16.to_le_bytes()); // col
+    vpb.extend_from_slice(&0u16.to_le_bytes()); // rwStart
+    vpb.extend_from_slice(&0u16.to_le_bytes()); // rwEnd
+    vpb.extend_from_slice(&3u16.to_le_bytes()); // col
+    vpb.extend_from_slice(&0u16.to_le_bytes()); // rwStart
+    vpb.extend_from_slice(&0u16.to_le_bytes()); // rwEnd
+    push_record(&mut sheet, RECORD_VERTICALPAGEBREAKS, &vpb);
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_single_sheet_workbook_stream(
@@ -8058,8 +8128,6 @@ fn build_page_setup_sheet_stream(xf_cell: u16, cfg: PageSetupFixtureSheet) -> Ve
     );
 
     // Manual page breaks.
-    // Note: BIFF8 page breaks store the 0-based index of the first row/col *after* the break.
-    // Our fixture helpers accept the model’s “after which break occurs” form (0-based).
     push_record(
         &mut sheet,
         RECORD_HPAGEBREAKS,
