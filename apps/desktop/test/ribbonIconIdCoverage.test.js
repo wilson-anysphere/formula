@@ -1,23 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function readDesktopSource(...segments) {
-  return fs.readFileSync(path.join(__dirname, "..", "src", ...segments), "utf8");
-}
-
-function readRibbonSchemaSource() {
-  const schemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
-  const schemaFiles = fs
-    .readdirSync(schemaDir)
-    .filter((entry) => entry.endsWith(".ts"))
-    .sort((a, b) => a.localeCompare(b));
-  return schemaFiles.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n");
-}
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
 
 function collectSchemaButtonsWithSize(source, sizeValue) {
   const buttons = new Map();

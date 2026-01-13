@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -11,20 +13,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes Formulas → Formula Auditing command ids", () => {
-  const schemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
-  let schema = "";
-  try {
-    const tabFiles = fs
-      .readdirSync(schemaDir, { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-      .map((entry) => entry.name)
-      .sort();
-    schema = tabFiles.map((file) => fs.readFileSync(path.join(schemaDir, file), "utf8")).join("\n");
-  } catch {
-    // Back-compat: older versions kept all tab definitions in ribbonSchema.ts.
-    const schemaPath = path.join(__dirname, "..", "src", "ribbon", "ribbonSchema.ts");
-    schema = fs.readFileSync(schemaPath, "utf8");
-  }
+  const schema = readRibbonSchemaSource();
 
   const commandIds = [
     "formulas.formulaAuditing.tracePrecedents",

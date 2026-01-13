@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -11,8 +13,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes Data → Queries & Connections controls", () => {
-  const schemaPath = path.join(__dirname, "..", "src", "ribbon", "schema", "dataTab.ts");
-  const schema = fs.readFileSync(schemaPath, "utf8");
+  const schema = readRibbonSchemaSource("dataTab.ts");
 
   // Toggle button.
   assert.match(schema, /\bid:\s*["']data\.queriesConnections\.queriesConnections["']/);

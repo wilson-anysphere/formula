@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function escapeRegExp(value) {
@@ -11,9 +13,7 @@ function escapeRegExp(value) {
 }
 
 test("Ribbon schema includes View/Developer macro command ids", () => {
-  const viewTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "viewTab.ts");
-  const developerTabPath = path.join(__dirname, "..", "src", "ribbon", "schema", "developerTab.ts");
-  const schema = `${fs.readFileSync(viewTabPath, "utf8")}\n${fs.readFileSync(developerTabPath, "utf8")}`;
+  const schema = readRibbonSchemaSource(["viewTab.ts", "developerTab.ts"]);
 
   const commandIds = [
     // View → Macros.

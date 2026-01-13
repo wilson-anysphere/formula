@@ -4,6 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
+import { readRibbonSchemaSource } from "./ribbonSchemaSource.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function collectStringPropertyValues(source, propertyName) {
@@ -27,14 +29,7 @@ function findDuplicates(values) {
 }
 
 test("ribbon schema and File backstage expose stable, unique test ids", () => {
-  const ribbonSchemaDir = path.join(__dirname, "..", "src", "ribbon", "schema");
-  const ribbonSchemaFiles = fs
-    .readdirSync(ribbonSchemaDir)
-    .filter((entry) => entry.endsWith(".ts"))
-    .sort((a, b) => a.localeCompare(b));
-  const ribbonSchema = ribbonSchemaFiles
-    .map((file) => fs.readFileSync(path.join(ribbonSchemaDir, file), "utf8"))
-    .join("\n");
+  const ribbonSchema = readRibbonSchemaSource();
 
   const ribbonTestIds = collectStringPropertyValues(ribbonSchema, "testId");
   const ribbonDuplicates = findDuplicates(ribbonTestIds);
