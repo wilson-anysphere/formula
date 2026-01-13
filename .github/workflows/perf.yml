@@ -235,6 +235,38 @@ jobs:
           DISPLAY: ""
         run: pnpm benchmark
         continue-on-error: true
+
+      - name: Verify desktop startup metrics are present
+        # If we decided to run the real desktop (Tauri) benchmarks, enforce that the expected
+        # metrics were actually produced (so we don't silently skip the perf gate due to a config
+        # regression).
+        if: always() && steps.desktop_bench.outputs.run == 'true'
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'benchmark-results.json';
+          if (!fs.existsSync(path)) {
+            console.error(`[perf] ${path} not found; desktop startup metrics could not be verified.`);
+            process.exit(1);
+          }
+          const results = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (!Array.isArray(results)) {
+            console.error(`[perf] ${path} is not a JSON array; got ${typeof results}`);
+            process.exit(1);
+          }
+          const names = new Set(results.map((r) => r && r.name).filter((n) => typeof n === 'string'));
+          const required = [
+            'desktop.startup.window_visible_ms.p95',
+            'desktop.startup.tti_ms.p95',
+          ];
+          const missing = required.filter((n) => !names.has(n));
+          if (missing.length) {
+            console.error(`[perf] Missing desktop startup benchmark metrics: ${missing.join(', ')}`);
+            console.error('[perf] Ensure FORMULA_RUN_DESKTOP_STARTUP_BENCH=1 and the desktop binary emits [startup] metrics.');
+            process.exit(1);
+          }
+          console.log(`[perf] Desktop startup metrics present: ${required.join(', ')}`);
+          NODE
       
       - name: Run TabCompletionEngine benchmark
         if: always()
