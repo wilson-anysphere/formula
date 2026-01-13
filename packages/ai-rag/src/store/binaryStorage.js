@@ -427,21 +427,21 @@ export class ChunkedLocalStorageBinaryStorage {
         // This handles cases where the old meta is missing/corrupted.
         if (typeof storage.key !== "function" || typeof storage.length !== "number") {
           // Storage implementation is missing `key()`/`length` (non-standard). We can't safely scan
-          // for leftover chunks, so skip cleanup.
-          return;
+          // for leftover chunks, so skip chunk cleanup.
+        } else {
+          const prefix = `${this.key}:`;
+          /** @type {string[]} */
+          const keysToRemove = [];
+          for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
+            const suffix = key.slice(prefix.length);
+            if (!/^\d+$/.test(suffix)) continue;
+            const index = Number(suffix);
+            if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
+          }
+          for (const key of keysToRemove) storage.removeItem?.(key);
         }
-        const prefix = `${this.key}:`;
-        /** @type {string[]} */
-        const keysToRemove = [];
-        for (let i = 0; i < storage.length; i += 1) {
-          const key = storage.key(i);
-          if (!key || !key.startsWith(prefix) || key === this.metaKey) continue;
-          const suffix = key.slice(prefix.length);
-          if (!/^\d+$/.test(suffix)) continue;
-          const index = Number(suffix);
-          if (Number.isInteger(index) && index >= chunks) keysToRemove.push(key);
-        }
-        for (const key of keysToRemove) storage.removeItem?.(key);
       }
 
       // Clean up the legacy single-key storage entry if it exists.
