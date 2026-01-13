@@ -45,8 +45,9 @@ describe("AIAuditRecorder", () => {
     expect(entries[0]!.user_feedback).toBe("accepted");
   });
 
-  it("finalize is best-effort (never throws) and records persistence errors", async () => {
-    const store = new FailingAIAuditStore(new Error("persist failed"));
+  it("finalize() is best-effort and records failures without throwing", async () => {
+    const err = new Error("persist failed");
+    const store = new FailingAIAuditStore(err);
     const recorder = new AIAuditRecorder({
       store,
       session_id: "session-fail",
@@ -56,6 +57,8 @@ describe("AIAuditRecorder", () => {
     });
 
     await expect(recorder.finalize()).resolves.toBeUndefined();
+    expect(recorder.finalizeError).toBe(err);
+    expect(recorder.getFinalizeError()).toBe(err);
     expect(recorder.finalize_error).toBe("persist failed");
     expect(typeof recorder.entry.latency_ms).toBe("number");
   });

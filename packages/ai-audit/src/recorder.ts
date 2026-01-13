@@ -32,6 +32,11 @@ export class AIAuditRecorder {
    * `finalize()` is intentionally best-effort (never throws) because it's often
    * invoked from `finally` blocks in higher-level AI flows.
    */
+  finalizeError: unknown | undefined;
+  /**
+   * Stringified message form of `finalizeError` (for backwards compatibility with
+   * older callers that expected a string).
+   */
   finalize_error?: string;
 
   constructor(options: AIAuditRecorderOptions) {
@@ -125,12 +130,19 @@ export class AIAuditRecorder {
     if (this.entry.latency_ms === undefined) {
       this.entry.latency_ms = nowMs() - this.startedAtMs;
     }
+
     try {
       await this.store.logEntry(this.entry);
+      this.finalizeError = undefined;
+      this.finalize_error = undefined;
     } catch (error) {
+      this.finalizeError = error;
       this.finalize_error = error instanceof Error ? error.message : String(error);
-      return;
     }
+  }
+
+  getFinalizeError(): unknown | undefined {
+    return this.finalizeError;
   }
 
   private resolveToolIndex(callIdOrIndex: string | number): number {

@@ -4,6 +4,7 @@ import { createDefaultAIAuditStore } from "../src/factory.js";
 import { BoundedAIAuditStore } from "../src/bounded-store.js";
 import { IndexedDbAIAuditStore } from "../src/indexeddb-store.js";
 import { LocalStorageAIAuditStore } from "../src/local-storage-store.js";
+
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 
 class MemoryLocalStorage implements Storage {
@@ -118,3 +119,4 @@ describe("createDefaultAIAuditStore", () => {
     expect((store as any).store).toBeInstanceOf(LocalStorageAIAuditStore);
   });
 });
+

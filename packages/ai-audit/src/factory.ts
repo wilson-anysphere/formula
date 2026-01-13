@@ -13,7 +13,7 @@ export interface AIAuditStoreRetentionOptions {
 export interface CreateDefaultAIAuditStoreOptions {
   /**
    * Prefer a specific backing store. When unset, a reasonable default is selected
-   * based on the runtime (browser vs Node).
+   * based on the runtime (browser/webview vs Node).
    */
   prefer?: "sqlite" | "indexeddb" | "localstorage" | "memory";
   /**
@@ -25,11 +25,25 @@ export interface CreateDefaultAIAuditStoreOptions {
   bounded?: boolean | BoundedAIAuditStoreOptions;
   /**
    * Retention options forwarded to the underlying store when supported.
+   *
+   * Deprecated: prefer specifying `max_entries` / `max_age_ms` at the top level.
    */
   retention?: AIAuditStoreRetentionOptions;
   /**
+   * Maximum number of entries to retain (newest retained).
+   */
+  max_entries?: number;
+  /**
+   * Maximum age in milliseconds. Entries older than (now - max_age_ms) are dropped
+   * or deleted at write-time (depending on store implementation).
+   */
+  max_age_ms?: number;
+  /**
    * Optional sqlite storage implementation used when `prefer: "sqlite"` in
    * Node runtimes (via `@formula/ai-audit/node`).
+   *
+   * This option is accepted here so callsites can share a single options object
+   * across browser + node entrypoints.
    */
   sqlite_storage?: SqliteBinaryStorage;
 }
@@ -41,10 +55,12 @@ export interface CreateDefaultAIAuditStoreOptions {
  * back to `LocalStorageAIAuditStore` and finally `MemoryAIAuditStore`.
  *
  * Node runtimes default to `MemoryAIAuditStore` to avoid pulling in sql.js unless
- * explicitly requested.
+ * explicitly requested (via the Node entrypoint).
  */
 export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditStoreOptions = {}): Promise<AIAuditStore> {
   const retention = options.retention ?? {};
+  const max_entries = options.max_entries ?? retention.max_entries;
+  const max_age_ms = options.max_age_ms ?? retention.max_age_ms;
   const prefer = options.prefer;
   const bounded = options.bounded;
 
@@ -54,16 +70,13 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
     return new BoundedAIAuditStore(store, boundedOptions);
   };
 
-  const createMemory = (): AIAuditStore =>
-    new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
-
-  const createLocalStorage = (): AIAuditStore =>
-    new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+  const createMemory = (): AIAuditStore => new MemoryAIAuditStore({ max_entries, max_age_ms });
+  const createLocalStorage = (): AIAuditStore => new LocalStorageAIAuditStore({ max_entries, max_age_ms });
 
   const createIndexedDb = async (): Promise<AIAuditStore | null> => {
     if (!isIndexedDbAvailable()) return null;
     try {
-      const store = new IndexedDbAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms });
+      const store = new IndexedDbAIAuditStore({ max_entries, max_age_ms });
       // Probe once so we fail fast (blocked/denied IndexedDB) and can fall back.
       await store.listEntries({ limit: 0 });
       return store;
@@ -77,9 +90,7 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
   }
 
   if (prefer === "localstorage") {
-    if (!isLocalStorageAvailable()) {
-      return wrap(createMemory());
-    }
+    if (!isLocalStorageAvailable()) return wrap(createMemory());
     return wrap(createLocalStorage());
   }
 
@@ -90,46 +101,35 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
     return wrap(createMemory());
   }
 
-  if (prefer === undefined) {
-    if (isBrowserRuntime()) {
-      const indexed = await createIndexedDb();
-      if (indexed) return wrap(indexed);
-      if (isLocalStorageAvailable()) return wrap(createLocalStorage());
-      return wrap(createMemory());
-    }
+  if (prefer === "sqlite") {
+    // Keep the browser-safe entrypoint free of sql.js. Consumers that want sqlite
+    // in browser-like environments should import `@formula/ai-audit/sqlite` and
+    // construct `SqliteAIAuditStore` directly.
+    throw new Error(
+      'createDefaultAIAuditStore(prefer: "sqlite") is not available in the default/browser entrypoint. ' +
+        'Import SqliteAIAuditStore from "@formula/ai-audit/sqlite" instead.'
+    );
+  }
 
+  // Automatic defaults.
+  if (isNodeRuntime()) {
     return wrap(createMemory());
   }
 
-  // Keep the browser-safe entrypoint free of sql.js. Consumers that want sqlite
-  // in browser-like environments should import `@formula/ai-audit/sqlite` and
-  // construct `SqliteAIAuditStore` directly.
-  throw new Error(
-    'createDefaultAIAuditStore(prefer: "sqlite") is not available in the default/browser entrypoint. ' +
-      'Import SqliteAIAuditStore from "@formula/ai-audit/sqlite" instead.'
-  );
+  const indexed = await createIndexedDb();
+  if (indexed) return wrap(indexed);
+  if (isLocalStorageAvailable()) return wrap(createLocalStorage());
+  return wrap(createMemory());
 }
 
-function isBrowserRuntime(): boolean {
-  // Most reliable signal: `window` exists.
-  // Avoid touching Node-only globals (process, Buffer) so the browser entrypoint
-  // can be imported in constrained environments.
-  return typeof window !== "undefined" && typeof window === "object";
-}
+function isNodeRuntime(): boolean {
+  // Treat webviews/Electron renderers as browser-like when `window` exists.
+  if (typeof window !== "undefined") return false;
 
-function isLocalStorageAvailable(): boolean {
-  const storage = getLocalStorageOrNull();
-  if (!storage) return false;
-
-  // Probe write access; some environments expose localStorage but throw on use
-  // (e.g. private mode, restricted webviews).
-  const key = "__formula_ai_audit_probe__";
   try {
-    const existing = storage.getItem(key);
-    storage.setItem(key, "1");
-    if (existing === null) storage.removeItem(key);
-    else storage.setItem(key, existing);
-    return true;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const versions = typeof process !== "undefined" ? ((process as any).versions as any) : undefined;
+    return !!versions?.node;
   } catch {
     return false;
   }
@@ -141,6 +141,22 @@ function isIndexedDbAvailable(): boolean {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const idb = (globalThis as any).indexedDB as IDBFactory | undefined;
     return !!idb && typeof idb.open === "function";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalStorageAvailable(): boolean {
+  const storage = getLocalStorageOrNull();
+  if (!storage) return false;
+
+  const key = "__formula_ai_audit_probe__";
+  try {
+    const existing = storage.getItem(key);
+    storage.setItem(key, "1");
+    if (existing === null) storage.removeItem(key);
+    else storage.setItem(key, existing);
+    return true;
   } catch {
     return false;
   }
@@ -174,3 +190,4 @@ function getLocalStorageOrNull(): Storage | null {
     return null;
   }
 }
+

@@ -13,6 +13,8 @@ import type { CreateDefaultAIAuditStoreOptions } from "./factory.ts";
  */
 export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditStoreOptions = {}): Promise<AIAuditStore> {
   const retention = options.retention ?? {};
+  const max_entries = options.max_entries ?? retention.max_entries;
+  const max_age_ms = options.max_age_ms ?? retention.max_age_ms;
   const prefer = options.prefer ?? "memory";
   const bounded = options.bounded;
 
@@ -23,16 +25,16 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
   };
 
   if (prefer === "memory") {
-    return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+    return wrap(new MemoryAIAuditStore({ max_entries, max_age_ms }));
   }
 
   if (prefer === "indexeddb") {
     // Node runtimes do not have IndexedDB. Treat as unsupported and fall back to
     // localStorage if explicitly available, otherwise memory.
     if (isLocalStorageAvailable()) {
-      return wrap(new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+      return wrap(new LocalStorageAIAuditStore({ max_entries, max_age_ms }));
     }
-    return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+    return wrap(new MemoryAIAuditStore({ max_entries, max_age_ms }));
   }
 
   if (prefer === "localstorage") {
@@ -40,16 +42,16 @@ export async function createDefaultAIAuditStore(options: CreateDefaultAIAuditSto
     // (e.g. jsdom / experimental webstorage). If localStorage is unavailable,
     // fall back to memory.
     if (!isLocalStorageAvailable()) {
-      return wrap(new MemoryAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+      return wrap(new MemoryAIAuditStore({ max_entries, max_age_ms }));
     }
-    return wrap(new LocalStorageAIAuditStore({ max_entries: retention.max_entries, max_age_ms: retention.max_age_ms }));
+    return wrap(new LocalStorageAIAuditStore({ max_entries, max_age_ms }));
   }
 
   // `prefer: "sqlite"` is explicit opt-in.
   const { SqliteAIAuditStore } = await import("./sqlite-store.ts");
   const sqlite = await SqliteAIAuditStore.create({
     storage: options.sqlite_storage,
-    retention
+    retention: { max_entries, max_age_ms }
   });
   return wrap(sqlite);
 }
@@ -81,3 +83,4 @@ function getLocalStorageOrNull(): Storage | null {
     return null;
   }
 }
+
