@@ -151,6 +151,28 @@ class TabCompletionEngine {
 }
 ```
 
+#### Locale-aware partial parsing (WASM engine)
+
+Tab completion needs a fast “best-effort” parse of *in-progress* formulas to know whether the user is typing a function
+name, which argument they are in, and what kinds of suggestions are appropriate. Formula exposes this as a locale-aware
+entrypoint in the WASM engine:
+
+```typescript
+const partial = await engine.parseFormulaPartial(formula, cursor, { localeId });
+```
+
+- **Why it matters:** Excel-style formulas are locale-sensitive.
+  - **Argument/list separators** vary (e.g. `,` vs `;`), which changes how `argIndex` is computed.
+  - **Localized function names** may be accepted/shown (e.g. `SUM` vs a localized equivalent), which impacts function-name
+    completion and signature help.
+- **How the UI should use it:** call `engine.parseFormulaPartial(...)` on each keystroke (or on a small debounce) and treat
+  the returned context/error as hints for completion, not as a hard validation pass.
+- **How it composes with `packages/ai-completion`:** the rule-based tab completion engine in `packages/ai-completion`
+  remains responsible for generating/ranking suggestions; its `TabCompletionEngine` supports injecting a
+  `parsePartialFormula` implementation. The UI can provide an adapter that delegates to
+  `engine.parseFormulaPartial(formula, cursor, { localeId })` (with a fallback to the existing lightweight JS parser when
+  WASM is unavailable) so completion logic stays consistent with the engine and the current locale.
+
 ### Mode 2: Inline Edit (Cmd/Ctrl+K)
 
 **Trigger:** User selects range and presses Cmd/Ctrl+K
