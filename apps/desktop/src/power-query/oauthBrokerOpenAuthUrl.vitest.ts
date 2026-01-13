@@ -135,4 +135,23 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl.toString() });
     expect(invoke).not.toHaveBeenCalledWith("oauth_loopback_listen", expect.anything());
   });
+
+  it.each([
+    ["missing port", "http://localhost/oauth/callback"],
+    ["https scheme", "https://localhost:4242/oauth/callback"],
+    ["non-loopback IPv4", "http://127.0.0.2:4242/oauth/callback"],
+  ] as const)("does not start the loopback listener when redirect_uri is %s", async (_label, redirectUri) => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = new URL("https://example.com/oauth/authorize");
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+
+    await broker.openAuthUrl(authUrl.toString());
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl.toString() });
+    expect(invoke).not.toHaveBeenCalledWith("oauth_loopback_listen", expect.anything());
+  });
 });

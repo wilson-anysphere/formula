@@ -344,6 +344,18 @@ test.describe("data queries: desktop OAuth redirect capture", () => {
         throw new Error(`Expected authorization URL to include state + redirect_uri: ${authUrlText}`);
       }
 
+      // Ensure loopback listener startup happens before opening the system browser.
+      const invokeOrdering = await page.evaluate((authUrlText) => {
+        const calls = (window as any).__tauriInvokeCalls as Array<{ cmd: string; args: any }> | undefined;
+        if (!Array.isArray(calls)) return null;
+        const listenIdx = calls.findIndex((c) => c?.cmd === "oauth_loopback_listen");
+        const openIdx = calls.findIndex((c) => c?.cmd === "open_external_url" && String(c?.args?.url ?? "") === String(authUrlText));
+        return { listenIdx, openIdx };
+      }, authUrlText);
+      expect(invokeOrdering).not.toBeNull();
+      expect(invokeOrdering!.listenIdx).toBeGreaterThanOrEqual(0);
+      expect(invokeOrdering!.openIdx).toBeGreaterThan(invokeOrdering!.listenIdx);
+
       // Deliver the redirect back to the running app via the stubbed Tauri event channel.
       await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["oauth-redirect"]));
       const redirectUrl = `${openedRedirectUri}?code=fake_code&state=${encodeURIComponent(state)}`;
