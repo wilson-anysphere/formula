@@ -6,6 +6,7 @@ use formula_model::CellValue;
 const PASSWORD: &str = "correct horse battery staple";
 const UNICODE_PASSWORD: &str = "pässwörd";
 const UNICODE_EMOJI_PASSWORD: &str = "pässwörd🔒";
+const WRONG_PASSWORD: &str = "hunter2";
 
 fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -201,6 +202,18 @@ fn rc4_cryptoapi_unicode_password_wrong_password_errors() {
         matches!(err, formula_xls::ImportError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
     );
+}
+
+#[test]
+fn rc4_cryptoapi_wrong_password_error_does_not_leak_password() {
+    let err = formula_xls::import_xls_path_with_password(fixture_path(), WRONG_PASSWORD)
+        .expect_err("expected wrong password error");
+
+    let display = err.to_string();
+    let debug = format!("{err:?}");
+
+    assert!(!display.contains(WRONG_PASSWORD));
+    assert!(!debug.contains(WRONG_PASSWORD));
 }
 
 #[test]
