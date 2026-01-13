@@ -75,15 +75,20 @@ trap cleanup EXIT
 # apps/desktop/src-tauri/tauri.conf.json `mainBinaryName` (and the Rust `[[bin]]`).
 EXPECTED_MAIN_BINARY="${FORMULA_APPIMAGE_MAIN_BINARY:-}"
 if [ -z "$EXPECTED_MAIN_BINARY" ]; then
-  if [ -f "$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json" ] && command -v python3 >/dev/null 2>&1; then
+  tauri_conf_path="$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json"
+  if [ -f "$tauri_conf_path" ] && command -v python3 >/dev/null 2>&1; then
     EXPECTED_MAIN_BINARY="$(
-      python3 - "$REPO_ROOT/apps/desktop/src-tauri/tauri.conf.json" <<'PY' 2>/dev/null || true
+      python3 - "$tauri_conf_path" <<'PY' 2>/dev/null || true
 import json
 import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     conf = json.load(f)
 print(conf.get("mainBinaryName", ""))
 PY
+    )"
+  elif [ -f "$tauri_conf_path" ] && command -v node >/dev/null 2>&1; then
+    EXPECTED_MAIN_BINARY="$(
+      node -p 'const fs=require("fs");const conf=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); conf.mainBinaryName ?? ""' "$tauri_conf_path" 2>/dev/null || true
     )"
   fi
   : "${EXPECTED_MAIN_BINARY:=formula-desktop}"
