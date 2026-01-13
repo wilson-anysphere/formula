@@ -845,6 +845,17 @@ export class YjsVersionStore {
   }
 
   /**
+   * Alias for {@link pruneIncompleteVersions}. Kept for API flexibility since
+   * different callers may prefer "cleanup" terminology.
+   *
+   * @param {{ olderThanMs?: number }} [opts]
+   * @returns {Promise<{ prunedIds: string[] }>}
+   */
+  async cleanupIncompleteVersions(opts) {
+    return this.pruneIncompleteVersions(opts);
+  }
+
+  /**
    * @returns {Promise<VersionRecord[]>}
    */
   async listVersions() {
