@@ -563,6 +563,9 @@
 
 .query-editor-add-step__suggestions {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .query-editor-add-step__no-suggestions {
@@ -572,7 +575,7 @@
 
 .query-editor-add-step__suggestion {
   width: 100%;
-  margin-top: 4px;
+  margin-top: 0;
   text-align: start;
   overflow: hidden;
   text-overflow: ellipsis;
