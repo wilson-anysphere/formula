@@ -375,6 +375,8 @@ await invoke("check_for_updates", { source: "manual" });
 - Support both x64 and arm64
 - Use `.ico` icon format
 - Handle UAC elevation if needed
+- Windows uses **Microsoft Edge WebView2**. Installers must ensure the Evergreen runtime is present via
+  `bundle.windows.webviewInstallMode` in `apps/desktop/src-tauri/tauri.conf.json` (see `docs/release.md`).
 
 ### Linux
 
