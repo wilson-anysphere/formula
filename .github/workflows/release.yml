@@ -18,6 +18,11 @@ concurrency:
   # atomically by a single workflow run.
   cancel-in-progress: false
 
+env:
+  # Keep release builds on the same Node.js major as CI (see ci.yml) to avoid
+  # "works in CI, breaks in release" drift.
+  NODE_VERSION: 22
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -40,7 +45,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Check desktop version matches release tag
         run: node scripts/check-desktop-version.mjs "${{ github.ref_name }}"
@@ -79,10 +84,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # Pin the pnpm patch version for deterministic tagged-release builds.
+          # Keep this in sync with the root package.json `packageManager` field.
+          version: 9.0.0
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
@@ -99,13 +113,6 @@ jobs:
       - name: Validate macOS entitlements (hardened runtime)
         if: runner.os == 'macOS'
         run: node scripts/check-macos-entitlements.mjs
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          # Pin the pnpm patch version for deterministic tagged-release builds.
-          # Keep this in sync with the root package.json `packageManager` field.
-          version: 9.0.0
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.92.0
@@ -766,7 +773,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Validate updater manifest assets + targets
         env:
