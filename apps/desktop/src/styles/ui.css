@@ -820,21 +820,22 @@
 .grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  border-top: 1px solid var(--grid-line);
+  border-top: 1px solid var(--formula-grid-line, var(--grid-line));
+  color: var(--formula-grid-cell-text, var(--text-primary));
 }
 
 .grid__headers {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 80px repeat(6, 1fr);
-  background: var(--grid-header-bg);
-  color: var(--grid-header-text);
-  border-bottom: 1px solid var(--grid-line);
+  background: var(--formula-grid-header-bg, var(--grid-header-bg));
+  color: var(--formula-grid-header-text, var(--grid-header-text));
+  border-bottom: 1px solid var(--formula-grid-line, var(--grid-line));
 }
 
 .grid__header-cell {
   padding: 8px 10px;
-  border-right: 1px solid var(--grid-line);
+  border-right: 1px solid var(--formula-grid-line, var(--grid-line));
   font-weight: 600;
   user-select: none;
 }
@@ -843,19 +844,19 @@
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 80px repeat(6, 1fr);
-  background: var(--bg-primary);
+  background: var(--formula-grid-bg, var(--bg-primary));
 }
 
 .grid__row-header,
 .grid__cell {
   padding: 8px 10px;
-  border-right: 1px solid var(--grid-line);
-  border-bottom: 1px solid var(--grid-line);
+  border-right: 1px solid var(--formula-grid-line, var(--grid-line));
+  border-bottom: 1px solid var(--formula-grid-line, var(--grid-line));
   min-height: 32px;
 }
 
 .grid__row-header {
-  background: var(--grid-header-bg);
+  background: var(--formula-grid-header-bg, var(--grid-header-bg));
   color: var(--text-secondary);
   font-weight: 600;
   user-select: none;
@@ -864,7 +865,7 @@
 .grid__cell--selected {
   background: var(--selection-bg);
   color: var(--selection-text);
-  outline: 2px solid var(--selection-border);
+  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: -2px;
 }
 
