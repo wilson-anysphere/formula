@@ -162,6 +162,18 @@ When handling user reports, these error variants map cleanly to “what happened
 If you need to distinguish **Agile vs Standard** for triage, include the `EncryptionInfo`
 `major.minor` pair in the bug report (or at least whether `minor == 2` vs `4.4`).
 
+### Lower-level error mapping (`formula-office-crypto`)
+
+If you are debugging decryption directly (outside the `formula-io` open path), the helper crate
+`crates/formula-office-crypto` exposes:
+
+- `formula_office_crypto::decrypt_encrypted_package_ole(bytes, password)` → decrypted ZIP bytes
+- `OfficeCryptoError::{InvalidPassword, UnsupportedEncryption, InvalidFormat, Io, ...}`
+
+This is where you will most commonly see the **`UnsupportedEncryption`** error: it indicates we
+recognized the encrypted OOXML wrapper, but the specific cipher/hash/KDF settings are not implemented
+by the decryptor.
+
 ## Test fixtures and attribution
 
 Encrypted workbook fixtures are stored under:
