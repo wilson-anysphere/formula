@@ -8,5 +8,6 @@
 //! This crate is now a thin compatibility wrapper that re-exports the `xlsx-diff`
 //! API so existing internal tooling can continue to compile.
 
-pub use xlsx_diff::*;
+#![deprecated(note = "Use `xlsx-diff`; `xlsb-diff` is a deprecated compatibility wrapper.")]
 
+pub use xlsx_diff::*;
