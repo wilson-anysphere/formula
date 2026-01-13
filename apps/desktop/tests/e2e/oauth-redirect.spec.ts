@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
-test.describe("desktop OAuth redirect capture", () => {
+test.describe("data queries: desktop OAuth redirect capture", () => {
   test("emitting oauth-redirect resolves a pending PKCE flow without prompting", async ({ page }) => {
     await page.addInitScript(() => {
       const listeners: Record<string, any> = {};
