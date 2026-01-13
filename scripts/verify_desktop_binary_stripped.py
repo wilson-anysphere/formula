@@ -18,6 +18,7 @@ from typing import Iterable
 
 
 DESKTOP_BINARY_NAME = "formula-desktop"
+_SKIP_DIR_SUFFIXES = (".app", ".framework", ".xcframework")
 
 
 @dataclass(frozen=True)
@@ -170,13 +171,37 @@ def _check_no_symbol_sidecars(repo_root: Path) -> None:
         # Not all builds produce bundles (e.g. local `cargo build`). Don't fail.
         return
 
-    forbidden_suffixes = [".pdb", ".dSYM", ".dwp"]
+    # `cargo`/linkers can emit separate debug symbol artifacts:
+    # - Windows: `.pdb` (often not bundled by default, but we guard against it)
+    # - macOS: `.dSYM` directory, sometimes archived as `.dSYM.zip`/`.dSYM.tar.gz`
+    # - Linux: `.dwp` (DWARF package)
+    #
+    # We scan bundle output directories rather than `target/` so local debug artifacts
+    # don't fail the check unless they would be shipped to users.
+    forbidden_file_suffixes = (".pdb", ".dwp")
     offenders: list[Path] = []
     for bundle_dir in bundle_dirs:
-        for p in bundle_dir.rglob("*"):
-            name = p.name
-            if any(name.endswith(s) for s in forbidden_suffixes):
-                offenders.append(p)
+        for root, dirs, files in os.walk(bundle_dir):
+            # Record (and avoid descending into) dSYM directories.
+            for d in list(dirs):
+                if d.lower().endswith(".dsym"):
+                    offenders.append(Path(root) / d)
+                    dirs.remove(d)
+
+            # Prune large nested bundles/framework trees; dSYM directories are handled above.
+            dirs[:] = [d for d in dirs if not d.lower().endswith(_SKIP_DIR_SUFFIXES)]
+
+            for f in files:
+                lower = f.lower()
+                if lower.endswith(forbidden_file_suffixes):
+                    offenders.append(Path(root) / f)
+                    continue
+                # Catch archived debug bundles (e.g. `Formula.app.dSYM.zip`).
+                if lower.endswith(".dsym") or ".dsym." in lower:
+                    offenders.append(Path(root) / f)
+                    continue
+                if ".pdb." in lower:
+                    offenders.append(Path(root) / f)
 
     _assert(
         not offenders,
@@ -220,4 +245,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
