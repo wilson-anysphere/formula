@@ -11,7 +11,8 @@ env:
   NODE_VERSION: 22
   # Keep in sync with release.yml so CI catches WASM toolchain issues early.
   WASM_PACK_VERSION: 0.13.1
-  # Keep in sync with the `tauri` dependency pinned in Cargo.lock.
+  # Keep in sync with the `tauri` dependency pinned in Cargo.lock (and the pinned
+  # TAURI_CLI_VERSION in release.yml) so CI catches toolchain drift early.
   TAURI_CLI_VERSION: 2.9.5
 
 jobs:
@@ -287,15 +288,16 @@ jobs:
           key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
             cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install cargo-tauri (CLI)
+      - name: Install pinned tauri-cli (cargo tauri)
         if: steps.cargo-tauri-cache.outputs.cache-hit != 'true'
-        run: bash scripts/cargo_agent.sh install cargo-tauri --version ${{ env.TAURI_CLI_VERSION }} --locked
+        run: bash scripts/cargo_agent.sh install tauri-cli --version "${TAURI_CLI_VERSION}" --locked --force
       - name: Verify cargo-tauri version
         shell: bash
         run: |
           set -euo pipefail
           expected="${TAURI_CLI_VERSION}"
           actual="$(cargo-tauri --version | tr -d '\r' | awk '{print $2}')"
+          echo "cargo-tauri version: ${actual}"
           if [[ "${actual}" != "${expected}" ]]; then
             echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
             exit 1
