@@ -101,6 +101,30 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("commits on Shift+Enter and forwards the shift modifier", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "shift-enter";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const e = new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("shift-enter", { reason: "enter", shift: true });
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.activeCell.input).toBe("shift-enter");
+
+    host.remove();
+  });
+
   it("cancels on Escape, restores the active cell input, and exits edit mode", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
