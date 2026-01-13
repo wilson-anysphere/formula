@@ -53,44 +53,24 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
     );
   }
 
-  // Desktop main.ts still handles the ribbon ids directly (ribbon command switch), matching
-  // the Excel-style behavior used by the legacy auditing UI.
-  assert.match(
-    main,
-    new RegExp(
-      `case\\s+["']formulas\\.formulaAuditing\\.tracePrecedents["']:\\s*\\n` +
-        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
-        `\\s*app\\.toggleAuditingPrecedents\\(\\);\\s*\\n` +
-        `\\s*app\\.focus\\(\\);\\s*\\n` +
-        `\\s*return;`,
-      "m",
-    ),
-    "Expected main.ts to handle formulas.formulaAuditing.tracePrecedents via clearAuditing/toggleAuditingPrecedents/focus",
-  );
+  // The desktop shell now routes ribbon commands through CommandRegistry when a builtin command exists
+  // with the same id. These ribbon command ids should *not* be special-cased in main.ts anymore.
+  for (const commandId of [
+    "formulas.formulaAuditing.tracePrecedents",
+    "formulas.formulaAuditing.traceDependents",
+    "formulas.formulaAuditing.removeArrows",
+  ]) {
+    assert.doesNotMatch(
+      main,
+      new RegExp(`\\b${escapeRegExp(commandId)}\\b`),
+      `Did not expect main.ts to special-case ${commandId}; it should be executed via CommandRegistry`,
+    );
+  }
 
   assert.match(
     main,
-    new RegExp(
-      `case\\s+["']formulas\\.formulaAuditing\\.traceDependents["']:\\s*\\n` +
-        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
-        `\\s*app\\.toggleAuditingDependents\\(\\);\\s*\\n` +
-        `\\s*app\\.focus\\(\\);\\s*\\n` +
-        `\\s*return;`,
-      "m",
-    ),
-    "Expected main.ts to handle formulas.formulaAuditing.traceDependents via clearAuditing/toggleAuditingDependents/focus",
-  );
-
-  assert.match(
-    main,
-    new RegExp(
-      `case\\s+["']formulas\\.formulaAuditing\\.removeArrows["']:\\s*\\n` +
-        `\\s*app\\.clearAuditing\\(\\);\\s*\\n` +
-        `\\s*app\\.focus\\(\\);\\s*\\n` +
-        `\\s*return;`,
-      "m",
-    ),
-    "Expected main.ts to handle formulas.formulaAuditing.removeArrows via clearAuditing/focus",
+    /const\s+cmd\s*=\s*commandRegistry\.getCommand\(commandId\)[\s\S]*?cmd\?\.\s*source\.kind\s*===\s*["']builtin["'][\s\S]*?executeBuiltinCommand\(commandId\);/m,
+    "Expected main.ts ribbon handler to dispatch builtin ribbon ids via CommandRegistry",
   );
 
   assert.match(
