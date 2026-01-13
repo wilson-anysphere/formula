@@ -103,10 +103,10 @@ In practice:
 
 Implementation notes:
 
-- Formula’s Standard parser (`crates/formula-offcrypto`) treats **`versionMinor == 2`** (and
-  `versionMajor ∈ {2,3,4}`) as Standard encryption; Excel commonly emits `3.2`.
-- Formula includes a small helper binary that prints the one-line scheme/version for an encrypted
-  OOXML file: `crates/formula-io/src/bin/ooxml-encryption-info.rs`.
+- `crates/formula-io/src/bin/ooxml-encryption-info.rs` prints a one-line scheme/version summary
+  based on the `(majorVersion, minorVersion)` header (e.g. `3.2` → Standard, `4.4` → Agile).
+- `crates/formula-offcrypto` is a low-level helper for decrypting a Standard `EncryptedPackage`
+  **given a derived key**; it does not parse `EncryptionInfo` by itself.
 
 ### Supported OOXML encryption schemes
 
