@@ -730,7 +730,7 @@ export class YjsVersionStore {
       const hasChunkArray = isYArray(chunksArr);
 
       const isMissingChunks = isChunkEncoded && chunksExpected && hasChunkArray && chunksArr.length < expectedChunks;
-      const isMissingChunkArray = isChunkEncoded && hasChunks && !hasChunkArray;
+      const isMissingChunkArray = isChunkEncoded && !hasChunkArray;
       const isMissingBase64 = snapshotEncoding === "base64" && typeof base64 !== "string";
 
       const isIncomplete = snapshotComplete === false || isMissingChunks || isMissingChunkArray || isMissingBase64;
