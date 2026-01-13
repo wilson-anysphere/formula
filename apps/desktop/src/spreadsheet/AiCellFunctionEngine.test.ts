@@ -944,6 +944,38 @@ describe("AiCellFunctionEngine", () => {
     expect(resolved).toBe("ok");
   });
 
+  it("blocks heuristic Restricted values under block policy even without structured classifications", async () => {
+    // Ensure the classification store is empty so enforcement relies on heuristics.
+    globalThis.localStorage?.clear();
+
+    const workbookId = "dlp-heuristic-block-workbook";
+    const sessionId = "dlp-heuristic-block-session";
+    const llmClient = { chat: vi.fn() };
+
+    setBlockPolicy(workbookId);
+
+    const auditStore = new MemoryAIAuditStore();
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore,
+      workbookId,
+      sessionId,
+    });
+
+    const getCellValue = (addr: string) => (addr === "A1" ? "user@example.com" : null);
+
+    const value = evaluateFormula('=AI("summarize", A1)', getCellValue, { ai: engine, cellAddress: "Sheet1!B1" });
+    expect(value).toBe(AI_CELL_DLP_ERROR);
+    expect(llmClient.chat).not.toHaveBeenCalled();
+
+    await engine.waitForIdle();
+    const entries = await auditStore.listEntries({ session_id: sessionId });
+    expect(entries).toHaveLength(1);
+    const input = entries[0]?.input as any;
+    expect(input?.blocked).toBe(true);
+    expect(JSON.stringify(input)).not.toContain("user@example.com");
+  });
+
   it("DLP redacts inputs before sending to the LLM", async () => {
     const workbookId = "dlp-redact-workbook";
     const llmClient = {
