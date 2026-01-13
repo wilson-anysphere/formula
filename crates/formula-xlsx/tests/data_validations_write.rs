@@ -1,0 +1,178 @@
+use std::io::{Cursor, Read, Write};
+use std::path::Path;
+
+use formula_model::{Cell, CellRef, CellValue, DataValidation, DataValidationKind, Range, Workbook};
+use formula_xlsx::{load_from_path, XlsxDocument};
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use zip::{ZipArchive, ZipWriter};
+
+fn read_part(bytes: &[u8], part: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
+    let mut text = String::new();
+    archive.by_name(part)?.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+#[test]
+fn writes_data_validations_section() -> Result<(), Box<dyn std::error::Error>> {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1")?;
+
+    {
+        let sheet = workbook.sheet_mut(sheet_id).expect("sheet exists");
+        sheet.set_cell(
+            CellRef::from_a1("A1")?,
+            Cell::new(CellValue::String("Pick".to_string())),
+        );
+
+        let rule = DataValidation {
+            kind: DataValidationKind::List,
+            operator: None,
+            formula1: "\"Yes,No\"".to_string(),
+            formula2: None,
+            allow_blank: true,
+            show_input_message: true,
+            show_error_message: true,
+            show_drop_down: false,
+            input_message: None,
+            error_alert: None,
+        };
+        sheet.add_data_validation(vec![Range::from_a1("A1")?], rule);
+    }
+
+    let doc = XlsxDocument::new(workbook);
+    let bytes = doc.save_to_vec()?;
+
+    let sheet_xml = read_part(&bytes, "xl/worksheets/sheet1.xml")?;
+
+    assert!(
+        sheet_xml.contains("<dataValidations"),
+        "expected `<dataValidations>` section, got:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<dataValidation") && sheet_xml.contains("type=\"list\""),
+        "expected list `<dataValidation>` element, got:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("sqref=\"A1\""),
+        "expected sqref=\"A1\", got:\n{sheet_xml}"
+    );
+    assert!(
+        sheet_xml.contains("<formula1>\"Yes,No\"</formula1>"),
+        "expected literal list formula1, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
+
+fn strip_data_validations(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = quick_xml::Writer::new(Vec::new());
+    let mut buf = Vec::new();
+    let mut skip_depth = 0usize;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"dataValidations" => {
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"dataValidations" => {
+                // Skip.
+            }
+            _ => writer.write_event(event.to_owned())?,
+        }
+        buf.clear();
+    }
+
+    Ok(String::from_utf8(writer.into_inner())?)
+}
+
+fn write_fixture_without_data_validations(
+    fixture_path: &Path,
+    out_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let src_file = std::fs::File::open(fixture_path)?;
+    let mut archive = ZipArchive::new(src_file)?;
+
+    let dst_file = std::fs::File::create(out_path)?;
+    let mut writer = ZipWriter::new(dst_file);
+    let options =
+        zip::write::FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        let name = file.name().to_string();
+        let mut buf = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut buf)?;
+
+        if name == "xl/worksheets/sheet1.xml" {
+            let xml = std::str::from_utf8(&buf)?;
+            let stripped = strip_data_validations(xml)?;
+            buf = stripped.into_bytes();
+        }
+
+        writer.start_file(name, options)?;
+        writer.write_all(&buf)?;
+    }
+
+    writer.finish()?;
+    Ok(())
+}
+
+#[test]
+fn clearing_data_validations_removes_data_validations_block() -> Result<(), Box<dyn std::error::Error>>
+{
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/metadata/data-validation-list.xlsx");
+
+    let mut doc = load_from_path(&fixture)?;
+    doc.workbook.sheets[0].data_validations.clear();
+
+    let out_bytes = doc.save_to_vec()?;
+
+    let sheet_xml = read_part(&out_bytes, "xl/worksheets/sheet1.xml")?;
+    assert!(
+        !sheet_xml.contains("dataValidations"),
+        "expected `<dataValidations>` removal, got:\n{sheet_xml}"
+    );
+
+    let tmpdir = tempfile::tempdir()?;
+    let out_path = tmpdir.path().join("out.xlsx");
+    std::fs::write(&out_path, &out_bytes)?;
+
+    // Build an "expected" workbook that is byte-for-byte the fixture except for the removal of
+    // `<dataValidations>` from `xl/worksheets/sheet1.xml`. The output should match that with no
+    // additional critical diffs.
+    let expected_path = tmpdir.path().join("expected.xlsx");
+    write_fixture_without_data_validations(&fixture, &expected_path)?;
+
+    let report = xlsx_diff::diff_workbooks(&expected_path, &out_path)?;
+    if report.has_at_least(xlsx_diff::Severity::Critical) {
+        eprintln!("Critical diffs detected after clearing data validations");
+        for diff in report
+            .differences
+            .iter()
+            .filter(|d| d.severity == xlsx_diff::Severity::Critical)
+        {
+            eprintln!("{diff}");
+        }
+        panic!("unexpected critical diffs after removing dataValidations block");
+    }
+
+    Ok(())
+}
+

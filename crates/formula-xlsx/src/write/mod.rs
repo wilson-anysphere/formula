@@ -39,6 +39,7 @@ const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/
 const CONTENT_TYPES_NS: &str = "http://schemas.openxmlformats.org/package/2006/content-types";
 
 mod dimension;
+mod data_validations;
 mod sheetdata_patch;
 
 #[derive(Debug, Error)]
@@ -773,6 +774,7 @@ fn build_parts(
             orig_cols,
             orig_autofilter,
             orig_sheet_protection,
+            orig_has_data_validations,
         ) = if let Some(orig) = orig {
             let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                 WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -783,6 +785,7 @@ fn build_parts(
             let orig_sheet_format = parse_sheet_format_settings(orig_xml)?;
             let orig_cols = parse_col_properties(orig_xml)?;
             let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
+            let orig_has_data_validations = worksheet_has_data_validations(orig_xml)?;
 
             let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
                 .map_err(|err| match err {
@@ -825,6 +828,7 @@ fn build_parts(
                 orig_cols,
                 orig_autofilter,
                 orig_sheet_protection,
+                orig_has_data_validations,
             )
         } else {
             (
@@ -836,6 +840,7 @@ fn build_parts(
                 BTreeMap::new(),
                 None,
                 None,
+                false,
             )
         };
 
@@ -891,6 +896,12 @@ fn build_parts(
             // element that may still be present in the source document (including cases where it
             // was stored as `<sheetProtection sheet="0" .../>`).
             orig_sheet_protection.is_some()
+        };
+
+        let data_validations_changed = if sheet.data_validations.is_empty() {
+            orig_has_data_validations
+        } else {
+            true
         };
 
         let sheet_xml_bytes = write_worksheet_xml(
@@ -999,6 +1010,7 @@ fn build_parts(
             && !sheet_protection_changed
             && !drawings_need_emit
             && !drawings_need_remove
+            && !data_validations_changed
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -1024,6 +1036,12 @@ fn build_parts(
         }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
+        }
+        if (is_new_sheet && !sheet.data_validations.is_empty()) || data_validations_changed {
+            sheet_xml = data_validations::update_worksheet_data_validations_xml(
+                &sheet_xml,
+                &sheet.data_validations,
+            )?;
         }
         if is_new_sheet || sheet_protection_changed {
             sheet_xml = update_sheet_protection_xml(&sheet_xml, &sheet.sheet_protection)?;
@@ -2232,6 +2250,24 @@ fn parse_sheet_protection(xml: &str) -> Result<Option<SheetProtection>, WriteErr
     }
 
     Ok(None)
+}
+
+fn worksheet_has_data_validations(xml: &str) -> Result<bool, WriteError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"dataValidations" => {
+                return Ok(true);
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(false)
 }
 
 fn update_sheet_protection_xml(
