@@ -288,6 +288,28 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                     _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
                 }
             }
+            // PtgAttr: [grbit: u8][wAttr: u16] + optional payloads.
+            //
+            // Most attributes are evaluation hints or formatting metadata. We treat them as
+            // non-printing tokens, but must consume their payload so later ptgs stay aligned.
+            0x19 => {
+                if input.len() < 3 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let grbit = input[0];
+                let w_attr = u16::from_le_bytes([input[1], input[2]]);
+                input = &input[3..];
+
+                const T_ATTR_CHOOSE: u8 = 0x04;
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    // `tAttrChoose` is followed by a jump table of `u16` offsets (wAttr entries).
+                    let needed = (w_attr as usize).saturating_mul(2);
+                    if input.len() < needed {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+                    input = &input[needed..];
+                }
+            }
             // Error literal.
             0x1C => {
                 if input.is_empty() {
@@ -388,6 +410,16 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
 
                 stack.push(ExprFragment::new(text));
             }
+            // PtgName: [nameId: u32][reserved: u16]
+            0x23 | 0x43 | 0x63 => {
+                if input.len() < 6 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let name_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                // Skip reserved u16.
+                input = &input[6..];
+                stack.push(ExprFragment::new(format!("Name{{{name_id}}}")));
+            }
             // PtgFuncVar
             0x22 | 0x42 | 0x62 => {
                 if input.len() < 3 {
@@ -396,6 +428,45 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 let argc = input[0] as usize;
                 let func_id = u16::from_le_bytes([input[1], input[2]]);
                 input = &input[3..];
+
+                // Excel uses a sentinel function id for user-defined functions: the top-of-stack
+                // item is the function name expression (typically from `PtgNameX`), followed by
+                // arguments.
+                if func_id == 0x00FF {
+                    if argc == 0 {
+                        return Err(DecodeRgceError::UnexpectedEof);
+                    }
+
+                    let func_name = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
+                    let mut args = Vec::with_capacity(argc.saturating_sub(1));
+                    for _ in 0..argc.saturating_sub(1) {
+                        args.push(stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?);
+                    }
+                    args.reverse();
+
+                    let mut text = String::new();
+                    text.push_str(&func_name.text);
+                    text.push('(');
+                    for (i, arg) in args.into_iter().enumerate() {
+                        if i > 0 {
+                            text.push(',');
+                        }
+                        if arg.is_missing {
+                            continue;
+                        }
+                        if arg.contains_union {
+                            text.push('(');
+                            text.push_str(&arg.text);
+                            text.push(')');
+                        } else {
+                            text.push_str(&arg.text);
+                        }
+                    }
+                    text.push(')');
+
+                    stack.push(ExprFragment::new(text));
+                    continue;
+                }
 
                 let name = function_id_to_name(func_id)
                     .ok_or(DecodeRgceError::UnknownFunctionId { func_id })?;
@@ -505,6 +576,85 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 }
                 stack.push(frag);
             }
+            // PtgMem* tokens: non-printing, but consume payload bytes to keep parsing aligned.
+            0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
+            | 0x2E | 0x4E | 0x6E => {
+                if input.len() < 2 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let cce = u16::from_le_bytes([input[0], input[1]]) as usize;
+                input = &input[2..];
+                if input.len() < cce {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                input = &input[cce..];
+            }
+            // PtgNameX: [ixti: u16][nameIndex: u16]
+            0x39 | 0x59 | 0x79 => {
+                if input.len() < 4 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let name_index = u16::from_le_bytes([input[2], input[3]]);
+                input = &input[4..];
+                stack.push(ExprFragment::new(format!("ExternName{ixti}:{name_index}")));
+            }
+            // PtgRef3d: [ixti: u16][row: u32][col: u16]
+            0x3A | 0x5A | 0x7A => {
+                if input.len() < 8 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let row0 = u32::from_le_bytes([input[2], input[3], input[4], input[5]]);
+                let col_field = u16::from_le_bytes([input[6], input[7]]);
+                input = &input[8..];
+
+                let prefix = format_sheet_placeholder(ixti);
+                let cell = format_cell_ref_from_field(row0, col_field);
+                stack.push(ExprFragment::new(format!("{prefix}{cell}")));
+            }
+            // PtgArea3d: [ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]
+            0x3B | 0x5B | 0x7B => {
+                if input.len() < 14 {
+                    return Err(DecodeRgceError::UnexpectedEof);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let row_first0 = u32::from_le_bytes([input[2], input[3], input[4], input[5]]);
+                let row_last0 = u32::from_le_bytes([input[6], input[7], input[8], input[9]]);
+                let col_first = u16::from_le_bytes([input[10], input[11]]);
+                let col_last = u16::from_le_bytes([input[12], input[13]]);
+                input = &input[14..];
+
+                let prefix = format_sheet_placeholder(ixti);
+                let a = format_cell_ref_from_field(row_first0, col_first);
+                let b = format_cell_ref_from_field(row_last0, col_last);
+
+                let is_single_cell = row_first0 == row_last0
+                    && (col_first & 0x3FFF) == (col_last & 0x3FFF);
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                let mut text = String::new();
+                let mut precedence = 100;
+                if is_value_class && !is_single_cell {
+                    text.push('@');
+                    precedence = 70;
+                }
+                text.push_str(&prefix);
+                if is_single_cell {
+                    text.push_str(&a);
+                } else {
+                    text.push_str(&a);
+                    text.push(':');
+                    text.push_str(&b);
+                }
+
+                stack.push(ExprFragment {
+                    text,
+                    precedence,
+                    contains_union: false,
+                    is_missing: false,
+                });
+            }
             _ => return Err(DecodeRgceError::UnsupportedToken { ptg }),
         }
     }
@@ -514,6 +664,43 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
     } else {
         Err(DecodeRgceError::UnsupportedToken { ptg: 0x00 })
     }
+}
+
+fn format_sheet_placeholder(ixti: u16) -> String {
+    // Best-effort placeholder: without workbook context we cannot resolve `ixti` into a real sheet
+    // name, but we can still emit valid sheet-qualified formula text by quoting a stable placeholder.
+    let sheet = format!("Sheet{ixti}");
+    let mut out = String::new();
+    out.push('\'');
+    for ch in sheet.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out.push('!');
+    out
+}
+
+fn format_cell_ref_from_field(row0: u32, col_field: u16) -> String {
+    let row1 = (row0 as u64).saturating_add(1);
+    let col = (col_field & 0x3FFF) as u32;
+    let col_relative = (col_field & 0x8000) == 0x8000;
+    let row_relative = (col_field & 0x4000) == 0x4000;
+
+    let mut out = String::new();
+    if !col_relative {
+        out.push('$');
+    }
+    push_column(col, &mut out);
+    if !row_relative {
+        out.push('$');
+    }
+    out.push_str(&row1.to_string());
+    out
 }
 
 fn push_column(mut col: u32, out: &mut String) {
