@@ -1,9 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
 import { migrateLegacyCellKeys } from "../src/index.ts";
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
 
 function makePlainCell(value) {
   const cell = new Y.Map();
@@ -127,5 +143,36 @@ test("migrateLegacyCellKeys deep-clones nested Yjs types (avoids integration err
   const migratedFormat = migrated.get("format");
   assert.ok(migratedFormat instanceof Y.Map);
   assert.notEqual(migratedFormat, format);
+  assert.equal(migratedFormat.get("bold"), true);
+});
+
+test("migrateLegacyCellKeys clones foreign (CJS) nested Yjs types to local constructors", () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const remoteCells = remote.getMap("cells");
+  remote.transact(() => {
+    const cell = new Ycjs.Map();
+    cell.set("value", 1);
+    const format = new Ycjs.Map();
+    format.set("bold", true);
+    cell.set("format", format);
+    remoteCells.set("Sheet1:0,0", cell);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  doc.getMap("cells"); // ensure root exists in this module
+  Ycjs.applyUpdate(doc, update);
+
+  const result = migrateLegacyCellKeys(doc);
+  assert.deepEqual(result, { migrated: 1, removed: 1, collisions: 0 });
+
+  const cells = doc.getMap("cells");
+  const migrated = /** @type {any} */ (cells.get("Sheet1:0:0"));
+  assert.ok(migrated instanceof Y.Map);
+  const migratedFormat = migrated.get("format");
+  assert.ok(migratedFormat instanceof Y.Map);
   assert.equal(migratedFormat.get("bold"), true);
 });

@@ -62,6 +62,8 @@ test("CollabSession undo captures comment edits when comments root is created la
 
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
+  sessionA.setPermissions({ role: "editor", userId: "u-a", rangeRestrictions: [] });
+  sessionB.setPermissions({ role: "editor", userId: "u-b", rangeRestrictions: [] });
 
   assert.ok(docA.share.get("comments") instanceof Y.Map);
   assert.ok(docB.share.get("comments") instanceof Y.Map);
@@ -164,6 +166,8 @@ test("CollabSession undo does not clobber legacy Array-backed comments root (in-
 
   const sessionA = createCollabSession({ doc: docA, undo: {} });
   const sessionB = createCollabSession({ doc: docB, undo: {} });
+  sessionA.setPermissions({ role: "editor", userId: "u-a", rangeRestrictions: [] });
+  sessionB.setPermissions({ role: "editor", userId: "u-b", rangeRestrictions: [] });
 
   assert.ok(docA.share.get("comments") instanceof Y.Array);
   assert.ok(docB.share.get("comments") instanceof Y.Array);
@@ -225,6 +229,7 @@ test("CollabSession undo captures comment edits when comments root was created b
   assert.ok(doc.share.get("comments"));
 
   const session = createCollabSession({ doc, undo: {} });
+  session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
   const commentsMgr = createCommentManagerForSession(session);
 
   assert.deepEqual(commentsMgr.listAll().map((c) => c.id), ["c1"]);
@@ -291,6 +296,7 @@ test("CollabSession undo captures comment edits when foreign Yjs constructors ar
   }
 
   const session = createCollabSession({ doc, undo: {} });
+  session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
   const commentsMgr = createCommentManagerForSession(session);
 
   assert.deepEqual(commentsMgr.listAll().map((c) => c.id), ["c1"]);
@@ -339,6 +345,7 @@ test("CollabSession undo captures comment edits when comments root is a legacy a
   assert.ok(doc.share.get("comments"));
 
   const session = createCollabSession({ doc, undo: {} });
+  session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
   const commentsMgr = createCommentManagerForSession(session);
 
   assert.deepEqual(commentsMgr.listAll().map((c) => c.id), ["c1"]);
@@ -703,6 +710,7 @@ test("CollabSession undo captures comment edits when comments root is a foreign 
   );
 
   const session = createCollabSession({ doc, undo: {} });
+  session.setPermissions({ role: "editor", userId: "u1", rangeRestrictions: [] });
 
   // The session should normalize the placeholder so the canonical root is usable.
   assert.ok(doc.share.get("comments") instanceof Y.Map);

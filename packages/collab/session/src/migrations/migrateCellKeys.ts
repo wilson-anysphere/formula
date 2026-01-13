@@ -114,8 +114,12 @@ function deletePlaintextFields(value: unknown): void {
 function cloneYjsValue(value: unknown): unknown {
   const map = getYMap(value);
   if (map) {
-    const MapCtor = (map as any).constructor as new () => any;
-    const out = new MapCtor();
+    // Always clone to *local* constructors (this module's Yjs instance). Docs can
+    // contain nested types created by a different Yjs module instance (CJS vs
+    // ESM, or duplicate dependency trees). Those foreign types may not pass
+    // `instanceof Y.AbstractType` checks during integration, so copying their
+    // constructor would re-introduce "Unexpected content type" crashes.
+    const out = new Y.Map();
     map.forEach((v: unknown, k: string) => {
       out.set(k, cloneYjsValue(v));
     });
@@ -124,8 +128,7 @@ function cloneYjsValue(value: unknown): unknown {
 
   const array = getYArray(value);
   if (array) {
-    const ArrayCtor = (array as any).constructor as new () => any;
-    const out = new ArrayCtor();
+    const out = new Y.Array();
     const items = typeof array.toArray === "function" ? array.toArray() : [];
     for (const item of items) {
       out.push([cloneYjsValue(item)]);
@@ -135,8 +138,7 @@ function cloneYjsValue(value: unknown): unknown {
 
   const text = getYText(value);
   if (text) {
-    const TextCtor = (text as any).constructor as new () => any;
-    const out = new TextCtor();
+    const out = new Y.Text();
     out.applyDelta(structuredClone(text.toDelta()));
     return out;
   }
