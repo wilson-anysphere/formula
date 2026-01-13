@@ -206,6 +206,8 @@ Useful entrypoints when working on encrypted workbook support:
     once you have the AES key + verifier salt
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
+- **Standard (CryptoAPI) RC4 algorithm writeup (KDF, 0x200 block size, test vectors):**
+  - `docs/offcrypto-standard-cryptoapi-rc4.md`
 
 ---
 
