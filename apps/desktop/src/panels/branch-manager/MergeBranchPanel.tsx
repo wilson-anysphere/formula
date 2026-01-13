@@ -229,6 +229,21 @@ function cellHasEnc(cell: Cell | null): boolean {
   return cell?.enc !== null && cell?.enc !== undefined;
 }
 
+function stringifyForKey(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function cellValueKey(cell: Cell | null): string {
+  if (!cell) return "∅";
+  if (cellHasEnc(cell)) return `enc:${stringifyForKey(cell.enc)}`;
+  if (cellHasValue(cell)) return `value:${stringifyForKey(cell.value)}`;
+  return "∅";
+}
+
 function CellInlineView({ cell }: { cell: Cell | null }) {
   if (!cell) return <span className="branch-merge__empty">∅</span>;
   if (cellHasEnc(cell)) return <span className="branch-merge__encrypted">{encryptedCellText(cell.enc)}</span>;
@@ -242,6 +257,7 @@ function CellInlineView({ cell }: { cell: Cell | null }) {
 function CellConflictColumn({
   label,
   cell,
+  baseCell,
   baseFormula,
   showEnc,
   showFormula,
@@ -251,6 +267,7 @@ function CellConflictColumn({
 }: {
   label: string;
   cell: Cell | null;
+  baseCell: Cell | null;
   baseFormula: string | null;
   showEnc: boolean;
   showFormula: boolean;
@@ -261,6 +278,7 @@ function CellConflictColumn({
   const currentFormula = cell?.formula ?? null;
   const formulaOld = baseFormula;
   const formulaNew = formulaMode === "base" ? baseFormula : currentFormula;
+  const showValueDiff = formulaMode !== "base" && cellValueKey(baseCell) !== cellValueKey(cell);
 
   return (
     <div className="branch-merge__cell-column">
@@ -292,7 +310,25 @@ function CellConflictColumn({
         <div className="branch-merge__cell-section">
           <div className="branch-merge__cell-section-title">Value</div>
           <div className="branch-merge__cell-section-body">
-            {cellHasEnc(cell) ? (
+            {showValueDiff ? (
+              <>
+                <span className={cellHasEnc(baseCell) ? "branch-merge__encrypted" : undefined}>
+                  {cellHasEnc(baseCell)
+                    ? encryptedCellText(baseCell?.enc)
+                    : cellHasValue(baseCell)
+                      ? valueSummary(baseCell?.value)
+                      : "∅"}
+                </span>
+                <span className="branch-merge__value-diff-arrow"> → </span>
+                <span className={cellHasEnc(cell) ? "branch-merge__encrypted" : undefined}>
+                  {cellHasEnc(cell)
+                    ? encryptedCellText(cell?.enc)
+                    : cellHasValue(cell)
+                      ? valueSummary(cell?.value)
+                      : "∅"}
+                </span>
+              </>
+            ) : cellHasEnc(cell) ? (
               <span className="branch-merge__encrypted">{encryptedCellText(cell?.enc)}</span>
             ) : cellHasValue(cell) ? (
               valueSummary(cell?.value)
@@ -350,7 +386,7 @@ function parseValueFromEditorText(text: string): unknown {
   return trimmed;
 }
 
-function normalizeFormulaInput(text: string): string | null {
+function normalizeFormulaInput(text: string | null | undefined): string | null {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return null;
   const withoutEquals = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
@@ -366,8 +402,8 @@ function normalizeManualCell(cell: Cell | null): Cell | null {
 
   if (cell.enc !== null && cell.enc !== undefined) out.enc = cell.enc;
 
-    const formula = normalizeFormulaInput(cell.formula);
-    if (formula) out.formula = formula;
+  const formula = normalizeFormulaInput(cell.formula);
+  if (formula) out.formula = formula;
 
   if (cell.value !== null && cell.value !== undefined) out.value = cell.value;
 
@@ -598,6 +634,7 @@ export function MergeBranchPanel({
                         <CellConflictColumn
                           label={t("branchMerge.conflict.base")}
                           cell={c.base}
+                          baseCell={c.base}
                           baseFormula={baseFormula}
                           showEnc={showEnc}
                           showFormula={showFormula}
@@ -608,6 +645,7 @@ export function MergeBranchPanel({
                         <CellConflictColumn
                           label={t("branchMerge.conflict.ours")}
                           cell={c.ours}
+                          baseCell={c.base}
                           baseFormula={baseFormula}
                           showEnc={showEnc}
                           showFormula={showFormula}
@@ -618,6 +656,7 @@ export function MergeBranchPanel({
                         <CellConflictColumn
                           label={t("branchMerge.conflict.theirs")}
                           cell={c.theirs}
+                          baseCell={c.base}
                           baseFormula={baseFormula}
                           showEnc={showEnc}
                           showFormula={showFormula}

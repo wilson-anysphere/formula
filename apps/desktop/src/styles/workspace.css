@@ -801,6 +801,10 @@
   font-style: italic;
 }
 
+.branch-merge__value-diff-arrow {
+  color: var(--text-secondary);
+}
+
 .branch-merge__conflict-grid--cell {
   align-items: start;
 }
