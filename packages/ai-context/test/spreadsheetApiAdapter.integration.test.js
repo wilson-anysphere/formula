@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+import { HashEmbedder } from "../../ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../ai-rag/src/store/inMemoryVectorStore.js";
 import { ContextManager } from "../src/contextManager.js";
 
 test("integration: buildWorkbookContextFromSpreadsheetApi retrieves relevant chunk", async () => {

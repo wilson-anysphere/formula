@@ -9,7 +9,8 @@ vi.mock("../../security/dlp/src/selectors.js", async () => {
 });
 
 import { ContextManager } from "./contextManager.js";
-import { HashEmbedder, InMemoryVectorStore } from "../../ai-rag/src/index.js";
+import { HashEmbedder } from "../../ai-rag/src/embedding/hashEmbedder.js";
+import { InMemoryVectorStore } from "../../ai-rag/src/store/inMemoryVectorStore.js";
 import { DLP_ACTION } from "../../security/dlp/src/actions.js";
 import * as selectors from "../../security/dlp/src/selectors.js";
 
