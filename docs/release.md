@@ -196,9 +196,6 @@ CI note:
   with `upload=true`) will **fail fast** if these secrets are missing (the workflow prints a
   “Missing Tauri updater signing secrets” error). Without the private key, the release workflow
   cannot generate the updater signature files (`*.sig`) required for auto-update.
-- CI also verifies that `TAURI_PRIVATE_KEY` matches the embedded updater public key
-  (`plugins.updater.pubkey`). A mismatch would produce signatures that clients cannot verify, so we
-  fail fast before any build steps run.
 - On forks/dry-runs without these secrets, the workflow can still build and upload artifacts, but
   updater signature/manifest validation jobs are skipped and auto-update will not work until you
   configure your own updater keypair/secrets.
@@ -316,10 +313,6 @@ local `tauri build` will typically produce **unsigned** artifacts. To run this c
 you must build a **signed** app (e.g. use the CI-produced artifacts, or temporarily set
 `bundle.macOS.signingIdentity` to your explicit `Developer ID Application: … (TEAMID)` identity and
 then revert the change—do not commit it).
-
-Practical note: the “blank WebView” failure mode tends to show up specifically under the **hardened
-runtime**. An unsigned local dev build may appear fine even when the hardened-runtime entitlements
-are wrong, so prefer testing with the CI-signed artifact when in doubt.
 
 1. Build the production bundles:
 
@@ -461,8 +454,6 @@ CI smoke test:
 - `.github/workflows/windows-arm64-smoke.yml` runs `cargo tauri build --target aarch64-pc-windows-msvc`
   and asserts that the expected Windows bundles land under
   `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**`.
-  - It also runs on a weekly schedule in the upstream repo to catch `windows-latest` runner image
-    regressions (missing MSVC/SDK ARM64 components) early.
 
 ## Windows installer bundler prerequisites (WiX + NSIS)
 
@@ -513,9 +504,6 @@ To verify on a clean Windows VM (no preinstalled WebView2 Runtime):
 If you need an offline-friendly installer, change `bundle.windows.webviewInstallMode` to `offlineInstaller` or
 `fixedRuntime` (at the cost of a much larger installer: roughly **+127 MB** for `offlineInstaller` or **+180 MB** for
 `fixedRuntime`).
-
-Note: per the upstream Tauri docs/schema, the **Windows updater bundle** uses `downloadBootstrapper` for WebView2. Keep
-that in mind if you switch the installer mode and expect update payloads to include an offline/fixed runtime.
 
 For the full set of options, see the Tauri docs:
 https://v2.tauri.app/distribute/windows-installer/#webview2-installation-options
@@ -620,8 +608,8 @@ targets **WebKitGTK 4.1 + GTK3**, so the distro-native packages (`.deb` / `.rpm`
 compatible with distros that ship those versions.
 
 - Prefer **`.deb` / `.rpm`** when the target distro provides WebKitGTK 4.1 (Debian/Ubuntu:
-  `libwebkit2gtk-4.1-0`; Fedora: `webkit2gtk4.1`; openSUSE: `libwebkit2gtk-4_1-0`). These integrate
-  with the system package manager and are the expected “happy path” on modern distros.
+  `libwebkit2gtk-4.1-0`; Fedora: `webkit2gtk4.1`). These integrate with the system package manager
+  and are the expected “happy path” on modern distros.
   - Note: some RHEL 9-family distros ship `webkit2gtk3` (WebKitGTK 4.0) instead of WebKitGTK 4.1;
     in that case prefer the `.AppImage`.
 - Prefer the **`.AppImage`** when installing the `.deb`/`.rpm` fails due to missing or incompatible
@@ -634,7 +622,6 @@ On the target distro, confirm a WebKitGTK 4.1 runtime package is available via t
 
 - Debian/Ubuntu: `apt-cache policy libwebkit2gtk-4.1-0` (or `apt search libwebkit2gtk-4.1`)
 - Fedora: `dnf info webkit2gtk4.1`
-- openSUSE: `zypper info libwebkit2gtk-4_1-0` (or `zypper search -s libwebkit2gtk-4_1`)
 - RHEL 9-family: `dnf info webkit2gtk3` (WebKitGTK 4.0; expect to use the `.AppImage` if 4.1 is unavailable)
 
 If the distro cannot install a WebKitGTK 4.1 package, recommend the `.AppImage` instead of the
@@ -822,14 +809,15 @@ are attached:
    and check the build job for the relevant platform/target (and whether the Tauri bundler step
    failed before uploading assets).
 2. Download `latest.json` and confirm `platforms` includes entries for:
-   - `darwin-universal` (macOS universal updater payload; sometimes `universal-apple-darwin`)
-   - `windows-x86_64` (Windows x64; sometimes `x86_64-pc-windows-msvc`)
-   - `windows-aarch64` / `windows-arm64` (Windows ARM64; sometimes `aarch64-pc-windows-msvc`)
-   - `linux-x86_64` (Linux; sometimes `x86_64-unknown-linux-gnu`)
+   - `darwin-universal`
+   - `windows-x86_64`
+   - `windows-aarch64`
+   - `linux-x86_64`
 
-   Note: our CI validator expects the macOS key to be the universal form (`darwin-universal` /
-   `universal-apple-darwin`). If you see per-arch keys like `darwin-x86_64` / `darwin-aarch64`, that
-   usually indicates a Tauri/toolchain change and the docs/validator should be updated together.
+   Note: the tagged-release CI validator is intentionally **strict** about these key names. If you
+   see different spellings (for example Rust target triples like `x86_64-pc-windows-msvc` or
+   `aarch64-pc-windows-msvc`), that usually indicates a Tauri/toolchain change and the
+   docs/validator should be updated together.
 
    Quick check (after downloading `latest.json` to your current directory):
 
@@ -951,28 +939,21 @@ integration metadata made it into the final bundles (not just `tauri.conf.json`)
 - macOS: `CFBundleDocumentTypes` includes `.xlsx`/`.csv`/`.parquet` (etc) and
   `CFBundleURLTypes` includes the `formula` scheme.
 - Linux: the installed `.desktop` file advertises the expected `MimeType=` list
-  (including `x-scheme-handler/formula` for deep links) and has an `Exec=`
-  placeholder so double-click open passes a path/URL.
+  and has an `Exec=` placeholder so double-click open passes a path/URL.
 
 You can run the same checks locally after building:
 
 ```bash
 # macOS
-app="$(find apps/desktop/src-tauri/target -type d -path '*/release/bundle/macos/*.app' -prune -print -quit)"
+app="$(find apps/desktop/src-tauri/target/release/bundle/macos -maxdepth 2 -name '*.app' -print -quit)"
 plutil -p "$app/Contents/Info.plist" | head -n 200
 python scripts/ci/verify_macos_bundle_associations.py --info-plist "$app/Contents/Info.plist"
 
 # Linux (.deb)
-deb="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/deb/*.deb' -print -quit)"
+deb="$(find apps/desktop/src-tauri/target/release/bundle/deb -maxdepth 1 -name '*.deb' -print -quit)"
 tmpdir="$(mktemp -d)"
 dpkg-deb -x "$deb" "$tmpdir"
-python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir"
-
-# Linux (.rpm)
-rpm="$(find apps/desktop/src-tauri/target -type f -path '*/release/bundle/rpm/*.rpm' -print -quit)"
-tmpdir_rpm="$(mktemp -d)"
-(cd "$tmpdir_rpm" && rpm2cpio "$rpm" | cpio -idm --quiet --no-absolute-filenames)
-python scripts/ci/verify_linux_desktop_integration.py --package-root "$tmpdir_rpm"
+python scripts/ci/verify_linux_desktop_integration.py --deb-root "$tmpdir"
 ```
 
 CI note: tagged releases run this check on macOS/Windows/Linux before uploading artifacts. If you need to temporarily skip the
@@ -986,8 +967,8 @@ AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails 
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
-download size** budget (compressed JS/CSS/WASM; see `node scripts/frontend_asset_size_report.mjs`
-and `pnpm -C apps/desktop check:bundle-size`).
+download size** budget (compressed JS/CSS/WASM; see `pnpm -C apps/desktop check:bundle-size` and
+`python scripts/desktop_size_report.py`).
 
 ### Rust binary size controls (Cargo release profile)
 

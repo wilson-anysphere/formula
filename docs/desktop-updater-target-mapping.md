@@ -26,17 +26,23 @@ If Tauri changes these identifiers in a future upgrade, our CI guardrail
 expected to fail (or require adding a new alias) with a clear “expected vs actual” diff, and this
 document should be updated alongside the validator.
 
-### Accepted aliases (CI)
+### Accepted aliases (local verification)
 
-The CI validator accepts a few equivalent key spellings to be resilient to toolchain differences:
+The release workflow's CI validator (`scripts/ci/validate-updater-manifest.mjs`) is intentionally
+**strict** about `latest.json.platforms` keys for tagged releases so toolchain changes fail loudly.
+
+For convenience when inspecting manifests from **local builds** or ad-hoc tooling, the standalone
+checker (`scripts/verify-tauri-latest-json.mjs --manifest ...`) canonicalizes a few common
+equivalents:
 
 - `universal-apple-darwin` → `darwin-universal`
 - `x86_64-pc-windows-msvc` → `windows-x86_64`
 - `windows-arm64` / `aarch64-pc-windows-msvc` → `windows-aarch64`
 - `x86_64-unknown-linux-gnu` → `linux-x86_64`
 
-These are treated as aliases for validation, but the canonical keys above are what we expect
-`tauri-action` to produce for Formula releases.
+These are treated as aliases for **local** validation, but the canonical keys above are what we
+expect `tauri-action` to produce for Formula releases. If a tagged release ever ships with a
+different key spelling, update both this document and the CI validator together.
 
 ## Mapping table (build target → platform key → updater artifact)
 
