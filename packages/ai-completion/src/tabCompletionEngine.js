@@ -86,8 +86,7 @@ export class TabCompletionEngine {
       const normalizedContext = {
         currentInput: input,
         cursorPosition,
-        // Normalize defensively because tab completion runs on every keystroke
-        // and hosts may pass malformed refs.
+        // Normalize defensively because tab completion runs on every keystroke.
         cellRef: safeNormalizeCellRef(context?.cellRef),
         surroundingCells: context?.surroundingCells,
       };
@@ -164,7 +163,7 @@ export class TabCompletionEngine {
     }
 
     const input = safeToString(context?.currentInput);
-    const cursor = Number.isInteger(context?.cursorPosition) ? context.cursorPosition : -1;
+    const cursor = clampCursor(input, context?.cursorPosition);
 
     const payload = { input, cursor, cell, surroundingKey, schemaKey };
 
@@ -478,9 +477,9 @@ export class TabCompletionEngine {
 
     const addReplacement = (replacement, { confidence }) => {
       let newText = replaceSpan(input, spanStart, spanEnd, replacement);
-      // Sheet-prefix completions (e.g. Sheet2! / 'My Sheet'!) are intentionally
-      // incomplete ranges, so don't auto-close function parens for them.
-      if (cursor === input.length && functionCouldBeComplete && !replacement.endsWith("!")) {
+      // Avoid auto-closing parens for incomplete sheet-prefix-only suggestions
+      // like "Sheet1!" (or obviously incomplete range prefixes like "A1:").
+      if (cursor === input.length && functionCouldBeComplete && !isIncompleteRangeReplacement(replacement)) {
         newText = closeUnbalancedParens(newText);
       }
       suggestions.push({
@@ -513,6 +512,7 @@ export class TabCompletionEngine {
 
     // 3) Sheet-qualified A1 ranges (Sheet2!A1:A10)
     const sheetNames = await safeProviderCall(provider.getSheetNames);
+
     const sheetArg = splitSheetQualifiedArg(rawPrefix);
     if (sheetArg) {
       const typedQuoted = rawPrefix.startsWith("'");
@@ -743,6 +743,10 @@ export class TabCompletionEngine {
     if (input.trim() !== "=") return [];
 
     const cursor = clampCursor(input, context.cursorPosition);
+    // The desktop formula bar completion UI only supports pure insertions at the
+    // caret. Avoid suggesting these starter functions unless the caret is at
+    // the end of the current input.
+    if (cursor !== input.length) return [];
 
     // Curated list + stable ordering.
     //
@@ -1265,6 +1269,21 @@ function rankAndDedupe(suggestions) {
 
 function clamp01(v) {
   return Math.max(0, Math.min(1, v));
+}
+
+/**
+ * Returns true when the replacement looks incomplete and should not trigger
+ * auto-closing parens.
+ *
+ * @param {string} replacement
+ */
+function isIncompleteRangeReplacement(replacement) {
+  if (typeof replacement !== "string" || replacement.length === 0) return false;
+  const trimmed = replacement.trimEnd();
+  if (trimmed.endsWith("!")) return true;
+  // Optional: don't auto-close for obviously incomplete range tokens.
+  if (trimmed.endsWith(":")) return true;
+  return false;
 }
 
 async function safeProviderCall(fn) {
