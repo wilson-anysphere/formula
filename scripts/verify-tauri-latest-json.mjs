@@ -23,6 +23,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { constants as fsConstants } from "node:fs";
+import { validatePlatformEntries } from "./ci/validate-updater-manifest.mjs";
 
 /**
  * @param {unknown} value
@@ -72,42 +73,6 @@ function findPlatformsObject(root) {
       }
     }
   }
-
-  return null;
-}
-
-/**
- * Map a Tauri updater "target" key into a canonical {os}-{arch} identifier.
- * Handles common variations between Tauri v1/v2 and Rust target triples.
- *
- * @param {string} key
- * @returns {string | null}
- */
-function canonicalizeTargetKey(key) {
-  const raw = key.trim();
-  if (!raw) return null;
-  const lower = raw.toLowerCase();
-
-  let os = null;
-  if (
-    lower.includes("universal-apple-darwin") ||
-    lower.includes("apple-darwin") ||
-    lower.includes("darwin") ||
-    lower.includes("macos") ||
-    lower.includes("osx")
-  ) {
-    os = "darwin";
-  } else if (lower.includes("pc-windows") || lower.includes("windows")) {
-    os = "windows";
-  } else if (lower.includes("unknown-linux") || lower.includes("linux")) {
-    os = "linux";
-  }
-
-  if (!os) return null;
-
-  if (lower.includes("universal")) return `${os}-universal`;
-  if (lower.includes("aarch64") || lower.includes("arm64")) return `${os}-aarch64`;
-  if (lower.includes("x86_64") || lower.includes("amd64") || /\bx64\b/.test(lower)) return `${os}-x86_64`;
 
   return null;
 }
@@ -207,36 +172,60 @@ async function runLocal(argv) {
     return 1;
   }
 
-  /** @type {Map<string, Set<string>>} */
-  const canonicalToRaw = new Map();
-  for (const key of platformKeys) {
-    const canonical = canonicalizeTargetKey(key);
-    if (!canonical) continue;
-    const set = canonicalToRaw.get(canonical) ?? new Set();
-    set.add(key);
-    canonicalToRaw.set(canonical, set);
-  }
-
-  const missing = [];
-
-  const hasDarwinUniversal = canonicalToRaw.has("darwin-universal");
-  const hasDarwinArm64 = canonicalToRaw.has("darwin-aarch64");
-  const hasDarwinX64 = canonicalToRaw.has("darwin-x86_64");
-  if (!(hasDarwinUniversal || (hasDarwinArm64 && hasDarwinX64))) {
-    missing.push("macOS target: darwin-universal (or both darwin-aarch64 + darwin-x86_64)");
-  }
-
-  if (!canonicalToRaw.has("windows-x86_64")) missing.push("windows-x86_64");
-  if (!canonicalToRaw.has("windows-aarch64")) missing.push("windows-aarch64");
-  if (!canonicalToRaw.has("linux-x86_64")) missing.push("linux-x86_64");
-
   console.log(`Tauri updater manifest platforms found at: ${found.path.join(".")}`);
   console.log(`Platform keys (${platformKeys.length}): ${platformKeys.join(", ")}`);
 
-  if (missing.length > 0) {
+  /**
+   * Offline validation cannot confirm that referenced assets exist on the GitHub Release, but we
+   * can still reuse the strict key + per-platform updater artifact type checks from the CI
+   * validator by constructing a synthetic asset-name set from the URLs.
+   *
+   * This keeps `--manifest/--sig` behavior aligned with CI (same expected platform key names).
+   */
+  const assetNames = new Set();
+  for (const entry of Object.values(found.platforms)) {
+    if (!entry || typeof entry !== "object") continue;
+    const url = /** @type {any} */ (entry).url;
+    if (typeof url !== "string" || url.trim().length === 0) continue;
+    try {
+      const parsed = new URL(url);
+      const last = parsed.pathname.split("/").filter(Boolean).pop() ?? "";
+      const decoded = decodeURIComponent(last);
+      if (decoded) assetNames.add(decoded);
+    } catch {
+      // Ignore; the validator will report invalid URLs.
+    }
+  }
+
+  const { errors, invalidTargets, missingAssets } = validatePlatformEntries({
+    platforms: found.platforms,
+    assetNames,
+  });
+
+  // missingAssets should normally be empty (we seed assetNames from the URLs); treat it as an
+  // internal consistency failure rather than a user-facing “asset missing” issue.
+  if (missingAssets.length > 0) {
+    errors.push(
+      `Internal error: expected offline assetNames set to cover all platforms, but ${missingAssets.length} entry(s) were missing.`,
+    );
+  }
+
+  if (invalidTargets.length > 0) {
+    errors.push(
+      [
+        `Invalid platform entries in latest.json:`,
+        ...invalidTargets.map((t) => `  - ${t.target}: ${t.message}`),
+      ].join("\n"),
+    );
+  }
+
+  if (errors.length > 0) {
     console.error("");
-    console.error(`Updater manifest verification failed: missing required platform entries:`);
-    for (const m of missing) console.error(`  - ${m}`);
+    console.error(`Updater manifest verification failed:`);
+    for (const err of errors) {
+      console.error(`- ${err}`);
+      console.error("");
+    }
     return 1;
   }
 
@@ -265,6 +254,11 @@ const argv = process.argv.slice(2);
 if (argv.length === 0) {
   console.error(usage());
   process.exit(2);
+}
+
+if (argv.includes("--help") || argv.includes("-h")) {
+  console.log(usage());
+  process.exit(0);
 }
 
 if (hasLocalFlags(argv)) {

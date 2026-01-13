@@ -56,19 +56,25 @@ test("passes for universal macOS + windows x64/arm64 + linux x64", () => {
   assert.match(proc.stdout, /verification passed/i);
 });
 
-test("passes for per-arch macOS keys instead of universal", () => {
+test("fails for alias platform keys (Rust target triples) instead of Tauri updater keys", () => {
   const proc = runLocal({
     version: "0.0.0",
     platforms: {
+      // These keys are intentionally *not* accepted by the validator; we pin the expected
+      // `latest.json.platforms` keys to the values documented in docs/desktop-updater-target-mapping.md.
       "x86_64-apple-darwin": { url: "https://example.com/app-x64.tar.gz", signature: "sig" },
       "aarch64-apple-darwin": { url: "https://example.com/app-arm.tar.gz", signature: "sig" },
-      "windows-x86_64": { url: "https://example.com/app.msi", signature: "sig" },
+      "x86_64-pc-windows-msvc": { url: "https://example.com/app.msi", signature: "sig" },
       "aarch64-pc-windows-msvc": { url: "https://example.com/app-arm.msi", signature: "sig" },
       "x86_64-unknown-linux-gnu": { url: "https://example.com/app.AppImage", signature: "sig" },
     },
   });
 
-  assert.equal(proc.status, 0, proc.stderr);
+  assert.notEqual(proc.status, 0);
+  assert.ok(
+    proc.stderr.includes("Unexpected latest.json.platforms keys"),
+    `stderr did not include expected message; got:\n${proc.stderr}`,
+  );
 });
 
 test("finds nested platforms objects", () => {
@@ -118,4 +124,3 @@ test("fails when latest.json.sig is missing", () => {
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /missing signature file/i);
 });
-
