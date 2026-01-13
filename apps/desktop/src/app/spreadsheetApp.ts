@@ -5777,6 +5777,23 @@ export class SpreadsheetApp {
         const entry: any = this.searchWorkbook.getName(rawText);
         const nameSheet = typeof entry?.sheetName === "string" ? entry.sheetName.trim() : "";
         if (nameSheet) return this.resolveSheetIdByName(nameSheet);
+
+        // Structured table refs (e.g. `Table1[Amount]`) can also belong to a specific sheet.
+        // Resolve the table metadata so previews don't accidentally show cells from the active sheet.
+        const bracket = rawText.indexOf("[");
+        if (bracket > 0) {
+          const tableName = rawText.slice(0, bracket).trim();
+          if (tableName) {
+            const table: any = this.searchWorkbook.getTable(tableName);
+            const tableSheet =
+              typeof table?.sheetName === "string"
+                ? table.sheetName.trim()
+                : typeof table?.sheet === "string"
+                  ? table.sheet.trim()
+                  : "";
+            if (tableSheet) return this.resolveSheetIdByName(tableSheet);
+          }
+        }
       }
       return null;
     })();
@@ -5814,6 +5831,15 @@ export class SpreadsheetApp {
           typeof r.endCol === "number"
         ) {
           return `${rawText} (${rangeToA1(r)})`;
+        }
+
+        // Structured table refs: show the resolved A1 address for context (similar to named ranges).
+        const bracket = rawText.indexOf("[");
+        if (bracket > 0) {
+          const tableName = rawText.slice(0, bracket).trim();
+          if (tableName && this.searchWorkbook.getTable(tableName)) {
+            return `${rawText} (${rangeToA1({ startRow, endRow, startCol, endCol })})`;
+          }
         }
       }
       return (

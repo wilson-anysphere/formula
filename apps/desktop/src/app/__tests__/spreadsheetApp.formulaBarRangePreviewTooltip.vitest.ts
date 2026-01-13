@@ -226,4 +226,104 @@ describe("SpreadsheetApp formula-bar range preview tooltip", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("renders a preview for structured table references (Table1[Amount])", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    // Table range includes header row at A1 and data rows at A2:A4.
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet1", { row: 1, col: 0 }, 1);
+    doc.setCellValue("Sheet1", { row: 2, col: 0 }, 2);
+    doc.setCellValue("Sheet1", { row: 3, col: 0 }, 3);
+
+    app.getSearchWorkbook().addTable({
+      name: "Table1",
+      sheetName: "Sheet1",
+      startRow: 0,
+      startCol: 0,
+      endRow: 3,
+      endCol: 0,
+      columns: ["Amount"],
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(Table1[Amount])", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    const refSpan = refSpans.find((s) => s.textContent === "Table1[Amount]") ?? null;
+    expect(refSpan?.textContent).toBe("Table1[Amount]");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(false);
+
+    const header = tooltip!.querySelector<HTMLElement>(".formula-range-preview-tooltip__header");
+    expect(header?.textContent).toBe("Table1[Amount] (A2:A4)");
+
+    const cells = Array.from(tooltip!.querySelectorAll("td")).map((td) => td.textContent);
+    expect(cells).toEqual(["1", "2", "3"]);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("skips structured table previews when the table belongs to a non-active sheet", () => {
+    const root = createRoot();
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Amount");
+    doc.setCellValue("Sheet2", { row: 1, col: 0 }, 99);
+    doc.setCellValue("Sheet2", { row: 2, col: 0 }, 100);
+
+    app.getSearchWorkbook().addTable({
+      name: "OtherTable",
+      sheetName: "Sheet2",
+      startRow: 0,
+      startCol: 0,
+      endRow: 2,
+      endCol: 0,
+      columns: ["Amount"],
+    });
+
+    const bar = (app as any).formulaBar;
+    bar.setActiveCell({ address: "C1", input: "=SUM(OtherTable[Amount])", value: null });
+
+    const highlight = formulaBar.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpans = Array.from(highlight?.querySelectorAll<HTMLElement>('span[data-kind="reference"]') ?? []);
+    const refSpan = refSpans.find((s) => s.textContent === "OtherTable[Amount]") ?? null;
+    expect(refSpan?.textContent).toBe("OtherTable[Amount]");
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    const tooltip = formulaBar.querySelector<HTMLElement>('[data-testid="formula-range-preview-tooltip"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.hidden).toBe(true);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
