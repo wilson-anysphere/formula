@@ -583,9 +583,7 @@ jobs:
         id: wasm-pack-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            ~/.cargo/bin/wasm-pack
-            ~/.cargo/bin/wasm-pack.exe
+          path: ~/.cargo/bin/wasm-pack*
           key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
             wasm-pack-${{ runner.os }}-${{ runner.arch }}-
@@ -615,9 +613,7 @@ jobs:
         id: tauri-cli-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: |
-            ~/.cargo/bin/cargo-tauri
-            ~/.cargo/bin/cargo-tauri.exe
+          path: ~/.cargo/bin/cargo-tauri*
           key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
           restore-keys: |
             cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
