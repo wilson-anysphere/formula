@@ -1961,6 +1961,102 @@ export class CollabSession {
     };
   }
 
+  compactCells(opts?: {
+    origin?: unknown;
+    maxCellsScanned?: number;
+    dryRun?: boolean;
+    pruneMarkerOnly?: boolean;
+  }): { scanned: number; deleted: number } {
+    const maxCellsScanned = opts?.maxCellsScanned ?? Number.POSITIVE_INFINITY;
+    if (maxCellsScanned !== Number.POSITIVE_INFINITY && (!Number.isFinite(maxCellsScanned) || maxCellsScanned <= 0)) {
+      return { scanned: 0, deleted: 0 };
+    }
+    const dryRun = Boolean(opts?.dryRun);
+
+    // Marker-only cells (formula=null + no value) are preserved by some writers so
+    // conflict monitors can reason about delete-vs-overwrite causality. When any
+    // conflict monitors are enabled, default to *not* pruning those marker-only
+    // entries unless the caller explicitly opts in.
+    const conflictMonitorsEnabled = Boolean(
+      this.formulaConflictMonitor || this.cellConflictMonitor || this.cellValueConflictMonitor
+    );
+    const pruneMarkerOnly = opts?.pruneMarkerOnly ?? !conflictMonitorsEnabled;
+
+    const keysToDelete: string[] = [];
+    let scanned = 0;
+
+    for (const cellKey of this.cells.keys()) {
+      if (scanned >= maxCellsScanned) break;
+      scanned += 1;
+
+      const cellData = this.cells.get(cellKey);
+      const ycell = getYMapCell(cellData);
+      const recordCell =
+        !ycell && cellData && typeof cellData === "object"
+          ? (Object.getPrototypeOf(cellData) === Object.prototype || Object.getPrototypeOf(cellData) === null
+              ? (cellData as Record<string, any>)
+              : null)
+          : null;
+
+      const get = ycell ? (k: string) => ycell.get(k) : recordCell ? (k: string) => recordCell[k] : null;
+      if (!get) continue;
+
+      const keys: string[] = [];
+      if (ycell) {
+        ycell.forEach((_: any, k: any) => keys.push(String(k)));
+      } else if (recordCell) {
+        keys.push(...Object.keys(recordCell));
+      }
+      const keySet = new Set(keys);
+
+      // Encrypted cells should never be pruned automatically.
+      if (keySet.has("enc")) continue;
+
+      // Format-only cells (or explicit format clears) should not be pruned.
+      // `style` is a legacy alias for `format`.
+      if (keySet.has("format") || keySet.has("style")) continue;
+
+      const rawValue = get("value");
+      const valueEmpty =
+        rawValue == null || (rawValue && typeof rawValue === "object" && (rawValue as any).t === "blank");
+      if (!valueEmpty) continue;
+
+      const rawFormula = get("formula");
+      const formulaEmpty =
+        rawFormula == null ||
+        (typeof rawFormula === "string" ? rawFormula.trim() === "" : String(rawFormula).trim() === "");
+      if (!formulaEmpty) continue;
+
+      const isMarkerOnly = keySet.has("formula") && rawFormula === null && valueEmpty;
+      if (isMarkerOnly && !pruneMarkerOnly) continue;
+
+      // Only prune entries that contain no other known meaningful keys.
+      // We intentionally allow best-effort metadata like `modified` / `modifiedBy`
+      // so marker-only cells created by clears remain prunable when the app opts in.
+      let hasOtherKeys = false;
+      for (const key of keySet) {
+        if (key === "value" || key === "formula" || key === "modified" || key === "modifiedBy") continue;
+        hasOtherKeys = true;
+        break;
+      }
+      if (hasOtherKeys) continue;
+
+      keysToDelete.push(cellKey);
+    }
+
+    const deleted = keysToDelete.length;
+    if (deleted === 0 || dryRun) return { scanned, deleted };
+
+    const origin = opts?.origin ?? "cells-compact";
+    this.doc.transact(() => {
+      for (const key of keysToDelete) {
+        this.cells.delete(key);
+      }
+    }, origin);
+
+    return { scanned, deleted };
+  }
+
   transactLocal(fn: () => void): void {
     const undoTransact = this.undo?.transact;
     if (typeof undoTransact === "function") {
