@@ -197,4 +197,41 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("navigates relative to the original edit cell when selection moved during range selection mode", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    // Begin editing A1.
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    input!.focus();
+    input!.value = "1";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // Simulate the user moving the grid selection while still editing (e.g. picking a range).
+    app.activateCell({ row: 4, col: 4 }, { scrollIntoView: false, focus: false });
+    expect(app.getActiveCell()).toEqual({ row: 4, col: 4 });
+
+    // Commit via Tab while the grid has focus. Navigation should be relative to the original edit
+    // cell (A1 -> B1), not the transient selection (E5 -> F5).
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 1 });
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
