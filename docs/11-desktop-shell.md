@@ -96,6 +96,13 @@ pnpm perf:desktop-memory
 This reports `idleRssMb`, which is the **resident set size (RSS)** of the desktop process *plus its child processes*,
 sampled after the app becomes interactive and a short "settle" delay.
 
+The CI performance suite (`pnpm benchmark`) also reports this as a tracked benchmark metric:
+
+- `desktop.memory.idle_rss_mb.p95` (unit: `mb`)
+
+CI uses `FORMULA_DESKTOP_IDLE_RSS_TARGET_MB` as an absolute budget for this metric (default is intentionally conservative;
+tighten it as the desktop app’s idle footprint improves).
+
 The perf commands use a repo-local HOME (`target/perf-home`) by default:
 
 - override with `FORMULA_PERF_HOME=/path/to/dir`
