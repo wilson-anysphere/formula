@@ -263,6 +263,10 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(part_change_ratio_critical, dict):
         part_change_ratio_critical = {}
 
+    rt_kinds = summary.get("failures_by_round_trip_failure_kind") or {}
+    if not isinstance(rt_kinds, dict):
+        rt_kinds = {}
+
     timings = summary.get("timings") or {}
     if not isinstance(timings, dict):
         timings = {}
@@ -309,6 +313,7 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         # Fraction of package parts that changed (any severity / critical-only).
         "part_change_ratio_p90": part_change_ratio.get("p90"),
         "part_change_ratio_critical_p90": part_change_ratio_critical.get("p90"),
+        "failures_by_round_trip_failure_kind": rt_kinds,
     }
 
     def _top_list(

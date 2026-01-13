@@ -38,6 +38,8 @@ class DashboardTrendTests(unittest.TestCase):
             "failures_by_round_trip_failure_kind": {"round_trip_styles": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
             "round_trip_size_overhead": {"count": 2, "mean": 1.0, "p50": 1.0, "p90": 1.08},
+            "part_change_ratio": {"p90": 0.30},
+            "part_change_ratio_critical": {"p90": 0.10},
             "timings": {
                 "load": {"count": 3, "p50_ms": 10, "p90_ms": 20, "mean_ms": 12.0, "max_ms": 30},
                 "round_trip": {
@@ -82,6 +84,9 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertEqual(entry["diff_totals"]["warning"], 2)
         self.assertEqual(entry["diff_totals"]["info"], 3)
         self.assertEqual(entry["diff_totals"]["total"], 6)
+
+        self.assertEqual(entry["part_change_ratio_p90"], 0.30)
+        self.assertEqual(entry["part_change_ratio_critical_p90"], 0.10)
 
         # Optional diff breakdowns should be preserved (top-N only; small in this fixture).
         self.assertEqual(
