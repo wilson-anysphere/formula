@@ -3,7 +3,7 @@
 /// This is intentionally lightweight and independent from the richer [`crate::Locale`] used by the
 /// full Excel format-code engine. `NumberLocale` only carries the decimal/thousands separators
 /// needed by the UI/formula bar when no explicit number format code is available.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NumberLocale {
     pub id: &'static str,
     pub decimal_separator: char,
@@ -52,8 +52,39 @@ pub static IT_IT: NumberLocale = NumberLocale {
     thousands_separator: Some('.'),
 };
 
+fn normalize_locale_id(id: &str) -> Option<&'static str> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Normalize common locale tag spellings:
+    // - treat `-` and `_` as equivalent
+    // - match case-insensitively
+    //
+    // This intentionally supports a small set of locales the formatter ships with.
+    let mut key = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        let ch = match ch {
+            '_' => '-',
+            other => other,
+        };
+        key.push(ch.to_ascii_lowercase());
+    }
+
+    match key.as_str() {
+        "en-us" | "en" => Some("en-US"),
+        "en-gb" | "en-uk" => Some("en-GB"),
+        "de-de" | "de" => Some("de-DE"),
+        "fr-fr" | "fr" => Some("fr-FR"),
+        "es-es" | "es" => Some("es-ES"),
+        "it-it" | "it" => Some("it-IT"),
+        _ => None,
+    }
+}
+
 pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
-    match id {
+    match normalize_locale_id(id)? {
         "en-US" => Some(&EN_US),
         "en-GB" => Some(&EN_GB),
         "de-DE" => Some(&DE_DE),
@@ -61,6 +92,30 @@ pub fn get_locale(id: &str) -> Option<&'static NumberLocale> {
         "es-ES" => Some(&ES_ES),
         "it-IT" => Some(&IT_IT),
         _ => None,
+    }
+}
+
+/// Convert a full format-code [`crate::Locale`] into a `NumberLocale`.
+///
+/// When the separators match one of the built-in locales, the returned `id` is a canonical BCP-47
+/// tag (e.g. `"fr-FR"`). Otherwise the `id` is `"und"` and separators are copied from `locale`.
+pub fn number_locale_from_locale(locale: crate::Locale) -> NumberLocale {
+    if locale == crate::Locale::en_us() {
+        EN_US
+    } else if locale == crate::Locale::de_de() {
+        DE_DE
+    } else if locale == crate::Locale::fr_fr() {
+        FR_FR
+    } else if locale == crate::Locale::es_es() {
+        ES_ES
+    } else if locale == crate::Locale::it_it() {
+        IT_IT
+    } else {
+        NumberLocale {
+            id: "und",
+            decimal_separator: locale.decimal_sep,
+            thousands_separator: Some(locale.thousands_sep),
+        }
     }
 }
 
@@ -143,4 +198,32 @@ fn group_thousands(int_part: &str, sep: char) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_locale_ids_like_formula_engine() {
+        assert_eq!(normalize_locale_id("en-us"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en_US"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en"), Some("en-US"));
+        assert_eq!(normalize_locale_id("en-GB"), Some("en-GB"));
+        assert_eq!(normalize_locale_id("en_uk"), Some("en-GB"));
+        assert_eq!(normalize_locale_id("de"), Some("de-DE"));
+        assert_eq!(normalize_locale_id("fr_fr"), Some("fr-FR"));
+        assert_eq!(normalize_locale_id("es-ES"), Some("es-ES"));
+        assert_eq!(normalize_locale_id("it_it"), Some("it-IT"));
+        assert_eq!(normalize_locale_id(""), None);
+    }
+
+    #[test]
+    fn formats_scientific_mantissa_with_locale_decimal_separator() {
+        // `format_number` relies on `f64::to_string()`, which may or may not produce exponent
+        // notation. Test the exponent handling logic directly so it stays covered.
+        let (mantissa, exp) = split_exponent("-1.23E-6").unwrap();
+        let mantissa = format_number_mantissa(mantissa, &DE_DE);
+        assert_eq!(format!("{mantissa}{exp}"), "-1,23E-6");
+    }
 }

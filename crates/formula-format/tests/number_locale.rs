@@ -62,6 +62,31 @@ fn formats_negative_numbers_for_each_locale() {
 }
 
 #[test]
+fn get_locale_normalizes_common_locale_id_spellings() {
+    assert_eq!(locale::get_locale("en-us").unwrap().id, "en-US");
+    assert_eq!(locale::get_locale("en").unwrap().id, "en-US");
+    assert_eq!(locale::get_locale("en_gb").unwrap().id, "en-GB");
+    assert_eq!(locale::get_locale("fr_fr").unwrap().id, "fr-FR");
+    assert_eq!(locale::get_locale("es").unwrap().id, "es-ES");
+    assert_eq!(locale::get_locale("it").unwrap().id, "it-IT");
+}
+
+#[test]
+fn converts_format_locale_to_number_locale() {
+    use formula_format::Locale;
+
+    let fr = locale::number_locale_from_locale(Locale::fr_fr());
+    assert_eq!(fr.id, "fr-FR");
+    assert_eq!(fr.decimal_separator, ',');
+    assert_eq!(fr.thousands_separator, Some('\u{00A0}'));
+
+    let de = locale::number_locale_from_locale(Locale::de_de());
+    assert_eq!(de.id, "de-DE");
+    assert_eq!(de.decimal_separator, ',');
+    assert_eq!(de.thousands_separator, Some('.'));
+}
+
+#[test]
 fn localizes_mantissa_decimal_separator_in_scientific_notation() {
     // `f64::to_string()` currently tends to emit fixed-point notation even for values written
     // as `1.23e6`, but the formatter still supports exponent notation if it appears (e.g. on
@@ -76,4 +101,3 @@ fn localizes_mantissa_decimal_separator_in_scientific_notation() {
         assert_eq!(out, "1.230.000");
     }
 }
-
