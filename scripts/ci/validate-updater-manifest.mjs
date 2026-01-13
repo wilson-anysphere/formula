@@ -70,6 +70,59 @@ function formatTargetAssetMarkdownTable(rows) {
   ].join("\n");
 }
 
+/**
+ * Best-effort locate a Tauri updater `platforms` map within a JSON payload.
+ *
+ * Tauri v1/v2 manifests typically have `{ platforms: { ... } }` at the top-level, but we keep this
+ * robust in case future versions nest the object.
+ *
+ * @param {unknown} root
+ * @returns {{ platforms: Record<string, unknown>; path: string[] } | null}
+ */
+function findPlatformsObject(root) {
+  if (!root || (typeof root !== "object" && !Array.isArray(root))) return null;
+
+  /** @type {{ value: unknown; path: string[] }[]} */
+  const queue = [{ value: root, path: [] }];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+
+    const { value, path: currentPath } = current;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const obj = /** @type {Record<string, unknown>} */ (value);
+      const platforms = obj.platforms;
+      if (platforms && typeof platforms === "object" && !Array.isArray(platforms)) {
+        return {
+          platforms: /** @type {Record<string, unknown>} */ (platforms),
+          path: [...currentPath, "platforms"],
+        };
+      }
+
+      if (currentPath.length >= 8) continue;
+      for (const [key, child] of Object.entries(obj)) {
+        if (child && (typeof child === "object" || Array.isArray(child))) {
+          queue.push({ value: child, path: [...currentPath, key] });
+        }
+      }
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      if (currentPath.length >= 8) continue;
+      for (let i = 0; i < value.length; i += 1) {
+        const child = value[i];
+        if (child && (typeof child === "object" || Array.isArray(child))) {
+          queue.push({ value: child, path: [...currentPath, String(i)] });
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 // Platform key mapping is intentionally strict.
 //
 // Source of truth:
@@ -671,7 +724,8 @@ async function main() {
     );
   }
 
-  const platforms = manifest?.platforms;
+  const platformsFound = findPlatformsObject(manifest);
+  const platforms = platformsFound?.platforms;
 
   // Validate the per-platform updater entries (strict target keys + asset type checks).
   // This is extracted so node:test can cover the tricky parts without GitHub API calls.
