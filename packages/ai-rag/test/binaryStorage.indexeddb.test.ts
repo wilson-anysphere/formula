@@ -92,6 +92,27 @@ test("IndexedDBBinaryStorage namespaces per workbookId", async () => {
   expect(Array.from((await storageB.load()) ?? [])).toEqual([2, 2, 2]);
 });
 
+test("IndexedDBBinaryStorage namespaces per namespace", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-namespace2");
+
+  const storageA = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.ns-a",
+    workbookId: "wb-shared",
+  });
+  const storageB = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.ns-b",
+    workbookId: "wb-shared",
+  });
+
+  await storageA.save(new Uint8Array([1]));
+  await storageB.save(new Uint8Array([2]));
+
+  expect(Array.from((await storageA.load()) ?? [])).toEqual([1]);
+  expect(Array.from((await storageB.load()) ?? [])).toEqual([2]);
+});
+
 test("IndexedDBBinaryStorage stores the exact Uint8Array view (respects byteOffset)", async () => {
   const dbName = uniqueDbName("ai-rag-idb-byteoffset");
   const storage = new IndexedDBBinaryStorage({
@@ -143,4 +164,32 @@ test("IndexedDBBinaryStorage remove deletes persisted bytes", async () => {
   await storage.remove();
   expect(await storage.load()).toBeNull();
   expect(await listKeys(dbName, "binary")).not.toContain(storage.key);
+});
+
+test("IndexedDBBinaryStorage retries opening after a transient open failure", async () => {
+  const dbName = uniqueDbName("ai-rag-idb-retry");
+  const storage = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag",
+    workbookId: "wb-retry",
+  });
+
+  // Fail the first open attempt.
+  Object.defineProperty(globalThis, "indexedDB", {
+    value: {
+      open() {
+        throw new Error("boom");
+      },
+    },
+    configurable: true,
+  });
+
+  await expect(storage.save(new Uint8Array([1, 2, 3]))).resolves.toBeUndefined();
+  await expect(storage.load()).resolves.toBeNull();
+
+  // Restore real IndexedDB implementation and ensure the storage recovers.
+  Object.defineProperty(globalThis, "indexedDB", { value: fakeIndexedDB, configurable: true });
+
+  await storage.save(new Uint8Array([1, 2, 3]));
+  expect(Array.from((await storage.load()) ?? [])).toEqual([1, 2, 3]);
 });
