@@ -10,7 +10,8 @@ Key files:
 - Commands: `apps/desktop/src/extensions/commandRegistry.ts`
 - Built-in command registration:
   - `apps/desktop/src/commands/registerBuiltinCommands.ts` (edit/clipboard/view/audit/etc.)
-  - `apps/desktop/src/main.ts` (formatting commands like `format.toggleBold`)
+  - `apps/desktop/src/commands/registerDesktopCommands.ts` (desktop command catalog, including formatting + Format Cells)
+  - `apps/desktop/src/commands/registerNumberFormatCommands.ts` (number-format preset commands used by ribbon + shortcuts)
 - Keybindings: `apps/desktop/src/commands/builtinKeybindings.ts`
 - Keybinding dispatcher: `apps/desktop/src/extensions/keybindingService.ts`
 - Ribbon UI state overrides: `apps/desktop/src/ribbon/ribbonUiState.ts`
@@ -164,7 +165,7 @@ Example: **Strikethrough** as a proper command (`format.toggleStrikethrough`) in
 
 ### 1) Register the command
 
-Add a built-in command registration in `apps/desktop/src/main.ts` near the existing formatting registrations (search for `format.toggleBold`).
+Add a built-in command registration in `apps/desktop/src/commands/registerDesktopCommands.ts` near the existing formatting registrations (search for `format.toggleBold`).
 
 Sketch:
 
@@ -227,7 +228,7 @@ E2E should select this control via `data-testid="ribbon-strikethrough"`.
 
 ### 4) Wire RibbonActions to execute the command
 
-In `apps/desktop/src/main.ts`, in the `mountRibbon(...).onCommand` handler, ensure that activations call:
+In `apps/desktop/src/main.ts`, the ribbon is mounted via `createRibbonActionsFromCommands(...)`. Ensure that activations call:
 
 - `commandRegistry.executeCommand(commandId)` (or the existing `executeCommand(commandId)` helper)
 
