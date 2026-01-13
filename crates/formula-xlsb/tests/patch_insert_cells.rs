@@ -272,6 +272,56 @@ fn patch_sheet_bin_can_insert_formula_with_rgcb_and_expand_dimension() {
 }
 
 #[test]
+fn patch_sheet_bin_rejects_inserting_formula_that_requires_rgcb_without_rgcb() {
+    let ctx = formula_xlsb::workbook_context::WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context("=SUM({4,5})", &ctx, CellCoord::new(5, 3)).expect("encode rgce");
+    assert!(
+        !encoded.rgcb.is_empty(),
+        "expected array formula encoding to produce rgcb bytes"
+    );
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_cell_number(0, 0, 1.0);
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("insert-formula-missing-rgcb-input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let sheet_part = wb.sheet_metas()[0].part_path.clone();
+    let sheet_bin = read_zip_part(&input_path, &sheet_part);
+
+    let err = patch_sheet_bin(
+        &sheet_bin,
+        &[CellEdit {
+            row: 5,
+            col: 3,
+            new_value: CellValue::Number(9.0),
+            new_formula: Some(encoded.rgce.clone()),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: None,
+            new_style: None,
+        }],
+    )
+    .expect_err("expected InvalidInput when inserting formula without rgcb");
+
+    match err {
+        formula_xlsb::Error::Io(io_err) => {
+            assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(
+                io_err.to_string().contains("set CellEdit.new_rgcb"),
+                "expected error to instruct caller to set CellEdit.new_rgcb, got: {io_err}"
+            );
+        }
+        other => panic!("expected InvalidInput, got {other:?}"),
+    }
+}
+
+#[test]
 fn patch_sheet_bin_can_insert_into_existing_row_in_column_order() {
     let mut builder = XlsbFixtureBuilder::new();
     builder.set_cell_number(0, 0, 1.0);
