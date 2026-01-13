@@ -1059,6 +1059,20 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "ROW",
+    description: "Returns the row number of a reference.",
+    args: [
+      { name: "reference", type: "range", optional: true },
+    ],
+  },
+  {
+    name: "COLUMN",
+    description: "Returns the column number of a reference.",
+    args: [
+      { name: "reference", type: "range", optional: true },
+    ],
+  },
+  {
     name: "VLOOKUP",
     description: "Looks for a value in the leftmost column of a table.",
     args: [
