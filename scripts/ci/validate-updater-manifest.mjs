@@ -296,29 +296,24 @@ async function main() {
   /** @type {Array<{ target: string; message: string }>} */
   const invalidTargets = [];
 
-  /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
-  const summaryRows = [];
-
   if (platforms && typeof platforms === "object" && !Array.isArray(platforms)) {
-    for (const expected of expectedTargets) {
-      const foundKey = expected.keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
-      if (!foundKey) {
-        missingTargets.push({ label: expected.label, expectedKeys: expected.keys });
-        continue;
-      }
+    /** @type {Array<{ target: string; url: string; assetName: string }>} */
+    const validatedTargets = [];
 
-      const entry = /** @type {any} */ (platforms)[foundKey];
+    // Validate *every* platform entry, not just the required ones. If the manifest contains
+    // stale/invalid targets we want to catch them too.
+    for (const [target, entry] of Object.entries(platforms)) {
       if (!entry || typeof entry !== "object") {
-        invalidTargets.push({ target: foundKey, message: "platform entry is not an object" });
+        invalidTargets.push({ target, message: "platform entry is not an object" });
         continue;
       }
 
       try {
-        expectNonEmptyString(`${foundKey}.url`, entry.url);
-        expectNonEmptyString(`${foundKey}.signature`, entry.signature);
+        expectNonEmptyString(`${target}.url`, /** @type {any} */ (entry).url);
+        expectNonEmptyString(`${target}.signature`, /** @type {any} */ (entry).signature);
       } catch (err) {
         invalidTargets.push({
-          target: foundKey,
+          target,
           message: err instanceof Error ? err.message : String(err),
         });
         continue;
@@ -326,20 +321,116 @@ async function main() {
 
       let assetName = "";
       try {
-        assetName = assetNameFromUrl(entry.url);
+        assetName = assetNameFromUrl(/** @type {any} */ (entry).url);
       } catch (err) {
         invalidTargets.push({
-          target: foundKey,
+          target,
           message: `url is not a valid URL (${err instanceof Error ? err.message : String(err)})`,
         });
         continue;
       }
 
       if (!assetNames.has(assetName)) {
-        missingAssets.push({ target: foundKey, url: entry.url, assetName });
+        missingAssets.push({
+          target,
+          url: /** @type {any} */ (entry).url,
+          assetName,
+        });
       }
 
-      summaryRows.push({ label: expected.label, key: foundKey, url: entry.url, assetName });
+      validatedTargets.push({
+        target,
+        url: /** @type {any} */ (entry).url,
+        assetName,
+      });
+    }
+
+    const validatedByTarget = new Map(validatedTargets.map((t) => [t.target, t]));
+
+    /** @type {Array<{ label: string; key: string; url: string; assetName: string }>} */
+    const summaryRows = [];
+
+    for (const expected of expectedTargets) {
+      const foundKey = expected.keys.find((k) => Object.prototype.hasOwnProperty.call(platforms, k));
+      if (!foundKey) {
+        missingTargets.push({ label: expected.label, expectedKeys: expected.keys });
+        continue;
+      }
+
+      const validated = validatedByTarget.get(foundKey);
+      if (!validated) {
+        // Entry exists (foundKey) but was invalid, so it will already be present in invalidTargets.
+        continue;
+      }
+      summaryRows.push({
+        label: expected.label,
+        key: foundKey,
+        url: validated.url,
+        assetName: validated.assetName,
+      });
+    }
+
+    // Print additional targets (if any) in the success summary.
+    const expectedKeySet = new Set(expectedTargets.flatMap((t) => t.keys));
+    const otherTargets = validatedTargets
+      .filter((t) => !expectedKeySet.has(t.target))
+      .sort((a, b) => a.target.localeCompare(b.target));
+
+    // Success: print a short summary (also write to the GitHub Actions step summary if available).
+    if (
+      errors.length === 0 &&
+      missingTargets.length === 0 &&
+      invalidTargets.length === 0 &&
+      missingAssets.length === 0
+    ) {
+      const summaryLines = [
+        `Updater manifest validation passed for ${tag} (version ${expectedVersion}).`,
+        `Targets present (${summaryRows.length}):`,
+        ...summaryRows.map((row) => `  - ${row.key} → ${row.assetName}`),
+        ...(otherTargets.length > 0
+          ? [
+              `Other targets present (${otherTargets.length}):`,
+              ...otherTargets.map((t) => `  - ${t.target} → ${t.assetName}`),
+            ]
+          : []),
+      ];
+
+      console.log(summaryLines.join("\n"));
+
+      const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
+      if (stepSummaryPath) {
+        const sha = crypto.createHash("sha256").update(readFileSync("latest.json")).digest("hex");
+        const sigSha = crypto
+          .createHash("sha256")
+          .update(readFileSync("latest.json.sig"))
+          .digest("hex");
+
+        const md = [
+          `## Updater manifest validation`,
+          ``,
+          `- Tag: \`${tag}\``,
+          `- Manifest version: \`${expectedVersion}\``,
+          `- latest.json sha256: \`${sha}\``,
+          `- latest.json.sig sha256: \`${sigSha}\``,
+          ``,
+          `### Targets`,
+          ``,
+          ...summaryRows.map((row) => `- \`${row.key}\` → \`${row.assetName}\``),
+          ...(otherTargets.length > 0
+            ? [
+                ``,
+                `### Other targets`,
+                ``,
+                ...otherTargets.map((t) => `- \`${t.target}\` → \`${t.assetName}\``),
+              ]
+            : []),
+          ``,
+        ].join("\n");
+        // Overwrite the step summary rather than append (the job is dedicated to validation).
+        writeFileSync(stepSummaryPath, md, "utf8");
+      }
+
+      return;
     }
   }
 
@@ -390,58 +481,6 @@ async function main() {
         `Verify the release workflow uploads a combined updater manifest for all targets.`,
       ].join("\n"),
     );
-  }
-
-  // Success: print a short summary (also write to the GitHub Actions step summary if available).
-  const extraTargets =
-    platforms && typeof platforms === "object" && !Array.isArray(platforms)
-      ? Object.keys(platforms)
-          .filter((k) => !expectedTargets.some((t) => t.keys.includes(k)))
-          .sort()
-      : [];
-
-  const summaryLines = [
-    `Updater manifest validation passed for ${tag} (version ${expectedVersion}).`,
-    `Targets present (${summaryRows.length}):`,
-    ...summaryRows.map((row) => `  - ${row.key} → ${row.assetName}`),
-    ...(extraTargets.length > 0
-      ? [
-          `Other targets present (${extraTargets.length}):`,
-          ...extraTargets.map((k) => `  - ${k}`),
-        ]
-      : []),
-  ];
-
-  console.log(summaryLines.join("\n"));
-
-  const stepSummaryPath = process.env.GITHUB_STEP_SUMMARY;
-  if (stepSummaryPath) {
-    const sha = crypto.createHash("sha256").update(readFileSync("latest.json")).digest("hex");
-    const sigSha = crypto.createHash("sha256").update(readFileSync("latest.json.sig")).digest("hex");
-
-    const md = [
-      `## Updater manifest validation`,
-      ``,
-      `- Tag: \`${tag}\``,
-      `- Manifest version: \`${expectedVersion}\``,
-      `- latest.json sha256: \`${sha}\``,
-      `- latest.json.sig sha256: \`${sigSha}\``,
-      ``,
-      `### Targets`,
-      ``,
-      ...summaryRows.map((row) => `- \`${row.key}\` → \`${row.assetName}\``),
-      ...(extraTargets.length > 0
-        ? [
-            ``,
-            `### Other targets`,
-            ``,
-            ...extraTargets.map((k) => `- \`${k}\``),
-          ]
-        : []),
-      ``,
-    ].join("\n");
-    // Overwrite the step summary rather than append (the job is dedicated to validation).
-    writeFileSync(stepSummaryPath, md, "utf8");
   }
 }
 
