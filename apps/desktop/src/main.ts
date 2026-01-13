@@ -76,7 +76,6 @@ import { getOpenFileFilters } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
 import type { CollabSession } from "@formula/collab-session";
-import * as Y from "yjs";
 import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import {
@@ -150,7 +149,6 @@ import {
 import {
   CollabWorkbookSheetStore,
   computeCollabSheetsKey,
-  findCollabSheetIndexById,
   listSheetsFromCollabSession,
   type CollabSheetsKeyRef,
 } from "./sheets/collabWorkbookSheetStore";
