@@ -41,7 +41,6 @@ concurrency:
 env:
   # Keep these pins aligned with CI/release so bundle size checks match what we ship.
   NODE_VERSION: 22
-  PNPM_VERSION: 9.0.0
   WASM_PACK_VERSION: 0.13.1
   TAURI_CLI_VERSION: "2.9.5"
 
@@ -68,7 +67,7 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           # Pin pnpm patch version for determinism (keep in sync with package.json).
-          version: ${{ env.PNPM_VERSION }}
+          version: 9.0.0
 
       - name: Setup Node
         uses: actions/setup-node@v4
