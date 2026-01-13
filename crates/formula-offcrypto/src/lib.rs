@@ -329,7 +329,7 @@ impl PartialEq for OffcryptoError {
                 Self::UnsupportedEncryption {
                     encryption_type: b,
                 },
-            ) => a == b,
+                ) => a == b,
             (Self::MissingOleStream { stream: a }, Self::MissingOleStream { stream: b }) => a == b,
             (Self::DecryptedPackageNotZip, Self::DecryptedPackageNotZip) => true,
             (Self::OfficeCrypto(a), Self::OfficeCrypto(b)) => a.to_string() == b.to_string(),
@@ -646,10 +646,20 @@ pub fn decrypt_standard_only(
         EncryptionInfo::Agile { .. } => Err(OffcryptoError::UnsupportedEncryptionType {
             encryption_type: EncryptionType::Agile,
         }),
-        EncryptionInfo::Unsupported { version } => Err(OffcryptoError::UnsupportedVersion {
-            major: version.major,
-            minor: version.minor,
-        }),
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                // "Extensible" encryption (MS-OFFCRYPTO): known scheme, but not supported by the
+                // Standard-only decrypt entrypoint.
+                Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                })
+            } else {
+                Err(OffcryptoError::UnsupportedVersion {
+                    major: version.major,
+                    minor: version.minor,
+                })
+            }
+        }
     }
 }
 
@@ -1490,6 +1500,7 @@ pub fn parse_encrypted_package_header(
 pub enum EncryptionType {
     Agile,
     Standard,
+    Extensible,
 }
 
 /// A best-effort summary of an `EncryptionInfo` stream.
@@ -2024,27 +2035,30 @@ pub fn agile_secret_key(
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.
 ///
 /// This is a thin wrapper around the upstream MIT-licensed [`office_crypto`] crate. We constrain
-/// support to **ECMA-376 Standard encryption** (CryptoAPI / `EncryptionInfo` version 3.2).
+/// support to **ECMA-376 Standard encryption** (CryptoAPI / `EncryptionInfo` `versionMinor == 2`;
+/// `versionMajor ∈ {2,3,4}` in real-world files).
 pub fn decrypt_standard_ooxml_from_bytes(
     raw_ole: Vec<u8>,
     password: &str,
 ) -> Result<Vec<u8>, OffcryptoError> {
-    // 1) Validate that the file's EncryptionInfo version indicates Standard encryption (3.2).
+    // 1) Validate that the file's EncryptionInfo version indicates Standard encryption.
     let encryption_info = read_ole_stream(&raw_ole, "EncryptionInfo")?;
     let version = EncryptionVersionInfo::parse(&encryption_info)?;
-    if (version.major, version.minor) != (3, 2) {
-        // `decrypt_standard_ooxml_from_bytes` intentionally only supports ECMA-376 Standard
-        // (CryptoAPI) encryption v3.2 via the upstream `office-crypto` crate. If we detect an
-        // Agile-encrypted file, surface that explicitly so callers can dispatch appropriately.
-        if (version.major, version.minor) == (4, 4) {
-            return Err(OffcryptoError::UnsupportedEncryption {
-                encryption_type: EncryptionType::Agile,
-            });
-        }
-        return Err(OffcryptoError::UnsupportedVersion {
-            major: version.major,
-            minor: version.minor,
+    let major = version.major;
+    let minor = version.minor;
+    if (major, minor) == (4, 4) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Agile,
         });
+    }
+    if minor == 3 && matches!(major, 3 | 4) {
+        return Err(OffcryptoError::UnsupportedEncryption {
+            encryption_type: EncryptionType::Extensible,
+        });
+    }
+    let is_standard = minor == 2 && matches!(major, 2 | 3 | 4);
+    if !is_standard {
+        return Err(OffcryptoError::UnsupportedVersion { major, minor });
     }
 
     // 2) Decrypt using upstream implementation.
