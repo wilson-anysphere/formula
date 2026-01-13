@@ -4,19 +4,17 @@ import { getPrimaryCommandKeybindingDisplay } from "../extensions/keybindings.js
  * Mapping from ribbon command ids (as defined in `ribbonSchema.ts`) to command ids
  * used by the KeybindingService / command palette.
  *
- * The ribbon uses a mix of Excel-style ids (e.g. `home.clipboard.copy`) and direct
- * built-in command ids (e.g. `format.toggleBold`). This lookup normalizes ribbon
- * ids to the corresponding KeybindingService command id so ribbon tooltips/menus
- * can display keybinding hints.
+ * The ribbon uses a mix of canonical CommandRegistry ids (e.g. `clipboard.copy`)
+ * and Excel-style ids (e.g. `home.number.accounting`). This lookup normalizes
+ * ribbon ids to the corresponding KeybindingService command id so ribbon
+ * tooltips/menus can display keybinding hints.
  */
 const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   // --- Clipboard --------------------------------------------------------------
-  "home.clipboard.cut": "clipboard.cut",
-  "home.clipboard.copy": "clipboard.copy",
-  "home.clipboard.paste": "clipboard.paste",
-  "home.clipboard.paste.default": "clipboard.paste",
-  "home.clipboard.pasteSpecial": "clipboard.pasteSpecial",
-  "home.clipboard.pasteSpecial.dialog": "clipboard.pasteSpecial",
+  "clipboard.cut": "clipboard.cut",
+  "clipboard.copy": "clipboard.copy",
+  "clipboard.paste": "clipboard.paste",
+  "clipboard.pasteSpecial": "clipboard.pasteSpecial",
 
   // --- Find/Replace/Go To -----------------------------------------------------
   // (These happen to share ids with the built-in commands, but keep the mapping

@@ -73,7 +73,7 @@ describe("Ribbon UI state overrides", () => {
 
   it("includes shortcut hints in the button title when provided", () => {
     const { container, root } = renderRibbon();
-    const copy = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.copy"]');
+    const copy = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.copy"]');
     expect(copy).toBeInstanceOf(HTMLButtonElement);
     expect(copy?.getAttribute("aria-label")).toBe("Copy");
     expect(copy?.getAttribute("title")).toBe("Copy");
@@ -83,7 +83,7 @@ describe("Ribbon UI state overrides", () => {
         pressedById: Object.create(null),
         labelById: Object.create(null),
         disabledById: Object.create(null),
-        shortcutById: { "home.clipboard.copy": "Ctrl+C" },
+        shortcutById: { "clipboard.copy": "Ctrl+C" },
       });
     });
 
