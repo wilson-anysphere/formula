@@ -1981,12 +1981,14 @@ export class DesktopSharedGrid {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollY = viewport.maxScrollY;
       const trackRect = this.vTrack.getBoundingClientRect();
+      const minThumbSize = 24 * renderer.getZoom();
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().y,
         viewportSize: Math.max(0, viewport.height - viewport.frozenHeight),
         contentSize: Math.max(0, viewport.totalHeight - viewport.frozenHeight),
-        trackSize: trackRect.height
+        trackSize: trackRect.height,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.height - thumb.size);
@@ -2017,12 +2019,14 @@ export class DesktopSharedGrid {
       const viewport = renderer.scroll.getViewportState();
       const maxScrollX = viewport.maxScrollX;
       const trackRect = this.hTrack.getBoundingClientRect();
+      const minThumbSize = 24 * renderer.getZoom();
 
       const thumb = computeScrollbarThumb({
         scrollPos: renderer.scroll.getScroll().x,
         viewportSize: Math.max(0, viewport.width - viewport.frozenWidth),
         contentSize: Math.max(0, viewport.totalWidth - viewport.frozenWidth),
-        trackSize: trackRect.width
+        trackSize: trackRect.width,
+        minThumbSize
       });
 
       const thumbTravel = Math.max(0, trackRect.width - thumb.size);
@@ -2049,6 +2053,7 @@ export class DesktopSharedGrid {
     const renderer = this.renderer;
     const viewport = renderer.scroll.getViewportState();
     const scroll = renderer.scroll.getScroll();
+    const minThumbSize = 24 * renderer.getZoom();
 
     const maxX = viewport.maxScrollX;
     const maxY = viewport.maxScrollY;
@@ -2108,6 +2113,7 @@ export class DesktopSharedGrid {
         viewportSize: Math.max(0, viewport.height - frozenHeight),
         contentSize: Math.max(0, viewport.totalHeight - frozenHeight),
         trackSize,
+        minThumbSize,
         out: this.scrollbarThumbScratch.v
       });
 
@@ -2133,6 +2139,7 @@ export class DesktopSharedGrid {
         viewportSize: Math.max(0, viewport.width - frozenWidth),
         contentSize: Math.max(0, viewport.totalWidth - frozenWidth),
         trackSize,
+        minThumbSize,
         out: this.scrollbarThumbScratch.h
       });
 

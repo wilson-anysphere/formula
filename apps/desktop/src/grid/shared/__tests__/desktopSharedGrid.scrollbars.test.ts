@@ -75,7 +75,12 @@ describe("DesktopSharedGrid scrollbars", () => {
     defaultRowHeight?: number;
     defaultColWidth?: number;
     enableWheel?: boolean;
-  }): { grid: DesktopSharedGrid; container: HTMLDivElement; selectionCanvas: HTMLCanvasElement } {
+  }): {
+    grid: DesktopSharedGrid;
+    container: HTMLDivElement;
+    selectionCanvas: HTMLCanvasElement;
+    scrollbars: { vTrack: HTMLDivElement; vThumb: HTMLDivElement; hTrack: HTMLDivElement; hThumb: HTMLDivElement };
+  } {
     const { rowCount, colCount } = options;
     const provider = new MockCellProvider({ rowCount, colCount });
 
@@ -122,7 +127,7 @@ describe("DesktopSharedGrid scrollbars", () => {
       enableResize: false
     });
 
-    return { grid, container, selectionCanvas: canvases.selection };
+    return { grid, container, selectionCanvas: canvases.selection, scrollbars };
   }
 
   it("avoids getBoundingClientRect during scroll-driven scrollbar sync", () => {
@@ -359,6 +364,65 @@ describe("DesktopSharedGrid scrollbars", () => {
     grid.scrollTo(0.6, 0.6);
     expect(grid.getScroll()).toEqual({ x: 0.5, y: 0.5 });
     expect(spy).not.toHaveBeenCalled();
+
+    grid.destroy();
+    container.remove();
+  });
+
+  it("uses zoom-scaled minimum thumb size when dragging scrollbars", () => {
+    const { grid, container, scrollbars } = createGrid({
+      rowCount: 100,
+      colCount: 10,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+
+    grid.resize(200, 200, 1);
+    grid.setZoom(2);
+
+    // Thumb size should respect the zoom-scaled minimum (24 * zoom).
+    expect(scrollbars.vThumb.style.height).toBe("48px");
+
+    vi.spyOn(scrollbars.vTrack, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 10,
+      bottom: 200,
+      width: 10,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => {}
+    } as DOMRect);
+
+    vi.spyOn(scrollbars.vThumb, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 10,
+      bottom: 48,
+      width: 10,
+      height: 48,
+      x: 0,
+      y: 0,
+      toJSON: () => {}
+    } as DOMRect);
+
+    const createPointerEvent = (type: string, options: { pointerId: number; clientY: number; clientX?: number }) => {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX: options.clientX ?? 0,
+        clientY: options.clientY
+      });
+      Object.defineProperty(event, "pointerId", { value: options.pointerId });
+      return event;
+    };
+
+    scrollbars.vThumb.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 1, clientY: 0 }));
+    window.dispatchEvent(createPointerEvent("pointermove", { pointerId: 1, clientY: 152 }));
+    window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 1, clientY: 152 }));
+
+    expect(grid.getScroll().y).toBe(1800);
 
     grid.destroy();
     container.remove();
