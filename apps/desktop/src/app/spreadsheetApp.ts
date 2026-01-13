@@ -1504,12 +1504,12 @@ export class SpreadsheetApp {
     this.gridCanvas.setAttribute("aria-hidden", "true");
 
     this.drawingCanvas = document.createElement("canvas");
-    this.drawingCanvas.className = "drawing-layer drawing-layer--overlay";
+    this.drawingCanvas.className = "drawing-layer drawing-layer--overlay grid-canvas--drawings";
     this.drawingCanvas.setAttribute("aria-hidden", "true");
     this.drawingCanvas.setAttribute("data-testid", "drawing-layer-canvas");
     if (this.gridMode === "shared") {
       // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
-      this.drawingCanvas.classList.add("drawing-layer--shared");
+      this.drawingCanvas.classList.add("drawing-layer--shared", "grid-canvas--shared-drawings");
     }
 
     this.chartCanvas = document.createElement("canvas");

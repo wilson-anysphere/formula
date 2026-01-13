@@ -21,13 +21,13 @@ test("SpreadsheetApp overlay canvases use CSS classes (no static inline styles)"
 
   // Ensure overlay layers are class-based.
   assert.match(block, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
-  assert.match(block, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay"/);
+  assert.match(block, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay[^"]*grid-canvas--drawings"/);
   assert.match(block, /chartCanvas\.className\s*=\s*"grid-canvas grid-canvas--chart"/);
   assert.match(block, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);
-  assert.match(block, /chartSelectionCanvas\.className\s*=\s*"grid-canvas chart-selection-canvas"/);
+  assert.match(block, /chartSelectionCanvas\.className\s*=\s*"grid-canvas[^"]*chart-selection-canvas"/);
 
   // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
-  assert.match(block, /drawingCanvas\.classList\.add\("drawing-layer--shared"\)/);
+  assert.match(block, /drawingCanvas\.classList\.add\([\s\S]*?"drawing-layer--shared"[\s\S]*?"grid-canvas--shared-drawings"[\s\S]*?\)/);
   assert.match(block, /chartCanvas\.classList\.add\("grid-canvas--shared-chart"\)/);
   assert.match(block, /selectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
   assert.match(block, /chartSelectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
@@ -62,11 +62,14 @@ test("chart + drawing overlay hosts are styled via charts-overlay.css", async ()
 
   // Shared-grid overlay stacking is driven via CSS variables + semantic classes.
   assert.match(css, /--grid-z-chart-overlay\s*:/);
+  assert.match(css, /--grid-z-drawings-overlay\s*:/);
+  // Back-compat alias (older selectors used singular `drawing`).
   assert.match(css, /--grid-z-drawing-overlay\s*:/);
   assert.match(css, /--grid-z-selection-overlay\s*:/);
   assert.match(css, /--grid-z-outline-overlay\s*:/);
 
   assert.match(css, /\.drawing-layer--shared\s*\{/);
+  assert.match(css, /\.grid-canvas--shared-drawings\s*\{/);
   assert.match(css, /\.grid-canvas--shared-chart\s*\{/);
   assert.match(css, /\.grid-canvas--shared-selection\s*\{/);
   assert.match(css, /\.outline-layer--shared\s*\{/);
@@ -92,7 +95,7 @@ test("shared-grid overlay stacking uses CSS classes (no zIndex inline styles)", 
   const spreadsheetAppPath = path.join(desktopRoot, "src/app/spreadsheetApp.ts");
   const text = await readFile(spreadsheetAppPath, "utf8");
 
-  assert.match(text, /drawingCanvas\.classList\.add\("drawing-layer--shared"\)/);
+  assert.match(text, /drawingCanvas\.classList\.add\([\s\S]*?"drawing-layer--shared"[\s\S]*?"grid-canvas--shared-drawings"[\s\S]*?\)/);
   assert.match(text, /chartCanvas\.classList\.add\("grid-canvas--shared-chart"\)/);
   assert.match(text, /selectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
   assert.match(text, /chartSelectionCanvas\.classList\.add\("grid-canvas--shared-selection"\)/);
@@ -113,9 +116,9 @@ test("SpreadsheetApp assigns semantic layer classes to grid canvases + overlays"
   // Canvases/layers should be tagged with role-ish classes so CSS can target them
   // without relying on DOM insertion order.
   assert.match(text, /gridCanvas\.className\s*=\s*"grid-canvas grid-canvas--base"/);
-  assert.match(text, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay"/);
+  assert.match(text, /drawingCanvas\.className\s*=\s*"drawing-layer drawing-layer--overlay[^"]*grid-canvas--drawings"/);
   assert.match(text, /chartCanvas\.className\s*=\s*"grid-canvas grid-canvas--chart"/);
-  assert.match(text, /chartSelectionCanvas\.className\s*=\s*"grid-canvas chart-selection-canvas"/);
+  assert.match(text, /chartSelectionCanvas\.className\s*=\s*"grid-canvas[^"]*chart-selection-canvas"/);
   assert.match(text, /referenceCanvas\.className\s*=\s*"grid-canvas grid-canvas--content"/);
   assert.match(text, /auditingCanvas\.className\s*=\s*"grid-canvas grid-canvas--auditing"/);
   assert.match(text, /selectionCanvas\.className\s*=\s*"grid-canvas grid-canvas--selection"/);

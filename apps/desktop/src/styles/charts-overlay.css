@@ -29,7 +29,7 @@
     drawings/images should render above the grid cell content and charts, but below selection + outline.
   */
   z-index: 3;
-  z-index: var(--grid-z-drawing-overlay, 3);
+  z-index: var(--grid-z-drawings-overlay, var(--grid-z-drawing-overlay, 3));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -46,7 +46,9 @@
 .grid-root {
   /* CanvasGridRenderer uses z-index 0/1/2 for its base/content/selection canvases. */
   --grid-z-chart-overlay: 2;
-  --grid-z-drawing-overlay: 3;
+  --grid-z-drawings-overlay: 3;
+  /* Back-compat alias (older selectors used singular `drawing`). */
+  --grid-z-drawing-overlay: var(--grid-z-drawings-overlay);
   --grid-z-selection-overlay: 4;
   --grid-z-outline-overlay: 4;
 }
@@ -73,7 +75,16 @@
 
 .drawing-layer--shared {
   z-index: 3;
-  z-index: var(--grid-z-drawing-overlay, 3);
+  z-index: var(--grid-z-drawings-overlay, var(--grid-z-drawing-overlay, 3));
+}
+
+.grid-canvas--drawings {
+  /* Semantic hook for the drawings/images overlay canvas (no-op by default). */
+}
+
+.grid-canvas--shared-drawings {
+  z-index: 3;
+  z-index: var(--grid-z-drawings-overlay, var(--grid-z-drawing-overlay, 3));
 }
 
 .grid-canvas--shared-chart {
