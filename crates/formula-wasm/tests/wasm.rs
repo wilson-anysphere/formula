@@ -6,6 +6,7 @@ use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
+use formula_engine::pivot::PivotValue;
 use formula_model::CellValue as ModelCellValue;
 use formula_wasm::{
     canonicalize_formula, lex_formula, localize_formula, parse_formula_partial,
@@ -2150,4 +2151,56 @@ fn goal_seek_solves_quadratic_and_updates_workbook_state() {
     let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
     let b1_value = b1.value.as_f64().unwrap();
     assert!((b1_value - 25.0).abs() < 1e-6, "B1 = {b1_value}");
+}
+
+#[wasm_bindgen_test]
+fn get_pivot_field_items_deduplicates_and_sorts() {
+    let mut wb = WasmWorkbook::new();
+
+    // Source data: a simple 2-column dataset with repeated category values and one blank.
+    wb.set_cell("A1".to_string(), JsValue::from_str("Category"), None)
+        .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("Value"), None)
+        .unwrap();
+
+    wb.set_cell("A2".to_string(), JsValue::from_str("B"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_f64(1.0), None)
+        .unwrap();
+
+    wb.set_cell("A3".to_string(), JsValue::from_str("A"), None)
+        .unwrap();
+    wb.set_cell("B3".to_string(), JsValue::from_f64(2.0), None)
+        .unwrap();
+
+    // Duplicate category value.
+    wb.set_cell("A4".to_string(), JsValue::from_str("B"), None)
+        .unwrap();
+    wb.set_cell("B4".to_string(), JsValue::from_f64(3.0), None)
+        .unwrap();
+
+    // Blank category.
+    wb.set_cell("A5".to_string(), JsValue::NULL, None).unwrap();
+    wb.set_cell("B5".to_string(), JsValue::from_f64(4.0), None)
+        .unwrap();
+
+    let items_js = wb
+        .get_pivot_field_items(
+            DEFAULT_SHEET.to_string(),
+            "A1:B5".to_string(),
+            "Category".to_string(),
+        )
+        .unwrap();
+    let items: Vec<PivotValue> = serde_wasm_bindgen::from_value(items_js).unwrap();
+
+    // Pivot item ordering is stable: text values sort alphabetically (case-insensitive), and
+    // blanks always appear last.
+    assert_eq!(
+        items,
+        vec![
+            PivotValue::Text("A".to_string()),
+            PivotValue::Text("B".to_string()),
+            PivotValue::Blank
+        ]
+    );
 }

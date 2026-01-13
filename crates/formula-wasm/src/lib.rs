@@ -781,9 +781,7 @@ fn engine_value_to_pivot_value(value: EngineValue) -> pivot_engine::PivotValue {
         EngineValue::Text(s) => pivot_engine::PivotValue::Text(s),
         EngineValue::Entity(entity) => pivot_engine::PivotValue::Text(entity.display),
         EngineValue::Record(record) => pivot_engine::PivotValue::Text(record.display),
-        EngineValue::Error(kind) => {
-            pivot_engine::PivotValue::Text(kind.as_code().to_string())
-        }
+        EngineValue::Error(kind) => pivot_engine::PivotValue::Text(kind.as_code().to_string()),
         // Arrays should generally be spilled into grid cells. If one reaches pivot extraction,
         // degrade to its top-left value for a scalar-like experience.
         EngineValue::Array(arr) => engine_value_to_pivot_value(arr.top_left()),
@@ -1472,7 +1470,6 @@ impl WorkbookState {
         }
         Ok(out)
     }
-
     fn set_cell_internal(
         &mut self,
         sheet: &str,
@@ -3313,6 +3310,64 @@ impl WasmWorkbook {
         }
 
         serde_wasm_bindgen::to_value(&PivotCalculationResultDto { writes })
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "getPivotFieldItems")]
+    pub fn get_pivot_field_items(
+        &self,
+        sheet: String,
+        source_range_a1: String,
+        field: String,
+    ) -> Result<JsValue, JsValue> {
+        ensure_rust_constructors_run();
+        let sheet = self.inner.require_sheet(&sheet)?.to_string();
+        let range = WorkbookState::parse_range(&source_range_a1)?;
+        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range);
+        let cache =
+            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+
+        let Some(values) = cache.unique_values.get(&field) else {
+            return Err(js_err(format!("missing field in pivot cache: {field}")));
+        };
+
+        use serde::ser::Serialize as _;
+        values
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|err| js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "getPivotFieldItemsPaged")]
+    pub fn get_pivot_field_items_paged(
+        &self,
+        sheet: String,
+        source_range_a1: String,
+        field: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsValue> {
+        ensure_rust_constructors_run();
+        let sheet = self.inner.require_sheet(&sheet)?.to_string();
+        let range = WorkbookState::parse_range(&source_range_a1)?;
+        let source = self.inner.read_range_values_as_pivot_values(&sheet, &range);
+        let cache =
+            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+
+        let Some(values) = cache.unique_values.get(&field) else {
+            return Err(js_err(format!("missing field in pivot cache: {field}")));
+        };
+
+        let start = offset as usize;
+        let end = start.saturating_add(limit as usize).min(values.len());
+        let slice: &[pivot_engine::PivotValue] = if start >= values.len() {
+            &[]
+        } else {
+            &values[start..end]
+        };
+
+        use serde::ser::Serialize as _;
+        slice
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|err| js_err(err.to_string()))
     }
 
