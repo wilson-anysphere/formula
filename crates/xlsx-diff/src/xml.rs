@@ -7,6 +7,8 @@ use roxmltree::{Document, Node};
 use crate::Severity;
 
 const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const OFFICE_DOCUMENT_REL_NS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedXml {
@@ -323,7 +325,7 @@ fn hyperlinks_child_sort_key(node: &XmlNode) -> (u8, String, String) {
     match node {
         XmlNode::Element(el) if el.name.local == "hyperlink" => {
             let key = attr_value(el, "ref")
-                .or_else(|| attr_value(el, "id"))
+                .or_else(|| attr_value_ns(el, Some(OFFICE_DOCUMENT_REL_NS), "id"))
                 .unwrap_or_default()
                 .to_string();
             (0, key, String::new())
@@ -390,6 +392,13 @@ fn attr_value<'a>(el: &'a XmlElement, local: &str) -> Option<&'a str> {
     el.attrs
         .iter()
         .find(|(k, _)| k.local == local)
+        .map(|(_, v)| v.as_str())
+}
+
+fn attr_value_ns<'a>(el: &'a XmlElement, ns: Option<&str>, local: &str) -> Option<&'a str> {
+    el.attrs
+        .iter()
+        .find(|(k, _)| k.local == local && k.ns.as_deref() == ns)
         .map(|(_, v)| v.as_str())
 }
 
