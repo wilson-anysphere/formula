@@ -2270,8 +2270,11 @@ fn propagate_filter(
 ) -> DaxResult<bool> {
     match direction {
         Direction::ToMany => {
-            // Propagate allowed keys from the "one" side to the "many" side:
-            //   to_table (one) -> from_table (many)
+            // Propagate allowed keys from the relationship's `to_table` to the `from_table`.
+            //
+            // This is the standard Tabular/PowerPivot propagation primitive for both 1:* and 1:1
+            // relationships (for 1:1, the `from_table` keys are also unique, but we keep the same
+            // index shape and propagation logic).
             let to_table_name = relationship.rel.to_table.as_str();
             let from_table_name = relationship.rel.from_table.as_str();
 
@@ -2332,8 +2335,10 @@ fn propagate_filter(
             Ok(changed)
         }
         Direction::ToOne => {
-            // Propagate allowed keys from the "many" side to the "one" side:
-            //   from_table (many) -> to_table (one)
+            // Propagate allowed keys from the relationship's `from_table` back to the `to_table`.
+            //
+            // When `cross_filter_direction == Both`, this enables bidirectional filtering for both
+            // 1:* and 1:1 relationships.
             let to_table_name = relationship.rel.to_table.as_str();
             let from_table_name = relationship.rel.from_table.as_str();
 

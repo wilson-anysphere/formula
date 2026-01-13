@@ -417,7 +417,7 @@ impl DataModel {
                 to_index_updates.push((rel_idx, key));
             }
 
-            if rel.from_table == table && rel.enforce_referential_integrity {
+            if rel.from_table == table {
                 let table_ref = self
                     .tables
                     .get(table)
@@ -429,6 +429,26 @@ impl DataModel {
                     }
                 })?;
                 let key = full_row.get(from_idx).cloned().unwrap_or(Value::Blank);
+
+                // For 1:1 relationships, the "from" side must also be unique. We treat BLANK as
+                // a real key for uniqueness, matching the existing to-side semantics.
+                if rel.cardinality == Cardinality::OneToOne
+                    && rel_info.from_index.contains_key(&key)
+                {
+                    self.tables
+                        .get_mut(table)
+                        .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
+                        .pop_row();
+                    return Err(DaxError::NonUniqueKey {
+                        table: rel.from_table.clone(),
+                        column: rel.from_column.clone(),
+                        value: key,
+                    });
+                }
+
+                if !rel.enforce_referential_integrity {
+                    continue;
+                }
                 if key.is_blank() {
                     continue;
                 }
@@ -502,7 +522,7 @@ impl DataModel {
                 column: to_col.clone(),
             })?;
 
-        if relationship.cardinality != Cardinality::OneToMany {
+        if relationship.cardinality == Cardinality::ManyToMany {
             return Err(DaxError::UnsupportedCardinality {
                 relationship: relationship.name.clone(),
                 cardinality: relationship.cardinality,
@@ -526,7 +546,19 @@ impl DataModel {
             let value = from_table
                 .value_by_idx(row, from_idx)
                 .unwrap_or(Value::Blank);
-            from_index.entry(value).or_default().push(row);
+            let rows = from_index.entry(value.clone()).or_default();
+
+            // For 1:1 relationships, the "from" side must also be unique. We treat BLANK as a
+            // real key for uniqueness, matching the existing to-side semantics.
+            if relationship.cardinality == Cardinality::OneToOne && !rows.is_empty() {
+                return Err(DaxError::NonUniqueKey {
+                    table: relationship.from_table.clone(),
+                    column: from_col.clone(),
+                    value: value.clone(),
+                });
+            }
+
+            rows.push(row);
         }
 
         if relationship.enforce_referential_integrity {
