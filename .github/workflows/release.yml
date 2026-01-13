@@ -1897,7 +1897,9 @@ jobs:
         run: node scripts/verify-tauri-updater-assets.mjs "${{ needs.validate-version.outputs.release_tag }}"
   verify-release-assets:
     name: Verify GitHub Release assets (multi-arch safe)
-    needs: [build, validate-version]
+    # Wait for the combined updater manifest publish step so we don't race while `latest.json`
+    # is being deleted/re-uploaded.
+    needs: [publish-updater-manifest, validate-version]
     if: needs.validate-version.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
     runs-on: ubuntu-24.04
     permissions:
