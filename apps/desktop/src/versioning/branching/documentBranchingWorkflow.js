@@ -7,7 +7,7 @@ import { parseA1 } from "../../document/coords.js";
 
 /**
  * @typedef {import("../../document/documentController.js").DocumentController} DocumentController
- * @typedef {import("../../../../../packages/versioning/branches/src/BranchService.js").BranchService} BranchService
+ * @typedef {import("../../../../../packages/versioning/branches/src/browser.js").BranchService} BranchService
  * @typedef {import("../../../../../packages/versioning/branches/src/types.js").Actor} Actor
  * @typedef {import("../../../../../packages/versioning/branches/src/merge.js").ConflictResolution} ConflictResolution
  */
