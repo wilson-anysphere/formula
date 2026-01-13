@@ -99,6 +99,21 @@ Key options:
 
 Many APIs in this package also accept `signal?: AbortSignal` to allow cancellation from UI surfaces.
 
+Cancellation behavior:
+
+- If `signal.aborted` is set (or becomes set during work), helpers will throw an `Error` whose `name` is `"AbortError"`.
+- This does not necessarily cancel underlying work (e.g. an embedder call), but it lets callers stop awaiting promptly.
+
+```js
+try {
+  const ctx = await cm.buildContext({ sheet, query, signal });
+  // ...
+} catch (err) {
+  if (err && typeof err === "object" && err.name === "AbortError") return;
+  throw err;
+}
+```
+
 ---
 
 ## Example: extract sheet schema + summarize
