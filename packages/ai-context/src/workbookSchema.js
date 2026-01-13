@@ -252,9 +252,13 @@ export function extractWorkbookSchema(workbook, options = {}) {
       ? Math.floor(maxAnalyzeColsRaw)
       : 50;
 
+  const workbookSheets = Array.isArray(workbook?.sheets) ? workbook.sheets : [];
+  const workbookTables = Array.isArray(workbook?.tables) ? workbook.tables : [];
+  const workbookNamedRanges = Array.isArray(workbook?.namedRanges) ? workbook.namedRanges : [];
+
   /** @type {Array<{ name: string, sheet: any }>} */
   const sheetEntries = [];
-  for (const sheet of workbook?.sheets ?? []) {
+  for (const sheet of workbookSheets) {
     throwIfAborted(signal);
     const name = typeof sheet?.name === "string" ? sheet.name : "";
     if (!name) continue;
@@ -267,7 +271,7 @@ export function extractWorkbookSchema(workbook, options = {}) {
 
   /** @type {ReturnType<typeof extractWorkbookSchema>["tables"]} */
   const tables = [];
-  for (const table of workbook?.tables ?? []) {
+  for (const table of workbookTables) {
     throwIfAborted(signal);
     const name = typeof table?.name === "string" ? table.name.trim() : "";
     const sheetName = typeof table?.sheetName === "string" ? table.sheetName : "";
@@ -299,7 +303,7 @@ export function extractWorkbookSchema(workbook, options = {}) {
 
   /** @type {ReturnType<typeof extractWorkbookSchema>["namedRanges"]} */
   const namedRanges = [];
-  for (const nr of workbook?.namedRanges ?? []) {
+  for (const nr of workbookNamedRanges) {
     throwIfAborted(signal);
     const name = typeof nr?.name === "string" ? nr.name.trim() : "";
     const sheetName = typeof nr?.sheetName === "string" ? nr.sheetName : "";

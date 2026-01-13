@@ -1,4 +1,3 @@
-import type { InferredType } from "./schema.js";
 import type { WorkbookSchemaSummary } from "./workbookSchema.js";
 
 export interface SummarizeWorkbookOptions {
@@ -24,7 +23,3 @@ export interface SummarizeWorkbookOptions {
  * Produce a compact, deterministic, schema-first summary of a workbook.
  */
 export function summarizeWorkbookSchema(schema: WorkbookSchemaSummary, options?: SummarizeWorkbookOptions): string;
-
-// Silence unused import linting for InferredType in TS declarations (kept for docs tooling).
-export type _SummarizeWorkbookSchemaUnusedInferredType = InferredType;
-
