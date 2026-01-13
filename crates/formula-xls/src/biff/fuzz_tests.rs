@@ -228,6 +228,31 @@ proptest! {
                     assert!(zoom.is_finite() && zoom > 0.0);
                 }
 
+                let row_col = sheet::parse_biff_sheet_row_col_properties(&buf, 0)
+                    .expect("offset 0 should always be in-bounds");
+                if let Some(range) = row_col.auto_filter_range {
+                    assert!(range.start.row <= range.end.row);
+                    assert!(range.start.col <= range.end.col);
+                }
+                if let Some(sort) = row_col.sort_state {
+                    for cond in sort.conditions {
+                        assert!(cond.range.start.row <= cond.range.end.row);
+                        assert!(cond.range.start.col <= cond.range.end.col);
+                    }
+                }
+                for (_row, props) in row_col.rows {
+                    if let Some(h) = props.height {
+                        assert!(h.is_finite() && h > 0.0);
+                    }
+                    assert!(props.outline_level <= 7);
+                }
+                for (_col, props) in row_col.cols {
+                    if let Some(w) = props.width {
+                        assert!(w.is_finite() && w > 0.0);
+                    }
+                    assert!(props.outline_level <= 7);
+                }
+
                 let merged = sheet::parse_biff_sheet_merged_cells(&buf, 0).expect("offset 0 should always be in-bounds");
                 for range in merged {
                     assert!(range.start.row <= range.end.row);
@@ -237,6 +262,17 @@ proptest! {
                 // Manual page breaks (re-exported by the parent `biff` module).
                 let _ = super::parse_biff_sheet_manual_page_breaks(&buf, 0)
                     .expect("offset 0 should always be in-bounds");
+
+                // Print settings helper (page setup + margins + manual page breaks).
+                let print = super::parse_biff_sheet_print_settings(&buf, 0)
+                    .expect("offset 0 should always be in-bounds");
+                let margins = &print.page_setup.margins;
+                assert!(margins.left.is_finite());
+                assert!(margins.right.is_finite());
+                assert!(margins.top.is_finite());
+                assert!(margins.bottom.is_finite());
+                assert!(margins.header.is_finite());
+                assert!(margins.footer.is_finite());
 
                 let xfs = sheet::parse_biff_sheet_cell_xf_indices_filtered(&buf, 0, None)
                     .expect("offset 0 should always be in-bounds");
