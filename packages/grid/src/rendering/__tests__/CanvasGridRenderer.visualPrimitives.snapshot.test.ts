@@ -247,7 +247,8 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     });
     renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
     renderer.resize(200, 80, 1);
-    renderer.setSelectionRange({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    // Use a multi-cell range so the fill-handle computation is exercised (bottom-right cell != start cell).
+    renderer.setSelectionRange({ startRow: 0, endRow: 2, startCol: 0, endCol: 2 });
     renderer.renderImmediately();
 
     const drawCalls = selectionCalls.filter((c) => c[0] === "fillRect" || c[0] === "strokeRect");
@@ -261,8 +262,33 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
           },
           0,
           0,
-          50,
-          20,
+          100,
+          40,
+        ],
+        [
+          "strokeRect",
+          {
+            "globalAlpha": 1,
+            "lineCap": "butt",
+            "lineDash": [],
+            "lineWidth": 2,
+            "strokeStyle": "#ff0000",
+          },
+          1,
+          1,
+          98,
+          38,
+        ],
+        [
+          "fillRect",
+          {
+            "fillStyle": "#00ff00",
+            "globalAlpha": 1,
+          },
+          96,
+          36,
+          8,
+          8,
         ],
         [
           "strokeRect",
@@ -277,17 +303,6 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
           1,
           48,
           18,
-        ],
-        [
-          "fillRect",
-          {
-            "fillStyle": "#00ff00",
-            "globalAlpha": 1,
-          },
-          46,
-          16,
-          8,
-          8,
         ],
       ]
     `);
@@ -708,4 +723,3 @@ describe("CanvasGridRenderer visual primitive snapshots (recorded draw calls)", 
     `);
   });
 });
-
