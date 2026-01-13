@@ -29,6 +29,7 @@ const textEncoder = new TextEncoder();
 const MAX_CELL_KEY_CHARS = 1024;
 const MAX_SHEET_ID_CHARS = 256;
 const MAX_CELL_INDEX_CHARS = 32;
+const MAX_CELL_KEY_LOG_PREFIX_CHARS = 128;
 
 type ReservedRootGuardConfig = {
   enabled: boolean;
@@ -1068,7 +1069,10 @@ export function installYwsSecurity(
         for (const cellKey of touchedCellKeys) {
           const parsed = parseCellKey(cellKey);
           if (!parsed) {
-            logRangeRestrictionOnce("range_restriction_unparseable_cell", { cellKey });
+            logRangeRestrictionOnce("range_restriction_unparseable_cell", {
+              cellKeyLength: cellKey.length,
+              cellKeyPrefix: truncateForLog(cellKey, MAX_CELL_KEY_LOG_PREFIX_CHARS),
+            });
             ws.close(1008, "unparseable cell key");
             return { drop: true };
           }
