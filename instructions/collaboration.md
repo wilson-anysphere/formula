@@ -127,6 +127,8 @@ pnpm dev:sync
 | `SYNC_SERVER_PERSISTENCE_ENCRYPTION` | `keyring` for encryption at rest |
 | `SYNC_SERVER_MAX_MESSAGE_BYTES` | Max websocket message size (defaults to 2MB; see close code `1009`) |
 
+Note: large in-doc history payloads (e.g. version snapshots stored under `versions*` and branch commits stored under `branching:*`) can exceed this limit if written as a single Yjs update. `@formula/collab-versioning` now defaults to streaming snapshot writes (chunked across multiple Yjs transactions/updates) to avoid 1009 disconnects for large workbooks. See [`docs/06-collaboration.md`](../docs/06-collaboration.md) for tuning via `yjsStoreOptions`.
+
 ### Client Connection
 
 ```typescript
