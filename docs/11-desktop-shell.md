@@ -711,6 +711,11 @@ The backend buffers early redirects in memory (`OauthRedirectState` in `apps/des
 
 ##### Quick manual smoke tests
 
+- **Log redirects in DevTools:** in the desktop app’s DevTools console, you can attach a temporary listener:
+  ```js
+  const unlisten = await __TAURI__.event.listen("oauth-redirect", (e) => console.log("[oauth-redirect]", e.payload));
+  // Later: await unlisten();
+  ```
 - **Loopback redirect capture:** from the desktop webview (DevTools), run:
   ```js
   await __TAURI__.core.invoke("oauth_loopback_listen", { redirect_uri: "http://127.0.0.1:4242/oauth/callback" });
