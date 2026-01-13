@@ -148,8 +148,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     env:
-      # Nightly schedule runs at least the Calculate (L2) check. Render smoke (L3) is opt-in.
-      CORPUS_RUN_RECALC: ${{ github.event_name == 'schedule' || github.event.inputs.recalc }}
+      # Nightly schedule runs at least the Calculate (L2) check by default. This can be disabled by
+      # setting vars.CORPUS_RUN_RECALC=false. Render smoke (L3) is opt-in.
+      CORPUS_RUN_RECALC: ${{ (github.event_name == 'schedule' && vars.CORPUS_RUN_RECALC != 'false') || github.event.inputs.recalc }}
       # Render smoke can be enabled for workflow_dispatch runs, or (for scheduled runs) via a repo
       # variable `CORPUS_RUN_RENDER_SMOKE=true`.
       CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke || vars.CORPUS_RUN_RENDER_SMOKE }}

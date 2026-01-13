@@ -466,6 +466,9 @@ required secrets/corpus archive are not configured.
 For scheduled runs, you can also opt into nightly render smoke by setting the repo variable
 `CORPUS_RUN_RENDER_SMOKE=true` (see `.github/workflows/corpus.yml`).
 
+By default the scheduled private corpus run enables `recalc` (Calculate / L2). To disable it, set the
+repo variable `CORPUS_RUN_RECALC=false`.
+
 ### Compatibility gate thresholds
 
 After generating `tools/corpus/out/**/summary.json` via `tools/corpus/dashboard.py`, you can enforce minimum
