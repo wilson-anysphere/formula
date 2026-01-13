@@ -2,6 +2,71 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+function skipStringLiteral(source: string, start: number): number {
+  const quote = source[start];
+  if (quote !== "'" && quote !== '"' && quote !== "`") return start + 1;
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === quote) return i + 1;
+    i += 1;
+  }
+  return source.length;
+}
+
+function findMatchingDelimiter(source: string, openIndex: number, openChar: string, closeChar: string): number | null {
+  let depth = 0;
+  for (let i = openIndex; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i = skipStringLiteral(source, i) - 1;
+      continue;
+    }
+    if (ch === openChar) depth += 1;
+    else if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return null;
+}
+
+function splitTopLevelArgs(argText: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let parens = 0;
+  let braces = 0;
+  let brackets = 0;
+
+  for (let i = 0; i < argText.length; i += 1) {
+    const ch = argText[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i = skipStringLiteral(argText, i) - 1;
+      continue;
+    }
+
+    if (ch === "(") parens += 1;
+    else if (ch === ")") parens = Math.max(0, parens - 1);
+    else if (ch === "{") braces += 1;
+    else if (ch === "}") braces = Math.max(0, braces - 1);
+    else if (ch === "[") brackets += 1;
+    else if (ch === "]") brackets = Math.max(0, brackets - 1);
+
+    if (ch === "," && parens === 0 && braces === 0 && brackets === 0) {
+      parts.push(argText.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+
+  const tail = argText.slice(start).trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
 describe("oauthRedirectIpc wiring", () => {
   it("installs the oauth-redirect IPC readiness handshake in main.ts (prevents cold-start drops)", () => {
     // `main.ts` has many side effects and isn't safe to import in unit tests. Instead, validate
@@ -32,11 +97,20 @@ describe("oauthRedirectIpc wiring", () => {
       /^(?:\s*)(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*\(\s*["']oauth-redirect["']/m.exec(code);
     if (assignment) {
       const varName = escapeForRegExp(assignment[1]!);
-      const hasThen =
-        new RegExp(
-          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*[^)]*\)\s*=>|\w+\s*=>|function\s*\(\s*[^)]*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
-          "m",
-        ).test(code);
+      const thenCall = new RegExp(String.raw`\b${varName}\b\s*\.\s*then\s*\(`, "m").exec(code);
+      let hasThen = false;
+      if (thenCall) {
+        const openParen = thenCall.index + thenCall[0].length - 1;
+        const closeParen = findMatchingDelimiter(code, openParen, "(", ")");
+        if (closeParen != null) {
+          const argsText = code.slice(openParen + 1, closeParen);
+          const [onFulfilled] = splitTopLevelArgs(argsText);
+          hasThen =
+            typeof onFulfilled === "string" &&
+            (onFulfilled.includes("=>") || onFulfilled.includes("function")) &&
+            /\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(onFulfilled);
+        }
+      }
       const hasAwait =
         new RegExp(
           String.raw`await\s+\b${varName}\b[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']`,
@@ -57,8 +131,19 @@ describe("oauthRedirectIpc wiring", () => {
     }
 
     // 3) Ensure the listener forwards the payload into the OAuth broker.
-    expect(code).toMatch(
-      /\blisten\s*\(\s*["']oauth-redirect["']\s*,[\s\S]{0,200}?(?:=>|function)[\s\S]{0,1000}?\boauthBroker\.observeRedirect\s*\(/,
-    );
+    const listenCall = /\blisten\s*\(\s*["']oauth-redirect["']/.exec(code);
+    expect(listenCall).toBeTruthy();
+    if (listenCall) {
+      const openParen = code.indexOf("(", listenCall.index);
+      const closeParen = openParen >= 0 ? findMatchingDelimiter(code, openParen, "(", ")") : null;
+      expect(closeParen).not.toBeNull();
+      if (openParen >= 0 && closeParen != null) {
+        const argsText = code.slice(openParen + 1, closeParen);
+        const args = splitTopLevelArgs(argsText);
+        expect(args.length).toBeGreaterThanOrEqual(2);
+        expect(args[0]).toMatch(/["']oauth-redirect["']/);
+        expect(args[1]).toMatch(/\boauthBroker\.observeRedirect\s*\(/);
+      }
+    }
   });
 });
