@@ -221,7 +221,7 @@ export function diffDocumentWorkbookSnapshots(opts) {
       });
     }
 
-    if (!isDeepStrictEqual(beforeSheet.tabColor ?? null, afterSheet.tabColor ?? null)) {
+    if (!deepEqual(beforeSheet.tabColor ?? null, afterSheet.tabColor ?? null)) {
       sheets.metaChanged.push({
         id,
         field: "tabColor",
