@@ -2225,6 +2225,44 @@ test("WEEKNUM return_type suggests 1, 2, 21", async () => {
   );
 });
 
+test("WORKDAY.INTL weekend suggests 1, 2, 7, 11, 17", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=WORKDAY.INTL(A1, 5, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "7", "11", "17"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=WORKDAY.INTL(A1, 5, ${v}`),
+      `Expected WORKDAY.INTL to suggest weekend=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
+test("NETWORKDAYS.INTL weekend suggests 1, 2, 7, 11, 17", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=NETWORKDAYS.INTL(A1, B1, ";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  for (const v of ["1", "2", "7", "11", "17"]) {
+    assert.ok(
+      suggestions.some((s) => s.text === `=NETWORKDAYS.INTL(A1, B1, ${v}`),
+      `Expected NETWORKDAYS.INTL to suggest weekend=${v}, got: ${suggestions.map((s) => s.text).join(", ")}`
+    );
+  }
+});
+
 test("DAYS360 method suggests TRUE/FALSE with meaning", async () => {
   const engine = new TabCompletionEngine();
 

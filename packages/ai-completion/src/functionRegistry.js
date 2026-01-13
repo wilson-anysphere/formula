@@ -235,7 +235,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "start_date", type: "number" },
       { name: "days", type: "number" },
-      { name: "weekend", type: "value", optional: true },
+      { name: "weekend", type: "number", optional: true },
       { name: "holidays", type: "range", optional: true },
     ],
   },
@@ -254,7 +254,7 @@ const CURATED_FUNCTIONS = [
     args: [
       { name: "start_date", type: "number" },
       { name: "end_date", type: "number" },
-      { name: "weekend", type: "value", optional: true },
+      { name: "weekend", type: "number", optional: true },
       { name: "holidays", type: "range", optional: true },
     ],
   },

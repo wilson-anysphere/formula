@@ -1100,6 +1100,26 @@ const FUNCTION_SPECIFIC_ARG_ENUMS = {
       { replacement: "21", displayText: "21 (ISO week numbering)", confidence: 0.63 },
     ],
   },
+  "WORKDAY.INTL": {
+    // weekend
+    2: [
+      { replacement: "1", displayText: "1 (Sat/Sun weekend)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (Sun/Mon weekend)", confidence: 0.65 },
+      { replacement: "7", displayText: "7 (Fri/Sat weekend)", confidence: 0.64 },
+      { replacement: "11", displayText: "11 (Sunday only)", confidence: 0.63 },
+      { replacement: "17", displayText: "17 (Saturday only)", confidence: 0.62 },
+    ],
+  },
+  "NETWORKDAYS.INTL": {
+    // weekend
+    2: [
+      { replacement: "1", displayText: "1 (Sat/Sun weekend)", confidence: 0.66 },
+      { replacement: "2", displayText: "2 (Sun/Mon weekend)", confidence: 0.65 },
+      { replacement: "7", displayText: "7 (Fri/Sat weekend)", confidence: 0.64 },
+      { replacement: "11", displayText: "11 (Sunday only)", confidence: 0.63 },
+      { replacement: "17", displayText: "17 (Saturday only)", confidence: 0.62 },
+    ],
+  },
   "FORECAST.ETS": {
     // seasonality
     3: [
