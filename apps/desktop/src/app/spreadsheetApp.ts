@@ -1956,7 +1956,9 @@ export class SpreadsheetApp {
               endCol: table?.endCol,
             };
             const reference = isValidDocRange(range) ? `${name}[#All]` : null;
-            tables.push({ label: name, reference });
+            // Tables should always navigate when selectable. If the table metadata is incomplete/invalid,
+            // surface it as a disabled entry rather than offering a broken Go To.
+            tables.push({ label: name, reference, enabled: reference != null });
           }
 
           const ciSort = (a: NameBoxMenuItem, b: NameBoxMenuItem): number =>
