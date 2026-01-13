@@ -22,6 +22,13 @@ test("InMemoryVectorStore.query breaks score ties by id (ascending)", async () =
     { id: "c", vector: [0, 1, 0], metadata: { workbookId: "wb" } },
   ]);
 
+  // Ensure tie-breaking influences selection at the cutoff (topK=1), not just output ordering.
+  const top1 = await store.query([1, 0, 0], 1, { workbookId: "wb" });
+  assert.deepEqual(
+    top1.map((h) => h.id),
+    ["a"],
+  );
+
   const hits = await store.query([1, 0, 0], 2, { workbookId: "wb" });
   assert.deepEqual(
     hits.map((h) => h.id),
@@ -38,6 +45,12 @@ test("SqliteVectorStore.query breaks score ties by id (ascending)", { skip: !sql
       { id: "c", vector: [0, 1, 0], metadata: { workbookId: "wb" } },
     ]);
 
+    const top1 = await store.query([1, 0, 0], 1, { workbookId: "wb" });
+    assert.deepEqual(
+      top1.map((h) => h.id),
+      ["a"],
+    );
+
     const hits = await store.query([1, 0, 0], 2, { workbookId: "wb" });
     assert.deepEqual(
       hits.map((h) => h.id),
@@ -47,4 +60,3 @@ test("SqliteVectorStore.query breaks score ties by id (ascending)", { skip: !sql
     await store.close();
   }
 });
-
