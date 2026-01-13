@@ -87,6 +87,12 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.alignment.orientation.rotateUp",
   "home.alignment.orientation.rotateDown",
   "home.alignment.orientation.formatCellAlignment",
+  // Merge commands are routed via the ribbon fallback handler in main.ts (not CommandRegistry yet).
+  "home.alignment.mergeCenter",
+  "home.alignment.mergeCenter.mergeCenter",
+  "home.alignment.mergeCenter.mergeAcross",
+  "home.alignment.mergeCenter.mergeCells",
+  "home.alignment.mergeCenter.unmergeCells",
   "home.number.numberFormat",
   "home.number.percent",
   "home.number.accounting",
