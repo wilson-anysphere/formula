@@ -1,3 +1,4 @@
+use super::aes_cbc::{AesCbcDecryptError, AES_BLOCK_SIZE};
 use super::crypto::CryptoError;
 use thiserror::Error;
 
@@ -126,10 +127,32 @@ impl From<CryptoError> for OffCryptoError {
     }
 }
 
+impl From<AesCbcDecryptError> for OffCryptoError {
+    fn from(source: AesCbcDecryptError) -> Self {
+        match source {
+            AesCbcDecryptError::UnsupportedKeyLength(len) => Self::UnsupportedCipherAlgorithm {
+                cipher: format!("AES (key length {len} bytes)"),
+            },
+            AesCbcDecryptError::InvalidIvLength(_len) => {
+                // The caller is expected to derive the IV from the encryption parameters.
+                // Treat an unexpected IV length as a format/parameter issue (not a crypto failure).
+                Self::InvalidAgileParameter {
+                    param: "AES-CBC IV length",
+                }
+            }
+            AesCbcDecryptError::InvalidCiphertextLength(len) => Self::CiphertextNotBlockAligned {
+                ciphertext_len: len,
+                block_size: AES_BLOCK_SIZE,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::offcrypto::crypto::{hash_password, HashAlgorithm};
+    use crate::offcrypto::AesCbcDecryptError;
 
     #[test]
     fn maps_crypto_error_unsupported_hash_algorithm() {
@@ -157,6 +180,28 @@ mod tests {
         assert!(
             off.to_string().to_lowercase().contains("agile"),
             "message should mention Agile encryption context: {}",
+            off
+        );
+    }
+
+    #[test]
+    fn maps_aes_cbc_ciphertext_length_error_to_block_alignment() {
+        let err = AesCbcDecryptError::InvalidCiphertextLength(15);
+        let off: OffCryptoError = err.into();
+        assert!(
+            matches!(
+                off,
+                OffCryptoError::CiphertextNotBlockAligned {
+                    ciphertext_len: 15,
+                    block_size: AES_BLOCK_SIZE
+                }
+            ),
+            "expected CiphertextNotBlockAligned, got {off:?}"
+        );
+        assert!(
+            off.to_string().to_lowercase().contains("encryptedpackage")
+                || off.to_string().to_lowercase().contains("encryption"),
+            "message should mention encryption context: {}",
             off
         );
     }
