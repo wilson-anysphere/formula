@@ -1507,13 +1507,20 @@ def main() -> int:
             {"id": report_id, "display_name": report.get("display_name", path.name), "file": filename}
         )
 
+    corpus_dir_str = str(args.corpus_dir)
+    input_dir_str = str(input_dir)
+    if args.privacy_mode == _PRIVACY_PRIVATE:
+        # Avoid leaking local filesystem paths (usernames, mount points) into uploaded artifacts.
+        corpus_dir_str = f"sha256={_sha256_text(corpus_dir_str)}"
+        input_dir_str = f"sha256={_sha256_text(input_dir_str)}"
+
     index = {
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
         "run_url": _redact_run_url(github_run_url(), privacy_mode=args.privacy_mode),
-        "corpus_dir": str(args.corpus_dir),
+        "corpus_dir": corpus_dir_str,
         "input_scope": args.input_scope,
-        "input_dir": str(input_dir),
+        "input_dir": input_dir_str,
         "report_count": len(reports),
         "reports": report_index_entries,
     }
