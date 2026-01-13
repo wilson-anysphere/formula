@@ -115,7 +115,11 @@ impl EncryptionVersionInfo {
         let major = r.read_u16_le("EncryptionVersionInfo.major")?;
         let minor = r.read_u16_le("EncryptionVersionInfo.minor")?;
         let flags = r.read_u32_le("EncryptionVersionInfo.flags")?;
-        Ok(Self { major, minor, flags })
+        Ok(Self {
+            major,
+            minor,
+            flags,
+        })
     }
 }
 
@@ -153,12 +157,8 @@ mod test_alloc {
     fn record(size: usize) {
         let mut prev = MAX_ALLOC.load(Ordering::Relaxed);
         while size > prev {
-            match MAX_ALLOC.compare_exchange_weak(
-                prev,
-                size,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
+            match MAX_ALLOC.compare_exchange_weak(prev, size, Ordering::Relaxed, Ordering::Relaxed)
+            {
                 Ok(_) => break,
                 Err(next) => prev = next,
             }
@@ -264,7 +264,8 @@ fn validate_standard_encryption_info(info: &StandardEncryptionInfo) -> Result<()
 
     if info.verifier.verifier_hash_size != 20 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
+            context:
+                "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
         });
     }
 
@@ -449,7 +450,10 @@ pub enum OffcryptoError {
     ///
     /// For AES-based Office encryption, ciphertext is padded to the AES block size (16 bytes), so
     /// the ciphertext length must be at least `ceil(total_size / 16) * 16`.
-    EncryptedPackageSizeMismatch { total_size: u64, ciphertext_len: usize },
+    EncryptedPackageSizeMismatch {
+        total_size: u64,
+        ciphertext_len: usize,
+    },
     /// The `EncryptionInfo` version is not supported by the current parser.
     UnsupportedVersion { major: u16, minor: u16 },
     /// The encryption schema is known but not supported by the selected decryption mode.
@@ -660,7 +664,11 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     let major = r.read_u16_le("EncryptionVersionInfo.major")?;
     let minor = r.read_u16_le("EncryptionVersionInfo.minor")?;
     let flags = r.read_u32_le("EncryptionVersionInfo.flags")?;
-    let version = EncryptionVersionInfo { major, minor, flags };
+    let version = EncryptionVersionInfo {
+        major,
+        minor,
+        flags,
+    };
 
     if (major, minor) == (4, 4) {
         // Agile EncryptionInfo payload is an UTF-8 XML document beginning at byte offset 8.
@@ -769,7 +777,8 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     let verifier_hash_size = r.read_u32_le("EncryptionVerifier.verifierHashSize")?;
     if verifier_hash_size != 20 {
         return Err(OffcryptoError::InvalidEncryptionInfo {
-            context: "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
+            context:
+                "EncryptionVerifier.verifierHashSize must be 20 (SHA1) for Standard encryption",
         });
     }
     // SHA1 hashes are 20 bytes, padded to an AES block boundary (16) => 32 bytes.
@@ -905,9 +914,10 @@ fn decode_utf16le_xml(bytes: &[u8]) -> Result<String, OffcryptoError> {
         units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
 
-    let mut xml = String::from_utf16(&units).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-        context: "agile EncryptionInfo XML is not valid UTF-16LE",
-    })?;
+    let mut xml =
+        String::from_utf16(&units).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "agile EncryptionInfo XML is not valid UTF-16LE",
+        })?;
 
     // Be tolerant of a BOM encoded as U+FEFF.
     if let Some(stripped) = xml.strip_prefix('\u{FEFF}') {
@@ -932,7 +942,9 @@ fn length_prefixed_slice(payload: &[u8]) -> Option<&[u8]> {
     let candidate_trimmed = strip_utf8_bom(candidate_trimmed);
     let looks_like_utf8 = candidate_trimmed.first() == Some(&b'<');
     let looks_like_utf16le = candidate_trimmed.starts_with(&[0xFF, 0xFE])
-        || (candidate_trimmed.len() >= 2 && candidate_trimmed[0] == b'<' && candidate_trimmed[1] == 0);
+        || (candidate_trimmed.len() >= 2
+            && candidate_trimmed[0] == b'<'
+            && candidate_trimmed[1] == 0);
     if !(looks_like_utf8 || looks_like_utf16le) {
         return None;
     }
@@ -975,7 +987,9 @@ fn try_parse_agile_xml_utf16le(bytes: &[u8]) -> Result<AgileEncryptionInfo, Offc
     parse_agile_encryption_info_xml_str(&xml)
 }
 
-fn parse_agile_encryption_info_xml(xml_bytes: &[u8]) -> Result<AgileEncryptionInfo, OffcryptoError> {
+fn parse_agile_encryption_info_xml(
+    xml_bytes: &[u8],
+) -> Result<AgileEncryptionInfo, OffcryptoError> {
     // Primary: treat remainder as UTF-8 XML (trim UTF-8 BOM, trim trailing NULs).
     //
     // Fallbacks:
@@ -1191,9 +1205,11 @@ fn parse_agile_encryption_info_xml_str(xml: &str) -> Result<AgileEncryptionInfo,
         password_salt: password_salt.ok_or(OffcryptoError::InvalidEncryptionInfo {
             context: "missing password <encryptedKey> element",
         })?,
-        password_hash_algorithm: password_hash_algorithm.ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "missing password <encryptedKey> element",
-        })?,
+        password_hash_algorithm: password_hash_algorithm.ok_or(
+            OffcryptoError::InvalidEncryptionInfo {
+                context: "missing password <encryptedKey> element",
+            },
+        )?,
         password_key_bits: password_key_bits.ok_or(OffcryptoError::InvalidEncryptionInfo {
             context: "missing password <encryptedKey> element",
         })?,
@@ -1306,8 +1322,10 @@ fn parse_key_data_attrs<'a>(
         let value = attr.value.as_ref();
         match key {
             b"cipherAlgorithm" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 if !s.trim().eq_ignore_ascii_case("AES") {
                     return Err(OffcryptoError::UnsupportedAlgorithm(
@@ -1316,8 +1334,10 @@ fn parse_key_data_attrs<'a>(
                 }
             }
             b"cipherChaining" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 if !s.trim().eq_ignore_ascii_case("ChainingModeCBC") {
                     return Err(OffcryptoError::UnsupportedAlgorithm(
@@ -1326,15 +1346,22 @@ fn parse_key_data_attrs<'a>(
                 }
             }
             b"saltValue" => {
-                salt_value = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                salt_value = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_SALT_LEN,
                     "keyData.saltValue too large",
                 )?);
             }
             b"hashAlgorithm" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 hash_algorithm = Some(HashAlgorithm::parse_offcrypto_name(s)?);
             }
@@ -1381,15 +1408,25 @@ fn parse_data_integrity_attrs<'a>(
         let value = attr.value.as_ref();
         match key {
             b"encryptedHmacKey" => {
-                encrypted_hmac_key = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                encrypted_hmac_key = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_MAX_ENCRYPTED_LEN,
                     "dataIntegrity.encryptedHmacKey too large",
                 )?);
             }
             b"encryptedHmacValue" => {
-                encrypted_hmac_value = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                encrypted_hmac_value = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_MAX_ENCRYPTED_LEN,
                     "dataIntegrity.encryptedHmacValue too large",
                 )?);
@@ -1406,9 +1443,10 @@ fn parse_data_integrity_attrs<'a>(
         "dataIntegrity.encryptedHmacKey must be AES-block aligned",
     )?;
 
-    let encrypted_hmac_value = encrypted_hmac_value.ok_or(OffcryptoError::InvalidEncryptionInfo {
-        context: "missing dataIntegrity.encryptedHmacValue",
-    })?;
+    let encrypted_hmac_value =
+        encrypted_hmac_value.ok_or(OffcryptoError::InvalidEncryptionInfo {
+            context: "missing dataIntegrity.encryptedHmacValue",
+        })?;
     validate_agile_encrypted_len(
         &encrypted_hmac_value,
         "dataIntegrity.encryptedHmacValue must be AES-block aligned",
@@ -1448,8 +1486,10 @@ fn parse_password_encrypted_key_attrs<'a>(
         let value = attr.value.as_ref();
         match key {
             b"cipherAlgorithm" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 if !s.trim().eq_ignore_ascii_case("AES") {
                     return Err(OffcryptoError::UnsupportedAlgorithm(
@@ -1458,8 +1498,10 @@ fn parse_password_encrypted_key_attrs<'a>(
                 }
             }
             b"cipherChaining" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 if !s.trim().eq_ignore_ascii_case("ChainingModeCBC") {
                     return Err(OffcryptoError::UnsupportedAlgorithm(
@@ -1469,36 +1511,58 @@ fn parse_password_encrypted_key_attrs<'a>(
             }
             b"spinCount" => spin_count = Some(parse_decimal_u32(value, "spinCount")?),
             b"saltValue" => {
-                salt_value = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                salt_value = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_SALT_LEN,
                     "encryptedKey.saltValue too large",
                 )?)
             }
             b"hashAlgorithm" => {
-                let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-                    context: "invalid UTF-8 attribute value",
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
                 })?;
                 hash_algorithm = Some(HashAlgorithm::parse_offcrypto_name(s)?);
             }
             b"keyBits" => key_bits = Some(parse_decimal_usize(value, "keyBits")?),
             b"encryptedKeyValue" => {
-                encrypted_key_value = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                encrypted_key_value = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_MAX_ENCRYPTED_LEN,
                     "encryptedKey.encryptedKeyValue too large",
                 )?)
             }
             b"encryptedVerifierHashInput" => {
-                encrypted_verifier_hash_input = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                encrypted_verifier_hash_input = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_MAX_ENCRYPTED_LEN,
                     "encryptedKey.encryptedVerifierHashInput too large",
                 )?)
             }
             b"encryptedVerifierHashValue" => {
-                encrypted_verifier_hash_value = Some(decode_base64_bounded(
-                    value,
+                let s = std::str::from_utf8(value).map_err(|_| {
+                    OffcryptoError::InvalidEncryptionInfo {
+                        context: "invalid UTF-8 attribute value",
+                    }
+                })?;
+                encrypted_verifier_hash_value = Some(decode_b64_attr_bounded(
+                    s,
                     AGILE_MAX_ENCRYPTED_LEN,
                     "encryptedKey.encryptedVerifierHashValue too large",
                 )?)
@@ -1590,21 +1654,60 @@ fn validate_agile_encrypted_len(buf: &[u8], context: &'static str) -> Result<(),
     Ok(())
 }
 
-fn decode_base64_bounded(
-    value: &[u8],
+fn decode_b64_attr(value: &str) -> Result<Vec<u8>, OffcryptoError> {
+    // Some producers pretty-print the `EncryptionInfo` XML and may insert whitespace into long
+    // base64 attribute values. Additionally, some omit `=` padding. Be permissive.
+    let bytes = value.as_bytes();
+
+    let mut non_ws_len: usize = 0;
+    let mut has_ws = false;
+    for &b in bytes {
+        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
+            has_ws = true;
+            continue;
+        }
+        non_ws_len += 1;
+    }
+
+    if non_ws_len == 0 {
+        return Ok(Vec::new());
+    }
+
+    let cleaned = if has_ws {
+        let mut out = Vec::with_capacity(non_ws_len);
+        for &b in bytes {
+            if !matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
+                out.push(b);
+            }
+        }
+        Some(out)
+    } else {
+        None
+    };
+
+    let input = cleaned.as_deref().unwrap_or(bytes);
+    STANDARD
+        .decode(input)
+        .or_else(|_| STANDARD_NO_PAD.decode(input))
+        .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "invalid base64 value",
+        })
+}
+
+fn decode_b64_attr_bounded(
+    value: &str,
     max_len: usize,
     context: &'static str,
 ) -> Result<Vec<u8>, OffcryptoError> {
     // Some producers pretty-print the `EncryptionInfo` XML and may insert whitespace into long
     // base64 attribute values. Additionally, some omit `=` padding. Be permissive, but avoid
     // decoding unreasonably large values.
+    let bytes = value.as_bytes();
     let mut non_ws_len: usize = 0;
-    let mut has_ws = false;
     let mut last: Option<u8> = None;
     let mut second_last: Option<u8> = None;
-    for &b in value {
+    for &b in bytes {
         if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
-            has_ws = true;
             continue;
         }
         second_last = last;
@@ -1653,26 +1756,7 @@ fn decode_base64_bounded(
         return Err(OffcryptoError::InvalidFormat { context });
     }
 
-    let cleaned = if has_ws {
-        let mut out = Vec::with_capacity(non_ws_len);
-        for &b in value {
-            if !matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
-                out.push(b);
-            }
-        }
-        Some(out)
-    } else {
-        None
-    };
-
-    let input = cleaned.as_deref().unwrap_or(value);
-    let decoded = STANDARD
-        .decode(input)
-        .or_else(|_| STANDARD_NO_PAD.decode(input))
-        .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-            context: "invalid base64 value",
-        })?;
-
+    let decoded = decode_b64_attr(value)?;
     if decoded.len() > max_len {
         return Err(OffcryptoError::InvalidFormat { context });
     }
@@ -1681,43 +1765,37 @@ fn decode_base64_bounded(
 }
 
 #[cfg(test)]
-fn decode_b64_attr(value: &str) -> Result<Vec<u8>, OffcryptoError> {
-    // Some producers pretty-print the `EncryptionInfo` XML and may insert whitespace into long
-    // base64 attribute values. Additionally, some omit `=` padding. Be permissive.
-    let bytes = value.as_bytes();
+mod decode_b64_attr_tests {
+    use super::decode_b64_attr;
 
-    // Avoid allocating in the common case where there is no whitespace.
-    let mut cleaned: Option<Vec<u8>> = None;
-    for (idx, &b) in bytes.iter().enumerate() {
-        if matches!(b, b'\r' | b'\n' | b'\t' | b' ') {
-            let mut out = Vec::with_capacity(bytes.len());
-            out.extend_from_slice(&bytes[..idx]);
-            for &b2 in &bytes[idx..] {
-                if !matches!(b2, b'\r' | b'\n' | b'\t' | b' ') {
-                    out.push(b2);
-                }
-            }
-            cleaned = Some(out);
-            break;
-        }
+    #[test]
+    fn padded_base64() {
+        let out = decode_b64_attr("aGVsbG8=").expect("decode");
+        assert_eq!(out.as_slice(), b"hello");
     }
 
-    let input = cleaned.as_deref().unwrap_or(bytes);
-    STANDARD
-        .decode(input)
-        .or_else(|_| STANDARD_NO_PAD.decode(input))
-        .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-            context: "invalid base64 value",
-        })
+    #[test]
+    fn unpadded_base64() {
+        let out = decode_b64_attr("aGVsbG8").expect("decode");
+        assert_eq!(out.as_slice(), b"hello");
+    }
+
+    #[test]
+    fn base64_with_embedded_whitespace() {
+        let out = decode_b64_attr(" aGVs \n\tbG8= \r\n").expect("decode");
+        assert_eq!(out.as_slice(), b"hello");
+    }
 }
 
 fn parse_decimal_u32(value: &[u8], _name: &'static str) -> Result<u32, OffcryptoError> {
     let s = std::str::from_utf8(value).map_err(|_| OffcryptoError::InvalidEncryptionInfo {
         context: "invalid UTF-8 numeric attribute",
     })?;
-    s.trim().parse::<u32>().map_err(|_| OffcryptoError::InvalidEncryptionInfo {
-        context: "invalid numeric attribute",
-    })
+    s.trim()
+        .parse::<u32>()
+        .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
+            context: "invalid numeric attribute",
+        })
 }
 
 fn parse_decimal_usize(value: &[u8], _name: &'static str) -> Result<usize, OffcryptoError> {
@@ -1971,8 +2049,8 @@ fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoE
     where
         C: BlockDecrypt + KeyInit,
     {
-        let cipher =
-            C::new_from_slice(key).map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
+        let cipher = C::new_from_slice(key)
+            .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
         for block in buf.chunks_mut(16) {
             cipher.decrypt_block(GenericArray::from_mut_slice(block));
         }
@@ -2144,10 +2222,9 @@ pub fn decrypt_encrypted_package_ecb(
 /// streams.
 pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, OffcryptoError> {
     let cursor = Cursor::new(data);
-    let mut ole =
-        cfb::CompoundFile::open(cursor).map_err(|err| {
-            OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {err}"))
-        })?;
+    let mut ole = cfb::CompoundFile::open(cursor).map_err(|err| {
+        OffcryptoError::InvalidStructure(format!("failed to open OLE compound file: {err}"))
+    })?;
 
     let encryption_info = read_stream_from_ole(&mut ole, "EncryptionInfo")?;
 
@@ -2176,7 +2253,9 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     }
 
     let (header, verifier) = match parse_encryption_info(&encryption_info)? {
-        EncryptionInfo::Standard { header, verifier, .. } => (header, verifier),
+        EncryptionInfo::Standard {
+            header, verifier, ..
+        } => (header, verifier),
         EncryptionInfo::Agile { .. } => {
             return Err(OffcryptoError::UnsupportedEncryption {
                 encryption_type: EncryptionType::Agile,
@@ -2198,7 +2277,11 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     };
 
     let key = make_key_from_password(password, &verifier.salt, header.key_size_bits)?;
-    verify_password(&key, &verifier.encrypted_verifier, &verifier.encrypted_verifier_hash)?;
+    verify_password(
+        &key,
+        &verifier.encrypted_verifier,
+        &verifier.encrypted_verifier_hash,
+    )?;
 
     let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
 
@@ -2283,14 +2366,18 @@ pub fn standard_derive_key_zeroizing(
 /// ECMA-376 Standard Encryption key verifier check.
 ///
 /// Reference algorithm: `msoffcrypto` `ECMA376Standard.verifykey`.
-pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<(), OffcryptoError> {
+pub fn standard_verify_key(
+    info: &StandardEncryptionInfo,
+    key: &[u8],
+) -> Result<(), OffcryptoError> {
     validate_standard_encryption_info(info)?;
 
     let mut verifier: Zeroizing<[u8; 16]> = Zeroizing::new(info.verifier.encrypted_verifier);
     aes_ecb_decrypt_in_place(key, &mut verifier[..])?;
     let expected_hash: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&verifier[..]));
 
-    let mut verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    let mut verifier_hash: Zeroizing<Vec<u8>> =
+        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     aes_ecb_decrypt_in_place(key, &mut verifier_hash[..])?;
     if verifier_hash.len() < SHA1_LEN {
         return Err(OffcryptoError::InvalidVerifierHashLength {
@@ -2496,9 +2583,10 @@ fn derive_iv_from_salt(
 fn salt_iv(salt: &[u8]) -> Result<[u8; 16], OffcryptoError> {
     let mut iv = [0u8; 16];
     iv.copy_from_slice(
-        salt.get(..16).ok_or(OffcryptoError::InvalidEncryptionInfo {
-            context: "password salt is shorter than AES block size",
-        })?,
+        salt.get(..16)
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "password salt is shorter than AES block size",
+            })?,
     );
     Ok(iv)
 }
@@ -2531,10 +2619,8 @@ fn aes_cbc_decrypt(
 
     match key.len() {
         16 => {
-            let decryptor =
-                Decryptor::<Aes128>::new_from_slices(key, iv).map_err(|_| OffcryptoError::InvalidKeyLength {
-                    len: key.len(),
-                })?;
+            let decryptor = Decryptor::<Aes128>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
             decryptor
                 .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
@@ -2542,10 +2628,8 @@ fn aes_cbc_decrypt(
                 })?;
         }
         24 => {
-            let decryptor =
-                Decryptor::<Aes192>::new_from_slices(key, iv).map_err(|_| OffcryptoError::InvalidKeyLength {
-                    len: key.len(),
-                })?;
+            let decryptor = Decryptor::<Aes192>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
             decryptor
                 .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
@@ -2553,10 +2637,8 @@ fn aes_cbc_decrypt(
                 })?;
         }
         32 => {
-            let decryptor =
-                Decryptor::<Aes256>::new_from_slices(key, iv).map_err(|_| OffcryptoError::InvalidKeyLength {
-                    len: key.len(),
-                })?;
+            let decryptor = Decryptor::<Aes256>::new_from_slices(key, iv)
+                .map_err(|_| OffcryptoError::InvalidKeyLength { len: key.len() })?;
             decryptor
                 .decrypt_padded_mut::<NoPadding>(&mut buf[..])
                 .map_err(|_| OffcryptoError::InvalidEncryptionInfo {
@@ -2633,7 +2715,8 @@ pub fn agile_verify_password_with_options(
             )?,
         };
 
-        let verifier_hash_input = aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &iv1)?;
+        let verifier_hash_input =
+            aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1, &iv1)?;
         let verifier_hash_value_full =
             aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2, &iv2)?;
 
@@ -2643,7 +2726,11 @@ pub fn agile_verify_password_with_options(
             },
         )?;
 
-        agile::verify_password(&verifier_hash_input, verifier_hash_value, info.password_hash_algorithm)
+        agile::verify_password(
+            &verifier_hash_input,
+            verifier_hash_value,
+            info.password_hash_algorithm,
+        )
     };
 
     match try_mode(AgilePasswordIvMode::Salt) {
@@ -2691,7 +2778,8 @@ pub fn agile_secret_key_with_options(
 
     // Select the IV scheme. If verifier fields are missing, fall back to the common `iv = salt`
     // behavior (used by `msoffcrypto-tool`'s `makekey_from_password` vector).
-    let iv_mode = if info.encrypted_verifier_hash_input.is_empty() || info.encrypted_verifier_hash_value.is_empty()
+    let iv_mode = if info.encrypted_verifier_hash_input.is_empty()
+        || info.encrypted_verifier_hash_value.is_empty()
     {
         AgilePasswordIvMode::Salt
     } else {
@@ -2754,10 +2842,12 @@ pub fn agile_secret_key_with_options(
 
         match verify_with_mode(AgilePasswordIvMode::Salt) {
             Ok(()) => AgilePasswordIvMode::Salt,
-            Err(OffcryptoError::InvalidPassword) => match verify_with_mode(AgilePasswordIvMode::Derived) {
-                Ok(()) => AgilePasswordIvMode::Derived,
-                Err(err) => return Err(err),
-            },
+            Err(OffcryptoError::InvalidPassword) => {
+                match verify_with_mode(AgilePasswordIvMode::Derived) {
+                    Ok(()) => AgilePasswordIvMode::Derived,
+                    Err(err) => return Err(err),
+                }
+            }
             Err(err) => return Err(err),
         }
     };
@@ -2906,9 +2996,8 @@ fn read_stream_from_ole<F: Read + Seek>(
     };
 
     let mut buf = Vec::new();
-    s.read_to_end(&mut buf).map_err(|e| {
-        OffcryptoError::InvalidStructure(format!("failed to read `{stream}`: {e}"))
-    })?;
+    s.read_to_end(&mut buf)
+        .map_err(|e| OffcryptoError::InvalidStructure(format!("failed to read `{stream}`: {e}")))?;
     Ok(buf)
 }
 
@@ -3073,7 +3162,10 @@ mod tests {
         assert_eq!(info.key_data_block_size, 16);
 
         assert_eq!(info.encrypted_hmac_key, (0x10u8..0x30).collect::<Vec<_>>());
-        assert_eq!(info.encrypted_hmac_value, (0xA0u8..0xC0).collect::<Vec<_>>());
+        assert_eq!(
+            info.encrypted_hmac_value,
+            (0xA0u8..0xC0).collect::<Vec<_>>()
+        );
 
         assert_eq!(info.spin_count, 100_000);
         assert_eq!(info.password_salt, (1u8..17).collect::<Vec<_>>());
@@ -3261,22 +3353,22 @@ mod tests {
             encrypted_hmac_value: Vec::new(),
             spin_count: 100_000,
             password_salt: vec![
-                0xCB, 0xCA, 0x1C, 0x99, 0x93, 0x43, 0xFB, 0xAD, 0x92, 0x07, 0x56, 0x34, 0x15,
-                0x00, 0x34, 0xB0,
+                0xCB, 0xCA, 0x1C, 0x99, 0x93, 0x43, 0xFB, 0xAD, 0x92, 0x07, 0x56, 0x34, 0x15, 0x00,
+                0x34, 0xB0,
             ],
             password_hash_algorithm: HashAlgorithm::Sha512,
             password_key_bits: 256,
             encrypted_key_value: Vec::new(),
             encrypted_verifier_hash_input: vec![
-                0x39, 0xEE, 0xA5, 0x4E, 0x26, 0xE5, 0x14, 0x79, 0x8C, 0x28, 0x4B, 0xC7, 0x71,
-                0x4D, 0x38, 0xAC,
+                0x39, 0xEE, 0xA5, 0x4E, 0x26, 0xE5, 0x14, 0x79, 0x8C, 0x28, 0x4B, 0xC7, 0x71, 0x4D,
+                0x38, 0xAC,
             ],
             encrypted_verifier_hash_value: vec![
-                0x14, 0x37, 0x6D, 0x6D, 0x81, 0x73, 0x34, 0xE6, 0xB0, 0xFF, 0x4F, 0xD8, 0x22,
-                0x1A, 0x7C, 0x67, 0x8E, 0x5D, 0x8A, 0x78, 0x4E, 0x8F, 0x99, 0x9F, 0x4C, 0x18,
-                0x89, 0x30, 0xC3, 0x6A, 0x4B, 0x29, 0xC5, 0xB3, 0x33, 0x60, 0x5B, 0x5C, 0xD4,
-                0x03, 0xB0, 0x50, 0x03, 0xAD, 0xCF, 0x18, 0xCC, 0xA8, 0xCB, 0xAB, 0x8D, 0xEB,
-                0xE3, 0x73, 0xC6, 0x56, 0x04, 0xA0, 0xBE, 0xCF, 0xAE, 0x5C, 0x0A, 0xD0,
+                0x14, 0x37, 0x6D, 0x6D, 0x81, 0x73, 0x34, 0xE6, 0xB0, 0xFF, 0x4F, 0xD8, 0x22, 0x1A,
+                0x7C, 0x67, 0x8E, 0x5D, 0x8A, 0x78, 0x4E, 0x8F, 0x99, 0x9F, 0x4C, 0x18, 0x89, 0x30,
+                0xC3, 0x6A, 0x4B, 0x29, 0xC5, 0xB3, 0x33, 0x60, 0x5B, 0x5C, 0xD4, 0x03, 0xB0, 0x50,
+                0x03, 0xAD, 0xCF, 0x18, 0xCC, 0xA8, 0xCB, 0xAB, 0x8D, 0xEB, 0xE3, 0x73, 0xC6, 0x56,
+                0x04, 0xA0, 0xBE, 0xCF, 0xAE, 0x5C, 0x0A, 0xD0,
             ],
         };
 
@@ -3286,7 +3378,8 @@ mod tests {
     #[test]
     fn agile_rejects_unsupported_cipher_algorithm() {
         // Start from a valid Agile XML payload so we fail specifically on the algorithm check.
-        let xml = minimal_agile_xml().replacen(r#"cipherAlgorithm="AES""#, r#"cipherAlgorithm="DES""#, 1);
+        let xml =
+            minimal_agile_xml().replacen(r#"cipherAlgorithm="AES""#, r#"cipherAlgorithm="DES""#, 1);
 
         let bytes = build_agile_encryption_info_stream(xml.as_bytes());
         let err = parse_encryption_info(&bytes).expect_err("expected unsupported algorithm");

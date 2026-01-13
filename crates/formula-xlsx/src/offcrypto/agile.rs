@@ -931,6 +931,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn decode_b64_attr_accepts_unpadded_and_whitespace() {
+        // "AQIDBA==" -> [1,2,3,4]. Remove padding and sprinkle whitespace.
+        let xml = "<keyData saltValue=\"A QID\r\nBA\t\" />";
+        let doc = roxmltree::Document::parse(xml).expect("parse xml");
+        let node = doc.root_element();
+
+        let decoded = decode_b64_attr("keyData", node, "saltValue", &ParseOptions::default()).expect("decode");
+        assert_eq!(decoded, vec![1, 2, 3, 4]);
+    }
+
     fn zero_pad(mut bytes: Vec<u8>) -> Vec<u8> {
         if bytes.is_empty() {
             return bytes;
