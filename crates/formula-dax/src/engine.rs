@@ -1330,10 +1330,9 @@ impl DaxEngine {
                 column: column.to_string(),
             })?;
 
-        let include_virtual_blank =
-            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table)?;
-
         if filter.is_empty() {
+            let include_virtual_blank =
+                blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, None)?;
             if let Some(non_blank) = table_ref.stats_non_blank_count(idx) {
                 let mut blanks = table_ref.row_count().saturating_sub(non_blank);
                 if include_virtual_blank {
@@ -1341,11 +1340,36 @@ impl DaxEngine {
                 }
                 return Ok(Value::from(blanks as i64));
             }
+
+            let mut blanks = 0usize;
+            for row in 0..table_ref.row_count() {
+                if table_ref
+                    .value_by_idx(row, idx)
+                    .unwrap_or(Value::Blank)
+                    .is_blank()
+                {
+                    blanks += 1;
+                }
+            }
+            if include_virtual_blank {
+                blanks += 1;
+            }
+            return Ok(Value::from(blanks as i64));
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
+        let sets = resolve_row_sets(model, filter)?;
+        let Some(rows_set) = sets.get(table) else {
+            return Err(DaxError::UnknownTable(table.to_string()));
+        };
+
+        let include_virtual_blank =
+            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
+
         let mut blanks = 0usize;
-        for row in rows {
+        for (row, allowed) in rows_set.iter().enumerate() {
+            if !*allowed {
+                continue;
+            }
             if table_ref
                 .value_by_idx(row, idx)
                 .unwrap_or(Value::Blank)
@@ -1462,7 +1486,7 @@ impl DaxEngine {
                     if has_blank {
                         out += 1;
                     } else if blank_row_allowed(filter, table)
-                        && virtual_blank_row_exists(model, filter, table)?
+                        && virtual_blank_row_exists(model, filter, table, None)?
                     {
                         out += 1;
                     }
@@ -1544,10 +1568,9 @@ impl DaxEngine {
                 column: column.clone(),
             })?;
 
-        let include_virtual_blank =
-            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table)?;
-
         if filter.is_empty() {
+            let include_virtual_blank =
+                blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, None)?;
             if let Some(values) = table_ref.distinct_values_filtered(idx, None) {
                 let mut out: HashSet<Value> = values.into_iter().collect();
                 if include_virtual_blank {
@@ -1555,9 +1578,31 @@ impl DaxEngine {
                 }
                 return Ok(out);
             }
+            let mut out = HashSet::new();
+            for row in 0..table_ref.row_count() {
+                let value = table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank);
+                out.insert(value);
+            }
+            if include_virtual_blank {
+                out.insert(Value::Blank);
+            }
+            return Ok(out);
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
+        let sets = resolve_row_sets(model, filter)?;
+        let Some(rows_set) = sets.get(table) else {
+            return Err(DaxError::UnknownTable(table.to_string()));
+        };
+
+        let include_virtual_blank =
+            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table, Some(&sets))?;
+
+        let rows: Vec<usize> = rows_set
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, allowed)| allowed.then_some(idx))
+            .collect();
+
         if let Some(values) = table_ref.distinct_values_filtered(idx, Some(rows.as_slice())) {
             let mut out: HashSet<Value> = values.into_iter().collect();
             if include_virtual_blank {
@@ -2308,7 +2353,7 @@ impl DaxEngine {
                             // excluded by the remaining filters.
                             if !seen.contains(&Value::Blank)
                                 && blank_row_allowed(&modified_filter, table)
-                                && virtual_blank_row_exists(model, &modified_filter, table)?
+                                && virtual_blank_row_exists(model, &modified_filter, table, None)?
                             {
                                 rows.push(table_ref.row_count());
                             }
@@ -2328,7 +2373,6 @@ impl DaxEngine {
                     };
                     match arg {
                         Expr::ColumnRef { table, column } => {
-                            let rows_in_ctx = resolve_table_rows(model, filter, table)?;
                             let table_ref = model
                                 .table(table)
                                 .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
@@ -2338,6 +2382,21 @@ impl DaxEngine {
                                     column: column.clone(),
                                 }
                             })?;
+
+                            let (rows_in_ctx, sets) = if filter.is_empty() {
+                                ((0..table_ref.row_count()).collect(), None)
+                            } else {
+                                let sets = resolve_row_sets(model, filter)?;
+                                let Some(rows_set) = sets.get(table) else {
+                                    return Err(DaxError::UnknownTable(table.to_string()));
+                                };
+                                let rows: Vec<usize> = rows_set
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
+                                    .collect();
+                                (rows, Some(sets))
+                            };
 
                             let mut seen = HashSet::new();
                             let mut rows = Vec::new();
@@ -2350,7 +2409,7 @@ impl DaxEngine {
                             }
                             if !seen.contains(&Value::Blank)
                                 && blank_row_allowed(filter, table)
-                                && virtual_blank_row_exists(model, filter, table)?
+                                && virtual_blank_row_exists(model, filter, table, sets.as_ref())?
                             {
                                 rows.push(table_ref.row_count());
                             }
@@ -2869,7 +2928,12 @@ impl DaxEngine {
                     let mut base_rows = resolve_table_rows(model, &summarize_filter, &base_table)?;
                     if group_tables.len() == 1
                         && blank_row_allowed(&summarize_filter, &base_table)
-                        && virtual_blank_row_exists(model, &summarize_filter, &base_table)?
+                        && virtual_blank_row_exists(
+                            model,
+                            &summarize_filter,
+                            &base_table,
+                            None,
+                        )?
                     {
                         base_rows.push(base_table_ref.row_count());
                     }
@@ -3546,6 +3610,7 @@ fn virtual_blank_row_exists(
     model: &DataModel,
     filter: &FilterContext,
     table: &str,
+    sets: Option<&HashMap<String, Vec<bool>>>,
 ) -> DaxResult<bool> {
     // Tabular models materialize an "unknown" (blank) row on the one-side of relationships when
     // there are fact-side rows whose foreign key is BLANK or has no match in the dimension. We
@@ -3558,6 +3623,16 @@ fn virtual_blank_row_exists(
             override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
         }
     }
+
+    let computed_sets;
+    let sets = if filter.is_empty() {
+        None
+    } else if let Some(sets) = sets {
+        Some(sets)
+    } else {
+        computed_sets = resolve_row_sets(model, filter)?;
+        Some(&computed_sets)
+    };
 
     for (idx, rel) in model.relationships().iter().enumerate() {
         if rel.rel.to_table != table {
@@ -3578,14 +3653,36 @@ fn virtual_blank_row_exists(
             continue;
         }
 
-        // A virtual blank row exists if the relationship has any fact-side key that does not map
-        // to a real dimension row.
-        if rel
-            .from_index
-            .keys()
-            .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
-        {
-            return Ok(true);
+        // A virtual blank row exists if the relationship has any *currently visible* fact-side
+        // row whose foreign key is BLANK or has no match in the dimension.
+        if filter.is_empty() {
+            if rel
+                .from_index
+                .keys()
+                .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
+            {
+                return Ok(true);
+            }
+            continue;
+        }
+
+        let Some(sets) = sets else {
+            continue;
+        };
+        let from_set = sets.get(rel.rel.from_table.as_str()).ok_or_else(|| {
+            DaxError::UnknownTable(rel.rel.from_table.clone())
+        })?;
+        for (key, rows) in &rel.from_index {
+            if !key.is_blank() && rel.to_index.contains_key(key) {
+                continue;
+            }
+            if rows
+                .iter()
+                .copied()
+                .any(|row| from_set.get(row).copied().unwrap_or(false))
+            {
+                return Ok(true);
+            }
         }
     }
 
