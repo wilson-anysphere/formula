@@ -17,6 +17,20 @@ function flushPromises() {
   return new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
+function setTextInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (setter) {
+    setter.call(input, value);
+  } else {
+    input.value = value;
+  }
+
+  // React attaches internal value trackers to inputs; dispatching events after
+  // using the native setter ensures onChange sees the update in jsdom.
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function createStubApi(overrides: Partial<WhatIfApi> = {}): WhatIfApi {
   const notImplemented = async () => {
     throw new Error("Not implemented in test stub");
@@ -89,6 +103,86 @@ describe("what-if UI components", () => {
     expect(host.innerHTML).toMatchSnapshot();
   });
 
+  it("ScenarioManagerPanel renders selected scenario metadata and a summary report table", async () => {
+    const scenarios: Scenario[] = [
+      {
+        id: 1,
+        name: "Base",
+        changingCells: ["A1"],
+        values: { A1: { type: "number", value: 1 } },
+        createdBy: "tester",
+      },
+      {
+        id: 2,
+        name: "Optimistic",
+        changingCells: ["A1", "A2"],
+        values: { A1: { type: "number", value: 2 }, A2: { type: "text", value: "ok" } },
+        createdBy: "tester",
+        comment: "demo",
+      },
+    ];
+
+    const generateSummaryReport = vi.fn(async () => {
+      return {
+        changingCells: ["A1"],
+        resultCells: ["B1", "C1"],
+        results: {
+          Base: {
+            B1: { type: "number", value: 10 },
+            C1: { type: "bool", value: true },
+          },
+          Optimistic: {
+            B1: { type: "text", value: "hi" },
+            C1: { type: "blank" },
+          },
+        },
+      } satisfies SummaryReport;
+    });
+
+    const api = createStubApi({
+      listScenarios: vi.fn(async () => scenarios),
+      generateSummaryReport,
+    });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(ScenarioManagerPanel, { api }));
+      await flushPromises();
+    });
+
+    const select = host.querySelector("select.what-if__select") as HTMLSelectElement | null;
+    expect(select).toBeTruthy();
+    await act(async () => {
+      select!.value = "2";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const resultCellsInput = host.querySelector("input.what-if__input") as HTMLInputElement | null;
+    expect(resultCellsInput).toBeTruthy();
+    await act(async () => {
+      setTextInputValue(resultCellsInput!, "B1, C1");
+    });
+
+    const summaryBtn = Array.from(host.querySelectorAll("button")).find((btn) => btn.textContent === "Summary Report") as
+      | HTMLButtonElement
+      | undefined;
+    expect(summaryBtn).toBeTruthy();
+
+    await act(async () => {
+      summaryBtn!.click();
+      await flushPromises();
+    });
+
+    expect(generateSummaryReport).toHaveBeenCalledWith(["B1", "C1"], [1, 2]);
+    expect(host.querySelector('[data-testid="scenario-manager-selected-meta"]')?.textContent).toContain("demo");
+    expect(host.querySelector('[data-testid="scenario-manager-report"]')).toBeTruthy();
+    expect(host.querySelectorAll("[style]").length).toBe(0);
+    expect(host.innerHTML).toMatchSnapshot();
+  });
+
   it("GoalSeekDialog renders a dialog shell with labeled fields (no inline styles)", async () => {
     const api = createStubApi();
 
@@ -106,6 +200,39 @@ describe("what-if UI components", () => {
     expect(dialog?.getAttribute("role")).toBe("dialog");
     expect(dialog?.getAttribute("aria-modal")).toBe("true");
     expect(dialog?.querySelectorAll("label").length).toBeGreaterThanOrEqual(3);
+    expect(host.innerHTML).toMatchSnapshot();
+  });
+
+  it("GoalSeekDialog shows progress + result after running", async () => {
+    const goalSeek = vi.fn(async (_params: GoalSeekParams, onProgress?: (p: any) => void) => {
+      onProgress?.({ iteration: 1, input: 0.5, output: 0.2, error: -0.8 });
+      await flushPromises();
+      onProgress?.({ iteration: 2, input: 1, output: 1, error: 0 });
+      return { status: "Converged", solution: 1, iterations: 2, finalOutput: 1, finalError: 0 } satisfies GoalSeekResult;
+    });
+
+    const api = createStubApi({ goalSeek });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(GoalSeekDialog, { api, open: true, onClose: () => {} }));
+    });
+
+    const solveBtn = host.querySelector("button.what-if__button--primary") as HTMLButtonElement | null;
+    expect(solveBtn).toBeTruthy();
+
+    await act(async () => {
+      solveBtn!.click();
+      await flushPromises();
+    });
+
+    expect(goalSeek).toHaveBeenCalled();
+    expect(host.querySelector('[data-testid="goal-seek-progress"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="goal-seek-result"]')).toBeTruthy();
+    expect(host.querySelectorAll("[style]").length).toBe(0);
     expect(host.innerHTML).toMatchSnapshot();
   });
 
@@ -127,5 +254,53 @@ describe("what-if UI components", () => {
     expect(host.querySelector('input[aria-label="Distribution JSON"]')).toBeTruthy();
     expect(host.innerHTML).toMatchSnapshot();
   });
-});
 
+  it("MonteCarloWizard shows progress + results after running", async () => {
+    const runMonteCarlo = vi.fn(async (_config: SimulationConfig, onProgress?: (p: any) => void) => {
+      onProgress?.({ completedIterations: 10, totalIterations: 1000 });
+      await flushPromises();
+      onProgress?.({ completedIterations: 1000, totalIterations: 1000 });
+      return {
+        iterations: 1000,
+        outputStats: {
+          B1: {
+            mean: 1,
+            median: 1,
+            stdDev: 0.5,
+            min: 0,
+            max: 2,
+            percentiles: { "5": 0.2, "95": 1.8 },
+            histogram: { bins: [] },
+          },
+        },
+        outputSamples: { B1: [] },
+      } satisfies SimulationResult;
+    });
+
+    const api = createStubApi({ runMonteCarlo });
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(React.createElement(MonteCarloWizard, { api }));
+    });
+
+    const runBtn = Array.from(host.querySelectorAll("button")).find((btn) => btn.textContent === "Run simulation") as
+      | HTMLButtonElement
+      | undefined;
+    expect(runBtn).toBeTruthy();
+
+    await act(async () => {
+      runBtn!.click();
+      await flushPromises();
+    });
+
+    expect(runMonteCarlo).toHaveBeenCalled();
+    expect(host.querySelector('[data-testid="monte-carlo-progress"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="monte-carlo-results"]')).toBeTruthy();
+    expect(host.querySelectorAll("[style]").length).toBe(0);
+    expect(host.innerHTML).toMatchSnapshot();
+  });
+});

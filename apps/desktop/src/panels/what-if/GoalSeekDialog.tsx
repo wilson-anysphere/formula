@@ -96,7 +96,7 @@ export function GoalSeekDialog({ api, open, onClose }: GoalSeekDialogProps) {
         ) : null}
 
         {progress ? (
-          <div className="what-if__mono-block" data-testid="goal-seek-progress">
+          <div className="what-if__mono-block" role="status" data-testid="goal-seek-progress">
             <div>
               {t("whatIf.goalSeek.progress.iteration")}: {progress.iteration}
             </div>
