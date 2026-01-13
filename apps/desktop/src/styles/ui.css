@@ -490,6 +490,24 @@
   color: var(--text-secondary);
 }
 
+.formula-bar-hint-arg-preview {
+  /* Force preview onto its own line within the flex-wrapping hint body. */
+  flex-basis: 100%;
+  margin-top: 4px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-tertiary);
+}
+
 .formula-bar-error-button {
   /* Hidden by default; shown when the active cell has an error explanation. */
   display: none;
