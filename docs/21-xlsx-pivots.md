@@ -208,10 +208,11 @@ intentionally ignore fidelity-sensitive options:
      but it currently assumes the **1900** date system. Workbooks using the **1904** date system
      will be off by 1462 days.
 
-4) **Pivot table sort/manual ordering**
-   - We parse enough of `pivotTableDefinition` for basic layout (fields + data fields), but we do
-     not yet interpret sort settings or manual item ordering. This can affect both rendered output
-     and recomputation consistency.
+4) **Pivot table sort/manual ordering (partial)**
+   - We parse `pivotField@sortType` and best-effort manual item ordering (including shared-item
+     indices when `sharedItems` metadata is available) and map it into the pivot-engine config.
+   - Remaining work: support the full range of Excel sort options (e.g. sorting by a value field),
+     and ensure round-trip fidelity for all sort-related XML.
 
 5) **`showDataAs` fidelity (partial)**
    - We map `dataField@showDataAs` into pivot-engine `ValueField.show_as`, and also map

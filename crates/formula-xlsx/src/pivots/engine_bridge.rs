@@ -118,6 +118,28 @@ fn pivot_key_display_string(value: PivotValue) -> String {
     }
 }
 
+fn pivot_value_to_key_part(value: PivotValue) -> PivotKeyPart {
+    fn canonical_number_bits(n: f64) -> u64 {
+        if n == 0.0 {
+            // Treat -0.0 and 0.0 as the same pivot item (Excel displays them identically).
+            return 0.0_f64.to_bits();
+        }
+        if n.is_nan() {
+            // Canonicalize all NaNs to a single representation so we don't emit multiple "NaN" rows.
+            return f64::NAN.to_bits();
+        }
+        n.to_bits()
+    }
+
+    match value {
+        PivotValue::Blank => PivotKeyPart::Blank,
+        PivotValue::Number(n) => PivotKeyPart::Number(canonical_number_bits(n)),
+        PivotValue::Date(d) => PivotKeyPart::Date(d),
+        PivotValue::Text(s) => PivotKeyPart::Text(s),
+        PivotValue::Bool(b) => PivotKeyPart::Bool(b),
+    }
+}
+
 /// Convert a parsed pivot table definition into a pivot-engine config.
 ///
 /// This is a best-effort conversion; unsupported layout / display options are
@@ -286,9 +308,19 @@ fn pivot_table_field_to_engine(
                             PivotTableFieldItem::Name(name) => {
                                 Some(PivotKeyPart::Text(name.clone()))
                             }
-                            // Mapping `item@x` indices requires parsing the cache field's shared items.
-                            // Until that metadata is available, skip indices.
-                            PivotTableFieldItem::Index(_) => None,
+                            PivotTableFieldItem::Index(item_idx) => cache_def
+                                .cache_fields
+                                .get(field_idx as usize)
+                                .and_then(|f| f.shared_items.as_ref())
+                                .and_then(|items| items.get(*item_idx as usize))
+                                .cloned()
+                                .map(|v| {
+                                    pivot_value_to_key_part(pivot_cache_value_to_engine(
+                                        cache_def,
+                                        field_idx as usize,
+                                        v,
+                                    ))
+                                }),
                         })
                         .collect();
                     if out.is_empty() {
@@ -508,6 +540,52 @@ mod tests {
         assert_eq!(source.len(), 2, "header + one record");
         assert_eq!(source[0], vec![PivotValue::Text("Region".to_string())]);
         assert_eq!(source[1], vec![PivotValue::Text("West".to_string())]);
+    }
+
+    #[test]
+    fn pivot_table_to_engine_config_maps_manual_sort_items_via_shared_item_indices() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pivotFields count="1">
+    <pivotField sortType="manual">
+      <items count="2">
+        <item x="1"/>
+        <item x="0"/>
+      </items>
+    </pivotField>
+  </pivotFields>
+  <rowFields count="1">
+    <field x="0"/>
+  </rowFields>
+  <dataFields count="1">
+    <dataField fld="0"/>
+  </dataFields>
+</pivotTableDefinition>"#;
+
+        let table =
+            PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml).expect("parse");
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "Region".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::String("East".to_string()),
+                    PivotCacheValue::String("West".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let cfg = pivot_table_to_engine_config(&table, &cache_def);
+        assert_eq!(cfg.row_fields.len(), 1);
+        assert_eq!(cfg.row_fields[0].sort_order, SortOrder::Manual);
+        assert_eq!(
+            cfg.row_fields[0].manual_sort,
+            Some(vec![
+                PivotKeyPart::Text("West".to_string()),
+                PivotKeyPart::Text("East".to_string()),
+            ])
+        );
     }
 
     #[test]
