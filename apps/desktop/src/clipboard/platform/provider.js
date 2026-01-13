@@ -23,6 +23,13 @@
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB (raw PNG bytes)
 const MAX_RICH_TEXT_BYTES = 2 * 1024 * 1024; // 2MB (HTML / RTF / text)
 
+// Export the effective numeric clipboard caps so tests (and other JS helpers) can assert
+// they stay in sync with the Rust backend (`apps/desktop/src-tauri/src/clipboard/mod.rs`).
+export const CLIPBOARD_LIMITS = {
+  maxImageBytes: MAX_IMAGE_BYTES,
+  maxRichTextBytes: MAX_RICH_TEXT_BYTES,
+};
+
 // Internal marker used to communicate "we detected an oversized text/plain blob" between provider
 // layers (e.g. Web Clipboard API read -> Tauri provider fallback logic) without surfacing it to
 // callers.

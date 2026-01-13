@@ -5,5 +5,9 @@ export type ClipboardProvider = {
   write: (payload: ClipboardWritePayload) => Promise<void>;
 };
 
-export function createClipboardProvider(): Promise<ClipboardProvider>;
+export const CLIPBOARD_LIMITS: {
+  maxImageBytes: number;
+  maxRichTextBytes: number;
+};
 
+export function createClipboardProvider(): Promise<ClipboardProvider>;
