@@ -1158,7 +1158,7 @@ enum StarSchemaGroupKeyAccessor<'a> {
     Base { key_pos: usize },
     Related {
         fk_key_pos: usize,
-        to_index: &'a std::collections::HashMap<Value, usize>,
+        to_index: &'a std::collections::HashMap<Value, RowSet>,
         to_table: &'a crate::model::Table,
         to_column_idx: usize,
     },
@@ -1179,6 +1179,23 @@ fn pivot_columnar_star_schema_group_by(
     let table_ref = model
         .table(base_table)
         .ok_or_else(|| DaxError::UnknownTable(base_table.to_string()))?;
+
+    let mut override_pairs: HashSet<(&str, &str)> = HashSet::new();
+    for &idx in filter.relationship_overrides() {
+        if let Some(rel) = model.relationships().get(idx) {
+            override_pairs.insert((rel.rel.from_table.as_str(), rel.rel.to_table.as_str()));
+        }
+    }
+    let is_relationship_active = |idx: usize, rel: &crate::model::RelationshipInfo| {
+        let pair = (rel.rel.from_table.as_str(), rel.rel.to_table.as_str());
+        let is_active = if override_pairs.contains(&pair) {
+            filter.relationship_overrides().contains(&idx)
+        } else {
+            rel.rel.is_active
+        };
+
+        is_active && !filter.is_relationship_disabled(idx)
+    };
 
     let mut group_idxs: Vec<usize> = Vec::new();
     let mut idx_to_pos: HashMap<usize, usize> = HashMap::new();
@@ -1207,7 +1224,7 @@ fn pivot_columnar_star_schema_group_by(
             base_table,
             &col.table,
             RelationshipPathDirection::ManyToOne,
-            |_, rel| rel.rel.is_active,
+            |idx, rel| is_relationship_active(idx, rel),
         )?
         else {
             // `pivot()` should ultimately error for unsupported RELATED columns (the planned
@@ -1413,8 +1430,25 @@ fn pivot_columnar_star_schema_group_by(
                     let fk = keys.get(*fk_key_pos).cloned().unwrap_or(Value::Blank);
                     if fk.is_blank() {
                         key_buf.push(Value::Blank);
-                    } else if let Some(&to_row) = to_index.get(&fk) {
-                        key_buf.push(to_table.value_by_idx(to_row, *to_column_idx).unwrap_or(Value::Blank));
+                    } else if let Some(to_row_set) = to_index.get(&fk) {
+                        let to_row = match to_row_set {
+                            RowSet::One(row) => *row,
+                            RowSet::Many(rows) => {
+                                if rows.len() == 1 {
+                                    rows[0]
+                                } else {
+                                    return Err(DaxError::Eval(format!(
+                                        "pivot related group key is ambiguous: key {fk} matches multiple rows in {}",
+                                        to_table.name()
+                                    )));
+                                }
+                            }
+                        };
+                        key_buf.push(
+                            to_table
+                                .value_by_idx(to_row, *to_column_idx)
+                                .unwrap_or(Value::Blank),
+                        );
                     } else {
                         key_buf.push(Value::Blank);
                     }

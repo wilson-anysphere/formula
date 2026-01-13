@@ -2,8 +2,8 @@ use formula_columnar::{
     ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions,
 };
 use formula_dax::{
-    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, FilterContext, GroupByColumn,
-    PivotMeasure, Relationship, Table, Value,
+    pivot, Cardinality, CrossFilterDirection, DataModel, DaxEngine, DaxError, FilterContext,
+    GroupByColumn, PivotMeasure, Relationship, Table, Value,
 };
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
@@ -691,4 +691,117 @@ fn pivot_star_schema_columnar_rolls_up_duplicate_dimension_attributes() {
             vec![Value::from("West"), Value::from("B"), 4.0.into(), 8.0.into()],
         ]
     );
+}
+
+#[test]
+fn pivot_star_schema_errors_on_ambiguous_relationship_paths() {
+    let options = TableOptions {
+        page_size_rows: 64,
+        cache: PageCacheConfig { max_entries: 4 },
+    };
+
+    let customers_schema = vec![
+        ColumnSchema {
+            name: "CustomerId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Region".to_string(),
+            column_type: ColumnType::String,
+        },
+    ];
+    let mut customers = ColumnarTableBuilder::new(customers_schema, options);
+    customers.append_row(&[
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::String(Arc::<str>::from("East")),
+    ]);
+    customers.append_row(&[
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::String(Arc::<str>::from("West")),
+    ]);
+
+    let sales_schema = vec![
+        ColumnSchema {
+            name: "SaleId".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId1".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "CustomerId2".to_string(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "Amount".to_string(),
+            column_type: ColumnType::Number,
+        },
+    ];
+    let mut sales = ColumnarTableBuilder::new(sales_schema, options);
+    sales.append_row(&[
+        formula_columnar::Value::Number(100.0),
+        formula_columnar::Value::Number(1.0),
+        formula_columnar::Value::Number(2.0),
+        formula_columnar::Value::Number(10.0),
+    ]);
+
+    let mut model = DataModel::new();
+    model
+        .add_table(Table::from_columnar("Customers", customers.finalize()))
+        .unwrap();
+    model
+        .add_table(Table::from_columnar("Sales", sales.finalize()))
+        .unwrap();
+
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Customers_1".into(),
+            from_table: "Sales".into(),
+            from_column: "CustomerId1".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+    model
+        .add_relationship(Relationship {
+            name: "Sales_Customers_2".into(),
+            from_table: "Sales".into(),
+            from_column: "CustomerId2".into(),
+            to_table: "Customers".into(),
+            to_column: "CustomerId".into(),
+            cardinality: Cardinality::OneToMany,
+            cross_filter_direction: CrossFilterDirection::Single,
+            is_active: true,
+            enforce_referential_integrity: true,
+        })
+        .unwrap();
+
+    model
+        .add_measure("Total Sales", "SUM(Sales[Amount])")
+        .unwrap();
+
+    let measures = vec![PivotMeasure::new("Total Sales", "[Total Sales]").unwrap()];
+    let group_by = vec![GroupByColumn::new("Customers", "Region")];
+
+    let err = pivot(
+        &model,
+        "Sales",
+        &group_by,
+        &measures,
+        &FilterContext::empty(),
+    )
+    .unwrap_err();
+
+    match err {
+        DaxError::Eval(message) => assert!(
+            message.contains("ambiguous active relationship path"),
+            "unexpected error message: {message}"
+        ),
+        other => panic!("expected DaxError::Eval, got {other:?}"),
+    }
 }
