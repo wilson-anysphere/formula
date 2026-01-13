@@ -26,4 +26,9 @@ describe("FormulaDiffView", () => {
     expect(html).toMatch(/(&quot;x&quot;|"x")/);
     expect(html).toMatch(/(&quot;y&quot;|"y")/);
   });
+
+  it("inserts readable spacing around operators and argument separators", () => {
+    const html = renderToStaticMarkup(React.createElement(FormulaDiffView, { before: null, after: "=IF(A1=0,1,2)" }));
+    expect(html).toContain("IF(A1 = 0, 1, 2)");
+  });
 });
