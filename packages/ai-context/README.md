@@ -375,3 +375,54 @@ It then fits your message list into `allowed_prompt_tokens` by keeping system me
   - `buildContext({ sampleRows })`: fewer rows → smaller prompts.
   - `buildWorkbookContext({ topK })`: fewer retrieved chunks → smaller prompts.
   - `createHeuristicTokenEstimator({ charsPerToken })`: adjust if your text is far from English-like (still approximate).
+
+### End-to-end example: budgeting a chat request
+
+This is a common pattern:
+
+1. pick a model context window (`contextWindowTokens`)
+2. reserve space for output (`reserveForOutputTokens`)
+3. subtract tool schema size (`estimateToolDefinitionTokens`)
+4. build spreadsheet context within a fixed budget (`ContextManager.tokenBudgetTokens`)
+5. trim messages to what remains (`trimMessagesToBudget`)
+
+```js
+import {
+  ContextManager,
+  createHeuristicTokenEstimator,
+  estimateToolDefinitionTokens,
+  trimMessagesToBudget,
+} from "./src/index.js";
+
+const estimator = createHeuristicTokenEstimator();
+
+const contextWindowTokens = 128_000;
+const reserveForOutputTokens = 4_000;
+
+// Tool schemas can be surprisingly large; subtract them first.
+const toolTokens = estimateToolDefinitionTokens(tools, estimator);
+const maxMessageTokens = Math.max(0, contextWindowTokens - toolTokens);
+
+// Use the *same* estimator for context + message trimming for consistent budgeting.
+const cm = new ContextManager({
+  tokenBudgetTokens: 20_000,
+  tokenEstimator: estimator,
+});
+
+const { promptContext } = await cm.buildContext({ sheet, query });
+
+const messages = [
+  { role: "system", content: `${baseSystemPrompt}\n\n${promptContext}`.trim() },
+  ...history,
+  { role: "user", content: query },
+];
+
+const trimmedMessages = await trimMessagesToBudget({
+  messages,
+  maxTokens: maxMessageTokens,
+  reserveForOutputTokens,
+  estimator,
+});
+
+// Send `trimmedMessages` (+ `tools`) to your LLM client.
+```
