@@ -189,7 +189,10 @@ fn truncation_header_shorter_than_fixed_fields() {
     bytes.extend_from_slice(&[0u8; 16]);
 
     let err = parse_encryption_info(&bytes).unwrap_err();
-    assert!(matches!(err, OffcryptoError::Truncated { .. }));
+    assert!(matches!(
+        err,
+        OffcryptoError::InvalidEncryptionInfo { .. }
+    ));
 }
 
 #[test]

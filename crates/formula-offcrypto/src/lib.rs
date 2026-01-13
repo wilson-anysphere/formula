@@ -499,13 +499,17 @@ pub fn parse_encryption_info(bytes: &[u8]) -> Result<EncryptionInfo, OffcryptoEr
     }
 
     let header_size = r.read_u32_le("EncryptionInfo.header_size")? as usize;
-    let header_bytes = r.take(header_size, "EncryptionHeader")?;
-
-    if header_bytes.len() < 8 * 4 {
-        return Err(OffcryptoError::Truncated {
-            context: "EncryptionHeader (missing fixed fields)",
+    // Standard `EncryptionHeader` has a fixed 8-DWORD prefix (32 bytes). Reject header sizes that
+    // are clearly invalid (as opposed to merely truncated inputs).
+    const MIN_STANDARD_HEADER_SIZE: usize = 8 * 4;
+    const MAX_STANDARD_HEADER_SIZE: usize = 1024 * 1024; // 1MiB: far larger than any real CSP name.
+    if header_size < MIN_STANDARD_HEADER_SIZE || header_size > MAX_STANDARD_HEADER_SIZE {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionInfo.header_size is out of bounds",
         });
     }
+
+    let header_bytes = r.take(header_size, "EncryptionHeader")?;
 
     let mut hr = Reader::new(header_bytes);
     let header = StandardEncryptionHeader {
