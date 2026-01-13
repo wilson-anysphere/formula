@@ -137,8 +137,10 @@ export class CollabVersioning {
             : userOpts.maxChunksPerTransaction;
 
         return new YjsVersionStore({
-          doc: opts.session.doc,
           ...userOpts,
+          // Always bind the store to the session's doc (ignore any accidental `doc`
+          // field passed via `yjsStoreOptions`).
+          doc: opts.session.doc,
           writeMode: userOpts.writeMode ?? "stream",
           chunkSize,
           maxChunksPerTransaction,
