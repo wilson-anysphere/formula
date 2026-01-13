@@ -120,6 +120,7 @@ import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateSto
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
+import { handleInsertPicturesRibbonCommand } from "./main.insertPicturesRibbonCommand.js";
 import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { createOpenFormatCells } from "./formatting/openFormatCellsCommand.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
@@ -8562,19 +8563,12 @@ function handleRibbonCommand(commandId: string): void {
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
         return;
 
-      case "formulas.formulaAuditing.tracePrecedents":
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.traceDependents":
-        app.clearAuditing();
-        app.toggleAuditingDependents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.removeArrows":
-        app.clearAuditing();
-        app.focus();
+      case "insert.illustrations.pictures":
+      case "insert.illustrations.pictures.thisDevice":
+      case "insert.illustrations.pictures.stockImages":
+      case "insert.illustrations.pictures.onlinePictures":
+      case "insert.illustrations.onlinePictures":
+        void handleInsertPicturesRibbonCommand(commandId, app);
         return;
 
       case "home.font.borders":

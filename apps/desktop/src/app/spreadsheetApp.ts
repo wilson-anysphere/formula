@@ -4221,6 +4221,120 @@ export class SpreadsheetApp {
     return this.selectedChartId;
   }
 
+  async insertPicturesFromFiles(files: File[]): Promise<void> {
+    if (this.isReadOnly()) {
+      throw new Error("Workbook is read-only.");
+    }
+    if (this.isEditing()) {
+      throw new Error("Finish editing before inserting a picture.");
+    }
+
+    const normalized = Array.isArray(files)
+      ? (files.filter((file) => file && typeof (file as File).arrayBuffer === "function") as File[])
+      : [];
+    if (normalized.length === 0) return;
+
+    const guessMimeType = (name: string): string => {
+      const ext = String(name ?? "").split(".").pop()?.toLowerCase();
+      switch (ext) {
+        case "png":
+          return "image/png";
+        case "jpg":
+        case "jpeg":
+          return "image/jpeg";
+        case "gif":
+          return "image/gif";
+        case "bmp":
+          return "image/bmp";
+        case "webp":
+          return "image/webp";
+        case "svg":
+          return "image/svg+xml";
+        default:
+          return "application/octet-stream";
+      }
+    };
+
+    const uuid = (): string => {
+      const randomUuid = (globalThis as any).crypto?.randomUUID as (() => string) | undefined;
+      if (typeof randomUuid === "function") {
+        try {
+          return randomUuid.call((globalThis as any).crypto);
+        } catch {
+          // Fall through to pseudo-random below.
+        }
+      }
+      return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+    };
+
+    const base = this.selection.active;
+    const startRow = base.row;
+    const startCol = base.col;
+
+    const DEFAULT_PICTURE_WIDTH_COLS = 5;
+    const DEFAULT_PICTURE_HEIGHT_ROWS = 11;
+    const DEFAULT_PICTURE_GAP_COLS = 1;
+
+    const existingDrawings = (() => {
+      try {
+        const raw = (this.document as any).getSheetDrawings?.(this.sheetId);
+        return Array.isArray(raw) ? raw : [];
+      } catch {
+        return [];
+      }
+    })();
+    let nextZOrder = existingDrawings.length;
+    for (const raw of existingDrawings) {
+      const maybe = raw as any;
+      const z = Number(maybe?.zOrder ?? maybe?.z_order);
+      if (Number.isFinite(z) && z >= nextZOrder) nextZOrder = z + 1;
+    }
+
+    const docAny = this.document as any;
+    if (typeof docAny.setImage !== "function" || typeof docAny.insertDrawing !== "function") {
+      throw new Error("Picture insertion is not supported in this build.");
+    }
+
+    this.document.beginBatch({ label: "Insert Picture" });
+    try {
+      for (let i = 0; i < normalized.length; i += 1) {
+        const file = normalized[i]!;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const mimeType = file.type && file.type.trim() ? file.type : guessMimeType(file.name);
+
+        const ext = (() => {
+          const raw = String(file.name ?? "").split(".").pop()?.toLowerCase();
+          return raw && raw !== file.name ? raw : null;
+        })();
+        const imageId = `image_${uuid()}${ext ? `.${ext}` : ""}`;
+
+        docAny.setImage(imageId, { bytes, mimeType });
+
+        const fromCol = startCol + i * (DEFAULT_PICTURE_WIDTH_COLS + DEFAULT_PICTURE_GAP_COLS);
+        const fromRow = startRow;
+        const drawing = {
+          id: `drawing_${uuid()}`,
+          kind: { type: "image", imageId },
+          anchor: {
+            type: "twoCell",
+            from: { cell: { row: fromRow, col: fromCol }, offset: { xEmu: 0, yEmu: 0 } },
+            to: {
+              cell: { row: fromRow + DEFAULT_PICTURE_HEIGHT_ROWS, col: fromCol + DEFAULT_PICTURE_WIDTH_COLS },
+              offset: { xEmu: 0, yEmu: 0 },
+            },
+          },
+          zOrder: nextZOrder++,
+        };
+
+        docAny.insertDrawing(this.sheetId, drawing);
+      }
+      this.document.endBatch();
+    } catch (err) {
+      this.document.cancelBatch();
+      throw err;
+    }
+  }
+
   private enqueueWasmSync(task: (engine: EngineClient) => Promise<void>): Promise<void> {
     const engine = this.wasmEngine;
     if (!engine) return Promise.resolve();
