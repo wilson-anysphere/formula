@@ -1,0 +1,81 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { FormulaBarView } from "../FormulaBarView.js";
+
+describe("FormulaBarView function autocomplete dropdown", () => {
+  it("shows a dropdown with matching functions (=VLO → includes VLOOKUP)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown).not.toBeNull();
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+    expect(dropdown?.textContent).toContain("VLOOKUP");
+
+    host.remove();
+  });
+
+  it("supports Arrow navigation + Tab to accept (=VLOOKUP()", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+
+    expect(view.textarea.value).toBe("=VLOOKUP(");
+    expect(view.model.draft).toBe("=VLOOKUP(");
+    expect(view.textarea.selectionStart).toBe(view.textarea.value.length);
+    expect(view.textarea.selectionEnd).toBe(view.textarea.value.length);
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+
+    host.remove();
+  });
+
+  it("closes the dropdown on Escape", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const dropdown = host.querySelector<HTMLElement>('[data-testid="formula-function-autocomplete"]');
+    expect(dropdown?.hasAttribute("hidden")).toBe(false);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+
+    expect(dropdown?.hasAttribute("hidden")).toBe(true);
+    // Escape should close the dropdown before cancelling the edit.
+    expect(view.model.isEditing).toBe(true);
+    expect(view.model.draft).toBe("=VLO");
+
+    host.remove();
+  });
+});
+

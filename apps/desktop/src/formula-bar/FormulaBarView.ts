@@ -11,6 +11,7 @@ import {
 import { searchFunctionResults } from "../command-palette/commandPaletteSearch.js";
 import FUNCTION_CATALOG from "../../../../shared/functionCatalog.mjs";
 import { getFunctionSignature, type FunctionSignature } from "./highlight/functionSignatures.js";
+import { FormulaBarFunctionAutocompleteController } from "./completion/functionAutocomplete.js";
 
 export type FixFormulaErrorWithAiInfo = {
   address: string;
@@ -127,6 +128,7 @@ export class FormulaBarView {
   #pendingRender: { preserveTextareaValue: boolean } | null = null;
   #lastHighlightHtml: string | null = null;
 
+  #functionAutocomplete: FormulaBarFunctionAutocompleteController;
   #nameBoxDropdownEl: HTMLButtonElement;
   #cancelButtonEl: HTMLButtonElement;
   #commitButtonEl: HTMLButtonElement;
@@ -413,6 +415,10 @@ export class FormulaBarView {
     textarea.addEventListener("scroll", () => this.#syncScroll());
     textarea.addEventListener("keydown", (e) => this.#onKeyDown(e));
 
+    // Non-AI function autocomplete dropdown (Excel-like).
+    // Mount after registering FormulaBarView's own listeners so focus/input updates keep the model in sync first.
+    this.#functionAutocomplete = new FormulaBarFunctionAutocompleteController({ formulaBar: this, anchor: editor });
+
     // When not editing, allow hover previews using the highlighted spans.
     highlight.addEventListener("mousemove", (e) => this.#onHighlightHover(e));
     highlight.addEventListener("mouseleave", () => this.#clearHoverOverride());
@@ -636,6 +642,8 @@ export class FormulaBarView {
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
 
+    if (this.#functionAutocomplete.handleKeyDown(e)) return;
+
     if (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey && this.model.draft.trim().startsWith("=")) {
       e.preventDefault();
 
@@ -703,6 +711,7 @@ export class FormulaBarView {
 
   #cancel(): void {
     if (!this.model.isEditing) return;
+    this.#functionAutocomplete.close();
     this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     this.model.cancel();
@@ -715,6 +724,7 @@ export class FormulaBarView {
 
   #commit(commit: FormulaBarCommit): void {
     if (!this.model.isEditing) return;
+    this.#functionAutocomplete.close();
     this.#closeFunctionPicker({ restoreFocus: false });
     this.textarea.blur();
     const committed = this.model.commit();
