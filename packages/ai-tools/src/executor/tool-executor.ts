@@ -2732,6 +2732,18 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
   }
 
   type AllowedHostEntry = { hostname: string; port?: string };
+  const normalizeHostname = (value: string): string => {
+    const normalized = String(value ?? "")
+      .trim()
+      .toLowerCase();
+    // WHATWG URL includes brackets in `.hostname` for IPv6 literals (e.g. "[::1]").
+    // Normalize by stripping those brackets so allowlist entries can be provided either
+    // bracketed (`[::1]`) or unbracketed (`::1`).
+    if (normalized.startsWith("[") && normalized.endsWith("]")) {
+      return normalized.slice(1, -1);
+    }
+    return normalized;
+  };
   const parseAllowedHostEntry = (value: string): AllowedHostEntry | null => {
     const trimmed = String(value ?? "")
       .trim()
@@ -2741,7 +2753,7 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
     // IPv6 hosts use brackets when combined with ports (e.g. "[::1]:443").
     const ipv6Match = trimmed.match(/^\[(?<hostname>[^\]]+)\](?::(?<port>\d+))?$/);
     if (ipv6Match?.groups?.hostname) {
-      const hostname = ipv6Match.groups.hostname.trim().toLowerCase();
+      const hostname = normalizeHostname(ipv6Match.groups.hostname);
       const port = ipv6Match.groups.port?.trim();
       return port ? { hostname, port } : { hostname };
     }
@@ -2749,17 +2761,17 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
     // Hostnames with optional explicit port (e.g. "api.example.com:8443").
     const hostPortMatch = trimmed.match(/^(?<hostname>[^:]+)(?::(?<port>\d+))?$/);
     if (hostPortMatch?.groups?.hostname) {
-      const hostname = hostPortMatch.groups.hostname.trim().toLowerCase();
+      const hostname = normalizeHostname(hostPortMatch.groups.hostname);
       const port = hostPortMatch.groups.port?.trim();
       return port ? { hostname, port } : { hostname };
     }
 
     // Fall back to the full value as a hostname-only entry. This preserves previous strictness:
     // malformed allowlist entries won't accidentally match a broader set of URLs.
-    return { hostname: trimmed };
+    return { hostname: normalizeHostname(trimmed) };
   };
 
-  const urlHostname = url.hostname.toLowerCase();
+  const urlHostname = normalizeHostname(url.hostname);
   const urlPort = url.port;
 
   const allowlist = allowedHosts.map(parseAllowedHostEntry).filter((entry): entry is AllowedHostEntry => entry !== null);

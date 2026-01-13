@@ -1100,6 +1100,59 @@ describe("ToolExecutor", () => {
     expect(denied.error?.code).toBe("permission_denied");
   });
 
+  it("fetch_external_data allowlist supports IPv6 hosts (hostname-only and host:port)", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return new Response(JSON.stringify([{ ok: true }]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const hostOnlyWorkbook = new InMemoryWorkbook(["Sheet1"]);
+    const hostOnlyExecutor = new ToolExecutor(hostOnlyWorkbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["[::1]"]
+    });
+    const hostOnlyResult = await hostOnlyExecutor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "http://[::1]:8080/data",
+        destination: "Sheet1!A1"
+      }
+    });
+    expect(hostOnlyResult.ok).toBe(true);
+
+    const hostPortWorkbook = new InMemoryWorkbook(["Sheet1"]);
+    const hostPortExecutor = new ToolExecutor(hostPortWorkbook, {
+      allow_external_data: true,
+      allowed_external_hosts: ["[::1]:8080"]
+    });
+    const hostPortAllowed = await hostPortExecutor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "http://[::1]:8080/data",
+        destination: "Sheet1!A1"
+      }
+    });
+    expect(hostPortAllowed.ok).toBe(true);
+
+    const hostPortDenied = await hostPortExecutor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "http://[::1]:8081/data",
+        destination: "Sheet1!A3"
+      }
+    });
+    expect(hostPortDenied.ok).toBe(false);
+    expect(hostPortDenied.error?.code).toBe("permission_denied");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("fetch_external_data is disabled by default (requires allow_external_data)", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
