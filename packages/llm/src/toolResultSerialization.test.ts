@@ -48,6 +48,36 @@ describe("serializeToolResultForModel", () => {
     expect(payload.data.truncated_cols).toBe(Math.max(0, cols - previewCols));
   });
 
+  it("read_range falls back to toolCall.arguments.range when result omits range", () => {
+    const toolCall = {
+      id: "call-1b",
+      name: "read_range",
+      arguments: { range: "Sheet1!A1:B2", include_formulas: true }
+    };
+
+    const result = {
+      tool: "read_range",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      data: {
+        values: [
+          [1, 2],
+          [3, 4]
+        ],
+        formulas: [
+          ["=1", "=2"],
+          [null, null]
+        ]
+      }
+    };
+
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars: 5_000 });
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("read_range");
+    expect(payload.data.range).toBe("Sheet1!A1:B2");
+    expect(payload.data.formulas).toBeDefined();
+  });
+
   it("filter_range truncates matching_rows while preserving count within budget", () => {
     const matchingRows = Array.from({ length: 2_000 }, (_, i) => i + 1);
 
@@ -80,6 +110,30 @@ describe("serializeToolResultForModel", () => {
     expect(payload.data.count).toBe(2_000);
     expect(payload.data.matching_rows.length).toBeLessThan(payload.data.count);
     expect(payload.data.truncated).toBe(true);
+  });
+
+  it("filter_range falls back to toolCall.arguments.range when result omits range", () => {
+    const toolCall = {
+      id: "call-2c",
+      name: "filter_range",
+      arguments: { range: "Sheet1!A1:D10" }
+    };
+
+    const result = {
+      tool: "filter_range",
+      ok: true,
+      timing: { started_at_ms: 0, duration_ms: 1 },
+      data: {
+        matching_rows: [2, 4, 6],
+        count: 3
+      }
+    };
+
+    const serialized = serializeToolResultForModel({ toolCall: toolCall as any, result, maxChars: 1_000 });
+    const payload = JSON.parse(serialized);
+    expect(payload.tool).toBe("filter_range");
+    expect(payload.data.range).toBe("Sheet1!A1:D10");
+    expect(payload.data.count).toBe(3);
   });
 
   it("filter_range preserves tool-provided truncated flag even when matching_rows fits preview limit", () => {
