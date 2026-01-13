@@ -84,3 +84,48 @@ fn parses_combo_plot_area_with_multiple_chart_types() {
     assert_eq!(model.series[1].plot_index, Some(1));
 }
 
+#[test]
+fn combo_plot_area_warns_only_for_unknown_chart_types() {
+    let xml = r#"
+        <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart>
+            <c:plotArea>
+              <c:areaChart>
+                <c:ser>
+                  <c:tx><c:v>Area Series</c:v></c:tx>
+                  <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef></c:cat>
+                  <c:val><c:numRef><c:f>Sheet1!$B$2:$B$3</c:f></c:numRef></c:val>
+                </c:ser>
+              </c:areaChart>
+              <c:barChart>
+                <c:ser>
+                  <c:tx><c:v>Bar Series</c:v></c:tx>
+                  <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$3</c:f></c:strRef></c:cat>
+                  <c:val><c:numRef><c:f>Sheet1!$C$2:$C$3</c:f></c:numRef></c:val>
+                </c:ser>
+              </c:barChart>
+            </c:plotArea>
+          </c:chart>
+        </c:chartSpace>
+    "#;
+
+    let model = parse_chart_space(xml.as_bytes(), "combo-unknown.xml").expect("parse chartSpace");
+    assert_eq!(model.series.len(), 2);
+    assert_eq!(model.series[0].plot_index, Some(0));
+    assert_eq!(model.series[1].plot_index, Some(1));
+
+    let PlotAreaModel::Combo(combo) = model.plot_area else {
+        panic!("expected combo plot area");
+    };
+    assert_eq!(combo.charts.len(), 2);
+
+    // We should only warn about the unsupported chart type, not because multiple chart types exist.
+    assert_eq!(model.diagnostics.len(), 1);
+    assert!(
+        model.diagnostics[0]
+            .message
+            .contains("unsupported chart type areaChart"),
+        "diagnostic was {:?}",
+        model.diagnostics[0]
+    );
+}
