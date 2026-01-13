@@ -702,7 +702,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
         if (normalizedValue === undefined) continue;
         // Cache key format has evolved over time. We currently expect:
         //   `${model}\0${function}\0${promptHash}\0${inputsHash}`
-        // where both hashes are 8-hex FNV-1a values.
+        // where both hashes are FNV-1a hex digests (either 8-hex legacy or 16-hex current).
         //
         // Drop legacy keys that embed the raw prompt text (can be large / sensitive).
         if (!isSupportedCacheKey(key)) continue;
@@ -777,7 +777,8 @@ function isSupportedCacheKey(key: string): boolean {
   if (parts.length !== 4) return false;
   const promptHash = parts[2] ?? "";
   const inputsHash = parts[3] ?? "";
-  return /^[0-9a-f]{8}$/.test(promptHash) && /^[0-9a-f]{8}$/.test(inputsHash);
+  const isSupportedHash = (value: string) => /^(?:[0-9a-f]{8}|[0-9a-f]{16})$/.test(value);
+  return isSupportedHash(promptHash) && isSupportedHash(inputsHash);
 }
 
 type AiCellFunctionReferences = {
@@ -889,7 +890,7 @@ function inferProvenanceFromValue(params: {
     // sample the same preview + sample indices we include in the prompt compaction
     // so DLP policy decisions cover exactly the values we might send to the model.
     const seedHex = hashText(`${params.documentId}:${params.defaultSheetId}:${params.functionName}:${params.argIndex}:array`);
-    const rand = mulberry32(Number.parseInt(seedHex, 16) >>> 0);
+    const rand = mulberry32(seedFromHashHex(seedHex));
     const previewCount = Math.min(MAX_RANGE_PREVIEW_VALUES, total);
     const previewIndices = new Set<number>();
     for (let i = 0; i < previewCount; i += 1) previewIndices.add(i);
@@ -1340,8 +1341,7 @@ function compactArrayForPrompt(params: {
   const seedHex = hashText(
     `${params.documentId}:${rangeSheetId ?? params.defaultSheetId}:${params.functionName}:${params.argIndex}:${rangeStableText ?? "array"}`,
   );
-  const seed = Number.parseInt(seedHex, 16) >>> 0;
-  const rand = mulberry32(seed);
+  const rand = mulberry32(seedFromHashHex(seedHex));
 
   const previewCount = Math.min(MAX_RANGE_PREVIEW_VALUES, providedCount);
   const previewIndices = new Set<number>();
@@ -1831,7 +1831,7 @@ function firstErrorCodeInValue(value: CellValue): string | null {
     const exclude = new Set<number>();
     for (let i = 0; i < prefixCount; i += 1) exclude.add(i);
     const seedHex = hashText(`errors:${total}:${max}`);
-    const rand = mulberry32(Number.parseInt(seedHex, 16) >>> 0);
+    const rand = mulberry32(seedFromHashHex(seedHex));
     const sample = pickSampleIndices({ total, count: remaining, rand, exclude });
     for (const idx of sample) {
       const err = firstErrorCodeInValue(arr[idx] as any);
@@ -1933,28 +1933,45 @@ function stableJsonStringify(value: unknown): string {
   }
 }
 
-function fnv1a32Update(hash: number, text: string): number {
-  let h = hash >>> 0;
+const FNV1A_64_OFFSET_BASIS = 0xcbf29ce484222325n;
+const FNV1A_64_PRIME = 0x100000001b3n;
+const FNV1A_64_MASK = 0xffffffffffffffffn;
+
+function fnv1a64Update(hash: bigint, text: string): bigint {
+  let h = hash;
   const s = String(text);
   for (let i = 0; i < s.length; i += 1) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+    h ^= BigInt(s.charCodeAt(i));
+    h = (h * FNV1A_64_PRIME) & FNV1A_64_MASK;
   }
-  return h >>> 0;
+  return h;
 }
 
 function hashText(text: string): string {
-  // FNV-1a 32-bit for deterministic, dependency-free hashing.
-  const hash = fnv1a32Update(0x811c9dc5, text);
-  return hash.toString(16).padStart(8, "0");
+  // FNV-1a 64-bit for deterministic, dependency-free hashing.
+  const hash = fnv1a64Update(FNV1A_64_OFFSET_BASIS, text) & FNV1A_64_MASK;
+  return hash.toString(16).padStart(16, "0");
+}
+
+function seedFromHashHex(seedHex: string): number {
+  // NOTE: `hashText` returns 16-hex characters (64-bit), which cannot be safely parsed
+  // with `parseInt` into a JS number without losing bits > 2^53. We intentionally use
+  // BigInt and take the low 32 bits so seeded sampling remains deterministic.
+  const hex = String(seedHex ?? "").trim();
+  if (!hex) return 0;
+  try {
+    return Number(BigInt(`0x${hex}`) & 0xffff_ffffn) >>> 0;
+  } catch {
+    return 0;
+  }
 }
 
 function hashClassificationRecords(records: Array<{ selector: any; classification: any }>): string {
   // We intentionally hash only the fields that impact enforcement/indexing. This keeps the hash
   // stable across innocuous record shape changes while still invalidating on selector/classification
   // updates.
-  let hash = 0x811c9dc5;
-  hash = fnv1a32Update(hash, String(records?.length ?? 0));
+  let hash = FNV1A_64_OFFSET_BASIS;
+  hash = fnv1a64Update(hash, String(records?.length ?? 0));
 
   for (const record of records || []) {
     if (!record || !record.selector || typeof record.selector !== "object") continue;
@@ -1969,13 +1986,13 @@ function hashClassificationRecords(records: Array<{ selector: any; classificatio
     const classification = normalizeClassification(record.classification);
     const classificationStable = `${classification.level}:${(classification.labels ?? []).join(",")}`;
 
-    hash = fnv1a32Update(hash, selectorStable);
-    hash = fnv1a32Update(hash, "\u0000");
-    hash = fnv1a32Update(hash, classificationStable);
-    hash = fnv1a32Update(hash, "\u0000");
+    hash = fnv1a64Update(hash, selectorStable);
+    hash = fnv1a64Update(hash, "\u0000");
+    hash = fnv1a64Update(hash, classificationStable);
+    hash = fnv1a64Update(hash, "\u0000");
   }
 
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return (hash & FNV1A_64_MASK).toString(16).padStart(16, "0");
 }
 
 function createSessionId(prefix: string): string {

@@ -89,7 +89,7 @@ describe("AiCellFunctionEngine", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.mode).toBe("cell_function");
     expect((entries[0]?.input as any)?.prompt).toBe("summarize");
-    expect((entries[0]?.input as any)?.inputs_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect((entries[0]?.input as any)?.inputs_hash).toMatch(/^[0-9a-f]{16}$/);
     expect(entries[0]?.token_usage).toEqual({
       prompt_tokens: 3,
       completion_tokens: 7,
@@ -370,7 +370,7 @@ describe("AiCellFunctionEngine", () => {
     const input = entries[0]?.input as any;
     expect(input?.output_preview?.length).toBe(200);
     expect(input?.output_preview).not.toBe(resolved);
-    expect(input?.output_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input?.output_hash).toMatch(/^[0-9a-f]{16}$/);
     expect(input?.output_value).toBeUndefined();
   });
 
@@ -435,6 +435,34 @@ describe("AiCellFunctionEngine", () => {
     expect(stored).not.toContain(legacyPrompt);
   });
 
+  it("loads persisted cache keys with legacy 8-hex hashes", async () => {
+    const persistKey = "ai-cache-compat";
+    const legacyKey = `test-model\u0000AI\u00001234abcd\u0000deadbeef`;
+    globalThis.localStorage?.setItem(persistKey, JSON.stringify([{ key: legacyKey, value: "legacy", updatedAtMs: 0 }]));
+
+    const llmClient = {
+      chat: vi.fn(async (_request: any) => ({
+        message: { role: "assistant", content: "ok" },
+        usage: { promptTokens: 1, completionTokens: 1 },
+      })),
+    };
+
+    const engine = new AiCellFunctionEngine({
+      llmClient: llmClient as any,
+      auditStore: new MemoryAIAuditStore(),
+      model: "test-model",
+      cache: { persistKey, maxEntries: 10 },
+    });
+
+    const pending = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+    expect(pending).toBe(AI_CELL_PLACEHOLDER);
+    await engine.waitForIdle();
+
+    const stored = globalThis.localStorage?.getItem(persistKey) ?? "";
+    const parsed = JSON.parse(stored) as Array<any>;
+    expect(parsed.some((entry) => entry?.key === legacyKey && entry?.value === "legacy")).toBe(true);
+  });
+
   it("persists AI cell cache keys using hashes (no raw prompt/input strings)", async () => {
     const persistKey = "ai-cache-hashed";
     const llmClient = {
@@ -460,7 +488,7 @@ describe("AiCellFunctionEngine", () => {
     expect(stored).not.toContain("hello");
 
     // Keys should be `${model}\0${fn}\0${promptHash}\0${inputsHash}`.
-    expect(stored).toMatch(/test-model\\u0000AI\\u0000[0-9a-f]{8}\\u0000[0-9a-f]{8}/);
+    expect(stored).toMatch(/test-model\\u0000AI\\u0000[0-9a-f]{16}\\u0000[0-9a-f]{16}/);
   });
 
   it("batches localStorage persistence across multiple cache writes", async () => {
@@ -634,8 +662,8 @@ describe("AiCellFunctionEngine", () => {
     const input = entries[0]?.input as any;
     expect(input?.prompt).toBe("[REDACTED]");
     expect(input?.prompt).not.toContain("top secret");
-    expect(input?.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
-    expect(input?.inputs_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input?.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
+    expect(input?.inputs_hash).toMatch(/^[0-9a-f]{16}$/);
     expect(input?.inputs_compaction).toBeDefined();
     expect(input?.blocked).toBe(true);
   });
@@ -1035,6 +1063,6 @@ describe("AiCellFunctionEngine", () => {
     expect(input.prompt.length).toBe(200);
     expect(input.prompt).toContain("[TRUNCATED]");
     expect(input.prompt.endsWith("…")).toBe(true);
-    expect(input.prompt_hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(input.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
   });
 });
