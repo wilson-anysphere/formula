@@ -15,8 +15,11 @@ export interface CellData {
   /**
    * Formula string including leading "=".
    *
-   * Note: The in-memory model does not evaluate formulas; formula cells are stored
-   * separately from `value` so tools can distinguish between literal strings and formulas.
+   * Note:
+   * - The in-memory workbook does not evaluate formulas, so formula cells typically have `value: null`.
+   * - Real spreadsheet backends may provide a computed `value` *alongside* `formula`. ToolExecutor
+   *   can optionally surface/use those computed values when `include_formula_values` is enabled
+   *   (with conservative DLP gating).
    */
   formula?: string;
   format?: CellFormat;
@@ -33,4 +36,3 @@ export function cloneCell(cell: CellData): CellData {
     format: cell.format ? { ...cell.format } : undefined
   };
 }
-
