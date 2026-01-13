@@ -50,6 +50,44 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.values).toEqual([[2]]);
   });
 
+  it("supports include_formula_values with sheet_name_resolver (display name -> stable id)", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    workbook.setCell(parseA1Cell("Sheet2!A1"), { formula: "=1+1", value: 2 });
+
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      },
+    };
+
+    const executor = new ToolExecutor(workbook, { include_formula_values: true, default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver });
+
+    const read = await executor.execute({
+      name: "read_range",
+      parameters: { range: "Budget!A1:A1" },
+    });
+
+    expect(read.ok).toBe(true);
+    expect(read.tool).toBe("read_range");
+    if (!read.ok || read.tool !== "read_range") throw new Error("Unexpected tool result");
+    expect(read.data?.range).toBe("Budget!A1");
+    expect(read.data?.values).toEqual([[2]]);
+
+    const stats = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Budget!A1:A1", measures: ["sum", "count"] },
+    });
+
+    expect(stats.ok).toBe(true);
+    expect(stats.tool).toBe("compute_statistics");
+    if (!stats.ok || stats.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(stats.data?.range).toBe("Budget!A1");
+    expect(stats.data?.statistics).toEqual({ sum: 2, count: 1 });
+  });
+
   it("read_range returns formulas and computed values together when include_formulas=true and include_formula_values is enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
