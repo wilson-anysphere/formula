@@ -10,8 +10,8 @@ use ms_offcrypto_writer::Ecma376AgileWriter;
 use zip::write::FileOptions;
 
 use formula_io::{
-    open_workbook_model, open_workbook_model_with_password, open_workbook_with_password, Error,
-    Workbook,
+    detect_workbook_format, open_workbook_model, open_workbook_model_with_password,
+    open_workbook_with_password, Error, Workbook, WorkbookFormat,
 };
 use formula_model::{CellRef, CellValue};
 
@@ -194,6 +194,42 @@ fn open_model_with_password(path: &Path, password: &str) -> formula_model::Workb
         .unwrap_or_else(|err| panic!("open encrypted workbook {path:?} failed: {err:?}"))
 }
 
+fn open_decrypted_package_bytes_with_password(path: &Path, password: &str) -> Vec<u8> {
+    let wb = open_workbook_with_password(path, Some(password))
+        .unwrap_or_else(|err| panic!("open encrypted workbook {path:?} failed: {err:?}"));
+    match wb {
+        Workbook::Xlsx(package) => package
+            .write_to_bytes()
+            .expect("serialize decrypted workbook package to bytes"),
+        other => panic!("expected Workbook::Xlsx, got {other:?}"),
+    }
+}
+
+fn assert_has_vba_project(decrypted: &[u8]) {
+    let archive = zip::ZipArchive::new(Cursor::new(decrypted)).expect("open decrypted ZIP");
+    let mut found = false;
+    for name in archive.file_names() {
+        if name.eq_ignore_ascii_case("xl/vbaProject.bin") {
+            found = true;
+            break;
+        }
+    }
+    assert!(
+        found,
+        "expected decrypted package to contain xl/vbaProject.bin"
+    );
+}
+
+fn assert_detects_xlsm(decrypted: &[u8]) {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("book.xlsm");
+    std::fs::write(&path, decrypted).expect("write decrypted workbook bytes");
+    assert_eq!(
+        detect_workbook_format(&path).expect("detect workbook format"),
+        WorkbookFormat::Xlsm
+    );
+}
+
 #[test]
 fn decrypts_agile_fixture_with_correct_password() {
     let plaintext_path = fixture_path("plaintext.xlsx");
@@ -208,6 +244,41 @@ fn decrypts_agile_fixture_with_correct_password() {
 
     let agile_empty = open_model_with_password(&agile_empty_password_path, "");
     assert_expected_contents(&agile_empty);
+}
+
+#[test]
+fn decrypts_macro_enabled_xlsm_fixtures_with_correct_password() {
+    let plaintext_basic_path = fixture_path("plaintext-basic.xlsm");
+    let agile_basic_path = fixture_path("agile-basic.xlsm");
+    let standard_basic_path = fixture_path("standard-basic.xlsm");
+
+    assert_eq!(
+        detect_workbook_format(&plaintext_basic_path).expect("detect plaintext-basic.xlsm"),
+        WorkbookFormat::Xlsm
+    );
+    let plaintext_basic_bytes =
+        std::fs::read(&plaintext_basic_path).expect("read plaintext-basic.xlsm");
+    assert_has_vba_project(&plaintext_basic_bytes);
+
+    let agile_basic = open_model_with_password(&agile_basic_path, "password");
+    assert!(
+        !agile_basic.sheets.is_empty(),
+        "expected decrypted macro workbook to have at least one sheet"
+    );
+    let agile_basic_bytes =
+        open_decrypted_package_bytes_with_password(&agile_basic_path, "password");
+    assert_has_vba_project(&agile_basic_bytes);
+    assert_detects_xlsm(&agile_basic_bytes);
+
+    let standard_basic = open_model_with_password(&standard_basic_path, "password");
+    assert!(
+        !standard_basic.sheets.is_empty(),
+        "expected decrypted macro workbook to have at least one sheet"
+    );
+    let standard_basic_bytes =
+        open_decrypted_package_bytes_with_password(&standard_basic_path, "password");
+    assert_has_vba_project(&standard_basic_bytes);
+    assert_detects_xlsm(&standard_basic_bytes);
 }
 
 #[test]
@@ -228,12 +299,16 @@ fn errors_on_wrong_password_fixtures() {
     let agile_empty_password_path = fixture_path("agile-empty-password.xlsx");
     let standard_path = fixture_path("standard.xlsx");
     let agile_unicode_path = fixture_path("agile-unicode.xlsx");
+    let agile_basic_path = fixture_path("agile-basic.xlsm");
+    let standard_basic_path = fixture_path("standard-basic.xlsm");
 
     for path in [
         &agile_path,
         &agile_empty_password_path,
         &standard_path,
         &agile_unicode_path,
+        &agile_basic_path,
+        &standard_basic_path,
     ] {
         assert!(
             matches!(
@@ -256,7 +331,10 @@ fn decrypts_agile_unicode_password() {
 fn agile_unicode_password_different_normalization_fails() {
     // NFC password is "pässwörd" (U+00E4, U+00F6). NFD decomposes those into combining marks.
     let nfd = "pa\u{0308}sswo\u{0308}rd";
-    assert_ne!(nfd, "pässwörd", "strings should differ before UTF-16 encoding");
+    assert_ne!(
+        nfd, "pässwörd",
+        "strings should differ before UTF-16 encoding"
+    );
 
     let path = fixture_path("agile-unicode.xlsx");
     assert!(

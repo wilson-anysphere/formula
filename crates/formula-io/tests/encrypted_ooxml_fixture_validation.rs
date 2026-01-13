@@ -22,7 +22,8 @@ fn read_encryption_info_header(path: &Path) -> (u16, u16, u32) {
 
     // Assert encryption streams exist.
     open_stream_case_tolerant(&mut ole, "EncryptionInfo").expect("EncryptionInfo stream missing");
-    open_stream_case_tolerant(&mut ole, "EncryptedPackage").expect("EncryptedPackage stream missing");
+    open_stream_case_tolerant(&mut ole, "EncryptedPackage")
+        .expect("EncryptedPackage stream missing");
 
     let mut stream =
         open_stream_case_tolerant(&mut ole, "EncryptionInfo").expect("open EncryptionInfo stream");
@@ -39,43 +40,33 @@ fn read_encryption_info_header(path: &Path) -> (u16, u16, u32) {
 
 #[test]
 fn encrypted_ooxml_fixtures_have_expected_encryption_info_versions() {
-    let agile = fixture_path("agile.xlsx");
-    let agile_empty_password = fixture_path("agile-empty-password.xlsx");
-    let standard = fixture_path("standard.xlsx");
-    let agile_empty = fixture_path("agile-empty-password.xlsx");
-    let agile_unicode = fixture_path("agile-unicode.xlsx");
+    for name in [
+        "agile.xlsx",
+        "agile-empty-password.xlsx",
+        "agile-unicode.xlsx",
+        "agile-large.xlsx",
+        "agile-basic.xlsm",
+    ] {
+        let path = fixture_path(name);
+        let (major, minor, _flags) = read_encryption_info_header(&path);
+        assert_eq!(
+            (major, minor),
+            (4, 4),
+            "Agile-encrypted OOXML should have EncryptionInfo version 4.4 ({name})"
+        );
+    }
 
-    let (major, minor, _flags) = read_encryption_info_header(&agile);
-    assert_eq!(
-        (major, minor),
-        (4, 4),
-        "Agile-encrypted OOXML should have EncryptionInfo version 4.4"
-    );
-    let (major, minor, _flags) = read_encryption_info_header(&agile_empty_password);
-    assert_eq!(
-        (major, minor),
-        (4, 4),
-        "Agile-encrypted OOXML (empty-password fixture) should have EncryptionInfo version 4.4"
-    );
-
-    let (major, minor, _flags) = read_encryption_info_header(&standard);
-    assert_eq!(
-        (major, minor),
-        (3, 2),
-        "Standard-encrypted OOXML should have EncryptionInfo version 3.2"
-    );
-
-    let (major, minor, _flags) = read_encryption_info_header(&agile_empty);
-    assert_eq!(
-        (major, minor),
-        (4, 4),
-        "agile-empty-password.xlsx should have EncryptionInfo version 4.4"
-    );
-
-    let (major, minor, _flags) = read_encryption_info_header(&agile_unicode);
-    assert_eq!(
-        (major, minor),
-        (4, 4),
-        "agile-unicode.xlsx should have EncryptionInfo version 4.4"
-    );
+    for name in [
+        "standard.xlsx",
+        "standard-large.xlsx",
+        "standard-basic.xlsm",
+    ] {
+        let path = fixture_path(name);
+        let (major, minor, _flags) = read_encryption_info_header(&path);
+        assert_eq!(
+            (major, minor),
+            (3, 2),
+            "Standard-encrypted OOXML should have EncryptionInfo version 3.2 ({name})"
+        );
+    }
 }
