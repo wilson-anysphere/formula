@@ -465,6 +465,30 @@ export class TabCompletionEngine {
       }
     }
 
+    // 3) Sheet identifiers (Sheet2!)
+    const sheetNames = await safeProviderCall(provider.getSheetNames);
+    for (const rawName of sheetNames) {
+      const sheetName = typeof rawName === "string" ? rawName.trim() : "";
+      if (!sheetName) continue;
+      // Do not suggest quoted sheet references here. The desktop formula bar tab-complete
+      // UI only supports "pure insertion" suggestions, and inserting leading quotes would
+      // require modifying text before the cursor.
+      if (needsSheetQuotes(sheetName)) continue;
+      if (!startsWithIgnoreCase(sheetName, prefix)) continue;
+
+      const completedName = completeIdentifier(sheetName, prefix);
+      const replacement = `${completedName}!`;
+      const insertedSuffix = replacement.slice(prefix.length);
+      const newText = replaceSpan(input, token.start, token.end, replacement);
+      suggestions.push({
+        text: newText,
+        // `displayText` is the part that would be inserted at the caret.
+        displayText: insertedSuffix,
+        type: "range",
+        confidence: clamp01(0.55 + ratioBoost(prefix, sheetName) * 0.35),
+      });
+    }
+
     return rankAndDedupe(suggestions).slice(0, this.maxSuggestions);
   }
 

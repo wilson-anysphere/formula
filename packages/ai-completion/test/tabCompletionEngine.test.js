@@ -1572,3 +1572,73 @@ test("Sheet-qualified ranges are not suggested when the sheet name prefix is inc
 
   assert.equal(suggestions.length, 0);
 });
+
+test("Sheet names are suggested as identifiers when typing =Sheet", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=Sheet";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=Sheet1!" || s.text === "=Sheet2!"),
+    `Expected a sheet-name identifier suggestion ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`,
+  );
+});
+
+test("Sheet name suggestions preserve the typed prefix case (lowercase)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=shee";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text.startsWith("=shee") && s.text.endsWith("!")),
+    `Expected a sheet-name suggestion that preserves prefix case, got: ${suggestions.map((s) => s.text).join(", ")}`,
+  );
+});
+
+test("Sheet names that require quotes are not suggested as identifiers (=My Sheet is ignored)", async () => {
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["My Sheet"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=My";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(
+    suggestions.filter((s) => s.text.endsWith("!")).length,
+    0,
+    `Expected no sheet-name suggestions ending with '!', got: ${suggestions.map((s) => s.text).join(", ")}`,
+  );
+});
