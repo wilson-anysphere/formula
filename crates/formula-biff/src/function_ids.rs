@@ -343,12 +343,12 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     Some((1, 255)), // 321 SUMSQ
     Some((1, 255)), // 322 KURT
     Some((1, 255)), // 323 SKEW
-    Some((1, 2)),   // 324 ZTEST
+    Some((2, 3)),   // 324 ZTEST
     Some((2, 2)),   // 325 LARGE
     Some((2, 2)),   // 326 SMALL
     Some((2, 2)),   // 327 QUARTILE
     Some((2, 2)),   // 328 PERCENTILE
-    Some((1, 2)),   // 329 PERCENTRANK
+    Some((2, 3)),   // 329 PERCENTRANK
     Some((1, 255)), // 330 MODE
     Some((2, 2)),   // 331 TRIMMEAN
     Some((2, 2)),   // 332 TINV
@@ -470,7 +470,7 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     Some((6, 6)),   // 448 CUMIPMT
     Some((2, 2)),   // 449 EDATE
     Some((2, 2)),   // 450 EOMONTH
-    Some((1, 2)),   // 451 YEARFRAC
+    Some((2, 3)),   // 451 YEARFRAC
     Some((3, 4)),   // 452 COUPDAYBS
     Some((3, 4)),   // 453 COUPDAYS
     Some((3, 4)),   // 454 COUPDAYSNC
@@ -500,7 +500,7 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     Some((2, 5)),   // 478 CUBESET
     Some((1, 1)),   // 479 CUBESETCOUNT
     Some((2, 2)),   // 480 IFERROR
-    Some((2, 255)), // 481 COUNTIFS
+    Some((2, 254)), // 481 COUNTIFS
     Some((3, 255)), // 482 SUMIFS
     Some((2, 3)),   // 483 AVERAGEIF
     Some((3, 255)), // 484 AVERAGEIFS
