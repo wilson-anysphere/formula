@@ -50,6 +50,17 @@ function blobToFloat32(blob) {
   return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
 }
 
+/**
+ * @param {Float32Array} vec
+ * @param {number} expectedDim
+ * @param {string} context
+ */
+function assertVectorDim(vec, expectedDim, context) {
+  if (vec.length !== expectedDim) {
+    throw new Error(`${context}: expected ${expectedDim}, got ${vec.length}`);
+  }
+}
+
 function float32ToBlob(vec) {
   const v = vec instanceof Float32Array ? vec : Float32Array.from(vec);
   return new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
@@ -436,9 +447,14 @@ export class SqliteVectorStore {
     this._db.create_function("dot", (a, b) => {
       const va = blobToFloat32(a);
       const vb = blobToFloat32(b);
-      const len = Math.min(va.length, vb.length);
+      if (va.length !== vb.length) {
+        throw new Error(
+          `SqliteVectorStore dot() dimension mismatch: expected ${this._dimension}, got ${va.length} vs ${vb.length}`
+        );
+      }
+      assertVectorDim(va, this._dimension, "SqliteVectorStore dot() dimension mismatch");
       let dot = 0;
-      for (let i = 0; i < len; i += 1) dot += va[i] * vb[i];
+      for (let i = 0; i < va.length; i += 1) dot += va[i] * vb[i];
       return dot;
     });
   }
@@ -633,6 +649,7 @@ export class SqliteVectorStore {
     stmt.free();
 
     const vec = blobToFloat32(row[0]);
+    assertVectorDim(vec, this._dimension, `SqliteVectorStore.get(${JSON.stringify(id)}) vector dimension mismatch`);
 
     const base = {};
     if (row[1] != null) base.workbookId = row[1];
@@ -742,9 +759,19 @@ export class SqliteVectorStore {
         const extra = parseExtraMetadata(row[offset + 11]);
         const metadata = { ...extra, ...base };
         if (filter && !filter(metadata, id)) continue;
+        let vecOut;
+        if (includeVector) {
+          const vec = blobToFloat32(vecBlob);
+          assertVectorDim(
+            vec,
+            this._dimension,
+            `SqliteVectorStore.list() vector dimension mismatch for id=${JSON.stringify(id)}`
+          );
+          vecOut = new Float32Array(vec);
+        }
         out.push({
           id,
-          vector: includeVector ? new Float32Array(blobToFloat32(vecBlob)) : undefined,
+          vector: vecOut,
           metadata,
         });
       }
@@ -765,8 +792,10 @@ export class SqliteVectorStore {
     const filter = opts?.filter;
     const workbookId = opts?.workbookId;
     throwIfAborted(signal);
+    const qVec = toFloat32Array(vector);
+    assertVectorDim(qVec, this._dimension, "SqliteVectorStore.query() vector dimension mismatch");
     if (topK <= 0) return [];
-    const q = normalizeL2(vector);
+    const q = normalizeL2(qVec);
     const qBlob = float32ToBlob(q);
 
     /**
