@@ -89,6 +89,8 @@ pub fn parse_chart_ex(
         plot_vis_only: None,
         chart_area_style: None,
         plot_area_style: None,
+        external_data_rel_id: None,
+        external_data_auto_update: None,
         diagnostics,
     })
 }

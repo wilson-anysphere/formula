@@ -8,6 +8,7 @@ use formula_model::charts::{
 use formula_model::RichText;
 use roxmltree::{Document, Node};
 
+use super::REL_NS;
 use crate::drawingml::style::{parse_marker, parse_sppr, parse_txpr};
 
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +51,24 @@ pub fn parse_chart_space(
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
+
+    let external_data_node = chart_space
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "externalData");
+    let external_data_rel_id = external_data_node
+        .and_then(|n| {
+            n.attribute((REL_NS, "id"))
+                .or_else(|| n.attribute("r:id"))
+                .or_else(|| n.attribute("id"))
+        })
+        .map(str::to_string);
+    let external_data_auto_update = external_data_node
+        .and_then(|n| {
+            n.children()
+                .find(|c| c.is_element() && c.tag_name().name() == "autoUpdate")
+        })
+        .and_then(|n| n.attribute("val"))
+        .map(parse_ooxml_bool);
 
     if doc
         .descendants()
@@ -105,6 +124,8 @@ pub fn parse_chart_space(
             plot_vis_only,
             chart_area_style,
             plot_area_style: None,
+            external_data_rel_id,
+            external_data_auto_update,
             diagnostics,
         });
     };
@@ -130,6 +151,8 @@ pub fn parse_chart_space(
         plot_vis_only,
         chart_area_style,
         plot_area_style,
+        external_data_rel_id,
+        external_data_auto_update,
         diagnostics,
     })
 }

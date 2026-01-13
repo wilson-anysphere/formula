@@ -31,6 +31,13 @@ pub struct ChartModel {
     /// Plot area shape properties (`c:plotArea/c:spPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plot_area_style: Option<ShapeStyle>,
+    /// External workbook link relationship id (`c:chartSpace/c:externalData/@r:id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_data_rel_id: Option<String>,
+    /// Whether the chart should auto-update when the linked workbook changes
+    /// (`c:chartSpace/c:externalData/c:autoUpdate/@val`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_data_auto_update: Option<bool>,
     pub diagnostics: Vec<ChartDiagnostic>,
 }
 
