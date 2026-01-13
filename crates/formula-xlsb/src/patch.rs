@@ -2495,9 +2495,17 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
 
     // Some ptgs (PtgMem*) embed a nested token stream of known length (`cce`). Scan those
     // sub-streams as well so we can detect `PtgArray` even when it appears inside the mem payload.
-    let mut stack: Vec<(&[u8], usize)> = vec![(rgce, 0)];
+    //
+    // The top-level `rgce` stream is scanned in "strict" mode: unknown ptgs abort the scan to
+    // avoid desync/false positives.
+    //
+    // Nested mem subexpressions are scanned in a "best-effort" mode: unknown ptgs stop scanning
+    // only that subexpression and resume scanning the outer stream. This avoids introducing false
+    // negatives when a mem subexpression contains an unsupported token but the outer formula
+    // later contains `PtgArray`.
+    let mut stack: Vec<(&[u8], usize, bool)> = vec![(rgce, 0, true)];
 
-    while let Some((buf, mut i)) = stack.pop() {
+    while let Some((buf, mut i, strict)) = stack.pop() {
         while i < buf.len() {
             let ptg = buf[i];
             i += 1;
@@ -2541,7 +2549,12 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                             i += 12;
                         }
                         // Unknown extend subtype: stop scanning to avoid desync/false positives.
-                        _ => return false,
+                        _ => {
+                            if strict {
+                                return false;
+                            }
+                            break;
+                        }
                     }
                 }
 
@@ -2649,8 +2662,8 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                     i += cce;
 
                     // Scan nested stream first, then resume after it.
-                    stack.push((buf, i));
-                    stack.push((subexpr, 0));
+                    stack.push((buf, i, strict));
+                    stack.push((subexpr, 0, false));
                     break;
                 }
 
@@ -2722,7 +2735,12 @@ pub fn rgce_references_rgcb(rgce: &[u8]) -> bool {
                 }
 
                 // Unknown ptg: stop scanning to avoid desync/false positives.
-                _ => return false,
+                _ => {
+                    if strict {
+                        return false;
+                    }
+                    break;
+                }
             }
         }
     }

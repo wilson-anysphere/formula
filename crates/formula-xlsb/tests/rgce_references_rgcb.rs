@@ -23,6 +23,25 @@ fn rgce_memfunc_with_array() -> Vec<u8> {
     rgce
 }
 
+fn rgce_memfunc_with_unknown_subexpr_and_outer_array() -> Vec<u8> {
+    // Regression guard: scanning nested `PtgMem*` subexpressions should not prevent us from
+    // detecting `PtgArray` that appears *outside* the mem token.
+    //
+    // This uses `PtgExp` (`0x01`) as an intentionally-unsupported-but-real ptg inside the mem
+    // subexpression.
+    let subexpr = vec![0x01, 0x00, 0x00, 0x00, 0x00]; // PtgExp + dummy coords
+
+    let mut rgce = vec![0x29];
+    rgce.extend_from_slice(
+        &u16::try_from(subexpr.len())
+            .expect("subexpression length fits in u16")
+            .to_le_bytes(),
+    );
+    rgce.extend_from_slice(&subexpr);
+    rgce.extend_from_slice(&fixture_builder::rgce::array_placeholder());
+    rgce
+}
+
 fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("open xlsb zip");
     let mut entry = zip
@@ -36,6 +55,12 @@ fn read_sheet1_bin_from_fixture(bytes: &[u8]) -> Vec<u8> {
 #[test]
 fn rgce_references_rgcb_detects_ptgarray_inside_memfunc() {
     let rgce = rgce_memfunc_with_array();
+    assert!(rgce_references_rgcb(&rgce));
+}
+
+#[test]
+fn rgce_references_rgcb_detects_ptgarray_outside_memfunc_even_if_mem_subexpr_has_unknown_ptg() {
+    let rgce = rgce_memfunc_with_unknown_subexpr_and_outer_array();
     assert!(rgce_references_rgcb(&rgce));
 }
 
