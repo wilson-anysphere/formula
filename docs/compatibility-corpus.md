@@ -252,6 +252,12 @@ parts** are responsible, without emitting any raw XML/text to logs.
 python -m tools.corpus.minimize --input /path/to/workbook.xlsx
 ```
 
+If you plan to upload the resulting JSON as an artifact (e.g. for private corpora), prefer:
+
+```bash
+python -m tools.corpus.minimize --input /path/to/workbook.xlsx --privacy-mode private
+```
+
 This produces a privacy-safe summary:
 
 - `critical_parts`: list of OPC part names with at least one `CRITICAL` diff
