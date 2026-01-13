@@ -1626,12 +1626,14 @@ export class FormulaBarView {
     const start = Math.max(0, Math.min(selection.start, prevText.length));
     const end = Math.max(0, Math.min(selection.end, prevText.length));
 
-    const insert = `${name}(`;
+    const insert = `${name}()`;
     // If the user was editing an empty cell, selecting a function should insert the
     // leading "=" (Excel behavior) so the result is a valid formula.
     const nextText = isEmpty ? `=${insert}` : prevText.slice(0, start) + insert + prevText.slice(end);
     // Place the caret inside the parentheses so users can immediately type arguments.
-    const cursor = isEmpty ? nextText.length : Math.max(0, Math.min(start + insert.length, nextText.length));
+    const cursor = isEmpty
+      ? Math.max(0, nextText.length - 1)
+      : Math.max(0, Math.min(start + insert.length - 1, nextText.length));
 
     this.textarea.value = nextText;
     try {
