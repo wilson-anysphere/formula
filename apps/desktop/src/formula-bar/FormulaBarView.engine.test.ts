@@ -9,15 +9,21 @@ import type { EngineClient, FormulaPartialLexResult, FormulaPartialParseResult, 
 import { FormulaBarView } from "./FormulaBarView.js";
 
 async function flushTooling(): Promise<void> {
-  // The FormulaBarView debounces engine tooling work to the next animation frame when
-  // available, otherwise it falls back to a `setTimeout(0)` tick.
-  if (typeof requestAnimationFrame === "function") {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-  } else {
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
-  // Allow the async engine calls + follow-up render to complete.
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const nextFrame = () =>
+    new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
+
+  // Frame 1: flush the scheduled render + scheduleEngineTooling tick.
+  await nextFrame();
+  // Frame 2: flush the render scheduled after the async engine result is applied.
+  await nextFrame();
+  // Frame 3: best-effort extra tick for environments where RAF is emulated via timers.
+  await nextFrame();
 }
 
 describe("FormulaBarView WASM editor tooling integration", () => {
@@ -72,8 +78,10 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const draft = "=SUM(1, 2)";
-    const commaIndex = draft.indexOf(",");
+    // Use a locale-sensitive argument separator to ensure we're actually using the
+    // engine parse context (the local fallback only understands commas).
+    const draft = "=SUM(1; 2)";
+    const sepIndex = draft.indexOf(";");
 
     const tokens: FormulaToken[] = [
       { kind: "Eq", span: { start: 0, end: 1 } },
@@ -92,7 +100,7 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     const engine = {
       lexFormulaPartial: vi.fn(async () => lexResult),
       parseFormulaPartial: vi.fn(async (formula: string, cursor?: number) => {
-        const argIndex = cursor != null && cursor <= commaIndex ? 0 : 1;
+        const argIndex = cursor != null && cursor <= sepIndex ? 0 : 1;
         return {
           ast: null,
           error: null,
@@ -104,11 +112,16 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     const view = new FormulaBarView(
       host,
       { onCommit: () => {} },
-      { getWasmEngine: () => engine, getLocaleId: () => "en-US", referenceStyle: "A1" },
+      { getWasmEngine: () => engine, getLocaleId: () => "de-DE", referenceStyle: "A1" },
     );
 
     view.setActiveCell({ address: "A1", input: "", value: null });
     view.focus({ cursor: "end" });
+
+    const hintEl = () => host.querySelector<HTMLElement>('[data-testid="formula-hint"]');
+    const activeParamText = () =>
+      hintEl()?.querySelector<HTMLElement>(".formula-bar-hint-token--paramActive")?.textContent ?? "";
+    const signatureText = () => hintEl()?.querySelector<HTMLElement>(".formula-bar-hint-signature")?.textContent ?? "";
 
     // Cursor within the first argument.
     const cursorArg0 = draft.indexOf("1") + 1;
@@ -116,19 +129,21 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     view.textarea.setSelectionRange(cursorArg0, cursorArg0);
     view.textarea.dispatchEvent(new Event("input"));
     await flushTooling();
-    expect(host.querySelector<HTMLElement>('[data-testid="formula-hint"]')?.textContent).toContain("SUM([number1]");
+    expect(activeParamText()).toBe("number1");
+    expect(signatureText()).toContain("; ");
 
     // Cursor within the second argument.
     const cursorArg1 = draft.indexOf("2") + 1;
     view.textarea.setSelectionRange(cursorArg1, cursorArg1);
     view.textarea.dispatchEvent(new Event("select"));
     await flushTooling();
-    expect(host.querySelector<HTMLElement>('[data-testid="formula-hint"]')?.textContent).toContain("SUM(number1");
+    expect(activeParamText()).toBe("[number2]");
+    expect(signatureText()).toContain("; ");
 
     host.remove();
   });
 
-  it("falls back to the local tokenizer/highlighter when the engine is absent", () => {
+  it("falls back to the local tokenizer/highlighter when the engine is absent", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -139,6 +154,7 @@ describe("FormulaBarView WASM editor tooling integration", () => {
     view.textarea.value = "=ROUND(1, 2)";
     view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
     view.textarea.dispatchEvent(new Event("input"));
+    await flushTooling();
 
     const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
     const fn = highlight?.querySelector<HTMLElement>('span[data-kind="function"]');
