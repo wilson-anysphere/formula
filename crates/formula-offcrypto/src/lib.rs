@@ -19,6 +19,9 @@ use sha1::{Digest as _, Sha1};
 const ITER_COUNT: u32 = 50_000;
 const SHA1_LEN: usize = 20;
 
+pub mod encrypted_package;
+pub use encrypted_package::decrypt_encrypted_package;
+
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
 
@@ -145,6 +148,10 @@ pub enum OffcryptoError {
     UnsupportedAlgorithm(u32),
     /// The stream contents are structurally invalid (e.g. missing required attributes).
     InvalidEncryptionInfo { context: &'static str },
+    /// The decrypted package size from the `EncryptedPackage` header does not fit into a `Vec<u8>`.
+    EncryptedPackageSizeOverflow { total_size: u64 },
+    /// Failed to reserve memory for the decrypted output buffer.
+    EncryptedPackageAllocationFailed { total_size: u64 },
     /// The `EncryptionInfo` version is not supported by the current parser.
     UnsupportedVersion { major: u16, minor: u16 },
     /// Ciphertext length must be a multiple of 16 bytes for AES-ECB.
@@ -177,6 +184,13 @@ impl fmt::Display for OffcryptoError {
             }
             OffcryptoError::InvalidEncryptionInfo { context } => {
                 write!(f, "invalid EncryptionInfo: {context}")
+            }
+            OffcryptoError::EncryptedPackageSizeOverflow { total_size } => write!(
+                f,
+                "EncryptedPackage reported invalid original size {total_size}"
+            ),
+            OffcryptoError::EncryptedPackageAllocationFailed { total_size } => {
+                write!(f, "failed to allocate decrypted package buffer of size {total_size}")
             }
             OffcryptoError::UnsupportedVersion { major, minor } => {
                 write!(f, "unsupported EncryptionInfo version {major}.{minor}")
@@ -992,4 +1006,56 @@ mod tests {
         assert_eq!(info.encrypted_verifier_hash_input, vec![9, 10, 11, 12]);
         assert_eq!(info.encrypted_verifier_hash_value, vec![13, 14, 15, 16]);
     }
+}
+
+#[cfg(test)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub static MAX_ALLOC: AtomicUsize = AtomicUsize::new(0);
+
+    pub struct TrackingAllocator;
+
+    unsafe impl GlobalAlloc for TrackingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc(layout)
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc_zeroed(layout)
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            record(new_size);
+            System.realloc(ptr, layout, new_size)
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout)
+        }
+    }
+
+    #[inline]
+    fn record(size: usize) {
+        let mut prev = MAX_ALLOC.load(Ordering::Relaxed);
+        while size > prev {
+            match MAX_ALLOC.compare_exchange_weak(
+                prev,
+                size,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => prev = next,
+            }
+        }
+    }
+
+    // Ensure tests can assert that huge `total_size` values are rejected *before*
+    // attempting allocations.
+    #[global_allocator]
+    static GLOBAL: TrackingAllocator = TrackingAllocator;
 }
