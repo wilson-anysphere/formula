@@ -195,9 +195,17 @@ docker build -f services/sync-server/Dockerfile -t formula-sync-server .
 ## Security
 
 - **Auth context:** `docId`, `sub`/`userId` (user id), `role` (owner/admin/editor/commenter/viewer), optional `rangeRestrictions` (from JWT claims or token introspection responses)
-- **Read-only enforcement:** viewer role enforced at the sync-server (drops writes); commenter role is comment-only (comments allowed, workbook edits rejected). Desktop mirrors this in the UX (binder/UI disable edits; comments gated via `session.canComment()`).
+- **Desktop JWT-derived permissions (best-effort):** in desktop collab mode, the client **decodes the JWT payload without verifying it** to drive UX + attribution:
+  - `sub` is used as the local presence id (so it matches what the sync-server enforces) and is forwarded to `CollabSession.setPermissions({ userId })`.
+  - `role` + `rangeRestrictions` are forwarded to `CollabSession.setPermissions({ role, rangeRestrictions })`.
+  - If the token is opaque / not JWT-decodable, desktop falls back to permissive client-side permissions (`{ role: "editor", rangeRestrictions: [] }`); server-side enforcement remains the source of truth.
+- **Read-only enforcement:** viewer role enforced at the sync-server (drops writes); commenter role is comment-only (comments allowed, workbook edits rejected). Desktop mirrors this in the UX:
+  - cell edits are blocked via the binder-installed `DocumentController.canEditCell` guard (and rejected/reverted as defense-in-depth)
+  - sheet-level view/format shared-state writes are suppressed via `canWriteSharedState: () => !session.isReadOnly()`
+  - comments are gated via `session.canComment()`
 - **Awareness sanitization:** presence `id` forced to JWT `sub` (desktop should set its local presence id to `sub` so identities are stable)
 - **Encryption at rest:** AES-256-GCM for persisted documents
+- **IndexedDB persistence compaction:** `IndexedDbCollabPersistence.flush(docId)` writes a snapshot update and compacts by default (see `docs/06-collaboration.md` for details + knobs like `maxUpdates` / `compactDebounceMs`).
 
 ---
 
