@@ -99,6 +99,13 @@ export class ChunkedLocalStorageBinaryStorage {
         }
         return decoded;
       } catch {
+        // Corrupted legacy base64 payload; clear it so future loads don't keep
+        // failing (and to free storage space).
+        try {
+          storage.removeItem?.(this.key);
+        } catch {
+          // ignore
+        }
         return null;
       }
     }
@@ -109,21 +116,52 @@ export class ChunkedLocalStorageBinaryStorage {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       meta = JSON.parse(metaRaw);
     } catch {
+      // Corrupted meta; clear all persisted chunks.
+      try {
+        await this.remove();
+      } catch {
+        // ignore
+      }
       return null;
     }
 
     const chunks = meta?.chunks;
-    if (!Number.isInteger(chunks) || chunks < 0) return null;
+    if (!Number.isInteger(chunks) || chunks < 0) {
+      try {
+        await this.remove();
+      } catch {
+        // ignore
+      }
+      return null;
+    }
 
     /** @type {string[]} */
     const parts = [];
     for (let i = 0; i < chunks; i += 1) {
       const part = storage.getItem(`${this.key}:${i}`);
-      if (typeof part !== "string") return null;
+      if (typeof part !== "string") {
+        // Missing/truncated chunk; clear persisted state so future opens can recover.
+        try {
+          await this.remove();
+        } catch {
+          // ignore
+        }
+        return null;
+      }
       parts.push(part);
     }
 
-    return fromBase64(parts.join(""));
+    try {
+      return fromBase64(parts.join(""));
+    } catch {
+      // Corrupted base64 payload; clear persisted chunks.
+      try {
+        await this.remove();
+      } catch {
+        // ignore
+      }
+      return null;
+    }
   }
 
   /**
