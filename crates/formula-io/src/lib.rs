@@ -559,7 +559,7 @@ pub fn detect_workbook_encryption(
     Ok(None)
 }
 
-fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
+fn workbook_format_impl(path: &Path, allow_encrypted_xls: bool) -> Result<WorkbookFormat, Error> {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
 
@@ -658,9 +658,15 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
             }
 
             if ole_workbook_has_biff_filepass_record(&mut ole) {
-                return Err(Error::EncryptedWorkbook {
-                    path: path.to_path_buf(),
-                });
+                // Legacy `.xls` BIFF encryption is signalled via a `FILEPASS` record in the workbook
+                // globals substream. Most open paths don't support legacy decryption and should
+                // surface a clear error early. However, password-capable callers may want to route
+                // encrypted `.xls` files to the `.xls` importer so it can attempt decryption.
+                if !allow_encrypted_xls {
+                    return Err(Error::EncryptedWorkbook {
+                        path: path.to_path_buf(),
+                    });
+                }
             }
 
             return Ok(WorkbookFormat::Xls);
@@ -749,6 +755,14 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
             extension: ext,
         }),
     }
+}
+
+fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
+    workbook_format_impl(path, false)
+}
+
+fn workbook_format_allow_encrypted_xls(path: &Path) -> Result<WorkbookFormat, Error> {
+    workbook_format_impl(path, true)
 }
 
 /// Open a spreadsheet workbook from disk directly into a [`formula_model::Workbook`].
@@ -858,11 +872,100 @@ pub fn open_workbook_model_with_password(
     path: impl AsRef<Path>,
     password: Option<&str>,
 ) -> Result<formula_model::Workbook, Error> {
+    use std::fs::File;
+    use std::io::BufReader;
+
     let path = path.as_ref();
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
-    open_workbook_model(path)
+
+    // If no password was provided, preserve the existing open path (including the current format
+    // classification behaviour for legacy `.xls`).
+    let Some(password) = password else {
+        return open_workbook_model(path);
+    };
+
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match workbook_format_allow_encrypted_xls(path)? {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
+            let file = File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsx::read_workbook_from_reader(file).map_err(|source| Error::OpenXlsx {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        WorkbookFormat::Xls => match xls::import_xls_path_with_password(path, password) {
+            Ok(result) => Ok(result.workbook),
+            Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
+                path: path.to_path_buf(),
+            }),
+            Err(source) => Err(Error::OpenXls {
+                path: path.to_path_buf(),
+                source,
+            }),
+        },
+        WorkbookFormat::Xlsb => {
+            let wb = xlsb::XlsbWorkbook::open_with_options(
+                path,
+                xlsb::OpenOptions {
+                    preserve_unknown_parts: false,
+                    preserve_parsed_parts: false,
+                    preserve_worksheets: false,
+                    decode_formulas: true,
+                    ..Default::default()
+                },
+            )
+            .map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            xlsb_to_model_workbook(&wb).map_err(|source| Error::OpenXlsb {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        WorkbookFormat::Csv => {
+            let file = File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let reader = BufReader::new(file);
+
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let sheet_name = formula_model::validate_sheet_name(stem)
+                .ok()
+                .map(|_| stem.to_string())
+                .unwrap_or_else(|| sanitize_sheet_name(stem));
+
+            let mut workbook = formula_model::Workbook::new();
+            import_csv_into_workbook(
+                &mut workbook,
+                sheet_name,
+                reader,
+                CsvOptions::default(),
+            )
+            .map_err(|source| Error::OpenCsv {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+            Ok(workbook)
+        }
+        WorkbookFormat::Parquet => open_parquet_model_workbook(path),
+        _ => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext.to_string(),
+        }),
+    }
 }
 
 /// Open a spreadsheet workbook from disk, providing a password for encrypted OOXML workbooks when
@@ -878,7 +981,83 @@ pub fn open_workbook_with_password(
     if let Some(err) = encrypted_ooxml_error_from_path(path, password) {
         return Err(err);
     }
-    open_workbook(path)
+
+    // If no password was provided, preserve the existing open path (including the current format
+    // classification behaviour for legacy `.xls`).
+    let Some(password) = password else {
+        return open_workbook(path);
+    };
+
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match workbook_format_allow_encrypted_xls(path)? {
+        WorkbookFormat::Xlsx | WorkbookFormat::Xlsm => {
+            let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let package =
+                xlsx::XlsxPackage::from_bytes(&bytes).map_err(|source| Error::OpenXlsx {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+            Ok(Workbook::Xlsx(package))
+        }
+        WorkbookFormat::Xls => match xls::import_xls_path_with_password(path, password) {
+            Ok(result) => Ok(Workbook::Xls(result)),
+            Err(xls::ImportError::EncryptedWorkbook) => Err(Error::EncryptedWorkbook {
+                path: path.to_path_buf(),
+            }),
+            Err(source) => Err(Error::OpenXls {
+                path: path.to_path_buf(),
+                source,
+            }),
+        },
+        WorkbookFormat::Xlsb => {
+            xlsb::XlsbWorkbook::open(path)
+                .map(Workbook::Xlsb)
+                .map_err(|source| Error::OpenXlsb {
+                    path: path.to_path_buf(),
+                    source,
+                })
+        }
+        WorkbookFormat::Csv => {
+            let file = std::fs::File::open(path).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let reader = std::io::BufReader::new(file);
+
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let sheet_name = formula_model::validate_sheet_name(stem)
+                .ok()
+                .map(|_| stem.to_string())
+                .unwrap_or_else(|| sanitize_sheet_name(stem));
+
+            let mut workbook = formula_model::Workbook::new();
+            import_csv_into_workbook(
+                &mut workbook,
+                sheet_name,
+                reader,
+                CsvOptions::default(),
+            )
+            .map_err(|source| Error::OpenCsv {
+                path: path.to_path_buf(),
+                source,
+            })?;
+
+            Ok(Workbook::Model(workbook))
+        }
+        WorkbookFormat::Parquet => open_parquet_model_workbook(path).map(Workbook::Model),
+        _ => Err(Error::UnsupportedExtension {
+            path: path.to_path_buf(),
+            extension: ext.to_string(),
+        }),
+    }
 }
 
 fn encrypted_ooxml_error_from_path(path: &Path, password: Option<&str>) -> Option<Error> {
