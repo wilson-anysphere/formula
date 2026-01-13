@@ -79,6 +79,11 @@ jobs:
         run: bash scripts/cargo_agent.sh install cargo-tauri --locked
 
       - name: Build desktop bundles (Tauri)
+        env:
+          # The AppImage tooling used by Tauri is itself distributed as an AppImage.
+          # In CI we may not have FUSE2 available, so force AppImages to run in
+          # "extract-and-run" mode (safe; does not affect the produced artifacts).
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
 
       - name: Report desktop bundle sizes
