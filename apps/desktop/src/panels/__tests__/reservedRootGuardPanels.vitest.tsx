@@ -48,9 +48,14 @@ class FakeBrowserWebSocket {
 class FakeProvider {
   ws: any;
   private readonly listeners = new Map<string, Set<(...args: any[]) => void>>();
+  connectCalls = 0;
 
   constructor(ws: any) {
     this.ws = ws;
+  }
+
+  connect() {
+    this.connectCalls += 1;
   }
 
   on(event: string, cb: (...args: any[]) => void) {
@@ -399,6 +404,8 @@ describe("sync-server reserved root guard disconnect UX", () => {
       retryBtn?.click();
       await flushPromises();
     });
+
+    expect(provider.connectCalls).toBe(1);
 
     await act(async () => {
       await waitFor(() => (container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false) === false);

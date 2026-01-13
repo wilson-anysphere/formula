@@ -110,6 +110,11 @@ export function CollabBranchManagerPanel({
         data-testid="reserved-root-guard-retry"
         onClick={() => {
           clearReservedRootGuardError((session as any)?.provider ?? null);
+          try {
+            (session as any)?.provider?.connect?.();
+          } catch {
+            // ignore
+          }
           setError(null);
           setReady(false);
           setMergeSource(null);

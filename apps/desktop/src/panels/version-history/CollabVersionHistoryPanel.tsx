@@ -52,6 +52,11 @@ export function CollabVersionHistoryPanel({
             // ignore
           }
           clearReservedRootGuardError((session as any)?.provider ?? null);
+          try {
+            (session as any)?.provider?.connect?.();
+          } catch {
+            // ignore
+          }
           setError(null);
           setLoadError(null);
           setCollabVersioning(null);
