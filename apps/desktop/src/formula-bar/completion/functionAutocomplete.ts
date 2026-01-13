@@ -213,6 +213,7 @@ export class FormulaBarFunctionAutocompleteController {
   #context: CompletionContext | null = null;
   #suggestions: FunctionSuggestion[] = [];
   #selectedIndex = 0;
+  #activeDescendantId: string | null = null;
 
   readonly #unsubscribe: Array<() => void> = [];
 
@@ -228,6 +229,10 @@ export class FormulaBarFunctionAutocompleteController {
     dropdown.hidden = true;
     opts.anchor.appendChild(dropdown);
     this.#dropdownEl = dropdown;
+
+    // Keep the textarea focused while navigating the listbox, using the
+    // active-descendant pattern for screen readers.
+    this.#textarea.setAttribute("aria-haspopup", "listbox");
 
     const updateNow = () => this.update();
     const onBlur = () => this.close();
@@ -263,6 +268,8 @@ export class FormulaBarFunctionAutocompleteController {
     this.#context = null;
     this.#suggestions = [];
     this.#selectedIndex = 0;
+    this.#activeDescendantId = null;
+    this.#textarea.removeAttribute("aria-activedescendant");
   }
 
   update(): void {
@@ -378,6 +385,7 @@ export class FormulaBarFunctionAutocompleteController {
     this.#dropdownEl.hidden = false;
     this.#dropdownEl.textContent = "";
     this.#itemEls = [];
+    this.#activeDescendantId = null;
 
     for (let i = 0; i < this.#suggestions.length; i += 1) {
       const item = this.#suggestions[i]!;
@@ -388,6 +396,11 @@ export class FormulaBarFunctionAutocompleteController {
       button.dataset.testid = "formula-function-autocomplete-item";
       button.dataset.name = item.name;
       button.setAttribute("aria-selected", i === this.#selectedIndex ? "true" : "false");
+      const id = `formula-function-autocomplete-option-${i}`;
+      button.id = id;
+      if (i === this.#selectedIndex) {
+        this.#activeDescendantId = id;
+      }
 
       // Prevent the mousedown from stealing focus from the textarea.
       button.addEventListener("mousedown", (e) => e.preventDefault());
@@ -416,17 +429,25 @@ export class FormulaBarFunctionAutocompleteController {
   }
 
   #syncSelection(): void {
+    this.#activeDescendantId = null;
     for (let i = 0; i < this.#itemEls.length; i += 1) {
       const el = this.#itemEls[i]!;
       const selected = i === this.#selectedIndex;
       el.setAttribute("aria-selected", selected ? "true" : "false");
       if (selected) {
+        this.#activeDescendantId = el.id || null;
         try {
           el.scrollIntoView({ block: "nearest" });
         } catch {
           // jsdom doesn't implement layout/scroll; ignore.
         }
       }
+    }
+
+    if (this.#activeDescendantId) {
+      this.#textarea.setAttribute("aria-activedescendant", this.#activeDescendantId);
+    } else {
+      this.#textarea.removeAttribute("aria-activedescendant");
     }
   }
 }

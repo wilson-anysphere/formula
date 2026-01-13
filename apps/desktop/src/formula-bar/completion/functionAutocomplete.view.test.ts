@@ -118,6 +118,34 @@ describe("FormulaBarView function autocomplete dropdown", () => {
     host.remove();
   });
 
+  it("uses aria-activedescendant on the textarea while navigating", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=VLO";
+    view.textarea.setSelectionRange(4, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    // Initial selection should populate aria-activedescendant.
+    const initial = view.textarea.getAttribute("aria-activedescendant");
+    expect(typeof initial).toBe("string");
+    expect(initial?.length).toBeGreaterThan(0);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    const afterDown = view.textarea.getAttribute("aria-activedescendant");
+    expect(afterDown).not.toBe(initial);
+
+    // Closing clears aria-activedescendant.
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(view.textarea.hasAttribute("aria-activedescendant")).toBe(false);
+
+    host.remove();
+  });
+
   it("accepts with Enter (and does not commit the edit)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
