@@ -109,6 +109,28 @@ test("VersionManager.destroy unsubscribes from doc updates (doc.off path)", () =
   assert.equal(vm.dirty, false);
 });
 
+test("VersionManager.destroy unsubscribes from doc updates (doc.removeListener path)", () => {
+  const doc = new FakeDoc();
+  // Simulate a doc that only implements `removeListener` (older EventEmitter API).
+  // Node's EventEmitter provides `off` as an alias, but some event emitter shims do not.
+  // Shadow the prototype method so `typeof doc.off !== 'function'`.
+  // @ts-expect-error - intentionally overriding
+  doc.off = undefined;
+
+  const store = new InMemoryVersionStore();
+  const vm = new VersionManager({ doc, store, autoStart: false });
+
+  assert.equal(vm.dirty, false);
+  doc.setCell("r0c0", { value: 1 });
+  assert.equal(vm.dirty, true);
+
+  vm.dirty = false;
+  vm.destroy();
+
+  doc.setCell("r0c1", { value: 2 });
+  assert.equal(vm.dirty, false);
+});
+
 test("VersionManager.destroy unsubscribes from doc updates (unsubscribe-returning doc.on path)", () => {
   class UnsubscribableDoc {
     constructor() {

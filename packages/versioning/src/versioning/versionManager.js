@@ -246,11 +246,19 @@ export class VersionManager extends SimpleEventEmitter {
       } catch {
         // ignore
       }
-    } else if (this.doc && typeof this.doc.off === "function" && this._docUpdateListener) {
-      try {
-        this.doc.off("update", this._docUpdateListener);
-      } catch {
-        // ignore
+    } else if (this.doc && this._docUpdateListener) {
+      const off =
+        typeof this.doc.off === "function"
+          ? this.doc.off
+          : typeof this.doc.removeListener === "function"
+            ? this.doc.removeListener
+            : null;
+      if (typeof off === "function") {
+        try {
+          off.call(this.doc, "update", this._docUpdateListener);
+        } catch {
+          // ignore
+        }
       }
     }
     this._docUpdateListener = null;
