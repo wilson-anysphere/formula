@@ -258,17 +258,31 @@ for rpm_path in "${rpms[@]}"; do
   echo "::endgroup::"
 
   # `rpm -qpR` lists "capabilities" which may be package names (when explicitly declared)
-  # or shared-library requirements (auto-generated). Match either so the check is robust
-  # across rpm-based distros and packaging strategies.
+  # or shared-library requirements (auto-generated).
   #
-  # Enforce WebKitGTK **4.1** specifically. We accept both Fedora-style package names
-  # (`webkit2gtk4.1`) and openSUSE-style library packages (`libwebkit2gtk-4_1-0`), along
-  # with the auto-generated soname requirements (`libwebkit2gtk-4.1.so.*`).
-  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1" "libwebkit2gtk-4\\.1"
-  assert_contains_any "$requires" "$rpm_path" "GTK3" "(^|[^a-z0-9])gtk3" "libgtk-3"
-  assert_contains_any "$requires" "$rpm_path" "AppIndicator (tray)" "appindicator"
-  assert_contains_any "$requires" "$rpm_path" "librsvg2 (icons)" "librsvg"
-  assert_contains_any "$requires" "$rpm_path" "OpenSSL (libssl)" "(^|[^a-z0-9])openssl" "libssl\\.so" "libssl"
+  # We validate **both**:
+  # 1) explicit package requirements (driven by `bundle.linux.rpm.depends` in `tauri.conf.json`),
+  #    so the RPM declares distro package names (Fedora/RHEL + openSUSE) instead of relying only
+  #    on auto-generated ELF soname requirements.
+  # 2) presence of the expected shared-library requirements (defense-in-depth).
+
+  # 1) Explicit package requirements (Fedora/RHEL + openSUSE naming via RPM rich deps).
+  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 package (webview)" "webkit2gtk4\\.1" "libwebkit2gtk-4_1"
+  assert_contains_any "$requires" "$rpm_path" "GTK3 package" "(^|[^a-z0-9])gtk3([^a-z0-9]|$)" "libgtk-3-0"
+  assert_contains_any "$requires" "$rpm_path" "AppIndicator/Ayatana package (tray)" \
+    "libayatana-appindicator-gtk3" \
+    "libappindicator-gtk3" \
+    "libayatana-appindicator3-1" \
+    "libappindicator3-1"
+  assert_contains_any "$requires" "$rpm_path" "librsvg package (icons)" "librsvg2" "librsvg-2-2"
+  assert_contains_any "$requires" "$rpm_path" "OpenSSL package" "openssl-libs" "libopenssl3"
+
+  # 2) Shared-library requirements (auto-generated).
+  assert_contains_any "$requires" "$rpm_path" "WebKitGTK 4.1 (webview) soname" "libwebkit2gtk-4\\.1"
+  assert_contains_any "$requires" "$rpm_path" "GTK3 soname" "libgtk-3"
+  assert_contains_any "$requires" "$rpm_path" "AppIndicator soname" "appindicator"
+  assert_contains_any "$requires" "$rpm_path" "librsvg soname" "librsvg"
+  assert_contains_any "$requires" "$rpm_path" "OpenSSL (libssl) soname" "libssl\\.so" "libssl"
 
   # Ensure the packaged binary itself is stripped (no accidental debug/symbol sections shipped).
   echo "::group::verify-linux-package-deps: stripped binary check (rpm) $(basename "$rpm_path")"
