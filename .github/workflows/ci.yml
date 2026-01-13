@@ -103,7 +103,7 @@ jobs:
   web:
     name: Web + desktop builds
     needs: conflict-marker-guard
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -119,6 +119,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       
       - name: Setup Rust toolchain (wasm32)
         uses: dtolnay/rust-toolchain@1.92.0
@@ -183,6 +188,23 @@ jobs:
 
       - name: Smoke-check WASM assets
         run: pnpm smoke:wasm
+
+      - name: Install Linux dependencies (Tauri/WebView)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+
+      - name: Build desktop binary (Rust, release)
+        run: cargo build -p formula-desktop-tauri --features desktop --release --locked
+
+      - name: Desktop size report (binary + dist)
+        run: python scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
 
   desktop-tauri-check:
     name: Desktop (Tauri) Rust compile check
