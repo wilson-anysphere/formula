@@ -1595,23 +1595,19 @@ fn import_xls_path_with_biff_reader(
                             );
                         }
                     } else {
-                        // Build a minimal rgce decode context. We provide sheet names (BoundSheet
-                        // order) and EXTERNSHEET entries so 3D references can be rendered; SUPBOOK and
-                        // defined-name metadata are left empty for best-effort decoding.
+                        // Provide a minimal rgce decode context: most formulas can be decoded
+                        // without workbook-global metadata, but we populate sheet names +
+                        // EXTERNSHEET so 3D references render as `Sheet!A1` rather than `#REF!`.
                         let sheet_names_by_biff_idx: Vec<String> = biff_sheets
                             .as_ref()
                             .map(|sheets| sheets.iter().map(|s| s.name.clone()).collect())
                             .unwrap_or_default();
-                        let externsheet_entries = biff_globals
-                            .as_ref()
-                            .map(|g| g.extern_sheets.as_slice())
-                            .unwrap_or(&[]);
                         let supbooks: &[biff::supbook::SupBookInfo] = &[];
                         let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
                         let ctx = biff::rgce::RgceDecodeContext {
                             codepage,
                             sheet_names: &sheet_names_by_biff_idx,
-                            externsheet: externsheet_entries,
+                            externsheet: &biff_externsheet_entries,
                             supbooks,
                             defined_names,
                         };
@@ -1719,6 +1715,7 @@ fn import_xls_path_with_biff_reader(
                     };
                     let mut apply_recovered_formulas =
                         |mut recovered: biff::formulas::PtgExpFallbackResult,
+                         override_existing: bool,
                          warnings: &mut Vec<ImportWarning>,
                          warnings_suppressed: &mut bool| {
                             for warning in recovered.warnings.drain(..) {
@@ -1727,18 +1724,20 @@ fn import_xls_path_with_biff_reader(
 
                             for (cell_ref, formula_text) in recovered.formulas {
                                 let anchor = sheet.merged_regions.resolve_cell(cell_ref);
-                                // Best-effort fallback only: do not override formulas that were
-                                // already resolved by calamine or earlier recovery passes.
-                                //
-                                // Calamine can return the `#UNKNOWN!` error sentinel for `PtgExp`
-                                // formulas it cannot resolve; treat that as "unresolved" so we can
-                                // replace it with a recovered materialized formula when possible.
-                                if sheet
-                                    .formula(anchor)
-                                    .is_some_and(|f| f != ErrorValue::Unknown.as_str())
-                                {
-                                    continue;
-                            }
+                                if !override_existing {
+                                    // Best-effort fallback only: do not override formulas that were
+                                    // already resolved by calamine or earlier recovery passes.
+                                    //
+                                    // Calamine can return the `#UNKNOWN!` error sentinel for `PtgExp`
+                                    // formulas it cannot resolve; treat that as "unresolved" so we can
+                                    // replace it with a recovered materialized formula when possible.
+                                    if sheet
+                                        .formula(anchor)
+                                        .is_some_and(|f| f != ErrorValue::Unknown.as_str())
+                                    {
+                                        continue;
+                                    }
+                                }
 
                             // Strip NUL bytes so formula text is parseable/stable (matches the
                             // calamine formula cleanup path).
@@ -1768,9 +1767,12 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => {
-                            apply_recovered_formulas(recovered, &mut warnings, &mut warnings_suppressed)
-                        }
+                        Ok(recovered) => apply_recovered_formulas(
+                            recovered,
+                            true,
+                            &mut warnings,
+                            &mut warnings_suppressed,
+                        ),
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(
@@ -1785,9 +1787,12 @@ fn import_xls_path_with_biff_reader(
                         sheet_info.offset,
                         &ctx,
                     ) {
-                        Ok(recovered) => {
-                            apply_recovered_formulas(recovered, &mut warnings, &mut warnings_suppressed)
-                        }
+                        Ok(recovered) => apply_recovered_formulas(
+                            recovered,
+                            false,
+                            &mut warnings,
+                            &mut warnings_suppressed,
+                        ),
                         Err(err) => push_import_warning(
                             &mut warnings,
                             format!(

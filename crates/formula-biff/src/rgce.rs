@@ -925,7 +925,7 @@ fn decode_rgce_impl(
 
                 let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
                 // Skip reserved u16.
-                i += 6;
+                i = i.saturating_add(6);
 
                 // Best-effort: we don't have workbook name context in this crate, so emit a stable
                 // placeholder that is parseable as an Excel identifier.
@@ -963,7 +963,7 @@ fn decode_rgce_impl(
 
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
                 let name_index = u16::from_le_bytes([rgce[i + 2], rgce[i + 3]]);
-                i += 4;
+                i = i.saturating_add(4);
 
                 // Best-effort: emit a stable placeholder identifier. Avoid characters like `:` and
                 // `{}` which would be treated as operators / invalid names by Excel formula

@@ -465,7 +465,7 @@ fn is_never_encrypted_record(record_id: u16) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod filepass_tests {
     use super::*;
     use formula_model::{CellRef, VerticalAlignment};
     use std::io::{Cursor, Read};
@@ -942,30 +942,33 @@ fn verify_password_legacy(
 }
 
 fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionInfo, DecryptError> {
-    if payload.len() < 2 {
-        return Err(DecryptError::InvalidFormat(format!(
-            "FILEPASS payload truncated (len={})",
-            payload.len()
-        )));
-    }
+    // FILEPASS payload layout for BIFF8 [MS-XLS] 2.4.117 (FilePass):
+    // - u16 wEncryptionType
+    // - (if wEncryptionType == 0x0000) XOR obfuscation: u16 key, u16 verifier
+    // - (if wEncryptionType == 0x0001) RC4 encryption:
+    //     u16 wEncryptionSubType
+    //     (subType-specific payload)
+    //
+    // This decryptor only supports RC4 CryptoAPI (`wEncryptionType=0x0001`, `wEncryptionSubType=0x0002`).
+    // Be careful to return `UnsupportedEncryption` (not `InvalidFormat`) when the payload is well-formed
+    // enough to identify an unsupported scheme.
 
     let encryption_type = read_u16_le(payload, 0).ok_or_else(|| {
-        DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
+        DecryptError::InvalidFormat(format!(
+            "FILEPASS payload truncated while reading wEncryptionType (len={})",
+            payload.len()
+        ))
     })?;
 
     if encryption_type != ENCRYPTION_TYPE_RC4 {
         return Err(DecryptError::UnsupportedEncryption);
     }
 
-    if payload.len() < 4 {
-        return Err(DecryptError::InvalidFormat(format!(
-            "FILEPASS payload truncated: missing wEncryptionSubType (len={})",
-            payload.len()
-        )));
-    }
-
     let encryption_subtype = read_u16_le(payload, 2).ok_or_else(|| {
-        DecryptError::InvalidFormat("FILEPASS missing wEncryptionSubType".to_string())
+        DecryptError::InvalidFormat(format!(
+            "FILEPASS payload truncated while reading wEncryptionSubType (len={})",
+            payload.len()
+        ))
     })?;
 
     if encryption_subtype != ENCRYPTION_SUBTYPE_CRYPTOAPI {
@@ -974,11 +977,10 @@ fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionIn
 
     if payload.len() < 8 {
         return Err(DecryptError::InvalidFormat(format!(
-            "FILEPASS payload truncated: missing dwEncryptionInfoLen (len={})",
+            "FILEPASS payload truncated (len={})",
             payload.len()
         )));
     }
-
     let enc_info_len = read_u32_le(payload, 4).ok_or_else(|| {
         DecryptError::InvalidFormat("FILEPASS missing dwEncryptionInfoLen".to_string())
     })? as usize;
@@ -1203,5 +1205,51 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
             Ok(out)
         }
         _ => Err(DecryptError::UnsupportedEncryption),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filepass_xor_is_reported_as_unsupported_encryption() {
+        // BIFF8 XOR obfuscation FILEPASS payload is:
+        //   u16 wEncryptionType (0x0000)
+        //   u16 key
+        //   u16 verifier
+        let payload = [0x00, 0x00, 0x34, 0x12, 0x78, 0x56];
+        let err = parse_filepass_record_payload(&payload).expect_err("expected error");
+        assert_eq!(err, DecryptError::UnsupportedEncryption);
+    }
+
+    #[test]
+    fn filepass_rc4_non_cryptoapi_is_reported_as_unsupported_encryption() {
+        // RC4 "standard" (non-CryptoAPI) has wEncryptionType==0x0001 but a different subtype.
+        let payload = [0x01, 0x00, 0x01, 0x00];
+        let err = parse_filepass_record_payload(&payload).expect_err("expected error");
+        assert_eq!(err, DecryptError::UnsupportedEncryption);
+    }
+
+    #[test]
+    fn filepass_missing_encryption_type_is_invalid_format() {
+        let payload = [0x00];
+        let err = parse_filepass_record_payload(&payload).expect_err("expected error");
+        assert!(matches!(err, DecryptError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn filepass_truncated_missing_subtype_is_invalid_format() {
+        let payload = [0x01, 0x00, 0x02];
+        let err = parse_filepass_record_payload(&payload).expect_err("expected error");
+        assert!(matches!(err, DecryptError::InvalidFormat(_)));
+    }
+
+    #[test]
+    fn filepass_truncated_missing_encryption_info_len_is_invalid_format() {
+        // wEncryptionType=RC4, wEncryptionSubType=CryptoAPI, but missing dwEncryptionInfoLen.
+        let payload = [0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00];
+        let err = parse_filepass_record_payload(&payload).expect_err("expected error");
+        assert!(matches!(err, DecryptError::InvalidFormat(_)));
     }
 }
