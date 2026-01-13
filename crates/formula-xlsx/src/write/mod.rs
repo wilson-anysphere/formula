@@ -915,8 +915,12 @@ fn build_parts(
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
 
-        let conditional_formatting_changed =
-            !sheet.conditional_formatting_rules.is_empty() && !orig_has_conditional_formatting;
+        // New sheets rendered from scratch already include conditional formatting blocks (with
+        // workbook-global `dxfId` remapping), so avoid re-inserting them via the streaming patcher
+        // which currently operates on the model's per-sheet `dxf_id` values.
+        let conditional_formatting_changed = !is_new_sheet
+            && !sheet.conditional_formatting_rules.is_empty()
+            && !orig_has_conditional_formatting;
 
         let sheet_protection_changed = if sheet.sheet_protection.enabled {
             match orig_sheet_protection.as_ref() {

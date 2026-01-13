@@ -4,9 +4,10 @@ use crate::openxml::{
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
 use crate::DateSystem;
+use super::{PivotCacheDefinition, PivotCacheValue};
+use formula_engine::pivot::{FilterField, PivotFieldRef, PivotKeyPart};
 use chrono::{Datelike, NaiveDate};
 use formula_engine::date::{serial_to_ymd, ymd_to_serial, ExcelDate, ExcelDateSystem};
-use formula_engine::pivot::PivotFieldRef;
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
 use formula_model::pivots::ScalarValue;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
@@ -14,8 +15,6 @@ use quick_xml::Reader;
 use quick_xml::Writer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Cursor;
-
-use super::{PivotCacheDefinition, PivotCacheValue};
 
 /// Best-effort slicer selection state extracted from `xl/slicerCaches/slicerCache*.xml`.
 ///
@@ -197,6 +196,105 @@ pub fn timeline_selection_to_row_filter(
     RowFilter::Timeline {
         field: field.into(),
         selection: TimelineSelection { start, end },
+    }
+}
+
+/// Convert a parsed timeline selection into a pivot-engine filter field by enumerating the
+/// allowed date items in the pivot cache definition.
+///
+/// This relies on the cache field's `<sharedItems>` list being available. If shared items are
+/// missing (or the timeline selection has no effective bounds), the returned [`FilterField`]
+/// will have `allowed: None`, meaning "allow all".
+pub fn timeline_selection_to_engine_filter_field_with_cache(
+    cache_def: &PivotCacheDefinition,
+    base_field: u32,
+    selection: &TimelineSelectionState,
+) -> FilterField {
+    let source_field = PivotFieldRef::CacheFieldName(
+        cache_def
+            .cache_fields
+            .get(base_field as usize)
+            .map(|f| f.name.clone())
+            .unwrap_or_default(),
+    );
+
+    if selection.start.is_none() && selection.end.is_none() {
+        return FilterField {
+            source_field,
+            allowed: None,
+        };
+    }
+
+    let start = selection.start.as_deref().and_then(parse_iso_ymd);
+    let end = selection.end.as_deref().and_then(parse_iso_ymd);
+
+    // If the persisted endpoints are not parseable, avoid applying a potentially destructive
+    // empty filter.
+    if start.is_none() && end.is_none() {
+        return FilterField {
+            source_field,
+            allowed: None,
+        };
+    }
+
+    let Some(field) = cache_def.cache_fields.get(base_field as usize) else {
+        return FilterField {
+            source_field,
+            allowed: None,
+        };
+    };
+    let Some(shared_items) = field.shared_items.as_ref() else {
+        return FilterField {
+            source_field,
+            allowed: None,
+        };
+    };
+
+    let mut allowed = HashSet::new();
+    for item in shared_items {
+        let Some(date) = pivot_cache_shared_item_to_naive_date(item) else {
+            continue;
+        };
+        if let Some(start) = start {
+            if date < start {
+                continue;
+            }
+        }
+        if let Some(end) = end {
+            if date > end {
+                continue;
+            }
+        }
+        allowed.insert(PivotKeyPart::Date(date));
+    }
+
+    FilterField {
+        source_field,
+        allowed: Some(allowed),
+    }
+}
+
+fn pivot_cache_shared_item_to_naive_date(item: &PivotCacheValue) -> Option<NaiveDate> {
+    match item {
+        PivotCacheValue::DateTime(v) | PivotCacheValue::String(v) => {
+            // Timeline caches normalize dates using the workbook's date system, but this helper is
+            // purely cache-definition based and does not have access to the workbook metadata. In
+            // practice shared items for date fields are typically stored as ISO strings, so the
+            // date-system parameter only matters when the shared item is a numeric serial encoded
+            // as a string.
+            normalize_timeline_date(v, ExcelDateSystem::EXCEL_1900)
+                .as_deref()
+                .and_then(parse_iso_ymd)
+        }
+        PivotCacheValue::Number(n) => {
+            // Excel stores dates as serial numbers; shared items for date fields should generally
+            // use `<d>`, but accept numbers as a best-effort fallback.
+            let serial = n.floor() as i32;
+            serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900)
+                .ok()
+                .and_then(|ymd| NaiveDate::from_ymd_opt(ymd.year, ymd.month as u32, ymd.day as u32))
+        }
+        _ => None,
     }
 }
 
@@ -2753,6 +2851,7 @@ fn parse_timeline_cache_xml(xml: &[u8]) -> Result<ParsedTimelineCacheXml, XlsxEr
 mod engine_filter_field_tests {
     use super::*;
     use crate::pivots::PivotCacheField;
+    use pretty_assertions::assert_eq;
     use std::collections::HashSet;
     use std::io::{Cursor, Write};
 
@@ -2911,6 +3010,40 @@ mod engine_filter_field_tests {
                 NaiveDate::from_ymd_opt(2024, 1, 15).unwrap()
             ))
         );
+    }
+
+    #[test]
+    fn timeline_selection_to_engine_filter_enumerates_dates_from_shared_items() {
+        let cache_def = PivotCacheDefinition {
+            cache_fields: vec![PivotCacheField {
+                name: "OrderDate".to_string(),
+                shared_items: Some(vec![
+                    PivotCacheValue::DateTime("2024-01-01".to_string()),
+                    PivotCacheValue::DateTime("2024-01-02".to_string()),
+                    PivotCacheValue::DateTime("2024-01-03".to_string()),
+                ]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let selection = TimelineSelectionState {
+            start: Some("2024-01-02".to_string()),
+            end: Some("2024-01-03".to_string()),
+        };
+
+        let filter = timeline_selection_to_engine_filter_field_with_cache(&cache_def, 0, &selection);
+
+        assert_eq!(
+            filter.source_field,
+            PivotFieldRef::CacheFieldName("OrderDate".to_string())
+        );
+
+        let mut expected = HashSet::new();
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 2).unwrap()));
+        expected.insert(PivotKeyPart::Date(NaiveDate::from_ymd_opt(2024, 1, 3).unwrap()));
+
+        assert_eq!(filter.allowed, Some(expected));
     }
 }
 

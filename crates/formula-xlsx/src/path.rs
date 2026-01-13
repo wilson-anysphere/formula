@@ -19,22 +19,33 @@ pub fn resolve_target(source_part: &str, target: &str) -> String {
 pub fn resolve_target_candidates(source_part: &str, target: &str) -> Vec<String> {
     let raw = resolve_target_inner(source_part, target);
 
-    // Fast path: if the target path has no percent escapes (after stripping fragments/queries and
-    // normalizing separators), there is no alternate candidate.
     let source_part_seps = normalize_separators(source_part);
     let target_seps = normalize_separators(target);
     let stripped = strip_uri_suffixes(target_seps.as_ref());
-    let decoded = percent_decode_best_effort(stripped);
-    let Cow::Owned(decoded) = decoded else {
-        return vec![raw];
-    };
 
-    let decoded_resolved = resolve_target_from_stripped(source_part_seps.as_ref(), decoded.as_str());
-    if decoded_resolved == raw {
-        vec![raw]
-    } else {
-        vec![raw, decoded_resolved]
+    let mut out = vec![raw.clone()];
+
+    // If the relationship target uses percent-encoding, also try a decoded path (some producers
+    // percent-encode relationship targets while storing ZIP entry names unescaped).
+    if let Cow::Owned(decoded) = percent_decode_best_effort(stripped) {
+        let decoded_resolved =
+            resolve_target_from_stripped(source_part_seps.as_ref(), decoded.as_str());
+        if decoded_resolved != raw {
+            out.push(decoded_resolved);
+        }
     }
+
+    // Conversely, some producers write relationship targets with unescaped spaces, while storing
+    // ZIP entry names percent-encoded. Try an encoded variant as a best-effort fallback.
+    if let Cow::Owned(encoded) = percent_encode_best_effort(stripped) {
+        let encoded_resolved =
+            resolve_target_from_stripped(source_part_seps.as_ref(), encoded.as_str());
+        if !out.iter().any(|v| v == &encoded_resolved) {
+            out.push(encoded_resolved);
+        }
+    }
+
+    out
 }
 
 fn strip_uri_suffixes(target: &str) -> &str {
@@ -118,6 +129,25 @@ fn percent_decode_best_effort(input: &str) -> Cow<'_, str> {
         Ok(s) => Cow::Owned(s),
         Err(_) => Cow::Borrowed(input),
     }
+}
+
+fn percent_encode_best_effort(input: &str) -> Cow<'_, str> {
+    // Best-effort: today we only need to support spaces, which are invalid in relationship target
+    // URIs but may show up in some producer-generated `.rels` parts. Excel stores some parts with
+    // percent-encoded names (`%20`) so we need to be able to map between the forms.
+    if !input.as_bytes().iter().any(|b| *b == b' ') {
+        return Cow::Borrowed(input);
+    }
+
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch == ' ' {
+            out.push_str("%20");
+        } else {
+            out.push(ch);
+        }
+    }
+    Cow::Owned(out)
 }
 
 fn is_hex_digit(b: u8) -> bool {
@@ -230,6 +260,18 @@ mod tests {
             vec![
                 "xl/worksheets/sheet%201.xml".to_string(),
                 "xl/worksheets/sheet 1.xml".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn resolve_target_candidates_returns_percent_encoded_variant() {
+        let targets = resolve_target_candidates("xl/workbook.xml", "worksheets/sheet 1.xml");
+        assert_eq!(
+            targets,
+            vec![
+                "xl/worksheets/sheet 1.xml".to_string(),
+                "xl/worksheets/sheet%201.xml".to_string()
             ]
         );
     }

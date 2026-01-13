@@ -117,8 +117,9 @@ pub use pivots::{
     slicers::{
         slicer_selection_to_engine_filter_field, slicer_selection_to_engine_filter_field_with_resolver,
         slicer_selection_to_row_filter, slicer_selection_to_row_filter_with_resolver,
-        timeline_selection_to_engine_filter_field, timeline_selection_to_row_filter, PivotSlicerParts,
-        SlicerDefinition, SlicerSelectionState, TimelineDefinition, TimelineSelectionState,
+        timeline_selection_to_engine_filter_field, timeline_selection_to_engine_filter_field_with_cache,
+        timeline_selection_to_row_filter, PivotSlicerParts, SlicerDefinition, SlicerSelectionState,
+        TimelineDefinition, TimelineSelectionState,
     },
     ux_graph::XlsxPivotUxGraph,
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
