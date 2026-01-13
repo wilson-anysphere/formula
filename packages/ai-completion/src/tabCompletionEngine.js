@@ -732,8 +732,12 @@ export class TabCompletionEngine {
 
     const cursor = clampCursor(input, context.cursorPosition);
 
-    // Curated list + stable ordering. Use slightly decreasing confidence so our
-    // list order is preserved even after global sorting.
+    // Curated list + stable ordering.
+    //
+    // Keep these just below the backend completion confidence so (when the backend
+    // is available) users get the richer, context-aware suggestion instead of a
+    // bare function stub. When the backend times out/unavailable, these still
+    // provide useful immediate fallbacks.
     const starters = ["SUM(", "AVERAGE(", "IF(", "XLOOKUP(", "VLOOKUP("];
 
     /** @type {Suggestion[]} */
@@ -745,7 +749,7 @@ export class TabCompletionEngine {
         text,
         displayText,
         type: "formula",
-        confidence: 0.9 - i * 0.01,
+        confidence: 0.34 - i * 0.01,
       });
     }
 
