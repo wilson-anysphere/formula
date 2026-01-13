@@ -21,8 +21,12 @@ These are used by:
   surface a password/encryption error when no password is supplied)
 - `crates/formula-io/tests/encrypted_ooxml_fixtures.rs` (format sniffing/detection; optional)
 
-If you add additional encrypted workbook fixtures, document the expected password in the adjacent
-README (or encode it in the filename) so tests can open them deterministically.
+These fixtures are currently only used to exercise the “password required” error path, so the
+actual passwords are not needed by tests (Formula does not decrypt encrypted workbooks yet).
+
+If you add additional encrypted workbook fixtures intended for decryption tests, document the
+expected password in the adjacent README (or encode it in the filename) so tests can open them
+deterministically.
 
 See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
 `EncryptedPackage`).
