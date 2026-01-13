@@ -193,7 +193,7 @@ function buildSuggestions(prefixUpper: string, limit: number): FunctionSuggestio
   return out;
 }
 
-export interface FormulaBarFunctionAutocompleteControllerOptions {
+interface FormulaBarFunctionAutocompleteControllerOptions {
   formulaBar: FormulaBarView;
   /**
    * Element used as the positioning context (should be `position: relative`).

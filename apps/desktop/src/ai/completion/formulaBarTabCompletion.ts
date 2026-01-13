@@ -23,7 +23,7 @@ function normalizeSheetNameToken(sheetName: string): string {
   return raw;
 }
 
-export interface FormulaBarTabCompletionControllerOptions {
+interface FormulaBarTabCompletionControllerOptions {
   formulaBar: FormulaBarView;
   document: DocumentController;
   getSheetId: () => string;
