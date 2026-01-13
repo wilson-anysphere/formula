@@ -577,6 +577,39 @@ test("buildContext: splitRegions indexes multiple row windows for tall sheets", 
   assert.match(out.retrieved[0].preview, /\bspecialtoken\b/);
 });
 
+test("buildContext: toggling splitRegions forces re-indexing and changes retrieved windows", async () => {
+  const ragIndex = new RagIndex();
+  let indexCalls = 0;
+  const originalIndexSheet = ragIndex.indexSheet.bind(ragIndex);
+  ragIndex.indexSheet = async (...args) => {
+    indexCalls++;
+    return originalIndexSheet(...args);
+  };
+
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, ragIndex });
+  const values = [];
+  for (let r = 0; r < 100; r++) values.push([r === 99 ? "specialtoken" : "filler"]);
+  const sheet = makeSheet(values);
+
+  const outUnsplit = await cm.buildContext({
+    sheet,
+    query: "specialtoken",
+    limits: { maxChunkRows: 10, splitRegions: false },
+  });
+  assert.equal(indexCalls, 1);
+  assert.doesNotMatch(outUnsplit.retrieved[0].preview, /\bspecialtoken\b/);
+  assert.equal(outUnsplit.retrieved[0].range, "Sheet1!A1:A100");
+
+  const outSplit = await cm.buildContext({
+    sheet,
+    query: "specialtoken",
+    limits: { maxChunkRows: 10, splitRegions: true, chunkRowOverlap: 0, maxChunksPerRegion: 20 },
+  });
+  assert.equal(indexCalls, 2);
+  assert.match(outSplit.retrieved[0].preview, /\bspecialtoken\b/);
+  assert.equal(outSplit.retrieved[0].range, "Sheet1!A91:A100");
+});
+
 test("buildContext: splitRegions constructor option enables row-window retrieval without per-call limits", async () => {
   const cm = new ContextManager({
     tokenBudgetTokens: 1_000,
