@@ -234,6 +234,13 @@ python -m tools.corpus.triage ... \
   --diff-ignore-path-in "xl/worksheets/*.xml:xr:uid"
 ```
 
+To ignore a family of parts by pattern (repeatable), pass `--diff-ignore-glob`:
+
+```bash
+# Ignore embedded media assets (images, etc.)
+python -m tools.corpus.triage ... --diff-ignore-glob 'xl/media/*'
+```
+
 #### calcChain (`xl/calcChain.xml`)
 
 Excel workbooks may include a **calculation chain** (`xl/calcChain.xml`) that records formula dependency order.

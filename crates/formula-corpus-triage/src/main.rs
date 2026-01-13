@@ -50,6 +50,10 @@ struct Args {
     #[arg(long = "ignore-part")]
     ignore_parts: Vec<String>,
 
+    /// Glob patterns to ignore when diffing round-tripped output (repeatable).
+    #[arg(long = "ignore-glob")]
+    ignore_globs: Vec<String>,
+
     /// Substring patterns to ignore within XML diff paths (repeatable).
     ///
     /// This is useful for suppressing known-noisy attributes (e.g. `dyDescent`,
@@ -215,6 +219,7 @@ struct PartDiffSummary {
 #[derive(Debug, Serialize)]
 struct DiffDetails {
     ignore: Vec<String>,
+    ignore_globs: Vec<String>,
     ignore_paths: Vec<String>,
     strict_calc_chain: bool,
     counts: DiffCounts,
@@ -262,6 +267,7 @@ struct RenderPrintArea {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    validate_ignore_globs(&args.ignore_globs)?;
 
     let mut output = TriageOutput {
         steps: BTreeMap::new(),
@@ -634,12 +640,6 @@ fn detect_workbook_format(input: &PathBuf, input_bytes: &[u8]) -> WorkbookFormat
     WorkbookFormat::Xlsx
 }
 
-fn normalize_ignore_pattern(input: &str) -> String {
-    let trimmed = input.trim();
-    let normalized = trimmed.replace('\\', "/");
-    normalized.trim_start_matches('/').to_string()
-}
-
 fn build_ignore_path_rules(args: &Args) -> Result<Vec<xlsx_diff::IgnorePathRule>> {
     let mut rules = Vec::new();
 
@@ -693,8 +693,15 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         .map(|s| normalize_opc_part_name(s))
         .filter(|s| !s.is_empty())
         .collect();
-    let mut ignore_sorted: Vec<String> = ignore.iter().cloned().collect();
-    ignore_sorted.sort();
+    let ignore_sorted: Vec<String> = ignore.iter().cloned().collect();
+
+    let ignore_globs: BTreeSet<String> = args
+        .ignore_globs
+        .iter()
+        .map(|s| normalize_ignore_pattern(s))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let ignore_globs_sorted: Vec<String> = ignore_globs.iter().cloned().collect();
 
     let ignore_paths = build_ignore_path_rules(args)?;
     let mut ignore_paths_sorted: Vec<String> = ignore_paths
@@ -728,7 +735,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         &actual_archive,
         &xlsx_diff::DiffOptions {
             ignore_parts: ignore,
-            ignore_globs: Vec::new(),
+            ignore_globs: ignore_globs_sorted.clone(),
             ignore_paths,
             strict_calc_chain,
         },
@@ -792,6 +799,7 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
 
     Ok(DiffDetails {
         ignore: ignore_sorted,
+        ignore_globs: ignore_globs_sorted,
         ignore_paths: ignore_paths_sorted,
         strict_calc_chain,
         counts,
@@ -951,6 +959,28 @@ fn normalize_opc_path(path: &str) -> String {
         }
     }
     out.join("/")
+}
+
+fn normalize_ignore_pattern(input: &str) -> String {
+    let trimmed = input.trim();
+    let normalized = trimmed.replace('\\', "/");
+    normalized.trim_start_matches('/').to_string()
+}
+
+fn validate_ignore_globs(ignore_globs: &[String]) -> Result<()> {
+    for raw in ignore_globs {
+        let pattern = normalize_ignore_pattern(raw);
+        if pattern.is_empty() {
+            continue;
+        }
+        if let Err(err) = Glob::new(&pattern) {
+            // Avoid leaking user-provided patterns into logs/artifacts; follow the same hashing
+            // convention as other triage errors.
+            let sha = sha256_text(&err.to_string());
+            anyhow::bail!("invalid --ignore-glob pattern (sha256={sha})");
+        }
+    }
+    Ok(())
 }
 
 fn recalc_against_cached(doc: &formula_xlsx::XlsxDocument) -> Result<Option<RecalcDetails>> {
@@ -1370,6 +1400,7 @@ mod tests {
             input: PathBuf::from("dummy.xlsx"),
             format: WorkbookFormat::Xlsx,
             ignore_parts: vec!["docProps/app.xml".to_string()],
+            ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
             strict_calc_chain: false,
@@ -1567,6 +1598,7 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
             strict_calc_chain: false,
@@ -1657,6 +1689,7 @@ mod tests {
             input: PathBuf::new(),
             format: WorkbookFormat::Xlsx,
             ignore_parts: Vec::new(),
+            ignore_globs: Vec::new(),
             ignore_paths: Vec::new(),
             ignore_paths_in: Vec::new(),
             strict_calc_chain: false,

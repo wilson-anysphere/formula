@@ -42,6 +42,11 @@ DEFAULT_DIFF_IGNORE = {
     # metrics/dashboards without failing CI gates (which key off critical diffs).
 }
 
+# Glob patterns to ignore during diffing. Keep conservative; this is primarily intended for local
+# corpus minimization workflows where you want to suppress clearly non-semantic churn (e.g. media
+# assets) without removing the files from the workbook.
+DEFAULT_DIFF_IGNORE_GLOBS: set[str] = set()
+
 
 def _normalize_diff_ignore_part(part: str) -> str:
     """Normalize a diff-ignore part path to match the Rust helper's canonicalization."""
@@ -369,6 +374,23 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
         return "round_trip_external_links"
 
     return "round_trip_other"
+def _normalize_diff_ignore_glob(pattern: str) -> str:
+    """Normalize a diff-ignore glob pattern to match the Rust helper's canonicalization."""
+
+    return _normalize_diff_ignore_part(pattern)
+
+
+def _compute_diff_ignore_globs(
+    *, diff_ignore_globs: list[str], use_default: bool
+) -> set[str]:
+    ignore: set[str] = set()
+    if use_default:
+        ignore |= DEFAULT_DIFF_IGNORE_GLOBS
+    for pattern in diff_ignore_globs:
+        normalized = _normalize_diff_ignore_glob(pattern)
+        if normalized:
+            ignore.add(normalized)
+    return ignore
 
 
 @dataclass(frozen=True)
@@ -1187,6 +1209,7 @@ def _run_rust_triage(
     *,
     workbook_name: str,
     diff_ignore: set[str],
+    diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
     diff_limit: int,
@@ -1227,6 +1250,10 @@ def _run_rust_triage(
         ]
         for part in sorted(diff_ignore):
             cmd.extend(["--ignore-part", part])
+        if diff_ignore_globs is None:
+            diff_ignore_globs = set()
+        for pattern in sorted({p.strip() for p in diff_ignore_globs if p and p.strip()}):
+            cmd.extend(["--ignore-glob", pattern])
         for pattern in sorted({p.strip() for p in diff_ignore_path if p and p.strip()}):
             cmd.extend(["--ignore-path", pattern])
         for scoped in sorted({p.strip() for p in diff_ignore_path_in if p and p.strip()}):
@@ -1261,6 +1288,7 @@ def triage_workbook(
     *,
     rust_exe: Path,
     diff_ignore: set[str],
+    diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] | list[str] = (),
     diff_ignore_path_in: tuple[str, ...] | list[str] = (),
     diff_limit: int,
@@ -1270,6 +1298,9 @@ def triage_workbook(
     strict_calc_chain: bool = False,
     privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> dict[str, Any]:
+    if diff_ignore_globs is None:
+        diff_ignore_globs = set(DEFAULT_DIFF_IGNORE_GLOBS)
+
     sha = sha256_hex(workbook.data)
     display_name = workbook.display_name
     if privacy_mode == _PRIVACY_PRIVATE:
@@ -1341,6 +1372,7 @@ def triage_workbook(
         # params when the target callable can accept them.
         optional_kwargs = {
             "workbook_name": workbook.display_name,
+            "diff_ignore_globs": diff_ignore_globs,
             "round_trip_fail_on": round_trip_fail_on,
             "diff_ignore_path": diff_ignore_path,
             "diff_ignore_path_in": diff_ignore_path_in,
@@ -1501,6 +1533,7 @@ def _triage_one_path(
     *,
     rust_exe: str,
     diff_ignore: tuple[str, ...],
+    diff_ignore_globs: tuple[str, ...] = (),
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
     diff_limit: int,
@@ -1544,6 +1577,7 @@ def _triage_one_path(
             wb,
             rust_exe=Path(rust_exe),
             diff_ignore=set(diff_ignore),
+            diff_ignore_globs=set(diff_ignore_globs),
             diff_ignore_path=diff_ignore_path,
             diff_ignore_path_in=diff_ignore_path_in,
             diff_limit=diff_limit,
@@ -1627,6 +1661,7 @@ def _triage_paths(
     *,
     rust_exe: str,
     diff_ignore: set[str],
+    diff_ignore_globs: set[str] | None = None,
     diff_ignore_path: tuple[str, ...] = (),
     diff_ignore_path_in: tuple[str, ...] = (),
     diff_limit: int,
@@ -1656,10 +1691,11 @@ def _triage_paths(
 
     reports_by_index: list[dict[str, Any] | None] = [None] * len(paths)
     diff_ignore_tuple = tuple(sorted({p for p in diff_ignore if p}))
+    if diff_ignore_globs is None:
+        diff_ignore_globs = set()
+    diff_ignore_globs_tuple = tuple(sorted({p for p in diff_ignore_globs if p}))
     diff_ignore_path_tuple = tuple(sorted({p for p in diff_ignore_path if p and p.strip()}))
-    diff_ignore_path_in_tuple = tuple(
-        sorted({p for p in diff_ignore_path_in if p and p.strip()})
-    )
+    diff_ignore_path_in_tuple = tuple(sorted({p for p in diff_ignore_path_in if p and p.strip()}))
 
     if worker_count == 1 or len(paths) <= 1:
         for idx, path in enumerate(paths):
@@ -1667,6 +1703,7 @@ def _triage_paths(
                 str(path),
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
+                diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
                 diff_limit=diff_limit,
@@ -1703,6 +1740,7 @@ def _triage_paths(
                 str(path),
                 rust_exe=rust_exe,
                 diff_ignore=diff_ignore_tuple,
+                diff_ignore_globs=diff_ignore_globs_tuple,
                 diff_ignore_path=diff_ignore_path_tuple,
                 diff_ignore_path_in=diff_ignore_path_in_tuple,
                 diff_limit=diff_limit,
@@ -1818,6 +1856,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Additional part path to ignore during diff (can be repeated).",
     )
     parser.add_argument(
+        "--diff-ignore-glob",
+        action="append",
+        default=[],
+        help="Additional glob pattern to ignore during diff (can be repeated).",
+    )
+    parser.add_argument(
         "--diff-ignore-path",
         action="append",
         default=[],
@@ -1840,7 +1884,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Disable the built-in default ignore list (docProps/*). "
-            "When set, only explicit --diff-ignore entries are ignored."
+            "When set, only explicit --diff-ignore/--diff-ignore-glob entries are ignored."
         ),
     )
     parser.add_argument(
@@ -1875,6 +1919,9 @@ def main() -> int:
 
     diff_ignore = _compute_diff_ignore(
         diff_ignore=args.diff_ignore, use_default=not args.no_default_diff_ignore
+    )
+    diff_ignore_globs = _compute_diff_ignore_globs(
+        diff_ignore_globs=args.diff_ignore_glob, use_default=not args.no_default_diff_ignore
     )
 
     try:
@@ -1932,6 +1979,7 @@ def main() -> int:
         paths,
         rust_exe=str(rust_exe),
         diff_ignore=diff_ignore,
+        diff_ignore_globs=diff_ignore_globs,
         diff_ignore_path=tuple(diff_ignore_path_values),
         diff_ignore_path_in=tuple(diff_ignore_path_in_values),
         diff_limit=args.diff_limit,
