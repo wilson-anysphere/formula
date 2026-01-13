@@ -584,7 +584,7 @@ export class ContextManager {
       if (dlpDecision.decision === DLP_DECISION.REDACT) {
         sheetForContext = {
           ...sheetForContext,
-          values: redactValuesForDlp(sheetForContext.values, this.redactor, { signal }),
+          values: redactValuesForDlp(sheetForContext.values, this.redactor, { signal, includeRestrictedContent }),
         };
       }
     }
@@ -631,12 +631,16 @@ export class ContextManager {
     );
 
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
-    const schemaOut = shouldReturnRedactedStructured ? redactStructuredValue(schema, this.redactor, { signal }) : schema;
+    const includeRestrictedContentForStructured =
+      dlp?.includeRestrictedContent ?? dlp?.include_restricted_content ?? false;
+    const schemaOut = shouldReturnRedactedStructured
+      ? redactStructuredValue(schema, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
+      : schema;
     const sampledOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(sampled, this.redactor, { signal })
+      ? redactStructuredValue(sampled, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
       : sampled;
     const retrievedOut = shouldReturnRedactedStructured
-      ? redactStructuredValue(retrieved, this.redactor, { signal })
+      ? redactStructuredValue(retrieved, this.redactor, { signal, includeRestrictedContent: includeRestrictedContentForStructured })
       : retrieved;
 
     const sections = [
@@ -1443,6 +1447,7 @@ function heuristicToPolicyClassification(heuristic) {
  */
 function redactValuesForDlp(values, redactor, options = {}) {
   const signal = options.signal;
+  const includeRestrictedContent = options.includeRestrictedContent ?? false;
   /** @type {unknown[][]} */
   const out = [];
   for (const row of values || []) {
@@ -1454,7 +1459,18 @@ function redactValuesForDlp(values, redactor, options = {}) {
     const nextRow = [];
     for (const cell of row) {
       throwIfAborted(signal);
-      nextRow.push(typeof cell === "string" ? redactor(cell) : cell);
+      if (typeof cell !== "string") {
+        nextRow.push(cell);
+        continue;
+      }
+      const redacted = redactor(cell);
+      // Defense-in-depth: if the configured redactor is a no-op (or incomplete),
+      // ensure heuristic sensitive patterns never slip through under DLP redaction.
+      if (!includeRestrictedContent && classifyText(redacted).level === "sensitive") {
+        nextRow.push("[REDACTED]");
+        continue;
+      }
+      nextRow.push(redacted);
     }
     out.push(nextRow);
   }
@@ -1475,15 +1491,24 @@ function redactValuesForDlp(values, redactor, options = {}) {
  */
 function redactStructuredValue(value, redactor, options = {}) {
   const signal = options.signal;
+  const includeRestrictedContent = options.includeRestrictedContent ?? false;
   throwIfAborted(signal);
 
-  if (typeof value === "string") return /** @type {T} */ (redactor(value));
+  if (typeof value === "string") {
+    const redacted = redactor(value);
+    if (!includeRestrictedContent && classifyText(redacted).level === "sensitive") {
+      return /** @type {T} */ ("[REDACTED]");
+    }
+    return /** @type {T} */ (redacted);
+  }
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
   if (value instanceof Date) return value;
 
   if (Array.isArray(value)) {
-    return /** @type {T} */ (value.map((v) => redactStructuredValue(v, redactor, { signal })));
+    return /** @type {T} */ (
+      value.map((v) => redactStructuredValue(v, redactor, { signal, includeRestrictedContent }))
+    );
   }
 
   const proto = Object.getPrototypeOf(value);
@@ -1496,7 +1521,7 @@ function redactStructuredValue(value, redactor, options = {}) {
   const out = {};
   for (const [key, v] of Object.entries(value)) {
     throwIfAborted(signal);
-    out[key] = redactStructuredValue(v, redactor, { signal });
+    out[key] = redactStructuredValue(v, redactor, { signal, includeRestrictedContent });
   }
   return out;
 }

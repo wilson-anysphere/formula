@@ -147,5 +147,41 @@ describe("ContextManager.buildContext origin-aware handling", () => {
 
     expect(auditLogger.log).toHaveBeenCalledTimes(1);
   });
-});
 
+  it("enforces heuristic redaction under DLP even when the configured redactor is a no-op", async () => {
+    const cm = new ContextManager({
+      tokenBudgetTokens: 1_000,
+      redactor: (text: string) => text,
+    });
+
+    const auditLogger = { log: vi.fn() };
+
+    const out = await cm.buildContext({
+      sheet: {
+        name: "Sheet1",
+        values: [
+          ["Name", "Email"],
+          ["Alice", "alice@example.com"],
+        ],
+      },
+      query: "alice",
+      dlp: {
+        documentId: "doc-1",
+        sheetId: "Sheet1",
+        policy: POLICY_REDACT_RESTRICTED,
+        classificationRecords: [],
+        auditLogger,
+      },
+    });
+
+    expect(out.promptContext).toContain("DLP:");
+    expect(out.promptContext).toContain("[REDACTED]");
+    expect(out.promptContext).not.toContain("alice@example.com");
+
+    expect(JSON.stringify(out.sampledRows)).not.toContain("alice@example.com");
+    expect(JSON.stringify(out.schema)).not.toContain("alice@example.com");
+    expect(JSON.stringify(out.retrieved)).not.toContain("alice@example.com");
+
+    expect(auditLogger.log).toHaveBeenCalledTimes(1);
+  });
+});
