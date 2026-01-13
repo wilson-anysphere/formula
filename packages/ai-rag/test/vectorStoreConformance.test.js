@@ -129,6 +129,32 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
         assert.equal(after.metadata.label, "Inc2");
       });
 
+      await t.test("listContentHashes returns ids + content/metadata hashes", async () => {
+        if (typeof store.listContentHashes !== "function") return;
+        await store.upsert([
+          {
+            id: "hash-a",
+            vector: [1, 0, 0],
+            metadata: { workbookId: "wb-hash", contentHash: "c-a", metadataHash: "m-a" },
+          },
+          { id: "hash-b", vector: [0, 1, 0], metadata: { workbookId: "wb-hash" } },
+        ]);
+
+        const hashes = await store.listContentHashes({ workbookId: "wb-hash" });
+        assert.deepEqual(
+          hashes
+            .map((r) => r.id)
+            .slice()
+            .sort(),
+          ["hash-a", "hash-b"]
+        );
+        const byId = new Map(hashes.map((r) => [r.id, r]));
+        assert.equal(byId.get("hash-a")?.contentHash, "c-a");
+        assert.equal(byId.get("hash-a")?.metadataHash, "m-a");
+        assert.equal(byId.get("hash-b")?.contentHash, null);
+        assert.equal(byId.get("hash-b")?.metadataHash, null);
+      });
+
       await t.test("query(vector, topK, { workbookId }) returns topK ordered desc", async () => {
         const hits = await store.query([1, 0, 0], 3, { workbookId: "wb-query" });
         assert.equal(hits.length, 3);
@@ -174,6 +200,15 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
         await assert.rejects(store.list({ workbookId: "wb-query", signal: abortController.signal }), {
           name: "AbortError",
         });
+
+        if (typeof store.listContentHashes === "function") {
+          await assert.rejects(
+            store.listContentHashes({ workbookId: "wb-query", signal: abortController.signal }),
+            {
+              name: "AbortError",
+            }
+          );
+        }
 
         await assert.rejects(store.query([1, 0, 0], 1, { workbookId: "wb-query", signal: abortController.signal }), {
           name: "AbortError",
