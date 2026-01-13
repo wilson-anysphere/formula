@@ -67,3 +67,13 @@ test("parsePartialFormula tracks quoted sheet names inside braces (sheet names m
   assert.equal(parsed.functionName, undefined);
   assert.equal(parsed.functionNamePrefix, undefined);
 });
+
+test("parsePartialFormula ignores ';' inside quoted sheet names", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM('Jan;2024'!A1; A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  // Only the semicolon *after* the A1 reference should split args.
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
