@@ -125,6 +125,31 @@ export class InMemoryVectorStore {
   }
 
   /**
+   * Return `{ id, contentHash, metadataHash }` for records. This avoids returning full
+   * metadata objects when callers only need hashes for incremental indexing.
+   *
+   * @param {{ workbookId?: string, signal?: AbortSignal }} [opts]
+   * @returns {Promise<Array<{ id: string, contentHash: string | null, metadataHash: string | null }>>}
+   */
+  async listContentHashes(opts) {
+    const signal = opts?.signal;
+    const workbookId = opts?.workbookId;
+    /** @type {Array<{ id: string, contentHash: string | null, metadataHash: string | null }>} */
+    const out = [];
+    for (const [id, rec] of this._records) {
+      throwIfAborted(signal);
+      if (workbookId && rec.metadata?.workbookId !== workbookId) continue;
+      out.push({
+        id,
+        contentHash: typeof rec.metadata?.contentHash === "string" ? rec.metadata.contentHash : null,
+        metadataHash: typeof rec.metadata?.metadataHash === "string" ? rec.metadata.metadataHash : null,
+      });
+    }
+    throwIfAborted(signal);
+    return out;
+  }
+
+  /**
    * @param {ArrayLike<number>} vector
    * @param {number} topK
    * @param {{ filter?: (metadata: any, id: string) => boolean, workbookId?: string }} [opts]

@@ -247,6 +247,14 @@ export class JsonVectorStore extends InMemoryVectorStore {
     return super.list(opts);
   }
 
+  async listContentHashes(opts) {
+    const signal = opts?.signal;
+    throwIfAborted(signal);
+    await this.load();
+    throwIfAborted(signal);
+    return super.listContentHashes(opts);
+  }
+
   async query(vector, topK, opts) {
     const signal = opts?.signal;
     throwIfAborted(signal);
