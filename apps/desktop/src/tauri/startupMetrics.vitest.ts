@@ -454,18 +454,21 @@ describe("startupMetrics", () => {
 
     await import("./startupMetricsBootstrap");
 
-    // Allow the listener-install promise and its `.finally(...)` to run.
+    // Allow the async listener-install promise and its `.finally(...)` to run.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
     await new Promise<void>((resolve) => queueMicrotask(resolve));
     await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-    expect(invoke).toHaveBeenCalledWith("report_startup_webview_loaded");
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls.map((args) => args[0])).toEqual([
+      "report_startup_webview_loaded",
+      "report_startup_webview_loaded",
+    ]);
     expect(listen).toHaveBeenCalled();
 
-    // The first report should happen before listener installation begins; the second should happen
-    // after listeners are registered to request a re-emit of cached timings.
-    expect(invoke.mock.invocationCallOrder[0]).toBeLessThan(listen.mock.invocationCallOrder[0]);
-    expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]);
+    // The first report should happen before listeners are registered.
+    expect(invoke.mock.invocationCallOrder[0]!).toBeLessThan(listen.mock.invocationCallOrder[0]!);
+    // The second report should happen after listeners are registered.
+    expect(listen.mock.invocationCallOrder.at(-1)!).toBeLessThan(invoke.mock.invocationCallOrder[1]!);
   });
 
   it("waits for listener installation to settle before requesting a re-emit (avoids dropping startup:* events)", async () => {

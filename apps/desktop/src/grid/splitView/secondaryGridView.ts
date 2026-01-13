@@ -1074,9 +1074,9 @@ export class SecondaryGridView {
     }
 
     // Image updates may be workbook-wide; re-render so any referenced bitmaps refresh.
-    //
-    // Note: DocumentController emits `imageDeltas: []` on every change payload, so only treat
-    // this as a drawings-affecting change when the array is non-empty.
+    // NOTE: DocumentController always includes `imageDeltas: []` in change payloads, even when no
+    // images changed. Guard on non-empty arrays so unrelated changes don't trigger extra drawings
+    // renders.
     if (
       (Array.isArray(payload?.imagesDeltas) && payload.imagesDeltas.length > 0) ||
       (Array.isArray(payload?.imageDeltas) && payload.imageDeltas.length > 0)

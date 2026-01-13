@@ -430,6 +430,13 @@ function findCompletionContext(input: string, cursorPosition: number): Completio
   // (We handle `_xlfn.` separately below.)
   if (!/^[_A-Za-z]/.test(typedPrefix)) return null;
 
+  // Avoid suggesting functions while the caret is inside a likely A1-style cell reference
+  // (e.g. `=A1`, `=XFD1048576`). This prevents the autocomplete dropdown from stealing
+  // Escape/Tab semantics while users edit references.
+  const fullIdent = input.slice(replaceStart, replaceEnd);
+  const fullUpper = fullIdent.toUpperCase();
+  if (/^[A-Z]{1,3}[0-9]+$/.test(fullUpper) && !FUNCTION_NAMES_UPPER.has(fullUpper)) return null;
+
   // Ensure we're at the start of an expression-like position:
   // `=VLO`, `=1+VLO`, `=SUM(VLO`, `=SUM(A, VLO)`
   let prev = replaceStart - 1;

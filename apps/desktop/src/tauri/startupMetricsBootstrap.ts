@@ -116,9 +116,11 @@ if (!g[BOOTSTRAPPED_KEY] && hasTauri) {
     // trigger a re-emit on completion), there is nothing left to poll for.
     if (g[WEBVIEW_REPORTED_KEY] && listenersInstallPromise) return;
 
+    const schedule = typeof setTimeout === "function" ? setTimeout : null;
+    if (!schedule) return;
     const nextDelay = delayMs;
     delayMs = Math.min(50, delayMs * 2);
-    setTimeout(tick, nextDelay);
+    schedule(tick, nextDelay);
   };
 
   tick();

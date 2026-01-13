@@ -3,6 +3,19 @@ import { getTauriDialogOpenOrNull, getTauriInvokeOrThrow } from "../tauri/api";
 
 export const IMAGE_FILE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"] as const;
 
+type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+
+export class FileTooLargeError extends Error {
+  readonly fileSize: number;
+  readonly maxSize: number;
+
+  constructor(fileSize: number, maxSize: number) {
+    super(`File is too large (${fileSize} bytes, max ${maxSize}).`);
+    this.name = "FileTooLargeError";
+    this.fileSize = fileSize;
+    this.maxSize = maxSize;
+  }
+}
 export type PickImagesFromTauriDialogOptions = {
   multiple?: boolean;
 };
@@ -112,7 +125,7 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
   const fileSize = normalizeFileSize(statPayload);
   if (fileSize <= 0) return new Uint8Array(0);
   if (fileSize > MAX_INSERT_IMAGE_BYTES) {
-    throw new Error(`File is too large (${fileSize} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+    throw new FileTooLargeError(fileSize, MAX_INSERT_IMAGE_BYTES);
   }
 
   // Keep single-call reads for small payloads, but avoid `read_binary_file` for larger
@@ -123,7 +136,7 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
     const payload = await invoke("read_binary_file", { path });
     const bytes = normalizeBinaryPayload(payload);
     if (bytes.length > MAX_INSERT_IMAGE_BYTES) {
-      throw new Error(`File is too large (${bytes.length} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+      throw new FileTooLargeError(bytes.length, MAX_INSERT_IMAGE_BYTES);
     }
     return bytes;
   }
@@ -143,7 +156,7 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
 
   const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
   if (totalLength > MAX_INSERT_IMAGE_BYTES) {
-    throw new Error(`File is too large (${totalLength} bytes, max ${MAX_INSERT_IMAGE_BYTES}).`);
+    throw new FileTooLargeError(totalLength, MAX_INSERT_IMAGE_BYTES);
   }
 
   const out = new Uint8Array(totalLength);

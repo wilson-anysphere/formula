@@ -1,5 +1,4 @@
-import { MAX_INSERT_IMAGE_BYTES } from "./insertImageLimits.js";
-import { pickImagesFromTauriDialog, readBinaryFile } from "./pickImagesFromTauriDialog.js";
+import { FileTooLargeError, pickImagesFromTauriDialog, readBinaryFile } from "./pickImagesFromTauriDialog.js";
 import { getTauriDialogOpenOrNull, getTauriInvokeOrNull } from "../tauri/api";
 
 export interface PickLocalImageFilesOptions {
@@ -111,17 +110,35 @@ async function pickLocalImageFilesViaTauriDialog(options: PickLocalImageFilesOpt
   const out: File[] = [];
   for (const path of selected) {
     const name = basename(path);
+    const mimeType = guessImageMimeType(name);
     try {
       const bytes = await readBinaryFile(path);
-      const mimeType = guessImageMimeType(name);
       out.push(new FileCtor([bytes], name, { type: mimeType }));
     } catch (err) {
-      const message = String((err as any)?.message ?? err);
-      // Oversized images should be skipped (with user feedback handled by the insertion layer).
-      // Return a lightweight placeholder with a `size` above the cap so callers can filter + toast
-      // without allocating the full byte payload.
-      if (message.toLowerCase().includes("file is too large")) {
-        out.push({ name, type: guessImageMimeType(name), size: MAX_INSERT_IMAGE_BYTES + 1 } as any as File);
+      // If the file is too large, return an oversized placeholder File so callers can
+      // surface an appropriate UI error without forcing us to load the whole payload.
+      if (err instanceof FileTooLargeError) {
+        try {
+          const placeholder = new FileCtor([new Uint8Array(0)], name, { type: mimeType });
+          let patched = false;
+          try {
+            // `File.size` is a getter on the prototype chain; define an own property so the
+            // placeholder compares as oversized without allocating large buffers.
+            Object.defineProperty(placeholder, "size", { value: err.fileSize });
+            patched = placeholder.size === err.fileSize;
+          } catch {
+            patched = false;
+          }
+          if (patched) {
+            out.push(placeholder);
+          } else {
+            out.push({ name, type: mimeType, size: err.maxSize + 1 } as any as File);
+          }
+        } catch {
+          // Some environments may not allow constructing/shimming a `File` instance. Fall back
+          // to a lightweight File-like object with an oversized `size`.
+          out.push({ name, type: mimeType, size: err.maxSize + 1 } as any as File);
+        }
         continue;
       }
       throw err;

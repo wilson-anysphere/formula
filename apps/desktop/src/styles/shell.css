@@ -148,10 +148,12 @@ dialog.print-preview-dialog::backdrop {
   margin-left: var(--space-4);
 }
 
-.find-replace-dialog input,
-.goto-dialog input,
+.find-replace-dialog input[type="text"],
+.goto-dialog input[type="text"],
 .find-replace-dialog select,
-.goto-dialog select {
+.goto-dialog select,
+.page-setup-dialog input[type="number"],
+.page-setup-dialog select {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -166,17 +168,20 @@ dialog.print-preview-dialog::backdrop {
     box-shadow var(--motion-duration-fast) var(--motion-ease);
 }
 
-.find-replace-dialog input:focus-visible,
-.goto-dialog input:focus-visible,
+.find-replace-dialog input[type="text"]:focus-visible,
+.goto-dialog input[type="text"]:focus-visible,
 .find-replace-dialog select:focus-visible,
-.goto-dialog select:focus-visible {
+.goto-dialog select:focus-visible,
+.page-setup-dialog input[type="number"]:focus-visible,
+.page-setup-dialog select:focus-visible {
   outline: none;
   border-color: var(--selection-border);
   box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .find-replace-dialog button,
-.goto-dialog button {
+.goto-dialog button,
+.page-setup-dialog button {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border);
   background: var(--bg-primary);
@@ -192,24 +197,28 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .find-replace-dialog button:hover:not(:disabled),
-.goto-dialog button:hover:not(:disabled) {
+.goto-dialog button:hover:not(:disabled),
+.page-setup-dialog button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 
 .find-replace-dialog button:active:not(:disabled),
-.goto-dialog button:active:not(:disabled) {
+.goto-dialog button:active:not(:disabled),
+.page-setup-dialog button:active:not(:disabled) {
   background: var(--bg-active);
 }
 
 .find-replace-dialog button:focus-visible,
-.goto-dialog button:focus-visible {
+.goto-dialog button:focus-visible,
+.page-setup-dialog button:focus-visible {
   outline: none;
   border-color: var(--selection-border);
   box-shadow: 0 0 0 var(--space-1) var(--selection-bg);
 }
 
 .find-replace-dialog button:disabled,
-.goto-dialog button:disabled {
+.goto-dialog button:disabled,
+.page-setup-dialog button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -222,13 +231,23 @@ dialog.print-preview-dialog::backdrop {
 .find-results {
   max-height: 240px;
   overflow: auto;
-  padding-left: calc(var(--space-5) + var(--space-3));
-  margin: var(--space-4) 0 0;
+  padding-left: var(--space-6);
+  margin: var(--space-2) 0 0;
 }
 
 .find-results li {
   cursor: pointer;
   padding: var(--space-1) 0;
+}
+
+/* Tighten print preview dialog controls (match find/goto button sizing). */
+.print-preview-dialog .dialog__controls button {
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+}
+
+.print-preview-dialog .dialog__controls {
+  gap: var(--space-3);
 }
 
 /* --- Grid canvas layering ------------------------------------------------ */
