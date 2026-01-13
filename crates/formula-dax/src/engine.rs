@@ -2436,7 +2436,6 @@ impl DaxEngine {
                 } else {
                     rel.rel.is_active
                 };
-
                 is_active && !filter.is_relationship_disabled(idx)
             },
         )?
@@ -2456,15 +2455,8 @@ impl DaxEngine {
             let from_table = model
                 .table(&rel_info.rel.from_table)
                 .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.from_table.clone()))?;
-            let from_idx = from_table
-                .column_idx(&rel_info.rel.from_column)
-                .ok_or_else(|| DaxError::UnknownColumn {
-                    table: rel_info.rel.from_table.clone(),
-                    column: rel_info.rel.from_column.clone(),
-                })?;
-
             let key = from_table
-                .value_by_idx(row, from_idx)
+                .value_by_idx(row, rel_info.from_column_idx)
                 .unwrap_or(Value::Blank);
             if key.is_blank() {
                 return Ok(Value::Blank);
@@ -3436,19 +3428,11 @@ impl DaxEngine {
                             .relationships()
                             .get(path[0])
                             .expect("relationship index from path");
-
                         let to_table_ref = model
                             .table(current_table)
                             .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
-                        let to_idx =
-                            to_table_ref.column_idx(&rel.rel.to_column).ok_or_else(|| {
-                                DaxError::UnknownColumn {
-                                    table: current_table.to_string(),
-                                    column: rel.rel.to_column.clone(),
-                                }
-                            })?;
                         let key = to_table_ref
-                            .value_by_idx(current_row, to_idx)
+                            .value_by_idx(current_row, rel.to_column_idx)
                             .unwrap_or(Value::Blank);
 
                         let sets = resolve_row_sets(model, filter)?;
@@ -3456,21 +3440,73 @@ impl DaxEngine {
                             .get(target_table)
                             .ok_or_else(|| DaxError::UnknownTable(target_table.to_string()))?;
 
-                        let mut rows: Vec<usize> = Vec::new();
+                        let mut rows = Vec::new();
                         if key.is_blank() {
-                            for (fk, candidates) in &rel.from_index {
-                                if fk.is_blank() || !rel.to_index.contains_key(fk) {
-                                    for &row in candidates {
-                                        if allowed.get(row).copied().unwrap_or(false) {
-                                            rows.push(row);
+                            if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
+                                for &row in unmatched {
+                                    if allowed.get(row).copied().unwrap_or(false) {
+                                        rows.push(row);
+                                    }
+                                }
+                            } else if let Some(from_index) = rel.from_index.as_ref() {
+                                for (fk, candidates) in from_index {
+                                    if fk.is_blank() || !rel.to_index.contains_key(fk) {
+                                        for &row in candidates {
+                                            if allowed.get(row).copied().unwrap_or(false) {
+                                                rows.push(row);
+                                            }
                                         }
                                     }
                                 }
+                            } else {
+                                // Fallback: scan the fact table to preserve blank-member semantics.
+                                let from_table_ref = model.table(target_table).ok_or_else(|| {
+                                    DaxError::UnknownTable(target_table.to_string())
+                                })?;
+                                for row in 0..from_table_ref.row_count() {
+                                    if !allowed.get(row).copied().unwrap_or(false) {
+                                        continue;
+                                    }
+                                    let v = from_table_ref
+                                        .value_by_idx(row, rel.from_column_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if v.is_blank() || !rel.to_index.contains_key(&v) {
+                                        rows.push(row);
+                                    }
+                                }
                             }
-                        } else if let Some(candidates) = rel.from_index.get(&key) {
-                            for &row in candidates {
-                                if allowed.get(row).copied().unwrap_or(false) {
-                                    rows.push(row);
+                        } else if let Some(from_index) = rel.from_index.as_ref() {
+                            if let Some(candidates) = from_index.get(&key) {
+                                for &row in candidates {
+                                    if allowed.get(row).copied().unwrap_or(false) {
+                                        rows.push(row);
+                                    }
+                                }
+                            }
+                        } else {
+                            let from_table_ref = model.table(target_table).ok_or_else(|| {
+                                DaxError::UnknownTable(target_table.to_string())
+                            })?;
+                            if let Some(candidates) =
+                                from_table_ref.filter_eq(rel.from_column_idx, &key)
+                            {
+                                for row in candidates {
+                                    if allowed.get(row).copied().unwrap_or(false) {
+                                        rows.push(row);
+                                    }
+                                }
+                            } else {
+                                // Fallback: scan and compare.
+                                for row in 0..from_table_ref.row_count() {
+                                    if !allowed.get(row).copied().unwrap_or(false) {
+                                        continue;
+                                    }
+                                    let v = from_table_ref
+                                        .value_by_idx(row, rel.from_column_idx)
+                                        .unwrap_or(Value::Blank);
+                                    if v == key {
+                                        rows.push(row);
+                                    }
                                 }
                             }
                         }
@@ -3488,35 +3524,80 @@ impl DaxEngine {
                             .get(rel_idx)
                             .expect("relationship index from path");
 
-                        let to_table_ref = model
-                            .table(&rel_info.rel.to_table)
-                            .ok_or_else(|| DaxError::UnknownTable(rel_info.rel.to_table.clone()))?;
-                        let to_idx = to_table_ref
-                            .column_idx(&rel_info.rel.to_column)
-                            .ok_or_else(|| DaxError::UnknownColumn {
-                                table: rel_info.rel.to_table.clone(),
-                                column: rel_info.rel.to_column.clone(),
-                            })?;
+                        let to_table_ref = model.table(&rel_info.rel.to_table).ok_or_else(|| {
+                            DaxError::UnknownTable(rel_info.rel.to_table.clone())
+                        })?;
 
-                        let mut next_rows: Vec<usize> = Vec::new();
+                        let mut key_set: HashSet<Value> = HashSet::new();
+                        let mut keys: Vec<Value> = Vec::new();
+                        let mut include_blank = false;
                         for &to_row in &current_rows {
                             let key = to_table_ref
-                                .value_by_idx(to_row, to_idx)
+                                .value_by_idx(to_row, rel_info.to_column_idx)
                                 .unwrap_or(Value::Blank);
-
                             if key.is_blank() {
-                                // Blank row semantics: include rows whose foreign key is BLANK or
-                                // does not match any row on the one-side.
-                                for (fk, candidates) in &rel_info.from_index {
+                                include_blank = true;
+                                continue;
+                            }
+                            if key_set.insert(key.clone()) {
+                                keys.push(key);
+                            }
+                        }
+
+                        let mut next_rows: Vec<usize> = Vec::new();
+                        if let Some(from_index) = rel_info.from_index.as_ref() {
+                            for key in &keys {
+                                if let Some(candidates) = from_index.get(key) {
+                                    next_rows.extend(candidates.iter().copied());
+                                }
+                            }
+
+                            if include_blank {
+                                for (fk, candidates) in from_index {
                                     if fk.is_blank() || !rel_info.to_index.contains_key(fk) {
                                         next_rows.extend(candidates.iter().copied());
                                     }
                                 }
-                                continue;
+                            }
+                        } else {
+                            let from_table_ref = model.table(&rel_info.rel.from_table).ok_or_else(
+                                || DaxError::UnknownTable(rel_info.rel.from_table.clone()),
+                            )?;
+
+                            if !keys.is_empty() {
+                                if let Some(rows) =
+                                    from_table_ref.filter_in(rel_info.from_column_idx, &keys)
+                                {
+                                    next_rows.extend(rows);
+                                } else {
+                                    // Fallback: scan and check membership.
+                                    let key_set: HashSet<Value> = keys.iter().cloned().collect();
+                                    for row in 0..from_table_ref.row_count() {
+                                        let v = from_table_ref
+                                            .value_by_idx(row, rel_info.from_column_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if key_set.contains(&v) {
+                                            next_rows.push(row);
+                                        }
+                                    }
+                                }
                             }
 
-                            if let Some(candidates) = rel_info.from_index.get(&key) {
-                                next_rows.extend(candidates.iter().copied());
+                            if include_blank {
+                                if let Some(unmatched) = rel_info.unmatched_fact_rows.as_deref() {
+                                    next_rows.extend(unmatched.iter().copied());
+                                } else {
+                                    for row in 0..from_table_ref.row_count() {
+                                        let v = from_table_ref
+                                            .value_by_idx(row, rel_info.from_column_idx)
+                                            .unwrap_or(Value::Blank);
+                                        if v.is_blank()
+                                            || !rel_info.to_index.contains_key(&v)
+                                        {
+                                            next_rows.push(row);
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -3529,6 +3610,7 @@ impl DaxEngine {
                         current_rows = next_rows;
                     }
 
+                    // Apply current filter context (including relationship propagation).
                     let sets = resolve_row_sets(model, filter)?;
                     let allowed = sets
                         .get(target_table)
@@ -3728,9 +3810,9 @@ fn resolve_row_sets(
                 Some(RelationshipOverride::Disabled) => unreachable!("checked above"),
             };
 
-            changed |= propagate_filter(&mut sets, relationship, Direction::ToMany, filter)?;
+            changed |= propagate_filter(model, &mut sets, relationship, Direction::ToMany, filter)?;
             if cross_filter_direction == CrossFilterDirection::Both {
-                changed |= propagate_filter(&mut sets, relationship, Direction::ToOne, filter)?;
+                changed |= propagate_filter(model, &mut sets, relationship, Direction::ToOne, filter)?;
             }
         }
     }
@@ -3744,6 +3826,7 @@ enum Direction {
 }
 
 fn propagate_filter(
+    model: &DataModel,
     sets: &mut HashMap<String, Vec<bool>>,
     relationship: &RelationshipInfo,
     direction: Direction,
@@ -3771,34 +3854,95 @@ fn propagate_filter(
                 return Ok(false);
             }
 
-            let allowed_keys: Vec<&Value> = relationship
+            // Collect the set of relationship keys that are visible on the `to_table` side under
+            // the current filter context. For many-to-many relationships, a key can correspond to
+            // multiple `to_table` rows, hence the use of `RowSet::any_allowed`.
+            let allowed_keys: Vec<Value> = relationship
                 .to_index
                 .iter()
-                .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key))
+                .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key.clone()))
                 .collect();
-
             let from_set = sets
                 .get(from_table_name)
                 .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
             let mut next = vec![false; from_set.len()];
 
-            for key in allowed_keys {
-                if let Some(rows) = relationship.from_index.get(key) {
-                    for &row in rows {
-                        if from_set.get(row).copied().unwrap_or(false) {
-                            next[row] = true;
+            if let Some(from_index) = relationship.from_index.as_ref() {
+                // Fast path: in-memory fact tables use a precomputed FK -> row list index.
+                for key in &allowed_keys {
+                    if let Some(rows) = from_index.get(key) {
+                        for &row in rows {
+                            if from_set.get(row).copied().unwrap_or(false) {
+                                next[row] = true;
+                            }
                         }
                     }
                 }
-            }
 
-            if blank_row_allowed {
-                // Include fact rows whose foreign key does not match any key in the dimension.
-                // Tabular models treat those rows as belonging to a virtual blank dimension row.
-                for (key, rows) in &relationship.from_index {
-                    if key.is_blank() || !relationship.to_index.contains_key(key) {
-                        for &row in rows {
+                if blank_row_allowed {
+                    // Include fact rows whose foreign key does not match any key in the dimension.
+                    // Tabular models treat those rows as belonging to a virtual blank dimension row.
+                    for (key, rows) in from_index {
+                        if key.is_blank() || !relationship.to_index.contains_key(key) {
+                            for &row in rows {
+                                if from_set.get(row).copied().unwrap_or(false) {
+                                    next[row] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Columnar fact tables: avoid storing per-key row vectors. Instead, use backend
+                // filter primitives.
+                let from_table = model
+                    .table(from_table_name)
+                    .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
+
+                if !allowed_keys.is_empty() {
+                    if let Some(rows) =
+                        from_table.filter_in(relationship.from_column_idx, &allowed_keys)
+                    {
+                        for row in rows {
                             if from_set.get(row).copied().unwrap_or(false) {
+                                next[row] = true;
+                            }
+                        }
+                    } else {
+                        // Fallback: scan and check membership.
+                        let allowed_set: HashSet<Value> = allowed_keys.iter().cloned().collect();
+                        for row in 0..from_set.len() {
+                            if !from_set[row] {
+                                continue;
+                            }
+                            let v = from_table
+                                .value_by_idx(row, relationship.from_column_idx)
+                                .unwrap_or(Value::Blank);
+                            if allowed_set.contains(&v) {
+                                next[row] = true;
+                            }
+                        }
+                    }
+                }
+
+                if blank_row_allowed {
+                    if let Some(unmatched) = relationship.unmatched_fact_rows.as_deref() {
+                        for &row in unmatched {
+                            if from_set.get(row).copied().unwrap_or(false) {
+                                next[row] = true;
+                            }
+                        }
+                    } else {
+                        // Shouldn't happen for columnar relationships, but keep semantics by
+                        // scanning if needed.
+                        for row in 0..from_set.len() {
+                            if !from_set[row] {
+                                continue;
+                            }
+                            let v = from_table
+                                .value_by_idx(row, relationship.from_column_idx)
+                                .unwrap_or(Value::Blank);
+                            if v.is_blank() || !relationship.to_index.contains_key(&v) {
                                 next[row] = true;
                             }
                         }
@@ -3838,25 +3982,60 @@ fn propagate_filter(
             }
 
             let mut next = vec![false; to_set.len()];
-            for (key, rows) in &relationship.from_index {
-                let mut any_allowed = false;
-                for &row in rows {
-                    if from_set.get(row).copied().unwrap_or(false) {
-                        any_allowed = true;
-                        break;
+
+            if let Some(from_index) = relationship.from_index.as_ref() {
+                for (key, rows) in from_index {
+                    if !rows.iter().any(|row| from_set.get(*row).copied().unwrap_or(false)) {
+                        continue;
                     }
+
+                    let Some(to_rows) = relationship.to_index.get(key) else {
+                        continue;
+                    };
+                    to_rows.for_each_row(|to_row| {
+                        if to_set.get(to_row).copied().unwrap_or(false) {
+                            next[to_row] = true;
+                        }
+                    });
                 }
-                if !any_allowed {
-                    continue;
+            } else {
+                // Columnar fact tables: derive distinct FK values from the allowed fact rows.
+                let from_table = model
+                    .table(from_table_name)
+                    .ok_or_else(|| DaxError::UnknownTable(from_table_name.to_string()))?;
+
+                let rows: Vec<usize> = from_set
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, allowed)| allowed.then_some(idx))
+                    .collect();
+
+                let keys = from_table
+                    .distinct_values_filtered(relationship.from_column_idx, Some(rows.as_slice()))
+                    .unwrap_or_else(|| {
+                        let mut seen = HashSet::new();
+                        let mut out = Vec::new();
+                        for &row in &rows {
+                            let v = from_table
+                                .value_by_idx(row, relationship.from_column_idx)
+                                .unwrap_or(Value::Blank);
+                            if seen.insert(v.clone()) {
+                                out.push(v);
+                            }
+                        }
+                        out
+                    });
+
+                for key in keys {
+                    let Some(to_rows) = relationship.to_index.get(&key) else {
+                        continue;
+                    };
+                    to_rows.for_each_row(|to_row| {
+                        if to_set.get(to_row).copied().unwrap_or(false) {
+                            next[to_row] = true;
+                        }
+                    });
                 }
-                let Some(to_rows) = relationship.to_index.get(key) else {
-                    continue;
-                };
-                to_rows.for_each_row(|to_row| {
-                    if to_set.get(to_row).copied().unwrap_or(false) {
-                        next[to_row] = true;
-                    }
-                });
             }
 
             let changed = to_set.iter().zip(&next).any(|(prev, next)| *prev && !*next);
@@ -4033,12 +4212,17 @@ fn virtual_blank_row_exists(
         // A virtual blank row exists if the relationship has any *currently visible* fact-side
         // row whose foreign key is BLANK or has no match in the dimension.
         if filter.is_empty() {
-            if rel
-                .from_index
-                .keys()
-                .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
-            {
-                return Ok(true);
+            if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
+                if !unmatched.is_empty() {
+                    return Ok(true);
+                }
+            } else if let Some(from_index) = rel.from_index.as_ref() {
+                if from_index
+                    .keys()
+                    .any(|key| key.is_blank() || !rel.to_index.contains_key(key))
+                {
+                    return Ok(true);
+                }
             }
             continue;
         }
@@ -4049,16 +4233,27 @@ fn virtual_blank_row_exists(
         let from_set = sets.get(rel.rel.from_table.as_str()).ok_or_else(|| {
             DaxError::UnknownTable(rel.rel.from_table.clone())
         })?;
-        for (key, rows) in &rel.from_index {
-            if !key.is_blank() && rel.to_index.contains_key(key) {
-                continue;
-            }
-            if rows
+
+        if let Some(unmatched) = rel.unmatched_fact_rows.as_deref() {
+            if unmatched
                 .iter()
                 .copied()
                 .any(|row| from_set.get(row).copied().unwrap_or(false))
             {
                 return Ok(true);
+            }
+        } else if let Some(from_index) = rel.from_index.as_ref() {
+            for (key, rows) in from_index {
+                if !key.is_blank() && rel.to_index.contains_key(key) {
+                    continue;
+                }
+                if rows
+                    .iter()
+                    .copied()
+                    .any(|row| from_set.get(row).copied().unwrap_or(false))
+                {
+                    return Ok(true);
+                }
             }
         }
     }
