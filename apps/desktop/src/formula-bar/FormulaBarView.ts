@@ -306,7 +306,13 @@ export class FormulaBarView {
     address.className = "formula-bar-address";
     address.dataset.testid = "formula-address";
     address.setAttribute("aria-label", "Name box");
-    address.setAttribute("aria-haspopup", "listbox");
+    // When the listbox dropdown provider is present, the name box input participates in a listbox
+    // (type-to-filter + aria-activedescendant). Otherwise, the name box supports a menu-style
+    // affordance (Alt+Down / F4) via the ContextMenu fallback.
+    address.setAttribute(
+      "aria-haspopup",
+      this.#nameBoxDropdownProvider ? "listbox" : this.#callbacks.getNameBoxMenuItems || this.#callbacks.onOpenNameBoxMenu ? "menu" : "false"
+    );
     address.setAttribute("aria-expanded", "false");
     address.autocomplete = "off";
     address.spellcheck = false;
@@ -325,7 +331,7 @@ export class FormulaBarView {
     nameBoxDropdown.textContent = "▾";
     nameBoxDropdown.title = "Name box menu";
     nameBoxDropdown.setAttribute("aria-label", "Open name box menu");
-    nameBoxDropdown.setAttribute("aria-haspopup", "menu");
+    nameBoxDropdown.setAttribute("aria-haspopup", this.#nameBoxDropdownProvider ? "listbox" : "menu");
     nameBoxDropdown.setAttribute("aria-expanded", "false");
 
     nameBox.appendChild(address);
@@ -2261,6 +2267,8 @@ export class FormulaBarView {
     this.#nameBoxDropdownPopupEl.hidden = false;
     this.#addressEl.setAttribute("aria-expanded", "true");
     this.#addressEl.setAttribute("aria-controls", this.#nameBoxDropdownListEl.id);
+    this.#nameBoxDropdownEl.setAttribute("aria-expanded", "true");
+    this.#nameBoxDropdownEl.setAttribute("aria-controls", this.#nameBoxDropdownListEl.id);
 
     this.#updateNameBoxDropdownFilter("");
     this.#positionNameBoxDropdown();
@@ -2326,6 +2334,8 @@ export class FormulaBarView {
     this.#addressEl.setAttribute("aria-expanded", "false");
     this.#addressEl.removeAttribute("aria-controls");
     this.#addressEl.removeAttribute("aria-activedescendant");
+    this.#nameBoxDropdownEl.setAttribute("aria-expanded", "false");
+    this.#nameBoxDropdownEl.removeAttribute("aria-controls");
 
     this.#detachNameBoxDropdownGlobalListeners();
   }
