@@ -1028,6 +1028,7 @@ export class SpreadsheetApp {
       }
     | null = null;
   private chartContentRefreshScheduled = false;
+  private drawingsRenderScheduled = false;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
   private clipboardCopyContext:
     | {
@@ -2407,12 +2408,12 @@ export class SpreadsheetApp {
     // through SpreadsheetApp UI actions that call `refresh()`. Listen for drawing/image
     // change payloads and re-render the active sheet's drawing overlay.
     const drawingUnsubs: Array<() => void> = [];
-    const invalidateAndRenderDrawings = () => {
+    const invalidateAndRenderDrawings = (reason?: string) => {
       // Keep memory bounded: only cache the active sheet's objects.
       this.drawingObjectsCache = null;
       this.drawingHitTestIndex = null;
       this.drawingHitTestIndexObjects = null;
-      this.renderDrawings();
+      this.scheduleDrawingsRender(reason);
     };
 
     drawingUnsubs.push(
@@ -2434,7 +2435,7 @@ export class SpreadsheetApp {
           if (imageId) this.drawingOverlay.invalidateImage(imageId);
         }
         this.handleWorkbookImageDeltasForBackground(payload);
-        invalidateAndRenderDrawings();
+        invalidateAndRenderDrawings("document:change");
       }),
     );
 
@@ -2445,7 +2446,7 @@ export class SpreadsheetApp {
         if (!this.uiReady) return;
         const sheetId = typeof payload?.sheetId === "string" ? payload.sheetId : null;
         if (sheetId && sheetId !== this.sheetId) return;
-        invalidateAndRenderDrawings();
+        invalidateAndRenderDrawings("document:drawings");
       }),
     );
     drawingUnsubs.push(
@@ -2453,7 +2454,7 @@ export class SpreadsheetApp {
         if (this.disposed) return;
         if (!this.uiReady) return;
         this.drawingOverlay.clearImageCache();
-        invalidateAndRenderDrawings();
+        invalidateAndRenderDrawings("document:images");
       }),
     );
 
@@ -3279,6 +3280,32 @@ export class SpreadsheetApp {
       if (this.disposed) return;
       if (!this.uiReady) return;
       this.renderCharts(true);
+    });
+  }
+
+  private scheduleDrawingsRender(reason?: string): void {
+    if (this.disposed) return;
+    if (!this.uiReady) return;
+    // A pending refresh will redraw drawings (and other overlays) anyway.
+    if (this.renderScheduled) return;
+    if (this.drawingsRenderScheduled) return;
+
+    // Keep the reason in the signature so callers can provide context without allocations.
+    void reason;
+
+    this.drawingsRenderScheduled = true;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+    schedule(() => {
+      this.drawingsRenderScheduled = false;
+      if (this.disposed) return;
+      if (!this.uiReady) return;
+      this.renderDrawings();
     });
   }
 
@@ -9069,6 +9096,13 @@ export class SpreadsheetApp {
     const sheetId = this.sheetId;
     const matchesSheet = (delta: any): boolean => String(delta?.sheetId ?? "") === sheetId;
     const touchesSheet = (deltas: any): boolean => Array.isArray(deltas) && deltas.some(matchesSheet);
+
+    // Sheet view changes (frozen panes, row/col sizes, and/or drawing metadata stored on the view)
+    // can affect how drawings are rendered even if the drawings list itself did not change.
+    if (touchesSheet(payload?.sheetViewDeltas)) return true;
+
+    // Sheet meta/order changes can change the active sheet or invalidate cached geometry.
+    if (touchesSheet(payload?.sheetMetaDeltas) || payload?.sheetOrderDelta) return true;
 
     // Drawing deltas are usually per-sheet.
     if (
