@@ -47,12 +47,12 @@ describe("hitTestDrawings frozen panes + header offsets", () => {
     };
 
     // Click inside the object as rendered under the headers.
-    const hit = hitTestDrawings(index, viewport, 30 + 2, 40 + 2);
+    const hit = hitTestDrawings(index, viewport, 30 + 2, 40 + 2, geom);
     expect(hit?.object.id).toBe(1);
     expect(hit?.bounds).toEqual({ x: 30, y: 40, width: 5, height: 5 });
 
     // Pointer events in the header gutter should not hit drawings.
-    expect(hitTestDrawings(index, viewport, 10, 10)).toBeNull();
+    expect(hitTestDrawings(index, viewport, 10, 10, geom)).toBeNull();
   });
 
   it("does not hit frozen-pane objects from other quadrants (clipped portions are not hittable)", () => {
@@ -73,7 +73,7 @@ describe("hitTestDrawings frozen panes + header offsets", () => {
 
     // The object extends beyond the frozen column boundary (x > CELL), but it is clipped
     // to the top-left quadrant, so the top-right quadrant should not register a hit.
-    expect(hitTestDrawings(index, viewport, CELL + 1, 1)).toBeNull();
+    expect(hitTestDrawings(index, viewport, CELL + 1, 1, geom)).toBeNull();
   });
 
   it("hits objects in the top-right quadrant (x scrolls, y is pinned)", () => {
@@ -93,10 +93,9 @@ describe("hitTestDrawings frozen panes + header offsets", () => {
     };
 
     // Sheet rect x = 2 * CELL. In the top-right quadrant it scrolls by scrollX.
-    const hit = hitTestDrawings(index, viewport, 2 * CELL - viewport.scrollX + 1, 1);
+    const hit = hitTestDrawings(index, viewport, 2 * CELL - viewport.scrollX + 1, 1, geom);
     expect(hit?.object.id).toBe(1);
     expect(hit?.bounds.x).toBe(2 * CELL - viewport.scrollX);
     expect(hit?.bounds.y).toBe(0);
   });
 });
-
