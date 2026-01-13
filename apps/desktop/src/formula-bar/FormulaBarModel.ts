@@ -116,6 +116,20 @@ export class FormulaBarModel {
     }
   }
 
+  /**
+   * Best-effort named-range resolver for view-mode hover previews.
+   *
+   * The formula tokenizer used for syntax highlighting represents named ranges as
+   * `identifier` tokens, so hover logic cannot rely on `reference` tokens alone.
+   */
+  resolveNameRange(name: string): FormulaReferenceRange | null {
+    const resolver = this.#extractFormulaReferencesOptions?.resolveName;
+    if (!resolver) return null;
+    const lower = String(name ?? "").toLowerCase();
+    if (lower === "true" || lower === "false") return null;
+    return resolver(name);
+  }
+
   get activeCell(): ActiveCellInfo {
     return this.#activeCell;
   }

@@ -1833,16 +1833,35 @@ export class FormulaBarView {
       return;
     }
     const kind = span.dataset.kind;
-    if (kind !== "reference") {
+    const text = span.textContent ?? "";
+    if (!text) {
       this.#clearHoverOverride();
       return;
     }
 
-    const text = span.textContent ?? "";
-    this.#hoverOverrideText = text || null;
-    this.#hoverOverride = text ? parseSheetQualifiedA1Range(text) : null;
-    this.#callbacks.onHoverRange?.(this.#hoverOverride);
-    this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
+    if (kind === "reference") {
+      this.#hoverOverrideText = text;
+      this.#hoverOverride = parseSheetQualifiedA1Range(text);
+      this.#callbacks.onHoverRange?.(this.#hoverOverride);
+      this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
+      return;
+    }
+
+    if (kind === "identifier") {
+      const resolved = this.model.resolveNameRange(text);
+      this.#hoverOverrideText = resolved ? text : null;
+      this.#hoverOverride = resolved
+        ? {
+            start: { row: resolved.startRow, col: resolved.startCol },
+            end: { row: resolved.endRow, col: resolved.endCol }
+          }
+        : null;
+      this.#callbacks.onHoverRange?.(this.#hoverOverride);
+      this.#callbacks.onHoverRangeWithText?.(this.#hoverOverride, this.#hoverOverrideText);
+      return;
+    }
+
+    this.#clearHoverOverride();
   }
 
   #clearHoverOverride(): void {
