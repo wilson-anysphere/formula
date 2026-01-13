@@ -416,6 +416,9 @@ docker run --rm -it \
   '
 ```
 
+CI guardrail: tagged releases run `bash scripts/ci/verify-linux-package-deps.sh`, which inspects the produced `.deb` with
+`dpkg -I` / `dpkg-deb -f` and fails the workflow if the **core runtime dependencies** are missing from `Depends:`.
+
 ## Linux: `.rpm` runtime dependencies (Fedora/RHEL)
 
 For RPM-based distros (Fedora/RHEL/CentOS derivatives), the same GTK3/WebKitGTK/AppIndicator stack
@@ -459,6 +462,9 @@ docker run --rm -it \
     ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
   '
 ```
+
+CI guardrail: tagged releases run `bash scripts/ci/verify-linux-package-deps.sh`, which inspects the produced `.rpm` with
+`rpm -qpR` and fails the workflow if the **core runtime dependencies** are missing from the RPM metadata.
 
 Note: showing a tray icon also requires a desktop environment with **StatusNotifier/AppIndicator**
 support (e.g. the GNOME Shell “AppIndicator and KStatusNotifierItem Support” extension).
