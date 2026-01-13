@@ -73,6 +73,17 @@ Window 2:
 http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u2&collabUserName=Bob&collabUserColor=%23f97316
 ```
 
+### Dev: exercise end-to-end cell encryption
+
+To test encrypted cell payloads (`enc`) end-to-end, open one client with `collabEncrypt=1` (and optionally `collabEncryptRange=...`) and another client without it.
+
+Example (client A has keys, client B does not):
+
+```text
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u1&collabUserName=Alice&collabUserColor=%234c8bf5&collabEncrypt=1&collabEncryptRange=Sheet1!A1:C10
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&collabUserId=u2&collabUserName=Bob&collabUserColor=%23f97316
+```
+
 Local persistence is enabled by default (IndexedDB). To disable it for debugging, add `&collabPersistence=0`.
 
 Edits and comments should sync in real-time.
