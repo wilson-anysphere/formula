@@ -26,9 +26,10 @@ fixtures/encrypted/
 Tests that need encrypted fixtures should reference these paths **explicitly** (they are not part
 of the round-trip corpus).
 
-Note: Some encryption tests build minimal encrypted containers programmatically instead of checking
-in binary files (see `crates/formula-io/tests/encrypted_ooxml.rs` and
-`crates/formula-io/tests/encrypted_xls.rs`). If/when we add real Excel-saved encrypted workbooks to
-the repo, they should live under `fixtures/encrypted/`.
+Note: Some encryption tests build minimal encrypted containers programmatically (see
+`crates/formula-io/tests/encrypted_xls.rs` and the synthetic container in
+`crates/formula-io/tests/encrypted_ooxml.rs`). For end-to-end “password required” regression tests,
+we also keep tiny encrypted OOXML fixtures in-repo under `fixtures/encrypted/ooxml/` (e.g.
+`agile.xlsx`, `standard.xlsx`).
 
 For background on Excel encryption formats and terminology, see `docs/21-encrypted-workbooks.md`.

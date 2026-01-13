@@ -10,8 +10,19 @@ packages**. Excel stores them as OLE/CFB (Compound File Binary) containers with
 These fixtures live outside `fixtures/xlsx/` so they are not picked up by
 `xlsx-diff::collect_fixture_paths` (which drives the ZIP-based round-trip test corpus).
 
-If you add a real encrypted workbook fixture, document the expected password in the adjacent README
-(or encode it in the filename) so tests can open it deterministically.
+## Fixtures
+
+- `agile.xlsx` – encrypted OOXML (Agile encryption; MS-OFFCRYPTO `EncryptionInfo` version 4.4)
+- `standard.xlsx` – encrypted OOXML (Standard encryption; MS-OFFCRYPTO `EncryptionInfo` version 3.2)
+
+These are used by:
+
+- `crates/formula-io/tests/encrypted_ooxml.rs` (ensures `open_workbook` / `open_workbook_model`
+  surface a password/encryption error when no password is supplied)
+- `crates/formula-io/tests/encrypted_ooxml_fixtures.rs` (format sniffing/detection; optional)
+
+If you add additional encrypted workbook fixtures, document the expected password in the adjacent
+README (or encode it in the filename) so tests can open them deterministically.
 
 See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
 `EncryptedPackage`).
