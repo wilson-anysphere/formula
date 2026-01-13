@@ -434,6 +434,39 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("Escape closes the picker first, then a second Escape cancels the edit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    const fx = queryFxButton(host);
+
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]')!;
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    expect(picker.hidden).toBe(false);
+    expect(view.model.isEditing).toBe(true);
+
+    const first = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    pickerInput.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+
+    expect(picker.hidden).toBe(true);
+    expect(view.model.isEditing).toBe(true);
+    expect(document.activeElement).toBe(view.textarea);
+
+    const second = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(second);
+
+    expect(second.defaultPrevented).toBe(true);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
   it("does not commit edit when pressing Enter in the function picker (it inserts a function)", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -464,6 +497,44 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.textarea.selectionEnd).toBe(5);
     expect(document.activeElement).toBe(view.textarea);
     expect(picker.hidden).toBe(true);
+
+    host.remove();
+  });
+
+  it("Enter inserts a function via the picker, then Enter commits the edit", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    const fx = queryFxButton(host);
+
+    fx.click();
+
+    const picker = host.querySelector<HTMLElement>('[data-testid="formula-function-picker"]')!;
+    const pickerInput = host.querySelector<HTMLInputElement>('[data-testid="formula-function-picker-input"]')!;
+    expect(picker.hidden).toBe(false);
+
+    pickerInput.value = "sum";
+    pickerInput.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const first = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    pickerInput.dispatchEvent(first);
+    expect(first.defaultPrevented).toBe(true);
+
+    expect(picker.hidden).toBe(true);
+    expect(view.model.isEditing).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.textarea.value).toBe("=SUM(");
+    expect(document.activeElement).toBe(view.textarea);
+
+    const second = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    view.textarea.dispatchEvent(second);
+
+    expect(second.defaultPrevented).toBe(true);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("=SUM(", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
 
     host.remove();
   });
