@@ -94,6 +94,15 @@ export function CollabBranchManagerPanel({
   const [mergeSource, setMergeSource] = useState<string | null>(null);
 
   useEffect(() => {
+    // If the sync server has disconnected due to reserved root mutations, branch
+    // merge cannot proceed. Close any in-progress merge UI so we don't strand the
+    // user on a "Loading…" screen (MergeBranchPanel intentionally skips fetching
+    // previews when mutations are disabled).
+    if (!mutationsDisabled) return;
+    setMergeSource(null);
+  }, [mutationsDisabled]);
+
+  useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
