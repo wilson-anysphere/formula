@@ -2817,6 +2817,11 @@ function installSheetStoreDocSync(): void {
 
 function reconcileSheetStoreWithDocument(ids: string[]): void {
   if (ids.length === 0) return;
+  // In collab mode, the authoritative sheet list comes from the Yjs session (`session.sheets`).
+  // Avoid reconciling against DocumentController's lazily-created sheet ids, which can drift
+  // (and in read-only sessions would cause local-only UI mutations).
+  const session = app.getCollabSession?.() ?? null;
+  if (session) return;
 
   const docIdSet = new Set(ids);
   const existing = workbookSheetStore.listAll();
