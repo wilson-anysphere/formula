@@ -234,6 +234,7 @@ def _part_change_ratio_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 TREND_MAX_ENTRIES = 90
+TREND_ENTRY_SCHEMA_VERSION = 1
 
 
 def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +284,7 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         return None
 
     entry: dict[str, Any] = {
+        "schema_version": TREND_ENTRY_SCHEMA_VERSION,
         "timestamp": summary.get("timestamp"),
         "commit": summary.get("commit"),
         "run_url": summary.get("run_url"),

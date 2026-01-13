@@ -53,6 +53,7 @@ class DashboardTrendTests(unittest.TestCase):
         }
 
         entry = _trend_entry(summary)
+        self.assertEqual(entry["schema_version"], 1)
         self.assertNotIn("commit", entry)
         self.assertNotIn("run_url", entry)
 
