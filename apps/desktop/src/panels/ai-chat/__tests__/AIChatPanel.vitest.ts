@@ -620,11 +620,12 @@ describe("AIChatPanel attachments UI", () => {
     });
 
     // Simulate a stale render where the button appears enabled, but by the time the user clicks
-    // there are no tables.
-    const getTableOptions = vi
-      .fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getTableOptions"]>>()
-      .mockImplementationOnce(() => [{ name: "SalesTable" }])
-      .mockImplementationOnce(() => []);
+    // there are no tables. Use mutable state so the test remains robust even if the panel
+    // re-renders (e.g. due to attachment-toolbar refreshes).
+    let currentTables: Array<{ name: string }> = [{ name: "SalesTable" }];
+    const getTableOptions = vi.fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getTableOptions"]>>(
+      () => currentTables as any,
+    );
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -643,6 +644,9 @@ describe("AIChatPanel attachments UI", () => {
     const attachTableBtn = container.querySelector('[data-testid="ai-chat-attach-table"]') as HTMLButtonElement | null;
     expect(attachTableBtn).toBeInstanceOf(HTMLButtonElement);
     expect(attachTableBtn?.disabled).toBe(false);
+
+    // Tables disappear before the click handler reads them.
+    currentTables = [];
 
     await act(async () => {
       attachTableBtn!.click();
@@ -785,11 +789,12 @@ describe("AIChatPanel attachments UI", () => {
       return { messages: [], final: "Ok" };
     });
 
-    // Simulate a stale render where charts existed, but are gone by click time.
-    const getChartOptions = vi
-      .fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getChartOptions"]>>()
-      .mockImplementationOnce(() => [{ id: "chart_1", label: "Chart 1" }])
-      .mockImplementationOnce(() => []);
+    // Simulate a stale render where charts existed, but are gone by click time. Use
+    // mutable state so the test remains robust even if the panel re-renders.
+    let currentCharts: Array<{ id: string; label: string }> = [{ id: "chart_1", label: "Chart 1" }];
+    const getChartOptions = vi.fn<NonNullable<React.ComponentProps<typeof AIChatPanel>["getChartOptions"]>>(
+      () => currentCharts as any,
+    );
 
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -808,6 +813,9 @@ describe("AIChatPanel attachments UI", () => {
     const attachChartBtn = container.querySelector('[data-testid="ai-chat-attach-chart"]') as HTMLButtonElement | null;
     expect(attachChartBtn).toBeInstanceOf(HTMLButtonElement);
     expect(attachChartBtn?.disabled).toBe(false);
+
+    // Charts disappear before click time.
+    currentCharts = [];
 
     await act(async () => {
       attachChartBtn!.click();
