@@ -886,7 +886,7 @@
 }
 
 .formula-table-header-cell--styled {
-  background: var(--grid-header-bg);
+  background: var(--formula-grid-header-bg, var(--grid-header-bg));
 }
 
 .formula-table-filter-button {

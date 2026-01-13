@@ -207,9 +207,9 @@
 /* --- AutoFilterDropdown --------------------------------------------------- */
 
 .formula-table-filter-dropdown {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
+  border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: var(--radius);
   box-shadow: var(--shadow-surface);
   overflow: hidden;
@@ -226,5 +226,5 @@
 
 .formula-table-filter-dropdown__controls {
   padding: 6px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--formula-grid-line, var(--border));
 }
