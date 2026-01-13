@@ -1,4 +1,5 @@
 use formula_model::charts::LineDash;
+use formula_model::charts::FillStyle;
 use formula_model::Color;
 use formula_xlsx::drawingml::charts::parse_chart_space;
 use formula_xlsx::XlsxPackage;
@@ -15,7 +16,10 @@ fn extracts_series_and_point_formatting_overrides() {
     let series = &model.series[0];
 
     let series_style = series.style.as_ref().expect("series has spPr");
-    let series_fill = series_style.fill.as_ref().expect("series has solidFill");
+    let series_fill = series_style.fill.as_ref().expect("series has fill");
+    let FillStyle::Solid(series_fill) = series_fill else {
+        panic!("expected series fill to be solidFill, got {series_fill:?}");
+    };
     assert_eq!(
         series_fill.color,
         Color::Theme {
@@ -34,6 +38,9 @@ fn extracts_series_and_point_formatting_overrides() {
         .find(|p| p.idx == 1)
         .expect("point idx=1 override exists");
     let pt_style = pt.style.as_ref().expect("point has spPr");
-    let pt_fill = pt_style.fill.as_ref().expect("point has solidFill");
+    let pt_fill = pt_style.fill.as_ref().expect("point has fill");
+    let FillStyle::Solid(pt_fill) = pt_fill else {
+        panic!("expected point fill to be solidFill, got {pt_fill:?}");
+    };
     assert_eq!(pt_fill.color, Color::Argb(0xFFFF0000));
 }

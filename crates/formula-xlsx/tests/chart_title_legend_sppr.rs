@@ -1,3 +1,4 @@
+use formula_model::charts::FillStyle;
 use formula_model::Color;
 use formula_xlsx::drawingml::charts::parse_chart_space;
 
@@ -35,7 +36,10 @@ fn parses_title_and_legend_shape_properties() {
 
     let title = model.title.expect("title parsed");
     let title_style = title.box_style.expect("title spPr parsed");
-    let title_fill = title_style.fill.expect("title solidFill parsed");
+    let title_fill = title_style.fill.expect("title fill parsed");
+    let FillStyle::Solid(title_fill) = title_fill else {
+        panic!("expected title fill to be solidFill, got {title_fill:?}");
+    };
     assert_eq!(title_fill.color, Color::Argb(0xFF00FF00));
     let title_line = title_style.line.expect("title ln parsed");
     assert_eq!(title_line.color, Some(Color::Argb(0xFFFF0000)));
@@ -43,8 +47,10 @@ fn parses_title_and_legend_shape_properties() {
 
     let legend = model.legend.expect("legend parsed");
     let legend_style = legend.style.expect("legend spPr parsed");
-    let legend_fill = legend_style.fill.expect("legend solidFill parsed");
+    let legend_fill = legend_style.fill.expect("legend fill parsed");
+    let FillStyle::Solid(legend_fill) = legend_fill else {
+        panic!("expected legend fill to be solidFill, got {legend_fill:?}");
+    };
     assert_eq!(legend_fill.color, Color::Argb(0xFF0000FF));
     assert!(legend_style.line.is_none());
 }
-

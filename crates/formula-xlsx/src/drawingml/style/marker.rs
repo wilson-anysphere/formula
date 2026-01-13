@@ -25,7 +25,12 @@ pub fn parse_marker(node: Node<'_, '_>) -> Option<MarkerStyle> {
         .find(|n| n.is_element() && n.tag_name().name() == "spPr")
         .and_then(parse_sppr);
 
-    let fill = sppr.as_ref().and_then(|s| s.fill.clone());
+    let fill = sppr.as_ref().and_then(|s| {
+        s.fill.as_ref().and_then(|fill| match fill {
+            formula_model::charts::FillStyle::Solid(solid) => Some(solid.clone()),
+            _ => None,
+        })
+    });
     let stroke = sppr.and_then(|s| s.line);
 
     let style = MarkerStyle {

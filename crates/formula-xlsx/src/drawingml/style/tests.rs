@@ -1,8 +1,9 @@
 use formula_model::charts::LineDash;
+use formula_model::charts::FillStyle;
 use formula_model::Color;
 use roxmltree::Document;
 
-use super::{parse_ln, parse_solid_fill, parse_txpr};
+use super::{parse_ln, parse_solid_fill, parse_sppr, parse_txpr};
 
 #[test]
 fn solid_fill_srgb() {
@@ -235,4 +236,34 @@ fn txpr_paragraph_defrpr_overrides_lststyle_defrpr() {
     let style = parse_txpr(doc.root_element()).unwrap();
     assert_eq!(style.font_family.as_deref(), Some("Arial"));
     assert_eq!(style.size_100pt, Some(1200));
+}
+
+#[test]
+fn sppr_no_fill() {
+    let xml = r#"<c:spPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:noFill/>
+    </c:spPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let sppr = parse_sppr(doc.root_element()).unwrap();
+    assert_eq!(sppr.fill, Some(FillStyle::None { none: true }));
+}
+
+#[test]
+fn sppr_pattern_fill_with_fg_bg() {
+    let xml = r#"<c:spPr xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"
+        xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:pattFill prst="pct50">
+            <a:fgClr><a:srgbClr val="FF0000"/></a:fgClr>
+            <a:bgClr><a:srgbClr val="00FF00"/></a:bgClr>
+        </a:pattFill>
+    </c:spPr>"#;
+    let doc = Document::parse(xml).unwrap();
+    let sppr = parse_sppr(doc.root_element()).unwrap();
+    let FillStyle::Pattern(fill) = sppr.fill.unwrap() else {
+        panic!("expected pattFill");
+    };
+    assert_eq!(fill.pattern, "pct50");
+    assert_eq!(fill.fg_color, Some(Color::Argb(0xFFFF0000)));
+    assert_eq!(fill.bg_color, Some(Color::Argb(0xFF00FF00)));
 }

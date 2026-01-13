@@ -15,6 +15,51 @@ pub struct SolidFill {
     pub color: ColorRef,
 }
 
+/// Pattern fill formatting (`a:pattFill`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternFill {
+    pub pattern: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fg_color: Option<ColorRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg_color: Option<ColorRef>,
+}
+
+/// Gradient fill formatting (`a:gradFill`).
+///
+/// Full gradient modeling is not implemented yet; we preserve the raw XML to
+/// allow renderers to make a best-effort attempt or round-trip the data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientFill {
+    pub raw_xml: String,
+}
+
+/// Catch-all fill formatting for unsupported DrawingML fill types (`a:*Fill`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownFill {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_xml: Option<String>,
+}
+
+/// Shape fill formatting extracted from DrawingML.
+///
+/// This enum is `serde(untagged)` to remain backwards compatible with the
+/// historical `ShapeStyle.fill: Option<SolidFill>` representation where the fill
+/// was always a `{ color: ... }` object.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FillStyle {
+    Solid(SolidFill),
+    None { none: bool },
+    Pattern(PatternFill),
+    Gradient(GradientFill),
+    Unknown(UnknownFill),
+}
+
 /// Line dash style (`a:prstDash`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,7 +97,7 @@ pub struct LineStyle {
 #[serde(rename_all = "camelCase")]
 pub struct ShapeStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fill: Option<SolidFill>,
+    pub fill: Option<FillStyle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<LineStyle>,
 }
