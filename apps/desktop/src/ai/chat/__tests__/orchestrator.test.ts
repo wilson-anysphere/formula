@@ -14,7 +14,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
-import { createAiChatOrchestrator } from "../orchestrator.js";
+import { AiChatOrchestratorError, createAiChatOrchestrator } from "../orchestrator.js";
 import { ChartStore } from "../../../charts/chartStore";
 import { createDesktopRagService } from "../../rag/ragService.js";
 import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
@@ -505,6 +505,89 @@ describe("ai chat orchestrator", () => {
     } finally {
       readRangeSpy.mockRestore();
     }
+  });
+
+  it("surfaces AbortError when aborted during the LLM/tool loop (does not wrap in AiChatOrchestratorError)", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const ragService = {
+      async getContextManager() {
+        return new ContextManager({ tokenBudgetTokens: 800 });
+      },
+      async buildWorkbookContextFromSpreadsheetApi() {
+        // Keep the test focused on abort propagation, not RAG retrieval.
+        return { retrieved: [] };
+      },
+      async dispose() {}
+    };
+
+    let resolveRequestSignal: ((signal: AbortSignal | undefined) => void) | null = null;
+    const requestSignalPromise = new Promise<AbortSignal | undefined>((resolve) => {
+      resolveRequestSignal = resolve;
+    });
+
+    const llmClient = {
+      chat: vi.fn(async (request: any) => {
+        const requestSignal: AbortSignal | undefined = request?.signal;
+        resolveRequestSignal?.(requestSignal);
+
+        return await new Promise((_resolve, reject) => {
+          if (!requestSignal) {
+            reject(new Error("Expected llmClient.chat to receive request.signal"));
+            return;
+          }
+
+          const onAbort = () => {
+            const err = new Error("Aborted");
+            err.name = "AbortError";
+            reject(err);
+          };
+
+          if (requestSignal.aborted) {
+            onAbort();
+            return;
+          }
+
+          requestSignal.addEventListener("abort", onAbort, { once: true });
+        });
+      })
+    };
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_abort_during_tool_loop" });
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_abort_during_tool_loop",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_abort_during_tool_loop",
+      ragService: ragService as any,
+      previewOptions: { approval_cell_threshold: 0 }
+    });
+
+    const promise = orchestrator.sendMessage({ text: "hi", history: [], signal });
+
+    const requestSignal = await requestSignalPromise;
+    expect(requestSignal).toBe(signal);
+
+    abortController.abort();
+
+    let thrown: unknown;
+    try {
+      await promise;
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toBeTruthy();
+    expect(thrown).toMatchObject({ name: "AbortError" });
+    expect(thrown).not.toBeInstanceOf(AiChatOrchestratorError);
   });
 
   it("recreates WorkbookContextBuilder when DLP inputs change (prevents cache reuse across policy/classification changes)", async () => {

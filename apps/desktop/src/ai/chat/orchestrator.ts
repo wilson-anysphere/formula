@@ -369,6 +369,15 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     if (signal?.aborted) throw createAbortError();
   }
 
+  function isAbortError(error: unknown): boolean {
+    // AbortSignal cancellations often surface as a DOMException("AbortError") in browsers,
+    // but many runtimes/libraries simply throw an Error with `name === "AbortError"`.
+    // We treat both as cancellations and preserve them for callers.
+    if (!error) return false;
+    if (typeof error !== "object" && typeof error !== "function") return false;
+    return (error as any).name === "AbortError";
+  }
+
   async function withAbort<T>(signal: AbortSignal | undefined, promise: Promise<T>): Promise<T> {
     if (!signal) return promise;
     throwIfAborted(signal);
@@ -604,6 +613,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
         sessionId
       };
     } catch (error) {
+      if (isAbortError(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       throw new AiChatOrchestratorError(message, {
         sessionId,
