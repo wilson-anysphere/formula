@@ -53,6 +53,13 @@ fn parses_plot_area_chart_inside_mc_alternate_content() {
     let model =
         parse_chart_space(xml.as_bytes(), "xl/charts/chart1.xml").expect("parse chartSpace");
     assert_eq!(model.chart_kind, ChartKind::Bar);
+    assert!(
+        model
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("AlternateContent")),
+        "expected AlternateContent warning diagnostic"
+    );
 
     assert_eq!(model.series.len(), 1);
     let ser = &model.series[0];
