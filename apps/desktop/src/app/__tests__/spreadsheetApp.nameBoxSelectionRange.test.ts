@@ -304,4 +304,83 @@ describe("SpreadsheetApp formula bar name box selection range", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("treats the multi-range name box label (N ranges) as a no-op go to", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    // Create a multi-range selection and force a status update so the name box shows "2 ranges".
+    (app as any).selection = buildSelection(
+      {
+        ranges: [
+          { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }, // A1
+          { startRow: 2, endRow: 2, startCol: 2, endCol: 2 }, // C3
+        ],
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+    (app as any).updateStatus();
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+    expect(address!.value).toBe("2 ranges");
+
+    address!.focus();
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+    // Should not trigger invalid-reference feedback for the display label.
+    expect(address!.getAttribute("aria-invalid")).not.toBe("true");
+    expect(status.selectionRange.textContent).toBe("2 ranges");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
+  it("navigates to full-column and full-row references entered into the name box", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+
+    // Go to column B (B:B).
+    address!.focus();
+    address!.value = "B:B";
+    address!.dispatchEvent(new Event("input", { bubbles: true }));
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(status.selectionRange.textContent).toBe("B:B");
+
+    // Go to row 2 (2:2).
+    address!.focus();
+    address!.value = "2:2";
+    address!.dispatchEvent(new Event("input", { bubbles: true }));
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(status.selectionRange.textContent).toBe("2:2");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });

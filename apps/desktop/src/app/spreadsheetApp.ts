@@ -5554,7 +5554,57 @@ export class SpreadsheetApp {
       // display-name -> id resolution is temporarily unavailable (e.g. during sheet
       // rename propagation).
       const currentSheetName = this.sheetId;
-      const { sheetName: qualifiedSheetName } = splitSheetQualifier(trimmed);
+      const { sheetName: qualifiedSheetName, ref: rawRef } = splitSheetQualifier(trimmed);
+
+      // Excel-style row/column range go-to (e.g. "A:A", "A:C", "1:1", "1:10").
+      // The search package's `parseGoTo` intentionally only parses A1-style cell refs, so handle
+      // these shorthands at the app layer where we have sheet limits.
+      const ref = rawRef.trim();
+      const targetSheetId = qualifiedSheetName ? this.resolveSheetIdByName(qualifiedSheetName) : this.sheetId;
+      if (!targetSheetId) return false;
+
+      const colRange = /^(\$?[A-Za-z]{1,3})\s*:\s*(\$?[A-Za-z]{1,3})$/.exec(ref);
+      if (colRange) {
+        const parseCol = (token: string): number => fromA1A1(`${token}1`).col0;
+        const a = parseCol(colRange[1]!);
+        const b = parseCol(colRange[2]!);
+        const startCol = Math.min(a, b);
+        const endCol = Math.max(a, b);
+        this.selectRange({
+          sheetId: targetSheetId,
+          range: { startRow: 0, endRow: this.limits.maxRows - 1, startCol, endCol },
+        });
+        return true;
+      }
+
+      const rowRange = /^(\$?\d+)\s*:\s*(\$?\d+)$/.exec(ref);
+      if (rowRange) {
+        const parseRow = (token: string): number => {
+          const rawRow = Number.parseInt(token.replaceAll("$", ""), 10);
+          if (!Number.isFinite(rawRow) || rawRow < 1) return Number.NaN;
+          return rawRow - 1;
+        };
+        const a = parseRow(rowRange[1]!);
+        const b = parseRow(rowRange[2]!);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+        const startRow = Math.min(a, b);
+        const endRow = Math.max(a, b);
+        this.selectRange({
+          sheetId: targetSheetId,
+          range: { startRow, endRow, startCol: 0, endCol: this.limits.maxCols - 1 },
+        });
+        return true;
+      }
+
+      // When multiple disjoint ranges are selected, the Name Box shows a stable label like
+      // "2 ranges". Treat pressing Enter on that label as a no-op navigation (Excel behavior is
+      // effectively a focus-return, not an "invalid reference" error).
+      const multiRangesLabel = `${this.selection.ranges.length} ranges`;
+      if (!qualifiedSheetName && this.selection.ranges.length > 1 && ref === multiRangesLabel) {
+        this.focus();
+        return true;
+      }
+
       const parsed = parseGoTo(trimmed, { workbook: this.searchWorkbook, currentSheetName });
       if (parsed.type !== "range") return false;
 
@@ -5562,13 +5612,14 @@ export class SpreadsheetApp {
       // For unqualified A1 references (e.g. "A1" or "A1:B2"), always treat navigation as relative
       // to the *current* stable sheet id (not the display name), even if the sheet metadata
       // resolver is temporarily unavailable/out-of-date.
-      const targetSheetId =
+      // `targetSheetId` is resolved above for row/column refs; recompute for A1/table/name refs.
+      const targetSheetIdForParsed =
         parsed.source === "a1" && !qualifiedSheetName ? this.sheetId : this.resolveSheetIdByName(parsed.sheetName);
-      if (!targetSheetId) return false;
+      if (!targetSheetIdForParsed) return false;
       if (range.startRow === range.endRow && range.startCol === range.endCol) {
-        this.activateCell({ sheetId: targetSheetId, row: range.startRow, col: range.startCol });
+        this.activateCell({ sheetId: targetSheetIdForParsed, row: range.startRow, col: range.startCol });
       } else {
-        this.selectRange({ sheetId: targetSheetId, range });
+        this.selectRange({ sheetId: targetSheetIdForParsed, range });
       }
       return true;
     } catch {
