@@ -69,7 +69,14 @@ test("ChunkedLocalStorageBinaryStorage clears corrupted meta json on load", asyn
     assert.deepEqual(listKeysWithPrefix(ls, `${storage.key}:`), []);
     assert.equal(ls.getItem(storage.key), null);
   } finally {
-    if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    } else {
+      // If the environment had no `localStorage`, remove the property we added so
+      // subsequent tests see the original global shape.
+      // eslint-disable-next-line no-undef
+      delete globalThis.localStorage;
+    }
   }
 });
 
@@ -94,7 +101,11 @@ test("ChunkedLocalStorageBinaryStorage clears missing chunk keys on load", async
     assert.deepEqual(listKeysWithPrefix(ls, `${storage.key}:`), []);
     assert.equal(ls.getItem(storage.key), null);
   } finally {
-    if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    } else {
+      // eslint-disable-next-line no-undef
+      delete globalThis.localStorage;
+    }
   }
 });
-
