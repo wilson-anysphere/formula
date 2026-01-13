@@ -1474,9 +1474,9 @@ jobs:
 
           api_url="https://api.github.com/repos/${repo}/releases/tags/${tag}"
           retry_delays=(2 4 8 12 20)
-          # Tauri output naming varies slightly between bundlers (e.g. "x64", "x86_64", "amd64", "win64").
+          # Tauri output naming varies slightly between bundlers (e.g. "x64", "x86_64", "x86-64", "amd64", "win64").
           # Treat these as equivalent x64 markers for collision detection.
-          win_x64_re='(x64|x86_64|amd64|win64)'
+          win_x64_re='(x64|x86[_-]64|amd64|win64)'
           win_arm64_re='(arm64|aarch64)'
 
           fetch_release() {
@@ -1664,7 +1664,7 @@ jobs:
             elif [[ "$base" == *.msi || "$base" == *.exe ]]; then
               if [[ "$base" =~ (arm64|aarch64) ]]; then
                 echo "windows-arm64"
-              elif [[ "$base" =~ (x64|x86_64|amd64|win64) ]]; then
+              elif [[ "$base" =~ (x64|x86[_-]64|amd64|win64) ]]; then
                 echo "windows-x64"
               else
                 echo "windows-unknown"
@@ -1699,9 +1699,7 @@ jobs:
             bucket_assets["$bucket"]+="${name}"$'\n'
           done
 
-          {
-            echo "## Release assets (${tag})"
-            echo
+          render_table() {
             echo "| Bucket | Asset |"
             echo "| --- | --- |"
             for bucket in macos-universal windows-x64 windows-arm64 linux-x64 updater-manifest other macos-unknown windows-unknown linux-unknown macos-x64 macos-arm64 linux-arm64; do
@@ -1711,8 +1709,18 @@ jobs:
                 echo "| ${bucket} | \`${name}\` |"
               done <<< "${bucket_assets[$bucket]}"
             done
+          }
+
+          {
+            echo "## Release assets (${tag})"
+            echo
+            render_table
             echo
           } >> "$GITHUB_STEP_SUMMARY"
+
+          echo
+          echo "Grouped release assets:"
+          render_table
 
           echo
           echo "Release asset verification passed."
