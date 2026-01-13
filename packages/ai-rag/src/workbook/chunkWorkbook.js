@@ -26,6 +26,44 @@ function isFormulaCell(cell) {
 }
 
 /**
+ * Packed coordinate key used to avoid allocating `${row},${col}` strings for
+ * region detection.
+ *
+ * We prefer a 32-bit packed Number when we can guarantee the bounds (fast, cheap),
+ * otherwise we fall back to BigInt packing. If BigInt isn't available at runtime,
+ * we fall back to the original string key representation.
+ *
+ * @typedef {number | bigint | string} CoordKey
+ */
+
+const FAST_PACK_COL_BITS = 20;
+const FAST_PACK_MAX_ROW = 1 << (32 - FAST_PACK_COL_BITS); // 12 bits for row
+const FAST_PACK_MAX_COL = 1 << FAST_PACK_COL_BITS; // 20 bits for col
+const MAX_UINT32 = 2 ** 32 - 1;
+const HAS_BIGINT = typeof BigInt === "function";
+
+/**
+ * @param {number} row
+ * @param {number} col
+ * @returns {CoordKey}
+ */
+function packCoordKey(row, col) {
+  // Fast path: pack into a 32-bit unsigned integer when both row/col fit.
+  // (Using bitwise operators keeps the key reversible and avoids collisions.)
+  if (row >= 0 && col >= 0 && row < FAST_PACK_MAX_ROW && col < FAST_PACK_MAX_COL) {
+    return ((row << FAST_PACK_COL_BITS) | col) >>> 0;
+  }
+
+  // General path: pack into a BigInt (row in high 32 bits, col in low 32 bits).
+  if (HAS_BIGINT && row >= 0 && col >= 0 && col <= MAX_UINT32) {
+    return (BigInt(row) << 32n) | BigInt(col);
+  }
+
+  // Last resort: preserve legacy behavior.
+  return `${row},${col}`;
+}
+
+/**
  * @param {import('./workbookTypes').Workbook} workbook
  * @returns {Map<string, import('./workbookTypes').Sheet>}
  */
@@ -53,7 +91,7 @@ function detectRegions(sheet, predicate, opts) {
   throwIfAborted(signal);
   const matrix = getSheetMatrix(sheet);
   if (matrix) {
-    /** @type {Map<string, { row: number, col: number }>} */
+    /** @type {Map<CoordKey, { row: number, col: number }>} */
     const coords = new Map();
     let truncated = false;
     let minRow = Number.POSITIVE_INFINITY;
@@ -76,7 +114,7 @@ function detectRegions(sheet, predicate, opts) {
           if (!Number.isInteger(c) || c < 0) continue;
           const cell = normalizeCell(row[c]);
           if (!predicate(cell)) continue;
-          coords.set(`${r},${c}`, { row: r, col: c });
+          coords.set(packCoordKey(r, c), { row: r, col: c });
           minRow = Math.min(minRow, r);
           minCol = Math.min(minCol, c);
           maxRow = Math.max(maxRow, r);
@@ -97,7 +135,7 @@ function detectRegions(sheet, predicate, opts) {
     if (coords.size === 0)
       return { components: [], truncated: false, boundsRect: null };
 
-    /** @type {Set<string>} */
+    /** @type {Set<CoordKey>} */
     const visited = new Set();
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
@@ -105,7 +143,7 @@ function detectRegions(sheet, predicate, opts) {
     const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
     for (const start of entries) {
       throwIfAborted(signal);
-      const startKey = `${start.row},${start.col}`;
+      const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
       visited.add(startKey);
       const stack = [start];
@@ -125,19 +163,43 @@ function detectRegions(sheet, predicate, opts) {
         c0 = Math.min(c0, cur.col);
         c1 = Math.max(c1, cur.col);
 
-        const neighbors = [
-          { row: cur.row - 1, col: cur.col },
-          { row: cur.row + 1, col: cur.col },
-          { row: cur.row, col: cur.col - 1 },
-          { row: cur.row, col: cur.col + 1 },
-        ];
-        for (const n of neighbors) {
-          const nk = `${n.row},${n.col}`;
-          if (!coords.has(nk)) continue;
-          if (visited.has(nk)) continue;
-          visited.add(nk);
+        const r = cur.row;
+        const c = cur.col;
+
+        if (r > 0) {
+          const nk = packCoordKey(r - 1, c);
           const entry = coords.get(nk);
-          if (entry) stack.push(entry);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        {
+          const nk = packCoordKey(r + 1, c);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        if (c > 0) {
+          const nk = packCoordKey(r, c - 1);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        {
+          const nk = packCoordKey(r, c + 1);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
         }
       }
 
@@ -188,7 +250,7 @@ function detectRegions(sheet, predicate, opts) {
       return { row, col };
     }
 
-    /** @type {Map<string, { row: number, col: number }>} */
+    /** @type {Map<CoordKey, { row: number, col: number }>} */
     const coords = new Map();
     let truncated = false;
     let minRow = Number.POSITIVE_INFINITY;
@@ -202,7 +264,7 @@ function detectRegions(sheet, predicate, opts) {
       if (!parsed) continue;
       const cell = normalizeCell(raw);
       if (!predicate(cell)) continue;
-      coords.set(`${parsed.row},${parsed.col}`, parsed);
+      coords.set(packCoordKey(parsed.row, parsed.col), parsed);
 
       minRow = Math.min(minRow, parsed.row);
       minCol = Math.min(minCol, parsed.col);
@@ -218,7 +280,7 @@ function detectRegions(sheet, predicate, opts) {
     if (coords.size === 0)
       return { components: [], truncated: false, boundsRect: null };
 
-    /** @type {Set<string>} */
+    /** @type {Set<CoordKey>} */
     const visited = new Set();
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
@@ -226,7 +288,7 @@ function detectRegions(sheet, predicate, opts) {
     const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
     for (const start of entries) {
       throwIfAborted(signal);
-      const startKey = `${start.row},${start.col}`;
+      const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
       visited.add(startKey);
       const stack = [start];
@@ -246,19 +308,43 @@ function detectRegions(sheet, predicate, opts) {
         c0 = Math.min(c0, cur.col);
         c1 = Math.max(c1, cur.col);
 
-        const neighbors = [
-          { row: cur.row - 1, col: cur.col },
-          { row: cur.row + 1, col: cur.col },
-          { row: cur.row, col: cur.col - 1 },
-          { row: cur.row, col: cur.col + 1 },
-        ];
-        for (const n of neighbors) {
-          const nk = `${n.row},${n.col}`;
-          if (!coords.has(nk)) continue;
-          if (visited.has(nk)) continue;
-          visited.add(nk);
+        const r = cur.row;
+        const c = cur.col;
+
+        if (r > 0) {
+          const nk = packCoordKey(r - 1, c);
           const entry = coords.get(nk);
-          if (entry) stack.push(entry);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        {
+          const nk = packCoordKey(r + 1, c);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        if (c > 0) {
+          const nk = packCoordKey(r, c - 1);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
+        }
+
+        {
+          const nk = packCoordKey(r, c + 1);
+          const entry = coords.get(nk);
+          if (entry && !visited.has(nk)) {
+            visited.add(nk);
+            stack.push(entry);
+          }
         }
       }
 
