@@ -296,3 +296,44 @@ fn rels_id_permutation_is_reported_as_id_changes_not_attribute_diffs() {
         report.differences
     );
 }
+
+#[test]
+fn rels_id_renumbering_is_detected_even_when_other_relationships_have_duplicate_semantics() {
+    // Some producers emit multiple relationships with the same (Type, Target) semantics (e.g. images).
+    // Ensure that ambiguity for those relationships doesn't disable Id-renumbering detection for
+    // unrelated, uniquely-identifiable relationships.
+
+    let expected_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#,
+    )]);
+
+    let actual_zip = zip_bytes(&[(
+        "xl/_rels/workbook.xml.rels",
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#,
+    )]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert_eq!(
+        report.differences.len(),
+        1,
+        "expected exactly one relationship_id_changed diff, got {:#?}",
+        report.differences
+    );
+    assert_eq!(report.differences[0].kind, "relationship_id_changed");
+    assert_eq!(report.differences[0].expected.as_deref(), Some("rId1"));
+    assert_eq!(report.differences[0].actual.as_deref(), Some("rId5"));
+}

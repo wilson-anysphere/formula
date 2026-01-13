@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use anyhow::{Context, Result};
@@ -60,16 +60,24 @@ pub(crate) struct RelationshipIdChange {
     pub(crate) actual_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RelationshipSemanticIdMap {
+    pub(crate) map: BTreeMap<RelationshipSemanticKey, String>,
+    pub(crate) has_ambiguous_keys: bool,
+}
+
 pub(crate) fn relationship_semantic_id_map(
     rels_part: &str,
     bytes: &[u8],
-) -> Result<Option<BTreeMap<RelationshipSemanticKey, String>>> {
+) -> Result<RelationshipSemanticIdMap> {
     let text = super::decode_xml_bytes(bytes)
         .with_context(|| format!("decode xml bytes for {rels_part}"))?;
     let doc =
         Document::parse(text.as_ref()).with_context(|| format!("parse xml for {rels_part}"))?;
 
     let mut map: BTreeMap<RelationshipSemanticKey, String> = BTreeMap::new();
+    let mut ambiguous: BTreeSet<RelationshipSemanticKey> = BTreeSet::new();
+    let mut has_ambiguous_keys = false;
 
     for node in doc
         .descendants()
@@ -94,14 +102,25 @@ pub(crate) fn relationship_semantic_id_map(
             target_mode: mode,
         };
 
-        if map.insert(key, id.to_string()).is_some() {
+        if ambiguous.contains(&key) {
+            continue;
+        }
+
+        if map.insert(key.clone(), id.to_string()).is_some() {
             // Duplicate semantic keys are ambiguous: there is no unique "same relationship"
-            // mapping we can use to talk about Id renumbering. Fall back to the regular XML diff.
-            return Ok(None);
+            // mapping we can use to talk about Id renumbering for that relationship.
+            //
+            // Drop the key and continue so we can still process other unique relationships.
+            map.remove(&key);
+            ambiguous.insert(key);
+            has_ambiguous_keys = true;
         }
     }
 
-    Ok(Some(map))
+    Ok(RelationshipSemanticIdMap {
+        map,
+        has_ambiguous_keys,
+    })
 }
 
 fn escape_path_value(value: &str) -> String {

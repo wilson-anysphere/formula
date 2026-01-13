@@ -628,18 +628,18 @@ fn postprocess_relationship_id_renumbering(
     diffs: Vec<xml::XmlDiff>,
     ignore: &IgnoreMatcher,
 ) -> Vec<xml::XmlDiff> {
-    let Some(expected_map) = rels::relationship_semantic_id_map(rels_part, expected_bytes)
-        .ok()
-        .flatten()
-    else {
-        return diffs;
+    let expected = match rels::relationship_semantic_id_map(rels_part, expected_bytes) {
+        Ok(map) => map,
+        Err(_) => return diffs,
     };
-    let Some(actual_map) = rels::relationship_semantic_id_map(rels_part, actual_bytes)
-        .ok()
-        .flatten()
-    else {
-        return diffs;
+    let actual = match rels::relationship_semantic_id_map(rels_part, actual_bytes) {
+        Ok(map) => map,
+        Err(_) => return diffs,
     };
+
+    let expected_map = expected.map;
+    let actual_map = actual.map;
+    let has_ambiguous_keys = expected.has_ambiguous_keys || actual.has_ambiguous_keys;
 
     let mut changes: Vec<rels::RelationshipIdChange> = Vec::new();
     for (key, expected_id) in &expected_map {
@@ -659,7 +659,8 @@ fn postprocess_relationship_id_renumbering(
         return diffs;
     }
 
-    let pure_renumbering = expected_map.len() == actual_map.len()
+    let pure_renumbering = !has_ambiguous_keys
+        && expected_map.len() == actual_map.len()
         && expected_map
             .keys()
             .zip(actual_map.keys())
