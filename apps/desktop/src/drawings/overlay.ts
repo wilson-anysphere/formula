@@ -34,6 +34,32 @@ export interface Viewport {
   width: number;
   height: number;
   dpr: number;
+  /**
+   * Frozen pane counts in *sheet-space* (i.e. they do not include any synthetic
+   * header rows/cols used by shared-grid mode).
+   */
+  frozenRows?: number;
+  frozenCols?: number;
+  /**
+   * Frozen pane extents in *viewport* coordinates (pixels).
+   *
+   * In shared-grid mode the underlying grid viewport state typically reports
+   * frozen extents including header rows/cols. If `headerOffsetX/Y` are also
+   * provided, the effective frozen content size becomes:
+   *
+   *   frozenContentWidth  = frozenWidthPx  - headerOffsetX
+   *   frozenContentHeight = frozenHeightPx - headerOffsetY
+   */
+  frozenWidthPx?: number;
+  frozenHeightPx?: number;
+  /**
+   * Optional viewport-space offsets for grid headers (row/col headers).
+   *
+   * When provided, drawing objects are shifted by this amount so they are
+   * rendered under headers rather than on top of them.
+   */
+  headerOffsetX?: number;
+  headerOffsetY?: number;
 }
 
 export interface ChartRenderer {
@@ -121,16 +147,42 @@ export class DrawingOverlay {
     const colors = resolveOverlayColorTokens();
     const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder);
 
+    const paneLayout = resolvePaneLayout(viewport, this.geom);
+    const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
+
     for (const obj of ordered) {
       const rect = anchorToRectPx(obj.anchor, this.geom);
+      const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+      const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+      const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
       const screenRect = {
-        x: rect.x - viewport.scrollX,
-        y: rect.y - viewport.scrollY,
+        x: rect.x - scrollX + paneLayout.headerOffsetX,
+        y: rect.y - scrollY + paneLayout.headerOffsetY,
         width: rect.width,
         height: rect.height,
       };
+      const clipRect = paneLayout.quadrants[pane.quadrant];
 
-      if (!intersects(screenRect, { x: 0, y: 0, width: viewport.width, height: viewport.height })) {
+      if (clipRect.width <= 0 || clipRect.height <= 0) continue;
+      // Skip objects that are fully outside of their pane quadrant.
+      if (!intersects(screenRect, clipRect)) continue;
+      // Paranoia: clip rects are expected to be within the viewport, but keep the
+      // early-out for callers providing custom layouts.
+      if (!intersects(clipRect, viewportRect)) continue;
+
+      const withClip = (fn: () => void) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+        ctx.clip();
+        try {
+          fn();
+        } finally {
+          ctx.restore();
+        }
+      };
+
+      if (!intersects(screenRect, viewportRect)) {
         continue;
       }
 
@@ -138,7 +190,9 @@ export class DrawingOverlay {
         const entry = this.images.get(obj.kind.imageId);
         if (!entry) continue;
         const bitmap = await this.bitmapCache.get(entry);
-        ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+        withClip(() => {
+          ctx.drawImage(bitmap, screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+        });
         continue;
       }
 
@@ -146,36 +200,40 @@ export class DrawingOverlay {
         const chartId = obj.kind.chartId;
         if (this.chartRenderer && typeof chartId === "string" && chartId.length > 0) {
           let rendered = false;
-          ctx.save();
-          try {
-            ctx.beginPath();
-            ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-            ctx.clip();
-            this.chartRenderer.renderToCanvas(ctx, chartId, screenRect);
-            rendered = true;
-          } catch {
-            rendered = false;
-          } finally {
-            ctx.restore();
-          }
+          withClip(() => {
+            ctx.save();
+            try {
+              ctx.beginPath();
+              ctx.rect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+              ctx.clip();
+              this.chartRenderer!.renderToCanvas(ctx, chartId, screenRect);
+              rendered = true;
+            } catch {
+              rendered = false;
+            } finally {
+              ctx.restore();
+            }
+          });
 
           if (rendered) continue;
         }
       }
 
       // Placeholder rendering for shapes/charts/unknown.
-      ctx.save();
-      ctx.strokeStyle =
-        obj.kind.type === "chart" ? colors.placeholderChartStroke : colors.placeholderOtherStroke;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 2]);
-      ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
-      ctx.setLineDash([]);
-      ctx.fillStyle = colors.placeholderLabel;
-      ctx.globalAlpha = 0.6;
-      ctx.font = "12px sans-serif";
-      ctx.fillText(obj.kind.type, screenRect.x + 4, screenRect.y + 14);
-      ctx.restore();
+      withClip(() => {
+        ctx.save();
+        ctx.strokeStyle =
+          obj.kind.type === "chart" ? colors.placeholderChartStroke : colors.placeholderOtherStroke;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 2]);
+        ctx.strokeRect(screenRect.x, screenRect.y, screenRect.width, screenRect.height);
+        ctx.setLineDash([]);
+        ctx.fillStyle = colors.placeholderLabel;
+        ctx.globalAlpha = 0.6;
+        ctx.font = "12px sans-serif";
+        ctx.fillText(obj.kind.type, screenRect.x + 4, screenRect.y + 14);
+        ctx.restore();
+      });
     }
 
     // Selection overlay.
@@ -183,13 +241,24 @@ export class DrawingOverlay {
       const selected = objects.find((o) => o.id === this.selectedId);
       if (selected) {
         const rect = anchorToRectPx(selected.anchor, this.geom);
+        const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
+        const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
+        const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
         const screen = {
-          x: rect.x - viewport.scrollX,
-          y: rect.y - viewport.scrollY,
+          x: rect.x - scrollX + paneLayout.headerOffsetX,
+          y: rect.y - scrollY + paneLayout.headerOffsetY,
           width: rect.width,
           height: rect.height,
         };
-        drawSelection(ctx, screen, colors);
+        const clipRect = paneLayout.quadrants[pane.quadrant];
+        if (clipRect.width > 0 && clipRect.height > 0 && intersects(screen, clipRect)) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+          ctx.clip();
+          drawSelection(ctx, screen, colors);
+          ctx.restore();
+        }
       }
     }
   }
@@ -254,4 +323,99 @@ function resolveCssVar(name: string, fallback: string): string {
   } catch {
     return fallback;
   }
+}
+
+type PaneQuadrant = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+
+function resolveAnchorPane(
+  anchor: Anchor,
+  frozenRows: number,
+  frozenCols: number,
+): { quadrant: PaneQuadrant; inFrozenRows: boolean; inFrozenCols: boolean } {
+  if (anchor.type === "absolute") {
+    return { quadrant: "bottomRight", inFrozenRows: false, inFrozenCols: false };
+  }
+  const fromRow = anchor.from.cell.row;
+  const fromCol = anchor.from.cell.col;
+  const inFrozenRows = fromRow < frozenRows;
+  const inFrozenCols = fromCol < frozenCols;
+
+  if (inFrozenRows && inFrozenCols) return { quadrant: "topLeft", inFrozenRows, inFrozenCols };
+  if (inFrozenRows && !inFrozenCols) return { quadrant: "topRight", inFrozenRows, inFrozenCols };
+  if (!inFrozenRows && inFrozenCols) return { quadrant: "bottomLeft", inFrozenRows, inFrozenCols };
+  return { quadrant: "bottomRight", inFrozenRows, inFrozenCols };
+}
+
+function resolvePaneLayout(
+  viewport: Viewport,
+  geom: GridGeometry,
+): {
+  frozenRows: number;
+  frozenCols: number;
+  headerOffsetX: number;
+  headerOffsetY: number;
+  quadrants: Record<PaneQuadrant, Rect>;
+} {
+  const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
+  const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
+  const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
+  const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
+
+  const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+  const cellAreaWidth = Math.max(0, viewport.width - headerOffsetX);
+  const cellAreaHeight = Math.max(0, viewport.height - headerOffsetY);
+
+  // `frozenWidthPx/HeightPx` are specified in viewport coordinates (they represent
+  // the frozen boundary position). When omitted, derive them from the grid geometry
+  // (sheet-space frozen extents) plus any header offset.
+  const derivedFrozenContentWidth = (() => {
+    if (frozenCols <= 0) return 0;
+    try {
+      return geom.cellOriginPx({ row: 0, col: frozenCols }).x;
+    } catch {
+      return 0;
+    }
+  })();
+  const derivedFrozenContentHeight = (() => {
+    if (frozenRows <= 0) return 0;
+    try {
+      return geom.cellOriginPx({ row: frozenRows, col: 0 }).y;
+    } catch {
+      return 0;
+    }
+  })();
+
+  const frozenBoundaryX = clamp(
+    Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
+    headerOffsetX,
+    viewport.width,
+  );
+  const frozenBoundaryY = clamp(
+    Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
+    headerOffsetY,
+    viewport.height,
+  );
+
+  const frozenContentWidth = clamp(frozenBoundaryX - headerOffsetX, 0, cellAreaWidth);
+  const frozenContentHeight = clamp(frozenBoundaryY - headerOffsetY, 0, cellAreaHeight);
+  const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
+  const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+
+  const x0 = headerOffsetX;
+  const y0 = headerOffsetY;
+  const x1 = headerOffsetX + frozenContentWidth;
+  const y1 = headerOffsetY + frozenContentHeight;
+
+  return {
+    frozenRows,
+    frozenCols,
+    headerOffsetX,
+    headerOffsetY,
+    quadrants: {
+      topLeft: { x: x0, y: y0, width: frozenContentWidth, height: frozenContentHeight },
+      topRight: { x: x1, y: y0, width: scrollableWidth, height: frozenContentHeight },
+      bottomLeft: { x: x0, y: y1, width: frozenContentWidth, height: scrollableHeight },
+      bottomRight: { x: x1, y: y1, width: scrollableWidth, height: scrollableHeight },
+    },
+  };
 }
