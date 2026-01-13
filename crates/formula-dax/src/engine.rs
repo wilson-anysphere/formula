@@ -2115,22 +2115,25 @@ impl DaxEngine {
         };
 
         // The third argument is a bare identifier in DAX, and our parser represents bare
-        // identifiers as `Expr::TableName`.
-        let override_dir = match direction {
-            Expr::TableName(name) => match name.to_ascii_uppercase().as_str() {
-                "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
-                // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
-                "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
-                "NONE" => RelationshipOverride::Disabled,
-                other => {
-                    return Err(DaxError::Eval(format!(
-                        "unsupported CROSSFILTER direction {other}"
-                    )))
-                }
-            },
+        // identifiers as `Expr::TableName`. Some users also write it as a string literal.
+        let direction = match direction {
+            Expr::TableName(name) => name.as_str(),
+            Expr::Text(s) => s.as_str(),
             other => {
                 return Err(DaxError::Type(format!(
-                    "CROSSFILTER expects a direction identifier, got {other:?}"
+                    "CROSSFILTER expects a direction identifier or string, got {other:?}"
+                )))
+            }
+        };
+        let direction = direction.trim().to_ascii_uppercase();
+        let override_dir = match direction.as_str() {
+            "BOTH" => RelationshipOverride::Active(CrossFilterDirection::Both),
+            // DAX uses `ONEWAY` but we'll accept the more explicit `SINGLE` as well.
+            "ONEWAY" | "SINGLE" => RelationshipOverride::Active(CrossFilterDirection::Single),
+            "NONE" => RelationshipOverride::Disabled,
+            other => {
+                return Err(DaxError::Eval(format!(
+                    "unsupported CROSSFILTER direction {other}"
                 )))
             }
         };
