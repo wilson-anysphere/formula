@@ -988,7 +988,7 @@ jobs:
             )
             echo "::endgroup::"
 
-            python scripts/ci/verify_linux_desktop_integration.py --deb-root "${tmpdir}"
+            python scripts/ci/verify_linux_desktop_integration.py --package-root "${tmpdir}"
 
             rm -rf "${tmpdir}"
             trap - EXIT
