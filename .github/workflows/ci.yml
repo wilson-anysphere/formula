@@ -261,8 +261,10 @@ jobs:
         env:
           # Budgets are interpreted as KiB (1024 bytes). Adjust intentionally when
           # landing changes that affect the initial load footprint.
-          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: "5000"
-          FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: "3300"
+          FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_TOTAL_BUDGET_KB || '5000' }}
+          FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB: ${{ vars.FORMULA_DESKTOP_JS_ENTRY_BUDGET_KB || '3300' }}
+          FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY: ${{ vars.FORMULA_DESKTOP_BUNDLE_SIZE_WARN_ONLY }}
+          FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP: ${{ vars.FORMULA_DESKTOP_BUNDLE_SIZE_SKIP_GZIP }}
 
       - name: Smoke-check WASM assets
         run: pnpm smoke:wasm
