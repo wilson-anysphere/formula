@@ -604,21 +604,20 @@ export class SqliteVectorStore {
    * reduce the exported/persisted byte size after deleting many rows.
    *
    * Note:
-   * - When `autoSave` is enabled (default), this will persist the compacted DB
-   *   via the configured BinaryStorage.
-   * - When `autoSave` is disabled, the compaction will only be persisted on the
-   *   next `close()` (consistent with `upsert()` / `delete()`).
+   * - This always persists the compacted DB via the configured BinaryStorage,
+   *   regardless of the `autoSave` setting. Unlike incremental writes,
+   *   compaction is an explicit, manual operation intended to reclaim persisted
+   *   storage space.
    */
   async compact() {
     // `VACUUM` cannot run inside a transaction. All of our public methods free
     // prepared statements and close transactions before returning, so we can
     // safely run it directly here.
     this._db.run("VACUUM;");
-    // Re-register custom SQL functions just in case SQLite/sql.js resets them.
-    // (sql.js definitely drops them after `export()`; VACUUM may or may not.)
-    this._registerFunctions();
     this._dirty = true;
-    if (this._autoSave) await this._enqueuePersist();
+    // Persist the compacted DB image so external storage (LocalStorage/IndexedDB/file)
+    // immediately reflects the reclaimed size.
+    await this._enqueuePersist();
   }
 
   /**
