@@ -101,6 +101,7 @@ import {
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
+import { CollabEncryptionKeyStore } from "../collab/encryptionKeyStore";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
 import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
@@ -907,6 +908,98 @@ export class SpreadsheetApp {
               resolveSheetIdByName: (name) => this.sheetNameResolver?.getSheetIdByName(name) ?? null,
             })
           : null;
+      const encryptionKeyStore = new CollabEncryptionKeyStore();
+      const encryptionKeyStoreHydrated = encryptionKeyStore.hydrateDoc(collab.docId).catch(() => {});
+      let encryptionMetadata: any = null;
+
+      const metaGet = (obj: any, key: string): any => {
+        if (!obj || typeof obj !== "object") return undefined;
+        if (typeof obj.get === "function") return obj.get(key);
+        return obj[key];
+      };
+
+      const metaToArray = (value: any): any[] => {
+        if (!value) return [];
+        if (Array.isArray(value)) return value;
+        if (typeof value.toArray === "function") return value.toArray();
+        return [];
+      };
+
+      const parseNonNegInt = (value: any): number | null => {
+        const num = typeof value === "number" ? value : Number(value);
+        if (!Number.isFinite(num)) return null;
+        const i = Math.trunc(num);
+        return i >= 0 ? i : null;
+      };
+
+      const encryptedKeyIdForCell = (cell: { sheetId: string; row: number; col: number }): string | null => {
+        const meta = encryptionMetadata;
+        if (!meta) return null;
+
+        const rawTop =
+          metaGet(meta, "cellEncryptionRanges") ??
+          metaGet(meta, "encryptedRanges") ??
+          metaGet(meta, "encryptedCellRanges") ??
+          metaGet(meta, "cell_encryption_ranges") ??
+          metaGet(meta, "cellEncryption") ??
+          metaGet(meta, "cell_encryption");
+
+        // Support nesting (e.g. `{ ranges: [...] }` or `{ encryptedRanges: [...] }`).
+        let rangesRaw: any = rawTop;
+        if (rangesRaw && typeof rangesRaw === "object" && !Array.isArray(rangesRaw) && typeof rangesRaw.toArray !== "function") {
+          rangesRaw =
+            metaGet(rangesRaw, "ranges") ??
+            metaGet(rangesRaw, "encryptedRanges") ??
+            metaGet(rangesRaw, "encrypted_ranges") ??
+            rangesRaw;
+        }
+
+        const ranges = metaToArray(rangesRaw);
+        if (ranges.length === 0) return null;
+
+        // Prefer later ranges if they overlap.
+        for (let i = ranges.length - 1; i >= 0; i -= 1) {
+          const entry = ranges[i];
+          if (!entry || typeof entry !== "object") continue;
+
+          const range = metaGet(entry, "range") ?? entry;
+          const keyIdRaw =
+            metaGet(entry, "keyId") ??
+            metaGet(entry, "key_id") ??
+            metaGet(range, "keyId") ??
+            metaGet(range, "key_id");
+          const keyId = typeof keyIdRaw === "string" ? keyIdRaw : keyIdRaw == null ? "" : String(keyIdRaw);
+          if (!keyId) continue;
+          const sheetIdRaw = metaGet(range, "sheetId") ?? metaGet(range, "sheet_id");
+          const sheetId = typeof sheetIdRaw === "string" ? sheetIdRaw : sheetIdRaw == null ? "" : String(sheetIdRaw);
+          if (!sheetId || sheetId !== cell.sheetId) continue;
+
+          const startRow = parseNonNegInt(metaGet(range, "startRow") ?? metaGet(range, "start_row"));
+          const startCol = parseNonNegInt(metaGet(range, "startCol") ?? metaGet(range, "start_col"));
+          if (startRow == null || startCol == null) continue;
+
+          const endRowExclusive =
+            parseNonNegInt(metaGet(range, "endRowExclusive") ?? metaGet(range, "end_row_exclusive")) ??
+            ((): number | null => {
+              const endRow = parseNonNegInt(metaGet(range, "endRow") ?? metaGet(range, "end_row"));
+              return endRow == null ? null : endRow + 1;
+            })();
+          const endColExclusive =
+            parseNonNegInt(metaGet(range, "endColExclusive") ?? metaGet(range, "end_col_exclusive")) ??
+            ((): number | null => {
+              const endCol = parseNonNegInt(metaGet(range, "endCol") ?? metaGet(range, "end_col"));
+              return endCol == null ? null : endCol + 1;
+            })();
+          if (endRowExclusive == null || endColExclusive == null) continue;
+          if (endRowExclusive <= startRow || endColExclusive <= startCol) continue;
+
+          if (cell.row < startRow || cell.row >= endRowExclusive) continue;
+          if (cell.col < startCol || cell.col >= endColExclusive) continue;
+          return keyId;
+        }
+
+        return null;
+      };
 
       this.collabSession = createCollabSession({
         docId: collab.docId,
@@ -923,7 +1016,16 @@ export class SpreadsheetApp {
           staleAfterMs: 60_000,
           throttleMs: 50,
         },
-        encryption: devEncryption ?? undefined,
+        encryption:
+          devEncryption ??
+          ({
+            shouldEncryptCell: (cell) => encryptedKeyIdForCell(cell) != null,
+            keyForCell: (cell) => {
+              const keyId = encryptedKeyIdForCell(cell);
+              if (!keyId) return null;
+              return encryptionKeyStore.getCachedKey(collab.docId, keyId);
+            },
+          } as any),
         // Enable formula/value conflict monitoring in collab mode.
         formulaConflicts: {
           localUserId: sessionPermissions.userId,
@@ -953,10 +1055,11 @@ export class SpreadsheetApp {
             }
           },
         },
-       });
-       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
-       // (used by some conflict resolution + versioning flows) and ensure downstream
-       // conflict UX can attribute local edits correctly.
+      });
+      encryptionMetadata = this.collabSession.metadata;
+      // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
+      // (used by some conflict resolution + versioning flows) and ensure downstream
+      // conflict UX can attribute local edits correctly.
       try {
         this.collabSession.setPermissions(sessionPermissions);
       } catch (err) {
@@ -1051,20 +1154,26 @@ export class SpreadsheetApp {
         },
       });
 
-      void bindCollabSessionToDocumentController({
-        session: this.collabSession,
-        documentController: this.document,
-        undoService,
-        defaultSheetId: this.sheetId,
-        userId: sessionPermissions.userId,
-        onEditRejected: (rejected) => {
-          showCollabEditRejectedToast(rejected);
-        },
-        // Opt into binder write semantics required for reliable causal conflict detection.
-        // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
-        // can reason about delete-vs-overwrite concurrency deterministically.)
-        formulaConflictsMode: "formula+value",
-      })
+      void (async () => {
+        // Ensure any previously-imported encryption keys are loaded into the in-memory
+        // cache before the binder reads encrypted cells.
+        await encryptionKeyStoreHydrated;
+
+        return await bindCollabSessionToDocumentController({
+          session: this.collabSession,
+          documentController: this.document,
+          undoService,
+          defaultSheetId: this.sheetId,
+          userId: sessionPermissions.userId,
+          onEditRejected: (rejected) => {
+            showCollabEditRejectedToast(rejected);
+          },
+          // Opt into binder write semantics required for reliable causal conflict detection.
+          // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
+          // can reason about delete-vs-overwrite concurrency deterministically.)
+          formulaConflictsMode: "formula+value",
+        });
+      })()
         .then((binder: any) => {
           if (this.disposed) {
             binder.destroy();

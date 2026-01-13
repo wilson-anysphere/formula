@@ -10,6 +10,10 @@ use std::fmt;
 
 use crate::macro_trust::MacroTrustDecision;
 #[cfg(feature = "desktop")]
+use crate::storage::collab_encryption_keys::{
+    CollabEncryptionKeyEntry, CollabEncryptionKeyListEntry, CollabEncryptionKeyStore,
+};
+#[cfg(feature = "desktop")]
 use crate::storage::power_query_cache_key::{PowerQueryCacheKey, PowerQueryCacheKeyStore};
 #[cfg(feature = "desktop")]
 use crate::storage::power_query_credentials::{
@@ -1316,6 +1320,104 @@ pub async fn power_query_credential_list(
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.list().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collab E2E cell encryption: retrieve a persisted encryption key for (docId, keyId).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_encryption_key_get(
+    window: tauri::WebviewWindow,
+    doc_id: String,
+    key_id: String,
+) -> Result<Option<CollabEncryptionKeyEntry>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
+        store.get(&doc_id, &key_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collab E2E cell encryption: persist an encryption key for (docId, keyId).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_encryption_key_set(
+    window: tauri::WebviewWindow,
+    doc_id: String,
+    key_id: String,
+    key_bytes_base64: String,
+) -> Result<CollabEncryptionKeyListEntry, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
+        store
+            .set(&doc_id, &key_id, &key_bytes_base64)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collab E2E cell encryption: delete a persisted encryption key for (docId, keyId).
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_encryption_key_delete(
+    window: tauri::WebviewWindow,
+    doc_id: String,
+    key_id: String,
+) -> Result<(), String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
+        store.delete(&doc_id, &key_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Collab E2E cell encryption: list persisted encryption keys for a document.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn collab_encryption_key_list(
+    window: tauri::WebviewWindow,
+    doc_id: String,
+) -> Result<Vec<CollabEncryptionKeyListEntry>, String> {
+    ipc_origin::ensure_main_window(
+        window.label(),
+        "collab encryption keys",
+        ipc_origin::Verb::Are,
+    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "collab encryption keys", ipc_origin::Verb::Are)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = CollabEncryptionKeyStore::open_default().map_err(|e| e.to_string())?;
+        store.list(&doc_id).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
