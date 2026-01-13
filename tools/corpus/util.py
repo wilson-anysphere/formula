@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,7 +96,22 @@ def github_commit_sha() -> str | None:
     sha = os.environ.get("GITHUB_SHA")
     if sha:
         return sha
-    return None
+    # Local runs: best-effort fallback to the current git commit so trend files can be used
+    # deterministically outside of GitHub Actions. This is intentionally non-fatal: if `git`
+    # isn't available (or we're not in a worktree), return None.
+    try:
+        root = Path(__file__).resolve().parents[2]
+        proc = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        out = (proc.stdout or "").strip()
+        return out or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def github_run_url() -> str | None:
