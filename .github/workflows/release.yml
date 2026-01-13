@@ -1040,27 +1040,26 @@ jobs:
           # accidentally validating an intermediate single-arch bundle.
           app_path=""
 
-          # Some Tauri builds export `CARGO_TARGET_DIR`. Prefer it when set so this check stays
-          # correct even if the workflow tweaks target dir routing for caching.
-          cargo_target_dir="${CARGO_TARGET_DIR:-}"
-          if [[ -n "$cargo_target_dir" && "$cargo_target_dir" != /* ]]; then
-            cargo_target_dir="${PWD}/${cargo_target_dir}"
-          fi
-          if [[ -n "$cargo_target_dir" && -d "$cargo_target_dir" ]]; then
-            app_path="$(
-              find "$cargo_target_dir/universal-apple-darwin" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
-            if [[ -z "$app_path" ]]; then
-              app_path="$(
-                find "$cargo_target_dir" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-              )"
-            fi
-          fi
-
+          app_path="$(
+            find apps/desktop/src-tauri/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+          )"
           if [[ -z "$app_path" ]]; then
-            app_path="$(
-              find apps/desktop/src-tauri/target/universal-apple-darwin -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
-            )"
+            # Some Tauri builds export `CARGO_TARGET_DIR`. Check it next so this verification stays
+            # correct even if the workflow tweaks target dir routing for caching.
+            cargo_target_dir="${CARGO_TARGET_DIR:-}"
+            if [[ -n "$cargo_target_dir" && "$cargo_target_dir" != /* ]]; then
+              cargo_target_dir="${PWD}/${cargo_target_dir}"
+            fi
+            if [[ -n "$cargo_target_dir" && -d "$cargo_target_dir" ]]; then
+              app_path="$(
+                find "$cargo_target_dir/universal-apple-darwin" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+              )"
+              if [[ -z "$app_path" ]]; then
+                app_path="$(
+                  find "$cargo_target_dir" -type d -path '*/release/bundle/*/*.app' -prune -print 2>/dev/null | head -n 1 || true
+                )"
+              fi
+            fi
           fi
           if [[ -z "$app_path" ]]; then
             app_path="$(
