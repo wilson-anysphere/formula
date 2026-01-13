@@ -822,6 +822,33 @@ Security boundaries:
   (active-cell fallback) and any spreadsheet ranges the extension has read/received (taint tracking).
 - **Extension sandboxing**: extension panels run in sandboxed iframes; do not expose Tauri IPC (`invoke`) or native clipboard APIs directly to untrusted iframe content. Clipboard operations must be mediated by the trusted host UI layer.
 
+### Debugging / troubleshooting
+
+Clipboard interop bugs are often **format- and OS-dependent**. The desktop app provides opt-in debug logs on both the Rust (native) and JS (provider) sides.
+
+**Rust (native clipboard backend)**: set `FORMULA_DEBUG_CLIPBOARD=1` **before launching** the desktop app (it’s read at process startup).
+
+Dev (`tauri dev`) example:
+
+```bash
+cd apps/desktop
+FORMULA_DEBUG_CLIPBOARD=1 bash ../../scripts/cargo_agent.sh tauri dev
+```
+
+In packaged/release builds, launch the installed desktop binary with `FORMULA_DEBUG_CLIPBOARD=1` set in the environment to get the same `[clipboard] …` log lines.
+
+**JS provider (frontend)**:
+
+- For a running session, enable logs in DevTools:
+  ```js
+  globalThis.FORMULA_DEBUG_CLIPBOARD = true;
+  // or:
+  globalThis.__FORMULA_DEBUG_CLIPBOARD__ = true;
+  ```
+- Optional build-time flag (Vite): set `VITE_FORMULA_DEBUG_CLIPBOARD=1` when building/running the desktop frontend so `import.meta.env.VITE_FORMULA_DEBUG_CLIPBOARD` is truthy.
+
+These debug logs include **format names/sources and byte counts only** (no clipboard contents). Still, avoid collecting or sharing clipboard diagnostics that could include sensitive user data.
+
 ### Manual QA matrix (recommended)
 
 | Platform | Copy from Formula | Paste target | What to verify |
