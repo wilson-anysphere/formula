@@ -11,6 +11,8 @@ env:
   NODE_VERSION: 22
   # Keep in sync with release.yml so CI catches WASM toolchain issues early.
   WASM_PACK_VERSION: 0.13.1
+  # Keep in sync with the `tauri` dependency pinned in Cargo.lock.
+  TAURI_CLI_VERSION: 2.9.5
 
 jobs:
   conflict-marker-guard:
@@ -267,11 +269,26 @@ jobs:
             librsvg2-dev \
             libssl-dev \
             patchelf
+      - name: Cache cargo-tauri binary
+        id: cargo-tauri-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: cargo-tauri-${{ runner.os }}-${{ runner.arch }}-v${{ env.TAURI_CLI_VERSION }}
+          restore-keys: |
+            cargo-tauri-${{ runner.os }}-${{ runner.arch }}-
       - name: Install cargo-tauri (CLI)
+        if: steps.cargo-tauri-cache.outputs.cache-hit != 'true'
+        run: bash scripts/cargo_agent.sh install cargo-tauri --version ${{ env.TAURI_CLI_VERSION }} --locked
+      - name: Verify cargo-tauri version
+        shell: bash
         run: |
           set -euo pipefail
-          if ! command -v cargo-tauri >/dev/null 2>&1; then
-            bash scripts/cargo_agent.sh install cargo-tauri --locked
+          expected="${TAURI_CLI_VERSION}"
+          actual="$(cargo-tauri --version | tr -d '\r' | awk '{print $2}')"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "Expected cargo-tauri ${expected}, but found ${actual}." >&2
+            exit 1
           fi
       - name: Validate Tauri capability permission identifiers
         run: node scripts/check-tauri-permissions.mjs
