@@ -1,8 +1,10 @@
 use crate::crypto::{aes_cbc_decrypt, derive_iv, HashAlgorithm, StandardKeyDeriver};
 use crate::error::OfficeCryptoError;
 use crate::util::{
-    checked_vec_len, decode_utf16le_nul_terminated, read_u32_le, read_u64_le, EncryptionInfoHeader,
+    checked_vec_len, ct_eq, decode_utf16le_nul_terminated, read_u32_le, read_u64_le,
+    EncryptionInfoHeader,
 };
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
@@ -227,16 +229,16 @@ fn decrypt_standard_with_scheme(
         }
     };
 
-    let verifier = aes_cbc_decrypt(
+    let verifier: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
         &verifier_key,
         &verifier_iv,
         &info.verifier.encrypted_verifier,
-    )?;
-    let verifier_hash_plain = aes_cbc_decrypt(
+    )?);
+    let verifier_hash_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
         &verifier_key,
         &verifier_iv,
         &info.verifier.encrypted_verifier_hash,
-    )?;
+    )?);
     let verifier_hash_plain = verifier_hash_plain
         .get(..info.verifier.verifier_hash_size as usize)
         .ok_or_else(|| {
@@ -245,8 +247,8 @@ fn decrypt_standard_with_scheme(
             )
         })?;
 
-    let verifier_hash = hash_alg.digest(&verifier);
-    if verifier_hash_plain != verifier_hash.as_slice() {
+    let verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(verifier.as_slice()));
+    if !ct_eq(verifier_hash_plain, verifier_hash.as_slice()) {
         return Err(OfficeCryptoError::InvalidPassword);
     }
 
@@ -322,8 +324,9 @@ where
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::*;
     use crate::crypto::{aes_cbc_encrypt, HashAlgorithm, StandardKeyDeriver};
-    use crate::util::parse_encryption_info_header;
+    use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
 
     pub(crate) fn standard_encryption_info_fixture() -> Vec<u8> {
         // Minimal EncryptionInfo (Standard) fixture:
@@ -399,5 +402,25 @@ pub(crate) mod tests {
         let hdr = parse_encryption_info_header(&out).expect("header");
         assert_eq!(hdr.kind, crate::util::EncryptionInfoKind::Standard);
         out
+    }
+
+    #[test]
+    fn standard_password_verifier_uses_constant_time_compare() {
+        reset_ct_eq_calls();
+
+        let encryption_info = standard_encryption_info_fixture();
+        let header = parse_encryption_info_header(&encryption_info).expect("parse header");
+        let info = parse_standard_encryption_info(&encryption_info, &header).expect("parse standard");
+
+        // Only the 8-byte length prefix is required for this test because the wrong password fails
+        // during verifier validation (before package decryption is attempted).
+        let encrypted_package = [0u8; 8];
+        let err =
+            decrypt_standard_encrypted_package(&info, &encrypted_package, "wrong-password").expect_err("wrong pw");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+        assert!(
+            ct_eq_call_count() > 0,
+            "expected constant-time compare helper to be invoked"
+        );
     }
 }

@@ -2263,6 +2263,7 @@ dependencies = [
  "rc4",
  "sha1",
  "sha2",
+ "subtle",
  "thiserror 1.0.69",
  "zeroize",
  "zip 2.4.2",

@@ -13,7 +13,7 @@ use crate::crypto::{
     HashAlgorithm,
 };
 use crate::error::OfficeCryptoError;
-use crate::util::{checked_vec_len, read_u64_le, EncryptionInfoHeader};
+use crate::util::{checked_vec_len, ct_eq, read_u64_le, EncryptionInfoHeader};
 use zeroize::Zeroizing;
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
@@ -167,24 +167,24 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_VERIFIER_HASH_INPUT,
     );
-    let verifier_hash_input_plain = aes_cbc_decrypt(
+    let verifier_hash_input_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
         &verifier_input_key,
         password_iv,
         &info.password_key_encryptor.encrypted_verifier_hash_input,
-    )?;
-    let verifier_hash_input_plain = verifier_hash_input_plain
+    )?);
+    let verifier_hash_input_slice = verifier_hash_input_plain
         .get(..16)
         .ok_or_else(|| {
             OfficeCryptoError::InvalidFormat(
                 "decrypted verifierHashInput shorter than 16 bytes".to_string(),
             )
-        })?
-        .to_vec();
+        })?;
 
-    let verifier_hash = info
-        .password_key_encryptor
-        .hash_algorithm
-        .digest(&verifier_hash_input_plain);
+    let verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(
+        info.password_key_encryptor
+            .hash_algorithm
+            .digest(verifier_hash_input_slice),
+    );
 
     let verifier_value_key = derive_agile_key(
         info.password_key_encryptor.hash_algorithm,
@@ -194,11 +194,11 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_VERIFIER_HASH_VALUE,
     );
-    let verifier_hash_value_plain = aes_cbc_decrypt(
+    let verifier_hash_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
         &verifier_value_key,
         password_iv,
         &info.password_key_encryptor.encrypted_verifier_hash_value,
-    )?;
+    )?);
     let expected_hash_slice = verifier_hash_value_plain
         .get(..verifier_hash.len())
         .ok_or_else(|| {
@@ -207,7 +207,7 @@ pub(crate) fn decrypt_agile_encrypted_package(
             )
         })?;
 
-    if expected_hash_slice != verifier_hash.as_slice() {
+    if !ct_eq(expected_hash_slice, verifier_hash.as_slice()) {
         return Err(OfficeCryptoError::InvalidPassword);
     }
 
@@ -220,11 +220,11 @@ pub(crate) fn decrypt_agile_encrypted_package(
         info.password_key_encryptor.key_bits / 8,
         BLOCK_KEY_ENCRYPTED_KEY_VALUE,
     );
-    let key_value_plain = aes_cbc_decrypt(
+    let key_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
         &key_value_key,
         password_iv,
         &info.password_key_encryptor.encrypted_key_value,
-    )?;
+    )?);
     let key_len = info.key_data.key_bits / 8;
     let package_key_bytes = key_value_plain.get(..key_len).ok_or_else(|| {
         OfficeCryptoError::InvalidFormat("decrypted keyValue shorter than keyBytes".to_string())
@@ -990,7 +990,7 @@ pub(crate) mod tests {
     use crate::crypto::{
         aes_cbc_encrypt, derive_agile_key, password_to_utf16le, HashAlgorithm,
     };
-    use crate::util::parse_encryption_info_header;
+    use crate::util::{ct_eq_call_count, parse_encryption_info_header, reset_ct_eq_calls};
 
     pub(crate) fn agile_encryption_info_fixture() -> Vec<u8> {
         // A small, deterministic Agile EncryptionInfo fixture for parsing tests.
@@ -1092,5 +1092,25 @@ pub(crate) mod tests {
   </keyEncryptors>
 </encryption>"#
         )
+    }
+
+    #[test]
+    fn agile_password_verifier_uses_constant_time_compare() {
+        reset_ct_eq_calls();
+
+        let encryption_info = agile_encryption_info_fixture();
+        let header = parse_encryption_info_header(&encryption_info).expect("parse header");
+        let info = parse_agile_encryption_info(&encryption_info, &header).expect("parse agile");
+
+        // Only the 8-byte length prefix is required for this test because the wrong password fails
+        // during verifier validation (before package decryption is attempted).
+        let encrypted_package = [0u8; 8];
+        let err =
+            decrypt_agile_encrypted_package(&info, &encrypted_package, "wrong-password").expect_err("wrong pw");
+        assert!(matches!(err, OfficeCryptoError::InvalidPassword));
+        assert!(
+            ct_eq_call_count() > 0,
+            "expected constant-time compare helper to be invoked"
+        );
     }
 }

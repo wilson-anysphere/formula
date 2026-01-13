@@ -1,5 +1,13 @@
 use crate::error::OfficeCryptoError;
 
+use subtle::ConstantTimeEq as _;
+
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(test)]
+static CT_EQ_CALLS: AtomicUsize = AtomicUsize::new(0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EncryptionInfoKind {
     Agile,
@@ -123,4 +131,27 @@ pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoErro
         .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
 
     Ok(len)
+}
+
+/// Compare two byte slices in constant time.
+///
+/// This should be used for comparing password verifier digests (both Standard and Agile) to avoid
+/// obvious timing side channels from Rust's early-exit `==` / `!=` implementations.
+///
+/// Note: This does not aim to make the overall decryption flow perfectly side-channel resistant; it
+/// only hardens the digest comparison step.
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    #[cfg(test)]
+    CT_EQ_CALLS.fetch_add(1, Ordering::Relaxed);
+    bool::from(a.ct_eq(b))
+}
+
+#[cfg(test)]
+pub(crate) fn reset_ct_eq_calls() {
+    CT_EQ_CALLS.store(0, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+pub(crate) fn ct_eq_call_count() -> usize {
+    CT_EQ_CALLS.load(Ordering::Relaxed)
 }

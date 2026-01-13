@@ -408,37 +408,34 @@ impl StandardKeyDeriver {
         &self,
         block_index: u32,
     ) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
-        let mut buf = Vec::with_capacity(self.password_hash.len() + 4);
+        let mut buf: Zeroizing<Vec<u8>> =
+            Zeroizing::new(Vec::with_capacity(self.password_hash.len() + 4));
         buf.extend_from_slice(&self.password_hash);
         buf.extend_from_slice(&block_index.to_le_bytes());
-        let h = self.hash_alg.digest(&buf);
-        Ok(Zeroizing::new(crypt_derive_key(
-            self.hash_alg,
-            &h,
-            self.key_bytes,
-        )))
+        let h: Zeroizing<Vec<u8>> = Zeroizing::new(self.hash_alg.digest(&buf));
+        Ok(crypt_derive_key(self.hash_alg, &h, self.key_bytes))
     }
 }
 
-fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Vec<u8> {
+fn crypt_derive_key(hash_alg: HashAlgorithm, hash: &[u8], key_len: usize) -> Zeroizing<Vec<u8>> {
     if key_len <= hash.len() {
-        return hash[..key_len].to_vec();
+        return Zeroizing::new(hash[..key_len].to_vec());
     }
 
     // MS-OFFCRYPTO's CryptoAPI key derivation extension: hash padded with 0x36/0x5c to 64 bytes,
     // then hashed again to produce additional material.
-    let mut buf1 = Vec::with_capacity(64);
+    let mut buf1: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(64));
     buf1.extend_from_slice(hash);
     buf1.resize(64, 0x36);
 
-    let mut buf2 = Vec::with_capacity(64);
+    let mut buf2: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(64));
     buf2.extend_from_slice(hash);
     buf2.resize(64, 0x5C);
 
-    let h1 = hash_alg.digest(&buf1);
-    let h2 = hash_alg.digest(&buf2);
+    let h1: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf1));
+    let h2: Zeroizing<Vec<u8>> = Zeroizing::new(hash_alg.digest(&buf2));
 
-    let mut out = Vec::with_capacity(h1.len() + h2.len());
+    let mut out: Zeroizing<Vec<u8>> = Zeroizing::new(Vec::with_capacity(h1.len() + h2.len()));
     out.extend_from_slice(&h1);
     out.extend_from_slice(&h2);
     out.truncate(key_len);
