@@ -71,11 +71,26 @@ node scripts/check-macos-entitlements.mjs
 
 After all platform builds finish, CI also verifies the **uploaded GitHub Release assets** are
 complete and consistent with the Tauri updater manifest (`latest.json`). This prevents publishing a
-release where `latest.json` points at missing artifacts or missing signature files:
+release where `latest.json` points at missing artifacts or missing signature files.
+
+CI runs:
 
 ```bash
-# Requires a GitHub token with access to the release assets.
-GITHUB_TOKEN=... node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
+node scripts/ci/validate-updater-manifest.mjs vX.Y.Z
+```
+
+You can run it locally too (requires a GitHub token with access to the release assets):
+
+```bash
+GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
+  node scripts/ci/validate-updater-manifest.mjs vX.Y.Z
+```
+
+Optional extra (stricter) local check that also validates the “human install” artifact set:
+
+```bash
+GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
+  node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
 
 ## Updater restart semantics (important)
