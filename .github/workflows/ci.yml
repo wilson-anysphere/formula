@@ -230,6 +230,14 @@ jobs:
           FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB: ${{ vars.FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB }}
         run: python scripts/desktop_size_report.py --binary target/release/formula-desktop --dist apps/desktop/dist --json-out desktop-size-report.json
 
+      - name: Upload desktop size report (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-size-report
+          path: desktop-size-report.json
+          if-no-files-found: ignore
+
   desktop-tauri-check:
     name: Desktop (Tauri) Rust compile check
     needs: conflict-marker-guard
