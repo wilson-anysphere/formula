@@ -2208,6 +2208,33 @@ fn values_column_row_context_disallows_other_columns() {
 }
 
 #[test]
+fn filter_values_restricts_row_context_columns() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(FILTER(VALUES(Orders[CustomerId]), Orders[CustomerId] = 1))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+
+    let err = DaxEngine::new()
+        .evaluate(
+            &model,
+            "COUNTROWS(FILTER(VALUES(Orders[CustomerId]), Orders[Amount] > 0))",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+    assert!(matches!(err, DaxError::Eval(_)));
+    assert!(err
+        .to_string()
+        .contains("not available in the current row context"));
+}
+
+#[test]
 fn allexcept_keeps_only_listed_columns() {
     let mut model = build_model();
     model

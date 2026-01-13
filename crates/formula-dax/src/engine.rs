@@ -1078,9 +1078,8 @@ impl DaxEngine {
 
                 let mut out = String::new();
                 let mut first = true;
-                for row in table_result.rows {
-                    let mut inner_ctx = row_ctx.clone();
-                    inner_ctx.push(&table_result.table, row);
+                for row in table_result.rows.iter().copied() {
+                    let inner_ctx = table_result.push_row_ctx(row_ctx, row);
                     let value = self.eval_scalar(model, text_expr, filter, &inner_ctx, env)?;
                     let text = coerce_text(&value);
                     if !first {
@@ -1571,13 +1570,8 @@ impl DaxEngine {
         let mut count = 0usize;
         let mut best: Option<f64> = None;
 
-        for row in table_result.rows {
-            let mut inner_ctx = row_ctx.clone();
-            inner_ctx.push_with_visible_cols(
-                &table_result.table,
-                row,
-                table_result.visible_cols.clone(),
-            );
+        for row in table_result.rows.iter().copied() {
+            let inner_ctx = table_result.push_row_ctx(row_ctx, row);
             let value = self.eval_scalar(model, value_expr, filter, &inner_ctx, env)?;
             match kind {
                 IteratorKind::Sum | IteratorKind::Average => match value {
@@ -1954,6 +1948,7 @@ impl DaxEngine {
             keep_filters: bool,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
+            env: &mut VarEnv,
         ) -> DaxResult<()> {
             let mut referenced_tables: HashSet<String> = HashSet::new();
             let mut referenced_columns: HashSet<(String, String)> = HashSet::new();
@@ -2117,6 +2112,7 @@ impl DaxEngine {
                     keep_filters,
                     &mut clear_columns,
                     &mut row_filters,
+                    env,
                 )?,
                 Expr::Call { name, .. }
                     if name.eq_ignore_ascii_case("NOT")
@@ -2132,6 +2128,7 @@ impl DaxEngine {
                         keep_filters,
                         &mut clear_columns,
                         &mut row_filters,
+                        env,
                     )?
                 }
                 Expr::BinaryOp { op, left, right } => {
@@ -2543,12 +2540,7 @@ impl DaxEngine {
                     let base = self.eval_table(model, table_expr, filter, row_ctx, env)?;
                     let mut rows = Vec::new();
                     for row in base.rows.iter().copied() {
-                        let mut inner_ctx = row_ctx.clone();
-                        inner_ctx.push_with_visible_cols(
-                            &base.table,
-                            row,
-                            base.visible_cols.clone(),
-                        );
+                        let inner_ctx = base.push_row_ctx(row_ctx, row);
                         let pred = self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                         if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                             rows.push(row);
@@ -3685,6 +3677,14 @@ struct TableResult {
     table: String,
     rows: Vec<usize>,
     visible_cols: Option<Vec<usize>>,
+}
+
+impl TableResult {
+    fn push_row_ctx(&self, base: &RowContext, row: usize) -> RowContext {
+        let mut ctx = base.clone();
+        ctx.push_with_visible_cols(&self.table, row, self.visible_cols.clone());
+        ctx
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
