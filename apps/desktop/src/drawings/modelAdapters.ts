@@ -26,6 +26,47 @@ function unwrapExternallyTaggedEnum(value: unknown, context: string): { tag: str
   return { tag, value: (value as Record<string, unknown>)[tag] };
 }
 
+function unwrapPossiblyTaggedEnum(
+  input: unknown,
+  context: string,
+  opts?: { tagKeys?: string[]; contentKeys?: string[] },
+): { tag: string; value: unknown } {
+  const tagKeys = opts?.tagKeys ?? ["kind", "type"];
+  const contentKeys = opts?.contentKeys ?? ["value", "content"];
+
+  if (!isRecord(input)) {
+    throw new Error(`${context} must be an enum object`);
+  }
+
+  // Prefer externally-tagged enums: `{ Variant: {...} }`.
+  const keys = Object.keys(input);
+  if (keys.length === 1 && !tagKeys.includes(keys[0]!)) {
+    const tag = keys[0]!;
+    return { tag, value: (input as Record<string, unknown>)[tag] };
+  }
+
+  // Support `#[serde(tag = "...", content = "...")]`: `{ type: "Variant", value: {...} }`.
+  for (const tagKey of tagKeys) {
+    const tagVal = (input as JsonRecord)[tagKey];
+    if (typeof tagVal !== "string") continue;
+
+    for (const contentKey of contentKeys) {
+      const content = (input as JsonRecord)[contentKey];
+      if (isRecord(content)) return { tag: tagVal, value: content };
+    }
+
+    // Support `#[serde(tag = "...")]`: `{ kind: "Variant", ...fields }`.
+    return { tag: tagVal, value: input };
+  }
+
+  throw new Error(`${context} must be an externally-tagged or internally-tagged enum object`);
+}
+
+function normalizeEnumTag(tag: string): string {
+  // Normalise variants like `OneCell`, `oneCell`, `one_cell` to a stable key.
+  return tag.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+}
+
 function readNumber(value: unknown, context: string): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "bigint") return Number(value);
@@ -177,22 +218,23 @@ function convertModelAnchorPoint(model: unknown, context: string): AnchorPoint {
 }
 
 export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
-  const { tag, value } = unwrapExternallyTaggedEnum(modelAnchorJson, "Anchor");
+  const { tag, value } = unwrapPossiblyTaggedEnum(modelAnchorJson, "Anchor", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`Anchor.${tag} must be an object`);
+  const normalized = normalizeEnumTag(tag);
 
-  switch (tag) {
-    case "OneCell": {
+  switch (normalized) {
+    case "onecell": {
       const from = convertModelAnchorPoint((value as JsonRecord).from, "Anchor.OneCell.from");
       const ext = pick(value, ["ext", "size"]);
       const size = convertModelEmuSize(ext, "Anchor.OneCell.ext");
       return { type: "oneCell", from, size };
     }
-    case "TwoCell": {
+    case "twocell": {
       const from = convertModelAnchorPoint((value as JsonRecord).from, "Anchor.TwoCell.from");
       const to = convertModelAnchorPoint((value as JsonRecord).to, "Anchor.TwoCell.to");
       return { type: "twoCell", from, to };
     }
-    case "Absolute": {
+    case "absolute": {
       const pos = convertModelCellOffset((value as JsonRecord).pos, "Anchor.Absolute.pos");
       const ext = pick(value, ["ext", "size"]);
       const size = convertModelEmuSize(ext, "Anchor.Absolute.ext");
@@ -204,23 +246,24 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
 }
 
 function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
-  const { tag, value } = unwrapExternallyTaggedEnum(model, "DrawingObjectKind");
+  const { tag, value } = unwrapPossiblyTaggedEnum(model, "DrawingObjectKind", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`DrawingObjectKind.${tag} must be an object`);
+  const normalized = normalizeEnumTag(tag);
 
-  switch (tag) {
-    case "Image": {
+  switch (normalized) {
+    case "image": {
       const imageIdValue = pick(value, ["image_id", "imageId"]);
       const imageId = parseImageId(imageIdValue, "DrawingObjectKind.Image.image_id");
       return { type: "image", imageId };
     }
-    case "Shape": {
+    case "shape": {
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
       const label = extractDrawingObjectName(rawXml);
       return { type: "shape", rawXml, label };
     }
-    case "ChartPlaceholder": {
-      const relIdValue = pick(value, ["rel_id", "relId"]);
+    case "chartplaceholder": {
+      const relIdValue = pick(value, ["rel_id", "relId", "chart_id", "chartId"]);
       const relId = readString(relIdValue, "DrawingObjectKind.ChartPlaceholder.rel_id");
       const rawXmlValue = pick(value, ["raw_xml", "rawXml"]);
       const rawXml = readOptionalString(rawXmlValue);
@@ -238,7 +281,14 @@ function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
 
       return { type: "chart", chartId: relId, label: label ?? `Chart (${relId})`, rawXml };
     }
-    case "Unknown":
+    case "chart": {
+      // UI/other internal representations may already use `{ type: "chart", chartId }`.
+      const chartId = readOptionalString(pick(value, ["chart_id", "chartId", "rel_id", "relId"]));
+      const rawXml = readOptionalString(pick(value, ["raw_xml", "rawXml"]));
+      const label = readOptionalString(pick(value, ["label"])) ?? extractDrawingObjectName(rawXml);
+      return { type: "chart", chartId: chartId ?? undefined, rawXml, label: label ?? undefined };
+    }
+    case "unknown":
       return {
         type: "unknown",
         rawXml: readOptionalString(pick(value, ["raw_xml", "rawXml"])),

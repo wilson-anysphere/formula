@@ -35,6 +35,44 @@ describe("drawings/modelAdapters", () => {
     });
   });
 
+  it("accepts UI/other internally-tagged representations for anchor + kind", () => {
+    const model = {
+      id: 123,
+      kind: { type: "image", imageId: "image1.png" },
+      anchor: {
+        type: "absolute",
+        pos: { xEmu: 5, yEmu: 7 },
+        size: { cx: 20, cy: 10 },
+      },
+      zOrder: 1,
+    };
+
+    const ui = convertModelDrawingObjectToUiDrawingObject(model);
+    expect(ui).toEqual({
+      id: 123,
+      kind: { type: "image", imageId: "image1.png" },
+      anchor: { type: "absolute", pos: { xEmu: 5, yEmu: 7 }, size: { cx: 20, cy: 10 } },
+      zOrder: 1,
+      size: undefined,
+    });
+  });
+
+  it("accepts internally-tagged Anchor variants (kind field)", () => {
+    const model = {
+      id: 1,
+      kind: { Image: { image_id: "image1.png" } },
+      anchor: {
+        kind: "TwoCell",
+        from: { cell: { row: 0, col: 0 }, offset: { x_emu: 0, y_emu: 0 } },
+        to: { cell: { row: 1, col: 1 }, offset: { x_emu: 0, y_emu: 0 } },
+      },
+      z_order: 0,
+    };
+
+    const ui = convertModelDrawingObjectToUiDrawingObject(model);
+    expect(ui.anchor.type).toBe("twoCell");
+  });
+
   it("converts a OneCell Shape drawing object", () => {
     const model = {
       id: 1,
