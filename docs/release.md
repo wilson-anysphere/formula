@@ -454,6 +454,8 @@ CI smoke test:
 - `.github/workflows/windows-arm64-smoke.yml` runs `cargo tauri build --target aarch64-pc-windows-msvc`
   and asserts that the expected Windows bundles land under
   `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**`.
+  - It also runs on a weekly schedule in the upstream repo to catch `windows-latest` runner image
+    regressions (missing MSVC/SDK ARM64 components) early.
 
 ## Windows installer bundler prerequisites (WiX + NSIS)
 
