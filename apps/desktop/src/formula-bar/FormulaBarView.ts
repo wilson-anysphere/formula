@@ -105,6 +105,50 @@ const DEFAULT_FUNCTION_NAMES: string[] = (() => {
   return out;
 })();
 
+const FORMULA_BAR_EXPANDED_STORAGE_KEY = "formula:ui:formulaBarExpanded";
+const FORMULA_BAR_MIN_HEIGHT = 24;
+const FORMULA_BAR_MAX_HEIGHT_COLLAPSED = 140;
+const FORMULA_BAR_MAX_HEIGHT_EXPANDED = 360;
+
+let formulaBarExpandedFallback: boolean | null = null;
+
+function getFormulaBarSessionStorage(): Storage | null {
+  try {
+    if (typeof window === "undefined") return null;
+    return window.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function loadFormulaBarExpandedState(): boolean {
+  const storage = getFormulaBarSessionStorage();
+  if (storage) {
+    try {
+      const raw = storage.getItem(FORMULA_BAR_EXPANDED_STORAGE_KEY);
+      if (raw === "true") return true;
+      if (raw === "false") return false;
+    } catch {
+      // ignore
+    }
+  }
+  return formulaBarExpandedFallback ?? false;
+}
+
+function storeFormulaBarExpandedState(expanded: boolean): void {
+  const storage = getFormulaBarSessionStorage();
+  if (storage) {
+    try {
+      storage.setItem(FORMULA_BAR_EXPANDED_STORAGE_KEY, expanded ? "true" : "false");
+      return;
+    } catch {
+      // Fall back to in-memory storage.
+    }
+  }
+
+  formulaBarExpandedFallback = expanded;
+}
+
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
   onCommit: (text: string, commit: FormulaBarCommit) => void;
@@ -180,6 +224,7 @@ export class FormulaBarView {
   #cancelButtonEl: HTMLButtonElement;
   #commitButtonEl: HTMLButtonElement;
   #fxButtonEl: HTMLButtonElement;
+  #expandButtonEl: HTMLButtonElement;
   #addressEl: HTMLInputElement;
   #highlightEl: HTMLElement;
   #hintEl: HTMLElement;
@@ -197,6 +242,7 @@ export class FormulaBarView {
   #hoverOverrideText: string | null = null;
   #selectedReferenceIndex: number | null = null;
   #mouseDownSelectedReferenceIndex: number | null = null;
+  #isExpanded = false;
   #callbacks: FormulaBarViewCallbacks;
   #tooling: FormulaBarViewToolingOptions | null = null;
   #toolingRequestId = 0;
@@ -231,6 +277,8 @@ export class FormulaBarView {
     this.#tooling = tooling ?? null;
 
     root.classList.add("formula-bar");
+    this.#isExpanded = loadFormulaBarExpandedState();
+    root.classList.toggle("formula-bar--expanded", this.#isExpanded);
 
     const row = document.createElement("div");
     row.className = "formula-bar-row";
@@ -307,6 +355,16 @@ export class FormulaBarView {
 
     editor.appendChild(highlight);
     editor.appendChild(textarea);
+
+    const expandButton = document.createElement("button");
+    expandButton.className = "formula-bar-expand-button";
+    expandButton.type = "button";
+    expandButton.dataset.testid = "formula-expand-button";
+    // Label/text synced after elements are assigned.
+    expandButton.textContent = "▾";
+    expandButton.title = "Expand formula bar";
+    expandButton.setAttribute("aria-label", "Expand formula bar");
+    expandButton.setAttribute("aria-pressed", "false");
 
     const errorButton = document.createElement("button");
     errorButton.className = "formula-bar-error-button";
@@ -385,6 +443,7 @@ export class FormulaBarView {
     row.appendChild(nameBox);
     row.appendChild(actions);
     row.appendChild(editor);
+    row.appendChild(expandButton);
     row.appendChild(errorButton);
 
     const hint = document.createElement("div");
@@ -429,6 +488,7 @@ export class FormulaBarView {
     this.#cancelButtonEl = cancelButton;
     this.#commitButtonEl = commitButton;
     this.#fxButtonEl = fxButton;
+    this.#expandButtonEl = expandButton;
     this.#addressEl = address;
     this.#highlightEl = highlight;
     this.#hintEl = hint;
@@ -538,10 +598,18 @@ export class FormulaBarView {
       e.preventDefault();
     });
 
+    expandButton.addEventListener("click", () => this.#toggleExpanded());
+    expandButton.addEventListener("mousedown", (e) => {
+      // Preserve the caret/selection in the textarea when clicking the toggle button.
+      e.preventDefault();
+    });
+
     functionPickerInput.addEventListener("input", () => this.#onFunctionPickerInput());
     const pickerKeyDown = (e: KeyboardEvent) => this.#onFunctionPickerKeyDown(e);
     functionPickerInput.addEventListener("keydown", pickerKeyDown);
     functionPickerList.addEventListener("keydown", pickerKeyDown);
+
+    this.#syncExpandedUi();
 
     // Initial render.
     this.model.setActiveCell({ address: "A1", input: "", value: "" });
@@ -1647,8 +1715,8 @@ export class FormulaBarView {
   }
 
   #adjustHeight(): void {
-    const minHeight = 24;
-    const maxHeight = 140;
+    const minHeight = FORMULA_BAR_MIN_HEIGHT;
+    const maxHeight = this.#isExpanded ? FORMULA_BAR_MAX_HEIGHT_EXPANDED : FORMULA_BAR_MAX_HEIGHT_COLLAPSED;
 
     const highlightEl = this.#highlightEl as HTMLElement;
 
@@ -1665,6 +1733,22 @@ export class FormulaBarView {
     highlightEl.style.height = `${minHeight}px`;
     const desired = Math.max(minHeight, Math.min(maxHeight, highlightEl.scrollHeight));
     highlightEl.style.height = `${desired}px`;
+  }
+
+  #toggleExpanded(): void {
+    this.#isExpanded = !this.#isExpanded;
+    storeFormulaBarExpandedState(this.#isExpanded);
+    this.#syncExpandedUi();
+    this.#adjustHeight();
+  }
+
+  #syncExpandedUi(): void {
+    this.root.classList.toggle("formula-bar--expanded", this.#isExpanded);
+    this.#expandButtonEl.textContent = this.#isExpanded ? "▴" : "▾";
+    const label = this.#isExpanded ? "Collapse formula bar" : "Expand formula bar";
+    this.#expandButtonEl.title = label;
+    this.#expandButtonEl.setAttribute("aria-label", label);
+    this.#expandButtonEl.setAttribute("aria-pressed", this.#isExpanded ? "true" : "false");
   }
 
   #syncScroll(): void {

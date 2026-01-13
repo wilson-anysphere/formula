@@ -63,7 +63,7 @@
 
 .formula-bar-row {
   display: grid;
-  grid-template-columns: 110px auto 1fr auto;
+  grid-template-columns: 110px auto 1fr auto auto;
   align-items: start;
   gap: 8px;
   min-width: 0;
@@ -299,6 +299,44 @@
   opacity: 0.8;
   font-size: 12px;
   margin-left: 6px;
+}
+
+.formula-bar-expand-button {
+  width: 24px;
+  height: 24px;
+  margin-top: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  line-height: 1;
+  font-size: 12px;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-expand-button:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.formula-bar-expand-button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-bar--expanded .formula-bar-expand-button {
+  color: var(--text-primary);
 }
 
 .formula-bar-function-autocomplete {
