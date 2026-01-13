@@ -16,4 +16,10 @@ describe("createLLMClient", () => {
       /Provider selection is no longer supported; all AI uses Cursor backend\./,
     );
   });
+
+  it("throws when passed a legacy apiKey config", () => {
+    expect(() => createLLMClient({ apiKey: "test" } as any)).toThrowError(
+      /User API keys are not supported; all AI uses Cursor backend auth via request headers \(getAuthHeaders\/authToken\)\./,
+    );
+  });
 });

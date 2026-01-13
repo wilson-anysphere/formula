@@ -27,6 +27,11 @@ export function createLLMClient(config) {
     throw new Error("Provider selection is no longer supported; all AI uses Cursor backend.");
   }
 
+  if ("apiKey" in config) {
+    throw new Error(
+      "User API keys are not supported; all AI uses Cursor backend auth via request headers (getAuthHeaders/authToken).",
+    );
+  }
+
   return new CursorLLMClient(config);
 }
-

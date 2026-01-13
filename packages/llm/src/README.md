@@ -5,7 +5,7 @@ This package provides a small, dependency-free LLM client that talks to the **Cu
 ## Cursor-only constraints
 
 - No provider selection (Cursor controls routing/model choice).
-- No user-supplied API keys (legacy provider env vars are **not** used by the Cursor client).
+- No user-supplied API keys (the `apiKey` option is not supported and will throw; legacy provider env vars are **not** used by the Cursor client).
 - Callers must inject auth using **request headers**.
 
 ## Backend protocol
