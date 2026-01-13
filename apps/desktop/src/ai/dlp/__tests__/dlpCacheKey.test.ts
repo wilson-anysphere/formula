@@ -24,6 +24,23 @@ describe("computeDlpCacheKey", () => {
     expect(computeDlpCacheKey(dlp)).toBe("dlp:excl:precomputed");
   });
 
+  it("returns a precomputed cache_key (snake_case) when present", () => {
+    const dlp = { cache_key: "dlp:excl:precomputed", classification_records: [] };
+    expect(computeDlpCacheKey(dlp)).toBe("dlp:excl:precomputed");
+  });
+
+  it("does not reuse a cached key when includeRestrictedContent prefix does not match", () => {
+    const dlp = {
+      cacheKey: "dlp:incl:precomputed",
+      includeRestrictedContent: false,
+      policy: { rules: { a: 1 } },
+      classificationRecords: [],
+    };
+    const computed = computeDlpCacheKey(dlp);
+    expect(computed).not.toBe("dlp:incl:precomputed");
+    expect(computed.startsWith("dlp:excl:")).toBe(true);
+  });
+
   it("does not reuse cacheKey when only a classification store is provided (store may change)", () => {
     const base = {
       document_id: "doc",
