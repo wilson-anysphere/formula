@@ -57,6 +57,18 @@ find_pkg_dirs() {
   # (node_modules, pnpm store, etc) can be very slow. Only scan expected Tauri
   # target directories.
   local -a search_roots=()
+
+  # Respect an explicit Cargo target dir override (common in CI caching setups).
+  local cargo_target_dir="${CARGO_TARGET_DIR:-}"
+  if [[ -n "${cargo_target_dir}" ]]; then
+    # Cargo interprets relative paths relative to the working directory (repo root).
+    if [[ "${cargo_target_dir}" != /* ]]; then
+      cargo_target_dir="${repo_root}/${cargo_target_dir}"
+    fi
+    if [[ -d "${cargo_target_dir}" ]]; then
+      search_roots+=("${cargo_target_dir}")
+    fi
+  fi
   local root
   for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
     if [[ -d "$root" ]]; then
@@ -65,7 +77,7 @@ find_pkg_dirs() {
   done
 
   if [[ ${#search_roots[@]} -eq 0 ]]; then
-    echo "linux-package-install-smoke: no target directories found (expected apps/desktop/src-tauri/target or target)" >&2
+    echo "linux-package-install-smoke: no target directories found (expected CARGO_TARGET_DIR, apps/desktop/src-tauri/target, apps/desktop/target, or target)" >&2
     exit 1
   fi
 
