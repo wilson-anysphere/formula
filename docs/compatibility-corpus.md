@@ -123,6 +123,31 @@ python -m tools.corpus.triage \
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
+### Diff policy (ignored parts + calcChain)
+
+The `xlsx-diff` step classifies differences by severity:
+
+- **CRITICAL** – counts toward CI regression gating (`diff_critical_count`)
+- **WARN** / **INFO** – surfaced in reports and dashboards, but do not fail CI by default
+
+`tools/corpus/triage.py` ignores a small set of parts that are typically noisy across writers
+(`docProps/core.xml`, `docProps/app.xml`).
+
+#### calcChain (`xl/calcChain.xml`)
+
+Excel workbooks may include a **calculation chain** (`xl/calcChain.xml`) that records formula dependency order.
+Many producers drop or regenerate it during recalculation, so churn is common.
+
+However, preserving calcChain *when possible* is a project goal, so corpus triage **does not ignore calcChain
+diffs**. `xlsx-diff` downgrades calcChain-related diffs (including associated relationship / content-type changes)
+to **WARN**, so they show up in round-trip metrics and dashboards without breaking CI gates.
+
+To locally hide calcChain noise (restoring the old triage behavior), run triage with:
+
+```bash
+python -m tools.corpus.triage ... --diff-ignore xl/calcChain.xml
+```
+
 To fail fast on suspicious plaintext in a corpus directory:
 
 ```bash

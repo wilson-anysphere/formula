@@ -34,8 +34,9 @@ DEFAULT_DIFF_IGNORE = {
     # These tend to change across round-trips in most writers due to timestamps and app metadata.
     "docProps/core.xml",
     "docProps/app.xml",
-    # Many apps rewrite calcChain as part of recalculation.
-    "xl/calcChain.xml",
+    # NOTE: calcChain (`xl/calcChain.xml`) is intentionally *not* ignored by default.
+    # `xlsx-diff` downgrades calcChain-related churn to WARNING so it shows up in metrics/dashboards
+    # without failing CI gates (which key off critical diffs).
 }
 
 
