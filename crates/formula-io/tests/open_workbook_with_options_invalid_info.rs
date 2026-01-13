@@ -47,6 +47,7 @@ fn maps_invalid_encryption_info_to_decrypt_ooxml() {
         &path,
         OpenOptions {
             password: Some("password".to_string()),
+            encrypted_package_cache_max_bytes: None,
         },
     )
     .expect_err("expected invalid EncryptionInfo to error");

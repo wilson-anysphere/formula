@@ -113,13 +113,25 @@ fn opens_encrypted_xls_with_options_password() {
     std::fs::write(&path, &bytes).expect("write encrypted xls fixture");
 
     // No password: options-based open APIs should surface PasswordRequired for encrypted legacy `.xls`.
-    let err = open_workbook_model_with_options(&path, OpenOptions { password: None })
+    let err = open_workbook_model_with_options(
+        &path,
+        OpenOptions {
+            password: None,
+            ..Default::default()
+        },
+    )
         .expect_err("expected password required");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
         "expected Error::PasswordRequired, got {err:?}"
     );
-    let err = open_workbook_with_options(&path, OpenOptions { password: None })
+    let err = open_workbook_with_options(
+        &path,
+        OpenOptions {
+            password: None,
+            ..Default::default()
+        },
+    )
         .expect_err("expected password required");
     assert!(
         matches!(err, Error::PasswordRequired { .. }),
@@ -131,6 +143,7 @@ fn opens_encrypted_xls_with_options_password() {
         &path,
         OpenOptions {
             password: Some(PASSWORD.to_string()),
+            ..Default::default()
         },
     )
     .expect("open encrypted xls as model");
@@ -145,6 +158,7 @@ fn opens_encrypted_xls_with_options_password() {
         &path,
         OpenOptions {
             password: Some(PASSWORD.to_string()),
+            ..Default::default()
         },
     )
     .expect("open encrypted xls");
@@ -162,6 +176,7 @@ fn opens_encrypted_xls_with_options_password() {
         &path,
         OpenOptions {
             password: Some("wrong".to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected invalid password to error");
@@ -174,6 +189,7 @@ fn opens_encrypted_xls_with_options_password() {
         &path,
         OpenOptions {
             password: Some("wrong".to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected invalid password to error");
@@ -285,6 +301,7 @@ fn errors_on_unsupported_encryption_for_encrypted_xls() {
         &path,
         OpenOptions {
             password: Some(PASSWORD.to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected unsupported encryption error");
@@ -306,6 +323,7 @@ fn errors_on_unsupported_encryption_for_encrypted_xls() {
         &path,
         OpenOptions {
             password: Some(PASSWORD.to_string()),
+            ..Default::default()
         },
     )
     .expect_err("expected unsupported encryption error");

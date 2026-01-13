@@ -2214,6 +2214,7 @@ dependencies = [
  "cipher",
  "getrandom 0.2.17",
  "hmac",
+ "lru",
  "md-5",
  "ms-offcrypto-writer",
  "proptest",

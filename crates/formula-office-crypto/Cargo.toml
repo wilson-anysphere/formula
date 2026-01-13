@@ -13,6 +13,7 @@ cipher = "0.4"
 md-5 = "0.10"
 rc4 = "0.1"
 hmac = "0.12"
+lru = "0.12"
 quick-xml = { version = "0.31", default-features = false }
 rand = "0.8"
 sha1 = "0.10"

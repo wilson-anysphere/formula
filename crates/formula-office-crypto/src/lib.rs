@@ -12,6 +12,7 @@ mod crypto;
 mod error;
 mod ole;
 mod standard;
+mod stream_reader;
 mod util;
 
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -19,6 +20,7 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 pub use crate::crypto::HashAlgorithm;
 pub use crate::error::OfficeCryptoError;
 pub use crate::ole::{extract_ole_entries, OleEntries, OleEntry, OleStream};
+pub use crate::stream_reader::EncryptedPackageReader;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
@@ -52,6 +54,8 @@ pub const MAX_STANDARD_VERIFIER_HASH_SIZE_BYTES: usize = 64;
 ///
 /// This size prefix is untrusted; callers should reject absurd values before allocating output.
 pub const MAX_ENCRYPTED_PACKAGE_ORIGINAL_SIZE: u64 = 512 * 1024 * 1024; // 512MiB
+/// Default maximum plaintext bytes cached by [`EncryptedPackageReader`].
+pub const DEFAULT_MAX_CACHE_BYTES: usize = 16 * 1024 * 1024; // 16MiB
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum EncryptionScheme {
@@ -79,20 +83,35 @@ impl Default for EncryptOptions {
 }
 
 /// Options controlling decryption resource limits.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DecryptOptions {
     /// Maximum allowed Agile `spinCount` before rejecting the file as unsafe/too expensive to
     /// process.
     pub max_spin_count: u32,
+    /// Maximum plaintext bytes to cache when decrypting an `EncryptedPackage` stream reader.
+    ///
+    /// The streaming reader decrypts the package on-demand in fixed-size segments (typically
+    /// 4096-byte chunks). The cache is bounded by this value and evicts least-recently-used
+    /// segments.
+    pub max_cache_bytes: usize,
 }
 
 impl Default for DecryptOptions {
     fn default() -> Self {
         Self {
             max_spin_count: DEFAULT_MAX_SPIN_COUNT,
+            max_cache_bytes: DEFAULT_MAX_CACHE_BYTES,
         }
     }
 }
+
+/// Convenience trait for `Read + Seek` objects that can be sent across threads.
+///
+/// Rust does not yet support stable trait aliases, so we expose this as a trait with a blanket
+/// implementation.
+pub trait ReadSeek: Read + Seek + Send {}
+
+impl<T: Read + Seek + Send> ReadSeek for T {}
 
 /// Returns true if the provided bytes look like an OLE/CFB container holding an Office-encrypted
 /// OOXML package (streams `EncryptionInfo` and `EncryptedPackage`).
@@ -475,6 +494,55 @@ pub fn decrypt_standard_encrypted_package(
     Ok(out)
 }
 
+/// Decrypt an Office-encrypted OOXML OLE/CFB wrapper and return a seekable reader over the
+/// decrypted raw ZIP bytes.
+///
+/// This enables streaming ZIP readers (like `zip::ZipArchive`) to access the decrypted package
+/// without materializing the entire decrypted payload in memory.
+///
+/// Note: this helper clones `bytes` into an owned buffer internally. For true streaming, prefer
+/// [`decrypt_encrypted_package_ole_reader_to_reader`].
+pub fn decrypt_encrypted_package_ole_to_reader(
+    bytes: &[u8],
+    password: &str,
+) -> Result<Box<dyn ReadSeek>, OfficeCryptoError> {
+    decrypt_encrypted_package_ole_to_reader_with_options(bytes, password, DecryptOptions::default())
+}
+
+/// Like [`decrypt_encrypted_package_ole_to_reader`], but allows configuring resource limits (e.g.
+/// max decrypted cache bytes).
+pub fn decrypt_encrypted_package_ole_to_reader_with_options(
+    bytes: &[u8],
+    password: &str,
+    options: DecryptOptions,
+) -> Result<Box<dyn ReadSeek>, OfficeCryptoError> {
+    let cursor = Cursor::new(bytes.to_vec());
+    decrypt_encrypted_package_ole_reader_to_reader_with_options(cursor, password, options)
+}
+
+/// Decrypt an Office-encrypted OOXML OLE/CFB wrapper from a seekable reader and return a seekable
+/// reader over the decrypted raw ZIP bytes.
+pub fn decrypt_encrypted_package_ole_reader_to_reader<R: Read + Seek + Send + Sync + 'static>(
+    reader: R,
+    password: &str,
+) -> Result<Box<dyn ReadSeek>, OfficeCryptoError> {
+    decrypt_encrypted_package_ole_reader_to_reader_with_options(reader, password, DecryptOptions::default())
+}
+
+/// Like [`decrypt_encrypted_package_ole_reader_to_reader`], but allows configuring resource limits
+/// (e.g. max decrypted cache bytes).
+pub fn decrypt_encrypted_package_ole_reader_to_reader_with_options<
+    R: Read + Seek + Send + Sync + 'static,
+>(
+    reader: R,
+    password: &str,
+    options: DecryptOptions,
+) -> Result<Box<dyn ReadSeek>, OfficeCryptoError> {
+    let ole = cfb::CompoundFile::open(reader)?;
+    let reader = stream_reader::EncryptedPackageReader::new(ole, password, options)?;
+    Ok(Box::new(reader))
+}
+
 /// Encrypt a raw OOXML ZIP package into an Office `EncryptedPackage` OLE/CFB wrapper.
 ///
 /// The returned bytes are an OLE/CFB container containing:
@@ -556,6 +624,28 @@ pub fn decrypt_encrypted_package_streams_with_options(
     let header = util::parse_encryption_info_header(encryption_info)?;
     match header.kind {
         util::EncryptionInfoKind::Agile => {
+            // Some malformed containers contain only the 8-byte `EncryptionVersionInfo` header and
+            // store the OOXML package bytes in plaintext in the `EncryptedPackage` stream.
+            //
+            // If there's no Agile XML payload, treat `EncryptedPackage` as plaintext.
+            if header.header_size == 0 {
+                if encrypted_package.len() < 8 {
+                    return Err(OfficeCryptoError::InvalidFormat(
+                        "EncryptedPackage stream too short".to_string(),
+                    ));
+                }
+                let total_size = util::parse_encrypted_package_original_size(encrypted_package)?;
+                let expected_len = util::checked_vec_len(total_size)?;
+                let plain = encrypted_package.get(8..8 + expected_len).ok_or_else(|| {
+                    OfficeCryptoError::InvalidFormat(
+                        "EncryptedPackage ciphertext truncated".to_string(),
+                    )
+                })?;
+                let out = plain.to_vec();
+                validate_decrypted_package(&out)?;
+                return Ok(out);
+            }
+
             let info = agile::parse_agile_encryption_info(encryption_info, &header)?;
             let out =
                 agile::decrypt_agile_encrypted_package(&info, encrypted_package, password, opts)?;

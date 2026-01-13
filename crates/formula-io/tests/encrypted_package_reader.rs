@@ -450,8 +450,15 @@ fn errors_when_orig_size_requires_a_missing_final_ciphertext_segment() {
     // Drop the entire final ciphertext segment.
     //
     // The `orig_size` prefix is attacker-controlled; the reader should reject inputs where the
-    // declared plaintext length is implausible for the available ciphertext bytes.
+    // declared plaintext length is implausible for the available ciphertext bytes. With a normal
+    // `Read + Seek` stream, this should be rejected up-front by the constructor.
     encrypted.truncate(8 + SEGMENT_LEN);
+
+    let cursor = Cursor::new(encrypted.clone());
+    let err = StandardAesEncryptedPackageReader::new(cursor, key.to_vec(), salt.to_vec())
+        .expect_err("expected truncated ciphertext to error");
+    assert_eq!(err.kind(), ErrorKind::InvalidData);
+
     // The reader's constructor validates that the ciphertext length is plausible for the declared
     // `orig_size`. Use a cursor that lies about its "file size" so we can still exercise the
     // mid-stream error behavior.

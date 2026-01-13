@@ -347,4 +347,3 @@ fn opens_real_encrypted_ooxml_fixtures_with_password() {
         }
     }
 }
-

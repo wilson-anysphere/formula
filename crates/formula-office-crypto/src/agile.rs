@@ -333,6 +333,170 @@ fn scan_to_first_xml_tag(payload: &[u8]) -> Option<&[u8]> {
     Some(&payload[idx..])
 }
 
+pub(crate) fn derive_agile_package_key(
+    info: &AgileEncryptionInfo,
+    password: &str,
+) -> Result<Zeroizing<Vec<u8>>, OfficeCryptoError> {
+    // This mirrors the package-key derivation and password verification logic from
+    // `decrypt_agile_encrypted_package`, but without decrypting the full package payload. It is
+    // used by the streaming `EncryptedPackageReader` so callers can access decrypted bytes via
+    // `Read + Seek` without materializing the entire ZIP in memory.
+
+    if info.key_data.cipher_algorithm != "AES" {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported cipherAlgorithm {}",
+            info.key_data.cipher_algorithm
+        )));
+    }
+    if info.key_data.cipher_chaining != "ChainingModeCBC" {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported cipherChaining {}",
+            info.key_data.cipher_chaining
+        )));
+    }
+
+    if info.password_key_encryptor.cipher_algorithm != "AES" {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported password cipherAlgorithm {}",
+            info.password_key_encryptor.cipher_algorithm
+        )));
+    }
+    if info.password_key_encryptor.cipher_chaining != "ChainingModeCBC" {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported password cipherChaining {}",
+            info.password_key_encryptor.cipher_chaining
+        )));
+    }
+
+    let password_block_size = info.password_key_encryptor.block_size;
+    if password_block_size != 16 {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported password blockSize {password_block_size}"
+        )));
+    }
+    if info.key_data.block_size != 16 {
+        return Err(OfficeCryptoError::UnsupportedEncryption(format!(
+            "unsupported keyData blockSize {}",
+            info.key_data.block_size
+        )));
+    }
+
+    let pw_utf16 = password_to_utf16le(password);
+
+    // See `decrypt_agile_encrypted_package`: real-world fixtures vary in how they set the IV for
+    // the password-key-encryptor blobs, so try both.
+    let schemes = [
+        PasswordKeyEncryptorIvScheme::SaltValue,
+        PasswordKeyEncryptorIvScheme::DerivedFromBlockKey,
+    ];
+
+    let mut last_err: Option<OfficeCryptoError> = None;
+    for scheme in schemes {
+        // Password verification.
+        let verifier_input_key = derive_agile_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            &pw_utf16,
+            info.password_key_encryptor.spin_count,
+            info.password_key_encryptor.key_bits / 8,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+        );
+        let iv_vhi = scheme.iv_for_block_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+            password_block_size,
+        )?;
+        let verifier_hash_input_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+            &verifier_input_key,
+            &iv_vhi,
+            &info.password_key_encryptor.encrypted_verifier_hash_input,
+        )?);
+        let verifier_hash_input_slice = verifier_hash_input_plain
+            .get(..password_block_size)
+            .ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "decrypted verifierHashInput shorter than 16 bytes".to_string(),
+                )
+            })?;
+
+        let verifier_hash_full: Zeroizing<Vec<u8>> = Zeroizing::new(
+            info.password_key_encryptor
+                .hash_algorithm
+                .digest(verifier_hash_input_slice),
+        );
+        let verifier_hash = verifier_hash_full
+            .get(..info.password_key_encryptor.hash_size)
+            .ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "hash output shorter than encryptedKey hashSize".to_string(),
+                )
+            })?;
+
+        let verifier_value_key = derive_agile_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            &pw_utf16,
+            info.password_key_encryptor.spin_count,
+            info.password_key_encryptor.key_bits / 8,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+        );
+        let iv_vhv = scheme.iv_for_block_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+            password_block_size,
+        )?;
+        let verifier_hash_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+            &verifier_value_key,
+            &iv_vhv,
+            &info.password_key_encryptor.encrypted_verifier_hash_value,
+        )?);
+        let expected_hash_slice = verifier_hash_value_plain
+            .get(..info.password_key_encryptor.hash_size)
+            .ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "decrypted verifierHashValue shorter than encryptedKey hashSize".to_string(),
+                )
+            })?;
+
+        if !ct_eq(expected_hash_slice, verifier_hash) {
+            if last_err.is_none() {
+                last_err = Some(OfficeCryptoError::InvalidPassword);
+            }
+            continue;
+        }
+
+        // Decrypt the package key.
+        let key_value_key = derive_agile_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            &pw_utf16,
+            info.password_key_encryptor.spin_count,
+            info.password_key_encryptor.key_bits / 8,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        );
+        let iv_kv = scheme.iv_for_block_key(
+            info.password_key_encryptor.hash_algorithm,
+            &info.password_key_encryptor.salt,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+            password_block_size,
+        )?;
+        let key_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+            &key_value_key,
+            &iv_kv,
+            &info.password_key_encryptor.encrypted_key_value,
+        )?);
+        let key_len = info.key_data.key_bits / 8;
+        let package_key_bytes = key_value_plain.get(..key_len).ok_or_else(|| {
+            OfficeCryptoError::InvalidFormat("decrypted keyValue shorter than keyBytes".to_string())
+        })?;
+        return Ok(Zeroizing::new(package_key_bytes.to_vec()));
+    }
+
+    Err(last_err.unwrap_or(OfficeCryptoError::InvalidPassword))
+}
+
 pub(crate) fn decrypt_agile_encrypted_package(
     info: &AgileEncryptionInfo,
     encrypted_package: &[u8],
@@ -2393,7 +2557,10 @@ pub(crate) mod tests {
     fn decrypt_agile_rejects_spin_count_too_large() {
         // Keep this test cheap: we only want to validate the early guard (and error surfacing),
         // not actually run an expensive password KDF in CI.
-        let opts = crate::DecryptOptions { max_spin_count: 1 };
+        let opts = crate::DecryptOptions {
+            max_spin_count: 1,
+            ..Default::default()
+        };
         let spin_count = 2;
 
         let info = AgileEncryptionInfo {
