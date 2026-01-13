@@ -14,6 +14,7 @@ enum CacheValue {
     Number(String),
     DateTime(String),
     Bool(bool),
+    Error(String),
     Missing,
 }
 
@@ -52,6 +53,7 @@ fn parse_cache_records(xml: &str) -> Vec<Vec<CacheValue>> {
                     b"n" => row.push(CacheValue::Number(v.unwrap_or_default())),
                     b"d" => row.push(CacheValue::DateTime(v.unwrap_or_default())),
                     b"b" => row.push(CacheValue::Bool(v.as_deref() == Some("1"))),
+                    b"e" => row.push(CacheValue::Error(v.unwrap_or_default())),
                     b"m" => row.push(CacheValue::Missing),
                     _ => {}
                 }
@@ -793,4 +795,62 @@ fn refreshes_pivot_cache_records_uses_workbook_date1904_for_datetime_serials() {
             ],
         ]
     );
+}
+
+#[test]
+fn refreshes_pivot_cache_records_with_errors_and_explicit_blank_strings() {
+    let fixture = include_bytes!("fixtures/pivot-cache-refresh.xlsx");
+    let mut pkg = XlsxPackage::from_bytes(fixture).expect("read fixture");
+
+    let updated_sheet = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>
+    <row r="1">
+      <c r="A1" t="inlineStr"><is><t>Region</t></is></c>
+      <c r="B1" t="inlineStr"><is><t>Product</t></is></c>
+      <c r="C1" t="inlineStr"><is><t>Revenue</t></is></c>
+    </row>
+    <row r="2">
+      <c r="A2" t="inlineStr"><is><t>East</t></is></c>
+      <c r="B2" t="inlineStr"><is/></c>
+      <c r="C2" t="e"><v>#DIV/0!</v></c>
+    </row>
+    <row r="3">
+      <c r="A3" t="inlineStr"><is><t>West</t></is></c>
+      <c r="B3" t="inlineStr"><is><t>A</t></is></c>
+      <c r="C3"><v>200</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+    pkg.set_part("xl/worksheets/sheet1.xml", updated_sheet.as_bytes().to_vec());
+
+    pkg.refresh_pivot_cache_from_worksheet("xl/pivotCache/pivotCacheDefinition1.xml")
+        .expect("refresh cache");
+
+    let cache_records_xml = std::str::from_utf8(
+        pkg.part("xl/pivotCache/pivotCacheRecords1.xml")
+            .expect("cache records exists"),
+    )
+    .expect("utf-8");
+
+    let rows = parse_cache_records(cache_records_xml);
+    assert_eq!(
+        rows,
+        vec![
+            vec![
+                CacheValue::String("East".to_string()),
+                CacheValue::String("".to_string()),
+                CacheValue::Error("#DIV/0!".to_string()),
+            ],
+            vec![
+                CacheValue::String("West".to_string()),
+                CacheValue::String("A".to_string()),
+                CacheValue::Number("200".to_string()),
+            ],
+        ]
+    );
+
+    assert!(cache_records_xml.contains(r##"<e v="#DIV/0!"/>"##));
+    assert!(cache_records_xml.contains(r#"<s v=""/>"#));
 }

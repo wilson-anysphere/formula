@@ -12,7 +12,6 @@ fn main() {
         CellRef::from_a1("A1").unwrap(),
         Cell {
             value: CellValue::String("Item".into()),
-            phonetic: None,
             formula: None,
             phonetic: None,
             style_id: 0,
@@ -22,7 +21,6 @@ fn main() {
         CellRef::from_a1("B1").unwrap(),
         Cell {
             value: CellValue::String("Qty".into()),
-            phonetic: None,
             formula: None,
             phonetic: None,
             style_id: 0,
@@ -32,7 +30,6 @@ fn main() {
         CellRef::from_a1("C1").unwrap(),
         Cell {
             value: CellValue::String("Price".into()),
-            phonetic: None,
             formula: None,
             phonetic: None,
             style_id: 0,
@@ -42,7 +39,6 @@ fn main() {
         CellRef::from_a1("D1").unwrap(),
         Cell {
             value: CellValue::String("Total".into()),
-            phonetic: None,
             formula: None,
             phonetic: None,
             style_id: 0,
@@ -61,7 +57,6 @@ fn main() {
             CellRef::from_a1(&format!("A{row}")).unwrap(),
             Cell {
                 value: CellValue::String((*item).into()),
-                phonetic: None,
                 formula: None,
                 phonetic: None,
                 style_id: 0,
@@ -71,7 +66,6 @@ fn main() {
             CellRef::from_a1(&format!("B{row}")).unwrap(),
             Cell {
                 value: CellValue::Number(*qty),
-                phonetic: None,
                 formula: None,
                 phonetic: None,
                 style_id: 0,
@@ -81,7 +75,6 @@ fn main() {
             CellRef::from_a1(&format!("C{row}")).unwrap(),
             Cell {
                 value: CellValue::Number(*price),
-                phonetic: None,
                 formula: None,
                 phonetic: None,
                 style_id: 0,
@@ -91,7 +84,6 @@ fn main() {
             CellRef::from_a1(&format!("D{row}")).unwrap(),
             Cell {
                 value: CellValue::Number(*total),
-                phonetic: None,
                 formula: Some("[@Qty]*[@Price]".into()),
                 phonetic: None,
                 style_id: 0,
@@ -104,7 +96,6 @@ fn main() {
         CellRef::from_a1("E1").unwrap(),
         Cell {
             value: CellValue::Number(20.0),
-            phonetic: None,
             formula: Some("SUM(Table1[Total])".into()),
             phonetic: None,
             style_id: 0,
@@ -115,7 +106,6 @@ fn main() {
         CellRef::from_a1("F1").unwrap(),
         Cell {
             value: CellValue::String("Qty".into()),
-            phonetic: None,
             formula: Some("Table1[[#Headers],[Qty]]".into()),
             phonetic: None,
             style_id: 0,

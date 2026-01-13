@@ -1160,6 +1160,7 @@ fn interpret_worksheet_cell_value(
             let raw = v_text.unwrap_or_default();
             PivotCacheValue::Bool(raw == "1" || raw.eq_ignore_ascii_case("true"))
         }
+        Some("e") => PivotCacheValue::Error(v_text.unwrap_or_default().to_string()),
         Some("str") => PivotCacheValue::String(v_text.unwrap_or_default().to_string()),
         Some("inlineStr") => PivotCacheValue::String(inline_text.unwrap_or_default().to_string()),
         Some(_) | None => {
