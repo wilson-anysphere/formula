@@ -138,8 +138,14 @@ export class ConflictUiController {
     body.appendChild(right);
     dialog.appendChild(body);
 
-    if (conflict.kind === "formula") {
-      const diff = renderFormulaDiffView(conflict.localFormula ?? null, conflict.remoteFormula ?? null);
+    const maybeFormulaDiff =
+      conflict.kind === "formula"
+        ? { before: conflict.localFormula ?? null, after: conflict.remoteFormula ?? null }
+        : conflict.kind === "content" && conflict.local?.type === "formula" && conflict.remote?.type === "formula"
+          ? { before: conflict.local.formula ?? null, after: conflict.remote.formula ?? null }
+          : null;
+    if (maybeFormulaDiff) {
+      const diff = renderFormulaDiffView(maybeFormulaDiff.before, maybeFormulaDiff.after);
       if (diff) dialog.appendChild(diff);
     }
 
