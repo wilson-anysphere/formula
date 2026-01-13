@@ -192,15 +192,21 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
 
 `suggestRanges({ currentArgText, cellRef, surroundingCells, sheetName?, maxScanRows?, maxScanCols? })`:
 
-1. **Accepts only conservative A1-style prefixes (pure-insertion friendly)**
+1. **Accepts conservative A1-style prefixes + single-column partial range syntax (pure-insertion friendly)**
    - Base token regex (no `:`): `^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$`
    - Supported prefix forms include:
-     - `A`, `$A`, `A1`, `$A$1`
+     - `A`, `$A`, `A1`, `A$1`, `$A$1`
      - partial range prefixes: `A:`, `A1:`, `$A$1:`
-     - single-column range prefixes: `A:A`, `A1:A` (also supports partially-typed end-column tokens for multi-letter columns, e.g. `AB1:A`)
+     - single-column range prefixes: `A:A`, `A1:A` (and partially-typed end-column tokens for multi-letter columns, e.g. `AB1:A`)
+   - Completion behavior for partial `:` forms:
+     - `A1:` → can be extended to `A1:A10` (and `$A$1:` → `$A$1:$A$10`)
+     - `A1:A` / `AB1:A` → end-column token is completed back to the start column (e.g. `AB1:A` → `AB1:AB10`)
+     - `A:` → suggests `A:A` (entire column) as the pure-insertion-friendly completion
+       - We intentionally do *not* suggest `A1:A10` here because that would require inserting characters *before* the typed `:`.
+     - `A:A` is accepted as input (even if higher-confidence “contiguous block” suggestions may not always be pure-insertion extensions).
    - Empty argument (`currentArgText === ""`) is allowed: the suggester defaults to the **active cell’s column** so it can still propose ranges while remaining a pure insertion.
-   - Special-case: when the user types a partial **column range** like `A:`, we only suggest `A:A` (we do *not* suggest `A1:A10` because that would require inserting characters *before* the typed `:` and would not be a pure insertion).
-   - Examples that do *not* work today: `A1:B`, `A1:B10`, `Table1[Col]` (multi-column ranges are intentionally rejected).
+   - Still rejected/unsupported as inputs: multi-column prefixes like `A1:B` / `A1:B10`, structured refs like `Table1[Col]`, etc.
+   - The suggester does not “repair” references by inserting missing characters *before* the caret; it only proposes completions that preserve the exact user-typed prefix.
 
 2. **Find a contiguous non-empty block in the typed column**
    - If the user provided a row (`A5`), treat that cell as the start and scan **down** until the first empty cell (`reason: contiguous_down_from_start`).
@@ -241,7 +247,7 @@ This is not a full “current region” detector. In particular, it:
 - doesn’t look at formatting/table borders
 - is intentionally conservative about complex/ambiguous references:
   - it rejects multi-column range prefixes like `A1:B` rather than guessing a 2D region
-  - it only supports the limited prefix forms described above (it won’t rewrite/repair arbitrary range syntax)
+  - it only supports the limited prefix forms described above and won’t rewrite/repair arbitrary range syntax (including inserting missing characters before the caret)
 
 ### Adding new heuristics safely (no OOM, stay <100ms)
 
