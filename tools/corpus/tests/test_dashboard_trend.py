@@ -35,6 +35,7 @@ class DashboardTrendTests(unittest.TestCase):
             "top_diff_part_groups_critical": [{"group": "worksheet_xml", "count": 5}],
             "top_diff_part_groups_total": [{"group": "worksheet_xml", "count": 6}],
             "failures_by_category": {"round_trip_diff": 1},
+            "failures_by_round_trip_failure_kind": {"round_trip_styles": 1},
             # Size ratios: [110/100=1.1, 180/200=0.9]
             "round_trip_size_overhead": {"count": 2, "mean": 1.0, "p50": 1.0, "p90": 1.08},
             "timings": {
@@ -89,6 +90,9 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertEqual(
             entry["top_diff_part_groups_total"][0],
             {"group": "worksheet_xml", "count": 6},
+        )
+        self.assertEqual(
+            entry["failures_by_round_trip_failure_kind"], {"round_trip_styles": 1}
         )
 
     def test_append_trend_file_appends_and_caps(self) -> None:

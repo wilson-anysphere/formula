@@ -289,6 +289,11 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "render_rate": rates.get("render"),
         "diff_totals": diff_totals,
         "failures_by_category": summary.get("failures_by_category") or {},
+        # Optional higher-signal breakdown for round-trip failures.
+        "failures_by_round_trip_failure_kind": summary.get(
+            "failures_by_round_trip_failure_kind"
+        )
+        or {},
         # Size ratio: output_size / input_size for successful round-trips.
         "size_overhead_mean": overhead.get("mean"),
         "size_overhead_p50": overhead.get("p50"),
