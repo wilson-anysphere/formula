@@ -993,6 +993,10 @@ fn main() {
         // Guardrails:
         // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this
         //   `generate_handler![...]` list matches `src-tauri/permissions/allow-invoke.json`.
+        // - `apps/desktop/src-tauri/tests/ipc_origin_guardrails.rs` asserts privileged commands
+        //   include runtime origin hardening (`ipc_origin::ensure_main_window` +
+        //   `ipc_origin::ensure_trusted_origin`) as defense-in-depth in case untrusted content is
+        //   ever loaded into a WebView.
         // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts:
         //   - the `allow-invoke` permission is granted to the main window
         //   - the allowlist stays explicit (no wildcards) and covers frontend `invoke("...")` usage

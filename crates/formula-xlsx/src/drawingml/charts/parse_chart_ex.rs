@@ -184,7 +184,6 @@ fn parse_legend(
         overlay,
         text_style: None,
         style: None,
-        layout: None,
     })
 }
 
