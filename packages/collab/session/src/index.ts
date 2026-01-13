@@ -1688,7 +1688,7 @@ export class CollabSession {
 
     let normalizedRestrictions: unknown[] = [];
     const rawRestrictions = permissions.rangeRestrictions;
-    if (rawRestrictions !== undefined && rawRestrictions !== null) {
+    if (rawRestrictions !== undefined) {
       if (!Array.isArray(rawRestrictions)) {
         throw new Error("rangeRestrictions must be an array");
       }

@@ -95,6 +95,26 @@ test("CollabSession.setPermissions validates rangeRestrictions eagerly", () => {
   );
 });
 
+test("CollabSession.setPermissions rejects non-array rangeRestrictions", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+
+  assert.throws(
+    () => {
+      session.setPermissions({
+        role: "editor",
+        userId: "u-editor",
+        // Misconfigured: should be an array.
+        rangeRestrictions: null,
+      });
+    },
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /rangeRestrictions must be an array/);
+      return true;
+    },
+  );
+});
+
 test("CollabSession.setPermissions stores normalized rangeRestrictions (sheetName → range.sheetId)", () => {
   const session = createCollabSession({ doc: new Y.Doc() });
 
@@ -114,7 +134,7 @@ test("CollabSession.setPermissions stores normalized rangeRestrictions (sheetNam
     ],
   });
 
-  const stored = session.permissions?.rangeRestrictions ?? null;
+  const stored = session.getPermissions()?.rangeRestrictions ?? null;
   assert.ok(Array.isArray(stored));
   assert.equal(stored.length, 1);
   const restriction = stored[0];
