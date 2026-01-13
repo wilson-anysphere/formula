@@ -95,6 +95,11 @@ TAURI_PRIVATE_KEY=... node scripts/ci/check-tauri-updater-secrets.mjs
 # Ensures macOS hardened-runtime entitlements include the WKWebView JIT keys
 # required for JavaScript/WebAssembly to run in signed/notarized builds.
 node scripts/check-macos-entitlements.mjs
+
+# (Optional) Validate that code signing certificate secrets are valid base64 PKCS#12
+# archives and decryptable with the configured password (same preflight CI runs).
+APPLE_CERTIFICATE=... APPLE_CERTIFICATE_PASSWORD=... bash scripts/ci/verify-codesign-secrets.sh macos
+WINDOWS_CERTIFICATE=... WINDOWS_CERTIFICATE_PASSWORD=... bash scripts/ci/verify-codesign-secrets.sh windows
 ```
 
 After all platform builds finish, CI also verifies the **uploaded GitHub Release assets** are
