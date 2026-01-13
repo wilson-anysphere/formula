@@ -120,7 +120,11 @@ impl PivotCacheDefinition {
     /// Excel encodes some pivot cache values (and slicer selections) as indices into a per-field
     /// `<sharedItems>` table. This helper turns those indices back into typed values so slicer and
     /// timeline selections match the pivot cache's key semantics.
-    pub fn resolve_shared_item(&self, field_idx: usize, shared_item_index: u32) -> Option<ScalarValue> {
+    pub fn resolve_shared_item(
+        &self,
+        field_idx: usize,
+        shared_item_index: u32,
+    ) -> Option<ScalarValue> {
         let field = self.cache_fields.get(field_idx)?;
         let item = field
             .shared_items
@@ -205,8 +209,7 @@ impl XlsxPackage {
         // Prefer the workbook-level pivotCaches mapping over filename guessing. In practice the
         // numeric suffix in `pivotCacheDefinitionN.xml` does not always line up with `cacheId`.
         if let Some(rel_id) = workbook_pivot_cache_rel_id(workbook_xml, cache_id)? {
-            if let Some(part_name) =
-                resolve_relationship_target(self, "xl/workbook.xml", &rel_id)?
+            if let Some(part_name) = resolve_relationship_target(self, "xl/workbook.xml", &rel_id)?
             {
                 if let Some(bytes) = self.part(&part_name) {
                     return Ok(Some((part_name, parse_pivot_cache_definition(bytes)?)));
@@ -296,14 +299,14 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
 
                 if in_shared_items {
                     if let Some(field_idx) = current_field_idx {
-                        if let Some(item) =
-                            parse_shared_item_start(&mut reader, &e, &mut nested_buf, &mut skip_buf)?
-                        {
+                        if let Some(item) = parse_shared_item_start(
+                            &mut reader,
+                            &e,
+                            &mut nested_buf,
+                            &mut skip_buf,
+                        )? {
                             if let Some(field) = def.cache_fields.get_mut(field_idx) {
-                                field
-                                    .shared_items
-                                    .get_or_insert_with(Vec::new)
-                                    .push(item);
+                                field.shared_items.get_or_insert_with(Vec::new).push(item);
                             }
                         }
                     } else {
@@ -337,10 +340,7 @@ fn parse_pivot_cache_definition(xml: &[u8]) -> Result<PivotCacheDefinition, Xlsx
                     if let Some(field_idx) = current_field_idx {
                         if let Some(item) = parse_shared_item_empty(&e) {
                             if let Some(field) = def.cache_fields.get_mut(field_idx) {
-                                field
-                                    .shared_items
-                                    .get_or_insert_with(Vec::new)
-                                    .push(item);
+                                field.shared_items.get_or_insert_with(Vec::new).push(item);
                             }
                         }
                     }
@@ -863,7 +863,10 @@ mod tests {
         assert_eq!(def.resolve_shared_item(0, 0), Some(ScalarValue::Blank));
         assert_eq!(def.resolve_shared_item(0, 1), Some(ScalarValue::from(42.0)));
         assert_eq!(def.resolve_shared_item(0, 2), Some(ScalarValue::Bool(true)));
-        assert_eq!(def.resolve_shared_item(0, 3), Some(ScalarValue::from("Hello")));
+        assert_eq!(
+            def.resolve_shared_item(0, 3),
+            Some(ScalarValue::from("Hello"))
+        );
         assert_eq!(
             def.resolve_shared_item(0, 4),
             Some(ScalarValue::Date(
@@ -1120,11 +1123,9 @@ mod tests {
   </dataFields>
 </pivotTableDefinition>"#;
 
-        let table = crate::pivots::PivotTableDefinition::parse(
-            "xl/pivotTables/pivotTable1.xml",
-            table_xml,
-        )
-        .expect("parse pivot table definition");
+        let table =
+            crate::pivots::PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", table_xml)
+                .expect("parse pivot table definition");
 
         let cfg = crate::pivots::engine_bridge::pivot_table_to_engine_config(&table, &cache_def);
         assert_eq!(

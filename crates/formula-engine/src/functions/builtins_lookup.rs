@@ -7,8 +7,7 @@ use crate::functions::{
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::pivot::{
-    AggregationType as PivotAggregationType, PivotKeyPart as PivotKeyPart,
-    PivotValue as PivotEngineValue,
+    AggregationType as PivotAggregationType, PivotKeyPart, PivotValue as PivotEngineValue,
 };
 use crate::value::{Array, ErrorKind, Value};
 use chrono::Datelike;
@@ -242,9 +241,7 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             match self {
                 LookupVectorArg::Values(values) => values.get(idx).cloned().unwrap_or(Value::Blank),
                 LookupVectorArg::Reference {
-                    shape,
-                    reference,
-                    ..
+                    shape, reference, ..
                 } => {
                     let start = reference.start;
                     match *shape {
@@ -267,7 +264,11 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             }
         }
 
-        fn xmatch_approx(&self, ctx: &dyn FunctionContext, lookup_value: &Value) -> Result<i32, ErrorKind> {
+        fn xmatch_approx(
+            &self,
+            ctx: &dyn FunctionContext,
+            lookup_value: &Value,
+        ) -> Result<i32, ErrorKind> {
             match self {
                 LookupVectorArg::Values(values) => lookup::xmatch_with_modes(
                     lookup_value,
@@ -309,7 +310,10 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    fn eval_vector_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<LookupVectorArg, ErrorKind> {
+    fn eval_vector_arg(
+        ctx: &dyn FunctionContext,
+        expr: &CompiledExpr,
+    ) -> Result<LookupVectorArg, ErrorKind> {
         match ctx.eval_arg(expr) {
             ArgValue::Reference(r) => {
                 let r = r.normalized();
@@ -333,7 +337,11 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
-    fn lookup_array_ref(ctx: &dyn FunctionContext, lookup_value: &Value, reference: &Reference) -> Value {
+    fn lookup_array_ref(
+        ctx: &dyn FunctionContext,
+        lookup_value: &Value,
+        reference: &Reference,
+    ) -> Value {
         let r = reference.normalized();
         // Record dereference for dynamic dependency tracing.
         ctx.record_reference(&r);
@@ -976,17 +984,15 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             search_mode: lookup::SearchMode,
         ) -> Result<i32, ErrorKind> {
             match self {
-                XlookupLookupArray::Values { values, .. } => {
-                    lookup::xmatch_with_modes_with_locale(
-                        lookup_value,
-                        values,
-                        match_mode,
-                        search_mode,
-                        ctx.value_locale(),
-                        ctx.date_system(),
-                        ctx.now_utc(),
-                    )
-                }
+                XlookupLookupArray::Values { values, .. } => lookup::xmatch_with_modes_with_locale(
+                    lookup_value,
+                    values,
+                    match_mode,
+                    search_mode,
+                    ctx.value_locale(),
+                    ctx.date_system(),
+                    ctx.now_utc(),
+                ),
                 XlookupLookupArray::Reference {
                     shape,
                     reference,
@@ -1384,7 +1390,9 @@ impl PivotAccumulator {
     fn finalize(&self, agg: PivotAggregationType) -> PivotEngineValue {
         match agg {
             PivotAggregationType::Count => PivotEngineValue::Number(self.count as f64),
-            PivotAggregationType::CountNumbers => PivotEngineValue::Number(self.count_numbers as f64),
+            PivotAggregationType::CountNumbers => {
+                PivotEngineValue::Number(self.count_numbers as f64)
+            }
             PivotAggregationType::Sum => PivotEngineValue::Number(self.sum),
             PivotAggregationType::Product => {
                 if self.count_numbers == 0 {
@@ -1579,7 +1587,9 @@ fn getpivotdata_from_registry(
             }
         }
 
-        let pv = record.get(value_src_idx).unwrap_or(&PivotEngineValue::Blank);
+        let pv = record
+            .get(value_src_idx)
+            .unwrap_or(&PivotEngineValue::Blank);
         acc.update(pv);
     }
 
@@ -1816,7 +1826,8 @@ struct ParsedPivotValueHeader {
 fn parse_pivot_value_header(header: &str) -> ParsedPivotValueHeader {
     // Pivot engine emits grand total columns as `"Grand Total - <value name>"`.
     const GT_PREFIX: &str = "Grand Total - ";
-    if header.len() >= GT_PREFIX.len() && header[..GT_PREFIX.len()].eq_ignore_ascii_case(GT_PREFIX) {
+    if header.len() >= GT_PREFIX.len() && header[..GT_PREFIX.len()].eq_ignore_ascii_case(GT_PREFIX)
+    {
         return ParsedPivotValueHeader {
             kind: PivotValueColKind::GrandTotal,
             value_name: header[GT_PREFIX.len()..].to_string(),
@@ -1856,16 +1867,16 @@ fn select_pivot_value_col(
     // If the caller provided an exact rendered header (e.g. `"A - Sum of Sales"`),
     // honor it directly.
     let data_field_key = data_field.to_ascii_uppercase();
-    let mut candidates: Vec<usize> = if let Some(idx) = layout.value_col_by_header.get(&data_field_key)
-    {
-        vec![*idx]
-    } else {
-        layout
-            .value_cols_by_value_name
-            .get(&data_field_key)
-            .cloned()
-            .unwrap_or_default()
-    };
+    let mut candidates: Vec<usize> =
+        if let Some(idx) = layout.value_col_by_header.get(&data_field_key) {
+            vec![*idx]
+        } else {
+            layout
+                .value_cols_by_value_name
+                .get(&data_field_key)
+                .cloned()
+                .unwrap_or_default()
+        };
 
     if candidates.is_empty() {
         return Err(ErrorKind::Ref);
@@ -2019,7 +2030,11 @@ fn getpivotdata_find_row(
     found.ok_or(ErrorKind::NA)
 }
 
-fn pivot_item_matches(ctx: &dyn FunctionContext, cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
+fn pivot_item_matches(
+    ctx: &dyn FunctionContext,
+    cell: &Value,
+    item: &Value,
+) -> Result<bool, ErrorKind> {
     match (cell, item) {
         (Value::Error(e), _) => Err(*e),
         (_, Value::Error(e)) => Err(*e),
@@ -2077,7 +2092,11 @@ fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
     Some(WildcardPattern::new(pattern))
 }
 
-fn exact_match_values(ctx: &dyn FunctionContext, lookup: &Value, values: &[Value]) -> Option<usize> {
+fn exact_match_values(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    values: &[Value],
+) -> Option<usize> {
     if let Some(pattern) = wildcard_pattern_for_lookup(lookup) {
         for (idx, candidate) in values.iter().enumerate() {
             let text = match candidate {
@@ -2470,7 +2489,9 @@ fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Blank, Value::Blank) => true,
         (Value::Error(x), Value::Error(y)) => x == y,
-        (Value::Number(num), other) | (other, Value::Number(num)) if text_like_str(other).is_some() => {
+        (Value::Number(num), other) | (other, Value::Number(num))
+            if text_like_str(other).is_some() =>
+        {
             let trimmed = text_like_str(other).unwrap().trim();
             if trimmed.is_empty() {
                 false
@@ -2582,7 +2603,10 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
                 (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
                     let a = text_like_str(a)?;
                     let b = text_like_str(b)?;
-                    Some(ordering_to_i32(cmp_case_insensitive(a.as_ref(), b.as_ref())))
+                    Some(ordering_to_i32(cmp_case_insensitive(
+                        a.as_ref(),
+                        b.as_ref(),
+                    )))
                 }
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Blank, Value::Blank) => Some(0),

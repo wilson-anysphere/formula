@@ -3217,7 +3217,12 @@ impl FieldIndices {
         })
     }
 
-    fn build_key<S: PivotRecordSource + ?Sized>(&self, source: &S, row: usize, indices: &[usize]) -> PivotKey {
+    fn build_key<S: PivotRecordSource + ?Sized>(
+        &self,
+        source: &S,
+        row: usize,
+        indices: &[usize],
+    ) -> PivotKey {
         PivotKey(
             indices
                 .iter()
@@ -3329,7 +3334,9 @@ fn common_prefix_len(a: &[PivotKeyPart], b: &[PivotKeyPart]) -> usize {
 mod tests {
     use super::*;
 
-    use formula_columnar::{ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions, Value};
+    use formula_columnar::{
+        ColumnSchema, ColumnType, ColumnarTableBuilder, PageCacheConfig, TableOptions, Value,
+    };
     use pretty_assertions::assert_eq;
     use std::sync::Arc;
 

@@ -743,7 +743,11 @@ pub fn worksheet_parts_from_reader<R: Read + Seek>(
                     .as_deref()
                     .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
             })
-            .map(|rel| crate::path::resolve_target(workbook_part, &rel.target))
+            .and_then(|rel| {
+                crate::path::resolve_target_candidates(workbook_part, &rel.target)
+                    .into_iter()
+                    .find(|candidate| part_names.contains(candidate))
+            })
             .or_else(|| {
                 let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
                 part_names.contains(&candidate).then_some(candidate)

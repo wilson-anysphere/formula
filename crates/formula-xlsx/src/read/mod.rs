@@ -24,7 +24,7 @@ use crate::autofilter::{parse_worksheet_autofilter, AutoFilterParseError};
 use crate::calc_settings::read_calc_settings_from_workbook_xml;
 use crate::conditional_formatting::parse_worksheet_conditional_formatting_streaming;
 use crate::drawings::DrawingPart;
-use crate::path::{rels_for_part, resolve_target};
+use crate::path::{rels_for_part, resolve_target, resolve_target_candidates};
 use crate::shared_strings::parse_shared_strings_xml;
 use crate::sheet_metadata::parse_sheet_tab_color;
 use crate::styles::StylesPart;
@@ -190,34 +190,54 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
 
-    let styles_part_name = rels_info
-        .styles_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/styles.xml".to_string());
-    let styles_bytes = read_zip_part_optional(archive, &styles_part_name)?;
+    let styles_bytes = if let Some(target) = rels_info.styles_target.as_deref() {
+        let mut found = None;
+        for candidate in resolve_target_candidates(WORKBOOK_PART, target) {
+            if let Some(bytes) = read_zip_part_optional(archive, &candidate)? {
+                found = Some(bytes);
+                break;
+            }
+        }
+        found
+    } else {
+        read_zip_part_optional(archive, "xl/styles.xml")?
+    };
     let styles_part = StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
     // Conditional formatting dxfs are only needed if a worksheet contains conditional
     // formatting rules. Parse them lazily to avoid unnecessary DOM parsing for workbooks
     // without conditional formatting.
     let mut conditional_formatting_dxfs: Option<Vec<formula_model::CfStyleOverride>> = None;
 
-    let shared_strings_part_name = rels_info
-        .shared_strings_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
-    let shared_strings = match read_zip_part_optional(archive, &shared_strings_part_name)? {
+    let shared_strings_bytes = if let Some(target) = rels_info.shared_strings_target.as_deref() {
+        let mut found = None;
+        for candidate in resolve_target_candidates(WORKBOOK_PART, target) {
+            if let Some(bytes) = read_zip_part_optional(archive, &candidate)? {
+                found = Some(bytes);
+                break;
+            }
+        }
+        found
+    } else {
+        read_zip_part_optional(archive, "xl/sharedStrings.xml")?
+    };
+    let shared_strings = match shared_strings_bytes {
         Some(bytes) => parse_shared_strings(&bytes)?,
         None => Vec::new(),
     };
 
-    let metadata_part_name = rels_info
-        .metadata_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/metadata.xml".to_string());
-    let metadata_part = read_zip_part_optional(archive, &metadata_part_name)?
+    let metadata_part_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
+        let mut found = None;
+        for candidate in resolve_target_candidates(WORKBOOK_PART, target) {
+            if let Some(bytes) = read_zip_part_optional(archive, &candidate)? {
+                found = Some(bytes);
+                break;
+            }
+        }
+        found
+    } else {
+        read_zip_part_optional(archive, "xl/metadata.xml")?
+    };
+    let metadata_part = metadata_part_bytes
         .as_deref()
         .and_then(|bytes| MetadataPart::parse(bytes).ok());
 
@@ -257,9 +277,25 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             };
         }
 
-        let sheet_xml = read_zip_part_optional(archive, &sheet.path)?.ok_or(
-            ReadError::MissingPart("worksheet part referenced from workbook.xml.rels"),
-        )?;
+        let sheet_part_candidates = rels_info
+            .id_to_target
+            .get(&sheet.relationship_id)
+            .map(|target| resolve_target_candidates(WORKBOOK_PART, target))
+            .unwrap_or_else(|| vec![sheet.path.clone()]);
+
+        let mut worksheet_part = None;
+        let mut sheet_xml = None;
+        for candidate in sheet_part_candidates {
+            if let Some(bytes) = read_zip_part_optional(archive, &candidate)? {
+                worksheet_part = Some(candidate);
+                sheet_xml = Some(bytes);
+                break;
+            }
+        }
+        let worksheet_part = worksheet_part.ok_or(ReadError::MissingPart(
+            "worksheet part referenced from workbook.xml.rels",
+        ))?;
+        let sheet_xml = sheet_xml.expect("worksheet_part implies sheet_xml is Some");
 
         // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet XML.
         // This is parsed via a streaming extractor (quick-xml) to avoid DOM parsing.
@@ -296,7 +332,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
 
         // Worksheet relationships are needed to resolve drawings, external hyperlink targets, and
         // table parts.
-        let rels_part = rels_for_part(&sheet.path);
+        let rels_part = rels_for_part(&worksheet_part);
         let rels_xml_bytes = read_zip_part_optional(archive, &rels_part)?;
         let rels_xml = rels_xml_bytes
             .as_deref()
@@ -305,7 +341,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         // Floating drawings (images, shapes, charts) anchored to the sheet.
         let drawing_objects = load_sheet_drawings_from_archive(
             sheet_index,
-            &sheet.path,
+            &worksheet_part,
             &sheet_xml,
             rels_xml_bytes.as_deref(),
             archive,
@@ -340,7 +376,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         // Best-effort: comments.
         crate::comments::import::import_sheet_comments(
             ws,
-            &sheet.path,
+            &worksheet_part,
             rels_xml_bytes.as_deref(),
             &persons,
             |target| {
@@ -353,13 +389,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
 
         ws.auto_filter = parse_worksheet_autofilter(sheet_xml_str).ok().flatten();
 
-        attach_tables_from_parts(
-            ws,
-            &sheet.path,
-            &sheet_xml,
-            rels_xml_bytes.as_deref(),
-            archive,
-        );
+        attach_tables_from_parts(ws, &worksheet_part, &sheet_xml, rels_xml_bytes.as_deref(), archive);
 
         parse_worksheet_into_model(
             ws,
@@ -580,10 +610,18 @@ fn attach_tables_from_part_getter<'a, F>(
             continue;
         }
 
-        let target = resolve_target(worksheet_part, &rel.target);
-        let table_bytes = match get_part(&target) {
-            Some(bytes) => bytes,
-            None => continue,
+        let mut resolved_target = None;
+        let mut table_bytes = None;
+        for candidate in resolve_target_candidates(worksheet_part, &rel.target) {
+            if let Some(bytes) = get_part(&candidate) {
+                resolved_target = Some(candidate);
+                table_bytes = Some(bytes);
+                break;
+            }
+        }
+        let (target, table_bytes) = match (resolved_target, table_bytes) {
+            (Some(target), Some(bytes)) => (target, bytes),
+            _ => continue,
         };
 
         let table_xml = match std::str::from_utf8(table_bytes.as_ref()) {
@@ -869,40 +907,40 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             workbook.theme = to_model_theme_palette(palette);
         }
     }
-
-    let styles_part_name = rels_info
-        .styles_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/styles.xml".to_string());
     // Conditional formatting dxfs are only needed if a worksheet contains conditional
     // formatting rules. Parse them lazily to avoid unnecessary DOM parsing for workbooks
     // without conditional formatting.
     let mut conditional_formatting_dxfs: Option<Vec<formula_model::CfStyleOverride>> = None;
-    let styles_part = StylesPart::parse_or_default(
-        part_bytes_tolerant(&parts, &styles_part_name),
-        &mut workbook.styles,
-    )?;
+    let styles_bytes = if let Some(target) = rels_info.styles_target.as_deref() {
+        resolve_target_candidates(WORKBOOK_PART, target)
+            .into_iter()
+            .find_map(|candidate| part_bytes_tolerant(&parts, &candidate))
+    } else {
+        part_bytes_tolerant(&parts, "xl/styles.xml")
+    };
+    let styles_part = StylesPart::parse_or_default(styles_bytes, &mut workbook.styles)?;
 
-    let shared_strings_part_name = rels_info
-        .shared_strings_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/sharedStrings.xml".to_string());
-    let shared_strings = if let Some(bytes) = part_bytes_tolerant(&parts, &shared_strings_part_name)
-    {
+    let shared_strings_bytes = if let Some(target) = rels_info.shared_strings_target.as_deref() {
+        resolve_target_candidates(WORKBOOK_PART, target)
+            .into_iter()
+            .find_map(|candidate| part_bytes_tolerant(&parts, &candidate))
+    } else {
+        part_bytes_tolerant(&parts, "xl/sharedStrings.xml")
+    };
+    let shared_strings = if let Some(bytes) = shared_strings_bytes {
         parse_shared_strings(bytes)?
     } else {
         Vec::new()
     };
 
-    let metadata_part_name = rels_info
-        .metadata_target
-        .as_deref()
-        .map(|target| resolve_target(WORKBOOK_PART, target))
-        .unwrap_or_else(|| "xl/metadata.xml".to_string());
-    let mut metadata_part = part_bytes_tolerant(&parts, &metadata_part_name)
-        .and_then(|bytes| MetadataPart::parse(bytes).ok());
+    let metadata_bytes = if let Some(target) = rels_info.metadata_target.as_deref() {
+        resolve_target_candidates(WORKBOOK_PART, target)
+            .into_iter()
+            .find_map(|candidate| part_bytes_tolerant(&parts, &candidate))
+    } else {
+        part_bytes_tolerant(&parts, "xl/metadata.xml")
+    };
+    let mut metadata_part = metadata_bytes.and_then(|bytes| MetadataPart::parse(bytes).ok());
     if let Some(metadata_part) = metadata_part.as_mut() {
         metadata_part.vm_index_base = infer_vm_index_base_for_workbook(&parts, &sheets);
     }
@@ -935,12 +973,23 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let ws_id = workbook.add_sheet(sheet.name.clone())?;
         worksheet_ids_by_index.push(ws_id);
 
-        let sheet_xml = part_bytes_tolerant(&parts, &sheet.path).ok_or(ReadError::MissingPart(
+        let sheet_part_candidates = rels_info
+            .id_to_target
+            .get(&sheet.relationship_id)
+            .map(|target| resolve_target_candidates(WORKBOOK_PART, target))
+            .unwrap_or_else(|| vec![sheet.path.clone()]);
+        let worksheet_part = sheet_part_candidates
+            .into_iter()
+            .find(|candidate| part_bytes_tolerant(&parts, candidate).is_some())
+            .ok_or(ReadError::MissingPart(
+                "worksheet part referenced from workbook.xml.rels",
+            ))?;
+        let sheet_xml = part_bytes_tolerant(&parts, &worksheet_part).ok_or(ReadError::MissingPart(
             "worksheet part referenced from workbook.xml.rels",
         ))?;
 
-        // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet XML.
-        // Parse them via a streaming extractor to avoid DOM parsing.
+        // Worksheet print settings (page setup/margins, manual page breaks) live in the worksheet
+        // XML. Parse them via a streaming extractor to avoid DOM parsing.
         let (page_setup, manual_breaks) = crate::print::parse_worksheet_print_settings(sheet_xml)
             .unwrap_or_else(|_| {
                 (
@@ -961,14 +1010,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         let sheet_xml_str = std::str::from_utf8(sheet_xml)?;
 
         // Worksheet relationships are needed to resolve table parts, hyperlinks, and drawings.
-        let rels_part = rels_for_part(&sheet.path);
+        let rels_part = rels_for_part(&worksheet_part);
         let rels_xml_bytes = part_bytes_tolerant(&parts, &rels_part);
         let rels_xml = rels_xml_bytes.map(std::str::from_utf8).transpose()?;
 
         // Comment part mapping discovered via the worksheet's `.rels`.
         // We only support *editing* existing comment infrastructure for now.
         let comment_parts_for_sheet =
-            discover_worksheet_comment_part_names(&sheet.path, rels_xml_bytes);
+            discover_worksheet_comment_part_names(&worksheet_part, rels_xml_bytes);
         let has_comment_parts = comment_parts_for_sheet.legacy_comments.is_some()
             || comment_parts_for_sheet.threaded_comments.is_some();
         if has_comment_parts {
@@ -1025,7 +1074,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             // Best-effort: comments.
             crate::comments::import::import_sheet_comments(
                 ws,
-                &sheet.path,
+                &worksheet_part,
                 rels_xml_bytes,
                 &persons,
                 |target| parts.get(target).map(|bytes| Cow::Borrowed(bytes.as_slice())),
@@ -1040,7 +1089,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
                 AutoFilterParseError::InvalidRef(e) => ReadError::InvalidRangeRef(e.to_string()),
             })?;
 
-            attach_tables_from_part_getter(ws, &sheet.path, sheet_xml, rels_xml_bytes, |target| {
+            attach_tables_from_part_getter(ws, &worksheet_part, sheet_xml, rels_xml_bytes, |target| {
                 part_bytes_tolerant(&parts, target).map(Cow::Borrowed)
             });
 
@@ -1068,7 +1117,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
 
         let drawing_objects = load_sheet_drawings_from_parts(
             sheet_index,
-            &sheet.path,
+            &worksheet_part,
             sheet_xml,
             rels_xml_bytes,
             &parts,
@@ -1085,7 +1134,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             sheet_id: sheet.sheet_id,
             relationship_id: sheet.relationship_id,
             state: sheet.state,
-            path: sheet.path,
+            path: worksheet_part,
         });
     }
 
@@ -3439,7 +3488,7 @@ mod tests {
     use formula_model::CellValue;
     use formula_model::ErrorValue;
 
-    use super::load_from_bytes;
+    use super::{load_from_bytes, read_workbook_model_from_bytes};
 
     fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
         let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -3471,6 +3520,64 @@ mod tests {
         zip.write_all(sheet_xml.as_bytes()).unwrap();
 
         zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn resolves_percent_encoded_relationship_targets_for_worksheets() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // The relationship target is percent-encoded, but the ZIP entry is stored unescaped.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet%201.xml"/>
+</Relationships>"#;
+
+        let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>42</v></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        // The part name uses a literal space.
+        zip.start_file("xl/worksheets/sheet 1.xml", options).unwrap();
+        zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+
+        let parts = crate::worksheet_parts_from_reader(Cursor::new(bytes.clone()))
+            .expect("worksheet_parts_from_reader");
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].worksheet_part, "xl/worksheets/sheet 1.xml");
+
+        let workbook = read_workbook_model_from_bytes(&bytes).expect("read_workbook_model_from_bytes");
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+        assert_eq!(
+            workbook.sheets[0].value_a1("A1").unwrap(),
+            CellValue::Number(42.0)
+        );
     }
 
     #[test]
