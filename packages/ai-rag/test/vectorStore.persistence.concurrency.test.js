@@ -247,6 +247,30 @@ test("JsonVectorStore serializes updateMetadata persistence writes to prevent lo
   assert.equal(byId.get("a").metadata.tag, "v2");
 });
 
+test("JsonVectorStore.close waits for an in-flight persist", async () => {
+  const storage = new ControlledBinaryStorage();
+  const store = new JsonVectorStore({ storage, dimension: 2, autoSave: true });
+
+  const upsertPromise = store.upsert([{ id: "a", vector: [1, 0], metadata: {} }]);
+  await storage.waitForSaves(1);
+
+  let closeResolved = false;
+  const closePromise = store.close().then(() => {
+    closeResolved = true;
+  });
+
+  // Give close() a chance to run; it should still be blocked on persistence.
+  for (let i = 0; i < 10; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+  assert.equal(closeResolved, false);
+
+  storage.release(1);
+  await Promise.all([upsertPromise, closePromise]);
+  assert.equal(closeResolved, true);
+});
+
 let sqlJsAvailable = true;
 try {
   // Keep this as a computed dynamic import (no literal bare specifier) so
@@ -309,6 +333,34 @@ test(
     await store.close();
     await reloaded.close();
   },
+);
+
+test(
+  "SqliteVectorStore.close waits for an in-flight persist",
+  { skip: !sqlJsAvailable },
+  async () => {
+    const storage = new ControlledBinaryStorage();
+    const SqliteVectorStore = await getSqliteVectorStore();
+    const store = await SqliteVectorStore.create({ storage, dimension: 2, autoSave: true });
+
+    const upsertPromise = store.upsert([{ id: "a", vector: [1, 0], metadata: {} }]);
+    await storage.waitForSaves(1);
+
+    let closeResolved = false;
+    const closePromise = store.close().then(() => {
+      closeResolved = true;
+    });
+
+    for (let i = 0; i < 10; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.resolve();
+    }
+    assert.equal(closeResolved, false);
+
+    storage.release(1);
+    await Promise.all([upsertPromise, closePromise]);
+    assert.equal(closeResolved, true);
+  }
 );
 
 test(
