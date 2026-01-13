@@ -11,3 +11,5 @@ export * from "./indexeddb-store.ts";
 export * from "./migrate.ts";
 export * from "./recorder.ts";
 export * from "./export.ts";
+export { createDefaultAIAuditStore } from "./factory.ts";
+export type { AIAuditStoreRetentionOptions, CreateDefaultAIAuditStoreOptions } from "./factory.ts";
