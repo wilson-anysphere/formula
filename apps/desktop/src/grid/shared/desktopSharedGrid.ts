@@ -1853,9 +1853,10 @@ export class DesktopSharedGrid {
 
       const grabOffset = event.clientY - thumbRect.top;
       const thumbTravel = Math.max(0, trackRect.height - thumbRect.height);
+      const pointerId = event.pointerId;
 
       const onMove = (move: PointerEvent) => {
-        if (move.pointerId !== event.pointerId) return;
+        if (move.pointerId !== pointerId) return;
         move.preventDefault();
         const pointerPos = move.clientY;
         const thumbOffset = pointerPos - trackRect.top - grabOffset;
@@ -1869,14 +1870,25 @@ export class DesktopSharedGrid {
         this.emitScroll();
       };
 
-      const onUp = (up: PointerEvent) => {
-        if (up.pointerId !== event.pointerId) return;
+      function cleanup() {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
-      };
+        window.removeEventListener("pointercancel", onCancel);
+      }
+
+      function onUp(up: PointerEvent) {
+        if (up.pointerId !== pointerId) return;
+        cleanup();
+      }
+
+      function onCancel(cancel: PointerEvent) {
+        if (cancel.pointerId !== pointerId) return;
+        cleanup();
+      }
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
+      window.addEventListener("pointercancel", onCancel, { passive: false });
     };
 
     this.vThumb.addEventListener("pointerdown", onVThumbDown, { passive: false });
@@ -1894,9 +1906,10 @@ export class DesktopSharedGrid {
 
       const grabOffset = event.clientX - thumbRect.left;
       const thumbTravel = Math.max(0, trackRect.width - thumbRect.width);
+      const pointerId = event.pointerId;
 
       const onMove = (move: PointerEvent) => {
-        if (move.pointerId !== event.pointerId) return;
+        if (move.pointerId !== pointerId) return;
         move.preventDefault();
         const pointerPos = move.clientX;
         const thumbOffset = pointerPos - trackRect.left - grabOffset;
@@ -1910,14 +1923,25 @@ export class DesktopSharedGrid {
         this.emitScroll();
       };
 
-      const onUp = (up: PointerEvent) => {
-        if (up.pointerId !== event.pointerId) return;
+      function cleanup() {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
-      };
+        window.removeEventListener("pointercancel", onCancel);
+      }
+
+      function onUp(up: PointerEvent) {
+        if (up.pointerId !== pointerId) return;
+        cleanup();
+      }
+
+      function onCancel(cancel: PointerEvent) {
+        if (cancel.pointerId !== pointerId) return;
+        cleanup();
+      }
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp, { passive: false });
+      window.addEventListener("pointercancel", onCancel, { passive: false });
     };
 
     this.hThumb.addEventListener("pointerdown", onHThumbDown, { passive: false });
