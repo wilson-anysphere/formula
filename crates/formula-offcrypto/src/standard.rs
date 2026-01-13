@@ -10,6 +10,7 @@
 
 use crate::util::ct_eq;
 use crate::{HashAlgorithm, OffcryptoError};
+use zeroize::Zeroizing;
 
 /// Verify the decrypted Standard verifier fields for a candidate password.
 ///
@@ -20,8 +21,8 @@ pub fn verify_verifier(
     verifier_hash: &[u8],
     hash_alg: HashAlgorithm,
 ) -> Result<(), OffcryptoError> {
-    let digest = hash_alg.digest(verifier);
-    if !ct_eq(&digest, verifier_hash) {
+    let digest = Zeroizing::new(hash_alg.digest(verifier));
+    if !ct_eq(&digest[..], verifier_hash) {
         return Err(OffcryptoError::InvalidPassword);
     }
     Ok(())

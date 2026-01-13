@@ -1698,7 +1698,7 @@ pub fn validate_agile_segment_decrypt_inputs(
 }
 
 fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
-    let mut out = Vec::with_capacity(password.len() * 2);
+    let mut out = Vec::with_capacity(password.len().saturating_mul(2));
     for unit in password.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
     }
@@ -1800,6 +1800,15 @@ pub fn standard_derive_key(
     Ok(out[..key_len].to_vec())
 }
 
+/// [`standard_derive_key`] variant that returns a [`Zeroizing<Vec<u8>>`], ensuring the derived
+/// key bytes are wiped from memory when dropped.
+pub fn standard_derive_key_zeroizing(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    Ok(Zeroizing::new(standard_derive_key(info, password)?))
+}
+
 /// ECMA-376 Standard Encryption key verifier check.
 ///
 /// Reference algorithm: `msoffcrypto` `ECMA376Standard.verifykey`.
@@ -1810,8 +1819,7 @@ pub fn standard_verify_key(info: &StandardEncryptionInfo, key: &[u8]) -> Result<
     aes_ecb_decrypt_in_place(key, &mut verifier[..])?;
     let expected_hash: Zeroizing<[u8; SHA1_LEN]> = Zeroizing::new(sha1(&verifier[..]));
 
-    let mut verifier_hash: Zeroizing<Vec<u8>> =
-        Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
+    let mut verifier_hash: Zeroizing<Vec<u8>> = Zeroizing::new(info.verifier.encrypted_verifier_hash.clone());
     aes_ecb_decrypt_in_place(key, &mut verifier_hash[..])?;
     if verifier_hash.len() < SHA1_LEN {
         return Err(OffcryptoError::InvalidVerifierHashLength {

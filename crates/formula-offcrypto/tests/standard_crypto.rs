@@ -6,7 +6,7 @@ use formula_offcrypto::{
 };
 use sha1::{Digest as _, Sha1};
 
-// Known test vector from `msoffcrypto/method/ecma376_standard.py` docstrings.
+// Known test vectors from `msoffcrypto/method/ecma376_standard.py` docstrings.
 const PASSWORD: &str = "Password1234_";
 const SALT: [u8; 16] = [
     0xe8, 0x82, 0x66, 0x49, 0x0c, 0x5b, 0xd1, 0xee, 0xbd, 0x2b, 0x43, 0x94, 0xe3, 0xf8, 0x30, 0xef,
@@ -221,5 +221,26 @@ fn standard_verify_key_rejects_invalid_salt_len() {
         OffcryptoError::InvalidEncryptionInfo {
             context: "EncryptionVerifier.saltSize must be 16 for Standard encryption"
         }
+    );
+}
+
+#[test]
+fn error_debug_does_not_include_derived_key_material() {
+    let info = standard_info();
+    let key = standard_derive_key(&info, PASSWORD).expect("derive key");
+
+    // Trigger a typical error and ensure its Debug output does not include password-derived
+    // material such as the derived key bytes.
+    let err = standard_verify_key(&info, &[0u8; 16]).expect_err("expected invalid password");
+    let dbg = format!("{err:?}");
+
+    let key_hex = hex::encode(&key);
+    assert!(
+        !dbg.contains(&key_hex),
+        "error Debug output should not include derived key bytes (got {dbg})"
+    );
+    assert!(
+        !dbg.contains(&format!("{key:?}")),
+        "error Debug output should not include derived key debug bytes (got {dbg})"
     );
 }
