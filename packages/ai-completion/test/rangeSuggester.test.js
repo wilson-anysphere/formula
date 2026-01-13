@@ -184,6 +184,24 @@ test("suggestRanges completes partial A1 range syntax (A1: -> A1:A10)", () => {
   assert.equal(suggestions[0].range, "A1:A10");
 });
 
+test("suggestRanges supports partial end-column prefixes for multi-letter columns (AB1:A -> AB1:AB3)", () => {
+  // Column AB is 0-based index 27 (A=0, B=1, ..., Z=25, AA=26, AB=27).
+  const AB_COL = 27;
+  const ctx = createGridContext([
+    [0, AB_COL, 10],
+    [1, AB_COL, 20],
+    [2, AB_COL, 30],
+  ]);
+
+  const suggestions = suggestRanges({
+    currentArgText: "AB1:A",
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: ctx,
+  });
+
+  assert.equal(suggestions[0].range, "AB1:AB3");
+});
+
 test("suggestRanges accepts partial column range syntax (A: -> A1:A3)", () => {
   const ctx = createColumnAContext([
     [0, 10],

@@ -161,13 +161,13 @@ const EXCEL_MAX_COL_INDEX = 16383; // XFD (1-based 16384)
  * Supported forms:
  * - A / A1 / $A$1
  * - A: / A1:
- * - A:A / A1:A
- *
- * Notes:
- * - We only support ranges within a single column. If the end column differs from the
- *   start column, return null (avoid suggesting wrong ranges for 2D selections).
- * - If a partial range has no explicit end token (e.g. "A1:"), the end column inherits
- *   the start column token/prefix (matching the existing single-token behavior).
+  * - A:A / A1:A
+  *
+  * Notes:
+  * - We only support ranges within a single column. If the end column prefix can't be
+  *   the start column (e.g. "A1:B"), return null to avoid suggesting wrong 2D ranges.
+  * - If a partial range has no explicit end token (e.g. "A1:"), the end column inherits
+  *   the start column token/prefix (matching the existing single-token behavior).
  *
  * @param {string} arg
  * @returns {{
@@ -227,8 +227,13 @@ function parseColumnRangePrefix(arg) {
   const end = parseColumnToken(right);
   if (!end) return null;
 
-  // Only support single-column ranges (avoid suggesting wrong multi-column ranges).
-  if (end.colLetters !== start.colLetters) return null;
+  // Only support single-column ranges. Allow partial end-column prefixes like:
+  // - AB1:A  (user has typed the first letter of the end column, but not the full AB yet)
+  // - AA1:A  (prefix of AA)
+  if (!start.colLetters.startsWith(end.colLetters)) return null;
+
+  const endColToken = completeColumnToken(end.colToken, start.colLetters);
+  if (!endColToken) return null;
 
   return {
     colLetters: start.colLetters,
@@ -237,8 +242,33 @@ function parseColumnRangePrefix(arg) {
     startColPrefix: start.colPrefix,
     startColToken: start.colToken,
     endColPrefix: end.colPrefix,
-    endColToken: end.colToken,
+    endColToken,
   };
+}
+
+/**
+ * Complete a partially typed end-column token (e.g. "A") to a full column token (e.g. "AB")
+ * using the known start column letters.
+ *
+ * This is intentionally conservative: if the typed token isn't a prefix of the full
+ * column letters, return null.
+ *
+ * @param {string} typedToken Column letters as typed by the user (no $ prefix).
+ * @param {string} fullColLetters Canonical uppercase column letters (e.g. "AB").
+ * @returns {string | null}
+ */
+function completeColumnToken(typedToken, fullColLetters) {
+  if (typeof typedToken !== "string" || typeof fullColLetters !== "string") return null;
+  if (typedToken.length === 0 || fullColLetters.length === 0) return null;
+
+  const typedUpper = typedToken.toUpperCase();
+  if (!fullColLetters.startsWith(typedUpper)) return null;
+  if (typedToken.length >= fullColLetters.length) return typedToken;
+
+  let remainder = fullColLetters.slice(typedToken.length);
+  if (typedToken === typedUpper) remainder = remainder.toUpperCase();
+  else if (typedToken === typedToken.toLowerCase()) remainder = remainder.toLowerCase();
+  return `${typedToken}${remainder}`;
 }
 
 /**
