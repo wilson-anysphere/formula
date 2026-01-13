@@ -220,8 +220,8 @@ If `Relationship::enforce_referential_integrity == true`:
 
 ### Virtual blank row behavior (Tabular “unknown member”)
 
-Tabular models behave as if the one-side table has an extra “unknown/blank” row when the many-side table
-contains foreign keys that are:
+Tabular models behave as if the table on the `to_table` side of a relationship has an extra
+“unknown/blank” row when the table on the `from_table` side contains key values that are:
 
 - `BLANK`, or
 - not present in the dimension key column (when referential integrity is not enforced)
@@ -233,9 +233,9 @@ contains foreign keys that are:
 
 Where this matters:
 
-1. **Filter propagation (dimension → fact)**  
-   When the virtual blank row is “allowed”, fact rows with unmatched keys stay visible even if the
-   dimension is filtered.
+1. **Filter propagation (`to_table → from_table`)**  
+   When the virtual blank row is “allowed”, rows with unmatched keys stay visible even if the
+   `to_table` side is filtered.
 
 2. **`VALUES(Dim[Key])` / `DISTINCT(Dim[Key])` and `DISTINCTCOUNT(Dim[Key])`**  
    These include `BLANK` when the virtual blank row exists and is allowed.
@@ -252,16 +252,18 @@ See `blank_row_allowed(...)` and `virtual_blank_row_exists(...)` in `engine.rs`.
 Different DAX functions consult relationships in slightly different ways:
 
 - `RELATED(Table[Column])`:
-  - Requires a **direct** active relationship from the current row-context table to `Table`
-    (`from_table == current_table`, `to_table == Table`, and `Relationship::is_active == true`).
-  - Current limitation: it does **not** consult `FilterContext` relationship overrides
-    (`USERELATIONSHIP` / `CROSSFILTER`).
+  - Requires row context.
+  - Follows a **unique** active relationship path from the current table to `Table` in the
+    `ManyToOne` direction (following relationships in their defined `from_table → to_table`
+    direction). If there are multiple active paths, the engine errors.
+  - Consults `FilterContext` relationship overrides when deciding which relationships are active
+    (`USERELATIONSHIP`) or disabled (`CROSSFILTER(..., NONE)`).
 
 - `RELATEDTABLE(Table)`:
-  - Requires row context and returns rows from a many-side table related to the current row on the one
-    side.
+  - Requires row context and returns rows from a `from_table`-side table related to the current row
+    on the `to_table` side.
   - Supports multi-hop traversal when there is a **unique** active relationship path (in the reverse
-    direction, `OneToMany` at each hop).
+    direction, `OneToMany` at each hop). If there are multiple active paths, the engine errors.
   - Consults `FilterContext` relationship overrides when deciding which relationships are active, and
     respects `CROSSFILTER(..., NONE)` disabling relationships.
 
