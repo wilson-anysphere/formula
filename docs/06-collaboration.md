@@ -193,6 +193,7 @@ Desktop dev/testing toggle:
   - `?collabEncryptRange=Sheet1!A1:C10` overrides the encrypted range (default `Sheet1!A1:C10`)
     - The sheet qualifier uses formula-style sheet names; desktop resolves these to stable sheet ids when possible.
 - This is implemented in `apps/desktop/src/collab/devEncryption.ts` and is intended for manual verification (two clients: one with the key, one without).
+- The key is derived deterministically from `docId` + a hardcoded dev salt (not production key management).
 
 Notes:
 

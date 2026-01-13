@@ -466,6 +466,7 @@ Params:
 - `collabEncrypt=1` enables **dev-only** end-to-end cell encryption for a deterministic demo range.
   - Use this to exercise encrypted cell payloads (`enc`) end-to-end across multiple clients.
   - To verify masking, open one client with `collabEncrypt=1` and another without it.
+  - The key is derived deterministically from `docId` + a hardcoded dev salt (testing only; not production key management).
 - `collabEncryptRange=Sheet1!A1:C10` optionally overrides the encrypted range (default: `Sheet1!A1:C10`).
   - The sheet part uses the same syntax as formulas (sheet *name*). When a sheet-name resolver is available, the desktop
     will map that name to the stable sheet id used by collab cell keys (so this works even when ids differ from names).
