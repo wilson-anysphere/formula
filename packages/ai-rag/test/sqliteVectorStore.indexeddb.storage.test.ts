@@ -104,3 +104,62 @@ maybeTest("SqliteVectorStore can reset persisted DB on dimension mismatch (Index
   expect(await store3.list()).toEqual([]);
   await store3.close();
 });
+
+maybeTest("SqliteVectorStore throws typed mismatch error on dimension mismatch when reset is disabled (IndexedDBBinaryStorage)", async () => {
+  const dbName = uniqueDbName("ai-rag-sqlite-idb-dim-mismatch-throw");
+  const storage1 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch-throw",
+  });
+
+  const store1 = await SqliteVectorStore.create({ storage: storage1, dimension: 3, autoSave: true });
+  await store1.upsert([{ id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb" } }]);
+  await store1.close();
+
+  const storage2 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch-throw",
+  });
+
+  let removed = false;
+  const originalRemove = storage2.remove.bind(storage2);
+  // eslint-disable-next-line no-param-reassign
+  storage2.remove = async () => {
+    removed = true;
+    await originalRemove();
+  };
+
+  await expect(
+    SqliteVectorStore.create({
+      storage: storage2,
+      dimension: 4,
+      autoSave: false,
+      resetOnDimensionMismatch: false,
+      resetOnCorrupt: false,
+    })
+  ).rejects.toMatchObject({
+    name: "SqliteVectorStoreDimensionMismatchError",
+    dbDimension: 3,
+    requestedDimension: 4,
+  });
+  expect(removed).toBe(false);
+
+  // Ensure the store wasn't wiped.
+  const storage3 = new IndexedDBBinaryStorage({
+    dbName,
+    namespace: "formula.test.rag.sqlite",
+    workbookId: "sqlite-store-dim-mismatch-throw",
+  });
+  const store3 = await SqliteVectorStore.create({
+    storage: storage3,
+    dimension: 3,
+    autoSave: false,
+    resetOnDimensionMismatch: false,
+    resetOnCorrupt: false,
+  });
+  const rec = await store3.get("a");
+  expect(rec).not.toBeNull();
+  await store3.close();
+});
