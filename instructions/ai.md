@@ -44,6 +44,7 @@ This is non-negotiable. Do not implement local model support, API key configurat
 ### Your Documentation
 
 - **Primary:** [`docs/05-ai-integration.md`](../docs/05-ai-integration.md) — AI modes, context management, tool calling
+- **Pivot tool semantics:** [`docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md`](../docs/adr/ADR-0005-pivot-tables-ownership-and-data-flow.md) — PivotTables ownership + data flow (avoid duplicating pivot engines inside AI tooling)
 
 ---
 
