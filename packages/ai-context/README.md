@@ -191,6 +191,18 @@ In most integrations, only `promptContext` should ever reach a cloud model.
 | `sampledRows` | ❌ No | Contains raw cell values by design. |
 | `retrieved` | ❌ No | Easy footgun: callers may serialize it directly; prefer the already-packed `promptContext`. |
 
+### Performance & safety limits (single-sheet)
+
+`buildContext()` expects `sheet.values` to be a 2D array, but real spreadsheets can accidentally materialize huge matrices
+(e.g. full-row/column selections). To avoid OOMs and runaway indexing, `ContextManager.buildContext()` **caps** the matrix
+it uses for schema extraction + sampling + single-sheet RAG:
+
+- scans at most **1,000 rows**
+- caps total scanned cells to ~**200,000** by shrinking the column count accordingly
+
+If you need larger coverage, prefer workbook RAG (`buildWorkbookContext*`) where the source of truth is a **sparse** list of
+non-empty cells (via `SpreadsheetApi.listNonEmptyCells`) rather than a dense matrix.
+
 ---
 
 ## Example: build workbook context with `ContextManager.buildWorkbookContextFromSpreadsheetApi`
