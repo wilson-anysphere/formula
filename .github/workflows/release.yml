@@ -116,8 +116,8 @@ jobs:
           # Keep this in sync with the root package.json `packageManager` field.
           version: 9.0.0
 
-      - name: Preflight: verify macOS code signing secrets (base64 + PKCS#12)
-        if: matrix.platform == 'macos-latest' && (secrets.APPLE_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
+      - name: "Preflight: verify macOS code signing secrets (base64 + PKCS#12)"
+        if: runner.os == 'macOS' && (secrets.APPLE_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
         shell: bash
         env:
           FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
@@ -125,8 +125,8 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: bash scripts/ci/verify-codesign-secrets.sh macos
 
-      - name: Preflight: verify Windows code signing secrets (base64 + PKCS#12)
-        if: matrix.platform == 'windows-latest' && (secrets.WINDOWS_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
+      - name: "Preflight: verify Windows code signing secrets (base64 + PKCS#12)"
+        if: runner.os == 'Windows' && (secrets.WINDOWS_CERTIFICATE != '' || vars.FORMULA_REQUIRE_CODESIGN == '1')
         shell: bash
         env:
           FORMULA_REQUIRE_CODESIGN: ${{ vars.FORMULA_REQUIRE_CODESIGN }}
@@ -324,7 +324,7 @@ jobs:
 
       - name: Cache wasm-pack binary
         id: wasm-pack-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/bin/wasm-pack
