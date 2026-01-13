@@ -21,6 +21,18 @@ pub(crate) const RECORD_BOF_BIFF8: u16 = 0x0809;
 /// BIFF5 `BOF` record id.
 pub(crate) const RECORD_BOF_BIFF5: u16 = 0x0009;
 
+// Hard cap for coalescing BIFF `CONTINUE` records into a single logical record.
+//
+// A malformed or malicious stream can contain extremely long runs of `CONTINUE` records (or large
+// record lengths), which would otherwise result in unbounded allocations when we concatenate
+// fragments. This cap is enforced *only* when coalescing is actually performed (i.e. the record id
+// allows continuation and a `CONTINUE` record is present).
+#[cfg(not(test))]
+pub(crate) const MAX_LOGICAL_RECORD_BYTES: usize = 16 * 1024 * 1024;
+// Keep unit tests fast and memory-efficient by using a much smaller cap.
+#[cfg(test)]
+pub(crate) const MAX_LOGICAL_RECORD_BYTES: usize = 1024;
+
 pub(crate) fn is_bof_record(record_id: u16) -> bool {
     record_id == RECORD_BOF_BIFF8 || record_id == RECORD_BOF_BIFF5
 }
@@ -331,6 +343,7 @@ impl<'a> Iterator for FragmentIter<'a> {
 pub(crate) struct LogicalBiffRecordIter<'a> {
     iter: std::iter::Peekable<BiffRecordIter<'a>>,
     allows_continuation: fn(u16) -> bool,
+    finished: bool,
 }
 
 impl<'a> LogicalBiffRecordIter<'a> {
@@ -347,6 +360,7 @@ impl<'a> LogicalBiffRecordIter<'a> {
         Ok(Self {
             iter: BiffRecordIter::from_offset(workbook_stream, offset)?.peekable(),
             allows_continuation,
+            finished: false,
         })
     }
 }
@@ -355,9 +369,16 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
     type Item = Result<LogicalBiffRecord<'a>, String>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
         let first = match self.iter.next()? {
             Ok(record) => record,
-            Err(err) => return Some(Err(err)),
+            Err(err) => {
+                self.finished = true;
+                return Some(Err(err));
+            }
         };
 
         let start_offset = first.offset;
@@ -406,8 +427,24 @@ impl<'a> Iterator for LogicalBiffRecordIter<'a> {
                 .expect("peek verified there is another record")
             {
                 Ok(record) => record,
-                Err(err) => return Some(Err(err)),
+                Err(err) => {
+                    self.finished = true;
+                    return Some(Err(err));
+                }
             };
+
+            let cap = MAX_LOGICAL_RECORD_BYTES;
+            let new_len = combined
+                .len()
+                .checked_add(next.data.len())
+                .unwrap_or(usize::MAX);
+            if new_len > cap {
+                self.finished = true;
+                return Some(Err(format!(
+                    "logical BIFF record 0x{record_id:04X} at offset {start_offset} exceeds max continued size ({cap} bytes)"
+                )));
+            }
+
             fragment_sizes.push(next.data.len());
             combined.extend_from_slice(next.data);
         }
@@ -637,6 +674,38 @@ mod tests {
         let second = iter.next().unwrap().unwrap();
         assert_eq!(second.record_id, 0x00BB);
         assert_eq!(second.data.as_ref(), &[9]);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn logical_iter_errors_on_oversized_continued_record() {
+        let allows = |id: u16| id == 0x00AA;
+        let first_payload = [0u8; 1];
+        let cont_payload = vec![0u8; 64];
+
+        let mut stream_parts: Vec<Vec<u8>> = Vec::new();
+        stream_parts.push(record(0x00AA, &first_payload));
+
+        let mut total = first_payload.len();
+        while total <= MAX_LOGICAL_RECORD_BYTES {
+            stream_parts.push(record(RECORD_CONTINUE, &cont_payload));
+            total += cont_payload.len();
+            if total > MAX_LOGICAL_RECORD_BYTES {
+                break;
+            }
+        }
+
+        let stream = stream_parts.concat();
+
+        let mut iter = LogicalBiffRecordIter::new(&stream, allows);
+        let err = iter.next().unwrap().unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "logical BIFF record 0x00AA at offset 0 exceeds max continued size ({} bytes)",
+                MAX_LOGICAL_RECORD_BYTES
+            )
+        );
         assert!(iter.next().is_none());
     }
 }
