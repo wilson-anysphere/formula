@@ -296,6 +296,13 @@ export function createSyncServer(
   { createLeveldbPersistence }: SyncServerCreateOptions = {}
 ) {
   const nodeEnv = process.env.NODE_ENV ?? "development";
+  const parseCommaList = (value: string | undefined): string[] | null => {
+    if (value === undefined) return null;
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+  };
   const reservedRootGuardEnabled = (() => {
     const raw = process.env.SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED;
     if (raw === undefined) {
@@ -307,10 +314,17 @@ export function createSyncServer(
     const normalized = raw.trim().toLowerCase();
     return normalized === "1" || normalized === "true";
   })();
+  const reservedRootNames =
+    parseCommaList(process.env.SYNC_SERVER_RESERVED_ROOT_NAMES) ?? [
+      "versions",
+      "versionsMeta",
+    ];
+  const reservedRootPrefixes =
+    parseCommaList(process.env.SYNC_SERVER_RESERVED_ROOT_PREFIXES) ?? ["branching:"];
   const reservedRootGuard = {
     enabled: reservedRootGuardEnabled,
-    reservedRootNames: ["versions", "versionsMeta"],
-    reservedRootPrefixes: ["branching:"],
+    reservedRootNames,
+    reservedRootPrefixes,
   };
 
   const allowedOrigins = (() => {
