@@ -1,0 +1,169 @@
+from __future__ import annotations
+
+import io
+import json
+import sys
+import tempfile
+import unittest
+from unittest import mock
+from pathlib import Path
+
+import tools.corpus.minimize as minimize_mod
+from tools.corpus.util import WorkbookInput
+
+
+class CorpusMinimizeTests(unittest.TestCase):
+    def test_relationship_id_from_diff_path(self) -> None:
+        self.assertEqual(
+            minimize_mod._relationship_id_from_diff_path(  # noqa: SLF001 (unit test)
+                '/Relationships/Relationship[@Id="rId3"]@Target'
+            ),
+            "rId3",
+        )
+        self.assertIsNone(minimize_mod._relationship_id_from_diff_path("/Relationships/Relationship"))  # noqa: SLF001
+
+    def test_summarize_differences_counts_and_rel_ids(self) -> None:
+        diffs = [
+            {
+                "severity": "CRITICAL",
+                "part": "xl/workbook.xml",
+                "path": "/workbook@{ns}attr",
+                "kind": "attribute_changed",
+            },
+            {
+                "severity": "CRITICAL",
+                "part": "xl/_rels/workbook.xml.rels",
+                "path": '/Relationships/Relationship[@Id="rId1"]@Target',
+                "kind": "attribute_changed",
+            },
+            {
+                "severity": "WARN",
+                "part": "xl/theme/theme1.xml",
+                "path": "/theme",
+                "kind": "child_added",
+            },
+        ]
+
+        per_part, critical_parts, rel_ids = minimize_mod.summarize_differences(diffs)
+
+        self.assertEqual(critical_parts, ["xl/_rels/workbook.xml.rels", "xl/workbook.xml"])
+        self.assertEqual(per_part["xl/workbook.xml"]["critical"], 1)
+        self.assertEqual(per_part["xl/theme/theme1.xml"]["warning"], 1)
+        self.assertEqual(rel_ids, {"xl/_rels/workbook.xml.rels": ["rId1"]})
+
+    def test_minimize_workbook_reruns_when_truncated(self) -> None:
+        calls: list[int] = []
+
+        def fake_run_rust_triage(*_args, diff_limit: int, **_kwargs):  # type: ignore[no-untyped-def]
+            calls.append(diff_limit)
+            full = [
+                {
+                    "severity": "CRITICAL",
+                    "part": "xl/workbook.xml",
+                    "path": "/workbook@{ns}attr",
+                    "kind": "attribute_changed",
+                },
+                {
+                    "severity": "CRITICAL",
+                    "part": "xl/_rels/workbook.xml.rels",
+                    "path": '/Relationships/Relationship[@Id="rId9"]@Target',
+                    "kind": "attribute_changed",
+                },
+                {
+                    "severity": "WARN",
+                    "part": "xl/theme/theme1.xml",
+                    "path": "/theme",
+                    "kind": "child_added",
+                },
+            ]
+            emitted = full[:1] if diff_limit < len(full) else full
+            return {
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 2, "warning": 1, "info": 0, "total": 3},
+                            "equal": False,
+                            "top_differences": emitted,
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": False},
+            }
+
+        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001 (test patch)
+        try:
+            minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
+            summary = minimize_mod.minimize_workbook(
+                WorkbookInput(display_name="book.xlsx", data=b"dummy"),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=1,
+            )
+        finally:
+            minimize_mod.triage_mod._run_rust_triage = original  # type: ignore[assignment]
+
+        # First run truncated (diff_limit=1) then rerun with diff_limit=total (=3).
+        self.assertEqual(calls, [1, 3])
+        self.assertEqual(summary["critical_parts"], ["xl/_rels/workbook.xml.rels", "xl/workbook.xml"])
+        self.assertEqual(summary["rels_critical_ids"], {"xl/_rels/workbook.xml.rels": ["rId9"]})
+
+    def test_main_writes_summary_json(self) -> None:
+        def fake_build_rust_helper() -> Path:  # type: ignore[no-untyped-def]
+            return Path("noop")
+
+        def fake_run_rust_triage(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+            return {
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 0, "warning": 0, "info": 0, "total": 0},
+                            "equal": True,
+                            "top_differences": [],
+                        },
+                    }
+                },
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+        orig_build = minimize_mod.triage_mod._build_rust_helper  # noqa: SLF001
+        orig_run = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001
+        try:
+            minimize_mod.triage_mod._build_rust_helper = fake_build_rust_helper  # type: ignore[assignment]
+            minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                in_path = Path(tmpdir) / "book.xlsx"
+                in_path.write_bytes(b"dummy")
+                out_path = Path(tmpdir) / "summary.json"
+
+                argv = sys.argv
+                try:
+                    sys.argv = [
+                        "tools.corpus.minimize",
+                        "--input",
+                        str(in_path),
+                        "--out",
+                        str(out_path),
+                    ]
+                    # Avoid polluting unit test output; the CLI is intentionally chatty.
+                    buf = io.StringIO()
+                    with mock.patch("sys.stdout", buf):
+                        rc = minimize_mod.main()
+                finally:
+                    sys.argv = argv
+
+                self.assertEqual(rc, 0)
+                data = json.loads(out_path.read_text(encoding="utf-8"))
+                self.assertEqual(data["display_name"], "book.xlsx")
+                self.assertEqual(data["diff_counts"]["critical"], 0)
+        finally:
+            minimize_mod.triage_mod._build_rust_helper = orig_build  # type: ignore[assignment]
+            minimize_mod.triage_mod._run_rust_triage = orig_run  # type: ignore[assignment]
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -148,6 +148,23 @@ To locally hide calcChain noise (restoring the old triage behavior), run triage 
 python -m tools.corpus.triage ... --diff-ignore xl/calcChain.xml
 ```
 
+### Isolate round-trip diffs by part ("diff root cause isolator")
+
+When a workbook fails round-trip (`diff_critical_count > 0`), it can be useful to quickly identify **which package
+parts** are responsible, without emitting any raw XML/text to logs.
+
+```bash
+python -m tools.corpus.minimize --input /path/to/workbook.xlsx
+```
+
+This produces a privacy-safe summary:
+
+- `critical_parts`: list of OPC part names with at least one `CRITICAL` diff
+- `part_counts`: per-part diff counts (C/W/I/total)
+- `rels_critical_ids`: for `.rels` parts, the relationship Ids (`rId...`) involved in critical diffs
+
+The tool always writes a JSON summary file (default: `tools/corpus/out/minimize/<sha16>.json`).
+
 To fail fast on suspicious plaintext in a corpus directory:
 
 ```bash
