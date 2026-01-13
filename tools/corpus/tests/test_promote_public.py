@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tools.corpus.promote_public import (
     _coerce_display_name,
+    _write_public_fixture,
     extract_public_expectations,
     update_public_expectations_file,
     upsert_expectations_entry,
@@ -14,6 +15,22 @@ from tools.corpus.promote_public import (
 
 
 class PromotePublicExpectationsTests(unittest.TestCase):
+    def test_write_public_fixture_refuses_overwrite_without_force(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-fixture-test-") as td:
+            tmp = Path(td)
+            path = tmp / "book.xlsx.b64"
+            _write_public_fixture(path, b"one", force=False)
+            # Idempotent if bytes are identical (doesn't rewrite).
+            before = path.read_bytes()
+            _write_public_fixture(path, b"one", force=False)
+            self.assertEqual(path.read_bytes(), before)
+
+            with self.assertRaises(FileExistsError):
+                _write_public_fixture(path, b"two", force=False)
+
+            _write_public_fixture(path, b"two", force=True)
+            self.assertNotEqual(path.read_bytes(), before)
+
     def test_coerce_display_name_appends_extension(self) -> None:
         self.assertEqual(_coerce_display_name("my-case", default_ext=".xlsx"), "my-case.xlsx")
 
@@ -39,6 +56,16 @@ class PromotePublicExpectationsTests(unittest.TestCase):
     def test_extract_public_expectations_requires_open_ok_true(self) -> None:
         with self.assertRaises(ValueError):
             extract_public_expectations({"result": {"open_ok": False}})
+
+    def test_extract_public_expectations_requires_round_trip_ok_bool(self) -> None:
+        with self.assertRaises(ValueError):
+            extract_public_expectations({"result": {"open_ok": True, "round_trip_ok": None}})
+
+    def test_extract_public_expectations_requires_diff_critical_int(self) -> None:
+        with self.assertRaises(ValueError):
+            extract_public_expectations(
+                {"result": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": "0"}}
+            )
 
     def test_upsert_expectations_entry_idempotent(self) -> None:
         expectations = {"book.xlsx": {"open_ok": True, "round_trip_ok": True, "diff_critical_count": 0}}
