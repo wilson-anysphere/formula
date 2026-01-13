@@ -277,10 +277,10 @@ interface Relationship {
 
 #### Many-to-many relationships (`formula-dax` semantics)
 
-`formula-dax` treats `"many-to-many"` relationships as **distinct-key** relationships for filter
-propagation: when a relationship propagates a filter from one table to the other, it does so by
-taking the distinct set of visible key values on the source side and applying that set to the
-target side (conceptually similar to `TREATAS(VALUES(source[key]), target[key])`).
+The intended `formula-dax` semantics treat `"many-to-many"` relationships as **distinct-key**
+relationships for filter propagation: when a relationship propagates a filter from one table to the
+other, it does so by taking the distinct set of visible key values on the source side and applying
+that set to the target side (conceptually similar to `TREATAS(VALUES(source[key]), target[key])`).
 
 Row-context navigation follows the relationship orientation (`fromTable` → `toTable`):
 

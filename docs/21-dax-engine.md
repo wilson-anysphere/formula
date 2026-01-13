@@ -112,26 +112,38 @@ Relationships are registered via `DataModel::add_relationship(Relationship)` (se
 
 `Relationship` is defined with:
 
-- `from_table` / `from_column`: the **many-side** table (typically a fact table) and its foreign key column
-- `to_table` / `to_column`: the **one-side** table (typically a dimension table) and its primary key column
+- `from_table` / `from_column`: the fact-side table (often the "many" side) and its key/foreign-key column
+- `to_table` / `to_column`: the lookup-side table (often the "one" side) and its key column
+
+The relationship is *oriented*: by default (`CrossFilterDirection::Single`) filters propagate
+`to_table → from_table`. This orientation is intended to remain meaningful for
+`Cardinality::ManyToMany` relationships as well.
 
 Internally, `DataModel` materializes two indices (`RelationshipInfo`):
 
-- `to_index: HashMap<Value, usize>` mapping **dimension key → dimension row index**
-- `from_index: HashMap<Value, Vec<usize>>` mapping **fact key → fact row indices**
+- `to_index: HashMap<Value, usize>` mapping **to_table key → to_table row index** (unique-key relationships)
+- `from_index: HashMap<Value, Vec<usize>>` mapping **from_table key → from_table row indices**
 
 These indices are built eagerly when the relationship is added, and updated on `DataModel::insert_row(...)`.
 
 ### Cardinality
 
-Supported cardinalities:
+Currently supported cardinalities:
 
 - `Cardinality::OneToMany`
 - `Cardinality::OneToOne`
 
-Unsupported:
+Many-to-many (planned semantics):
 
-- `Cardinality::ManyToMany` (returns `DaxError::UnsupportedCardinality`)
+- `Cardinality::ManyToMany` is currently rejected by `DataModel::add_relationship` (returns
+  `DaxError::UnsupportedCardinality`).
+- Intended filter propagation is **distinct-key propagation** (conceptually like
+  `TREATAS(VALUES(source[key]), target[key])`).
+- `RELATED` is ambiguous when there is more than one match on the `to_table` side (error).
+- `RELATEDTABLE` returns the set of matching rows (can be >1 for many-to-many).
+- Pivot/group-by: the current pivot/group-by implementation does not expand a base row into multiple
+  related rows when traversing a many-to-many relationship, so grouping across many-to-many is
+  currently ambiguous/unsupported.
 
 For `OneToOne` relationships, the engine enforces uniqueness on **both** sides when the relationship is
 added (`DaxError::NonUniqueKey`), treating `BLANK` as a real key for uniqueness checks.
