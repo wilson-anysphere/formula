@@ -5,6 +5,10 @@ use sha1::{Digest, Sha1};
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
 use aes::{Aes128, Aes192, Aes256};
 
+use crate::rc4_encrypted_package::{
+    parse_rc4_encrypted_package_stream, Rc4EncryptedPackageParseError, Rc4EncryptedPackageParseOptions,
+};
+
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const AES_BLOCK_LEN: usize = 16;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
@@ -31,6 +35,9 @@ pub enum EncryptedPackageError {
         orig_size: u64,
         ciphertext_len: usize,
     },
+
+    #[error("`EncryptedPackage` orig_size {orig_size} exceeds configured maximum {max}")]
+    OrigSizeExceedsMax { orig_size: u64, max: u64 },
 
     #[error("`EncryptedPackage` ciphertext length {ciphertext_len} is not a multiple of AES block size ({AES_BLOCK_LEN})")]
     CiphertextLenNotBlockAligned { ciphertext_len: usize },
@@ -479,16 +486,29 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
         &self,
         encrypted_package_stream: &[u8],
     ) -> Result<Vec<u8>, EncryptedPackageError> {
-        if encrypted_package_stream.len() < ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN {
-            return Err(EncryptedPackageError::StreamTooShort {
+        let parsed = parse_rc4_encrypted_package_stream(
+            encrypted_package_stream,
+            &Rc4EncryptedPackageParseOptions::default(),
+        )
+        .map_err(|err| match err {
+            Rc4EncryptedPackageParseError::TruncatedHeader => EncryptedPackageError::StreamTooShort {
                 len: encrypted_package_stream.len(),
-            });
-        }
-
-        let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
-        size_bytes.copy_from_slice(&encrypted_package_stream[..ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN]);
-        let orig_size = u64::from_le_bytes(size_bytes);
-        let ciphertext = &encrypted_package_stream[ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN..];
+            },
+            Rc4EncryptedPackageParseError::DeclaredSizeExceedsPayload { declared, available } => {
+                EncryptedPackageError::ImplausibleOrigSize {
+                    orig_size: declared,
+                    ciphertext_len: available as usize,
+                }
+            }
+            Rc4EncryptedPackageParseError::DeclaredSizeExceedsMax { declared, max } => {
+                EncryptedPackageError::OrigSizeExceedsMax {
+                    orig_size: declared,
+                    max,
+                }
+            }
+        })?;
+        let orig_size = parsed.header.package_size;
+        let ciphertext = parsed.encrypted_payload;
 
         if ciphertext.is_empty() && orig_size == 0 {
             return Ok(Vec::new());
@@ -496,14 +516,6 @@ impl CryptoapiRc4EncryptedPackageDecryptor {
 
         let orig_size_usize = usize::try_from(orig_size)
             .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
-
-        // RC4 has no block padding requirements, so ciphertext must contain at least `orig_size` bytes.
-        if orig_size > ciphertext.len() as u64 {
-            return Err(EncryptedPackageError::ImplausibleOrigSize {
-                orig_size,
-                ciphertext_len: ciphertext.len(),
-            });
-        }
 
         let mut out = ciphertext[..orig_size_usize].to_vec();
         for (block_index, chunk) in out.chunks_mut(ENCRYPTED_PACKAGE_RC4_BLOCK_LEN).enumerate() {

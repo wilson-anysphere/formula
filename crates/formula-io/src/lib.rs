@@ -16,6 +16,7 @@ pub use encryption_info::{extract_agile_encryption_info_xml, EncryptionInfoXmlEr
 mod rc4_cryptoapi;
 pub use rc4_cryptoapi::{HashAlg, Rc4CryptoApiDecryptReader, Rc4CryptoApiEncryptedPackageError};
 mod ms_offcrypto;
+mod rc4_encrypted_package;
 
 #[cfg(feature = "encrypted-workbooks")]
 mod encrypted_ooxml;

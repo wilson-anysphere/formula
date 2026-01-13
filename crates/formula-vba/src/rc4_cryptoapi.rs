@@ -20,6 +20,8 @@ pub(crate) enum HashAlg {
 pub(crate) enum Rc4CryptoApiError {
     #[error("EncryptedPackage stream is truncated")]
     Truncated,
+    #[error("EncryptedPackage declared plaintext length {0} does not fit into usize")]
+    PlaintextLenTooLarge(u64),
     #[error("unsupported key length {0} (must be <= 20 for SHA-1)")]
     UnsupportedKeyLength(usize),
     #[error("unsupported hash algorithm")]
@@ -155,7 +157,16 @@ impl Rc4CryptoApiDecryptor {
             .ok_or(Rc4CryptoApiError::Truncated)?
             .try_into()
             .map_err(|_| Rc4CryptoApiError::Truncated)?;
-        let plaintext_len = u64::from_le_bytes(len_bytes) as usize;
+        // The `EncryptedPackage` stream begins with an 8-byte **plaintext** size header.
+        //
+        // Some implementations treat it as `u32 totalSize` + `u32 reserved`, while others treat it
+        // as a true little-endian `u64`. Parse as lo/hi DWORDs so we never accidentally truncate the
+        // high bits on 32-bit targets.
+        let lo = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]);
+        let hi = u32::from_le_bytes([len_bytes[4], len_bytes[5], len_bytes[6], len_bytes[7]]);
+        let plaintext_len_u64 = (lo as u64) | ((hi as u64) << 32);
+        let plaintext_len = usize::try_from(plaintext_len_u64)
+            .map_err(|_| Rc4CryptoApiError::PlaintextLenTooLarge(plaintext_len_u64))?;
 
         let ciphertext = encrypted_package_stream
             .get(8..)

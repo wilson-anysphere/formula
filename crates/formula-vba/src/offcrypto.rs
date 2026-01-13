@@ -1200,6 +1200,8 @@ mod tests {
 
         let key_40 = standard_cryptoapi_rc4_block_key(CALG_SHA1, password, &salt, 50_000, 0, 40)
             .expect("should derive sha1 rc4 block key");
+        // CryptoAPI/Office represent a "40-bit" RC4 key as a 128-bit key with the high 88 bits
+        // cleared. `standard_cryptoapi_rc4_block_key` returns the padded 16-byte RC4 key.
         assert_eq!(hex_lower(&key_40), "6ad7dedf2d0000000000000000000000");
     }
 }

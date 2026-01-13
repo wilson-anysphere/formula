@@ -156,7 +156,17 @@ impl<R: Read + Seek> Rc4CryptoApiDecryptReader<R> {
 
         let mut size_bytes = [0u8; ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN];
         inner.read_exact(&mut size_bytes)?;
-        let package_size = u64::from_le_bytes(size_bytes);
+        // The first 8 bytes of the EncryptedPackage stream are plaintext.
+        //
+        // Different implementations interpret these bytes as either:
+        // - `u32 totalSize` + `u32 reserved` (often 0), or
+        // - a `u64` size.
+        //
+        // Parse as two little-endian DWORDs so we can reliably support both, and inspect the
+        // high DWORD for diagnostics if needed.
+        let lo = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]]);
+        let hi = u32::from_le_bytes([size_bytes[4], size_bytes[5], size_bytes[6], size_bytes[7]]);
+        let package_size = (lo as u64) | ((hi as u64) << 32);
 
         let ciphertext_len = stream_len
             .checked_sub(ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN as u64)
