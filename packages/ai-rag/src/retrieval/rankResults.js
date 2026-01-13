@@ -177,12 +177,18 @@ export function dedupeOverlappingResults(results, opts = {}) {
     if (cand.id) seenIds.add(cand.id);
 
     const meta = cand.value?.metadata ?? {};
-    const sheetName = meta.sheetName;
     const workbookId = meta.workbookId;
+    const sheetName = meta.sheetName;
     const rect = meta.rect;
 
     let isDup = false;
-    if (typeof sheetName === "string" && sheetName && isValidRect(rect)) {
+    if (
+      typeof workbookId === "string" &&
+      workbookId &&
+      typeof sheetName === "string" &&
+      sheetName &&
+      isValidRect(rect)
+    ) {
       for (const prev of kept) {
         const prevMeta = prev.value?.metadata ?? {};
         if (prevMeta.workbookId !== workbookId) continue;
