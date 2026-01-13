@@ -16,6 +16,13 @@
   overflow: hidden;
 }
 
+/* Canvas-based drawings overlay (shapes, images, etc). */
+.drawing-layer {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+}
+
 /* Individual chart host elements (positioned within the chart overlay). */
 .chart-object {
   position: absolute;
@@ -39,9 +46,15 @@
   any floating UI (comments, tooltips, conflicts, etc).
 */
 .grid-root {
+  --grid-z-drawing-overlay: 1;
   --grid-z-chart-overlay: 2;
   --grid-z-selection-overlay: 3;
   --grid-z-outline-overlay: 4;
+}
+
+/* Shared-grid overlay stacking: drawings above cells, charts above drawings, selection above all. */
+.drawing-layer--shared {
+  z-index: var(--grid-z-drawing-overlay, 1);
 }
 
 /* Shared-grid overlay stacking: charts above cells, selection above charts. */

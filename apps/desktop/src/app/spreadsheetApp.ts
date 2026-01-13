@@ -8,6 +8,8 @@ import { emuToPx } from "../charts/overlay.js";
 import { placeholderSvg, renderChartSvg } from "../charts/renderSvg.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
+import { DrawingOverlay, pxToEmu, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
+import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
 import { applyPlainTextEdit } from "../grid/text/rich-text/edit.js";
 import { renderRichText } from "../grid/text/rich-text/render.js";
 import {
@@ -561,7 +563,19 @@ export class SpreadsheetApp {
   private externalRepaintUnsubscribe: (() => void) | null = null;
 
   private gridCanvas: HTMLCanvasElement;
+  private drawingCanvas: HTMLCanvasElement;
   private chartLayer: HTMLDivElement;
+  private drawingOverlay: DrawingOverlay;
+  private readonly drawingImages: ImageStore;
+  private drawingViewportMemo:
+    | {
+        width: number;
+        height: number;
+        dpr: number;
+        offsetX: number;
+        offsetY: number;
+      }
+    | null = null;
   private sharedChartPanes:
     | {
         topLeft: HTMLDivElement;
@@ -1078,6 +1092,15 @@ export class SpreadsheetApp {
     this.gridCanvas.className = "grid-canvas grid-canvas--base";
     this.gridCanvas.setAttribute("aria-hidden", "true");
 
+    this.drawingCanvas = document.createElement("canvas");
+    this.drawingCanvas.className = "drawing-layer drawing-layer--overlay";
+    this.drawingCanvas.setAttribute("aria-hidden", "true");
+    this.drawingCanvas.setAttribute("data-testid", "drawing-layer-canvas");
+    if (this.gridMode === "shared") {
+      // Shared-grid overlay stacking is expressed via CSS classes (see charts-overlay.css).
+      this.drawingCanvas.classList.add("drawing-layer--shared");
+    }
+
     this.chartLayer = document.createElement("div");
     this.chartLayer.className = "chart-layer chart-layer--overlay";
     this.chartLayer.setAttribute("aria-hidden", "true");
@@ -1108,6 +1131,7 @@ export class SpreadsheetApp {
     }
 
     this.root.appendChild(this.gridCanvas);
+    this.root.appendChild(this.drawingCanvas);
     this.root.appendChild(this.chartLayer);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.auditingCanvas);
@@ -1325,18 +1349,19 @@ export class SpreadsheetApp {
 
                const prevX = this.scrollX;
                const prevY = this.scrollY;
-               const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
-               this.scrollX = nextScroll.x;
-               this.scrollY = nextScroll.y;
-               this.syncSharedChartPanes(effectiveViewport);
-               this.clearSharedHoverCellCache();
-               this.hideCommentTooltip();
-               this.renderCharts(zoomChanged);
-               this.renderAuditing();
-               this.renderSelection();
-              if (this.scrollX !== prevX || this.scrollY !== prevY) {
-                this.notifyScrollListeners();
-              }
+                const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+                this.scrollX = nextScroll.x;
+                this.scrollY = nextScroll.y;
+                this.syncSharedChartPanes(effectiveViewport);
+                this.clearSharedHoverCellCache();
+                this.hideCommentTooltip();
+                this.renderDrawings(effectiveViewport);
+                this.renderCharts(zoomChanged);
+                this.renderAuditing();
+                this.renderSelection();
+               if (this.scrollX !== prevX || this.scrollY !== prevY) {
+                 this.notifyScrollListeners();
+               }
             },
             onSelectionChange: () => {
               if (this.sharedGridSelectionSyncInProgress) return;
@@ -1497,6 +1522,54 @@ export class SpreadsheetApp {
 
       this.initSharedChartPanes();
     }
+
+    const drawingImageMap = new Map<string, ImageEntry>();
+    this.drawingImages = {
+      get: (id) => drawingImageMap.get(id),
+      set: (entry) => {
+        drawingImageMap.set(entry.id, entry);
+      },
+    };
+
+    const legacyDrawingGeom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => ({
+        x: this.visualIndexForCol(cell.col) * this.cellWidth,
+        y: this.visualIndexForRow(cell.row) * this.cellHeight,
+      }),
+      cellSizePx: () => ({ width: this.cellWidth, height: this.cellHeight }),
+    };
+
+    const sharedDrawingGeom: DrawingGridGeometry = {
+      cellOriginPx: (cell) => {
+        const grid = this.sharedGrid;
+        if (!grid) return { x: 0, y: 0 };
+        const headerRows = this.sharedHeaderRows();
+        const headerCols = this.sharedHeaderCols();
+        const headerWidth = headerCols > 0 ? grid.renderer.scroll.cols.totalSize(headerCols) : 0;
+        const headerHeight = headerRows > 0 ? grid.renderer.scroll.rows.totalSize(headerRows) : 0;
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return {
+          x: grid.renderer.scroll.cols.positionOf(gridCol) - headerWidth,
+          y: grid.renderer.scroll.rows.positionOf(gridRow) - headerHeight,
+        };
+      },
+      cellSizePx: (cell) => {
+        const grid = this.sharedGrid;
+        if (!grid) return { width: this.cellWidth, height: this.cellHeight };
+        const headerRows = this.sharedHeaderRows();
+        const headerCols = this.sharedHeaderCols();
+        const gridRow = cell.row + headerRows;
+        const gridCol = cell.col + headerCols;
+        return { width: grid.renderer.getColWidth(gridCol), height: grid.renderer.getRowHeight(gridRow) };
+      },
+    };
+
+    this.drawingOverlay = new DrawingOverlay(
+      this.drawingCanvas,
+      this.drawingImages,
+      this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom,
+    );
 
     if (this.gridMode === "shared") {
       // Shared-grid mode uses the CanvasGridRenderer selection layer, but we still
@@ -2231,6 +2304,7 @@ export class SpreadsheetApp {
       const renderMode = this.pendingRenderMode;
       this.pendingRenderMode = "full";
       this.renderGrid();
+      this.renderDrawings();
       this.renderCharts(renderMode === "full");
       this.renderReferencePreview();
       this.renderAuditing();
@@ -3221,6 +3295,7 @@ export class SpreadsheetApp {
       if (didClamp) this.notifyScrollListeners();
     }
     this.renderGrid();
+    this.renderDrawings();
     this.renderCharts(true);
     this.renderReferencePreview();
     if (this.sharedGrid) {
@@ -5380,6 +5455,7 @@ export class SpreadsheetApp {
       this.scrollX = scroll.x;
       this.scrollY = scroll.y;
 
+      this.renderDrawings(viewport);
       this.renderCharts(true);
       this.renderAuditing();
       this.renderSelection();
@@ -5424,6 +5500,7 @@ export class SpreadsheetApp {
     this.syncScrollbars();
     if (didClamp) this.notifyScrollListeners();
 
+    this.renderDrawings();
     this.renderGrid();
     this.renderCharts(true);
     this.renderReferencePreview();
@@ -6109,6 +6186,68 @@ export class SpreadsheetApp {
       el.remove();
       this.chartElements.delete(id);
     }
+  }
+
+  private syncDrawingOverlayViewport(sharedViewport?: GridViewportState): DrawingViewport {
+    let offsetX = 0;
+    let offsetY = 0;
+    let width = 0;
+    let height = 0;
+
+    if (this.sharedGrid) {
+      const viewport = sharedViewport ?? this.sharedGrid.renderer.scroll.getViewportState();
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      const headerWidth = headerCols > 0 ? this.sharedGrid.renderer.scroll.cols.totalSize(headerCols) : 0;
+      const headerHeight = headerRows > 0 ? this.sharedGrid.renderer.scroll.rows.totalSize(headerRows) : 0;
+      offsetX = Math.min(headerWidth, viewport.width);
+      offsetY = Math.min(headerHeight, viewport.height);
+      width = Math.max(0, viewport.width - offsetX);
+      height = Math.max(0, viewport.height - offsetY);
+    } else {
+      offsetX = this.rowHeaderWidth;
+      offsetY = this.colHeaderHeight;
+      width = Math.max(0, this.width - offsetX);
+      height = Math.max(0, this.height - offsetY);
+    }
+
+    this.drawingCanvas.style.left = `${offsetX}px`;
+    this.drawingCanvas.style.top = `${offsetY}px`;
+
+    const memo = this.drawingViewportMemo;
+    if (!memo || memo.width !== width || memo.height !== height || memo.dpr !== this.dpr) {
+      this.drawingOverlay.resize({ scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr });
+      this.drawingViewportMemo = { width, height, dpr: this.dpr, offsetX, offsetY };
+    } else if (memo.offsetX !== offsetX || memo.offsetY !== offsetY) {
+      memo.offsetX = offsetX;
+      memo.offsetY = offsetY;
+    }
+
+    return { scrollX: this.scrollX, scrollY: this.scrollY, width, height, dpr: this.dpr };
+  }
+
+  private listDrawingObjectsForSheet(): DrawingObject[] {
+    // Demo objects until we have a real drawings store.
+    return [
+      {
+        id: 1,
+        kind: { type: "shape", label: "demo" },
+        anchor: {
+          type: "oneCell",
+          from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(8), yEmu: pxToEmu(8) } },
+          size: { cx: pxToEmu(240), cy: pxToEmu(120) },
+        },
+        zOrder: 0,
+      },
+    ];
+  }
+
+  private renderDrawings(sharedViewport?: GridViewportState): void {
+    const viewport = this.syncDrawingOverlayViewport(sharedViewport);
+    const objects = this.listDrawingObjectsForSheet();
+    void this.drawingOverlay.render(objects, viewport).catch(() => {
+      // Best-effort: avoid unhandled rejections from demo overlay rendering.
+    });
   }
 
   private renderAuditing(): void {
