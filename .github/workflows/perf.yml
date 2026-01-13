@@ -28,6 +28,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    env:
+      # Desktop idle RSS should eventually be ~100MB, but start conservative while
+      # the measurement stabilizes in CI. Override via repo variable when tightening.
+      FORMULA_DESKTOP_IDLE_RSS_TARGET_MB: ${{ vars.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB || '250' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -141,6 +145,9 @@ jobs:
         env:
           # Enable the real desktop startup benchmark (Tauri shell) only when we've built it.
           FORMULA_RUN_DESKTOP_STARTUP_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
+          # Enable the optional desktop idle-memory benchmark only when the desktop
+          # binary + assets were built in this job.
+          FORMULA_RUN_DESKTOP_MEMORY_BENCH: ${{ steps.desktop_bench.outputs.run == 'true' && '1' || '0' }}
           # Keep PR runtime reasonable; use more iterations on main for stable signals.
           FORMULA_DESKTOP_STARTUP_RUNS: ${{ steps.desktop_bench.outputs.runs }}
           FORMULA_DESKTOP_STARTUP_TIMEOUT_MS: 20000
@@ -169,6 +176,38 @@ jobs:
           alert-threshold: '120%'
           comment-on-alert: true
           fail-on-alert: true
+
+      - name: Enforce desktop idle RSS target (MB)
+        if: always() && steps.desktop_bench.outputs.run == 'true'
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const targetRaw = process.env.FORMULA_DESKTOP_IDLE_RSS_TARGET_MB;
+          const target = Number(targetRaw);
+          if (!Number.isFinite(target) || target <= 0) {
+            console.log(
+              `[perf] FORMULA_DESKTOP_IDLE_RSS_TARGET_MB is not set to a positive number (${JSON.stringify(targetRaw)}); skipping idle RSS gate.`,
+            );
+            process.exit(0);
+          }
+          const results = JSON.parse(fs.readFileSync('benchmark-results.json', 'utf8'));
+          const metricName = 'desktop.memory.idle_rss_mb.p95';
+          const entry = Array.isArray(results) ? results.find((r) => r && r.name === metricName) : null;
+          if (!entry) {
+            console.error(`[perf] Missing ${metricName} in benchmark-results.json (did the desktop memory benchmark run?).`);
+            process.exit(1);
+          }
+          const value = Number(entry.value);
+          if (!Number.isFinite(value)) {
+            console.error(`[perf] Invalid ${metricName} value: ${JSON.stringify(entry.value)}`);
+            process.exit(1);
+          }
+          console.log(`[perf] ${metricName}=${value}MB (target=${target}MB)`);
+          if (value > target) {
+            console.error(`[perf] Desktop idle RSS regression: ${value}MB exceeds target ${target}MB`);
+            process.exit(1);
+          }
+          NODE
 
       - name: Fail on absolute target regression
         if: steps.perf.outcome == 'failure'
