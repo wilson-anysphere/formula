@@ -123,7 +123,14 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
 }
 
 describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
+  const originalGetContext = HTMLCanvasElement.prototype.getContext;
+
   afterEach(() => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      writable: true,
+      value: originalGetContext,
+    });
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -140,21 +147,22 @@ describe("SpreadsheetApp shared-grid hide/unhide perf", () => {
 
     // The perf coverage here focuses on the axis override batch plumbing, not actual painting.
     // Keep requestAnimationFrame cheap and deterministic by making it a no-op.
-    Object.defineProperty(globalThis, "requestAnimationFrame", {
-      configurable: true,
-      value: () => 0,
-    });
-    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
+      writable: true,
       value: () => createMockCanvasContext(),
     });
 
-    (globalThis as any).ResizeObserver = class {
-      observe() {}
-      disconnect() {}
-    };
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
   });
 
   it("applies and clears 10k row/col overrides without O(maxRows/maxCols) work", () => {
