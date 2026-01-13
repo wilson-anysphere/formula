@@ -50,7 +50,7 @@ jobs:
           # Pin pnpm patch version for determinism (keep in sync with package.json).
           corepack prepare pnpm@9.0.0 --activate
 
-      - name: Setup Rust (stable + clippy)
+      - name: Setup Rust (pinned + clippy)
         uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: clippy

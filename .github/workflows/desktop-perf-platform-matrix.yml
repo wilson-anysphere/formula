@@ -40,7 +40,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Setup Rust toolchain (stable + wasm32)
+      - name: Setup Rust toolchain (pinned + wasm32)
         uses: dtolnay/rust-toolchain@1.92.0
         with:
           targets: wasm32-unknown-unknown
