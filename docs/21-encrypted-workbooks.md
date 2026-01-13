@@ -378,14 +378,15 @@ Encrypted workbook handling should distinguish at least these cases:
 These distinctions matter for UX and telemetry: “needs password” is a normal user workflow, while
 “unsupported scheme” is an engineering coverage gap.
 
-Until password-based decryption is implemented, Formula will generally surface a single
-“encrypted workbook not supported” error instead of distinguishing the cases above.
+Until password-based decryption is implemented end-to-end in `formula-io`, the high-level open APIs
+will generally surface a single “encrypted workbook not supported” error instead of distinguishing
+the cases above.
 
 ### Mapping to existing Rust error types
 
-Lower-level decryption code (used by XLSX) already has more granular error variants. When wiring
-password support through `formula-io`, we should preserve these distinctions rather than collapsing
-them back into a generic “encrypted workbook” error:
+Lower-level crypto/decryption code already has more granular error variants. When wiring password
+support through `formula-io`, we should preserve these distinctions rather than collapsing them
+back into a generic “encrypted workbook” error:
 
 - `formula_xlsx::offcrypto::OffCryptoError::WrongPassword` → **Invalid password**
 - `formula_xlsx::offcrypto::OffCryptoError::IntegrityMismatch` → **Invalid password** *or* **corrupt file**
@@ -393,6 +394,17 @@ them back into a generic “encrypted workbook” error:
     corrupted”.
 - `formula_xlsx::offcrypto::OffCryptoError::UnsupportedEncryptionVersion { .. }` and
   `Unsupported*` variants → **Unsupported encryption scheme**
+
+- `formula_offcrypto::OffcryptoError::InvalidPassword` → **Invalid password**
+- `formula_offcrypto::OffcryptoError::UnsupportedVersion { .. }` and `UnsupportedAlgorithm(..)` → **Unsupported encryption scheme**
+- `formula_offcrypto::OffcryptoError::InvalidEncryptionInfo { .. }` / `Truncated { .. }` → **Corrupt encrypted wrapper**
+
+- `formula_io::offcrypto::EncryptedPackageError::*` → **Corrupt file / invalid encrypted wrapper**
+  - e.g. `StreamTooShort`, `CiphertextLenNotBlockAligned`, `DecryptedTooShort`
+
+- `formula_xls::DecryptError::WrongPassword` → **Invalid password**
+- `formula_xls::DecryptError::UnsupportedEncryption` → **Unsupported encryption scheme**
+- `formula_xls::DecryptError::InvalidFormat(..)` → **Corrupt encrypted wrapper**
 
 ---
 
