@@ -139,6 +139,7 @@ import {
   listSheetsFromCollabSession,
   type CollabSheetsKeyRef,
 } from "./sheets/collabWorkbookSheetStore";
+import { tryInsertCollabSheet } from "./sheets/collabSheetMutations";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
 import {
   applyAllBorders,
@@ -2902,12 +2903,6 @@ async function handleAddSheet(): Promise<void> {
 
     const collabSession = app.getCollabSession?.() ?? null;
     if (collabSession) {
-      const permission = getWorkbookMutationPermission(collabSession);
-      if (!permission.allowed) {
-        showToast(permission.reason ?? READ_ONLY_SHEET_MUTATION_MESSAGE, "error");
-        return;
-      }
-
       // In collab mode, the Yjs `session.sheets` array is the authoritative sheet list.
       // Create the new sheet by updating that metadata so it propagates to other clients.
       const existing = listSheetsFromCollabSession(collabSession);
@@ -2927,18 +2922,17 @@ async function handleAddSheet(): Promise<void> {
         id = `${id}_${Math.random().toString(16).slice(2)}`;
       }
 
-      collabSession.transactLocal(() => {
-        const sheet = new Y.Map<unknown>();
-        sheet.set("id", id);
-        sheet.set("name", desiredName);
-        sheet.set("visibility", "visible");
-
-        // Insert after the active sheet when possible; otherwise append.
-        const activeIndex = findCollabSheetIndexById(collabSession, activeId);
-        const insertIndex = activeIndex >= 0 ? activeIndex + 1 : collabSession.sheets.length;
-
-        collabSession.sheets.insert(insertIndex, [sheet as any]);
+      const inserted = tryInsertCollabSheet({
+        session: collabSession,
+        sheetId: id,
+        name: desiredName,
+        visibility: "visible",
+        insertAfterSheetId: activeId,
       });
+      if (!inserted.inserted) {
+        showToast(inserted.reason, "error");
+        return;
+      }
 
       // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
       doc.getCell(id, { row: 0, col: 0 });

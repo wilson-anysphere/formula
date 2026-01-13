@@ -7,6 +7,7 @@ import {
   findCollabSheetIndexById,
   listSheetsFromCollabSession,
 } from "../collabWorkbookSheetStore";
+import { tryInsertCollabSheet } from "../collabSheetMutations";
 
 function makeSession(
   initial: Array<{ id: string; name?: string; visibility?: string; tabColor?: unknown }>,
@@ -231,5 +232,50 @@ describe("CollabWorkbookSheetStore", () => {
     expect(store.listAll().map((s) => s.id)).toEqual(beforeOrder);
     expect(snapshot()).toEqual(beforeSheets);
     expect(keyRef.value).toBe(beforeKey);
+  });
+
+  it.each(["viewer", "commenter"] as const)("does not insert new sheets when role is %s", (role) => {
+    const session = makeSession(
+      [
+        { id: "a", name: "SheetA", visibility: "visible" },
+        { id: "b", name: "SheetB", visibility: "visible" },
+      ],
+      role,
+    );
+
+    const before = session.sheets.toArray().map((entry) => (entry as any).get("id"));
+
+    const result = tryInsertCollabSheet({
+      session: session as any,
+      sheetId: "new",
+      name: "New Sheet",
+      visibility: "visible",
+      insertAfterSheetId: "a",
+    });
+
+    expect(result.inserted).toBe(false);
+    expect(session.sheets.toArray().map((entry) => (entry as any).get("id"))).toEqual(before);
+  });
+
+  it("inserts new sheets when role is editor", () => {
+    const session = makeSession([
+      { id: "a", name: "SheetA", visibility: "visible" },
+      { id: "b", name: "SheetB", visibility: "visible" },
+    ]);
+
+    const result = tryInsertCollabSheet({
+      session: session as any,
+      sheetId: "new",
+      name: "New Sheet",
+      visibility: "visible",
+      insertAfterSheetId: "a",
+    });
+
+    expect(result).toEqual({ inserted: true, index: 1 });
+    expect(session.sheets.length).toBe(3);
+    const entry = session.sheets.get(1) as any;
+    expect(entry.get("id")).toBe("new");
+    expect(entry.get("name")).toBe("New Sheet");
+    expect(entry.get("visibility")).toBe("visible");
   });
 });
