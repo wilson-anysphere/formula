@@ -291,6 +291,17 @@
   --formula-grid-remote-presence-10: var(--accent);
   --formula-grid-remote-presence-11: var(--accent);
   --formula-grid-remote-presence-12: var(--accent);
+
+  /*
+    Charts: use system colors so series remain visible/differentiable in high contrast.
+
+    Note: If additional `--chart-series-*` tokens are introduced, they should also be
+    mapped to system colors here and in the forced-colors/prefers-contrast override below.
+  */
+  --chart-series-1: Highlight;
+  --chart-series-2: LinkText;
+  --chart-series-3: VisitedText;
+  --chart-series-4: CanvasText;
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
@@ -369,6 +380,12 @@
     --formula-grid-remote-presence-10: var(--accent);
     --formula-grid-remote-presence-11: var(--accent);
     --formula-grid-remote-presence-12: var(--accent);
+
+    /* Charts: override palette-based series colors for high contrast. */
+    --chart-series-1: Highlight;
+    --chart-series-2: LinkText;
+    --chart-series-3: VisitedText;
+    --chart-series-4: CanvasText;
   }
 }
 
