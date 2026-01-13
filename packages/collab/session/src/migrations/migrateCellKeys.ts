@@ -382,6 +382,14 @@ export function migrateLegacyCellKeys(doc: Y.Doc, opts: MigrateLegacyCellKeysOpt
     return runMigrationDry({ cells, defaultSheetId, conflict });
   }
 
+  // Avoid instantiating workbook roots when the document doesn't contain the
+  // expected schema yet (e.g. a brand new doc). If there's no `cells` root, there
+  // are no cell keys to migrate, and creating the root would be an unexpected
+  // mutation.
+  if (!doc.share.has("cells")) {
+    return { migrated: 0, removed: 0, collisions: 0 };
+  }
+
   let result: MigrateLegacyCellKeysResult = { migrated: 0, removed: 0, collisions: 0 };
   doc.transact(
     () => {

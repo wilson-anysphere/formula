@@ -139,6 +139,19 @@ test("migrateLegacyCellKeys dryRun computes counts without mutating the doc", ()
   assert.equal(cells.has("Sheet1:1:2"), false);
 });
 
+test("migrateLegacyCellKeys does not create the cells root when absent", () => {
+  const doc = new Y.Doc();
+  assert.equal(doc.share.has("cells"), false);
+
+  const before = Y.encodeStateAsUpdate(doc);
+  const result = migrateLegacyCellKeys(doc);
+  const after = Y.encodeStateAsUpdate(doc);
+
+  assert.deepEqual(result, { migrated: 0, removed: 0, collisions: 0 });
+  assert.equal(Buffer.from(before).equals(Buffer.from(after)), true);
+  assert.equal(doc.share.has("cells"), false);
+});
+
 test("migrateLegacyCellKeys migrates null values (does not drop data)", () => {
   const doc = new Y.Doc();
   const cells = doc.getMap("cells");
