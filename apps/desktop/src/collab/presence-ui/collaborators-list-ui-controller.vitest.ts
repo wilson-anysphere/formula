@@ -31,9 +31,9 @@ describe("CollaboratorsListUiController", () => {
 
     const ui = new CollaboratorsListUiController({ container, maxVisible: 2 });
     ui.setCollaborators([
-      { key: "u1:1", name: "Ada", color: "#ff0000" },
-      { key: "u2:2", name: "Grace", color: "#00ff00" },
-      { key: "u3:3", name: "Linus", color: "#0000ff" },
+      { key: "u1:1", name: "Ada", color: "var(--accent)" },
+      { key: "u2:2", name: "Grace", color: "var(--success)" },
+      { key: "u3:3", name: "Linus", color: "var(--warning)" },
     ]);
 
     expect(container.querySelector('[data-testid="presence-collaborators"]')?.getAttribute("aria-label")).toBe(

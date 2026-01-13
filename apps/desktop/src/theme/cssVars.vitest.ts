@@ -29,8 +29,8 @@ describe("theme/cssVars.resolveCssVar", () => {
 
   it("reads literal values from computed style", () => {
     const root = {};
-    withStubbedGetComputedStyle((name) => (name === "--color" ? "#123456" : ""), () => {
-      expect(resolveCssVar("--color", { root: root as any, fallback: "black" })).toBe("#123456");
+    withStubbedGetComputedStyle((name) => (name === "--color" ? "rebeccapurple" : ""), () => {
+      expect(resolveCssVar("--color", { root: root as any, fallback: "black" })).toBe("rebeccapurple");
     });
   });
 
@@ -38,20 +38,24 @@ describe("theme/cssVars.resolveCssVar", () => {
     const root = {};
     const vars: Record<string, string> = {
       "--a": "var(--b)",
-      "--b": "rgb(1, 2, 3)",
+      "--b": "rgb(var(--r), var(--g), var(--b))",
     };
     withStubbedGetComputedStyle((name) => vars[name] ?? "", () => {
-      expect(resolveCssVar("--a", { root: root as any, fallback: "black" })).toBe("rgb(1, 2, 3)");
+      expect(resolveCssVar("--a", { root: root as any, fallback: "black" })).toBe(
+        "rgb(var(--r), var(--g), var(--b))",
+      );
     });
   });
 
   it("resolves var(--token, fallback) when the referenced token is missing", () => {
     const root = {};
     const vars: Record<string, string> = {
-      "--a": "var(--missing, rgb(4, 5, 6))",
+      "--a": "var(--missing, rgb(var(--r), var(--g), var(--b)))",
     };
     withStubbedGetComputedStyle((name) => vars[name] ?? "", () => {
-      expect(resolveCssVar("--a", { root: root as any, fallback: "black" })).toBe("rgb(4, 5, 6)");
+      expect(resolveCssVar("--a", { root: root as any, fallback: "black" })).toBe(
+        "rgb(var(--r), var(--g), var(--b))",
+      );
     });
   });
 

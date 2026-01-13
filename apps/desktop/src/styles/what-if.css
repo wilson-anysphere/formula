@@ -179,6 +179,10 @@
   background: var(--bg-tertiary);
 }
 
+.what-if__button:active {
+  background: var(--bg-active);
+}
+
 .what-if__button:disabled {
   opacity: 0.5;
   cursor: default;
