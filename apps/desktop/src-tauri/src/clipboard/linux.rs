@@ -34,6 +34,95 @@ fn latin1_encode_if_possible(text: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+fn trim_trailing_nuls(bytes: &[u8]) -> &[u8] {
+    let mut end = bytes.len();
+    while end > 0 && bytes[end - 1] == 0 {
+        end -= 1;
+    }
+    &bytes[..end]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Utf8DecodeMode {
+    /// Reject invalid UTF-8 (return `None`) so callers can fall back to other targets.
+    Strict,
+    /// Decode invalid UTF-8 using replacement characters (U+FFFD).
+    Lossy,
+}
+
+fn decode_latin1(bytes: &[u8]) -> Option<String> {
+    let bytes = trim_trailing_nuls(bytes);
+    if bytes.is_empty() {
+        return None;
+    }
+
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        out.push(char::from(b));
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+fn decode_utf8(bytes: &[u8], mode: Utf8DecodeMode) -> Option<String> {
+    let bytes = trim_trailing_nuls(bytes);
+    if bytes.is_empty() {
+        return None;
+    }
+    match mode {
+        Utf8DecodeMode::Strict => {
+            let s = std::str::from_utf8(bytes).ok()?;
+            (!s.is_empty()).then_some(s.to_string())
+        }
+        Utf8DecodeMode::Lossy => {
+            let s = String::from_utf8_lossy(bytes);
+            (!s.is_empty()).then_some(s.to_string())
+        }
+    }
+}
+
+/// Decode clipboard text bytes based on the advertised target name.
+///
+/// - `STRING` is specified as ISO-8859-1 (Latin-1) on X11, so we decode it as a direct
+///   byte->Unicode mapping (U+00XX).
+/// - `UTF8_STRING` and MIME-ish `text/*` targets are expected to contain UTF-8; we attempt strict
+///   decoding first so invalid bytes don't silently turn into U+FFFD.
+/// - `TEXT` is a legacy X11 target with unspecified locale-dependent encoding; we try UTF-8 first
+///   (common in modern apps) and fall back to Latin-1 as a best-effort byte-preserving decode.
+fn decode_text_for_target_impl(
+    target: &str,
+    bytes: &[u8],
+    utf8_mode: Utf8DecodeMode,
+) -> Option<String> {
+    let normalized = normalize_target_name(target);
+    if normalized == "string" {
+        return decode_latin1(bytes);
+    }
+    if normalized == "text" {
+        return decode_utf8(bytes, Utf8DecodeMode::Strict).or_else(|| decode_latin1(bytes));
+    }
+
+    if normalized == "utf8_string" || normalized.starts_with("text/") {
+        return decode_utf8(bytes, utf8_mode);
+    }
+
+    // Unknown text targets: treat as UTF-8 by default, matching historical behavior, but keep
+    // strictness configurable so callers can choose whether to accept replacement characters.
+    decode_utf8(bytes, utf8_mode)
+}
+
+fn decode_text_for_target(target: &str, bytes: &[u8]) -> Option<String> {
+    decode_text_for_target_impl(target, bytes, Utf8DecodeMode::Strict)
+}
+
+fn decode_text_for_target_lossy_utf8(target: &str, bytes: &[u8]) -> Option<String> {
+    decode_text_for_target_impl(target, bytes, Utf8DecodeMode::Lossy)
+}
+
+fn target_prefers_utf8(target: &str) -> bool {
+    let normalized = normalize_target_name(target);
+    normalized == "utf8_string" || normalized.starts_with("text/")
+}
+
 /// Choose the "best" clipboard target from a list of advertised targets.
 ///
 /// Linux clipboard targets are free-form atoms and different apps may advertise the same content
@@ -65,19 +154,37 @@ fn choose_best_target<'a, T: AsRef<str>>(
     None
 }
 
-#[cfg(feature = "desktop")]
-fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
-    if bytes.is_empty() {
-        return None;
+/// Returns all matching targets in preference order.
+///
+/// This is similar to [`choose_best_target`], but instead of returning only the single best match,
+/// it returns a list of candidates so callers can try decoding multiple targets until one works
+/// (e.g. when an app advertises `UTF8_STRING` but the payload contains invalid UTF-8).
+fn choose_targets_in_order<'a, T: AsRef<str>>(
+    targets: &'a [T],
+    preferred_prefixes: &[&str],
+) -> Vec<&'a str> {
+    let mut out = Vec::new();
+
+    for preferred in preferred_prefixes {
+        // First, collect exact matches (ignoring case/whitespace).
+        for target in targets {
+            let target = target.as_ref();
+            if normalize_target_name(target) == *preferred && !out.iter().any(|&t| t == target) {
+                out.push(target);
+            }
+        }
+
+        // Then, collect prefix matches (ignoring case/whitespace).
+        for target in targets {
+            let target = target.as_ref();
+            if normalize_target_name(target).starts_with(preferred) && !out.iter().any(|&t| t == target)
+            {
+                out.push(target);
+            }
+        }
     }
-    // Some clipboard sources include NUL termination.
-    let s = String::from_utf8_lossy(bytes);
-    let s = s.trim_end_matches('\0');
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
+
+    out
 }
 
 #[cfg(feature = "desktop")]
@@ -86,7 +193,8 @@ mod gtk_backend {
 
     use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
     use super::{
-        bytes_to_utf8, choose_best_target, decoded_pixbuf_len, ClipboardContent, ClipboardError,
+        choose_best_target, decode_text_for_target, decode_text_for_target_lossy_utf8,
+        decoded_pixbuf_len, target_prefers_utf8, ClipboardContent, ClipboardError,
         ClipboardWritePayload, MAX_DECODED_IMAGE_BYTES,
         latin1_encode_if_possible,
     };
@@ -160,6 +268,7 @@ mod gtk_backend {
         targets: &[&str],
         max_bytes: usize,
     ) -> Option<String> {
+        let mut lossy_utf8_fallback: Option<(&str, Vec<u8>)> = None;
         for target in targets {
             let atom = gdk::Atom::intern(target);
             let Some(data) = clipboard.wait_for_contents(&atom) else {
@@ -178,11 +287,20 @@ mod gtk_backend {
                 continue;
             }
             let bytes = data.data();
-            if let Some(s) = bytes_to_utf8(&bytes) {
+            if let Some(s) = decode_text_for_target(target, &bytes) {
                 return Some(s);
             }
+            // As a last resort (only when no other target decodes successfully), allow lossy UTF-8
+            // decoding for targets that are explicitly expected to be UTF-8.
+            if lossy_utf8_fallback.is_none()
+                && target_prefers_utf8(target)
+                && !super::trim_trailing_nuls(&bytes).is_empty()
+            {
+                lossy_utf8_fallback = Some((*target, bytes));
+            }
         }
-        None
+        lossy_utf8_fallback
+            .and_then(|(target, bytes)| decode_text_for_target_lossy_utf8(target, &bytes))
     }
 
     fn wait_for_bytes_base64(
@@ -225,18 +343,24 @@ mod gtk_backend {
                 // `text/plain;charset=utf-8`). We prefer using `wait_for_contents` so we can check
                 // the `SelectionData` length before copying large buffers into Rust.
                 let text = match targets.as_deref() {
-                    Some(targets) => choose_best_target(
-                        targets,
-                        &[
-                            "text/plain;charset=utf-8",
-                            "text/plain; charset=utf-8",
-                            "text/plain",
-                            "utf8_string",
-                            "string",
-                            "text",
-                        ],
-                    )
-                    .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
+                    Some(targets) => {
+                        let candidates = super::choose_targets_in_order(
+                            targets,
+                            &[
+                                "text/plain;charset=utf-8",
+                                "text/plain; charset=utf-8",
+                                "text/plain",
+                                "utf8_string",
+                                "string",
+                                "text",
+                            ],
+                        );
+                        if candidates.is_empty() {
+                            None
+                        } else {
+                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                        }
+                    }
                     None => wait_for_utf8_targets(
                         clipboard,
                         &[
@@ -252,8 +376,14 @@ mod gtk_backend {
                 }
                 .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
                 let html = match targets.as_deref() {
-                    Some(targets) => choose_best_target(targets, &["text/html"])
-                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
+                    Some(targets) => {
+                        let candidates = super::choose_targets_in_order(targets, &["text/html"]);
+                        if candidates.is_empty() {
+                            None
+                        } else {
+                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                        }
+                    }
                     // If target enumeration isn't available, fall back to the canonical target.
                     None => wait_for_utf8_targets(
                         clipboard,
@@ -266,11 +396,17 @@ mod gtk_backend {
                     ),
                 };
                 let rtf = match targets.as_deref() {
-                    Some(targets) => choose_best_target(
-                        targets,
-                        &["text/rtf", "application/rtf", "application/x-rtf"],
-                    )
-                    .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
+                    Some(targets) => {
+                        let candidates = super::choose_targets_in_order(
+                            targets,
+                            &["text/rtf", "application/rtf", "application/x-rtf"],
+                        );
+                        if candidates.is_empty() {
+                            None
+                        } else {
+                            wait_for_utf8_targets(clipboard, &candidates, MAX_TEXT_BYTES)
+                        }
+                    }
                     None => wait_for_utf8_targets(
                         clipboard,
                         &[
@@ -530,7 +666,8 @@ pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        choose_best_target, decoded_pixbuf_len, normalize_target_name, MAX_DECODED_IMAGE_BYTES,
+        choose_best_target, decode_text_for_target, decode_text_for_target_lossy_utf8,
+        decoded_pixbuf_len, normalize_target_name, target_prefers_utf8, MAX_DECODED_IMAGE_BYTES,
     };
 
     #[test]
@@ -681,5 +818,53 @@ mod tests {
         } else {
             assert!(len.is_some(), "64-bit usize should be able to represent the product");
         }
+    }
+
+    #[test]
+    fn decode_text_for_target_decodes_string_as_latin1() {
+        // X11 `STRING` uses ISO-8859-1; a standalone 0xE9 byte should decode to "é".
+        let bytes = [0xE9u8];
+        let decoded = decode_text_for_target("STRING", &bytes);
+        assert_eq!(decoded.as_deref(), Some("é"));
+    }
+
+    #[test]
+    fn decode_text_for_target_allows_fallback_when_utf8_string_is_invalid() {
+        // Some legacy apps advertise `UTF8_STRING` but provide invalid UTF-8. We must not turn
+        // those bytes into U+FFFD if a better (e.g. `STRING`) target is available.
+        let invalid_utf8 = [0xE9u8]; // Invalid UTF-8 when interpreted as a standalone byte.
+        let latin1 = [0xE9u8];
+
+        let decoded = [("UTF8_STRING", &invalid_utf8[..]), ("STRING", &latin1[..])]
+            .into_iter()
+            .find_map(|(target, bytes)| decode_text_for_target(target, bytes));
+
+        assert_eq!(decoded.as_deref(), Some("é"));
+    }
+
+    #[test]
+    fn decode_text_for_target_lossy_utf8_can_replace_invalid_sequences() {
+        let invalid_utf8 = [0xE9u8];
+        let decoded = decode_text_for_target_lossy_utf8("UTF8_STRING", &invalid_utf8);
+        assert_eq!(decoded.as_deref(), Some("\u{FFFD}"));
+    }
+
+    #[test]
+    fn target_prefers_utf8_identifies_utf8_like_targets() {
+        assert!(target_prefers_utf8("UTF8_STRING"));
+        assert!(target_prefers_utf8("text/plain"));
+        assert!(!target_prefers_utf8("STRING"));
+        assert!(!target_prefers_utf8("TEXT"));
+    }
+
+    #[test]
+    fn choose_targets_in_order_returns_multiple_candidates_in_preference_order() {
+        let targets = vec!["STRING", "UTF8_STRING", "text/plain;charset=utf-8"];
+        let candidates =
+            super::choose_targets_in_order(&targets, &["text/plain", "utf8_string", "string", "text"]);
+        assert_eq!(
+            candidates,
+            vec!["text/plain;charset=utf-8", "UTF8_STRING", "STRING"]
+        );
     }
 }
