@@ -73,6 +73,10 @@ function formatBytes(bytes) {
   return `${gb.toFixed(2)} GiB`;
 }
 
+function runtimeInfo() {
+  return { node: process.version, platform: process.platform, arch: process.arch };
+}
+
 class StyleTableStub {
   constructor() {
     /** @type {Map<string, number>} */
@@ -234,6 +238,12 @@ perfTest(
     const cells = ydoc.getMap("cells");
     const origin = { type: "perf-origin" };
 
+    if (RUN_PERF && typeof global.gc !== "function") {
+      console.warn(
+        "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
+      );
+    }
+
     if (typeof global.gc === "function") global.gc();
     const startMem = process.memoryUsage();
     let peakHeapUsed = startMem.heapUsed;
@@ -294,6 +304,7 @@ perfTest(
         JSON.stringify({
           suite: "session-binder-perf",
           scenario: "yjs->dc",
+          runtime: runtimeInfo(),
           updates: totalUpdates,
           batchSize,
           cols,
@@ -343,6 +354,12 @@ perfTest(
     const binder = await bindCollabSessionToDocumentController({ session, documentController: dc, userId: "perf-user" });
 
     const cells = ydoc.getMap("cells");
+
+    if (RUN_PERF && typeof global.gc !== "function") {
+      console.warn(
+        "[session-binder-perf] global.gc() unavailable; run with NODE_OPTIONS=--expose-gc for more stable memory readings",
+      );
+    }
 
     if (typeof global.gc === "function") global.gc();
     const startMem = process.memoryUsage();
@@ -406,6 +423,7 @@ perfTest(
         JSON.stringify({
           suite: "session-binder-perf",
           scenario: "dc->yjs",
+          runtime: runtimeInfo(),
           updates: totalUpdates,
           batchSize,
           cols,
