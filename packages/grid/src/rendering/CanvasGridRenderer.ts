@@ -5,6 +5,7 @@ import { LruCache } from "../utils/LruCache.ts";
 import type { GridPresence } from "../presence/types.ts";
 import type { GridTheme } from "../theme/GridTheme.ts";
 import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme.ts";
+import { DEFAULT_GRID_FONT_FAMILY } from "./defaultFontFamilies.ts";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
 import { VirtualScrollManager } from "../virtualization/VirtualScrollManager.ts";
 import {
@@ -428,7 +429,7 @@ function fontSpecForRichTextStyle(
 const EXPLICIT_NEWLINE_RE = /[\r\n]/;
 const MAX_TEXT_OVERFLOW_COLUMNS = 128;
 const EMPTY_MERGED_INDEX = new MergedCellIndex([]);
-const DEFAULT_CELL_FONT_FAMILY = "system-ui";
+const DEFAULT_CELL_FONT_FAMILY = DEFAULT_GRID_FONT_FAMILY;
 
 interface ViewportListenerEntry {
   listener: GridViewportChangeListener;
