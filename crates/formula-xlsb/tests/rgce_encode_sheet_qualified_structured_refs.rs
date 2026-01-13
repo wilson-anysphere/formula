@@ -92,6 +92,21 @@ fn ast_encoder_supports_sheet_qualified_tableless_structured_ref_by_inferring_ta
 }
 
 #[test]
+fn ast_encoder_sheet_qualified_tableless_structured_ref_falls_back_to_single_table_heuristic() {
+    // Context has table + column metadata but no ranges, so `table_id_for_cell` cannot infer.
+    // We should still encode because the workbook contains exactly one table.
+    let mut ctx = WorkbookContext::default();
+    ctx.add_table(1, "Table1");
+    ctx.add_table_column(1, 1, "Item");
+    ctx.add_table_column(1, 2, "Qty");
+
+    let base = CellCoord::new(0, 0);
+    let encoded = encode_rgce_with_context_ast("=Sheet1![@Qty]", &ctx, base).expect("encode");
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "[@Qty]");
+}
+
+#[test]
 fn ast_encoder_rejects_sheet_qualified_structured_ref_when_sheet_does_not_match_table() {
     let ctx = ctx_table1_on_sheet1();
 

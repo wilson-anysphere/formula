@@ -2432,14 +2432,18 @@ mod encode_ast {
                 if let Some(sheet_name) = sheet_qualifier {
                     // `Sheet1![@Col]`-style references: use the explicit sheet qualifier along with
                     // the origin cell to infer the containing table.
-                    ctx.table_id_for_cell(sheet_name, base.row, base.col)
-                        .ok_or_else(|| {
-                            EncodeError::Parse(format!(
-                                "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
-                                base.row.saturating_add(1),
-                                base.col.saturating_add(1)
-                            ))
-                        })?
+                    if let Some(table_id) = ctx.single_table_id() {
+                        table_id
+                    } else {
+                        ctx.table_id_for_cell(sheet_name, base.row, base.col)
+                            .ok_or_else(|| {
+                                EncodeError::Parse(format!(
+                                    "cannot infer table for structured reference without an explicit table name at '{sheet_name}'!R{}C{} (cell must be inside exactly one table)",
+                                    base.row.saturating_add(1),
+                                    base.col.saturating_add(1)
+                                ))
+                            })?
+                    }
                 } else {
                     // Always prefer the "single table in workbook" heuristic when possible. This
                     // is the only inference path when we lack sheet+range information, and is
