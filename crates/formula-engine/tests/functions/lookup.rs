@@ -1518,7 +1518,7 @@ fn getpivotdata_supports_column_fields_and_multiple_value_fields() {
 fn getpivotdata_uses_registry_for_column_fields_and_multiple_values() {
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotConfig, PivotField, PivotTable, PivotValue,
-        SubtotalPosition, ValueField,
+        PivotFieldRef, SubtotalPosition, ValueField,
     };
     use formula_model::{CellRef, Range};
 

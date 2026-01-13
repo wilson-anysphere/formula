@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use formula_io::{open_workbook_model_with_password, open_workbook_with_password, Error, Workbook};
+use formula_io::{
+    detect_workbook_encryption, open_workbook, open_workbook_model, open_workbook_model_with_password,
+    open_workbook_with_password, Error, Workbook, WorkbookEncryptionKind,
+};
 use formula_model::CellValue;
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -23,6 +26,32 @@ fn encrypted_xls_unicode_emoji_fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../formula-xls/tests/fixtures/encrypted")
         .join("biff8_rc4_cryptoapi_unicode_emoji_pw_open.xls")
+}
+
+#[test]
+fn detects_rc4_cryptoapi_xls_filepass_encryption() {
+    let path = encrypted_xls_fixture_path();
+    let info = detect_workbook_encryption(&path)
+        .expect("detect encryption")
+        .expect("expected encrypted workbook");
+    assert_eq!(info.kind, WorkbookEncryptionKind::XlsFilepass);
+}
+
+#[test]
+fn non_password_apis_error_on_rc4_cryptoapi_encrypted_xls() {
+    let path = encrypted_xls_fixture_path();
+
+    let err = open_workbook(&path).expect_err("expected open_workbook to error");
+    assert!(
+        matches!(err, Error::EncryptedWorkbook { .. }),
+        "expected Error::EncryptedWorkbook, got {err:?}"
+    );
+
+    let err = open_workbook_model(&path).expect_err("expected open_workbook_model to error");
+    assert!(
+        matches!(err, Error::EncryptedWorkbook { .. }),
+        "expected Error::EncryptedWorkbook, got {err:?}"
+    );
 }
 
 #[test]

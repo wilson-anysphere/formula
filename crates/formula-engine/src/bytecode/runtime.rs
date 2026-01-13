@@ -5219,7 +5219,7 @@ fn fn_indirect(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             crate::eval::SheetReference::External(_) => {
                 // Match `functions::builtins_reference::INDIRECT`: Excel's INDIRECT does not
-                // support external workbook references.
+                // support external workbook references, so reject them here as well.
                 None
             }
         }
