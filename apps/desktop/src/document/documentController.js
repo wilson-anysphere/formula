@@ -121,6 +121,64 @@ function decodeBase64(base64) {
 }
 
 /**
+ * Best-effort MIME type inference for workbook images.
+ *
+ * Many code paths provide a mime type (e.g. file import, XLSX load). Keep this lightweight and
+ * conservative so callers can omit it without breaking rendering.
+ *
+ * @param {string} imageId
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function inferMimeTypeForImage(imageId, bytes) {
+  const ext = String(imageId ?? "").split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    default:
+      break;
+  }
+
+  if (bytes && bytes.length >= 4) {
+    // PNG
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+    // JPEG
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+    // GIF
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif";
+    // BMP
+    if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
+    // WebP: "RIFF"...."WEBP"
+    if (
+      bytes.length >= 12 &&
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50
+    ) {
+      return "image/webp";
+    }
+  }
+
+  return "application/octet-stream";
+}
+
+/**
  * Deep-clone a JSON-serializable value.
  *
  * @template T
@@ -2485,7 +2543,10 @@ export class DocumentController {
     if (!entry) return null;
     if (typeof Blob === "undefined") return null;
     try {
-      return new Blob([entry.bytes], { type: entry.mimeType || "application/octet-stream" });
+      const explicit =
+        entry && typeof entry.mimeType === "string" && entry.mimeType.trim().length > 0 ? entry.mimeType : null;
+      const mimeType = explicit ?? inferMimeTypeForImage(id, entry.bytes);
+      return new Blob([entry.bytes], { type: mimeType });
     } catch {
       return null;
     }

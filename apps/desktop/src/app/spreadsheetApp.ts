@@ -201,13 +201,64 @@ function decodeBase64ToBytes(base64: string): Uint8Array {
   return bytes;
 }
 
+function inferMimeTypeFromId(id: string, bytes?: Uint8Array): string {
+  const ext = String(id ?? "").split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "bmp":
+      return "image/bmp";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    default:
+      break;
+  }
+
+  if (bytes && bytes.length >= 4) {
+    // PNG
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
+    // JPEG
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+    // GIF
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return "image/gif";
+    // BMP
+    if (bytes[0] === 0x42 && bytes[1] === 0x4d) return "image/bmp";
+    // WebP: "RIFF"...."WEBP"
+    if (
+      bytes.length >= 12 &&
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46 &&
+      bytes[8] === 0x57 &&
+      bytes[9] === 0x45 &&
+      bytes[10] === 0x42 &&
+      bytes[11] === 0x50
+    ) {
+      return "image/webp";
+    }
+  }
+
+  return "application/octet-stream";
+}
+
 function normalizeImageEntry(id: string, raw: unknown): ImageEntry | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const record = raw as any;
   const bytes: unknown = record.bytes;
   if (!(bytes instanceof Uint8Array)) return undefined;
-  const mimeType: unknown = record.mimeType ?? record.contentType ?? record.content_type;
-  if (typeof mimeType !== "string" || mimeType.trim() === "") return undefined;
+  const mimeTypeRaw: unknown = record.mimeType ?? record.contentType ?? record.content_type;
+  const mimeType =
+    typeof mimeTypeRaw === "string" && mimeTypeRaw.trim() !== ""
+      ? mimeTypeRaw
+      : inferMimeTypeFromId(String(record.id ?? id), bytes);
   const entryId = typeof record.id === "string" && record.id.trim() !== "" ? record.id : id;
   return { id: entryId, bytes, mimeType };
 }
