@@ -715,9 +715,11 @@ export class DesktopSharedGrid {
       let deltaY = event.deltaY;
 
       if (event.deltaMode === 1) {
-        const line = 16;
-        deltaX *= line;
-        deltaY *= line;
+        // Match React CanvasGrid wheel normalization: treat DOM_DELTA_LINE as "rows per tick"
+        // and scale by zoom so line-based wheels scroll consistently across zoom levels.
+        const lineHeight = 16 * renderer.getZoom();
+        deltaX *= lineHeight;
+        deltaY *= lineHeight;
       } else if (event.deltaMode === 2) {
         const viewport = renderer.scroll.getViewportState();
         deltaX *= viewport.width;
