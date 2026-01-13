@@ -28,6 +28,18 @@ class TriageInputScopeTests(unittest.TestCase):
             chosen = _resolve_triage_input_dir(root, "auto")
             self.assertEqual(chosen, sanitized)
 
+    def test_sanitized_scope_requires_sanitized_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(ValueError):
+                _resolve_triage_input_dir(root, "sanitized")
+
+    def test_originals_scope_requires_originals_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(ValueError):
+                _resolve_triage_input_dir(root, "originals")
+
     def test_main_auto_scans_only_sanitized_tree_when_present(self) -> None:
         import tools.corpus.triage as triage_mod
 
@@ -92,6 +104,63 @@ class TriageInputScopeTests(unittest.TestCase):
         finally:
             triage_mod._build_rust_helper = original_build_rust_helper  # type: ignore[assignment]
             triage_mod._triage_paths = original_triage_paths  # type: ignore[assignment]
+
+    def test_main_sanitized_missing_errors(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = Path(tmp) / "corpus"
+            corpus_dir.mkdir(parents=True)
+            out_dir = Path(tmp) / "out"
+
+            argv = sys.argv
+            try:
+                sys.argv = [
+                    "tools.corpus.triage",
+                    "--corpus-dir",
+                    str(corpus_dir),
+                    "--out-dir",
+                    str(out_dir),
+                    "--input-scope",
+                    "sanitized",
+                ]
+                with mock.patch("sys.stderr", new=io.StringIO()):
+                    with self.assertRaises(SystemExit) as ctx:
+                        triage_mod.main()
+            finally:
+                sys.argv = argv
+
+            self.assertEqual(ctx.exception.code, 2)
+
+    def test_main_originals_requires_decryption_key(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            corpus_dir = Path(tmp) / "corpus"
+            originals = corpus_dir / "originals"
+            originals.mkdir(parents=True)
+            (originals / "book.xlsx.enc").write_bytes(b"dummy")
+            out_dir = Path(tmp) / "out"
+
+            argv = sys.argv
+            try:
+                sys.argv = [
+                    "tools.corpus.triage",
+                    "--corpus-dir",
+                    str(corpus_dir),
+                    "--out-dir",
+                    str(out_dir),
+                    "--input-scope",
+                    "originals",
+                ]
+                with mock.patch.dict("os.environ", {}, clear=True):
+                    with mock.patch("sys.stderr", new=io.StringIO()):
+                        with self.assertRaises(SystemExit) as ctx:
+                            triage_mod.main()
+            finally:
+                sys.argv = argv
+
+            self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":
