@@ -168,6 +168,49 @@ test("buildWorkbookContext: workbook_schema does not contain raw sensitive strin
   assert.doesNotMatch(out.promptContext, /123-45-6789/);
 });
 
+test("buildWorkbookContext: workbook_schema redacts sensitive header strings when DLP redaction is enabled", async () => {
+  const workbook = {
+    id: "wb-dlp-schema-header",
+    sheets: [
+      {
+        name: "Contacts",
+        cells: [
+          // Force header detection by ensuring the next row contains a numeric value.
+          [{ v: "Name" }, { v: "alice@example.com" }, { v: "123-45-6789" }, { v: "Amount" }],
+          [{ v: "Alice" }, { v: "foo" }, { v: "bar" }, { v: 100 }],
+        ],
+      },
+    ],
+    tables: [{ name: "HeaderSensitiveTable", sheetName: "Contacts", rect: { r0: 0, c0: 0, r1: 1, c1: 3 } }],
+  };
+
+  const embedder = new HashEmbedder({ dimension: 128 });
+  const vectorStore = new InMemoryVectorStore({ dimension: 128 });
+
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1200,
+    workbookRag: { vectorStore, embedder, topK: 3 },
+  });
+
+  const out = await cm.buildWorkbookContext({
+    workbook,
+    query: "contacts",
+    dlp: {
+      documentId: workbook.id,
+      policy: makePolicy({ redactDisallowed: true }),
+    },
+  });
+
+  const schemaSection =
+    out.promptContext.match(/## workbook_schema\n([\s\S]*?)(?:\n\n## [^\n]+\n|$)/i)?.[1] ?? "";
+
+  assert.match(out.promptContext, /## workbook_schema/i);
+  assert.doesNotMatch(schemaSection, /alice@example\.com/);
+  assert.doesNotMatch(schemaSection, /123-45-6789/);
+  assert.match(schemaSection, /\[REDACTED_EMAIL\]/);
+  assert.match(schemaSection, /\[REDACTED_SSN\]/);
+});
+
 test("buildWorkbookContext: does not send raw sensitive workbook text to embedder when blocked", async () => {
   const workbook = makeSensitiveWorkbook();
   const embedder = new CapturingEmbedder({ dimension: 64 });
