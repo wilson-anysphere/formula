@@ -18,6 +18,10 @@ node scripts/check-desktop-version.mjs vX.Y.Z
 
 # Ensures plugins.updater.pubkey/endpoints are not placeholders when the updater is active.
 node scripts/check-updater-config.mjs
+
+# Ensures macOS hardened-runtime entitlements include the WKWebView JIT keys
+# required for JavaScript/WebAssembly to run in signed/notarized builds.
+node scripts/check-macos-entitlements.mjs
 ```
 
 ## Updater restart semantics (important)
@@ -108,6 +112,76 @@ Secrets used by `tauri-apps/tauri-action`:
 - `APPLE_ID` – Apple ID email
 - `APPLE_PASSWORD` – app-specific password
 - `APPLE_TEAM_ID`
+
+#### Hardened runtime entitlements (WKWebView / WASM)
+
+The macOS app is signed with the **hardened runtime**. WKWebView (Tauri/Wry) needs explicit JIT entitlements in the signed binary so that JavaScript and WebAssembly can execute reliably.
+
+The entitlements file used during signing is:
+
+- `apps/desktop/src-tauri/entitlements.plist` (wired via `bundle.macOS.entitlements` in `apps/desktop/src-tauri/tauri.conf.json`)
+
+CI guardrail (run on macOS release builds):
+
+```bash
+node scripts/check-macos-entitlements.mjs
+```
+
+If these entitlements are missing, a notarized build can still pass notarization but launch with a **blank window** or a crashing WebView process.
+
+#### Local verification checklist (signed app)
+
+1. Build the production bundles:
+
+   ```bash
+   pnpm install
+   pnpm build:desktop
+   cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
+   ```
+
+2. Locate the `.app` produced by Tauri (path can vary by target):
+
+   ```bash
+   ls apps/desktop/src-tauri/target/release/bundle/macos/*.app
+   ```
+
+3. Verify the signature + entitlements (replace the path as needed):
+
+   ```bash
+   app="apps/desktop/src-tauri/target/release/bundle/macos/Formula.app"
+   codesign --verify --deep --strict --verbose=2 "$app"
+   codesign -d --entitlements :- "$app" 2>&1 | grep -E "allow-jit|allow-unsigned-executable-memory"
+   spctl --assess --type execute -vv "$app"
+   ```
+
+4. Launch the app and sanity-check runtime behavior:
+   - The window should render (no blank WebView).
+   - Network features work (e.g. updater check / HTTPS fetches).
+   - Cross-origin isolation still works in the packaged app (see `pnpm -C apps/desktop check:coi`).
+
+#### Troubleshooting: blank window / crashes in a signed build
+
+If a signed/notarized build launches with a blank window or crashes immediately, check:
+
+1. The **entitlements actually embedded in the signed app** (not just the plist file in the repo):
+
+   ```bash
+   codesign -d --entitlements :- /Applications/Formula.app
+   ```
+
+   Ensure it includes:
+   - `com.apple.security.cs.allow-jit`
+   - `com.apple.security.cs.allow-unsigned-executable-memory`
+
+2. The signature is valid and the hardened runtime is enabled:
+
+   ```bash
+   codesign -dv --verbose=4 /Applications/Formula.app 2>&1 | grep -E "Runtime|TeamIdentifier|Identifier"
+   ```
+
+3. macOS logs/crash reports:
+   - Use **Console.app** → Crash Reports / log stream.
+   - Look for `WebKit`, `JavaScriptCore`, or `EXC_BAD_ACCESS` crashes in a `WebContent` process.
 
 ### Windows (Authenticode)
 

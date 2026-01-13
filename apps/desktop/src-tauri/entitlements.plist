@@ -2,7 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <!--
+      Outbound network access.
+      - Required by the updater and any HTTPS/WSS calls made by the desktop backend.
+      - Note: this is only enforced when sandboxing is enabled (we do not enable app sandboxing today).
+    -->
     <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!--
+      WKWebView / JavaScriptCore JIT + WebAssembly under the hardened runtime.
+      Without these, signed/notarized builds can launch with a blank WebView or crash
+      when the JS engine tries to allocate JIT executable memory.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
   </dict>
 </plist>

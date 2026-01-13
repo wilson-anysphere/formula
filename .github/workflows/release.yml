@@ -67,6 +67,10 @@ jobs:
       - name: Validate Tauri updater config
         run: node scripts/check-updater-config.mjs
 
+      - name: Validate macOS entitlements (hardened runtime)
+        if: matrix.platform == 'macos-latest'
+        run: node scripts/check-macos-entitlements.mjs
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:

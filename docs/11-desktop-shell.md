@@ -248,6 +248,8 @@ Notable keys:
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
+  - `bundle.macOS.entitlements` points at `apps/desktop/src-tauri/entitlements.plist`.
+    - For Developer ID distribution with the hardened runtime, the entitlements must include the WKWebView JIT keys (`com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`) or the signed app may launch with a blank WebView. See `docs/release.md` for troubleshooting.
 
 ### `plugins.updater`
 
