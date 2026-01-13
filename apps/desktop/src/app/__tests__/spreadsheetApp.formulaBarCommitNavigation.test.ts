@@ -151,5 +151,50 @@ describe("SpreadsheetApp formula bar commit navigation", () => {
     root.remove();
     formulaBar.remove();
   });
-});
 
+  it("commits and navigates on Tab/Shift+Tab/Enter even when the grid has focus (range selection mode)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+
+    // Tab (grid focused) moves right.
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    input!.focus();
+    input!.value = "1";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 1 });
+
+    // Shift+Tab (grid focused) moves left.
+    input!.focus();
+    input!.value = "2";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+    // Enter (grid focused) moves down.
+    input!.focus();
+    input!.value = "3";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    root.focus();
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expect(app.getActiveCell()).toEqual({ row: 1, col: 0 });
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+});

@@ -10976,6 +10976,13 @@ export class SpreadsheetApp {
         this.formulaBar?.commitEdit("enter", e.shiftKey);
         return;
       }
+      // Match FormulaBarView: Tab/Shift+Tab commits (and the app navigates selection). Prevent
+      // browser focus traversal while editing, even if the grid temporarily has focus.
+      if (e.key === "Tab") {
+        e.preventDefault();
+        this.formulaBar?.commitEdit("tab", e.shiftKey);
+        return;
+      }
 
       // Excel-like: while editing a formula, F4 toggles absolute/relative references.
       // Route it to the formula bar even if focus is temporarily on the grid (range selection mode).
