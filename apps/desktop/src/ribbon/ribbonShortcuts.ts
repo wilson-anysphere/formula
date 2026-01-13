@@ -40,8 +40,8 @@ const KEYBINDING_COMMAND_BY_RIBBON_ID: Record<string, string> = {
   "comments.togglePanel": "comments.togglePanel",
 
   // --- View ------------------------------------------------------------------
-  "open-panel-ai-chat": "view.togglePanel.aiChat",
-  "open-inline-ai-edit": "ai.inlineEdit",
+  "view.togglePanel.aiChat": "view.togglePanel.aiChat",
+  "ai.inlineEdit": "ai.inlineEdit",
 };
 
 export function deriveRibbonShortcutById(commandKeybindingDisplayIndex: Map<string, string[]>): Record<string, string> {
