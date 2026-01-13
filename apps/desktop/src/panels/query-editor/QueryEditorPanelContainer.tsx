@@ -58,8 +58,6 @@ async function pickFile(extensions: string[]): Promise<string | null> {
 
   const path = await showInputBox({ prompt: `Enter path to ${extensions.join("/").toUpperCase()} file`, value: "" });
   return path && path.trim() ? path.trim() : null;
-
-  return null;
 }
 
 function describeSource(source: any): string {
