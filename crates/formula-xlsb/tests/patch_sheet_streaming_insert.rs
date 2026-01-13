@@ -1004,6 +1004,7 @@ fn patch_sheet_bin_streaming_preserves_cell_header_varint_bytes_for_fixed_size_v
         new_style: None,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     }];
 
@@ -1063,6 +1064,7 @@ fn patch_sheet_bin_streaming_preserves_formula_header_varint_bytes_when_payload_
         new_style: None,
         new_formula: None,
         new_rgcb: None,
+        new_formula_flags: None,
         shared_string_index: None,
     }];
 
