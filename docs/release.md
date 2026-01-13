@@ -219,6 +219,23 @@ Secrets:
 - `WINDOWS_CERTIFICATE` – base64-encoded `.pfx`
 - `WINDOWS_CERTIFICATE_PASSWORD`
 
+## Windows: WebView2 runtime installation (required)
+
+Formula relies on the **Microsoft Edge WebView2 Evergreen Runtime** on Windows. The Windows installers are configured to
+install WebView2 automatically if it is missing by using Tauri's WebView2 installer integration:
+
+- Config: `apps/desktop/src-tauri/tauri.conf.json` → `bundle.windows.webviewInstallMode.type = "downloadBootstrapper"`
+  (Evergreen **bootstrapper**).
+- CI verification: the release workflow runs `scripts/ci/check-windows-webview2-installer.py`, which inspects the produced
+  Windows installer(s) and asserts they contain a reference to `MicrosoftEdgeWebview2Setup.exe` (or an offline runtime
+  installer), failing the release build if this regresses.
+
+To verify locally after a Windows build, run:
+
+```bash
+python scripts/ci/check-windows-webview2-installer.py
+```
+
 ## 4) Hosting updater endpoints
 
 The desktop app is configured to use **GitHub Releases** as the updater source.

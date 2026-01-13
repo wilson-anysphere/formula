@@ -375,6 +375,10 @@ jobs:
           Write-Host "NSIS installers:"
           $nsisExes | ForEach-Object { Write-Host " - $($_.FullName)" }
 
+      - name: Verify Windows installers bundle/reference WebView2 (bootstrapper/runtime)
+        if: runner.os == 'Windows'
+        run: python scripts/ci/check-windows-webview2-installer.py
+
       - name: Verify Linux release artifacts (AppImage + deb + rpm + signatures)
         if: matrix.platform == 'ubuntu-24.04'
         shell: bash
