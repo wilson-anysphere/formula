@@ -1416,13 +1416,17 @@ pub fn roundtrip_zip_copy(original: &Path, out_path: &Path) -> Result<()> {
 ///
 /// Note: this helper is used by round-trip test harnesses that treat each file as a ZIP/OPC
 /// package. Password-protected/encrypted OOXML workbooks that use an OLE/CFB wrapper
-/// (`EncryptionInfo` + `EncryptedPackage`) must not be placed under `fixtures/xlsx/`; they live
-/// under `fixtures/encrypted/ooxml/` instead.
+/// (`EncryptionInfo` + `EncryptedPackage`) are **not ZIP archives** and must be excluded from this
+/// corpus (they otherwise fail ZIP-based round-trip tests).
+///
+/// Convention: keep them under `fixtures/xlsx/encrypted/` (or `fixtures/encrypted/ooxml/`) and this
+/// helper will skip the `encrypted/` subtree.
 pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
     if !root.exists() {
         return Err(anyhow!("fixtures root {} does not exist", root.display()));
     }
 
+    let encrypted_dir = root.join("encrypted");
     let mut files = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
@@ -1433,6 +1437,9 @@ pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
             continue;
         }
         let path = entry.path();
+        if path.starts_with(&encrypted_dir) {
+            continue;
+        }
         match path.extension().and_then(|s| s.to_str()) {
             Some("xlsx") | Some("xlsm") | Some("xlsb") => files.push(path.to_path_buf()),
             _ => {}

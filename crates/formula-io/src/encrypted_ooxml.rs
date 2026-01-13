@@ -66,52 +66,607 @@ pub(crate) fn decrypted_package_reader<R: Read + Seek>(
     }
 }
 
+/// Convenience helper that decrypts an `EncryptedPackage` stream fully into memory.
+///
+/// This is primarily used by path-based open APIs that need the decrypted ZIP bytes.
+pub(crate) fn decrypt_encrypted_package(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, DecryptError> {
+    if encryption_info.len() < 4 {
+        return Err(DecryptError::InvalidInfo(
+            "EncryptionInfo truncated (missing version header)".to_string(),
+        ));
+    }
+
+    let major = u16::from_le_bytes([encryption_info[0], encryption_info[1]]);
+    let minor = u16::from_le_bytes([encryption_info[2], encryption_info[3]]);
+
+    if encrypted_package.len() < 8 {
+        return Err(DecryptError::InvalidInfo(
+            "EncryptedPackage truncated (missing size prefix)".to_string(),
+        ));
+    }
+
+    let plaintext_len = u64::from_le_bytes(
+        encrypted_package[..8]
+            .try_into()
+            .expect("slice length already checked"),
+    );
+
+    match (major, minor) {
+        (4, 4) => {
+            // The ciphertext begins immediately after the 8-byte plaintext length header.
+            let ciphertext = &encrypted_package[8..];
+            let cursor = std::io::Cursor::new(ciphertext);
+            let mut reader =
+                decrypted_package_reader(cursor, plaintext_len, encryption_info, password)?;
+
+            let mut out = Vec::new();
+            if let Ok(cap) = usize::try_from(plaintext_len) {
+                out.reserve(cap);
+            }
+            reader.read_to_end(&mut out)?;
+            Ok(out)
+        }
+        (major, 2) if (2..=4).contains(&major) => {
+            decrypt_encrypted_package_standard(encryption_info, encrypted_package, password)
+        }
+        _ => Err(DecryptError::UnsupportedVersion { major, minor }),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StandardAesScheme {
+    /// Baseline MS-OFFCRYPTO Standard AES: decrypt with AES-ECB using the block-0 key.
+    Ecb,
+    /// Decrypt the ciphertext as a single AES-CBC stream using:
+    /// - key = block-0 key
+    /// - iv  = 0
+    CbcIvZeroStream,
+    /// Decrypt the ciphertext as a single AES-CBC stream using:
+    /// - key = block-0 key
+    /// - iv  = Hash(salt || LE32(0))[:16]
+    CbcIvHash0Stream,
+    /// Segment the ciphertext in 4096-byte chunks; decrypt each chunk with AES-CBC using:
+    /// - key = block-0 key
+    /// - iv  = Hash(salt || LE32(segmentIndex))[:16]
+    CbcConstKeyPerSegmentIvHash,
+    /// Segment the ciphertext in 4096-byte chunks; decrypt each chunk with AES-CBC using:
+    /// - key = block-0 key
+    /// - iv  = 0
+    CbcConstKeyPerSegmentIvZero,
+    /// Segment the ciphertext in 4096-byte chunks; decrypt each chunk with AES-CBC using:
+    /// - key = block-0 key
+    /// - iv  = salt[:16]
+    CbcConstKeyPerSegmentIvSalt,
+    /// Segment the ciphertext in 4096-byte chunks; decrypt each chunk with AES-CBC using:
+    /// - key = key derived for blockIndex=segmentIndex
+    /// - iv  = 0
+    CbcPerSegmentKeyIvZero,
+    /// Decrypt the ciphertext as a single AES-CBC stream using:
+    /// - key = block-0 key
+    /// - iv  = salt[:16]
+    CbcIvSaltStream,
+}
+
+fn decrypt_encrypted_package_standard(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, DecryptError> {
+    use crate::offcrypto;
+    use crate::offcrypto::standard::{derive_file_key_standard, verify_password_standard_with_key};
+
+    let info = offcrypto::parse_encryption_info_standard(encryption_info).map_err(|err| match err {
+        offcrypto::OffcryptoError::UnsupportedEncryptionInfoVersion { major, minor, .. } => {
+            DecryptError::UnsupportedVersion { major, minor }
+        }
+        other => DecryptError::InvalidInfo(format!(
+            "failed to parse Standard EncryptionInfo: {other}"
+        )),
+    })?;
+
+    // Validate orig_size (and avoid allocating attacker-controlled buffers).
+    let plaintext_len = u64::from_le_bytes(
+        encrypted_package[..8]
+            .try_into()
+            .expect("slice length already checked"),
+    );
+    let plaintext_len_usize = usize::try_from(plaintext_len).map_err(|_| {
+        DecryptError::InvalidInfo(format!(
+            "EncryptedPackage orig_size {plaintext_len} does not fit into usize"
+        ))
+    })?;
+
+    match info.header.alg_id {
+        offcrypto::CALG_RC4 => {
+            let key0 = derive_file_key_standard(&info, password).map_err(|err| {
+                DecryptError::InvalidInfo(format!("failed to derive Standard RC4 key: {err}"))
+            })?;
+
+            // Verify password using the EncryptionVerifier before decrypting the package.
+            let ok = verify_password_standard_with_key(&info, &key0).map_err(|err| {
+                DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
+            })?;
+            if !ok {
+                return Err(DecryptError::InvalidPassword);
+            }
+
+            let key_len = (info.header.key_size / 8) as usize;
+            let out = offcrypto::decrypt_standard_cryptoapi_rc4_encrypted_package_stream(
+                encrypted_package,
+                password,
+                &info.verifier.salt,
+                key_len,
+            )
+            .map_err(|err| {
+                DecryptError::InvalidInfo(format!(
+                    "failed to decrypt Standard RC4 EncryptedPackage: {err}"
+                ))
+            })?;
+            Ok(out)
+        }
+        offcrypto::CALG_AES_128 | offcrypto::CALG_AES_192 | offcrypto::CALG_AES_256 => {
+            // Try a small set of schemes seen in the wild.
+            //
+            // Some producers appear to derive the AES-128 key by truncating the block hash instead
+            // of running the CryptoAPI `CryptDeriveKey` ipad/opad expansion. For robustness, we try
+            // both key derivation variants when keySize=128.
+            //
+            // Additionally, some schemes share the same initial IV (so the first decrypted block can
+            // look like a ZIP even when the overall scheme is wrong). Therefore, when we get a
+            // promising `PK` prefix we validate by parsing the full decrypted bytes as a ZIP archive.
+            let schemes = [
+                StandardAesScheme::Ecb,
+                StandardAesScheme::CbcIvZeroStream,
+                StandardAesScheme::CbcIvSaltStream,
+                StandardAesScheme::CbcIvHash0Stream,
+                StandardAesScheme::CbcConstKeyPerSegmentIvHash,
+                StandardAesScheme::CbcConstKeyPerSegmentIvZero,
+                StandardAesScheme::CbcConstKeyPerSegmentIvSalt,
+                StandardAesScheme::CbcPerSegmentKeyIvZero,
+            ];
+
+            let ciphertext = &encrypted_package[8..];
+
+            let mut try_with_key0 =
+                |key0: &[u8]| -> Result<Option<Vec<u8>>, DecryptError> {
+                    for scheme in schemes {
+                        let prefix_ok = decrypt_standard_aes_prefix_is_zip(
+                            &info,
+                            plaintext_len_usize,
+                            ciphertext,
+                            scheme,
+                            key0,
+                        )?;
+                        if !prefix_ok {
+                            continue;
+                        }
+
+                        let Ok(out) = decrypt_standard_aes_with_scheme(
+                            &info,
+                            password,
+                            plaintext_len_usize,
+                            ciphertext,
+                            scheme,
+                            key0,
+                        ) else {
+                            continue;
+                        };
+
+                        if is_valid_zip(&out) {
+                            return Ok(Some(out));
+                        }
+                    }
+                    Ok(None)
+                };
+
+            let key0 = derive_file_key_standard(&info, password).map_err(|err| {
+                DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}"))
+            })?;
+            if let Some(out) = try_with_key0(&key0)? {
+                return Ok(out);
+            }
+
+            // AES-128 truncation fallback.
+            if info.header.key_size == 128 {
+                if let Ok(key_trunc) = derive_standard_aes_key_truncate(&info, password) {
+                    if key_trunc != key0 {
+                        if let Some(out) = try_with_key0(&key_trunc)? {
+                            return Ok(out);
+                        }
+                    }
+                }
+            }
+
+            Err(DecryptError::InvalidPassword)
+        }
+        other => Err(DecryptError::InvalidInfo(format!(
+            "unsupported Standard CryptoAPI algorithm algId=0x{other:08x}"
+        ))),
+    }
+}
+
+fn decrypt_standard_aes_with_scheme(
+    info: &crate::offcrypto::StandardEncryptionInfo,
+    password: &str,
+    plaintext_len: usize,
+    ciphertext: &[u8],
+    scheme: StandardAesScheme,
+    key0: &[u8],
+) -> Result<Vec<u8>, DecryptError> {
+    use crate::offcrypto::standard::derive_key_standard_for_block;
+
+    const AES_BLOCK: usize = 16;
+    const SEGMENT_LEN: usize = 0x1000;
+
+    let needed_cipher_len = round_up_to_multiple(plaintext_len, AES_BLOCK);
+
+    match scheme {
+        StandardAesScheme::Ecb => {
+            if ciphertext.len() < needed_cipher_len {
+                return Err(DecryptError::InvalidInfo(format!(
+                    "EncryptedPackage ciphertext truncated: have {}, need at least {}",
+                    ciphertext.len(),
+                    needed_cipher_len
+                )));
+            }
+            let mut buf = ciphertext[..needed_cipher_len].to_vec();
+            aes_ecb_decrypt_in_place(key0, &mut buf)
+                .map_err(|msg| DecryptError::InvalidInfo(msg.to_string()))?;
+            buf.truncate(plaintext_len);
+            Ok(buf)
+        }
+        StandardAesScheme::CbcIvZeroStream => {
+            if ciphertext.len() < needed_cipher_len {
+                return Err(DecryptError::InvalidInfo(format!(
+                    "EncryptedPackage ciphertext truncated: have {}, need at least {}",
+                    ciphertext.len(),
+                    needed_cipher_len
+                )));
+            }
+
+            let iv = [0u8; AES_BLOCK];
+            let mut buf = ciphertext[..needed_cipher_len].to_vec();
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+            buf.truncate(plaintext_len);
+            Ok(buf)
+        }
+        StandardAesScheme::CbcIvHash0Stream => {
+            if ciphertext.len() < needed_cipher_len {
+                return Err(DecryptError::InvalidInfo(format!(
+                    "EncryptedPackage ciphertext truncated: have {}, need at least {}",
+                    ciphertext.len(),
+                    needed_cipher_len
+                )));
+            }
+
+            let iv = derive_standard_segment_iv(info.header.alg_id_hash, &info.verifier.salt, 0)?;
+            let mut buf = ciphertext[..needed_cipher_len].to_vec();
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+            buf.truncate(plaintext_len);
+            Ok(buf)
+        }
+        StandardAesScheme::CbcIvSaltStream => {
+            if ciphertext.len() < needed_cipher_len {
+                return Err(DecryptError::InvalidInfo(format!(
+                    "EncryptedPackage ciphertext truncated: have {}, need at least {}",
+                    ciphertext.len(),
+                    needed_cipher_len
+                )));
+            }
+
+            let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
+            })?;
+            let iv: [u8; AES_BLOCK] = iv
+                .try_into()
+                .expect("slice length checked to be 16 bytes");
+
+            let mut buf = ciphertext[..needed_cipher_len].to_vec();
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+            buf.truncate(plaintext_len);
+            Ok(buf)
+        }
+        StandardAesScheme::CbcConstKeyPerSegmentIvHash => {
+            decrypt_segmented_aes_cbc(
+                ciphertext,
+                plaintext_len,
+                |_segment_index| Ok(key0.to_vec()),
+                |segment_index| derive_standard_segment_iv(info.header.alg_id_hash, &info.verifier.salt, segment_index),
+                SEGMENT_LEN,
+            )
+        }
+        StandardAesScheme::CbcConstKeyPerSegmentIvZero => decrypt_segmented_aes_cbc(
+            ciphertext,
+            plaintext_len,
+            |_segment_index| Ok(key0.to_vec()),
+            |_segment_index| Ok([0u8; AES_BLOCK]),
+            SEGMENT_LEN,
+        ),
+        StandardAesScheme::CbcConstKeyPerSegmentIvSalt => {
+            let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
+            })?;
+            let iv: [u8; AES_BLOCK] = iv
+                .try_into()
+                .expect("slice length checked to be 16 bytes");
+
+            decrypt_segmented_aes_cbc(
+                ciphertext,
+                plaintext_len,
+                |_segment_index| Ok(key0.to_vec()),
+                |_segment_index| Ok(iv),
+                SEGMENT_LEN,
+            )
+        }
+        StandardAesScheme::CbcPerSegmentKeyIvZero => decrypt_segmented_aes_cbc(
+            ciphertext,
+            plaintext_len,
+            |segment_index| {
+                if segment_index == 0 {
+                    return Ok(key0.to_vec());
+                }
+
+                let key = derive_key_standard_for_block(info, password, segment_index).map_err(|err| {
+                    DecryptError::InvalidInfo(format!(
+                        "failed to derive Standard per-segment key (segment_index={segment_index}): {err}"
+                    ))
+                })?;
+                Ok(key)
+            },
+            |_segment_index| Ok([0u8; AES_BLOCK]),
+            SEGMENT_LEN,
+        ),
+    }
+}
+
+fn decrypt_standard_aes_prefix_is_zip(
+    info: &crate::offcrypto::StandardEncryptionInfo,
+    plaintext_len: usize,
+    ciphertext: &[u8],
+    scheme: StandardAesScheme,
+    key0: &[u8],
+) -> Result<bool, DecryptError> {
+    const AES_BLOCK: usize = 16;
+    if plaintext_len == 0 {
+        return Ok(false);
+    }
+    let first = ciphertext.get(..AES_BLOCK).ok_or_else(|| {
+        DecryptError::InvalidInfo("EncryptedPackage ciphertext truncated (missing first AES block)".to_string())
+    })?;
+    let mut buf = first.to_vec();
+
+    match scheme {
+        StandardAesScheme::Ecb => {
+            aes_ecb_decrypt_in_place(key0, &mut buf)
+                .map_err(|msg| DecryptError::InvalidInfo(msg.to_string()))?;
+        }
+        StandardAesScheme::CbcIvZeroStream
+        | StandardAesScheme::CbcConstKeyPerSegmentIvZero
+        | StandardAesScheme::CbcPerSegmentKeyIvZero => {
+            let iv = [0u8; AES_BLOCK];
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+        }
+        StandardAesScheme::CbcIvHash0Stream | StandardAesScheme::CbcConstKeyPerSegmentIvHash => {
+            let iv = derive_standard_segment_iv(info.header.alg_id_hash, &info.verifier.salt, 0)?;
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+        }
+        StandardAesScheme::CbcIvSaltStream | StandardAesScheme::CbcConstKeyPerSegmentIvSalt => {
+            let iv = info.verifier.salt.get(..AES_BLOCK).ok_or_else(|| {
+                DecryptError::InvalidInfo("EncryptionVerifier.salt shorter than 16 bytes".to_string())
+            })?;
+            let iv: [u8; AES_BLOCK] = iv
+                .try_into()
+                .expect("slice length checked to be 16 bytes");
+            decrypt_aes_cbc_no_padding_in_place(key0, &iv, &mut buf).map_err(|e| {
+                DecryptError::InvalidInfo(format!("AES-CBC decrypt failed: {e}"))
+            })?;
+        }
+    }
+
+    Ok(buf.len() >= 2 && &buf[..2] == b"PK")
+}
+
+fn derive_standard_aes_key_truncate(
+    info: &crate::offcrypto::StandardEncryptionInfo,
+    password: &str,
+) -> Result<Vec<u8>, DecryptError> {
+    use crate::offcrypto::cryptoapi::{
+        crypt_derive_key, final_hash, hash_password_fixed_spin, password_to_utf16le, HashAlg,
+    };
+
+    let hash_alg = HashAlg::from_calg_id(info.header.alg_id_hash).map_err(|err| {
+        DecryptError::InvalidInfo(format!(
+            "unsupported Standard algIdHash=0x{:08x}: {err}",
+            info.header.alg_id_hash
+        ))
+    })?;
+
+    let pw_utf16le = password_to_utf16le(password);
+    let h_final = hash_password_fixed_spin(&pw_utf16le, &info.verifier.salt, hash_alg);
+    let h_block0 = final_hash(&h_final, 0, hash_alg);
+
+    let key_len = (info.header.key_size / 8) as usize;
+    Ok(crypt_derive_key(&h_block0, key_len, hash_alg))
+}
+
+fn is_valid_zip(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || &bytes[..2] != b"PK" {
+        return false;
+    }
+    let cursor = std::io::Cursor::new(bytes);
+    zip::ZipArchive::new(cursor).is_ok()
+}
+
+fn decrypt_segmented_aes_cbc(
+    ciphertext: &[u8],
+    plaintext_len: usize,
+    mut key_for_segment: impl FnMut(u32) -> Result<Vec<u8>, DecryptError>,
+    mut iv_for_segment: impl FnMut(u32) -> Result<[u8; 16], DecryptError>,
+    segment_len: usize,
+) -> Result<Vec<u8>, DecryptError> {
+    const AES_BLOCK: usize = 16;
+
+    let mut out = Vec::new();
+    out.reserve(plaintext_len);
+
+    let mut segment_index: u32 = 0;
+    while out.len() < plaintext_len {
+        let remaining = plaintext_len - out.len();
+        let seg_plain_len = remaining.min(segment_len);
+        let seg_cipher_len = round_up_to_multiple(seg_plain_len, AES_BLOCK);
+
+        let seg_start = (segment_index as usize)
+            .checked_mul(segment_len)
+            .ok_or_else(|| DecryptError::InvalidInfo("segment index overflow".to_string()))?;
+        let seg_end = seg_start
+            .checked_add(seg_cipher_len)
+            .ok_or_else(|| DecryptError::InvalidInfo("segment length overflow".to_string()))?;
+        let seg_cipher = ciphertext.get(seg_start..seg_end).ok_or_else(|| {
+            DecryptError::InvalidInfo(format!(
+                "EncryptedPackage ciphertext truncated for segment {segment_index}: need bytes {seg_start}..{seg_end} (len={})",
+                ciphertext.len()
+            ))
+        })?;
+
+        let key = key_for_segment(segment_index)?;
+        let iv = iv_for_segment(segment_index)?;
+
+        let mut buf = seg_cipher.to_vec();
+        decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut buf).map_err(|e| {
+            DecryptError::InvalidInfo(format!("AES-CBC decrypt failed for segment {segment_index}: {e}"))
+        })?;
+        out.extend_from_slice(&buf[..seg_plain_len]);
+
+        segment_index = segment_index
+            .checked_add(1)
+            .ok_or_else(|| DecryptError::InvalidInfo("segment index overflow".to_string()))?;
+    }
+
+    Ok(out)
+}
+
+fn derive_standard_segment_iv(
+    alg_id_hash: u32,
+    salt: &[u8],
+    segment_index: u32,
+) -> Result<[u8; 16], DecryptError> {
+    let mut iv = [0u8; 16];
+    match alg_id_hash {
+        crate::offcrypto::CALG_SHA1 => {
+            use sha1::Digest as _;
+            let mut hasher = sha1::Sha1::new();
+            hasher.update(salt);
+            hasher.update(segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..16]); // SHA-1 digest is 20 bytes
+            Ok(iv)
+        }
+        crate::offcrypto::CALG_MD5 => {
+            use md5::Digest as _;
+            let mut hasher = md5::Md5::new();
+            hasher.update(salt);
+            hasher.update(segment_index.to_le_bytes());
+            let digest = hasher.finalize();
+            iv.copy_from_slice(&digest[..16]); // MD5 digest is 16 bytes
+            Ok(iv)
+        }
+        other => Err(DecryptError::InvalidInfo(format!(
+            "unsupported Standard algIdHash=0x{other:08x} for IV derivation"
+        ))),
+    }
+}
+
+fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), &'static str> {
+    use aes::cipher::{generic_array::GenericArray, BlockDecrypt, KeyInit};
+    use aes::{Aes128, Aes192, Aes256};
+
+    const AES_BLOCK: usize = 16;
+    if buf.len() % AES_BLOCK != 0 {
+        return Err("AES-ECB ciphertext length is not a multiple of 16 bytes");
+    }
+
+    fn decrypt_with<C>(key: &[u8], buf: &mut [u8]) -> Result<(), &'static str>
+    where
+        C: BlockDecrypt + KeyInit,
+    {
+        let cipher = C::new_from_slice(key).map_err(|_| "invalid AES key length")?;
+        for block in buf.chunks_mut(AES_BLOCK) {
+            cipher.decrypt_block(GenericArray::from_mut_slice(block));
+        }
+        Ok(())
+    }
+
+    match key.len() {
+        16 => decrypt_with::<Aes128>(key, buf),
+        24 => decrypt_with::<Aes192>(key, buf),
+        32 => decrypt_with::<Aes256>(key, buf),
+        _ => Err("invalid AES key length"),
+    }
+}
+
+fn round_up_to_multiple(value: usize, multiple: usize) -> usize {
+    if multiple == 0 {
+        return value;
+    }
+    let rem = value % multiple;
+    if rem == 0 {
+        value
+    } else {
+        value + (multiple - rem)
+    }
+}
+
 fn decrypted_package_reader_standard<R: Read + Seek>(
     ciphertext_reader: R,
     plaintext_len: u64,
     encryption_info: &[u8],
     password: &str,
 ) -> Result<DecryptedPackageReader<R>, DecryptError> {
-    use formula_offcrypto::{
-        parse_encryption_info, standard_derive_key, standard_verify_key, EncryptionInfo,
-        OffcryptoError, StandardEncryptionInfo,
-    };
+    use crate::offcrypto;
+    use crate::offcrypto::standard::{derive_file_key_standard, verify_password_standard_with_key};
 
-    let info = match parse_encryption_info(encryption_info) {
-        Ok(EncryptionInfo::Standard {
-            header, verifier, ..
-        }) => StandardEncryptionInfo { header, verifier },
-        Ok(EncryptionInfo::Unsupported { version }) => {
-            return Err(DecryptError::UnsupportedVersion {
-                major: version.major,
-                minor: version.minor,
-            })
+    let info = offcrypto::parse_encryption_info_standard(encryption_info).map_err(|err| match err {
+        offcrypto::OffcryptoError::UnsupportedEncryptionInfoVersion { major, minor, .. } => {
+            DecryptError::UnsupportedVersion { major, minor }
         }
-        Ok(EncryptionInfo::Agile { .. }) => {
-            return Err(DecryptError::InvalidInfo(
-                "expected Standard EncryptionInfo, got Agile".to_string(),
-            ))
-        }
-        Err(OffcryptoError::UnsupportedVersion { major, minor }) => {
-            return Err(DecryptError::UnsupportedVersion { major, minor })
-        }
-        Err(OffcryptoError::InvalidPassword) => return Err(DecryptError::InvalidPassword),
-        Err(err) => {
+        other => DecryptError::InvalidInfo(format!(
+            "failed to parse Standard EncryptionInfo: {other}"
+        )),
+    })?;
+
+    // The streaming decryptor currently supports the AES-CBC CryptoAPI variant.
+    match info.header.alg_id {
+        offcrypto::CALG_AES_128 | offcrypto::CALG_AES_192 | offcrypto::CALG_AES_256 => {}
+        other => {
             return Err(DecryptError::InvalidInfo(format!(
-                "failed to parse Standard EncryptionInfo: {err}"
+                "unsupported Standard CryptoAPI algorithm algId=0x{other:08x}"
             )))
         }
-    };
+    }
 
-    let key = standard_derive_key(&info, password).map_err(|err| match err {
-        OffcryptoError::InvalidPassword => DecryptError::InvalidPassword,
-        other => DecryptError::InvalidInfo(format!("failed to derive Standard key: {other}")),
-    })?;
+    let key = derive_file_key_standard(&info, password)
+        .map_err(|err| DecryptError::InvalidInfo(format!("failed to derive Standard key: {err}")))?;
 
-    standard_verify_key(&info, &key).map_err(|err| match err {
-        OffcryptoError::InvalidPassword => DecryptError::InvalidPassword,
-        other => DecryptError::InvalidInfo(format!("failed to verify Standard key: {other}")),
+    let ok = verify_password_standard_with_key(&info, &key).map_err(|err| {
+        DecryptError::InvalidInfo(format!("failed to verify Standard password: {err}"))
     })?;
+    if !ok {
+        return Err(DecryptError::InvalidPassword);
+    }
 
     Ok(DecryptedPackageReader::new(
         ciphertext_reader,
@@ -286,6 +841,35 @@ fn validate_cipher_settings(node: roxmltree::Node<'_, '_>) -> Result<(), Decrypt
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PasswordKeyIvMode {
+    Salt,
+    Derived,
+}
+
+fn password_key_iv(
+    key: &AgilePasswordKeyEncryptor,
+    mode: PasswordKeyIvMode,
+    block_key: &[u8],
+) -> Result<Vec<u8>, DecryptError> {
+    match mode {
+        PasswordKeyIvMode::Salt => key
+            .salt_value
+            .get(..key.block_size)
+            .ok_or_else(|| {
+                DecryptError::InvalidInfo("encryptedKey.saltValue shorter than blockSize".into())
+            })
+            .map(|iv| iv.to_vec()),
+        PasswordKeyIvMode::Derived => derive_iv(
+            &key.salt_value,
+            block_key,
+            key.block_size,
+            key.hash_algorithm,
+        )
+        .map_err(map_crypto_err("derive_iv")),
+    }
+}
+
 fn agile_decrypt_package_key(
     password: &str,
     info: &AgileEncryptionInfo,
@@ -310,122 +894,118 @@ fn agile_decrypt_package_key(
             formula_xlsx::offcrypto::AES_BLOCK_SIZE
         )));
     }
-    enum PasswordKeyIvDerivation {
-        SaltValue,
-        Derived,
-    }
+    
+    fn try_unwrap_key(
+        info: &AgileEncryptionInfo,
+        password_hash: &[u8],
+        key_encrypt_key_len: usize,
+        package_key_len: usize,
+        mode: PasswordKeyIvMode,
+    ) -> Result<Vec<u8>, DecryptError> {
+        let password_key = &info.password_key;
 
-    let decrypt_with_iv_derivation =
-        |iv_derivation: PasswordKeyIvDerivation| -> Result<Vec<u8>, DecryptError> {
-            let iv_for = |block_key: &[u8]| -> Result<Vec<u8>, DecryptError> {
-                match iv_derivation {
-                    PasswordKeyIvDerivation::SaltValue => Ok(password_key
-                        .salt_value
-                        .get(..password_key.block_size)
-                        .ok_or_else(|| {
-                            DecryptError::InvalidInfo(
-                                "encryptedKey.saltValue shorter than blockSize".into(),
-                            )
-                        })?
-                        .to_vec()),
-                    PasswordKeyIvDerivation::Derived => derive_iv(
-                        &password_key.salt_value,
-                        block_key,
-                        password_key.block_size,
-                        password_key.hash_algorithm,
-                    )
-                    .map_err(map_crypto_err("derive_iv(encryptedKey)")),
-                }
-            };
+        let verifier_input_iv = password_key_iv(password_key, mode, &VERIFIER_HASH_INPUT_BLOCK)?;
+        let verifier_value_iv = password_key_iv(password_key, mode, &VERIFIER_HASH_VALUE_BLOCK)?;
+        let key_value_iv = password_key_iv(password_key, mode, &KEY_VALUE_BLOCK)?;
 
-            let verifier_input = {
-                let k = derive_key(
-                    &password_hash,
-                    &VERIFIER_HASH_INPUT_BLOCK,
-                    key_encrypt_key_len,
-                    password_key.hash_algorithm,
-                )
-                .map_err(map_crypto_err("derive_key(verifierHashInput)"))?;
-                let iv = iv_for(&VERIFIER_HASH_INPUT_BLOCK)?;
-                let mut decrypted = password_key.encrypted_verifier_hash_input.clone();
-                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
+        let verifier_input = {
+            let k = derive_key(
+                password_hash,
+                &VERIFIER_HASH_INPUT_BLOCK,
+                key_encrypt_key_len,
+                password_key.hash_algorithm,
+            )
+            .map_err(map_crypto_err("derive_key(verifierHashInput)"))?;
+            let mut decrypted = password_key.encrypted_verifier_hash_input.clone();
+            decrypt_aes_cbc_no_padding_in_place(&k, &verifier_input_iv, &mut decrypted)
+                .map_err(|e| {
                     DecryptError::InvalidInfo(format!("decrypt verifierHashInput: {e}"))
                 })?;
-                decrypted
-                    .get(..password_key.block_size)
-                    .ok_or_else(|| {
-                        DecryptError::InvalidInfo(
-                            "decrypted verifierHashInput shorter than blockSize".into(),
-                        )
-                    })?
-                    .to_vec()
-            };
-
-            let verifier_hash = {
-                let k = derive_key(
-                    &password_hash,
-                    &VERIFIER_HASH_VALUE_BLOCK,
-                    key_encrypt_key_len,
-                    password_key.hash_algorithm,
-                )
-                .map_err(map_crypto_err("derive_key(verifierHashValue)"))?;
-                let iv = iv_for(&VERIFIER_HASH_VALUE_BLOCK)?;
-                let mut decrypted = password_key.encrypted_verifier_hash_value.clone();
-                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
-                    DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}"))
-                })?;
-                decrypted
-                    .get(..password_key.hash_size)
-                    .ok_or_else(|| {
-                        DecryptError::InvalidInfo(
-                            "decrypted verifierHashValue shorter than hashSize".into(),
-                        )
-                    })?
-                    .to_vec()
-            };
-
-            let expected_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
-            let expected_hash = expected_hash_full.get(..password_key.hash_size).ok_or_else(|| {
-                DecryptError::InvalidInfo("hash output shorter than hashSize".into())
-            })?;
-
-            if expected_hash != verifier_hash.as_slice() {
-                return Err(DecryptError::InvalidPassword);
-            }
-
-            let key_value = {
-                let k = derive_key(
-                    &password_hash,
-                    &KEY_VALUE_BLOCK,
-                    key_encrypt_key_len,
-                    password_key.hash_algorithm,
-                )
-                .map_err(map_crypto_err("derive_key(keyValue)"))?;
-                let iv = iv_for(&KEY_VALUE_BLOCK)?;
-                let mut decrypted = password_key.encrypted_key_value.clone();
-                decrypt_aes_cbc_no_padding_in_place(&k, &iv, &mut decrypted).map_err(|e| {
-                    DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}"))
-                })?;
-                decrypted
-                    .get(..package_key_len)
-                    .ok_or_else(|| {
-                        DecryptError::InvalidInfo(
-                            "decrypted keyValue shorter than keyData.keyBits".into(),
-                        )
-                    })?
-                    .to_vec()
-            };
-
-            Ok(key_value)
+            decrypted
+                .get(..password_key.block_size)
+                .ok_or_else(|| {
+                    DecryptError::InvalidInfo(
+                        "decrypted verifierHashInput shorter than blockSize".into(),
+                    )
+                })?
+                .to_vec()
         };
 
-    // Some producers vary how the AES-CBC IV is derived for the password-key-encryptor fields. Try
-    // both strategies, falling back when the verifier hash doesn't match.
-    let key_value = match decrypt_with_iv_derivation(PasswordKeyIvDerivation::SaltValue) {
-        Ok(key) => key,
-        Err(DecryptError::InvalidPassword) => {
-            decrypt_with_iv_derivation(PasswordKeyIvDerivation::Derived)?
+        let verifier_hash = {
+            let k = derive_key(
+                password_hash,
+                &VERIFIER_HASH_VALUE_BLOCK,
+                key_encrypt_key_len,
+                password_key.hash_algorithm,
+            )
+            .map_err(map_crypto_err("derive_key(verifierHashValue)"))?;
+            let mut decrypted = password_key.encrypted_verifier_hash_value.clone();
+            decrypt_aes_cbc_no_padding_in_place(&k, &verifier_value_iv, &mut decrypted)
+                .map_err(|e| {
+                    DecryptError::InvalidInfo(format!("decrypt verifierHashValue: {e}"))
+                })?;
+            decrypted
+                .get(..password_key.hash_size)
+                .ok_or_else(|| {
+                    DecryptError::InvalidInfo(
+                        "decrypted verifierHashValue shorter than hashSize".into(),
+                    )
+                })?
+                .to_vec()
+        };
+
+        let expected_hash_full = hash_bytes(password_key.hash_algorithm, &verifier_input);
+        let expected_hash = expected_hash_full
+            .get(..password_key.hash_size)
+            .ok_or_else(|| DecryptError::InvalidInfo("hash output shorter than hashSize".into()))?;
+
+        if expected_hash != verifier_hash.as_slice() {
+            return Err(DecryptError::InvalidPassword);
         }
+
+        let key_value = {
+            let k = derive_key(
+                password_hash,
+                &KEY_VALUE_BLOCK,
+                key_encrypt_key_len,
+                password_key.hash_algorithm,
+            )
+            .map_err(map_crypto_err("derive_key(keyValue)"))?;
+            let mut decrypted = password_key.encrypted_key_value.clone();
+            decrypt_aes_cbc_no_padding_in_place(&k, &key_value_iv, &mut decrypted)
+                .map_err(|e| {
+                    DecryptError::InvalidInfo(format!("decrypt encryptedKeyValue: {e}"))
+                })?;
+            decrypted
+                .get(..package_key_len)
+                .ok_or_else(|| {
+                    DecryptError::InvalidInfo(
+                        "decrypted keyValue shorter than keyData.keyBits".into(),
+                    )
+                })?
+                .to_vec()
+        };
+
+        Ok(key_value)
+    }
+
+    // Some producers (notably `msoffcrypto-tool`) derive the IV for verifier/keyValue fields via
+    // `derive_iv(saltValue, blockKey)` instead of using the raw saltValue.
+    let key_value = match try_unwrap_key(
+        info,
+        &password_hash,
+        key_encrypt_key_len,
+        package_key_len,
+        PasswordKeyIvMode::Salt,
+    ) {
+        Ok(k) => k,
+        Err(DecryptError::InvalidPassword) => try_unwrap_key(
+            info,
+            &password_hash,
+            key_encrypt_key_len,
+            package_key_len,
+            PasswordKeyIvMode::Derived,
+        )?,
         Err(other) => return Err(other),
     };
 

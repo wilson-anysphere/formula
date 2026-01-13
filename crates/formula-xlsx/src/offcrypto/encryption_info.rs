@@ -68,14 +68,22 @@ pub fn extract_encryption_info_xml<'a>(
     encryption_info_stream: &'a [u8],
     opts: &ParseOptions,
 ) -> Result<&'a [u8]> {
-    let xml = encryption_info_stream.get(8..).unwrap_or(&[]);
-    if xml.len() > opts.max_encryption_info_xml_len {
+    let xml_raw = encryption_info_stream.get(8..).unwrap_or(&[]);
+    if xml_raw.len() > opts.max_encryption_info_xml_len {
         return Err(OffCryptoError::EncryptionInfoTooLarge {
-            len: xml.len(),
+            len: xml_raw.len(),
             max: opts.max_encryption_info_xml_len,
         });
     }
-    Ok(xml)
+
+    // Some producers (notably `msoffcrypto-tool`) include trailing NUL bytes after the XML payload.
+    // XML 1.0 forbids the NUL character, so trim it here so downstream UTF-8 and XML parsers can
+    // consume otherwise valid descriptors.
+    let mut end = xml_raw.len();
+    while end > 0 && xml_raw[end - 1] == 0 {
+        end -= 1;
+    }
+    Ok(&xml_raw[..end])
 }
 
 fn trim_trailing_nul_bytes(mut bytes: &[u8]) -> &[u8] {

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["encrypted-workbooks"]
 # Keep Parquet support behind a feature so `formula-io` stays lightweight by default.
 parquet = ["dep:formula-columnar"]
 # Enable `formula-xlsx`'s optional VBA helpers (`formula-vba` + OpenSSL).

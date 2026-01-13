@@ -502,7 +502,17 @@ pub fn verify_password_standard(
     password: &str,
 ) -> Result<bool, OffcryptoError> {
     let key = derive_file_key_standard(info, password)?;
+    verify_password_standard_with_key(info, &key)
+}
 
+/// Verify a candidate Standard/CryptoAPI key against the `EncryptionVerifier` structure.
+///
+/// This is useful when callers need the derived key for subsequent decryption (e.g. decrypting the
+/// `EncryptedPackage` stream) and want to avoid running the 50,000-iteration password hash twice.
+pub(crate) fn verify_password_standard_with_key(
+    info: &StandardEncryptionInfo,
+    key: &[u8],
+) -> Result<bool, OffcryptoError> {
     // Decrypt the concatenated verifier blob (`encryptedVerifier` || `encryptedVerifierHash`) as a
     // single stream.
     let mut ciphertext = Vec::with_capacity(16 + info.verifier.encrypted_verifier_hash.len());
@@ -520,14 +530,14 @@ pub fn verify_password_standard(
             // Baseline MS-OFFCRYPTO Standard AES uses AES-ECB (no IV) for verifier fields.
             // Compatibility fallback: AES-CBC (no padding) with a derived IV if ECB does not verify.
             let mut ecb_plaintext = ciphertext.clone();
-            aes_ecb_decrypt_in_place(&key, &mut ecb_plaintext)?;
+            aes_ecb_decrypt_in_place(key, &mut ecb_plaintext)?;
             if verifier_hash_matches(info, &ecb_plaintext)? {
                 return Ok(true);
             }
 
             // Compatibility fallback: AES-CBC (no padding) with a derived IV.
             let iv = derive_standard_aes_iv(info)?;
-            decrypt_aes_cbc_no_padding_in_place(&key, &iv, &mut ciphertext).map_err(|err| {
+            decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut ciphertext).map_err(|err| {
                 let msg = match err {
                     AesCbcDecryptError::UnsupportedKeyLength(_) => "unsupported AES key length",
                     AesCbcDecryptError::InvalidIvLength(_) => "invalid AES IV length",
@@ -538,7 +548,7 @@ pub fn verify_password_standard(
             verifier_hash_matches(info, &ciphertext)
         }
         CALG_RC4 => {
-            rc4_apply_keystream(&key, &mut ciphertext)?;
+            rc4_apply_keystream(key, &mut ciphertext)?;
             verifier_hash_matches(info, &ciphertext)
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
@@ -601,9 +611,15 @@ fn aes_ecb_decrypt_in_place(key: &[u8], buf: &mut [u8]) -> Result<(), OffcryptoE
     }
 }
 
-fn derive_file_key_standard(
+/// Derive the Standard/CryptoAPI key material for a specific `block_index`.
+///
+/// - `block_index = 0` is used for the verifier and (in baseline Standard AES) for the
+///   `EncryptedPackage` stream.
+/// - Some non-standard producers appear to use different block indices for per-segment keys.
+pub(crate) fn derive_key_standard_for_block(
     info: &StandardEncryptionInfo,
     password: &str,
+    block_index: u32,
 ) -> Result<Vec<u8>, OffcryptoError> {
     let key_size_bits = info.header.key_size;
     if key_size_bits == 0 || key_size_bits % 8 != 0 {
@@ -614,27 +630,34 @@ fn derive_file_key_standard(
     let password_utf16le = utf16le_bytes(password);
     let h = hash_password_fixed_spin(&password_utf16le, &info.verifier.salt, info.header.alg_id_hash)?;
 
-    let block = 0u32.to_le_bytes();
-    let h_block0 = hash(info.header.alg_id_hash, &[&h, &block])?;
+    let block = block_index.to_le_bytes();
+    let h_block = hash(info.header.alg_id_hash, &[&h, &block])?;
 
     match info.header.alg_id {
         CALG_RC4 => {
-            if key_len > h_block0.len() {
+            if key_len > h_block.len() {
                 return Err(OffcryptoError::InvalidKeySize { key_size_bits });
             }
             // Standard RC4 key derivation truncates H_block0 directly. CryptoAPI/Office represent a
             // "40-bit" RC4 key as a padded 16-byte key (high 88 bits zero).
-            let mut key = h_block0[..key_len].to_vec();
+            let mut key = h_block[..key_len].to_vec();
             if key_len == 5 {
                 key.resize(16, 0);
             }
             Ok(key)
         }
         CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {
-            crypt_derive_key(&h_block0, key_len, info.header.alg_id_hash)
+            crypt_derive_key(&h_block, key_len, info.header.alg_id_hash)
         }
         other => Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
     }
+}
+
+pub(crate) fn derive_file_key_standard(
+    info: &StandardEncryptionInfo,
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    derive_key_standard_for_block(info, password, 0)
 }
 
 fn derive_standard_aes_iv(info: &StandardEncryptionInfo) -> Result<[u8; AES_BLOCK_SIZE], OffcryptoError> {

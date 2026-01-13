@@ -1553,6 +1553,12 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
                 path: path.to_path_buf(),
             });
         }
+        if zip_contains_workbook_bin(package_bytes) {
+            return Err(Error::UnsupportedEncryptedWorkbookKind {
+                path: path.to_path_buf(),
+                kind: "xlsb",
+            });
+        }
         return Ok(Some(package_bytes.to_vec()));
     }
 
@@ -1859,6 +1865,7 @@ fn try_decrypt_ooxml_encrypted_package_from_path(
     Ok(Some(decrypted))
 }
 
+#[cfg(feature = "encrypted-workbooks")]
 fn sniff_ooxml_zip_workbook_kind(decrypted_bytes: &[u8]) -> Option<WorkbookFormat> {
     let archive = zip::ZipArchive::new(std::io::Cursor::new(decrypted_bytes)).ok()?;
 
