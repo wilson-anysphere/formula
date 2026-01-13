@@ -692,6 +692,50 @@ async function verifyUpdaterPlatformAssetSignatures({ manifest, assetsByName, to
   console.log("Verified updater asset signatures.");
 }
 
+/**
+ * Verify that `latest.json.sig` matches `latest.json` under the updater public key embedded in
+ * `apps/desktop/src-tauri/tauri.conf.json` (`plugins.updater.pubkey`).
+ *
+ * @param {Buffer} latestJsonBytes
+ * @param {string} latestSigText
+ * @param {string} updaterPubkeyBase64
+ */
+function verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, updaterPubkeyBase64) {
+  let pubkey;
+  try {
+    pubkey = parseTauriUpdaterPubkey(updaterPubkeyBase64);
+  } catch (err) {
+    throw new ActionableError(`Invalid updater public key (plugins.updater.pubkey).`, [
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
+
+  let signature;
+  try {
+    signature = parseTauriUpdaterSignature(latestSigText, "latest.json.sig");
+  } catch (err) {
+    throw new ActionableError(`Invalid updater manifest signature file (latest.json.sig).`, [
+      err instanceof Error ? err.message : String(err),
+    ]);
+  }
+
+  if (signature.keyId && pubkey.keyId && signature.keyId !== pubkey.keyId) {
+    throw new ActionableError(`Updater manifest signature key id mismatch.`, [
+      `latest.json.sig key id: ${signature.keyId}`,
+      `plugins.updater.pubkey key id: ${pubkey.keyId}`,
+    ]);
+  }
+
+  const publicKey = ed25519PublicKeyFromRaw(pubkey.publicKeyBytes);
+  const ok = verify(null, latestJsonBytes, publicKey, signature.signatureBytes);
+  if (!ok) {
+    throw new ActionableError(`Updater manifest signature mismatch.`, [
+      `latest.json.sig does not verify latest.json with the configured updater public key.`,
+      `This typically means latest.json and latest.json.sig were uploaded/generated inconsistently (race/overwrite), or TAURI_PRIVATE_KEY does not match plugins.updater.pubkey.`,
+    ]);
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -737,10 +781,7 @@ async function main() {
     config?.plugins?.updater?.pubkey,
     `${tauriConfigRelativePath} → plugins.updater.pubkey`
   );
-  if (
-    updaterPubkeyBase64 === PLACEHOLDER_PUBKEY ||
-    updaterPubkeyBase64.includes("REPLACE_WITH")
-  ) {
+  if (updaterPubkeyBase64 === PLACEHOLDER_PUBKEY || updaterPubkeyBase64.includes("REPLACE_WITH")) {
     throw new ActionableError(`Invalid updater public key (placeholder).`, [
       `Expected ${tauriConfigRelativePath} → plugins.updater.pubkey to be the real updater public key (base64).`,
     ]);
@@ -863,7 +904,6 @@ async function main() {
           `This usually means the manifest/signature were generated with a different key, or assets were tampered with.`,
         ]);
       }
-
       validateLatestJson(manifest, expectedVersion, assetsByName);
 
       // If we get here, manifest + asset cross-check has passed.
@@ -967,5 +1007,6 @@ export {
   findPlatformsObject,
   isPrimaryBundleAssetName,
   normalizeVersion,
+  verifyUpdaterManifestSignature,
   validateLatestJson,
 };

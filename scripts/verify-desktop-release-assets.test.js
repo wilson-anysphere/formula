@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import test from "node:test";
 import {
   ActionableError,
   filenameFromUrl,
   validateLatestJson,
+  verifyUpdaterManifestSignature,
 } from "./verify-desktop-release-assets.mjs";
 
 function assetMap(names) {
@@ -161,5 +163,47 @@ test("validateLatestJson fails when both inline signature and sibling .sig are m
   assert.throws(
     () => validateLatestJson(manifest, "0.1.0", assets),
     (err) => err instanceof ActionableError && err.message.includes("missing a non-empty \"signature\""),
+  );
+});
+
+test("verifyUpdaterManifestSignature verifies latest.json.sig against latest.json with minisign pubkey", () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }) + "\n", "utf8");
+  const signature = crypto.sign(null, latestJsonBytes, privateKey);
+  const latestSigText = `${signature.toString("base64")}\n`;
+
+  // Build a Tauri/minisign pubkey string: base64(minisign text block).
+  const spki = /** @type {Buffer} */ (publicKey.export({ format: "der", type: "spki" }));
+  const rawPubkey = spki.subarray(spki.length - 32);
+  const keyIdLe = Buffer.from("0102030405060708", "hex");
+  const keyIdHex = Buffer.from(keyIdLe).reverse().toString("hex").toUpperCase();
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), keyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${keyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  assert.doesNotThrow(() => verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, pubkeyBase64));
+});
+
+test("verifyUpdaterManifestSignature fails on key id mismatch (minisign payload)", () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const latestJsonBytes = Buffer.from(JSON.stringify({ version: "0.1.0", platforms: {} }) + "\n", "utf8");
+  const signature = crypto.sign(null, latestJsonBytes, privateKey);
+
+  const spki = /** @type {Buffer} */ (publicKey.export({ format: "der", type: "spki" }));
+  const rawPubkey = spki.subarray(spki.length - 32);
+
+  const pubKeyIdLe = Buffer.from("0102030405060708", "hex");
+  const pubKeyIdHex = Buffer.from(pubKeyIdLe).reverse().toString("hex").toUpperCase();
+  const pubPayload = Buffer.concat([Buffer.from([0x45, 0x64]), pubKeyIdLe, rawPubkey]);
+  const pubkeyText = `untrusted comment: minisign public key: ${pubKeyIdHex}\n${pubPayload.toString("base64")}\n`;
+  const pubkeyBase64 = Buffer.from(pubkeyText, "utf8").toString("base64");
+
+  const sigKeyIdLe = Buffer.from("1111111111111111", "hex");
+  const minisignSigPayload = Buffer.concat([Buffer.from([0x45, 0x64]), sigKeyIdLe, Buffer.from(signature)]);
+  const latestSigText = `${minisignSigPayload.toString("base64")}\n`;
+
+  assert.throws(
+    () => verifyUpdaterManifestSignature(latestJsonBytes, latestSigText, pubkeyBase64),
+    (err) => err instanceof ActionableError && /key id mismatch/i.test(err.message),
   );
 });
