@@ -537,10 +537,11 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
       type: "object",
       properties: {
         source_range: { type: "string" },
-        rows: { type: "array", items: { type: "string" } },
+        rows: { type: "array", items: { type: "string" }, minItems: 1 },
         columns: { type: "array", items: { type: "string" } },
         values: {
           type: "array",
+          minItems: 1,
           items: {
             type: "object",
             properties: {
@@ -585,6 +586,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
         range: { type: "string" },
         sort_by: {
           type: "array",
+          minItems: 1,
           items: {
             type: "object",
             properties: {
@@ -609,6 +611,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
         range: { type: "string" },
         criteria: {
           type: "array",
+          minItems: 1,
           items: {
             oneOf: [
               {
