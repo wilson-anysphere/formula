@@ -47,6 +47,55 @@ test("Typing = suggests starter functions like SUM(", async () => {
   );
 });
 
+test("TabCompletionEngine supports async parsePartialFormula overrides", async () => {
+  const engine = new TabCompletionEngine({
+    // Simulate a worker/WASM-backed partial parser that is async.
+    parsePartialFormula: async (input) => {
+      if (input !== "=VLO") return { isFormula: false, inFunctionCall: false };
+      return {
+        isFormula: true,
+        inFunctionCall: false,
+        functionNamePrefix: { text: "VLO", start: 1, end: 4 },
+      };
+    },
+  });
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=VLO",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP("),
+    `Expected async parser to yield VLOOKUP suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("TabCompletionEngine falls back when async parsePartialFormula throws", async () => {
+  let calls = 0;
+  const engine = new TabCompletionEngine({
+    parsePartialFormula: async () => {
+      calls += 1;
+      throw new Error("parser unavailable");
+    },
+  });
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=VLO",
+    cursorPosition: 4,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.equal(calls, 1);
+  assert.ok(
+    suggestions.some((s) => s.text === "=VLOOKUP("),
+    `Expected fallback parser to yield VLOOKUP suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =<space> suggests starter functions (pure insertion)", async () => {
   const engine = new TabCompletionEngine();
 
