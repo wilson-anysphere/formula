@@ -930,8 +930,9 @@ impl DataModel {
         // other calculated columns in the same table).
         let table_name = table.clone();
         if let Err(err) = self.refresh_calculated_column_order(&table_name) {
-            // Roll back the definition; the physical column was already added, but calculated
-            // columns are only supported for in-memory tables so we can remove the last column.
+            // Roll back the definition. The physical column was already added; for in-memory
+            // tables we can also remove the last column, but columnar tables do not currently
+            // support removing columns.
             self.calculated_columns.pop();
             if let Some(table_mut) = self.tables.get_mut(&table_name) {
                 let _ = table_mut.pop_last_column();
@@ -1315,6 +1316,16 @@ impl DataModel {
         out: &mut HashSet<String>,
     ) {
         match expr {
+            Expr::Let { bindings, body } => {
+                for (_, binding_expr) in bindings {
+                    self.collect_same_table_column_dependencies_inner(
+                        binding_expr,
+                        current_table,
+                        out,
+                    );
+                }
+                self.collect_same_table_column_dependencies_inner(body, current_table, out);
+            }
             Expr::ColumnRef { table, column } => {
                 if table == current_table {
                     out.insert(column.clone());
