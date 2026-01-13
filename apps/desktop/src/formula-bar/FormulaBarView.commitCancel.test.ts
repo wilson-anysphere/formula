@@ -698,6 +698,31 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("cancels cleanly even when onCancel is not provided", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+    view.setActiveCell({ address: "A1", input: "original", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    view.textarea.dispatchEvent(e);
+
+    expect(e.defaultPrevented).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("original");
+    expect(view.textarea.value).toBe("original");
+
+    host.remove();
+  });
+
   it("commits/cancels via ✓/✕ buttons with the same behavior as Enter/Escape", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
