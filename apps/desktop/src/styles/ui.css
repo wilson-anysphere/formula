@@ -378,15 +378,7 @@
 
 .formula-bar-function-autocomplete-name {
   font-weight: 600;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -397,15 +389,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .formula-bar-function-autocomplete-item[aria-selected="true"] .formula-bar-function-autocomplete-signature,
