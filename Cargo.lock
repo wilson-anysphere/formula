@@ -8954,6 +8954,7 @@ dependencies = [
  "anyhow",
  "cfb 0.10.0",
  "clap",
+ "formula-office-crypto",
  "formula-xlsx",
  "globset",
  "ms-offcrypto-writer",

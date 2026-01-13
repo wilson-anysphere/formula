@@ -39,15 +39,26 @@ pub(crate) fn parse_encryption_info_header(
     // MS-OFFCRYPTO / ECMA-376 identifies "Standard" encryption via `versionMinor == 2`, but
     // real-world files vary `versionMajor` across Office generations (2/3/4).
     //
-    // Agile encryption is signaled by (4,4) and stores the XML descriptor directly after the
-    // version header (no `headerSize` field).
+    // "Extensible" encryption uses `versionMinor == 3` with `versionMajor` 3 or 4.
     match (version_major, version_minor) {
         (4, 4) => {
-            let header_offset = 8usize;
-            let xml_len = bytes.len().saturating_sub(header_offset);
-            let header_size = u32::try_from(xml_len).map_err(|_| {
-                OfficeCryptoError::InvalidFormat("EncryptionInfo XML too large".to_string())
-            })?;
+            // Agile (XML) EncryptionInfo.
+            //
+            // Some producers include a 4-byte XML length prefix after the 8-byte
+            // `EncryptionVersionInfo` header. Others store the XML document directly starting at
+            // byte offset 8. Accept both forms.
+            let (header_offset, header_size) = if bytes.len() >= 12 {
+                let candidate = read_u32_le(bytes, 8)?;
+                let available = bytes.len().saturating_sub(12);
+                if (candidate as usize) <= available {
+                    (12usize, candidate)
+                } else {
+                    (8usize, bytes.len().saturating_sub(8) as u32)
+                }
+            } else {
+                (8usize, bytes.len().saturating_sub(8) as u32)
+            };
+
             Ok(EncryptionInfoHeader {
                 version_major,
                 version_minor,

@@ -391,6 +391,8 @@ fn agile_encrypt_with_block_key(
     plaintext: &[u8],
 ) -> Vec<u8> {
     let key = agile_derive_key_sha512(salt, password_utf16le, spin_count, key_bits, block_key);
+    // The password key-encryptor fields use `saltValue` as the IV (truncated to blockSize),
+    // unlike `EncryptedPackage` segment IVs which are derived from `keyData/@saltValue`.
     let iv = &salt[..block_size];
 
     // plaintext must be multiple of 16 for NoPadding.
