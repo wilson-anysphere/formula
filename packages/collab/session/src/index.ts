@@ -2590,13 +2590,22 @@ export async function bindCollabSessionToDocumentController(options: {
    */
   maskCellFormat?: boolean;
   /**
+   * Called when the underlying binder rejects a local edit (permissions, missing encryption key, etc).
+   *
+   * The binder will revert the local `DocumentController` state to keep it consistent with the shared
+   * Yjs document; this hook allows UIs to surface a user-facing message instead of silently "snapping
+   * back".
+   */
+  onEditRejected?: (rejected: any[]) => void;
+  /**
    * Opt-in binder write semantics needed for `FormulaConflictMonitor` to reliably
    * detect true offline/concurrent conflicts when edits flow through the desktop
    * UI path (DocumentController → binder → Yjs).
    */
   formulaConflictsMode?: "off" | "formula" | "formula+value";
 }): Promise<DocumentControllerBinder> {
-  const { session, documentController, undoService, defaultSheetId, userId, maskCellFormat, formulaConflictsMode } = options ?? ({} as any);
+  const { session, documentController, undoService, defaultSheetId, userId, maskCellFormat, onEditRejected, formulaConflictsMode } =
+    options ?? ({} as any);
   if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
   if (!documentController)
     throw new Error("bindCollabSessionToDocumentController requires { documentController }");
@@ -2657,6 +2666,7 @@ export async function bindCollabSessionToDocumentController(options: {
     // encrypted cells that cannot be decrypted.
     maskCellValue: (value) => maskCellValue(value),
     maskCellFormat,
+    onEditRejected,
     formulaConflictsMode,
   }) as DocumentControllerBinder;
 }

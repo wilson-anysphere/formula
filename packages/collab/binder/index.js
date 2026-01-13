@@ -2542,7 +2542,11 @@ export function bindYjsToDocumentController(options) {
       if (allowedByPermissions && allowedByEncryption) {
         allowed.push(delta);
       } else {
-        rejected.push(delta);
+        rejected.push({
+          ...delta,
+          rejectionKind: "cell",
+          rejectionReason: !allowedByPermissions ? "permission" : !allowedByEncryption ? "encryption" : "unknown",
+        });
         if (!allowedByEncryption) {
           console.warn(
             "bindYjsToDocumentController: refused edit to encrypted cell (missing key or encryption required)",
@@ -2563,7 +2567,7 @@ export function bindYjsToDocumentController(options) {
       if (canEditFormatDelta(delta)) {
         allowedFormatDeltas.push(delta);
       } else {
-        rejected.push(delta);
+        rejected.push({ ...delta, rejectionKind: "format", rejectionReason: "permission" });
         const inv = {
           sheetId: delta.sheetId,
           layer: delta.layer,
@@ -2579,7 +2583,7 @@ export function bindYjsToDocumentController(options) {
       if (canEditRangeRunDelta(delta)) {
         allowedRangeRunDeltas.push(delta);
       } else {
-        rejected.push(delta);
+        rejected.push({ ...delta, rejectionKind: "rangeRun", rejectionReason: "permission" });
         deniedInverseRangeRuns.push({
           sheetId: delta.sheetId,
           col: delta.col,

@@ -94,6 +94,7 @@ import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sh
 import { resolveDevCollabEncryptionFromSearch } from "../collab/devEncryption.js";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
 import { loadCollabToken, storeCollabToken } from "../sharing/collabTokenStore.js";
+import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
@@ -1036,6 +1037,10 @@ export class SpreadsheetApp {
         undoService,
         defaultSheetId: this.sheetId,
         userId: sessionPermissions.userId,
+        userId: sessionPermissions.userId,
+        onEditRejected: (rejected) => {
+          showCollabEditRejectedToast(rejected);
+        },
         // Opt into binder write semantics required for reliable causal conflict detection.
         // (E.g. represent clears as explicit `formula=null` markers so FormulaConflictMonitor
         // can reason about delete-vs-overwrite concurrency deterministically.)

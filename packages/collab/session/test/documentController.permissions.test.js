@@ -354,3 +354,63 @@ test("CollabSession↔DocumentController binder normalizes formula text (trimmin
   session.destroy();
   doc.destroy();
 });
+
+test("bindCollabSessionToDocumentController forwards onEditRejected (permission rejection)", async () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc });
+  session.setPermissions({
+    role: "editor",
+    userId: "u-b",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        // Anyone can read, but only "other-user" can edit.
+        readAllowlist: [],
+        editAllowlist: ["other-user"],
+      },
+    ],
+  });
+
+  const dc = new DocumentController();
+
+  /** @type {any[] | null} */
+  let rejected = null;
+  const binder = await bindCollabSessionToDocumentController({
+    session,
+    documentController: dc,
+    onEditRejected: (deltas) => {
+      rejected = deltas;
+    },
+  });
+
+  const before = dc.getCell("Sheet1", "A1");
+  // Bypass DocumentController.canEditCell (simulates a buggy caller / special edit path).
+  dc.applyExternalDeltas(
+    [
+      {
+        sheetId: "Sheet1",
+        row: 0,
+        col: 0,
+        before,
+        after: { value: "hacked", formula: null, styleId: before.styleId },
+      },
+    ],
+    { recalc: false },
+  );
+
+  assert.ok(Array.isArray(rejected), "expected onEditRejected to be called");
+  assert.equal(rejected?.length, 1);
+  assert.equal(rejected?.[0]?.sheetId, "Sheet1");
+  assert.equal(rejected?.[0]?.row, 0);
+  assert.equal(rejected?.[0]?.col, 0);
+  // Binder annotates the rejection cause so UIs can differentiate permission vs encryption failures.
+  assert.equal(rejected?.[0]?.rejectionReason, "permission");
+
+  binder.destroy();
+  session.destroy();
+  doc.destroy();
+});
