@@ -8,7 +8,21 @@ cd "$repo_root"
 # Optional overrides for CI/debugging.
 # - FORMULA_APPIMAGE_MAIN_BINARY: expected basename of the main binary under `squashfs-root/usr/bin/`
 # - FORMULA_EXPECTED_ELF_MACHINE_SUBSTRING: expected substring from `readelf -h` "Machine:" line
-: "${FORMULA_APPIMAGE_MAIN_BINARY:=formula-desktop}"
+if [ -z "${FORMULA_APPIMAGE_MAIN_BINARY:-}" ]; then
+  # Keep this in sync with apps/desktop/src-tauri/tauri.conf.json `mainBinaryName`.
+  # Prefer reading it dynamically so the smoke test doesn't silently drift if the binary is renamed.
+  if [ -f "apps/desktop/src-tauri/tauri.conf.json" ] && command -v python3 >/dev/null 2>&1; then
+    FORMULA_APPIMAGE_MAIN_BINARY="$(
+      python3 - <<'PY' 2>/dev/null || true
+import json
+with open("apps/desktop/src-tauri/tauri.conf.json", "r", encoding="utf-8") as f:
+    conf = json.load(f)
+print(conf.get("mainBinaryName", ""))
+PY
+    )"
+  fi
+  : "${FORMULA_APPIMAGE_MAIN_BINARY:=formula-desktop}"
+fi
 
 ##
 # CI smoke test for produced Linux AppImage artifacts.
@@ -281,7 +295,7 @@ main() {
 
     chmod +x "$appimage"
 
-    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path
+    local appimage_abs tmp squashfs_root main_bin appdir_ld_library_path ld_library_path
     appimage_abs="$(realpath "$appimage")"
     tmp="$(mktemp -d)"
     # shellcheck disable=SC2064
@@ -323,11 +337,20 @@ main() {
     # Shared library dependency check.
     appdir_ld_library_path="$(build_appdir_ld_library_path "$squashfs_root")"
     if [ -n "$appdir_ld_library_path" ]; then
-      echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
+    echo "Using AppImage LD_LIBRARY_PATH for ldd: $appdir_ld_library_path"
+  fi
+
+    ld_library_path="${LD_LIBRARY_PATH:-}"
+    if [ -n "$appdir_ld_library_path" ]; then
+      if [ -n "$ld_library_path" ]; then
+        ld_library_path="$appdir_ld_library_path:$ld_library_path"
+      else
+        ld_library_path="$appdir_ld_library_path"
+      fi
     fi
 
     set +e
-    ldd_out="$(LD_LIBRARY_PATH="${appdir_ld_library_path}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$main_bin" 2>&1)"
+    ldd_out="$(LD_LIBRARY_PATH="$ld_library_path" ldd "$main_bin" 2>&1)"
     ldd_status=$?
     set -e
 
