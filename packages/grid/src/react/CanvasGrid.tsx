@@ -411,6 +411,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   };
 
   const headersControlled = props.headerRows !== undefined || props.headerCols !== undefined;
+  const headersControlledRef = useRef(headersControlled);
+  headersControlledRef.current = headersControlled;
   const headerRows = sanitizeHeaderCount(props.headerRows, props.rowCount);
   const headerCols = sanitizeHeaderCount(props.headerCols, props.colCount);
   const headerRowsRef = useRef(headerRows);
@@ -1114,8 +1116,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const colAxis = renderer.scroll.cols;
       const rowAxis = renderer.scroll.rows;
 
-      const effectiveHeaderRows = headersControlled ? headerRowsRef.current : viewport.frozenRows > 0 ? 1 : 0;
-      const effectiveHeaderCols = headersControlled ? headerColsRef.current : viewport.frozenCols > 0 ? 1 : 0;
+      const headersAreControlled = headersControlledRef.current;
+      const effectiveHeaderRows = headersAreControlled ? headerRowsRef.current : viewport.frozenRows > 0 ? 1 : 0;
+      const effectiveHeaderCols = headersAreControlled ? headerColsRef.current : viewport.frozenCols > 0 ? 1 : 0;
 
       const headerRowsFrozen = Math.min(effectiveHeaderRows, viewport.frozenRows);
       const headerColsFrozen = Math.min(effectiveHeaderCols, viewport.frozenCols);

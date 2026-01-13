@@ -136,5 +136,64 @@ describe("CanvasGrid resize hit testing", () => {
     });
     host.remove();
   });
-});
 
+  it("updates resize hit testing when headers become controlled", async () => {
+    const provider: CellProvider = { getCell: () => null };
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={provider}
+          rowCount={100}
+          colCount={100}
+          frozenRows={3}
+          frozenCols={3}
+          defaultRowHeight={20}
+          defaultColWidth={50}
+          enableResize
+        />
+      );
+    });
+
+    const selectionCanvas = host.querySelector('[data-testid="canvas-grid-selection"]') as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    // Uncontrolled headers use legacy behavior: treat the first frozen row/col as headers.
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { clientX: 100, clientY: 30, pointerId: 1 }));
+    });
+    expect(selectionCanvas.style.cursor).toBe("default");
+
+    // Switch to controlled headers; now the second header row should also be resize-active.
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={provider}
+          rowCount={100}
+          colCount={100}
+          headerRows={2}
+          headerCols={1}
+          frozenRows={3}
+          frozenCols={3}
+          defaultRowHeight={20}
+          defaultColWidth={50}
+          enableResize
+        />
+      );
+    });
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { clientX: 100, clientY: 30, pointerId: 1 }));
+    });
+    expect(selectionCanvas.style.cursor).toBe("col-resize");
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+});
