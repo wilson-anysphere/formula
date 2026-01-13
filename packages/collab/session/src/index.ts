@@ -20,7 +20,7 @@ import {
 } from "@formula/collab-encryption";
 import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
 
-import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
+import { assertValidRole, getCellPermissions, maskCellValue, normalizeRestriction } from "../../permissions/index.js";
 import {
   makeCellKey as makeCellKeyImpl,
   normalizeCellKey as normalizeCellKeyImpl,
@@ -351,7 +351,7 @@ export interface CellAddress {
 
 export interface SessionPermissions {
   role: DocumentRole;
-  rangeRestrictions: unknown[];
+  rangeRestrictions?: unknown[];
   userId: string | null;
 }
 
@@ -1487,9 +1487,28 @@ export class CollabSession {
 
   setPermissions(permissions: SessionPermissions): void {
     assertValidRole(permissions.role);
+
+    let normalizedRestrictions: unknown[] = [];
+    const rawRestrictions = permissions.rangeRestrictions;
+    if (rawRestrictions !== undefined && rawRestrictions !== null) {
+      if (!Array.isArray(rawRestrictions)) {
+        throw new Error("rangeRestrictions must be an array");
+      }
+
+      normalizedRestrictions = [];
+      for (let i = 0; i < rawRestrictions.length; i += 1) {
+        try {
+          normalizedRestrictions.push(normalizeRestriction(rawRestrictions[i] as any));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`rangeRestrictions[${i}] invalid: ${message}`);
+        }
+      }
+    }
+
     this.permissions = {
       role: permissions.role,
-      rangeRestrictions: Array.isArray(permissions.rangeRestrictions) ? permissions.rangeRestrictions : [],
+      rangeRestrictions: normalizedRestrictions,
       userId: permissions.userId ?? null,
     };
   }

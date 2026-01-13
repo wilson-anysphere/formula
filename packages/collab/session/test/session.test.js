@@ -65,6 +65,67 @@ test("CollabSession permissions gate reads/writes + mask unreadable values (API 
   assert.equal(session.cells.has("Sheet1:0:0"), false);
 });
 
+test("CollabSession.setPermissions validates rangeRestrictions eagerly", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+
+  assert.throws(
+    () => {
+      session.setPermissions({
+        role: "editor",
+        userId: "u-editor",
+        rangeRestrictions: [
+          {
+            sheetName: "Sheet1",
+            startRow: 0,
+            startCol: 0,
+            endRow: 0,
+            endCol: 0,
+            // Invalid: should be an array.
+            readAllowlist: "u-owner",
+          },
+        ],
+      });
+    },
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.match(err.message, /rangeRestrictions\[0\] invalid:/);
+      assert.match(err.message, /restriction\.readAllowlist must be an array when provided/);
+      return true;
+    },
+  );
+});
+
+test("CollabSession.setPermissions stores normalized rangeRestrictions (sheetName → range.sheetId)", () => {
+  const session = createCollabSession({ doc: new Y.Doc() });
+
+  session.setPermissions({
+    role: "editor",
+    userId: "u-editor",
+    rangeRestrictions: [
+      {
+        sheetName: "Sheet1",
+        startRow: 0,
+        startCol: 0,
+        endRow: 0,
+        endCol: 0,
+        readAllowlist: [],
+        editAllowlist: [],
+      },
+    ],
+  });
+
+  const stored = session.permissions?.rangeRestrictions ?? null;
+  assert.ok(Array.isArray(stored));
+  assert.equal(stored.length, 1);
+  const restriction = stored[0];
+  assert.ok(restriction && typeof restriction === "object");
+  assert.ok(restriction.range && typeof restriction.range === "object");
+  assert.equal(restriction.range.sheetId, "Sheet1");
+  // Ensure we didn't store the flattened input shape.
+  assert.equal(restriction.startRow, undefined);
+  assert.equal(restriction.sheetName, undefined);
+});
+
 test("CollabSession integration: sync + presence (in-memory)", async () => {
   const doc1 = new Y.Doc();
   const doc2 = new Y.Doc();
