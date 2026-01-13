@@ -529,7 +529,7 @@
   align-items: baseline;
   padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   color: var(--text-secondary);
 }
@@ -561,7 +561,7 @@
   font-weight: 700;
   background: var(--accent-bg);
   padding: 0 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: inset 0 -2px 0 0 var(--accent);
 }
 

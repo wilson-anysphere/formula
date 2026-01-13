@@ -84,11 +84,15 @@ test("panelBodyRenderer.tsx avoids inline styles (class-driven panel mounts)", (
     );
   }
 
-  const versionHistorySection = versionHistorySource;
   assert.equal(
-    /\bstyle=\{\{/.test(versionHistorySection),
+    /\bstyle=\{\{/.test(versionHistorySource),
     false,
     "CollabVersionHistoryPanel should not use React inline styles; use CSS classes in workspace.css instead",
+  );
+  assert.equal(
+    /\.style\./.test(versionHistorySource),
+    false,
+    "CollabVersionHistoryPanel should not assign DOM inline styles via `.style.*`; use CSS classes instead",
   );
 
   const branchManagerSection = branchManagerSource;
