@@ -1,0 +1,360 @@
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { createInterface, type Interface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
+
+export type StartupMetrics = {
+  windowVisibleMs: number;
+  webviewLoadedMs: number | null;
+  ttiMs: number;
+};
+
+// Ensure paths are rooted at repo root even when invoked from elsewhere.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+
+const perfHome = resolve(repoRoot, 'target', 'perf-home');
+const perfTmp = resolve(perfHome, 'tmp');
+const perfXdgConfig = resolve(perfHome, '.config');
+const perfXdgCache = resolve(perfHome, '.cache');
+const perfXdgState = resolve(perfHome, '.local', 'state');
+const perfXdgData = resolve(perfHome, '.local', 'share');
+const perfAppData = resolve(perfHome, 'AppData', 'Roaming');
+const perfLocalAppData = resolve(perfHome, 'AppData', 'Local');
+
+export function defaultDesktopBinPath(): string | null {
+  const exe = process.platform === 'win32' ? 'formula-desktop.exe' : 'formula-desktop';
+  const candidates = [
+    // Cargo workspace default target dir (most common).
+    resolve(repoRoot, 'target', 'release', exe),
+    resolve(repoRoot, 'target', 'debug', exe),
+    // Fallbacks in case a caller built with a custom target dir rooted under the app.
+    resolve(repoRoot, 'apps/desktop/src-tauri/target', 'release', exe),
+    resolve(repoRoot, 'apps/desktop/src-tauri/target', 'debug', exe),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+export function shouldUseXvfb(): boolean {
+  if (process.platform !== 'linux') return false;
+  const xvfb = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
+  if (!existsSync(xvfb)) return false;
+
+  // In CI/headless environments it is common for $DISPLAY to be set but unusable.
+  // `xvfb-run-safe.sh` is conservative about trusting DISPLAY, so prefer it in CI.
+  if (process.env.CI) return true;
+
+  // If DISPLAY is unset, we need Xvfb.
+  if (!process.env.DISPLAY || process.env.DISPLAY.trim() === '') return true;
+  return false;
+}
+
+export function mean(values: number[]): number {
+  return values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/**
+ * Percentile over a sorted array.
+ *
+ * Matches the implementation used by `apps/desktop/tests/performance/benchmark.ts`.
+ */
+export function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.floor(sorted.length * p);
+  return sorted[Math.min(idx, sorted.length - 1)]!;
+}
+
+export function median(sorted: number[]): number {
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+
+export function stdDev(values: number[], avg: number): number {
+  const variance = values.reduce((sum, x) => sum + Math.pow(x - avg, 2), 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+export function parseStartupLine(line: string): StartupMetrics | null {
+  // Example:
+  // [startup] window_visible_ms=123 webview_loaded_ms=234 tti_ms=456
+  const trimmed = line.trim();
+  const idx = trimmed.indexOf('[startup]');
+  if (idx === -1) return null;
+
+  const payload = trimmed.slice(idx + '[startup]'.length).trim();
+  if (payload.length === 0) return null;
+
+  const entries = payload.split(/\s+/);
+  const kv: Record<string, string> = {};
+  for (const entry of entries) {
+    const eq = entry.indexOf('=');
+    if (eq <= 0) continue;
+    const k = entry.slice(0, eq);
+    const v = entry.slice(eq + 1);
+    if (!k || !v) continue;
+    kv[k] = v;
+  }
+
+  const windowVisibleRaw = kv['window_visible_ms'];
+  const ttiRaw = kv['tti_ms'];
+  if (!windowVisibleRaw || !ttiRaw) return null;
+
+  const windowVisibleMs = Number(windowVisibleRaw);
+  const ttiMs = Number(ttiRaw);
+  if (!Number.isFinite(windowVisibleMs) || !Number.isFinite(ttiMs)) return null;
+
+  const webviewLoadedRaw = kv['webview_loaded_ms'];
+  const webviewLoadedMs =
+    !webviewLoadedRaw || webviewLoadedRaw === 'n/a' ? null : Number(webviewLoadedRaw);
+  if (webviewLoadedMs !== null && !Number.isFinite(webviewLoadedMs)) return null;
+
+  return { windowVisibleMs, webviewLoadedMs, ttiMs };
+}
+
+type RunOnceOptions = {
+  binPath: string;
+  timeoutMs: number;
+  envOverrides?: NodeJS.ProcessEnv;
+};
+
+function mergeEnvParts(parts: Array<NodeJS.ProcessEnv | undefined>): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const part of parts) {
+    if (!part) continue;
+    for (const [k, v] of Object.entries(part)) {
+      if (v === undefined) {
+        // Allow overrides to delete inherited vars (useful for ensuring isolation).
+        delete out[k];
+        continue;
+      }
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function forceKill(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    } catch {
+      // Fall through to best-effort `child.kill()`.
+    }
+  }
+
+  try {
+    if (process.platform !== 'win32') {
+      // We spawn with `detached: true`, so the child is the process group leader.
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // `SIGKILL` isn't supported on all platforms (e.g. Windows).
+    try {
+      child.kill();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function terminate(child: ChildProcess): void {
+  if (!child.pid) return;
+  if (process.platform !== 'win32') {
+    try {
+      // We spawn with `detached: true`, so the child is the process group leader.
+      process.kill(-child.pid, 'SIGTERM');
+      return;
+    } catch {
+      // ignore
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    // ignore
+  }
+}
+
+function closeReadline(rl: Interface | null): void {
+  if (!rl) return;
+  try {
+    rl.close();
+  } catch {
+    // ignore
+  }
+}
+
+export async function runOnce({ binPath, timeoutMs, envOverrides }: RunOnceOptions): Promise<StartupMetrics> {
+  // Best-effort isolation: keep the desktop app from mutating a developer's real home directory.
+  mkdirSync(perfHome, { recursive: true });
+  mkdirSync(perfTmp, { recursive: true });
+  mkdirSync(perfXdgConfig, { recursive: true });
+  mkdirSync(perfXdgCache, { recursive: true });
+  mkdirSync(perfXdgState, { recursive: true });
+  mkdirSync(perfXdgData, { recursive: true });
+  mkdirSync(perfAppData, { recursive: true });
+  mkdirSync(perfLocalAppData, { recursive: true });
+
+  const useXvfb = shouldUseXvfb();
+  const xvfbPath = resolve(repoRoot, 'scripts/xvfb-run-safe.sh');
+  const command = useXvfb ? 'bash' : binPath;
+  const args = useXvfb ? [xvfbPath, binPath] : [];
+
+  const env = mergeEnvParts([
+    process.env,
+    {
+      // Enable the Rust-side single-line log in release builds.
+      FORMULA_STARTUP_METRICS: '1',
+      // In case the app reads $HOME / XDG dirs for config, keep per-run caches out of the real home dir.
+      HOME: perfHome,
+      USERPROFILE: perfHome,
+      XDG_CONFIG_HOME: perfXdgConfig,
+      XDG_CACHE_HOME: perfXdgCache,
+      XDG_STATE_HOME: perfXdgState,
+      XDG_DATA_HOME: perfXdgData,
+      APPDATA: perfAppData,
+      LOCALAPPDATA: perfLocalAppData,
+      TMPDIR: perfTmp,
+      TEMP: perfTmp,
+      TMP: perfTmp,
+    },
+    envOverrides,
+  ]);
+
+  return await new Promise<StartupMetrics>((resolvePromise, rejectPromise) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      // On POSIX, start the app in its own process group so we can kill the whole tree
+      // without relying on any kill-by-name pattern.
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+    });
+
+    let rlOut: Interface | null = null;
+    let rlErr: Interface | null = null;
+
+    let settled = false;
+    let captured: StartupMetrics | null = null;
+    let startupTimeout: NodeJS.Timeout | null = null;
+    let forceKillTimer: NodeJS.Timeout | null = null;
+    let exitDeadline: NodeJS.Timeout | null = null;
+    let timedOutWaitingForMetrics = false;
+
+    const cleanup = () => {
+      if (startupTimeout) clearTimeout(startupTimeout);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (exitDeadline) clearTimeout(exitDeadline);
+      closeReadline(rlOut);
+      closeReadline(rlErr);
+    };
+
+    const settle = (kind: 'resolve' | 'reject', value: any) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (kind === 'resolve') resolvePromise(value);
+      else rejectPromise(value);
+    };
+
+    const beginShutdown = (reason: 'captured' | 'timeout') => {
+      if (exitDeadline) return;
+
+      // Stop the app after capturing the metrics so we can run multiple iterations.
+      terminate(child);
+
+      // If the process doesn't exit quickly, force-kill it so we don't accumulate
+      // background GUI processes during a multi-run benchmark.
+      forceKillTimer = setTimeout(() => forceKill(child), 2000);
+
+      exitDeadline = setTimeout(() => {
+        forceKill(child);
+
+        // Extremely defensive: don't hang the parent process even if kill fails.
+        try {
+          child.unref();
+        } catch {
+          // ignore
+        }
+        try {
+          child.stdout?.destroy();
+        } catch {
+          // ignore
+        }
+        try {
+          child.stderr?.destroy();
+        } catch {
+          // ignore
+        }
+
+        const msg =
+          reason === 'captured'
+            ? 'Timed out waiting for desktop process to exit after capturing metrics'
+            : 'Timed out waiting for desktop process to exit after timing out waiting for metrics';
+        settle('reject', new Error(msg));
+      }, 5000);
+    };
+
+    const onLine = (line: string) => {
+      if (captured || timedOutWaitingForMetrics) return;
+      const parsed = parseStartupLine(line);
+      if (!parsed) return;
+      captured = parsed;
+      if (startupTimeout) {
+        clearTimeout(startupTimeout);
+        startupTimeout = null;
+      }
+      beginShutdown('captured');
+    };
+
+    if (child.stdout) {
+      rlOut = createInterface({ input: child.stdout });
+      rlOut.on('line', onLine);
+    }
+    if (child.stderr) {
+      rlErr = createInterface({ input: child.stderr });
+      rlErr.on('line', onLine);
+    }
+
+    startupTimeout = setTimeout(() => {
+      timedOutWaitingForMetrics = true;
+      beginShutdown('timeout');
+    }, timeoutMs);
+
+    child.on('error', (err) => {
+      settle('reject', err);
+    });
+
+    child.on('exit', (code, signal) => {
+      if (settled) return;
+
+      if (timedOutWaitingForMetrics) {
+        settle('reject', new Error(`Timed out after ${timeoutMs}ms waiting for startup metrics`));
+        return;
+      }
+
+      if (captured) {
+        settle('resolve', captured);
+        return;
+      }
+
+      settle(
+        'reject',
+        new Error(`Desktop process exited before reporting metrics (code=${code}, signal=${signal})`),
+      );
+    });
+  });
+}
+
