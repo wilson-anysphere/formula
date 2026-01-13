@@ -262,6 +262,28 @@ test("Typing =SUM(A suggests a contiguous range above the current cell", async (
   );
 });
 
+test("Typing =SUM(A suggests a contiguous range below the current cell when the formula is above the data block", async () => {
+  const engine = new TabCompletionEngine();
+
+  const values = {};
+  for (let r = 2; r <= 11; r++) {
+    values[`A${r}`] = r; // A2..A11 contain numbers
+  }
+
+  const suggestions = await engine.getSuggestions({
+    currentInput: "=SUM(A",
+    cursorPosition: 6,
+    // Pretend we're on A1 (0-based row 0), above the data in column A.
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext(values),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(A2:A11)"),
+    `Expected a SUM range suggestion for data below, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Range suggestions work for subsequent args when ';' is used as the argument separator", async () => {
   const engine = new TabCompletionEngine();
 
