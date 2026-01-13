@@ -2423,6 +2423,82 @@ test("Sheet-qualified ranges are suggested when typing Sheet2!A above the data b
   );
 });
 
+test("Sheet-qualified partial range prefixes do not produce invalid insertions (Sheet2!A: avoids '::')", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A:";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    !suggestions.some((s) => s.text.includes("::")),
+    `Expected no invalid '::' suggestions, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A:A)"),
+    `Expected a whole-column completion for the partial 'A:' prefix, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Sheet-qualified partial range prefixes do not emit non-insertions (Sheet2!A1: avoids trailing ':')", async () => {
+  const values = {};
+  for (let r = 1; r <= 10; r++) values[`Sheet2!A${r}`] = r;
+
+  const cellContext = {
+    getCellValue(row, col, sheetName) {
+      const sheet = sheetName ?? "Sheet1";
+      const a1 = `${sheet}!${columnIndexToLetter(col)}${row + 1}`;
+      return values[a1] ?? null;
+    },
+  };
+
+  const engine = new TabCompletionEngine({
+    schemaProvider: {
+      getNamedRanges: () => [],
+      getSheetNames: () => ["Sheet1", "Sheet2"],
+      getTables: () => [],
+    },
+  });
+
+  const currentInput = "=SUM(Sheet2!A1:";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 10, col: 1 },
+    surroundingCells: cellContext,
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=SUM(Sheet2!A1:A10)"),
+    `Expected a completed A1:A10 range for the 'A1:' prefix, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+  assert.ok(
+    !suggestions.some((s) => s.text === "=SUM(Sheet2!A1:)"),
+    `Expected no suggestions that do not extend the typed prefix, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Sheet-qualified ranges work when the quoted sheet name contains a comma", async () => {
   const values = {};
   for (let r = 1; r <= 10; r++) values[`Jan,2024!A${r}`] = r;

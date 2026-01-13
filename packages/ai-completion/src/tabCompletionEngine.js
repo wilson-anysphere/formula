@@ -528,6 +528,18 @@ export class TabCompletionEngine {
               sheetName,
             });
             for (const candidate of rangeCandidates) {
+              // Only emit suggestions that can be represented as a pure insertion at the
+              // caret (i.e. candidate.range must start with the user-typed range prefix).
+              //
+              // Examples:
+              // - Typed: "Sheet2!A1:"  -> Candidate: "A1:A10" (ok; insertion after ':')
+              // - Typed: "Sheet2!A:"   -> Candidate: "A1:A10" (not ok; would need to insert before ':')
+              //
+              // When the candidate doesn't extend the typed prefix, don't emit it.
+              if (typeof candidate?.range !== "string") continue;
+              if (!candidate.range.startsWith(sheetArg.rangePrefix)) continue;
+              if (candidate.range.length <= sheetArg.rangePrefix.length) continue;
+
               addReplacement(`${rawPrefix}${candidate.range.slice(sheetArg.rangePrefix.length)}`, {
                 confidence: Math.min(0.85, candidate.confidence + 0.05),
               });
