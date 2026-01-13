@@ -476,6 +476,12 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
       refreshButton.disabled = false;
       loadMoreButton.disabled = !hasMore;
       updateMeta();
+
+      const next = queuedOperation;
+      if (next) {
+        queuedOperation = null;
+        void runOperation(next);
+      }
     }
   }
 
