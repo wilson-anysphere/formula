@@ -62,6 +62,33 @@ test("parseGoTo supports structured table references (Table1[#All])", () => {
   assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 0, endCol: 1 });
 });
 
+test("parseGoTo supports structured table specifiers (#Headers/#Data/#Totals)", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  const headers = parseGoTo("Table1[#Headers]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(headers.source, "table");
+  assert.deepEqual(headers.range, { startRow: 0, endRow: 0, startCol: 0, endCol: 1 });
+
+  const data = parseGoTo("Table1[#Data]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(data.source, "table");
+  assert.deepEqual(data.range, { startRow: 1, endRow: 9, startCol: 0, endCol: 1 });
+
+  const totals = parseGoTo("Table1[#Totals]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(totals.source, "table");
+  assert.deepEqual(totals.range, { startRow: 9, endRow: 9, startCol: 0, endCol: 1 });
+});
+
 test("parseGoTo supports structured table column references (Table1[Col2])", () => {
   const wb = new InMemoryWorkbook();
   wb.addSheet("Sheet1");
@@ -80,6 +107,37 @@ test("parseGoTo supports structured table column references (Table1[Col2])", () 
   assert.equal(parsed.source, "table");
   assert.equal(parsed.sheetName, "Sheet1");
   assert.deepEqual(parsed.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
+});
+
+test("parseGoTo supports selector-qualified structured table column references", () => {
+  const wb = new InMemoryWorkbook();
+  wb.addSheet("Sheet1");
+
+  wb.addTable({
+    name: "Table1",
+    sheetName: "Sheet1",
+    startRow: 0,
+    endRow: 9,
+    startCol: 0,
+    endCol: 1,
+    columns: ["Col1", "Col2"],
+  });
+
+  const headers = parseGoTo("Table1[[#Headers],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(headers.source, "table");
+  assert.deepEqual(headers.range, { startRow: 0, endRow: 0, startCol: 1, endCol: 1 });
+
+  const data = parseGoTo("Table1[[#Data],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(data.source, "table");
+  assert.deepEqual(data.range, { startRow: 1, endRow: 9, startCol: 1, endCol: 1 });
+
+  const totals = parseGoTo("Table1[[#Totals],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(totals.source, "table");
+  assert.deepEqual(totals.range, { startRow: 9, endRow: 9, startCol: 1, endCol: 1 });
+
+  const all = parseGoTo("Table1[[#All],[Col2]]", { workbook: wb, currentSheetName: "Sheet1" });
+  assert.equal(all.source, "table");
+  assert.deepEqual(all.range, { startRow: 0, endRow: 9, startCol: 1, endCol: 1 });
 });
 
 test("parseGoTo throws for unknown sheet-qualified references when workbook.getSheet is available", () => {

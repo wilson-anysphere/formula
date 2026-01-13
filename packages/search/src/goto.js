@@ -8,11 +8,30 @@ function isLikelyA1(ref) {
 function parseStructuredRef(input) {
   const s = String(input).trim();
 
-  // Minimal subset: TableName[ColumnName] or TableName[#All]
-  const m = s.match(/^([A-Za-z_][A-Za-z0-9_]*)\[(.+)\]$/);
-  if (!m) return null;
+  const firstBracket = s.indexOf("[");
+  if (firstBracket <= 0) return null;
 
-  return { tableName: m[1], spec: m[2] };
+  const tableName = s.slice(0, firstBracket);
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(tableName)) return null;
+
+  const suffix = s.slice(firstBracket);
+  if (!suffix) return null;
+
+  // Match the subset supported by the formula tokenizer / reference extractor:
+  // - TableName[ColumnName]
+  // - TableName[#All] / [#Headers] / [#Data] / [#Totals]
+  // - TableName[[#All],[ColumnName]] (and other selectors like #Data/#Headers/#Totals)
+  const qualifiedMatch = suffix.match(/^\[\[\s*(#[A-Za-z]+)\s*\]\s*,\s*\[\s*([^\]]+?)\s*\]\]$/i);
+  if (qualifiedMatch) {
+    return { tableName, selector: qualifiedMatch[1], columnName: qualifiedMatch[2] };
+  }
+
+  const simpleMatch = suffix.match(/^\[\s*([^\[\]]+?)\s*\]$/);
+  if (simpleMatch) {
+    return { tableName, selector: null, columnName: simpleMatch[1] };
+  }
+
+  return null;
 }
 
 function resolveSheetName(name, workbook) {
@@ -33,7 +52,10 @@ function resolveSheetName(name, workbook) {
  * - A1 references: `A1`, `A1:B2`
  * - Sheet-qualified: `Sheet2!C3`, `'My Sheet'!A1`
  * - Named ranges: `MyName`
- * - Table structured refs (minimal): `Table1[Column]`, `Table1[#All]`
+ * - Table structured refs:
+ *   - `Table1[Column]`
+ *   - `Table1[#All]` / `Table1[#Headers]` / `Table1[#Data]` / `Table1[#Totals]`
+ *   - `Table1[[#All],[Column]]` (and other selectors like `#Data`/`#Headers`/`#Totals`)
  */
 export function parseGoTo(input, { workbook, currentSheetName } = {}) {
   if (!workbook) throw new Error("parseGoTo: workbook is required");
@@ -52,34 +74,71 @@ export function parseGoTo(input, { workbook, currentSheetName } = {}) {
     if (!table) throw new Error(`Unknown table: ${structured.tableName}`);
     const tableSheetName = resolveSheetName(table.sheetName, workbook);
 
-    const specNorm = normalizeName(structured.spec);
-    if (specNorm === "#ALL") {
-      return {
-        type: "range",
-        source: "table",
-        sheetName: tableSheetName,
-        range: {
-          startRow: table.startRow,
-          endRow: table.endRow,
-          startCol: table.startCol,
-          endCol: table.endCol,
-        },
-      };
+    const columnNorm = normalizeName(structured.columnName);
+    const selectorNorm = structured.selector ? normalizeName(structured.selector) : null;
+
+    // Whole-table specifiers: `Table1[#All]`, `Table1[#Headers]`, `Table1[#Data]`, `Table1[#Totals]`.
+    if (!selectorNorm && columnNorm.startsWith("#")) {
+      if (columnNorm === "#ALL") {
+        return {
+          type: "range",
+          source: "table",
+          sheetName: tableSheetName,
+          range: { startRow: table.startRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
+        };
+      }
+      if (columnNorm === "#HEADERS") {
+        return {
+          type: "range",
+          source: "table",
+          sheetName: tableSheetName,
+          range: { startRow: table.startRow, endRow: table.startRow, startCol: table.startCol, endCol: table.endCol },
+        };
+      }
+      if (columnNorm === "#DATA") {
+        const startRow = table.endRow > table.startRow ? table.startRow + 1 : table.startRow;
+        return {
+          type: "range",
+          source: "table",
+          sheetName: tableSheetName,
+          range: { startRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
+        };
+      }
+      if (columnNorm === "#TOTALS") {
+        return {
+          type: "range",
+          source: "table",
+          sheetName: tableSheetName,
+          range: { startRow: table.endRow, endRow: table.endRow, startCol: table.startCol, endCol: table.endCol },
+        };
+      }
     }
 
+    // Column references: `Table1[Col2]` or selector-qualified `Table1[[#Headers],[Col2]]`.
     const columns = table.columns ?? [];
-    const idx = columns.findIndex((c) => normalizeName(c) === specNorm);
+    const idx = columns.findIndex((c) => normalizeName(c) === columnNorm);
     if (idx === -1) {
-      throw new Error(`Unknown table column: ${structured.tableName}[${structured.spec}]`);
+      const suffix = selectorNorm ? `[[${structured.selector}],[${structured.columnName}]]` : `[${structured.columnName}]`;
+      throw new Error(`Unknown table column: ${structured.tableName}${suffix}`);
     }
 
     const col = table.startCol + idx;
-    return {
-      type: "range",
-      source: "table",
-      sheetName: tableSheetName,
-      range: { startRow: table.startRow, endRow: table.endRow, startCol: col, endCol: col },
-    };
+    let startRow = table.startRow;
+    let endRow = table.endRow;
+
+    // For selector-qualified column refs, adjust the row span. Unqualified `Table1[Col]`
+    // intentionally selects the full column including headers (legacy behavior).
+    if (selectorNorm === "#HEADERS") {
+      endRow = startRow;
+    } else if (selectorNorm === "#TOTALS") {
+      startRow = endRow;
+    } else if (selectorNorm === "#DATA") {
+      if (endRow > startRow) startRow = startRow + 1;
+    } else if (selectorNorm === "#ALL") {
+      // keep full range (including headers)
+    }
+
+    return { type: "range", source: "table", sheetName: tableSheetName, range: { startRow, endRow, startCol: col, endCol: col } };
   }
 
   // A1 reference
