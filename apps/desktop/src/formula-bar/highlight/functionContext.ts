@@ -1,7 +1,7 @@
 import { getFunctionSignature, signatureParts, type FunctionSignature, type SignaturePart } from "./functionSignatures.js";
 import { getActiveArgumentSpan } from "./activeArgument.js";
 
-export type FunctionCallContext = { name: string; argIndex: number };
+type FunctionCallContext = { name: string; argIndex: number };
 
 export function getFunctionCallContext(formula: string, cursorIndex: number): FunctionCallContext | null {
   const active = getActiveArgumentSpan(formula, cursorIndex);

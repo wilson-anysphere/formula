@@ -1,4 +1,4 @@
-export type ActiveArgumentSpan = {
+type ActiveArgumentSpan = {
   fnName: string;
   argIndex: number;
   argText: string;
