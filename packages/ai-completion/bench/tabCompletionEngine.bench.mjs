@@ -258,6 +258,9 @@ async function main() {
   if (ci) console.log(`CI budget: p95 <= ${fmtMs(budgetMs)}`);
   console.log("");
 
+  // Note: scenario names are used as stable identifiers in CI/perf tracking
+  // (e.g. benchmark-action history). Avoid renaming them unless you are okay
+  // with resetting the time-series.
   const scenarios = [
     {
       name: "Function-name completion (=VLO)",
