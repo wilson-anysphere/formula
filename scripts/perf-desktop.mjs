@@ -237,6 +237,18 @@ function reportSize({ env }) {
   console.log("\n[desktop-size] Summary (binary + dist):\n");
   runPython("scripts/desktop_size_report.py", [], { env });
 
+  // Rust binary size breakdown (crates + symbols).
+  //
+  // This is best-effort: it relies on `cargo-bloat` for the most useful output,
+  // but will fall back to `llvm-size`/`size` when available. Keep it non-fatal so
+  // `pnpm perf:desktop-size` still works in minimal local environments.
+  // eslint-disable-next-line no-console
+  console.log("\n[desktop-size] Rust binary breakdown (cargo-bloat / llvm-size):\n");
+  runOptional(process.env.PYTHON || "python3", ["scripts/desktop_binary_size_report.py", "--no-build"], {
+    env,
+    label: "desktop_binary_size_report",
+  });
+
   const distDir = path.join(repoRoot, "apps", "desktop", "dist");
   if (existsSync(distDir)) {
     const largest = listLargestFiles(distDir, 10);
