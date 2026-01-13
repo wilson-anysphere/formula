@@ -101,6 +101,7 @@ import type {
   GridPresence,
   GridViewportState
 } from "@formula/grid";
+import { wheelDeltaToPixels } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shared/desktopSharedGrid.js";
@@ -9540,19 +9541,8 @@ export class SpreadsheetApp {
     if (target?.closest('[data-testid="comments-panel"]')) return;
     if (e.ctrlKey) return;
 
-    let deltaX = e.deltaX;
-    let deltaY = e.deltaY;
-
-    if (e.deltaMode === 1) {
-      // DOM_DELTA_LINE: browsers use a "line" abstraction; normalize to CSS pixels.
-      const line = 16;
-      deltaX *= line;
-      deltaY *= line;
-    } else if (e.deltaMode === 2) {
-      // DOM_DELTA_PAGE.
-      deltaX *= this.viewportWidth();
-      deltaY *= this.viewportHeight();
-    }
+    let deltaX = wheelDeltaToPixels(e.deltaX, e.deltaMode, { pageSize: this.viewportWidth() });
+    let deltaY = wheelDeltaToPixels(e.deltaY, e.deltaMode, { pageSize: this.viewportHeight() });
 
     // Common UX: shift+wheel scrolls horizontally.
     if (e.shiftKey && deltaX === 0) {
