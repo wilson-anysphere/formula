@@ -309,3 +309,53 @@ test("YjsBranchStore.ensureDocument repairs main branch head when it points at a
   assert.ok(main instanceof Y.Map);
   assert.equal(main.get("headCommitId"), rootId);
 });
+
+test("YjsBranchStore.ensureDocument does not delete stale incomplete commits referenced by a branch head", async () => {
+  const ydoc = new Y.Doc();
+  const store = new YjsBranchStore({
+    ydoc,
+    payloadEncoding: "gzip-chunks",
+    maxChunksPerTransaction: 1,
+  });
+  const docId = "doc1";
+  const actor = { userId: "u1", role: "owner" };
+
+  await store.ensureDocument(docId, actor, { sheets: {} });
+
+  const meta = ydoc.getMap("branching:meta");
+  const commits = ydoc.getMap("branching:commits");
+  const rootId = meta.get("rootCommitId");
+  assert.ok(typeof rootId === "string" && rootId.length > 0);
+
+  const staleId = "stale-incomplete-referenced";
+  const now = Date.now();
+
+  ydoc.transact(() => {
+    const commit = new Y.Map();
+    commit.set("id", staleId);
+    commit.set("docId", docId);
+    commit.set("parentCommitId", rootId);
+    commit.set("mergeParentCommitId", null);
+    commit.set("createdBy", actor.userId);
+    commit.set("createdAt", now);
+    commit.set("writeStartedAt", now - 2 * 60 * 60 * 1000);
+    commit.set("message", "stale");
+    commit.set("patchEncoding", "gzip-chunks");
+    commit.set("commitComplete", false);
+    commit.set("patchChunks", new Y.Array());
+    commits.set(staleId, commit);
+  });
+
+  await store.createBranch({
+    docId,
+    name: "feature",
+    createdBy: actor.userId,
+    createdAt: now,
+    description: null,
+    headCommitId: staleId,
+  });
+
+  assert.ok(commits.has(staleId));
+  await store.ensureDocument(docId, actor, { sheets: {} });
+  assert.ok(commits.has(staleId));
+});
