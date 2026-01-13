@@ -19,9 +19,13 @@ require_cmd() {
 
 require_cmd find
 require_cmd grep
+require_cmd file
+require_cmd readelf
 require_cmd dpkg
 require_cmd dpkg-deb
 require_cmd rpm
+require_cmd rpm2cpio
+require_cmd cpio
 require_cmd file
 require_cmd readelf
 require_cmd rpm2cpio
