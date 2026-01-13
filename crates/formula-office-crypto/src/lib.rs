@@ -15,8 +15,8 @@ mod util;
 
 use std::io::{Cursor, Read};
 
-pub use crate::error::OfficeCryptoError;
 pub use crate::crypto::HashAlgorithm;
+pub use crate::error::OfficeCryptoError;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
@@ -92,7 +92,9 @@ pub fn encrypt_package_to_ole(
     use std::io::Write as _;
 
     let (encryption_info, encrypted_package) = match opts.scheme {
-        EncryptionScheme::Agile => agile::encrypt_agile_encrypted_package(zip_bytes, password, &opts)?,
+        EncryptionScheme::Agile => {
+            agile::encrypt_agile_encrypted_package(zip_bytes, password, &opts)?
+        }
         EncryptionScheme::Standard => {
             return Err(OfficeCryptoError::UnsupportedEncryption(
                 "Standard encryption writer not implemented".to_string(),
@@ -134,10 +136,7 @@ fn decrypt_encrypted_package(
     }
 }
 
-fn stream_exists<R: Read + std::io::Seek>(
-    ole: &mut cfb::CompoundFile<R>,
-    name: &str,
-) -> bool {
+fn stream_exists<R: Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
     ole.open_stream(name).is_ok()
 }
 
@@ -154,6 +153,8 @@ fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {
 mod tests {
     use super::*;
     use crate::crypto::{HashAlgorithm, StandardKeyDeriver};
+    use crate::test_alloc::MAX_ALLOC;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn detects_encrypted_ooxml_ole_container() {
@@ -202,8 +203,7 @@ mod tests {
         let info_bytes = agile::tests::agile_encryption_info_fixture();
         let header = util::parse_encryption_info_header(&info_bytes).expect("parse header");
         assert_eq!(header.kind, util::EncryptionInfoKind::Agile);
-        let parsed =
-            agile::parse_agile_encryption_info(&info_bytes, &header).expect("parse agile");
+        let parsed = agile::parse_agile_encryption_info(&info_bytes, &header).expect("parse agile");
         assert_eq!(parsed.version_major, 4);
         assert_eq!(parsed.version_minor, 4);
         assert_eq!(parsed.key_data.key_bits, 256);
@@ -215,17 +215,149 @@ mod tests {
         // Deterministic vector to catch regressions in key derivation.
         let password = "Password";
         let salt: [u8; 16] = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
-            0x0D, 0x0E, 0x0F,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
         ];
         let deriver = StandardKeyDeriver::new(HashAlgorithm::Sha1, 128, &salt, password);
         let key_block0 = deriver.derive_key_for_block(0).expect("derive key");
         assert_eq!(
             key_block0.as_slice(),
             &[
-                0x5A, 0x93, 0xE0, 0xF1, 0xBC, 0x70, 0xC5, 0xBA, 0x59, 0x46, 0x04, 0xA1,
-                0x5C, 0xD0, 0xE8, 0x92,
+                0x5A, 0x93, 0xE0, 0xF1, 0xBC, 0x70, 0xC5, 0xBA, 0x59, 0x46, 0x04, 0xA1, 0x5C, 0xD0,
+                0xE8, 0x92,
             ]
         );
     }
+
+    #[test]
+    fn oversized_encrypted_package_size_errors_without_large_allocation() {
+        let total_size: u64 = if usize::BITS < 64 {
+            (usize::MAX as u64) + 1
+        } else {
+            u64::MAX
+        };
+
+        let mut encrypted_package = Vec::new();
+        encrypted_package.extend_from_slice(&total_size.to_le_bytes());
+
+        let dummy_standard = standard::StandardEncryptionInfo {
+            version_major: 0,
+            version_minor: 0,
+            flags: 0,
+            header: standard::EncryptionHeader {
+                alg_id: 0,
+                alg_id_hash: 0,
+                key_bits: 0,
+                provider_type: 0,
+                csp_name: String::new(),
+            },
+            verifier: standard::EncryptionVerifier {
+                salt: Vec::new(),
+                encrypted_verifier: Vec::new(),
+                verifier_hash_size: 0,
+                encrypted_verifier_hash: Vec::new(),
+            },
+        };
+
+        let dummy_agile = agile::AgileEncryptionInfo {
+            version_major: 0,
+            version_minor: 0,
+            flags: 0,
+            key_data: agile::AgileKeyData {
+                salt: Vec::new(),
+                block_size: 16,
+                key_bits: 128,
+                hash_algorithm: HashAlgorithm::Sha256,
+                cipher_algorithm: String::new(),
+                cipher_chaining: String::new(),
+            },
+            data_integrity: agile::AgileDataIntegrity {
+                encrypted_hmac_key: Vec::new(),
+                encrypted_hmac_value: Vec::new(),
+            },
+            password_key_encryptor: agile::AgilePasswordKeyEncryptor {
+                salt: Vec::new(),
+                block_size: 16,
+                key_bits: 128,
+                spin_count: 0,
+                hash_algorithm: HashAlgorithm::Sha256,
+                cipher_algorithm: String::new(),
+                cipher_chaining: String::new(),
+                encrypted_verifier_hash_input: Vec::new(),
+                encrypted_verifier_hash_value: Vec::new(),
+                encrypted_key_value: Vec::new(),
+            },
+        };
+
+        MAX_ALLOC.store(0, Ordering::Relaxed);
+
+        let err =
+            standard::decrypt_standard_encrypted_package(&dummy_standard, &encrypted_package, "")
+                .expect_err("expected size overflow");
+        assert!(
+            matches!(err, OfficeCryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
+            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+        );
+
+        let err = agile::decrypt_agile_encrypted_package(&dummy_agile, &encrypted_package, "")
+            .expect_err("expected size overflow");
+        assert!(
+            matches!(err, OfficeCryptoError::EncryptedPackageSizeOverflow { total_size: got } if got == total_size),
+            "expected EncryptedPackageSizeOverflow({total_size}), got {err:?}"
+        );
+
+        let max_alloc = MAX_ALLOC.load(Ordering::Relaxed);
+        assert!(
+            max_alloc < 16 * 1024 * 1024,
+            "expected no large allocation attempts, observed max allocation request: {max_alloc} bytes"
+        );
+    }
+}
+
+#[cfg(test)]
+mod test_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    pub static MAX_ALLOC: AtomicUsize = AtomicUsize::new(0);
+
+    pub struct TrackingAllocator;
+
+    unsafe impl GlobalAlloc for TrackingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc(layout)
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            record(layout.size());
+            System.alloc_zeroed(layout)
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            record(new_size);
+            System.realloc(ptr, layout, new_size)
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout)
+        }
+    }
+
+    #[inline]
+    fn record(size: usize) {
+        let mut prev = MAX_ALLOC.load(Ordering::Relaxed);
+        while size > prev {
+            match MAX_ALLOC.compare_exchange_weak(prev, size, Ordering::Relaxed, Ordering::Relaxed)
+            {
+                Ok(_) => break,
+                Err(next) => prev = next,
+            }
+        }
+    }
+
+    // Ensure tests can assert that huge `total_size` values are rejected *before*
+    // attempting allocations.
+    #[global_allocator]
+    static GLOBAL: TrackingAllocator = TrackingAllocator;
 }

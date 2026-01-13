@@ -1,6 +1,8 @@
 use crate::crypto::{aes_cbc_decrypt, derive_iv, HashAlgorithm, StandardKeyDeriver};
 use crate::error::OfficeCryptoError;
-use crate::util::{decode_utf16le_nul_terminated, read_u32_le, read_u64_le, EncryptionInfoHeader};
+use crate::util::{
+    checked_vec_len, decode_utf16le_nul_terminated, read_u32_le, read_u64_le, EncryptionInfoHeader,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct StandardEncryptionInfo {
@@ -109,9 +111,14 @@ fn parse_encryption_verifier(
 
     // Ciphertext is padded to the cipher block size. For AES-CBC, that's 16.
     let encrypted_hash_len = ((verifier_hash_size as usize + 15) / 16) * 16;
-    let encrypted_verifier_hash = bytes.get(offset..offset + encrypted_hash_len).ok_or_else(|| {
-        OfficeCryptoError::InvalidFormat("EncryptionVerifier missing verifier hash".to_string())
-    })?;
+    let encrypted_verifier_hash =
+        bytes
+            .get(offset..offset + encrypted_hash_len)
+            .ok_or_else(|| {
+                OfficeCryptoError::InvalidFormat(
+                    "EncryptionVerifier missing verifier hash".to_string(),
+                )
+            })?;
 
     // Basic algorithm sanity check: support AES only for now.
     match header.alg_id {
@@ -136,15 +143,16 @@ pub(crate) fn decrypt_standard_encrypted_package(
     encrypted_package: &[u8],
     password: &str,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
-    let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
-
     if encrypted_package.len() < 8 {
         return Err(OfficeCryptoError::InvalidFormat(
             "EncryptedPackage stream too short".to_string(),
         ));
     }
-    let expected_len = read_u64_le(encrypted_package, 0)? as usize;
+    let total_size = read_u64_le(encrypted_package, 0)?;
+    let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
+
+    let hash_alg = HashAlgorithm::from_cryptoapi_alg_id_hash(info.header.alg_id_hash)?;
 
     // Try a small set of schemes seen in the wild. We validate via the password verifier and by
     // checking that the decrypted output starts with `PK`.
@@ -158,6 +166,7 @@ pub(crate) fn decrypt_standard_encrypted_package(
         let Ok(out) = decrypt_standard_with_scheme(
             info,
             ciphertext,
+            total_size,
             expected_len,
             password,
             hash_alg,
@@ -189,12 +198,18 @@ enum StandardScheme {
 fn decrypt_standard_with_scheme(
     info: &StandardEncryptionInfo,
     ciphertext: &[u8],
+    total_size: u64,
     expected_len: usize,
     password: &str,
     hash_alg: HashAlgorithm,
     scheme: StandardScheme,
 ) -> Result<Vec<u8>, OfficeCryptoError> {
-    let deriver = StandardKeyDeriver::new(hash_alg, info.header.key_bits, &info.verifier.salt, password);
+    let deriver = StandardKeyDeriver::new(
+        hash_alg,
+        info.header.key_bits,
+        &info.verifier.salt,
+        password,
+    );
     let key0 = deriver.derive_key_for_block(0)?;
 
     // Verify password using EncryptionVerifier.
@@ -212,9 +227,16 @@ fn decrypt_standard_with_scheme(
         }
     };
 
-    let verifier = aes_cbc_decrypt(&verifier_key, &verifier_iv, &info.verifier.encrypted_verifier)?;
-    let verifier_hash_plain =
-        aes_cbc_decrypt(&verifier_key, &verifier_iv, &info.verifier.encrypted_verifier_hash)?;
+    let verifier = aes_cbc_decrypt(
+        &verifier_key,
+        &verifier_iv,
+        &info.verifier.encrypted_verifier,
+    )?;
+    let verifier_hash_plain = aes_cbc_decrypt(
+        &verifier_key,
+        &verifier_iv,
+        &info.verifier.encrypted_verifier_hash,
+    )?;
     let verifier_hash_plain = verifier_hash_plain
         .get(..info.verifier.verifier_hash_size as usize)
         .ok_or_else(|| {
@@ -231,13 +253,13 @@ fn decrypt_standard_with_scheme(
     // Password is valid; decrypt the package.
     match scheme {
         StandardScheme::PerBlockKeyIvZero => {
-            decrypt_segmented(ciphertext, expected_len, |block| {
+            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
                 let key = deriver.derive_key_for_block(block)?;
                 Ok((key, [0u8; 16].to_vec()))
             })
         }
         StandardScheme::ConstKeyPerBlockIvHash => {
-            decrypt_segmented(ciphertext, expected_len, |block| {
+            decrypt_segmented(ciphertext, total_size, expected_len, |block| {
                 let iv = derive_iv(hash_alg, &info.verifier.salt, &block.to_le_bytes(), 16);
                 Ok((key0.clone(), iv))
             })
@@ -252,7 +274,7 @@ fn decrypt_standard_with_scheme(
                     "decrypted package length {} shorter than expected {}",
                     plain.len(),
                     expected_len
-)));
+                )));
             }
             plain.truncate(expected_len);
             Ok(plain)
@@ -262,6 +284,7 @@ fn decrypt_standard_with_scheme(
 
 fn decrypt_segmented<F>(
     ciphertext: &[u8],
+    total_size: u64,
     expected_len: usize,
     mut key_iv_for_block: F,
 ) -> Result<Vec<u8>, OfficeCryptoError>
@@ -269,7 +292,10 @@ where
     F: FnMut(u32) -> Result<(zeroize::Zeroizing<Vec<u8>>, Vec<u8>), OfficeCryptoError>,
 {
     const SEGMENT_LEN: usize = 4096;
-    let mut out = Vec::with_capacity(expected_len);
+    let mut out = Vec::new();
+    out.try_reserve_exact(ciphertext.len()).map_err(|source| {
+        OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
+    })?;
     let mut offset = 0usize;
     let mut block = 0u32;
     while offset < ciphertext.len() {
@@ -334,8 +360,8 @@ pub(crate) mod tests {
         // Build a minimal verifier that will pass for password="Password".
         let password = "Password";
         let salt: [u8; 16] = [
-            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C,
-            0x1D, 0x1E, 0x1F,
+            0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D,
+            0x1E, 0x1F,
         ];
         let verifier_plain: [u8; 16] = *b"formula-std-test";
         let verifier_hash = HashAlgorithm::Sha1.digest(&verifier_plain);

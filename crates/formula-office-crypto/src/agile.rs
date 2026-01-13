@@ -9,10 +9,11 @@ use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 
 use crate::crypto::{
-    aes_cbc_decrypt, aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm,
+    aes_cbc_decrypt, aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le,
+    HashAlgorithm,
 };
 use crate::error::OfficeCryptoError;
-use crate::util::{read_u64_le, EncryptionInfoHeader};
+use crate::util::{checked_vec_len, read_u64_le, EncryptionInfoHeader};
 use zeroize::Zeroizing;
 
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
@@ -106,7 +107,8 @@ pub(crate) fn decrypt_agile_encrypted_package(
             "EncryptedPackage stream too short".to_string(),
         ));
     }
-    let expected_len = read_u64_le(encrypted_package, 0)? as usize;
+    let total_size = read_u64_le(encrypted_package, 0)?;
+    let expected_len = checked_vec_len(total_size)?;
     let ciphertext = &encrypted_package[8..];
 
     if info.key_data.cipher_algorithm != "AES" {
@@ -230,7 +232,10 @@ pub(crate) fn decrypt_agile_encrypted_package(
 
     // Decrypt the package data in 4096-byte segments.
     const SEGMENT_LEN: usize = 4096;
-    let mut out = Vec::with_capacity(expected_len);
+    let mut out = Vec::new();
+    out.try_reserve_exact(ciphertext.len()).map_err(|source| {
+        OfficeCryptoError::EncryptedPackageAllocationFailed { total_size, source }
+    })?;
     let mut offset = 0usize;
     let mut block_index = 0u32;
     while offset < ciphertext.len() {
@@ -307,7 +312,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_VERIFIER_HASH_INPUT,
     );
-    let iv_vhi = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_INPUT, block_size);
+    let iv_vhi = derive_iv(
+        hash_alg,
+        &salt_key_encryptor,
+        BLOCK_KEY_VERIFIER_HASH_INPUT,
+        block_size,
+    );
     let enc_vhi = aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain)?;
 
     // Encrypt verifierHashValue.
@@ -319,7 +329,12 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_VERIFIER_HASH_VALUE,
     );
-    let iv_vhv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_VALUE, block_size);
+    let iv_vhv = derive_iv(
+        hash_alg,
+        &salt_key_encryptor,
+        BLOCK_KEY_VERIFIER_HASH_VALUE,
+        block_size,
+    );
     let enc_vhv = aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain)?;
 
     // Encrypt package key (encryptedKeyValue).
@@ -331,12 +346,22 @@ pub(crate) fn encrypt_agile_encrypted_package(
         key_bytes,
         BLOCK_KEY_ENCRYPTED_KEY_VALUE,
     );
-    let iv_kv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_ENCRYPTED_KEY_VALUE, block_size);
+    let iv_kv = derive_iv(
+        hash_alg,
+        &salt_key_encryptor,
+        BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+        block_size,
+    );
     let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain)?;
 
     // Encrypt package bytes.
-    let encrypted_package =
-        encrypt_encrypted_package_stream(zip_bytes, &package_key_plain, hash_alg, &salt_key_data, block_size)?;
+    let encrypted_package = encrypt_encrypted_package_stream(
+        zip_bytes,
+        &package_key_plain,
+        hash_alg,
+        &salt_key_data,
+        block_size,
+    )?;
 
     // Integrity (HMAC over the EncryptedPackage stream).
     let mut hmac_key_plain = vec![0u8; hash_alg.digest_len()];
@@ -345,13 +370,23 @@ pub(crate) fn encrypt_agile_encrypted_package(
     let hmac_value_plain = compute_hmac(hash_alg, &hmac_key_plain, &encrypted_package);
     let hmac_value_plain = pad_zero(&hmac_value_plain, block_size);
 
-    let iv_hmac_key = derive_iv(hash_alg, &salt_key_data, BLOCK_KEY_INTEGRITY_HMAC_KEY, block_size);
+    let iv_hmac_key = derive_iv(
+        hash_alg,
+        &salt_key_data,
+        BLOCK_KEY_INTEGRITY_HMAC_KEY,
+        block_size,
+    );
     let encrypted_hmac_key = aes_cbc_encrypt(
         &package_key_plain,
         &iv_hmac_key,
         &pad_zero(&hmac_key_plain, block_size),
     )?;
-    let iv_hmac_val = derive_iv(hash_alg, &salt_key_data, BLOCK_KEY_INTEGRITY_HMAC_VALUE, block_size);
+    let iv_hmac_val = derive_iv(
+        hash_alg,
+        &salt_key_data,
+        BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+        block_size,
+    );
     let encrypted_hmac_value =
         aes_cbc_encrypt(&package_key_plain, &iv_hmac_val, &hmac_value_plain)?;
 
@@ -450,17 +485,20 @@ fn compute_hmac(hash_alg: HashAlgorithm, key: &[u8], data: &[u8]) -> Vec<u8> {
             mac.finalize().into_bytes().to_vec()
         }
         HashAlgorithm::Sha256 => {
-            let mut mac: Hmac<Sha256> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha256> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);
             mac.finalize().into_bytes().to_vec()
         }
         HashAlgorithm::Sha384 => {
-            let mut mac: Hmac<Sha384> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha384> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);
             mac.finalize().into_bytes().to_vec()
         }
         HashAlgorithm::Sha512 => {
-            let mut mac: Hmac<Sha512> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+            let mut mac: Hmac<Sha512> =
+                Hmac::new_from_slice(key).expect("HMAC accepts any key size");
             mac.update(data);
             mac.finalize().into_bytes().to_vec()
         }
@@ -560,9 +598,7 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                             )
                         })?;
                     let encrypted_key_value = tmp_encrypted_key_value.take().ok_or_else(|| {
-                        OfficeCryptoError::InvalidFormat(
-                            "missing encryptedKeyValue".to_string(),
-                        )
+                        OfficeCryptoError::InvalidFormat("missing encryptedKeyValue".to_string())
                     })?;
                     password_key_encryptor = Some(AgilePasswordKeyEncryptor {
                         salt: attrs.salt,
@@ -579,7 +615,9 @@ fn parse_agile_descriptor(xml: &str) -> Result<AgileDescriptor, OfficeCryptoErro
                 }
                 if matches!(
                     name,
-                    b"encryptedVerifierHashInput" | b"encryptedVerifierHashValue" | b"encryptedKeyValue"
+                    b"encryptedVerifierHashInput"
+                        | b"encryptedVerifierHashValue"
+                        | b"encryptedKeyValue"
                 ) {
                     capture = None;
                 }
@@ -659,9 +697,8 @@ fn parse_key_data_attrs(
     let mut cipher_chaining: Option<String> = None;
 
     for attr in e.attributes() {
-        let attr = attr.map_err(|_| {
-            OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string())
-        })?;
+        let attr = attr
+            .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
         let value = attr.unescape_value().map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
@@ -723,9 +760,8 @@ fn parse_data_integrity_attrs(
     let mut encrypted_hmac_key: Option<Vec<u8>> = None;
     let mut encrypted_hmac_value: Option<Vec<u8>> = None;
     for attr in e.attributes() {
-        let attr = attr.map_err(|_| {
-            OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string())
-        })?;
+        let attr = attr
+            .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
         let value = attr.unescape_value().map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
@@ -753,9 +789,7 @@ fn parse_data_integrity_attrs(
             OfficeCryptoError::InvalidFormat("dataIntegrity missing encryptedHmacKey".to_string())
         })?,
         encrypted_hmac_value: encrypted_hmac_value.ok_or_else(|| {
-            OfficeCryptoError::InvalidFormat(
-                "dataIntegrity missing encryptedHmacValue".to_string(),
-            )
+            OfficeCryptoError::InvalidFormat("dataIntegrity missing encryptedHmacValue".to_string())
         })?,
     })
 }
@@ -783,9 +817,8 @@ fn parse_password_key_encryptor_attrs(
     let mut cipher_chaining: Option<String> = None;
 
     for attr in e.attributes() {
-        let attr = attr.map_err(|_| {
-            OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string())
-        })?;
+        let attr = attr
+            .map_err(|_| OfficeCryptoError::InvalidFormat("invalid XML attribute".to_string()))?;
         let key = local_name(attr.key.as_ref());
         let value = attr.unescape_value().map_err(|_| {
             OfficeCryptoError::InvalidFormat("invalid XML attribute encoding".to_string())
@@ -877,7 +910,9 @@ fn decode_b64_attr(value: &str) -> Result<Vec<u8>, base64::DecodeError> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::crypto::{aes_cbc_encrypt, derive_agile_key, derive_iv, HashAlgorithm, password_to_utf16le};
+    use crate::crypto::{
+        aes_cbc_encrypt, derive_agile_key, derive_iv, password_to_utf16le, HashAlgorithm,
+    };
     use crate::util::parse_encryption_info_header;
 
     pub(crate) fn agile_encryption_info_fixture() -> Vec<u8> {
@@ -910,12 +945,12 @@ pub(crate) mod tests {
         let block_size = 16usize;
 
         let salt_key_encryptor: [u8; 16] = [
-            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC,
-            0xAD, 0xAE, 0xAF,
+            0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD,
+            0xAE, 0xAF,
         ];
         let salt_key_data: [u8; 16] = [
-            0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC,
-            0xBD, 0xBE, 0xBF,
+            0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+            0xBE, 0xBF,
         ];
 
         let verifier_hash_input_plain: [u8; 16] = *b"formula-agl-test";
@@ -930,8 +965,14 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_INPUT,
         );
-        let iv_vhi = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_INPUT, block_size);
-        let enc_vhi = aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain).expect("enc vhi");
+        let iv_vhi = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_VERIFIER_HASH_INPUT,
+            block_size,
+        );
+        let enc_vhi =
+            aes_cbc_encrypt(&key_vhi, &iv_vhi, &verifier_hash_input_plain).expect("enc vhi");
 
         let key_vhv = derive_agile_key(
             hash_alg,
@@ -941,8 +982,14 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_VERIFIER_HASH_VALUE,
         );
-        let iv_vhv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_VERIFIER_HASH_VALUE, block_size);
-        let enc_vhv = aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain).expect("enc vhv");
+        let iv_vhv = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_VERIFIER_HASH_VALUE,
+            block_size,
+        );
+        let enc_vhv =
+            aes_cbc_encrypt(&key_vhv, &iv_vhv, &verifier_hash_value_plain).expect("enc vhv");
 
         let key_kv = derive_agile_key(
             hash_alg,
@@ -952,7 +999,12 @@ pub(crate) mod tests {
             key_bits / 8,
             BLOCK_KEY_ENCRYPTED_KEY_VALUE,
         );
-        let iv_kv = derive_iv(hash_alg, &salt_key_encryptor, BLOCK_KEY_ENCRYPTED_KEY_VALUE, block_size);
+        let iv_kv = derive_iv(
+            hash_alg,
+            &salt_key_encryptor,
+            BLOCK_KEY_ENCRYPTED_KEY_VALUE,
+            block_size,
+        );
         let enc_kv = aes_cbc_encrypt(&key_kv, &iv_kv, &package_key_plain).expect("enc key");
 
         let b64 = base64::engine::general_purpose::STANDARD;

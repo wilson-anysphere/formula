@@ -95,3 +95,14 @@ pub(crate) fn decode_utf16le_nul_terminated(bytes: &[u8]) -> Result<String, Offi
         OfficeCryptoError::InvalidFormat("invalid UTF-16LE in EncryptionInfo".to_string())
     })
 }
+
+pub(crate) fn checked_vec_len(total_size: u64) -> Result<usize, OfficeCryptoError> {
+    let len = usize::try_from(total_size)
+        .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
+
+    // `Vec<u8>` cannot exceed `isize::MAX` due to `Layout::array`/pointer offset invariants.
+    isize::try_from(len)
+        .map_err(|_| OfficeCryptoError::EncryptedPackageSizeOverflow { total_size })?;
+
+    Ok(len)
+}

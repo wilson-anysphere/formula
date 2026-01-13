@@ -25,10 +25,10 @@ fn wrong_password_fails() {
     let zip = basic_xlsx_fixture_bytes();
     let ole = encrypt_package_to_ole(&zip, "password", EncryptOptions::default()).expect("encrypt");
 
-    let err = decrypt_encrypted_package_ole(&ole, "not-the-password").expect_err("expected failure");
+    let err =
+        decrypt_encrypted_package_ole(&ole, "not-the-password").expect_err("expected failure");
     assert!(
         matches!(err, OfficeCryptoError::InvalidPassword),
         "expected InvalidPassword, got {err:?}"
     );
 }
-

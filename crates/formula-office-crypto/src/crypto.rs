@@ -320,21 +320,27 @@ pub(crate) fn aes_cbc_encrypt(
                 OfficeCryptoError::InvalidFormat("invalid AES-128 key/iv".to_string())
             })?;
             enc.encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
-                .map_err(|_| OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string()))?;
+                .map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string())
+                })?;
         }
         24 => {
             let enc = Encryptor::<Aes192>::new_from_slices(key, iv).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("invalid AES-192 key/iv".to_string())
             })?;
             enc.encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
-                .map_err(|_| OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string()))?;
+                .map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string())
+                })?;
         }
         32 => {
             let enc = Encryptor::<Aes256>::new_from_slices(key, iv).map_err(|_| {
                 OfficeCryptoError::InvalidFormat("invalid AES-256 key/iv".to_string())
             })?;
             enc.encrypt_padded_mut::<NoPadding>(&mut buf, plaintext.len())
-                .map_err(|_| OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string()))?;
+                .map_err(|_| {
+                    OfficeCryptoError::InvalidFormat("AES-CBC encrypt failed".to_string())
+                })?;
         }
         other => {
             return Err(OfficeCryptoError::UnsupportedEncryption(format!(
