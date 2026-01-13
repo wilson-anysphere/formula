@@ -680,6 +680,7 @@ rpm_pkg="$(ls target/release/bundle/rpm/*.rpm | head -n 1)"
 rpm -qpR "$rpm_pkg"
 
 # Extract and confirm all linked shared libraries resolve
+# (requires `cpio`: Fedora `dnf -y install cpio`, Debian/Ubuntu `apt-get install -y cpio`)
 tmpdir="$(mktemp -d)"
 (cd "$tmpdir" && rpm2cpio "$rpm_pkg" | cpio -idmv)
 ldd "$tmpdir/usr/bin/formula-desktop" | grep -q "not found" && exit 1 || true
