@@ -1065,9 +1065,15 @@ fn main() {
         //  3) Added to the explicit JS invoke allowlist in
         //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
         //
-        // Note: this repo's Tauri toolchain does not currently expose a `core:allow-invoke` permission identifier.
-        // The `allow-invoke` application permission is granted to the `main` window via
-        // `src-tauri/capabilities/main.json` (the `"allow-invoke"` entry in `"permissions"`).
+        // Note: Tauri command invocation can be allowlisted in two ways:
+        // - `allow-invoke` (application permission defined in `src-tauri/permissions/allow-invoke.json`)
+        // - `core:allow-invoke` (optional core permission supported by some toolchains)
+        //
+        // IMPORTANT:
+        // - Never grant the string form `"core:allow-invoke"` (it enables the default/unscoped allowlist).
+        // - If `core:allow-invoke` is present in `src-tauri/capabilities/main.json`, it must use the object form:
+        //   `{ "identifier": "core:allow-invoke", "allow": [{ "command": "..." }, ...] }`
+        //   and stay explicit + in sync with `allow-invoke.json`.
         //
         // Guardrails:
         // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this
@@ -1079,7 +1085,8 @@ fn main() {
         // - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts:
         //   - the `allow-invoke` permission is granted to the main window
         //   - the allowlist stays explicit (no wildcards) and covers frontend `invoke("...")` usage
-        //   - we don't grant an unsupported/unscoped `core:allow-invoke` permission
+        //   - we don't grant the unscoped string form `"core:allow-invoke"` (and if `core:allow-invoke` is present, it is the
+        //     object form with an explicit per-command allowlist)
         //   - the plugin permission surface stays minimal/explicit (dialogs/window ops/clipboard/updater)
         //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);

@@ -189,8 +189,8 @@ including `"allow-invoke"` in that capability’s `"permissions"` list.
 This is guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`, which ensures the command
 allowlist is explicit (no wildcards/duplicates) and matches actual frontend `invoke("...")` usage. It also asserts we do
 not grant the unscoped string form `core:allow-invoke` (default allowlist); if `core:allow-invoke` is present, it must
-use the object form with an explicit per-command allowlist (note: `core:allow-invoke` is not present in this repo’s
-current Tauri toolchain).
+use the object form with an explicit per-command allowlist and stay in sync with `allow-invoke.json` + actual frontend
+`invoke("...")` usage.
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
