@@ -39,7 +39,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     expect(overlay?.hidden).toBe(true);
   });
 
-  it("opens via ArrowDown when the name box input is focused and selects via Enter", () => {
+  it("opens via Alt+ArrowDown when the name box input is focused and selects via Enter", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -57,7 +57,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     expect(address).toBeInstanceOf(HTMLInputElement);
     address!.focus();
 
-    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true, cancelable: true }));
 
     const overlay = document.querySelector<HTMLDivElement>('[data-testid="name-box-menu"]');
     expect(overlay).toBeInstanceOf(HTMLDivElement);

@@ -477,7 +477,7 @@ export class FormulaBarView {
     address.addEventListener("keydown", (e) => {
       // Excel-style name box dropdown affordance.
       if (
-        (e.key === "ArrowDown" && !e.ctrlKey && !e.metaKey) ||
+        (e.key === "ArrowDown" && e.altKey && !e.ctrlKey && !e.metaKey) ||
         (e.key === "F4" && !e.altKey && !e.ctrlKey && !e.metaKey)
       ) {
         e.preventDefault();
