@@ -78,6 +78,9 @@ function tokenCountPenalty(tokenCount, opts) {
  * retrieval quality for hash-based embeddings (which can produce clustered
  * similarity scores) by applying small, stable adjustments based on metadata.
  *
+ * Note: the returned results overwrite `score` with the adjusted score so callers
+ * can treat it as a single relevance value (including downstream dedupe logic).
+ *
  * @template {{ id: string, score: number, metadata?: any }} T
  * @param {string} query
  * @param {T[]} results

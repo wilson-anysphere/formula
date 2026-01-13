@@ -7,6 +7,9 @@ import { awaitWithAbort, throwIfAborted } from "../utils/abort.js";
  * - Query vector store
  * - Optional rerank + dedupe
  *
+ * Note: When reranking is enabled, returned `score` values are adjusted scores
+ * (not raw cosine similarity).
+ *
  * @param {{
  *   queryText: string,
  *   workbookId: string,
