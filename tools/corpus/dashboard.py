@@ -11,7 +11,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .triage import infer_round_trip_failure_kind
+from .triage import _PRIVACY_PRIVATE, _PRIVACY_PUBLIC, _redact_run_url, infer_round_trip_failure_kind
 from .util import ensure_dir, github_commit_sha, github_run_url, utc_now_iso, write_json
 
 
@@ -979,6 +979,12 @@ def main() -> int:
     parser.add_argument("--triage-dir", type=Path, required=True)
     parser.add_argument("--out-dir", type=Path, help="Defaults to --triage-dir")
     parser.add_argument(
+        "--privacy-mode",
+        choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
+        default=_PRIVACY_PUBLIC,
+        help="Redact potentially sensitive fields (e.g. hash non-github.com run URLs).",
+    )
+    parser.add_argument(
         "--append-trend",
         type=Path,
         help="Append a compact time-series entry for this run to the given JSON list file.",
@@ -1002,6 +1008,7 @@ def main() -> int:
     reports_dir = triage_dir / "reports"
     reports = _load_reports(reports_dir)
     summary = _compute_summary(reports)
+    summary["run_url"] = _redact_run_url(summary.get("run_url"), privacy_mode=args.privacy_mode)
     timings = summary.get("timings") or {}
     if not isinstance(timings, dict):
         timings = {}

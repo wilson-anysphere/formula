@@ -216,6 +216,7 @@ jobs:
           fi
           python -m tools.corpus.dashboard \
             --triage-dir tools/corpus/out/private \
+            --privacy-mode private \
             --append-trend tools/corpus/out/private/trend.json \
             "${GATE_FLAGS[@]}"
       - name: Publish summary (private)
