@@ -1807,6 +1807,7 @@ export function bindYjsToDocumentController(options) {
    */
   function applyDocumentSheetViewDeltas(deltas) {
     if (!deltas || deltas.length === 0) return;
+    if (!canWriteSharedState()) return;
 
     /** @type {Array<{ sheetId: string, view: any }>} */
     const prepared = [];
@@ -1934,6 +1935,7 @@ export function bindYjsToDocumentController(options) {
    */
   function applyDocumentFormatDeltas(deltas) {
     if (!deltas || deltas.length === 0) return;
+    if (!canWriteSharedState()) return;
 
     /** @type {Array<{ sheetId: string, layer: string, index?: number, style: any | null }>} */
     const prepared = [];
@@ -2132,6 +2134,7 @@ export function bindYjsToDocumentController(options) {
    */
   function applyDocumentRangeRunDeltas(deltas) {
     if (!deltas || deltas.length === 0) return;
+    if (!canWriteSharedState()) return;
 
     /**
      * @type {Map<string, Array<{ col: number, runs: any[] }>>}
