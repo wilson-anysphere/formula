@@ -353,20 +353,33 @@ export const SortRangeParamsSchema = z.object({
 
 export type SortRangeParams = z.infer<typeof SortRangeParamsSchema>;
 
-export const FilterRangeParamsSchema = z.object({
-  range: A1RangeSchema,
-  criteria: z
-    .array(
-      z.object({
-        column: ColumnSchema,
-        operator: z.enum(["equals", "contains", "greater", "less", "between"]),
-        value: z.union([z.string(), z.number()]),
-        value2: z.union([z.string(), z.number()]).optional()
-      })
-    )
-    .min(1),
-  has_header: z.boolean().optional().default(false)
-});
+export const FilterRangeParamsSchema = z
+  .object({
+    range: A1RangeSchema,
+    criteria: z
+      .array(
+        z.object({
+          column: ColumnSchema,
+          operator: z.enum(["equals", "contains", "greater", "less", "between"]),
+          value: z.union([z.string(), z.number()]),
+          value2: z.union([z.string(), z.number()]).optional()
+        })
+      )
+      .min(1),
+    has_header: z.boolean().optional().default(false)
+  })
+  .superRefine((params, ctx) => {
+    for (let i = 0; i < params.criteria.length; i += 1) {
+      const criterion = params.criteria[i]!;
+      if (criterion.operator === "between" && criterion.value2 == null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "value2 is required when operator is 'between'.",
+          path: ["criteria", i, "value2"]
+        });
+      }
+    }
+  });
 
 export type FilterRangeParams = z.infer<typeof FilterRangeParamsSchema>;
 
