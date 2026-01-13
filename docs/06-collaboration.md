@@ -58,6 +58,9 @@ Note: even “empty” cells may still exist in Yjs as marker-only `Y.Map`s (for
 record a causal `formula = null` clear for deterministic conflict detection; see “Conflict
 monitoring” below). `CollabSession.getCell()` treats these marker-only cells as empty UI
 state (returns `null`) even though the underlying Yjs map entry is preserved for causality.
+If you don’t need marker-only causality history (for example, when conflict monitors are
+disabled), you can optionally prune these entries with `CollabSession.compactCells(...)`
+(see “Cell-map compaction” below).
 
 `@formula/collab-workbook` (`getWorkbookRoots`, `ensureWorkbookSchema`) is the canonical place that defines/normalizes these roots.
 
@@ -236,6 +239,7 @@ These checks also incorporate encryption invariants (e.g. refusing writes to enc
 The desktop binder can enforce permissions and masking at the UI projection layer:
 
 - Unreadable cells are masked in `DocumentController` (default mask is `"###"`).
+- Optionally, per-cell formatting for masked cells can also be suppressed with `maskCellFormat: true` (defaults to `false`; clears the per-cell `styleId` to `0` when a cell is masked due to permissions or missing encryption keys).
 - Disallowed edits are rejected and reverted (optionally surfaced via `onEditRejected`).
 
 The binder accepts either:
@@ -403,6 +407,31 @@ Useful lifecycle helpers:
 - `await session.flushLocalPersistence()` — best-effort: forces any pending local persistence work to be durably written (useful before app teardown)
 - `await session.whenSynced()` — resolves when the sync provider reports `sync=true`
 
+#### Observability APIs (sync status + local diagnostics)
+
+`CollabSession` exposes a few lightweight observability hooks for **status bars** and **debug tooling**. These APIs are intentionally **best-effort**:
+
+- Not all providers emit `"status"` / `"sync"` events.
+- Some providers don’t update `.connected` / `.wsconnected` / `.synced` eagerly.
+- These APIs should not be treated as protocol-level guarantees (they can be briefly stale).
+
+APIs:
+
+- `session.getSyncState(): { connected: boolean; synced: boolean }`
+  - `connected`: best-effort derived from provider state + `"status"` events.
+  - `synced`: best-effort “initial sync complete” signal (forced `false` when disconnected).
+- `session.onStatusChange(cb): () => void`
+  - Subscribes to `{ connected, synced }` transitions.
+  - Does **not** call `cb` immediately; call `getSyncState()` for a snapshot.
+- `session.getUpdateStats(): { lastUpdateBytes: number; maxRecentBytes: number; avgRecentBytes: number }`
+  - Tracks the size (bytes) of recent **local-origin** Yjs updates (currently last 20).
+  - Useful for diagnosing sync-server/websocket message size limits. This is the raw Yjs update payload size (not websocket framing/compression).
+- `session.getLocalPersistenceState(): { enabled: boolean; loaded: boolean; lastFlushedAt: number | null }`
+  - `loaded` stays `false` if persistence hydration fails.
+  - `lastFlushedAt` is set by `flushLocalPersistence()` (best-effort).
+
+Implementation: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`getSyncState`, `onStatusChange`, `getUpdateStats`, `getLocalPersistenceState` + constructor “Observability hooks”).
+
 #### IndexedDB persistence flush + compaction (`IndexedDbCollabPersistence`)
 
 `IndexedDbCollabPersistence` (implementation: [`packages/collab/persistence/src/indexeddb.ts`](../packages/collab/persistence/src/indexeddb.ts)) is a thin wrapper around `y-indexeddb`.
@@ -513,6 +542,72 @@ Implementation references:
 - `CollabSession.transactLocal`: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts)
 - `REMOTE_ORIGIN`: [`packages/collab/undo/src/yjs-undo-service.js`](../packages/collab/undo/src/yjs-undo-service.js)
 
+### Batch cell writes (`CollabSession.setCells`)
+
+`CollabSession.setCells(...)` applies multiple cell updates as a **single local transaction**, with semantics aligned to `setCellValue` / `setCellFormula` (permissions, encryption, and conflict monitors).
+
+Signature:
+
+```ts
+await session.setCells(
+  [{ cellKey: "Sheet1:0:0", value: 123 }, { cellKey: "Sheet1:0:1", formula: "=A1*2" }],
+  { ignorePermissions?: boolean },
+);
+```
+
+Semantics (implementation-backed):
+
+- **Formula wins**: when both `value` and `formula` are provided, the update is treated as a formula write (`value` is ignored). `formula: null` (or empty/whitespace) clears the formula.
+- **Atomic / all-or-nothing**:
+  - The session validates the entire batch before applying any cell-content writes.
+  - All cell mutations are applied inside a single `session.transactLocal(...)` after a preflight check, so the batch does not partially apply (permission denied, missing encryption key, plaintext-to-encrypted violation).
+- **Permissions**:
+  - If session permissions are configured via `session.setPermissions(...)`, the batch is rejected if *any* target cell is not editable.
+  - `{ ignorePermissions: true }` bypasses permission checks (intended for internal tooling/migrations), but does **not** bypass encryption invariants.
+- **Encryption invariants**:
+  - If a cell is already encrypted (or `shouldEncryptCell` says it should be), the write is stored as `enc` (never plaintext).
+  - Plaintext writes are rejected for encrypted cells (checked for the whole batch before applying any update).
+  - When `encryption.encryptFormat = true`, the session attempts to preserve existing per-cell formatting by decrypting the previous payload when possible, otherwise falling back to plaintext `format` / legacy `style` stored under existing key aliases, and then removing plaintext `format`/`style` keys when writing the encrypted payload.
+- **Conflict monitors**: when enabled, `setCells` delegates to the monitors (`FormulaConflictMonitor` / `CellConflictMonitor`) so null-marker semantics (`formula = null`) stay consistent.
+
+Implementation: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`CollabSession.setCells`).
+
+### Cell-map compaction (`CollabSession.compactCells`)
+
+Some writers preserve “empty” cell entries in the `cells` root (including marker-only clears used for conflict detection). Over time this can bloat the `cells` map and increase snapshot/update size.
+
+`CollabSession.compactCells(...)` is an **opt-in** maintenance API that deletes prunable entries from `doc.getMap("cells")` while preserving encryption and formatting invariants.
+
+Signature:
+
+```ts
+const { scanned, deleted } = session.compactCells({
+  dryRun: true,
+  maxCellsScanned: 50_000,
+  // pruneMarkerOnly: true | false,
+});
+```
+
+Options (implementation-backed):
+
+- `dryRun?: boolean` — when true, returns counts without mutating the doc.
+- `maxCellsScanned?: number` — bounds work; defaults to `Infinity`. If non-finite or `<= 0`, returns `{ scanned: 0, deleted: 0 }`.
+- `pruneMarkerOnly?: boolean` — controls whether marker-only entries (`formula = null` clears) are eligible for deletion:
+  - **Default:** `false` when *any* conflict monitor is enabled (`formulaConflicts`, `cellConflicts`, or `cellValueConflicts`), otherwise `true`.
+- `origin?: unknown` — Yjs transaction origin for the delete transaction (defaults to `"cells-compact"`).
+
+Preservation rules:
+
+- **Never prunes encrypted cells** (`enc` present).
+- **Never prunes format-only cells** or explicit format clears (`format` or legacy `style` present).
+- Only prunes entries that contain no keys other than `value` / `formula` / `modified` / `modifiedBy`.
+
+When it’s safe to run:
+
+- Safe to run periodically in docs where you are **not relying on marker-only causality** (e.g. conflict monitoring disabled), or when you explicitly set `pruneMarkerOnly: false` to preserve clear markers.
+
+Implementation: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`CollabSession.compactCells`).
+
 ---
 
 ## Binding Yjs to the desktop workbook model
@@ -599,6 +694,8 @@ const binder = await bindCollabSessionToDocumentController({
   session,
   documentController,
   userId,
+  // Optional: also clear per-cell formatting for masked cells.
+  // maskCellFormat: true,
 
   // Optional: override how DocumentController-driven writes are transacted into Yjs.
   //
@@ -609,6 +706,13 @@ const binder = await bindCollabSessionToDocumentController({
   // undoService: null,
 });
 ```
+
+`bindCollabSessionToDocumentController` passes `maskCellFormat` through to the underlying binder.
+
+Implementation:
+
+- Binder option: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController` → `maskCellFormat`)
+- Helper pass-through: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`bindCollabSessionToDocumentController`)
 
 ### Echo suppression (feedback-loop prevention)
 
@@ -849,6 +953,42 @@ Use `createCommentManagerForDoc({ doc: session.doc, transact: undoService.transa
 If you need to normalize legacy Array-backed docs to the canonical Map schema:
 
 - `migrateCommentsArrayToMap(doc)` (see [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts))
+
+### Automatic legacy schema migration (`comments.migrateLegacyArrayToMap`)
+
+If you construct a `CollabSession` on unknown/historical documents, you can opt into an automatic, best-effort migration of legacy Array-backed comment roots:
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+
+const session = createCollabSession({
+  connection: { wsUrl, docId, token },
+  comments: { migrateLegacyArrayToMap: true },
+});
+```
+
+What it migrates:
+
+- Legacy schema: `comments` root stored as `Y.Array<Y.Map>` (a list of comment maps).
+- Canonical schema: `comments` root stored as `Y.Map<string, Y.Map>` keyed by comment id.
+
+Migration behavior (implementation-backed):
+
+- Runs **after initial hydration**, queued in a microtask:
+  - after local persistence load completes (if `options.persistence` / legacy `options.offline` is enabled), and/or
+  - after the provider reports initial `sync=true` (if a provider is enabled).
+- Uses `migrateCommentsArrayToMap(doc, { origin: "comments-migrate" })`, which:
+  - renames the legacy root to `comments_legacy*` (so old content remains accessible), and
+  - creates a canonical Map-backed `comments` root and copies entries keyed by comment id.
+- Preserves collaborative undo scope: because migration replaces the `comments` root object, `CollabSession` re-adds the new root to all known `UndoManager` scopes (best-effort) so subsequent comment edits remain undoable.
+- Never blocks session startup: failures are swallowed (best-effort).
+
+Desktop: the desktop app opts into this by default (see [`apps/desktop/src/app/spreadsheetApp.ts`](../apps/desktop/src/app/spreadsheetApp.ts)).
+
+Implementation:
+
+- Session scheduling + undo-scope repair: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`scheduleCommentsMigration`)
+- Migration transform: [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`migrateCommentsArrayToMap`)
 
 ---
 
