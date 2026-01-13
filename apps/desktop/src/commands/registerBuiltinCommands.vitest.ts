@@ -467,6 +467,35 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(commandRegistry.getCommand("edit.editCell")?.keywords).toEqual(expect.arrayContaining(["f2"]));
   });
 
+  it("executes formulas.formulaAuditing.tracePrecedents by clearing auditing then toggling precedents", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const calls: string[] = [];
+    const app = {
+      isEditing: vi.fn(() => false),
+      clearAuditing: vi.fn(() => calls.push("clearAuditing")),
+      toggleAuditingPrecedents: vi.fn(() => calls.push("toggleAuditingPrecedents")),
+      focus: vi.fn(() => calls.push("focus")),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    // Coverage: ensure the ribbon command id is registered.
+    expect(commandRegistry.getCommand("formulas.formulaAuditing.tracePrecedents")).toBeDefined();
+
+    await commandRegistry.executeCommand("formulas.formulaAuditing.tracePrecedents");
+    expect(calls).toEqual(["clearAuditing", "toggleAuditingPrecedents", "focus"]);
+  });
+
   it("uses document.execCommand for undo/redo when a text input is focused", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {

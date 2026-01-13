@@ -8072,14 +8072,13 @@ function handleRibbonCommand(commandId: string): void {
       return;
     }
 
-    // Page Layout ribbon actions are backed by real commands so they can be invoked from
-    // the command palette / extensions and can participate in generic command disabling.
-    if (commandId.startsWith("pageLayout.")) {
-      const registered = commandRegistry.getCommand(commandId);
-      if (registered && registered.source.kind === "builtin") {
-        executeBuiltinCommand(commandId);
-        return;
-      }
+    // Prefer routing ribbon commands through the CommandRegistry when a builtin command
+    // exists with the same id. This lets ribbon wiring share behavior with keyboard
+    // shortcuts + the command palette (and keeps `main.ts` switch logic small).
+    const cmd = commandRegistry.getCommand(commandId);
+    if (cmd?.source.kind === "builtin") {
+      executeBuiltinCommand(commandId);
+      return;
     }
 
     if (
@@ -8674,20 +8673,6 @@ function handleRibbonCommand(commandId: string): void {
         }
         return;
 
-      case "formulas.formulaAuditing.tracePrecedents":
-        app.clearAuditing();
-        app.toggleAuditingPrecedents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.traceDependents":
-        app.clearAuditing();
-        app.toggleAuditingDependents();
-        app.focus();
-        return;
-      case "formulas.formulaAuditing.removeArrows":
-        app.clearAuditing();
-        app.focus();
-        return;
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));

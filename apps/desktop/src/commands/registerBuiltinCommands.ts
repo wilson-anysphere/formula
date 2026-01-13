@@ -971,6 +971,25 @@ export function registerBuiltinCommands(params: {
     },
   );
 
+  // Ribbon command id: keep in sync with `apps/desktop/src/ribbon/ribbonSchema.ts` to avoid schema churn.
+  commandRegistry.registerBuiltinCommand(
+    "formulas.formulaAuditing.tracePrecedents",
+    t("command.audit.tracePrecedents"),
+    () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
+      app.clearAuditing();
+      app.toggleAuditingPrecedents();
+      app.focus();
+    },
+    {
+      category: t("commandCategory.audit"),
+      icon: null,
+      description: t("commandDescription.audit.tracePrecedents"),
+      keywords: ["audit", "precedents", "trace", "ribbon"],
+    },
+  );
+
   commandRegistry.registerBuiltinCommand(
     "audit.traceDependents",
     t("command.audit.traceDependents"),
@@ -986,6 +1005,25 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.audit.traceDependents"),
       keywords: ["audit", "dependents", "trace"],
+    },
+  );
+
+  // Ribbon command id: keep in sync with `apps/desktop/src/ribbon/ribbonSchema.ts` to avoid schema churn.
+  commandRegistry.registerBuiltinCommand(
+    "formulas.formulaAuditing.traceDependents",
+    t("command.audit.traceDependents"),
+    () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
+      app.clearAuditing();
+      app.toggleAuditingDependents();
+      app.focus();
+    },
+    {
+      category: t("commandCategory.audit"),
+      icon: null,
+      description: t("commandDescription.audit.traceDependents"),
+      keywords: ["audit", "dependents", "trace", "ribbon"],
     },
   );
 
@@ -1022,6 +1060,24 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.audit.clearAuditing"),
       keywords: ["audit", "clear"],
+    },
+  );
+
+  // Ribbon command id: keep in sync with `apps/desktop/src/ribbon/ribbonSchema.ts` to avoid schema churn.
+  commandRegistry.registerBuiltinCommand(
+    "formulas.formulaAuditing.removeArrows",
+    "Remove Arrows",
+    () => {
+      if (app.isEditing()) return;
+      if (getTextEditingTarget()) return;
+      app.clearAuditing();
+      app.focus();
+    },
+    {
+      category: t("commandCategory.audit"),
+      icon: null,
+      description: t("commandDescription.audit.clearAuditing"),
+      keywords: ["audit", "clear", "remove", "arrows", "ribbon"],
     },
   );
 
