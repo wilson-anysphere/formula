@@ -19,8 +19,10 @@ early:
 - Extract the generated `*.AppImage` via `--appimage-extract` (no FUSE required)
 - Verify the extracted main ELF binary architecture via `readelf -h`
 - Run `ldd` and fail the workflow if any shared libraries are `not found`
+- Validate the extracted `.desktop` file exists and advertises spreadsheet (xlsx) integration
 
 See `scripts/ci/check-appimage.sh`.
+See also `scripts/validate-linux-appimage.sh`.
 
 For the **exact** `latest.json.platforms` key names (and which asset each key should point to),
 see:
