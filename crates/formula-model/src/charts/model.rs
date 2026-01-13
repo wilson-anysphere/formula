@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::RichText;
 
-use super::{MarkerStyle, ShapeStyle, TextRunStyle};
+use super::{ChartColorStylePartModel, ChartStylePartModel, MarkerStyle, ShapeStyle, TextRunStyle};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +25,18 @@ pub struct ChartModel {
     /// Whether only visible cells are plotted (`c:chart/c:plotVisOnly/@val`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plot_vis_only: Option<bool>,
+    /// Optional external chart style part (`xl/charts/style*.xml`).
+    ///
+    /// This is considered an implementation detail for now and is skipped during
+    /// serde (de)serialization to avoid changing the public JSON schema.
+    #[serde(default, skip)]
+    pub style_part: Option<ChartStylePartModel>,
+    /// Optional external chart color style part (`xl/charts/colors*.xml`).
+    ///
+    /// This is considered an implementation detail for now and is skipped during
+    /// serde (de)serialization to avoid changing the public JSON schema.
+    #[serde(default, skip)]
+    pub colors_part: Option<ChartColorStylePartModel>,
     /// Chart area shape properties (`c:chartSpace/c:spPr`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart_area_style: Option<ShapeStyle>,

@@ -90,6 +90,8 @@ pub fn parse_chart_ex(
         rounded_corners: None,
         disp_blanks_as: None,
         plot_vis_only: None,
+        style_part: None,
+        colors_part: None,
         chart_area_style: None,
         plot_area_style: None,
         external_data_rel_id: None,

@@ -5,11 +5,15 @@ use roxmltree::Document;
 
 use crate::workbook::ChartExtractionError;
 
+mod parse_chart_color_style;
 mod parse_chart_ex;
 mod parse_chart_space;
+mod parse_chart_style;
 
+pub use parse_chart_color_style::{parse_chart_color_style, ChartColorStyleParseError};
 pub use parse_chart_ex::{parse_chart_ex, ChartExParseError};
 pub use parse_chart_space::{parse_chart_space, ChartSpaceParseError};
+pub use parse_chart_style::{parse_chart_style, ChartStyleParseError};
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -70,8 +74,8 @@ pub fn extract_chart_object_refs(
 ) -> Result<Vec<DrawingChartObjectRef>, ChartExtractionError> {
     let xml = std::str::from_utf8(drawing_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
-    let doc =
-        Document::parse(xml).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
 
     let mut out = Vec::new();
     for anchor in doc.descendants().filter(|n| n.is_element()) {

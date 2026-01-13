@@ -5,8 +5,9 @@ use roxmltree::Document;
 
 use crate::charts::parse_chart;
 use crate::drawingml::charts::{
-    extract_chart_object_refs, parse_chart_ex, parse_chart_space, ChartDiagnostic,
-    ChartDiagnosticSeverity, ChartExParseError, ChartObject, ChartParts, ChartSpaceParseError,
+    extract_chart_object_refs, parse_chart_color_style, parse_chart_ex, parse_chart_space,
+    parse_chart_style, ChartColorStyleParseError, ChartDiagnostic, ChartDiagnosticSeverity,
+    ChartExParseError, ChartObject, ChartParts, ChartSpaceParseError, ChartStyleParseError,
     OpcPart,
 };
 use crate::drawingml::extract_chart_refs;
@@ -275,7 +276,7 @@ impl XlsxPackage {
                     }
                 });
 
-                let model = if let Some(chart_ex_part) = chart_ex.as_ref() {
+                let mut model = if let Some(chart_ex_part) = chart_ex.as_ref() {
                     match parse_chart_ex(&chart_ex_part.bytes, &chart_ex_part.path) {
                         Ok(model) => {
                             if let ChartKind::Unknown { name } = &model.chart_kind {
@@ -327,6 +328,40 @@ impl XlsxPackage {
                         }
                     }
                 };
+
+                if let Some(model) = model.as_mut() {
+                    if let Some(style_part) = style.as_ref() {
+                        match parse_chart_style(&style_part.bytes, &style_part.path) {
+                            Ok(style_model) => model.style_part = Some(style_model),
+                            Err(err) => diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Warning,
+                                message: format!(
+                                    "failed to parse chartStyle part {}: {}",
+                                    style_part.path,
+                                    format_chart_style_error(&err)
+                                ),
+                                part: Some(style_part.path.clone()),
+                                xpath: None,
+                            }),
+                        }
+                    }
+
+                    if let Some(colors_part) = colors.as_ref() {
+                        match parse_chart_color_style(&colors_part.bytes, &colors_part.path) {
+                            Ok(colors_model) => model.colors_part = Some(colors_model),
+                            Err(err) => diagnostics.push(ChartDiagnostic {
+                                severity: ChartDiagnosticSeverity::Warning,
+                                message: format!(
+                                    "failed to parse chartColorStyle part {}: {}",
+                                    colors_part.path,
+                                    format_chart_color_style_error(&err)
+                                ),
+                                part: Some(colors_part.path.clone()),
+                                xpath: None,
+                            }),
+                        }
+                    }
+                }
 
                 chart_objects.push(ChartObject {
                     sheet_name: sheet_name.clone(),
@@ -479,5 +514,13 @@ fn format_chart_space_error(err: &ChartSpaceParseError) -> String {
 }
 
 fn format_chart_ex_error(err: &ChartExParseError) -> String {
+    err.to_string()
+}
+
+fn format_chart_style_error(err: &ChartStyleParseError) -> String {
+    err.to_string()
+}
+
+fn format_chart_color_style_error(err: &ChartColorStyleParseError) -> String {
     err.to_string()
 }

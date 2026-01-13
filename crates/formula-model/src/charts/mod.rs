@@ -2,8 +2,10 @@ use serde::{Deserialize, Serialize};
 
 mod formatting;
 mod model;
+mod style_parts;
 pub use formatting::*;
 pub use model::*;
+pub use style_parts::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
