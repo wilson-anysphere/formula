@@ -38,9 +38,10 @@ use std::path::PathBuf;
 use aes::{Aes128, Aes192, Aes256};
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+use formula_offcrypto::encrypted_package::decrypt_encrypted_package as decrypt_encrypted_package_stream;
 use formula_offcrypto::{
-    decrypt_encrypted_package, decrypt_standard_only, inspect_encryption_info, parse_encryption_info,
-    AgileEncryptionInfo, EncryptionInfo, HashAlgorithm, OffcryptoError,
+    decrypt_standard_only, inspect_encryption_info, parse_encryption_info, AgileEncryptionInfo,
+    EncryptionInfo, HashAlgorithm, OffcryptoError,
 };
 use hmac::{Hmac, Mac as _};
 use sha1::Digest as _;
@@ -335,7 +336,7 @@ fn decrypt_agile_encrypted_package(
 
     // Decrypt the segmented package ciphertext.
     let decrypted =
-        decrypt_encrypted_package(encrypted_package, |segment_index, ciphertext, plaintext| {
+        decrypt_encrypted_package_stream(encrypted_package, |segment_index, ciphertext, plaintext| {
             let iv = derive_iv_16(
                 &info.key_data_salt,
                 &segment_index.to_le_bytes(),

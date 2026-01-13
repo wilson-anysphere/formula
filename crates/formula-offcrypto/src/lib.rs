@@ -28,9 +28,11 @@ use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
 use base64::Engine;
 use cbc::Decryptor;
 use cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
+use hmac::{Hmac, Mac};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader as XmlReader;
 use sha1::{Digest as _, Sha1};
+use sha2::{Sha256, Sha384, Sha512};
 use zeroize::Zeroizing;
 
 const ITER_COUNT: u32 = 50_000;
@@ -69,12 +71,18 @@ impl Default for DecryptLimits {
 /// Options controlling decryption behavior.
 #[derive(Debug, Clone)]
 pub struct DecryptOptions {
+    /// For Agile encryption, verify the `dataIntegrity` HMAC before decrypting the payload.
+    ///
+    /// When enabled, corrupted/tampered ciphertext is detected before attempting to decrypt large
+    /// payloads.
+    pub verify_integrity: bool,
     pub limits: DecryptLimits,
 }
 
 impl Default for DecryptOptions {
     fn default() -> Self {
         Self {
+            verify_integrity: true,
             limits: DecryptLimits::default(),
         }
     }
@@ -90,9 +98,7 @@ fn check_spin_count(spin_count: u32, limits: &DecryptLimits) -> Result<(), Offcr
 }
 
 pub mod encrypted_package;
-pub use encrypted_package::{
-    agile_decrypt_package, decrypt_encrypted_package, decrypt_standard_encrypted_package,
-};
+pub use encrypted_package::{agile_decrypt_package, decrypt_standard_encrypted_package};
 
 const PASSWORD_KEY_ENCRYPTOR_NS: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
@@ -508,6 +514,8 @@ pub enum OffcryptoError {
     InvalidVerifierHashLength { len: usize },
     /// Password/key did not pass verifier check.
     InvalidPassword,
+    /// Agile ciphertext integrity check (HMAC) failed.
+    IntegrityCheckFailed,
     /// Agile `spinCount` is larger than allowed by the configured decryption limits.
     SpinCountTooLarge { spin_count: u32, max: u32 },
 }
@@ -597,6 +605,7 @@ impl fmt::Display for OffcryptoError {
                 "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
             ),
             OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
+            OffcryptoError::IntegrityCheckFailed => write!(f, "integrity check failed"),
             OffcryptoError::SpinCountTooLarge { spin_count, max } => {
                 write!(f, "Agile spinCount too large: {spin_count} (max {max})")
             }
@@ -2295,28 +2304,24 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
 
     let encryption_info = read_stream_from_ole(&mut ole, "EncryptionInfo")?;
 
-    // `EncryptionInfo` parsing for Agile (4.4) expects a full XML payload. For this
-    // Standard-only decryptor we can short-circuit purely from the version header so that:
-    // - detection does not depend on parsing the XML
-    // - synthetic/minimal fixtures can validate behavior without embedding full XML
+    // `parse_encryption_info` is intentionally strict for Agile (it parses the full XML). For this
+    // Standard-only entrypoint, we want to short-circuit as soon as we can tell the file is Agile
+    // (4.4) without requiring the full XML payload or the `EncryptedPackage` stream.
     let version = EncryptionVersionInfo::parse(&encryption_info)?;
-    if (version.major, version.minor) == (4, 4) {
-        return Err(OffcryptoError::UnsupportedEncryption {
-            encryption_type: EncryptionType::Agile,
-        });
-    }
-    if version.minor == 3 && matches!(version.major, 3 | 4) {
-        // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this Standard
-        // decryptor.
-        return Err(OffcryptoError::UnsupportedEncryption {
-            encryption_type: EncryptionType::Extensible,
-        });
-    }
-    if version.minor != 2 || !matches!(version.major, 2 | 3 | 4) {
-        return Err(OffcryptoError::UnsupportedVersion {
-            major: version.major,
-            minor: version.minor,
-        });
+    match (version.major, version.minor) {
+        (4, 4) => {
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Agile,
+            })
+        }
+        (3 | 4, 3) => {
+            // MS-OFFCRYPTO "Extensible" encryption: known scheme, but not supported by this
+            // Standard-only decryptor.
+            return Err(OffcryptoError::UnsupportedEncryption {
+                encryption_type: EncryptionType::Extensible,
+            });
+        }
+        (_, _) => {}
     }
 
     let (header, verifier) = match parse_encryption_info(&encryption_info)? {
@@ -2357,7 +2362,6 @@ pub fn decrypt_from_bytes(data: &[u8], password: &str) -> Result<Vec<u8>, Offcry
     )?;
 
     let encrypted_package = read_stream_from_ole(&mut ole, "EncryptedPackage")?;
-
     decrypt_encrypted_package_ecb(key.as_slice(), &encrypted_package)
 }
 
@@ -2480,6 +2484,9 @@ pub fn standard_verify_key(
 const BLK_KEY_VERIFIER_HASH_INPUT: [u8; 8] = [0xFE, 0xA7, 0xD2, 0x76, 0x3B, 0x4B, 0x9E, 0x79];
 const BLK_KEY_VERIFIER_HASH_VALUE: [u8; 8] = [0xD7, 0xAA, 0x0F, 0x6D, 0x30, 0x61, 0x34, 0x4E];
 const BLK_KEY_ENCRYPTED_KEY_VALUE: [u8; 8] = [0x14, 0x6E, 0x0B, 0xE7, 0xAB, 0xAC, 0xD0, 0xD6];
+// Agile dataIntegrity block keys (MS-OFFCRYPTO).
+const BLK_KEY_HMAC_KEY: [u8; 8] = [0x5F, 0xB2, 0xAD, 0x01, 0x0C, 0xB9, 0xE1, 0xF6];
+const BLK_KEY_HMAC_VALUE: [u8; 8] = [0xA0, 0x67, 0x7F, 0x02, 0xB2, 0x2C, 0x84, 0x33];
 
 /// Decrypt an Office-encrypted OOXML package using Standard (CryptoAPI) encryption.
 ///
@@ -2530,6 +2537,29 @@ pub fn decrypt_ooxml_standard(
     }
 
     Ok(decrypted)
+}
+
+fn hash_output_len(algo: HashAlgorithm) -> usize {
+    match algo {
+        HashAlgorithm::Sha1 => 20,
+        HashAlgorithm::Sha256 => 32,
+        HashAlgorithm::Sha384 => 48,
+        HashAlgorithm::Sha512 => 64,
+    }
+}
+
+fn derive_iv_from_salt_and_block_key(
+    salt: &[u8],
+    hash_algorithm: HashAlgorithm,
+    block_key: &[u8],
+) -> [u8; 16] {
+    let mut buf = Vec::with_capacity(salt.len() + block_key.len());
+    buf.extend_from_slice(salt);
+    buf.extend_from_slice(block_key);
+    let digest = hash_algorithm.digest(&buf);
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&digest[..16]);
+    iv
 }
 
 fn normalize_key_material(bytes: &[u8], out_len: usize) -> Vec<u8> {
@@ -2983,6 +3013,207 @@ pub fn agile_secret_key_with_options(
     // Copy into a right-sized buffer so we don't keep the full decrypted block (including any
     // padding bytes) alive in the returned allocation's spare capacity.
     Ok(Zeroizing::new(secret_key_full[..key_len].to_vec()))
+}
+
+fn validate_zip_like(bytes: &[u8]) -> Result<(), OffcryptoError> {
+    if bytes.len() < 2 || &bytes[..2] != b"PK" {
+        // Mirror `msoffcrypto` behavior: treat "not a zip" as an invalid password.
+        return Err(OffcryptoError::InvalidPassword);
+    }
+    Ok(())
+}
+
+fn verify_agile_integrity(
+    info: &AgileEncryptionInfo,
+    secret_key: &[u8],
+    encrypted_package: &[u8],
+) -> Result<(), OffcryptoError> {
+    let hash_len = hash_output_len(info.key_data_hash_algorithm);
+
+    let iv_key = derive_iv_from_salt_and_block_key(
+        &info.key_data_salt,
+        info.key_data_hash_algorithm,
+        &BLK_KEY_HMAC_KEY,
+    );
+    let hmac_key_raw = aes_cbc_decrypt(&info.encrypted_hmac_key, secret_key, &iv_key)?;
+
+    let iv_value = derive_iv_from_salt_and_block_key(
+        &info.key_data_salt,
+        info.key_data_hash_algorithm,
+        &BLK_KEY_HMAC_VALUE,
+    );
+    let expected_hmac_raw = aes_cbc_decrypt(&info.encrypted_hmac_value, secret_key, &iv_value)?;
+
+    let hmac_key = hmac_key_raw.get(..hash_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "decrypted HMAC key is truncated",
+    })?;
+    let expected_hmac =
+        expected_hmac_raw
+            .get(..hash_len)
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "decrypted HMAC value is truncated",
+            })?;
+
+    // MS-OFFCRYPTO dataIntegrity HMAC is computed over the full EncryptedPackage stream (including
+    // the 8-byte original size header).
+    let actual_hmac = match info.key_data_hash_algorithm {
+        HashAlgorithm::Sha1 => {
+            let mut mac = <Hmac<Sha1> as Mac>::new_from_slice(hmac_key)
+                .expect("HMAC key length is unrestricted");
+            mac.update(encrypted_package);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha256 => {
+            let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(hmac_key)
+                .expect("HMAC key length is unrestricted");
+            mac.update(encrypted_package);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha384 => {
+            let mut mac = <Hmac<Sha384> as Mac>::new_from_slice(hmac_key)
+                .expect("HMAC key length is unrestricted");
+            mac.update(encrypted_package);
+            mac.finalize().into_bytes().to_vec()
+        }
+        HashAlgorithm::Sha512 => {
+            let mut mac = <Hmac<Sha512> as Mac>::new_from_slice(hmac_key)
+                .expect("HMAC key length is unrestricted");
+            mac.update(encrypted_package);
+            mac.finalize().into_bytes().to_vec()
+        }
+    };
+
+    let actual_hmac = actual_hmac.get(..hash_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "hash output shorter than expected",
+    })?;
+
+    if !util::ct_eq(actual_hmac, expected_hmac) {
+        return Err(OffcryptoError::IntegrityCheckFailed);
+    }
+
+    Ok(())
+}
+
+fn decrypt_agile_stream(
+    info: &AgileEncryptionInfo,
+    encrypted_package: &[u8],
+    password: &str,
+    options: &DecryptOptions,
+) -> Result<Vec<u8>, OffcryptoError> {
+    if info.key_data_block_size != 16 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "keyData.blockSize must be 16 for AES",
+        });
+    }
+
+    // Derive the iterated password hash once, then use it for both verifier checks and secret key
+    // extraction.
+    let hfinal = derive_iterated_hash_from_password(
+        password,
+        &info.password_salt,
+        info.password_hash_algorithm,
+        info.spin_count,
+        &options.limits,
+        None,
+    )?;
+
+    // Verify password (verifier-hash algorithm).
+    let key1 = derive_encryption_key(
+        &hfinal[..],
+        &BLK_KEY_VERIFIER_HASH_INPUT,
+        info.password_hash_algorithm,
+        info.password_key_bits,
+    )?;
+    let key2 = derive_encryption_key(
+        &hfinal[..],
+        &BLK_KEY_VERIFIER_HASH_VALUE,
+        info.password_hash_algorithm,
+        info.password_key_bits,
+    )?;
+
+    let verifier_hash_input =
+        aes_cbc_decrypt(&info.encrypted_verifier_hash_input, &key1[..], &info.password_salt)?;
+    let verifier_hash_value_full =
+        aes_cbc_decrypt(&info.encrypted_verifier_hash_value, &key2[..], &info.password_salt)?;
+
+    let hash_len = hash_output_len(info.password_hash_algorithm);
+    let verifier_hash_value =
+        verifier_hash_value_full
+            .get(..hash_len)
+            .ok_or(OffcryptoError::InvalidEncryptionInfo {
+                context: "decrypted verifierHashValue shorter than hash output",
+            })?;
+
+    agile::verify_password(
+        &verifier_hash_input,
+        verifier_hash_value,
+        info.password_hash_algorithm,
+    )?;
+
+    // Derive the secret key (decrypt encryptedKeyValue).
+    let encryption_key = derive_encryption_key(
+        &hfinal[..],
+        &BLK_KEY_ENCRYPTED_KEY_VALUE,
+        info.password_hash_algorithm,
+        info.password_key_bits,
+    )?;
+    let secret_key_full =
+        aes_cbc_decrypt(&info.encrypted_key_value, &encryption_key[..], &info.password_salt)?;
+
+    // `derive_encryption_key` already rejects `keyBits % 8 != 0`.
+    let key_len = info.password_key_bits / 8;
+    let secret_key = secret_key_full.get(..key_len).ok_or(OffcryptoError::InvalidEncryptionInfo {
+        context: "decrypted keyValue shorter than keyBits",
+    })?;
+
+    if options.verify_integrity {
+        verify_agile_integrity(info, secret_key, encrypted_package)?;
+    }
+
+    agile_decrypt_package(info, secret_key, encrypted_package)
+}
+
+fn decrypt_standard_stream(
+    info: StandardEncryptionInfo,
+    encrypted_package: &[u8],
+    password: &str,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let key = standard_derive_key(&info, password)?;
+    standard_verify_key(&info, &key)?;
+    decrypt_encrypted_package_ecb(&key, encrypted_package)
+}
+
+/// Decrypt an MS-OFFCRYPTO `EncryptedPackage` stream using the provided `EncryptionInfo` bytes.
+pub fn decrypt_encrypted_package(
+    encryption_info: &[u8],
+    encrypted_package: &[u8],
+    password: &str,
+    options: DecryptOptions,
+) -> Result<Vec<u8>, OffcryptoError> {
+    let info = parse_encryption_info(encryption_info)?;
+
+    let decrypted = match info {
+        EncryptionInfo::Standard { header, verifier, .. } => decrypt_standard_stream(
+            StandardEncryptionInfo { header, verifier },
+            encrypted_package,
+            password,
+        )?,
+        EncryptionInfo::Agile { info, .. } => decrypt_agile_stream(&info, encrypted_package, password, &options)?,
+        EncryptionInfo::Unsupported { version } => {
+            if version.minor == 3 && matches!(version.major, 3 | 4) {
+                return Err(OffcryptoError::UnsupportedEncryption {
+                    encryption_type: EncryptionType::Extensible,
+                });
+            }
+            return Err(OffcryptoError::UnsupportedVersion {
+                major: version.major,
+                minor: version.minor,
+            });
+        }
+    };
+
+    validate_zip_like(&decrypted)?;
+    Ok(decrypted)
 }
 
 /// Decrypt a Standard-encrypted OOXML package (e.g. `.docx`, `.xlsx`) from a raw OLE/CFB wrapper.

@@ -426,6 +426,7 @@ mod tests {
         };
 
         let options = DecryptOptions {
+            verify_integrity: true,
             limits: crate::DecryptLimits {
                 max_spin_count: Some(10),
             },
