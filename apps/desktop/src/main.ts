@@ -8583,38 +8583,8 @@ function handleRibbonCommand(commandId: string): void {
       case "view.unfreezePanes":
         executeBuiltinCommand(commandId);
         return;
-      case "audit-precedents":
-        app.toggleAuditingPrecedents();
-        app.focus();
-        return;
-      case "audit-dependents":
-        app.toggleAuditingDependents();
-        app.focus();
-        return;
-      case "audit-transitive":
-        app.toggleAuditingTransitive();
-        app.focus();
-        return;
-      case "split-vertical":
-        ribbonLayoutController?.setSplitDirection("vertical", 0.5);
-        return;
-      case "split-horizontal":
-        ribbonLayoutController?.setSplitDirection("horizontal", 0.5);
-        return;
-      case "split-none":
-        ribbonLayoutController?.setSplitDirection("none", 0.5);
-        return;
-      case "freeze-panes":
-        executeBuiltinCommand("view.freezePanes");
-        return;
-      case "freeze-top-row":
-        executeBuiltinCommand("view.freezeTopRow");
-        return;
-      case "freeze-first-column":
-        executeBuiltinCommand("view.freezeFirstColumn");
-        return;
-      case "unfreeze-panes":
-        executeBuiltinCommand("view.unfreezePanes");
+      case "open-vba-migrate-panel":
+        toggleDockPanel(PanelIds.VBA_MIGRATE);
         return;
       default:
         // If the ribbon command matches a registered command id (builtin or extension),

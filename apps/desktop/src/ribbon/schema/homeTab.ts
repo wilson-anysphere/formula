@@ -581,7 +581,7 @@ export const homeTab: RibbonTabDefinition = {
       label: "Auditing",
       buttons: [
         {
-          id: "audit-precedents",
+          id: "audit.togglePrecedents",
           label: "Trace precedents",
           ariaLabel: "Trace precedents",
           iconId: "arrowLeft",
@@ -589,7 +589,7 @@ export const homeTab: RibbonTabDefinition = {
           size: "icon",
         },
         {
-          id: "audit-dependents",
+          id: "audit.toggleDependents",
           label: "Trace dependents",
           ariaLabel: "Trace dependents",
           iconId: "arrowRight",
@@ -597,7 +597,7 @@ export const homeTab: RibbonTabDefinition = {
           size: "icon",
         },
         {
-          id: "audit-transitive",
+          id: "audit.toggleTransitive",
           label: "Transitive",
           ariaLabel: "Toggle transitive auditing",
           iconId: "refresh",
@@ -611,7 +611,7 @@ export const homeTab: RibbonTabDefinition = {
       label: "Split view",
       buttons: [
         {
-          id: "split-vertical",
+          id: "view.splitVertical",
           label: "Split vertical",
           ariaLabel: "Split vertically",
           iconId: "arrowLeftRight",
@@ -619,24 +619,24 @@ export const homeTab: RibbonTabDefinition = {
           size: "icon",
         },
         {
-          id: "split-horizontal",
+          id: "view.splitHorizontal",
           label: "Split horizontal",
           ariaLabel: "Split horizontally",
           iconId: "arrowUpDown",
           testId: "split-horizontal",
           size: "icon",
         },
-        { id: "split-none", label: "Unsplit", ariaLabel: "Remove split", iconId: "close", testId: "split-none", size: "icon" },
+        { id: "view.splitNone", label: "Unsplit", ariaLabel: "Remove split", iconId: "close", testId: "split-none", size: "icon" },
       ],
     },
     {
       id: "home.debug.freeze",
       label: "Freeze",
       buttons: [
-        { id: "freeze-panes", label: "Freeze Panes", ariaLabel: "Freeze Panes", iconId: "lock", testId: "freeze-panes", size: "icon" },
-        { id: "freeze-top-row", label: "Freeze Top Row", ariaLabel: "Freeze Top Row", iconId: "arrowUp", testId: "freeze-top-row", size: "icon" },
-        { id: "freeze-first-column", label: "Freeze First Column", ariaLabel: "Freeze First Column", iconId: "arrowLeft", testId: "freeze-first-column", size: "icon" },
-        { id: "unfreeze-panes", label: "Unfreeze Panes", ariaLabel: "Unfreeze Panes", iconId: "chart", testId: "unfreeze-panes", size: "icon" },
+        { id: "view.freezePanes", label: "Freeze Panes", ariaLabel: "Freeze Panes", iconId: "lock", testId: "freeze-panes", size: "icon" },
+        { id: "view.freezeTopRow", label: "Freeze Top Row", ariaLabel: "Freeze Top Row", iconId: "arrowUp", testId: "freeze-top-row", size: "icon" },
+        { id: "view.freezeFirstColumn", label: "Freeze First Column", ariaLabel: "Freeze First Column", iconId: "arrowLeft", testId: "freeze-first-column", size: "icon" },
+        { id: "view.unfreezePanes", label: "Unfreeze Panes", ariaLabel: "Unfreeze Panes", iconId: "chart", testId: "unfreeze-panes", size: "icon" },
       ],
     },
   ],

@@ -556,6 +556,7 @@ export function registerBuiltinCommands(params: {
       if (app.isEditing()) return;
       if (getTextEditingTarget()) return;
       app.toggleAuditingPrecedents();
+      app.focus();
     },
     {
       category: t("commandCategory.audit"),
@@ -572,6 +573,7 @@ export function registerBuiltinCommands(params: {
       if (app.isEditing()) return;
       if (getTextEditingTarget()) return;
       app.toggleAuditingDependents();
+      app.focus();
     },
     {
       category: t("commandCategory.audit"),
@@ -1045,6 +1047,51 @@ export function registerBuiltinCommands(params: {
       icon: null,
       description: t("commandDescription.view.zoom.openPicker"),
       keywords: ["zoom", "custom zoom", "view", "scale"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.splitVertical",
+    t("command.view.splitVertical"),
+    () => {
+      layoutController.setSplitDirection("vertical", 0.5);
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.splitVertical"),
+      keywords: ["split", "view", "vertical"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.splitHorizontal",
+    t("command.view.splitHorizontal"),
+    () => {
+      layoutController.setSplitDirection("horizontal", 0.5);
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.splitHorizontal"),
+      keywords: ["split", "view", "horizontal"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.splitNone",
+    t("command.view.splitNone"),
+    () => {
+      layoutController.setSplitDirection("none", 0.5);
+      app.focus();
+    },
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.splitNone"),
+      keywords: ["split", "view", "unsplit", "none"],
     },
   );
 

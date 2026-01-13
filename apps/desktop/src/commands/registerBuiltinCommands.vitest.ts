@@ -415,6 +415,7 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       redo: vi.fn(),
       isEditing: vi.fn(() => false),
       setShowFormulas: vi.fn(),
+      focus: vi.fn(),
       toggleShowFormulas: vi.fn(),
       toggleAuditingPrecedents: vi.fn(),
       toggleAuditingDependents: vi.fn(),
@@ -501,6 +502,63 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
 
     await commandRegistry.executeCommand("formulas.formulaAuditing.tracePrecedents");
     expect(calls).toEqual(["clearAuditing", "toggleAuditingPrecedents", "focus"]);
+  });
+
+  });
+
+  it("executes audit.toggleTransitive", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      isEditing: vi.fn(() => false),
+      toggleAuditingTransitive: vi.fn(),
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("audit.toggleTransitive");
+    expect(app.toggleAuditingTransitive).toHaveBeenCalledTimes(1);
+    expect(app.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("executes view.split* commands", async () => {
+    const commandRegistry = new CommandRegistry();
+    const setSplitDirection = vi.fn();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+      setSplitDirection,
+    } as any;
+
+    const app = {
+      focus: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    await commandRegistry.executeCommand("view.splitVertical");
+    await commandRegistry.executeCommand("view.splitHorizontal");
+    await commandRegistry.executeCommand("view.splitNone");
+
+    expect(setSplitDirection).toHaveBeenNthCalledWith(1, "vertical", 0.5);
+    expect(setSplitDirection).toHaveBeenNthCalledWith(2, "horizontal", 0.5);
+    expect(setSplitDirection).toHaveBeenNthCalledWith(3, "none", 0.5);
+    expect(app.focus).toHaveBeenCalledTimes(3);
   });
 
   it("uses document.execCommand for undo/redo when a text input is focused", async () => {
