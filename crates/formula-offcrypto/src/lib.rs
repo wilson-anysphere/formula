@@ -944,37 +944,125 @@ impl StandardAlgId {
 pub fn inspect_encryption_info(
     encryption_info: &[u8],
 ) -> Result<EncryptionInfoSummary, OffcryptoError> {
-    match parse_encryption_info(encryption_info)? {
-        EncryptionInfo::Standard { header, .. } => Ok(EncryptionInfoSummary {
-            encryption_type: EncryptionType::Standard,
-            agile: None,
-            standard: Some(StandardEncryptionInfoSummary {
-                alg_id: StandardAlgId::from_raw(header.alg_id),
-                key_size: header.key_size_bits,
-            }),
-        }),
-        EncryptionInfo::Agile { info, .. } => {
-            let key_bits = u32::try_from(info.password_key_bits).map_err(|_| {
-                OffcryptoError::InvalidEncryptionInfo {
-                    context: "encryptedKey.keyBits too large",
-                }
-            })?;
+    // `parse_encryption_info` is intentionally strict (it validates algorithms and required field
+    // sizes). For user prompting / preflight checks, we want a best-effort summary that can be
+    // extracted from *partially-formed* EncryptionInfo buffers.
+    //
+    // For Standard (3.2), only the fixed EncryptionHeader fields are needed (algId/keySize).
+    // For Agile (4.4), we reuse the existing XML parser (it already produces actionable errors).
+    let mut r = Reader::new(encryption_info);
+    let major = r.read_u16_le("EncryptionVersionInfo.major")?;
+    let minor = r.read_u16_le("EncryptionVersionInfo.minor")?;
+    let _flags = r.read_u32_le("EncryptionVersionInfo.flags")?;
 
-            Ok(EncryptionInfoSummary {
-                encryption_type: EncryptionType::Agile,
-                agile: Some(AgileEncryptionInfoSummary {
-                    hash_algorithm: info.password_hash_algorithm,
-                    spin_count: info.spin_count,
-                    key_bits,
-                }),
-                standard: None,
-            })
-        }
-        EncryptionInfo::Unsupported { version } => Err(OffcryptoError::UnsupportedVersion {
-            major: version.major,
-            minor: version.minor,
-        }),
+    if (major, minor) == (4, 4) {
+        let info = parse_agile_encryption_info_xml(r.remaining())?;
+        let key_bits = u32::try_from(info.password_key_bits).map_err(|_| {
+            OffcryptoError::InvalidEncryptionInfo {
+                context: "encryptedKey.keyBits too large",
+            }
+        })?;
+        return Ok(EncryptionInfoSummary {
+            encryption_type: EncryptionType::Agile,
+            agile: Some(AgileEncryptionInfoSummary {
+                hash_algorithm: info.password_hash_algorithm,
+                spin_count: info.spin_count,
+                key_bits,
+            }),
+            standard: None,
+        });
     }
+
+    if (major, minor) != (3, 2) {
+        return Err(OffcryptoError::UnsupportedVersion { major, minor });
+    }
+
+    let header_size = r.read_u32_le("EncryptionInfo.header_size")? as usize;
+    let header_bytes = r.take(header_size, "EncryptionHeader")?;
+    if header_bytes.len() < 8 * 4 {
+        return Err(OffcryptoError::Truncated {
+            context: "EncryptionHeader (missing fixed fields)",
+        });
+    }
+    let mut hr = Reader::new(header_bytes);
+    let _flags = hr.read_u32_le("EncryptionHeader.flags")?;
+    let _size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;
+    let alg_id = hr.read_u32_le("EncryptionHeader.algId")?;
+    let _alg_id_hash = hr.read_u32_le("EncryptionHeader.algIdHash")?;
+    let key_size = hr.read_u32_le("EncryptionHeader.keySize")?;
+
+    Ok(EncryptionInfoSummary {
+        encryption_type: EncryptionType::Standard,
+        agile: None,
+        standard: Some(StandardEncryptionInfoSummary {
+            alg_id: StandardAlgId::from_raw(alg_id),
+            key_size,
+        }),
+    })
+}
+
+fn round_up_to_multiple(n: usize, multiple: usize) -> Option<usize> {
+    if multiple == 0 {
+        return None;
+    }
+    let rem = n % multiple;
+    if rem == 0 {
+        return Some(n);
+    }
+    n.checked_add(multiple - rem)
+}
+
+/// Validate an MS-OFFCRYPTO `EncryptedPackage` stream for Standard (CryptoAPI) encryption.
+///
+/// This is intentionally lightweight and only checks framing invariants:
+/// - the 8-byte `original_size` prefix is present
+/// - ciphertext length is AES block-aligned (multiple of 16)
+pub fn validate_standard_encrypted_package_stream(
+    encrypted_package_stream: &[u8],
+) -> Result<(), OffcryptoError> {
+    parse_encrypted_package_header(encrypted_package_stream)?;
+    let ciphertext_len = encrypted_package_stream.len().saturating_sub(8);
+    if ciphertext_len % 16 != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength {
+            len: ciphertext_len,
+        });
+    }
+    Ok(())
+}
+
+/// Validate an Agile-encrypted segment decrypt call (IV/ciphertext lengths).
+///
+/// Agile encryption processes the package stream in 4096-byte plaintext segments, encrypted
+/// independently using AES-CBC with a per-segment IV.
+///
+/// This helper is intended for robustness tests and defensive callers: it ensures we return an
+/// `OffcryptoError` on malformed inputs rather than panicking.
+pub fn validate_agile_segment_decrypt_inputs(
+    iv: &[u8],
+    ciphertext: &[u8],
+    expected_plaintext_len: usize,
+) -> Result<(), OffcryptoError> {
+    if iv.len() != 16 {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "Agile segment IV length must be 16 bytes",
+        });
+    }
+    if ciphertext.len() % 16 != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength {
+            len: ciphertext.len(),
+        });
+    }
+    let min_cipher_len = round_up_to_multiple(expected_plaintext_len, 16).ok_or(
+        OffcryptoError::InvalidEncryptionInfo {
+            context: "Agile segment expected_plaintext_len overflow",
+        },
+    )?;
+    if ciphertext.len() < min_cipher_len {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "Agile segment ciphertext is too short for expected_plaintext_len",
+        });
+    }
+    Ok(())
 }
 
 fn password_to_utf16le_bytes(password: &str) -> Vec<u8> {
