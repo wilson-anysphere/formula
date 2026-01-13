@@ -24,13 +24,13 @@ release contains **exactly** these `latest.json.platforms` keys:
 
 If Tauri changes these identifiers in a future upgrade, our CI guardrail
 (`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is
-expected to fail with a clear “expected vs actual” diff, and this document should be updated
+expected to fail loudly with a clear “expected vs actual” diff, and this document should be updated
 alongside the validator.
 
 ### Common equivalents (not accepted by tagged-release CI)
 
-The release workflow's CI validator (`scripts/ci/validate-updater-manifest.mjs`) is intentionally
-**strict** about `latest.json.platforms` keys for tagged releases so toolchain changes fail loudly.
+The CI validator and the standalone checker are intentionally **strict** about the `latest.json`
+platform key names so toolchain changes fail loudly.
 
 When inspecting manifests from **local builds** or ad-hoc tooling, you may see alternate platform
 key spellings (often Rust target triples). Treat these as equivalent to the canonical keys above
@@ -43,9 +43,8 @@ keys.
 - `x86_64-unknown-linux-gnu` → `linux-x86_64`
 - `aarch64-unknown-linux-gnu` → `linux-aarch64`
 
-These are treated as aliases for **local** validation, but the canonical keys above are what we
-expect `tauri-action` to produce for Formula releases. If a tagged release ever ships with a
-different key spelling, update both this document and the CI validator together.
+If a tagged release ever ships with a different key spelling, update both this document and the CI
+validator together.
 
 ## Mapping table (build target → platform key → updater artifact)
 
@@ -66,11 +65,10 @@ The table below documents what each platform key should point to in `latest.json
   as stable for CI verification.
 - Formula still publishes **additional** artifacts (DMG, NSIS `.exe`, `.deb`, `.rpm`) for user
   convenience; the updater keys above intentionally validate the *updatable* artifact.
-- Windows distribution requirement: even though the updater typically uses the `.msi` for self-update
-  (and CI currently accepts either `.msi` or `.exe` in `latest.json`), tagged
-  releases must also ship a corresponding **NSIS `.exe` installer** for both `windows-x86_64` and
-  `windows-aarch64`. The release workflow enforces that both `.msi` and `.exe` assets exist per
-  architecture.
+- Windows distribution requirement: the updater uses whichever installer is referenced in
+  `latest.json` (`.msi` or `.exe`; in this repo it is typically `.msi`). Tagged releases must also
+  ship a corresponding **NSIS `.exe` installer** for both `windows-x86_64` and `windows-aarch64`. The
+  release workflow enforces that both `.msi` and `.exe` assets exist per architecture.
 - Windows multi-arch safety requirement: the `.msi` / `.exe` filenames must include an explicit
   architecture marker (for example `x64`, `x86_64`, `amd64`, `win64` vs `arm64`, `aarch64`) so that
   a multi-target run cannot overwrite/clobber assets on the GitHub Release. CI enforces this via:
