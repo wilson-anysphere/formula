@@ -10,7 +10,7 @@
   position: absolute;
   z-index: 5;
   background: var(--formula-grid-scrollbar-track, var(--bg-tertiary));
-  border-radius: 6px;
+  border-radius: var(--radius);
   opacity: 0.9;
   user-select: none;
 }
@@ -18,7 +18,7 @@
 .grid-scrollbar-thumb {
   position: absolute;
   background: var(--formula-grid-scrollbar-thumb, var(--text-secondary));
-  border-radius: 6px;
+  border-radius: var(--radius);
   cursor: pointer;
   user-select: none;
   transition:
