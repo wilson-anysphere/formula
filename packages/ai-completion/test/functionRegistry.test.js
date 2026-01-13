@@ -147,6 +147,10 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   assert.ok(sw?.args?.[1]?.repeating, "Expected SWITCH value1 to mark a repeating group");
   assert.ok(registry.getFunction("IFERROR"), "Expected IFERROR to have a curated signature");
   assert.ok(registry.getFunction("IFNA"), "Expected IFNA to have a curated signature");
+  assert.equal(registry.getArgType("LET", 0), "string", "Expected LET name1 to be a string-like identifier");
+  assert.equal(registry.getArgType("LET", 2), "value", "Expected LET calculation to be a value");
+  assert.equal(registry.getArgType("LAMBDA", 0), "string", "Expected LAMBDA parameter1 to be string-like");
+  assert.equal(registry.getArgType("LAMBDA", 1), "value", "Expected LAMBDA calculation to be a value");
 
   // Legacy descriptive stats
   assert.ok(registry.isRangeArg("PERCENTILE", 0), "Expected PERCENTILE array to be a range");

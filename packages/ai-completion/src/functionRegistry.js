@@ -1277,6 +1277,23 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "LET",
+    description: "Assigns names to calculation results to improve readability and performance.",
+    args: [
+      { name: "name1", type: "string" },
+      { name: "value1", type: "value" },
+      { name: "calculation", type: "value" },
+    ],
+  },
+  {
+    name: "LAMBDA",
+    description: "Creates a custom, reusable function and returns it as a value.",
+    args: [
+      { name: "parameter1", type: "string", optional: true },
+      { name: "calculation", type: "value" },
+    ],
+  },
+  {
     name: "IFERROR",
     description: "Returns a value you specify if a formula evaluates to an error; otherwise returns the formula result.",
     args: [
