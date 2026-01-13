@@ -1864,6 +1864,8 @@ jobs:
             require_min "latest.json.sig" '^latest\.json\.sig$' 1
             require_min "macOS DMG" '\.dmg$' 1
             require_min "macOS app archive (.app.tar.gz)" '\.app\.tar\.gz$' 1
+            require_min "macOS DMG signature" '\.dmg\.sig$' 1
+            require_min "macOS app archive signature (.app.tar.gz.sig)" '\.app\.tar\.gz\.sig$' 1
 
             # Windows multi-arch: ensure distinct installers per architecture were uploaded.
             count_windows_arch() {
@@ -1903,6 +1905,9 @@ jobs:
             require_min "Linux AppImage" '\.AppImage$' 1
             require_min "Linux DEB" '\.deb$' 1
             require_min "Linux RPM" '\.rpm$' 1
+            require_min "Linux AppImage signature" '\.AppImage\.sig$' 1
+            require_min "Linux DEB signature" '\.deb\.sig$' 1
+            require_min "Linux RPM signature" '\.rpm\.sig$' 1
 
             windows_archless_count="$(echo "$json" | jq -r --arg x64 "$win_x64_re" --arg arm64 "$win_arm64_re" '[.[].name
               | select(test("\\.(msi|exe)$"; "i"))
