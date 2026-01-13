@@ -95,4 +95,18 @@ test("FunctionRegistry uses curated range metadata for common multi-range functi
   // Common stats varargs: STDEV.S / VAR.S
   assert.ok(registry.isRangeArg("STDEV.S", 0), "Expected STDEV.S arg1 to be a range");
   assert.ok(registry.isRangeArg("VAR.S", 0), "Expected VAR.S arg1 to be a range");
+
+  // Matrix functions
+  assert.ok(registry.isRangeArg("MMULT", 0), "Expected MMULT array1 to be a range");
+  assert.ok(registry.isRangeArg("MMULT", 1), "Expected MMULT array2 to be a range");
+  assert.ok(registry.isRangeArg("MDETERM", 0), "Expected MDETERM array to be a range");
+  assert.ok(registry.isRangeArg("MINVERSE", 0), "Expected MINVERSE array to be a range");
+
+  // Statistical test functions with dot/legacy names
+  assert.ok(registry.isRangeArg("T.TEST", 0), "Expected T.TEST array1 to be a range");
+  assert.ok(registry.isRangeArg("TTEST", 0), "Expected TTEST array1 to be a range");
+  assert.ok(registry.isRangeArg("F.TEST", 0), "Expected F.TEST array1 to be a range");
+  assert.ok(registry.isRangeArg("FTEST", 0), "Expected FTEST array1 to be a range");
+  assert.ok(registry.isRangeArg("Z.TEST", 0), "Expected Z.TEST array to be a range");
+  assert.ok(registry.isRangeArg("ZTEST", 0), "Expected ZTEST array to be a range");
 });

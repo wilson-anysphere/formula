@@ -485,6 +485,76 @@ const CURATED_FUNCTIONS = [
     ],
   },
   {
+    name: "CHISQ.TEST",
+    description: "Returns the test for independence.",
+    args: [
+      { name: "actual_range", type: "range" },
+      { name: "expected_range", type: "range" },
+    ],
+  },
+  {
+    name: "CHITEST",
+    description: "Returns the test for independence (legacy).",
+    args: [
+      { name: "actual_range", type: "range" },
+      { name: "expected_range", type: "range" },
+    ],
+  },
+  {
+    name: "F.TEST",
+    description: "Returns the result of an F-test.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "FTEST",
+    description: "Returns the result of an F-test (legacy).",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "T.TEST",
+    description: "Returns the probability associated with a Student's t-test.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+      { name: "tails", type: "number" },
+      { name: "type", type: "number" },
+    ],
+  },
+  {
+    name: "TTEST",
+    description: "Returns the probability associated with a Student's t-test (legacy).",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+      { name: "tails", type: "number" },
+      { name: "type", type: "number" },
+    ],
+  },
+  {
+    name: "Z.TEST",
+    description: "Returns the one-tailed probability-value of a z-test.",
+    args: [
+      { name: "array", type: "range" },
+      { name: "x", type: "number" },
+      { name: "sigma", type: "number", optional: true },
+    ],
+  },
+  {
+    name: "ZTEST",
+    description: "Returns the one-tailed probability-value of a z-test (legacy).",
+    args: [
+      { name: "array", type: "range" },
+      { name: "x", type: "number" },
+      { name: "sigma", type: "number", optional: true },
+    ],
+  },
+  {
     name: "FREQUENCY",
     description: "Calculates how often values occur within a range of values and returns a vertical array of numbers.",
     args: [
@@ -777,6 +847,28 @@ const CURATED_FUNCTIONS = [
   {
     name: "TRANSPOSE",
     description: "Returns the transpose of an array or range.",
+    args: [
+      { name: "array", type: "range" },
+    ],
+  },
+  {
+    name: "MMULT",
+    description: "Returns the matrix product of two arrays.",
+    args: [
+      { name: "array1", type: "range" },
+      { name: "array2", type: "range" },
+    ],
+  },
+  {
+    name: "MDETERM",
+    description: "Returns the matrix determinant of an array.",
+    args: [
+      { name: "array", type: "range" },
+    ],
+  },
+  {
+    name: "MINVERSE",
+    description: "Returns the inverse matrix for a matrix stored in an array.",
     args: [
       { name: "array", type: "range" },
     ],
