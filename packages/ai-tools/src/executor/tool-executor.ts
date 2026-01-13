@@ -208,6 +208,16 @@ export interface ToolExecutorOptions {
    * Instead, tools should return deterministic "skipped" results where appropriate.
    */
   preview_mode?: boolean;
+  /**
+   * Explicit allowlist for `fetch_external_data`.
+   *
+   * Entries can be either:
+   * - `example.com` (hostname-only): matches `url.hostname` regardless of port.
+   * - `example.com:8443` (host:port): matches `url.hostname` + port. For default ports (80/443),
+   *   URLs that omit an explicit port are treated as using the scheme default.
+   *
+   * Matching is case-insensitive and whitespace is trimmed.
+   */
   allowed_external_hosts?: string[];
   max_external_bytes?: number;
   /**
