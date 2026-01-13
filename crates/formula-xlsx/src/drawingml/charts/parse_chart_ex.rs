@@ -267,7 +267,7 @@ fn parse_chart_data<'a>(
 
     let mut out: HashMap<String, ChartExDataDefinition> = HashMap::new();
     for data in chart_data
-        .children()
+        .descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "data")
     {
         let Some(id) = data.attribute("id") else {
@@ -350,7 +350,7 @@ fn parse_series_data_id(series_node: Node<'_, '_>) -> Option<String> {
     }
 
     series_node
-        .children()
+        .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "dataId")
         .and_then(|n| {
             n.attribute("val")
@@ -394,19 +394,25 @@ fn parse_series(
             if let Some(def) = chart_data.get(&data_id) {
                 if categories.is_none() {
                     categories = def.categories.clone();
+                } else if let (Some(dst), Some(src)) =
+                    (categories.as_mut(), def.categories.as_ref())
+                {
+                    if dst.formula.is_none() {
+                        dst.formula = src.formula.clone();
+                    }
                 }
 
+                let src_values = def.values.as_ref().or(def.size.as_ref());
                 if values.is_none() {
-                    values = def.values.clone().or_else(|| def.size.clone());
+                    values = src_values.cloned();
+                } else if let (Some(dst), Some(src)) = (values.as_mut(), src_values) {
+                    if dst.formula.is_none() {
+                        dst.formula = src.formula.clone();
+                    }
                 }
 
-                if x_values.is_none() {
-                    x_values = def.x_values.clone();
-                }
-
-                if y_values.is_none() {
-                    y_values = def.y_values.clone();
-                }
+                fill_series_data_formula(&mut x_values, &def.x_values);
+                fill_series_data_formula(&mut y_values, &def.y_values);
             } else {
                 diagnostics.push(ChartDiagnostic {
                     level: ChartDiagnosticLevel::Warning,
@@ -431,6 +437,31 @@ fn parse_series(
         data_labels: None,
         points: Vec::new(),
         plot_index: None,
+    }
+}
+
+fn fill_series_data_formula(dst: &mut Option<SeriesData>, src: &Option<SeriesData>) {
+    if dst.is_none() {
+        *dst = src.clone();
+        return;
+    }
+
+    let (Some(dst_data), Some(src_data)) = (dst.as_mut(), src.as_ref()) else {
+        return;
+    };
+
+    match (dst_data, src_data) {
+        (SeriesData::Text(dst_text), SeriesData::Text(src_text)) => {
+            if dst_text.formula.is_none() {
+                dst_text.formula = src_text.formula.clone();
+            }
+        }
+        (SeriesData::Number(dst_num), SeriesData::Number(src_num)) => {
+            if dst_num.formula.is_none() {
+                dst_num.formula = src_num.formula.clone();
+            }
+        }
+        _ => {}
     }
 }
 
