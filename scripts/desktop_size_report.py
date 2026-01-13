@@ -130,6 +130,21 @@ def _append_step_summary(markdown: str) -> None:
         f.write("\n")
 
 
+def _append_error_summary(message: str) -> None:
+    """
+    Best-effort: if running in GitHub Actions, surface failures in the step summary.
+    """
+    md = "\n".join(
+        [
+            "## Desktop size report",
+            "",
+            f"**ERROR:** {message}",
+            "",
+        ]
+    )
+    _append_step_summary(md)
+
+
 def _relpath(path: Path, repo_root: Path) -> str:
     try:
         return str(path.relative_to(repo_root))
@@ -247,7 +262,9 @@ def main() -> int:
         binary_limit_mb = _parse_optional_limit_mb("FORMULA_DESKTOP_BINARY_SIZE_LIMIT_MB")
         dist_limit_mb = _parse_optional_limit_mb("FORMULA_DESKTOP_DIST_SIZE_LIMIT_MB")
     except ValueError as exc:
-        print(f"desktop-size: ERROR {exc}", file=sys.stderr)
+        msg = str(exc)
+        print(f"desktop-size: ERROR {msg}", file=sys.stderr)
+        _append_error_summary(msg)
         return 2
 
     binary_path = args.binary
@@ -265,10 +282,14 @@ def main() -> int:
             dist_path = repo_root / dist_path
 
     if not binary_path.is_file():
-        print(f"desktop-size: ERROR binary not found: {binary_path}", file=sys.stderr)
+        msg = f"binary not found: {binary_path}"
+        print(f"desktop-size: ERROR {msg}", file=sys.stderr)
+        _append_error_summary(msg)
         return 2
     if not dist_path.is_dir():
-        print(f"desktop-size: ERROR dist directory not found: {dist_path}", file=sys.stderr)
+        msg = f"dist directory not found: {dist_path}"
+        print(f"desktop-size: ERROR {msg}", file=sys.stderr)
+        _append_error_summary(msg)
         return 2
 
     binary = SizedPath(path=binary_path, size_bytes=binary_path.stat().st_size)
@@ -315,7 +336,7 @@ def main() -> int:
 
     if args.json_out is not None:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        with open(args.json_out, "w", encoding="utf-8") as f:
+        with open(args.json_out, "w", encoding="utf-8", newline="\n") as f:
             json.dump(report, f, indent=2, sort_keys=True)
             f.write("\n")
 
