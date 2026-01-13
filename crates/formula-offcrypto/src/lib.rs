@@ -38,6 +38,53 @@ const AES_BLOCK_SIZE: usize = 16;
 const AGILE_SALT_LEN: usize = 16;
 const AGILE_MAX_ENCRYPTED_LEN: usize = 64;
 
+/// Recommended default upper bound for Agile `spinCount`.
+///
+/// Excel commonly uses `100_000` for Agile encryption. Allowing up to `1_000_000`
+/// preserves compatibility while preventing pathological attacker-controlled values
+/// (e.g. `u32::MAX`) from hanging the process.
+pub const DEFAULT_MAX_SPIN_COUNT: u32 = 1_000_000;
+
+/// Limits to apply during decryption to prevent resource exhaustion (DoS).
+#[derive(Debug, Clone)]
+pub struct DecryptLimits {
+    /// Maximum allowed Agile `spinCount` value.
+    ///
+    /// `None` disables the limit.
+    pub max_spin_count: Option<u32>,
+}
+
+impl Default for DecryptLimits {
+    fn default() -> Self {
+        Self {
+            max_spin_count: Some(DEFAULT_MAX_SPIN_COUNT),
+        }
+    }
+}
+
+/// Options controlling decryption behavior.
+#[derive(Debug, Clone)]
+pub struct DecryptOptions {
+    pub limits: DecryptLimits,
+}
+
+impl Default for DecryptOptions {
+    fn default() -> Self {
+        Self {
+            limits: DecryptLimits::default(),
+        }
+    }
+}
+
+fn check_spin_count(spin_count: u32, limits: &DecryptLimits) -> Result<(), OffcryptoError> {
+    if let Some(max) = limits.max_spin_count {
+        if spin_count > max {
+            return Err(OffcryptoError::SpinCountTooLarge { spin_count, max });
+        }
+    }
+    Ok(())
+}
+
 pub mod encrypted_package;
 pub use encrypted_package::{agile_decrypt_package, decrypt_encrypted_package};
 
@@ -266,6 +313,8 @@ pub enum OffcryptoError {
     InvalidVerifierHashLength { len: usize },
     /// Password/key did not pass verifier check.
     InvalidPassword,
+    /// Agile `spinCount` is larger than allowed by the configured decryption limits.
+    SpinCountTooLarge { spin_count: u32, max: u32 },
 }
 impl fmt::Display for OffcryptoError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -325,6 +374,9 @@ impl fmt::Display for OffcryptoError {
                 "encrypted verifier hash must be at least 20 bytes after decryption, got {len}"
             ),
             OffcryptoError::InvalidPassword => write!(f, "invalid password or key"),
+            OffcryptoError::SpinCountTooLarge { spin_count, max } => {
+                write!(f, "Agile spinCount too large: {spin_count} (max {max})")
+            }
         }
     }
 }
@@ -1975,7 +2027,12 @@ fn derive_iterated_hash_from_password(
     salt_value: &[u8],
     hash_algorithm: HashAlgorithm,
     spin_count: u32,
-) -> Zeroizing<Vec<u8>> {
+    limits: &DecryptLimits,
+    mut on_iteration: Option<&mut dyn FnMut(u32)>,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    // `spinCount` is attacker-controlled; enforce limits up front to avoid CPU DoS.
+    check_spin_count(spin_count, limits)?;
+
     // Initial round: hash(salt + password(UTF-16LE))
     let password_utf16 = Zeroizing::new(password_to_utf16le_bytes(password));
     let mut buf = Zeroizing::new(Vec::with_capacity(salt_value.len() + password_utf16.len()));
@@ -1986,13 +2043,16 @@ fn derive_iterated_hash_from_password(
 
     // Iteration 0..spin_count-1: hash(i_le + h)
     for i in 0..spin_count {
+        if let Some(cb) = on_iteration.as_mut() {
+            cb(i);
+        }
         let mut round = Zeroizing::new(Vec::with_capacity(4 + hfinal.len()));
         round.extend_from_slice(&i.to_le_bytes());
         round.extend_from_slice(&hfinal[..]);
         hfinal = Zeroizing::new(hash_digest(hash_algorithm, &round));
     }
 
-    hfinal
+    Ok(hfinal)
 }
 
 fn derive_encryption_key(
@@ -2080,21 +2140,33 @@ pub fn agile_verify_password(
     info: &AgileEncryptionInfo,
     password: &str,
 ) -> Result<(), OffcryptoError> {
-    let h = derive_iterated_hash_from_password(
+    let options = DecryptOptions::default();
+    agile_verify_password_with_options(info, password, &options)
+}
+
+/// Like [`agile_verify_password`], but allows overriding resource limits.
+pub fn agile_verify_password_with_options(
+    info: &AgileEncryptionInfo,
+    password: &str,
+    options: &DecryptOptions,
+) -> Result<(), OffcryptoError> {
+    let hfinal = derive_iterated_hash_from_password(
         password,
         &info.password_salt,
         info.password_hash_algorithm,
         info.spin_count,
-    );
+        &options.limits,
+        None,
+    )?;
 
     let key1 = derive_encryption_key(
-        &h,
+        &hfinal[..],
         &BLK_KEY_VERIFIER_HASH_INPUT,
         info.password_hash_algorithm,
         info.password_key_bits,
     )?;
     let key2 = derive_encryption_key(
-        &h,
+        &hfinal[..],
         &BLK_KEY_VERIFIER_HASH_VALUE,
         info.password_hash_algorithm,
         info.password_key_bits,
@@ -2137,12 +2209,24 @@ pub fn agile_secret_key(
     info: &AgileEncryptionInfo,
     password: &str,
 ) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
+    let options = DecryptOptions::default();
+    agile_secret_key_with_options(info, password, &options)
+}
+
+/// Like [`agile_secret_key`], but allows overriding resource limits.
+pub fn agile_secret_key_with_options(
+    info: &AgileEncryptionInfo,
+    password: &str,
+    options: &DecryptOptions,
+) -> Result<Zeroizing<Vec<u8>>, OffcryptoError> {
     let hfinal = derive_iterated_hash_from_password(
         password,
         &info.password_salt,
         info.password_hash_algorithm,
         info.spin_count,
-    );
+        &options.limits,
+        None,
+    )?;
 
     let encryption_key = derive_encryption_key(
         &hfinal[..],
@@ -2516,6 +2600,59 @@ mod tests {
             })
         );
         assert!(summary.agile.is_none());
+    }
+
+    #[test]
+    fn agile_spin_count_just_below_limit_succeeds() {
+        let limits = DecryptLimits {
+            max_spin_count: Some(10),
+        };
+
+        let spin_count = 9;
+        let out = derive_iterated_hash_from_password(
+            "password",
+            b"01234567",
+            HashAlgorithm::Sha256,
+            spin_count,
+            &limits,
+            None,
+        )
+        .expect("spinCount below limit should succeed");
+
+        assert_eq!(out.len(), 32);
+        assert!(out.iter().any(|b| *b != 0));
+    }
+
+    #[test]
+    fn agile_spin_count_above_limit_errors_without_iterating() {
+        let limits = DecryptLimits {
+            max_spin_count: Some(10),
+        };
+
+        // A huge spinCount that would be a CPU DoS without an up-front check.
+        let spin_count = u32::MAX;
+
+        let mut iter_hook = |_i: u32| -> () {
+            panic!("spinCount loop should not run when over the limit");
+        };
+
+        let err = derive_iterated_hash_from_password(
+            "password",
+            b"01234567",
+            HashAlgorithm::Sha256,
+            spin_count,
+            &limits,
+            Some(&mut iter_hook),
+        )
+        .expect_err("spinCount above limit should error");
+
+        assert_eq!(
+            err,
+            OffcryptoError::SpinCountTooLarge {
+                spin_count,
+                max: 10
+            }
+        );
     }
 }
 
