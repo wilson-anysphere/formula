@@ -526,10 +526,11 @@ fn parse_series(
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
         .and_then(|tx| parse_text_from_tx(tx, diagnostics, "series.tx"));
 
-    let mut categories = series_node
+    let (mut categories, categories_num) = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "cat")
-        .and_then(|cat| parse_series_text_data(cat, diagnostics, "series.cat"));
+        .map(|cat| parse_series_categories(cat, diagnostics, "series.cat"))
+        .unwrap_or((None, None));
 
     let mut values = series_node
         .children()
@@ -549,7 +550,7 @@ fn parse_series(
     if !chart_data.is_empty() {
         if let Some(data_id) = parse_series_data_id(series_node) {
             if let Some(def) = chart_data.get(&data_id) {
-                if categories.is_none() {
+                if categories.is_none() && categories_num.is_none() {
                     categories = def.categories.clone();
                 } else if let (Some(dst), Some(src)) =
                     (categories.as_mut(), def.categories.as_ref())
@@ -604,6 +605,7 @@ fn parse_series(
         order,
         name,
         categories,
+        categories_num,
         values,
         x_values,
         y_values,
@@ -738,6 +740,22 @@ fn fill_series_data_from_chart_data(dst: &mut Option<SeriesData>, src: &Option<S
     }
 }
 
+fn parse_series_categories(
+    cat_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> (Option<SeriesTextData>, Option<SeriesNumberData>) {
+    // Preserve numeric categories separately rather than stringifying them.
+    if cat_node
+        .children()
+        .any(|n| n.is_element() && matches!(n.tag_name().name(), "numRef" | "numLit"))
+    {
+        return (None, parse_series_number_data(cat_node, diagnostics, context));
+    }
+
+    (parse_series_text_data(cat_node, diagnostics, context), None)
+}
+
 fn parse_text_from_tx(
     tx_node: Node<'_, '_>,
     diagnostics: &mut Vec<ChartDiagnostic>,
@@ -801,23 +819,6 @@ fn parse_series_text_data(
         return Some(parse_str_ref(str_ref, diagnostics, context));
     }
 
-    if let Some(num_ref) = data_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numRef")
-    {
-        let num = parse_num_ref(num_ref, diagnostics, context);
-        let cache = num
-            .cache
-            .as_ref()
-            .map(|vals| vals.iter().map(|v| v.to_string()).collect());
-        return Some(SeriesTextData {
-            formula: num.formula,
-            cache,
-            multi_cache: None,
-            literal: None,
-        });
-    }
-
     if let Some(str_lit) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strLit")
@@ -828,20 +829,6 @@ fn parse_series_text_data(
             cache: values.clone(),
             multi_cache: None,
             literal: values,
-        });
-    }
-
-    if let Some(num_lit) = data_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numLit")
-    {
-        let (values, _format_code) = parse_num_cache(num_lit, diagnostics, context);
-        let cache = values.map(|vals| vals.into_iter().map(|v| v.to_string()).collect());
-        return Some(SeriesTextData {
-            formula: None,
-            cache: cache.clone(),
-            multi_cache: None,
-            literal: cache,
         });
     }
 

@@ -412,6 +412,11 @@ pub struct SeriesModel {
     pub order: Option<u32>,
     pub name: Option<TextModel>,
     pub categories: Option<SeriesTextData>,
+    /// Numeric categories (`c:cat/c:numRef`, `c:cat/c:numLit`), commonly used by
+    /// date/time axes. Stored separately to preserve numeric/date semantics
+    /// without stringifying.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub categories_num: Option<SeriesNumberData>,
     pub values: Option<SeriesNumberData>,
     pub x_values: Option<SeriesData>,
     pub y_values: Option<SeriesData>,

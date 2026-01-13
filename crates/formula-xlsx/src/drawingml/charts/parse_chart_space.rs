@@ -148,6 +148,7 @@ pub fn parse_chart_space(
 
     let (chart_kind, plot_area, series) = parse_plot_area_chart(plot_area_node, &mut diagnostics);
     let axes = parse_axes(plot_area_node, &mut diagnostics);
+    warn_on_numeric_categories_with_non_numeric_axis(plot_area_node, &series, &mut diagnostics);
 
     Ok(ChartModel {
         chart_kind,
@@ -391,10 +392,11 @@ fn parse_series(
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
         .and_then(|tx| parse_text_from_tx(tx, diagnostics, "series.tx"));
 
-    let categories = series_node
+    let (categories, categories_num) = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "cat")
-        .and_then(|cat| parse_series_text_data(cat, diagnostics, "series.cat"));
+        .map(|cat| parse_series_categories(cat, diagnostics, "series.cat"))
+        .unwrap_or((None, None));
 
     let values = series_node
         .children()
@@ -446,6 +448,7 @@ fn parse_series(
         order,
         name,
         categories,
+        categories_num,
         values,
         x_values,
         y_values,
@@ -481,6 +484,23 @@ fn parse_data_labels(
         position,
         num_fmt,
     }
+}
+
+fn parse_series_categories(
+    cat_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    context: &str,
+) -> (Option<SeriesTextData>, Option<SeriesNumberData>) {
+    // `c:cat` can contain either string or numeric categories. Preserve numeric
+    // categories separately rather than stringifying them.
+    if cat_node
+        .children()
+        .any(|n| n.is_element() && matches!(n.tag_name().name(), "numRef" | "numLit"))
+    {
+        return (None, parse_series_number_data(cat_node, diagnostics, context));
+    }
+
+    (parse_series_text_data(cat_node, diagnostics, context), None)
 }
 
 fn parse_series_point_style(dpt_node: Node<'_, '_>) -> Option<SeriesPointStyle> {
@@ -645,6 +665,38 @@ fn flatten_alternate_content<'a, 'input>(
         .filter(|n| n.is_element())
         .flat_map(|n| flatten_alternate_content(n, desired))
         .collect()
+}
+
+fn warn_on_numeric_categories_with_non_numeric_axis(
+    plot_area_node: Node<'_, '_>,
+    series: &[SeriesModel],
+    diagnostics: &mut Vec<ChartDiagnostic>,
+) {
+    if !series.iter().any(|s| s.categories_num.is_some()) {
+        return;
+    }
+
+    // For classic charts, numeric categories are typically paired with `<c:dateAx>`.
+    // Scatter charts can have a `<c:valAx>` in the category position.
+    let has_date_ax = plot_area_node
+        .children()
+        .any(|n| n.is_element() && n.tag_name().name() == "dateAx");
+    let has_cat_ax = plot_area_node
+        .children()
+        .any(|n| n.is_element() && n.tag_name().name() == "catAx");
+    let has_val_ax = plot_area_node
+        .children()
+        .any(|n| n.is_element() && n.tag_name().name() == "valAx");
+
+    let category_axis_is_numeric = has_date_ax || (!has_cat_ax && has_val_ax);
+    if category_axis_is_numeric {
+        return;
+    }
+
+    warn(
+        diagnostics,
+        "numeric series categories detected, but the category axis is not a date/value axis; rendering may interpret categories as text",
+    );
 }
 
 fn parse_axis(
@@ -1179,26 +1231,6 @@ fn parse_series_text_data(
         return Some(parse_str_ref(str_ref, diagnostics, context));
     }
 
-    if let Some(num_ref) = data_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numRef")
-    {
-        warn(
-            diagnostics,
-            format!("{context}: numeric category axis detected; values will be stringified"),
-        );
-        let num = parse_num_ref(num_ref, diagnostics, context);
-        let cache = num
-            .cache
-            .map(|vals| vals.into_iter().map(|v| v.to_string()).collect());
-        return Some(SeriesTextData {
-            formula: num.formula,
-            cache,
-            multi_cache: None,
-            literal: None,
-        });
-    }
-
     if let Some(str_lit) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "strLit")
@@ -1209,24 +1241,6 @@ fn parse_series_text_data(
             cache: values.clone(),
             multi_cache: None,
             literal: values,
-        });
-    }
-
-    if let Some(num_lit) = data_node
-        .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numLit")
-    {
-        warn(
-            diagnostics,
-            format!("{context}: numeric category axis detected; values will be stringified"),
-        );
-        let (values, _format_code) = parse_num_cache(num_lit, diagnostics, context);
-        let cache = values.map(|vals| vals.into_iter().map(|v| v.to_string()).collect());
-        return Some(SeriesTextData {
-            formula: None,
-            cache: cache.clone(),
-            multi_cache: None,
-            literal: cache,
         });
     }
 
@@ -1364,7 +1378,6 @@ fn parse_series_data(
             literal: values,
         }));
     }
-
     if let Some(num_lit) = data_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "numLit")
@@ -1419,7 +1432,6 @@ fn parse_num_ref(
         literal: None,
     }
 }
-
 fn parse_ax_ids(chart_node: Node<'_, '_>) -> Vec<u32> {
     chart_node
         .children()
