@@ -9,10 +9,22 @@ import { DRAWING_HANDLE_SIZE_PX } from "./constants";
  */
 export const RESIZE_HANDLE_SIZE_PX = DRAWING_HANDLE_SIZE_PX;
 
+// Rotation handle is drawn separately from resize handles (Excel-style). We keep
+// it slightly larger to avoid it being confused with the top midpoint handle.
+export const ROTATION_HANDLE_SIZE_PX = 10;
+export const ROTATION_HANDLE_HIT_SIZE_PX = 14;
+// Distance from the selection outline (top edge midpoint) to the rotation handle.
+export const ROTATION_HANDLE_OFFSET_PX = 18;
+
 export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 export interface ResizeHandleCenter {
   handle: ResizeHandle;
+  x: number;
+  y: number;
+}
+
+export interface RotationHandleCenter {
   x: number;
   y: number;
 }
@@ -130,6 +142,51 @@ export function hitTestResizeHandle(
     test("sw", -hw, hh) ??
     test("w", -hw, 0)
   );
+}
+
+export function getRotationHandleCenter(bounds: Rect, transform?: DrawingTransform): RotationHandleCenter {
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+
+  // Find the visually top edge midpoint after transforms so the rotation handle
+  // always appears above the selection, even when flips swap local edges.
+  let topEdge: { x: number; y: number } | null = null;
+  for (const c of getResizeHandleCenters(bounds, transform)) {
+    if (c.handle !== "n" && c.handle !== "e" && c.handle !== "s" && c.handle !== "w") continue;
+    if (!topEdge || c.y < topEdge.y) topEdge = { x: c.x, y: c.y };
+  }
+  if (!topEdge) {
+    // Degenerate bounds; fall back to an untransformed top handle location.
+    topEdge = { x: cx, y: bounds.y };
+  }
+
+  const vx = topEdge.x - cx;
+  const vy = topEdge.y - cy;
+  const len = Math.hypot(vx, vy);
+  const ux = len > 0 ? vx / len : 0;
+  const uy = len > 0 ? vy / len : -1;
+
+  return {
+    x: topEdge.x + ux * ROTATION_HANDLE_OFFSET_PX,
+    y: topEdge.y + uy * ROTATION_HANDLE_OFFSET_PX,
+  };
+}
+
+export function hitTestRotationHandle(
+  bounds: Rect,
+  x: number,
+  y: number,
+  transform?: DrawingTransform,
+): boolean {
+  const c = getRotationHandleCenter(bounds, transform);
+  const half = ROTATION_HANDLE_HIT_SIZE_PX / 2;
+  return x >= c.x - half && x <= c.x + half && y >= c.y - half && y <= c.y + half;
+}
+
+export function cursorForRotationHandle(active?: boolean): string {
+  // There is no cross-browser standard rotation cursor. Use grab/grabbing for an
+  // intuitive affordance.
+  return active ? "grabbing" : "grab";
 }
 
 export function cursorForResizeHandle(handle: ResizeHandle): string {

@@ -2,7 +2,13 @@ import type { AnchorPoint, DrawingObject, DrawingTransform, Rect } from "./types
 import type { GridGeometry, Viewport } from "./overlay";
 import { anchorToRectPx, emuToPx, pxToEmu } from "./overlay";
 import { buildHitTestIndex, hitTestDrawings, hitTestDrawingsObject, type HitTestIndex } from "./hitTest";
-import { cursorForResizeHandleWithTransform, hitTestResizeHandle, type ResizeHandle } from "./selectionHandles";
+import {
+  cursorForResizeHandleWithTransform,
+  cursorForRotationHandle,
+  hitTestResizeHandle,
+  hitTestRotationHandle,
+  type ResizeHandle,
+} from "./selectionHandles";
 import {
   extractXfrmOff,
   patchAnchorExt,
@@ -10,8 +16,9 @@ import {
   patchAnchorPos,
   patchXfrmExt,
   patchXfrmOff,
+  patchXfrmRot,
 } from "./drawingml/patch";
-import { applyTransformVector, inverseTransformVector } from "./transform";
+import { applyTransformVector, inverseTransformVector, normalizeRotationDeg } from "./transform";
 
 export interface DrawingInteractionCallbacks {
   getViewport(): Viewport;
@@ -62,6 +69,17 @@ export class DrawingInteractionController {
         startHeightPx: number;
         /** Only set for image objects; used when Shift is held during resize. */
         aspectRatio: number | null;
+      }
+    | null = null;
+  private rotating:
+    | {
+        id: number;
+        startAngleRad: number;
+        centerX: number;
+        centerY: number;
+        startRotationDeg: number;
+        startObjects: DrawingObject[];
+        transform?: DrawingTransform;
       }
     | null = null;
   private selectedId: number | null = null;
@@ -151,6 +169,27 @@ export class DrawingInteractionController {
           index.bounds[selectedIndex!],
           this.scratchRect,
         );
+        if (hitTestRotationHandle(selectedBounds, x, y, selectedObject.transform)) {
+          const centerX = selectedBounds.x + selectedBounds.width / 2;
+          const centerY = selectedBounds.y + selectedBounds.height / 2;
+          const startAngleRad = Math.atan2(y - centerY, x - centerX);
+          const startRotationDeg = selectedObject.transform?.rotationDeg ?? 0;
+          this.stopPointerEvent(e);
+          this.activeRect = rect;
+          this.element.setPointerCapture(e.pointerId);
+          this.rotating = {
+            id: selectedObject.id,
+            startAngleRad,
+            centerX,
+            centerY,
+            startRotationDeg,
+            startObjects: objects,
+            transform: selectedObject.transform,
+          };
+          this.element.style.cursor = cursorForRotationHandle(true);
+          return;
+        }
+
         const handle = hitTestResizeHandle(selectedBounds, x, y, selectedObject.transform);
         if (handle && !isNonPrimaryMouseButton) {
           this.stopPointerEvent(e);
@@ -231,6 +270,30 @@ export class DrawingInteractionController {
   };
 
   private readonly onPointerMove = (e: PointerEvent) => {
+    if (this.rotating) {
+      this.stopPointerEvent(e);
+      const rect = this.activeRect ?? this.element.getBoundingClientRect();
+      const { x, y } = this.getLocalPoint(e, rect);
+
+      const angle = Math.atan2(y - this.rotating.centerY, x - this.rotating.centerX);
+      const deltaDeg = ((angle - this.rotating.startAngleRad) * 180) / Math.PI;
+      const rotationDeg = normalizeRotationDeg(this.rotating.startRotationDeg + deltaDeg);
+      const baseTransform = this.rotating.transform ?? { rotationDeg: 0, flipH: false, flipV: false };
+      const nextTransform = { ...baseTransform, rotationDeg };
+
+      const next = this.rotating.startObjects.map((obj) => {
+        if (obj.id !== this.rotating!.id) return obj;
+        if (rotationDeg === 0 && !nextTransform.flipH && !nextTransform.flipV) {
+          const { transform: _old, ...rest } = obj;
+          return rest;
+        }
+        return { ...obj, transform: nextTransform };
+      });
+      this.callbacks.setObjects(next);
+      this.element.style.cursor = cursorForRotationHandle(true);
+      return;
+    }
+
     if (this.resizing) {
       this.stopPointerEvent(e);
       const rect = this.activeRect ?? this.element.getBoundingClientRect();
@@ -314,7 +377,8 @@ export class DrawingInteractionController {
   private readonly onPointerUp = (e: PointerEvent) => {
     const dragging = this.dragging;
     const resizing = this.resizing;
-    if (!dragging && !resizing) return;
+    const rotating = this.rotating;
+    if (!dragging && !resizing && !rotating) return;
 
     this.stopPointerEvent(e);
 
@@ -323,7 +387,7 @@ export class DrawingInteractionController {
     // so inner `<a:xfrm>` values (when present) stay consistent with the new anchor.
     const objects = this.callbacks.getObjects();
 
-    const active = dragging ?? resizing;
+    const active = dragging ?? resizing ?? rotating;
     const startObj = active.startObjects.find((o) => o.id === active.id);
     const currentObj = objects.find((o) => o.id === active.id);
 
@@ -344,6 +408,10 @@ export class DrawingInteractionController {
       if (resizing) {
         patched = patchDrawingXmlForResize(patched, cxEmu, cyEmu);
       }
+      if (rotating) {
+        const rotationDeg = currentObj.transform?.rotationDeg ?? 0;
+        patched = patchDrawingXmlForRotate(patched, rotationDeg);
+      }
       if (dxEmu !== 0 || dyEmu !== 0) {
         patched = patchDrawingXmlForMove(patched, dxEmu, dyEmu);
       }
@@ -358,6 +426,7 @@ export class DrawingInteractionController {
 
     this.dragging = null;
     this.resizing = null;
+    this.rotating = null;
     this.activeRect = null;
     try {
       this.element.releasePointerCapture(e.pointerId);
@@ -369,7 +438,7 @@ export class DrawingInteractionController {
 
   private readonly onPointerLeave = () => {
     // Avoid leaving the resize/move cursor stuck when the pointer leaves the overlay canvas.
-    if (this.dragging || this.resizing) return;
+    if (this.dragging || this.resizing || this.rotating) return;
     this.element.style.cursor = "default";
   };
 
@@ -398,6 +467,10 @@ export class DrawingInteractionController {
           selectedInFrozenRows === pointInFrozenRows
         ) {
           const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex], this.scratchRect);
+          if (hitTestRotationHandle(bounds, x, y, selected.transform)) {
+            this.element.style.cursor = cursorForRotationHandle(false);
+            return;
+          }
           const handle = hitTestResizeHandle(bounds, x, y, selected.transform);
           if (handle) {
             this.element.style.cursor = cursorForResizeHandleWithTransform(handle, selected.transform);
@@ -497,6 +570,10 @@ function patchDrawingXmlForMove(obj: DrawingObject, dxEmu: number, dyEmu: number
     if (off.xEmu === 0 && off.yEmu === 0) return xml;
     return patchXfrmOff(xml, off.xEmu + dxEmu, off.yEmu + dyEmu);
   });
+}
+
+function patchDrawingXmlForRotate(obj: DrawingObject, rotationDeg: number): DrawingObject {
+  return patchDrawingInnerXml(obj, (xml) => patchXfrmRot(xml, rotationDeg));
 }
 
 function patchDrawingInnerXml(obj: DrawingObject, patch: (xml: string) => string): DrawingObject {

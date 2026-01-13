@@ -2,7 +2,7 @@ import type { Anchor, DrawingObject, DrawingTransform, ImageEntry, ImageStore, R
 import { ImageBitmapCache } from "./imageBitmapCache";
 import { graphicFramePlaceholderLabel, isGraphicFrame, parseShapeRenderSpec, type ShapeRenderSpec } from "./shapeRenderer";
 import { parseDrawingMLShapeText, type ShapeTextLayout, type ShapeTextRun } from "./drawingml/shapeText";
-import { getResizeHandleCenters, RESIZE_HANDLE_SIZE_PX } from "./selectionHandles";
+import { getResizeHandleCenters, getRotationHandleCenter, RESIZE_HANDLE_SIZE_PX, ROTATION_HANDLE_SIZE_PX } from "./selectionHandles";
 import { applyTransformVector, degToRad } from "./transform";
 
 import { EMU_PER_INCH, PX_PER_INCH, emuToPx, pxToEmu } from "../shared/emu.js";
@@ -956,6 +956,15 @@ function drawSelection(
     ctx.fill();
     ctx.stroke();
   }
+
+  // Optional Excel-style rotation handle.
+  const rotHandle = ROTATION_HANDLE_SIZE_PX;
+  const rotHalf = rotHandle / 2;
+  const rot = getRotationHandleCenter(rect, transform);
+  ctx.beginPath();
+  ctx.rect(rot.x - rotHalf, rot.y - rotHalf, rotHandle, rotHandle);
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 

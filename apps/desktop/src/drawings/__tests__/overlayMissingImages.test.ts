@@ -101,7 +101,8 @@ describe("DrawingOverlay missing images", () => {
         call.args[3] === 8,
     );
     expect(handleRects).toHaveLength(8);
-    expect(calls.filter((call) => call.method === "fill")).toHaveLength(8);
-    expect(calls.filter((call) => call.method === "stroke")).toHaveLength(8);
+    // 8 resize handles + 1 rotation handle.
+    expect(calls.filter((call) => call.method === "fill")).toHaveLength(9);
+    expect(calls.filter((call) => call.method === "stroke")).toHaveLength(9);
   });
 });

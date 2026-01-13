@@ -120,6 +120,9 @@ describe("DrawingOverlay images", () => {
     const renderPromise = overlay.render([obj1, obj2], viewport);
 
     expect(getMock).toHaveBeenCalledTimes(2);
+    // `await`ing a thenable triggers `.then(...)` via a microtask; yield once so we
+    // can observe the first awaited decode.
+    await Promise.resolve();
     expect(getCallsAtAwait).toEqual([2]);
 
     // Resolve out-of-order to ensure draw order respects zOrder.

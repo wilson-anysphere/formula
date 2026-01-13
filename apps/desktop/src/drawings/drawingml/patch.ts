@@ -18,6 +18,15 @@ function formatEmu(n: number): string {
   return String(Math.round(n));
 }
 
+function formatRotationUnits(rotationDeg: number): string {
+  // DrawingML `rot` is stored in 1/60000th degrees and encoded as a positive
+  // clockwise rotation in the [0, 360) range.
+  const deg = Number.isFinite(rotationDeg) ? rotationDeg : 0;
+  let normalized = deg % 360;
+  if (normalized < 0) normalized += 360;
+  return String(Math.round(normalized * 60_000));
+}
+
 function patchAttr(tag: string, attrName: string, attrValue: string): string {
   // Replace only when the attribute already exists.
   // Handles both single and double quoted values.
@@ -49,6 +58,17 @@ export function patchNvPrId(xml: string, newId: number): string {
   return changed ? out : xml;
 }
 
+function upsertAttr(tag: string, attrName: string, attrValue: string): string {
+  const patched = patchAttr(tag, attrName, attrValue);
+  if (patched !== tag) return patched;
+
+  // Attribute not present; insert before closing.
+  const insert = ` ${attrName}="${attrValue}"`;
+  if (tag.endsWith("/>")) return tag.slice(0, -2) + insert + "/>";
+  if (tag.endsWith(">")) return tag.slice(0, -1) + insert + ">";
+  return tag;
+}
+
 function patchFirstInXfrm(xml: string, localName: "ext" | "off", patch: (tag: string) => string): string {
   // Find the first `<*:xfrm>…</*:xfrm>` element; we avoid trying to patch every
   // xfrm in the fragment because some fragments (e.g. group shapes) may contain
@@ -68,6 +88,32 @@ function patchFirstInXfrm(xml: string, localName: "ext" | "off", patch: (tag: st
 
   const patchedXfrm = xfrmXml.replace(tag, patchedTag);
   return xml.slice(0, m.index) + patchedXfrm + xml.slice(m.index + xfrmXml.length);
+}
+
+function patchFirstXfrmStartTag(xml: string, patch: (tag: string) => string): string {
+  // Prefer non-self-closing xfrm (the common case).
+  const xfrmRe = /<(?:[A-Za-z_][\w.-]*:)?xfrm\b[^>]*>[\s\S]*?<\/(?:[A-Za-z_][\w.-]*:)?xfrm>/;
+  const m = xfrmRe.exec(xml);
+  if (m) {
+    const xfrmXml = m[0];
+    const startTagRe = /<(?:[A-Za-z_][\w.-]*:)?xfrm\b[^>]*>/;
+    const startTagMatch = startTagRe.exec(xfrmXml);
+    if (!startTagMatch) return xml;
+    const tag = startTagMatch[0];
+    const patchedTag = patch(tag);
+    if (patchedTag === tag) return xml;
+    const patchedXfrm = xfrmXml.replace(tag, patchedTag);
+    return xml.slice(0, m.index) + patchedXfrm + xml.slice(m.index + xfrmXml.length);
+  }
+
+  // Fall back to self-closing xfrm.
+  const selfClosingRe = /<(?:[A-Za-z_][\w.-]*:)?xfrm\b[^>]*\/>/;
+  const m2 = selfClosingRe.exec(xml);
+  if (!m2) return xml;
+  const tag = m2[0];
+  const patchedTag = patch(tag);
+  if (patchedTag === tag) return xml;
+  return xml.slice(0, m2.index) + patchedTag + xml.slice(m2.index + tag.length);
 }
 
 /**
@@ -97,6 +143,19 @@ export function patchXfrmOff(xml: string, xEmu: number, yEmu: number): string {
     out = patchAttr(out, "x", x);
     out = patchAttr(out, "y", y);
     return out;
+  });
+}
+
+/**
+ * Updates (or inserts) `rot="…"` on the first `<*:xfrm>` start tag found in the
+ * fragment. When the xfrm element is missing, this is a no-op.
+ */
+export function patchXfrmRot(xml: string, rotationDeg: number): string {
+  const rot = formatRotationUnits(rotationDeg);
+  return patchFirstXfrmStartTag(xml, (tag) => {
+    // Avoid mutating tags when the attribute is absent and the rotation is 0.
+    if (rot === "0") return patchAttr(tag, "rot", rot);
+    return upsertAttr(tag, "rot", rot);
   });
 }
 

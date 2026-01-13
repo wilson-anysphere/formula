@@ -7,6 +7,7 @@ import {
   patchNvPrId,
   patchXfrmExt,
   patchXfrmOff,
+  patchXfrmRot,
 } from "../drawingml/patch";
 import { duplicateDrawingObject } from "../duplicate";
 import { DrawingInteractionController } from "../interaction";
@@ -70,6 +71,18 @@ describe("DrawingML patch helpers", () => {
     const out = patchXfrmOff(input, 10, 20);
     // No-op because there is no plain `x=`/`y=` attribute to patch.
     expect(out).toBe(input);
+  });
+
+  it("patchXfrmRot inserts rot on xfrm when missing", () => {
+    const input = `<a:xfrm><a:off x="0" y="0"/><a:ext cx="1" cy="2"/></a:xfrm>`;
+    const out = patchXfrmRot(input, 90);
+    expect(out).toContain(`<a:xfrm rot="5400000">`);
+  });
+
+  it("patchXfrmRot patches rot when present", () => {
+    const input = `<a:xfrm rot="0"><a:off x="0" y="0"/><a:ext cx="1" cy="2"/></a:xfrm>`;
+    const out = patchXfrmRot(input, 15);
+    expect(out).toContain(`<a:xfrm rot="900000">`);
   });
 
   it("patchAnchorPoint patches <from>/<to> blocks in full anchor XML", () => {

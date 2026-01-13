@@ -5,8 +5,11 @@ import { DrawingInteractionController } from "../interaction";
 import {
   cursorForResizeHandle,
   cursorForResizeHandleWithTransform,
+  cursorForRotationHandle,
   getResizeHandleCenters,
+  getRotationHandleCenter,
   hitTestResizeHandle,
+  hitTestRotationHandle,
   type ResizeHandle,
 } from "../selectionHandles";
 import type { DrawingTransform } from "../types";
@@ -55,6 +58,29 @@ describe("drawings selection handles", () => {
     for (const c of centers) {
       expect(hitTestResizeHandle(bounds, c.x, c.y, transform)).toBe(c.handle);
     }
+  });
+
+  it("rotation handle is placed above the visually top edge", () => {
+    const bounds = { x: 100, y: 200, width: 80, height: 40 };
+    const center = getRotationHandleCenter(bounds);
+    expect(center.x).toBeCloseTo(140);
+    expect(center.y).toBeLessThan(200);
+    expect(hitTestRotationHandle(bounds, center.x, center.y)).toBe(true);
+  });
+
+  it("rotation handle placement accounts for transforms (rotate + flip)", () => {
+    const bounds = { x: 100, y: 200, width: 80, height: 40 };
+    const t90: DrawingTransform = { rotationDeg: 90, flipH: false, flipV: false };
+    const center90 = getRotationHandleCenter(bounds, t90);
+    expect(center90.x).toBeCloseTo(140);
+    expect(center90.y).toBeLessThan(180);
+    expect(hitTestRotationHandle(bounds, center90.x, center90.y, t90)).toBe(true);
+
+    const flipV: DrawingTransform = { rotationDeg: 0, flipH: false, flipV: true };
+    const centerFlip = getRotationHandleCenter(bounds, flipV);
+    expect(centerFlip.x).toBeCloseTo(140);
+    expect(centerFlip.y).toBeLessThan(200);
+    expect(hitTestRotationHandle(bounds, centerFlip.x, centerFlip.y, flipV)).toBe(true);
   });
 
   it("cursorForResizeHandle matches expected CSS cursors", () => {
@@ -165,6 +191,9 @@ describe("drawings selection handles", () => {
       pointerMove!(makePointerEvent(c.x, c.y));
       expect(canvas.style.cursor).toBe(cursorForResizeHandle(c.handle));
     }
+    const rot = getRotationHandleCenter(bounds);
+    pointerMove!(makePointerEvent(rot.x, rot.y));
+    expect(canvas.style.cursor).toBe(cursorForRotationHandle(false));
   });
 
   it("DrawingInteractionController hit-tests transformed handles for hover cursors", () => {
@@ -348,6 +377,64 @@ describe("drawings selection handles", () => {
     expect(resized.size.cy).toBeCloseTo(pxToEmu(50));
 
     pointerUp!(makePointerEvent(87, 187));
+  });
+
+  it("supports rotating a selected object via the rotation handle", () => {
+    const listeners = new Map<string, (e: any) => void>();
+    const canvas: any = makeCanvas(listeners);
+
+    const geom: GridGeometry = {
+      cellOriginPx: () => ({ x: 0, y: 0 }),
+      cellSizePx: () => ({ width: 0, height: 0 }),
+    };
+
+    const viewport: Viewport = { scrollX: 0, scrollY: 0, width: 500, height: 500, dpr: 1 };
+
+    let objects: DrawingObject[] = [
+      {
+        id: 1,
+        kind: { type: "shape", label: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(100), yEmu: pxToEmu(200) },
+          size: { cx: pxToEmu(80), cy: pxToEmu(40) },
+        },
+        zOrder: 0,
+      },
+    ];
+
+    const callbacks = {
+      getViewport: () => viewport,
+      getObjects: () => objects,
+      setObjects: (next: DrawingObject[]) => {
+        objects = next;
+      },
+      onSelectionChange: vi.fn(),
+    };
+
+    new DrawingInteractionController(canvas as HTMLCanvasElement, geom, callbacks);
+
+    const pointerDown = listeners.get("pointerdown")!;
+    const pointerUp = listeners.get("pointerup")!;
+    const pointerMove = listeners.get("pointermove")!;
+
+    // Select first.
+    pointerDown(makePointerEvent(140, 220));
+    pointerUp(makePointerEvent(140, 220));
+
+    const bounds = { x: 100, y: 200, width: 80, height: 40 };
+    const rot = getRotationHandleCenter(bounds);
+
+    // Start rotating.
+    pointerDown(makePointerEvent(rot.x, rot.y));
+    expect(canvas.style.cursor).toBe(cursorForRotationHandle(true));
+
+    // Drag to the right of center (roughly +90° clockwise from "above").
+    pointerMove(makePointerEvent(240, 220));
+    expect(canvas.style.cursor).toBe(cursorForRotationHandle(true));
+    expect(objects[0]?.transform?.rotationDeg).toBeCloseTo(90);
+
+    pointerUp(makePointerEvent(240, 220));
   });
 
   it("supports hover cursors with header offsets (shared-grid headers)", () => {
