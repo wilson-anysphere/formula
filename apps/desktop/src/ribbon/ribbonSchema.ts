@@ -773,13 +773,13 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Editing",
           buttons: [
             {
-              id: "home.editing.autoSum",
+              id: "edit.autoSum",
               label: "AutoSum",
               ariaLabel: "AutoSum",
               iconId: "autoSum",
               kind: "dropdown",
               menuItems: [
-                { id: "home.editing.autoSum.sum", label: "Sum", ariaLabel: "Sum", iconId: "autoSum" },
+                { id: "edit.autoSum", label: "Sum", ariaLabel: "Sum", iconId: "autoSum" },
                 { id: "home.editing.autoSum.average", label: "Average", ariaLabel: "Average", iconId: "divide" },
                 { id: "home.editing.autoSum.countNumbers", label: "Count Numbers", ariaLabel: "Count Numbers", iconId: "hash" },
                 { id: "home.editing.autoSum.max", label: "Max", ariaLabel: "Max", iconId: "arrowUp" },
@@ -794,8 +794,8 @@ export const defaultRibbonSchema: RibbonSchema = {
               iconId: "fillDown",
               kind: "dropdown",
               menuItems: [
-                { id: "home.editing.fill.down", label: "Down", ariaLabel: "Fill Down", iconId: "arrowDown" },
-                { id: "home.editing.fill.right", label: "Right", ariaLabel: "Fill Right", iconId: "arrowRight" },
+                { id: "edit.fillDown", label: "Down", ariaLabel: "Fill Down", iconId: "arrowDown" },
+                { id: "edit.fillRight", label: "Right", ariaLabel: "Fill Right", iconId: "arrowRight" },
                 { id: "home.editing.fill.up", label: "Up", ariaLabel: "Fill Up", iconId: "arrowUp" },
                 { id: "home.editing.fill.left", label: "Left", ariaLabel: "Fill Left", iconId: "arrowLeft" },
                 { id: "home.editing.fill.series", label: "Series…", ariaLabel: "Series", iconId: "moreFormats" },

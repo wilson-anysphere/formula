@@ -9525,18 +9525,17 @@ mountRibbon(ribbonReactRoot, {
       case "home.cells.format.formatCells":
         openFormatCells();
         return;
-      case "home.editing.autoSum":
-      case "home.editing.autoSum.sum":
-        executeBuiltinCommand("edit.autoSum");
+      case "edit.autoSum":
+        executeBuiltinCommand(commandId);
         // `edit.autoSum` restores focus, but ensure the grid is focused even if the command is a no-op.
         app.focus();
         return;
-      case "home.editing.fill.down":
-        executeBuiltinCommand("edit.fillDown");
+      case "edit.fillDown":
+        executeBuiltinCommand(commandId);
         app.focus();
         return;
-      case "home.editing.fill.right":
-        executeBuiltinCommand("edit.fillRight");
+      case "edit.fillRight":
+        executeBuiltinCommand(commandId);
         app.focus();
         return;
       case "edit.find":
