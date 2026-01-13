@@ -146,4 +146,17 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].headers).toEqual(["Column1", "Sales"]);
     expect(schema.tables[0].inferredColumnTypes).toEqual(["empty", "number"]);
   });
+
+  it("quotes sheet names in generated A1 ranges (tables + named ranges)", () => {
+    const workbook = {
+      id: "wb-quoted",
+      sheets: [{ name: "Bob's Sheet", cells: [["Header", "Value"], ["A", 1]] }],
+      tables: [{ name: "T", sheetName: "Bob's Sheet", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+      namedRanges: [{ name: "NR", sheetName: "Bob's Sheet", rect: { r0: 0, c0: 0, r1: 0, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables[0].rangeA1).toBe("'Bob''s Sheet'!A1:B2");
+    expect(schema.namedRanges[0].rangeA1).toBe("'Bob''s Sheet'!A1:B1");
+  });
 });
