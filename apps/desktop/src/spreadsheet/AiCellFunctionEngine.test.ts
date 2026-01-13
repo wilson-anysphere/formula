@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { evaluateFormula } from "./evaluateFormula.js";
-import { AI_CELL_DLP_ERROR, AI_CELL_PLACEHOLDER, AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
+import { AI_CELL_DLP_ERROR, AI_CELL_ERROR, AI_CELL_PLACEHOLDER, AiCellFunctionEngine } from "./AiCellFunctionEngine.js";
 
 import { MemoryAIAuditStore } from "../../../../packages/ai-audit/src/memory-store.js";
 
@@ -117,6 +117,55 @@ describe("AiCellFunctionEngine", () => {
     const second = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
     expect(second).toBe("cached");
     expect(llmClient.chat).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries cached #AI! errors after the configured TTL", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(0));
+
+    try {
+      const deferred1 = defer<any>();
+      const deferred2 = defer<any>();
+      let callCount = 0;
+      const llmClient = {
+        chat: vi.fn((_request: any) => {
+          callCount += 1;
+          return callCount === 1 ? deferred1.promise : deferred2.promise;
+        }),
+      };
+
+      const engine = new AiCellFunctionEngine({
+        llmClient: llmClient as any,
+        auditStore: new MemoryAIAuditStore(),
+        cache: { errorTtlMs: 60_000 },
+      });
+
+      const first = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(first).toBe(AI_CELL_PLACEHOLDER);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+      deferred1.reject(new Error("transient"));
+      await engine.waitForIdle();
+
+      // Immediate reevaluation should stick with the cached error (no tight retry loop).
+      const errored = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(errored).toBe(AI_CELL_ERROR);
+      expect(llmClient.chat).toHaveBeenCalledTimes(1);
+
+      // After TTL, the cached error expires and we retry.
+      vi.advanceTimersByTime(60_001);
+      const retrying = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(retrying).toBe(AI_CELL_PLACEHOLDER);
+      expect(llmClient.chat).toHaveBeenCalledTimes(2);
+
+      deferred2.resolve({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } });
+      await engine.waitForIdle();
+
+      const resolved = evaluateFormula('=AI("summarize", "hello")', () => null, { ai: engine, cellAddress: "Sheet1!A1" });
+      expect(resolved).toBe("ok");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("formats range inputs in LLM prompts using sheet display names (Excel quoting)", async () => {

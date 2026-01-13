@@ -39,6 +39,7 @@ export const AI_CELL_ERROR = "#AI!";
 const DLP_REDACTION_PLACEHOLDER = "[REDACTED]";
 
 const DEFAULT_RANGE_SAMPLE_LIMIT = 200;
+const DEFAULT_ERROR_CACHE_TTL_MS = 60_000;
 const MAX_PROMPT_CHARS = 2_000;
 const MAX_SCALAR_CHARS = 500;
 const MAX_RANGE_HEADER_VALUES = 20;
@@ -80,6 +81,11 @@ export interface AiCellFunctionEngineOptions {
      * Maximum number of cached entries to retain.
      */
     maxEntries?: number;
+    /**
+     * How long to keep `#AI!` error cache entries before retrying.
+     * Successful values are cached indefinitely.
+     */
+    errorTtlMs?: number;
   };
   limits?: {
     /**
@@ -125,6 +131,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
   private readonly cachePersistKey?: string;
   private readonly cacheMaxEntries: number;
+  private readonly cacheErrorTtlMs: number;
 
   private readonly maxInputCells: number;
   private readonly maxUserMessageChars: number;
@@ -147,6 +154,9 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
 
     this.cachePersistKey = options.cache?.persistKey;
     this.cacheMaxEntries = options.cache?.maxEntries ?? 500;
+    const errorTtlMs = options.cache?.errorTtlMs;
+    this.cacheErrorTtlMs =
+      typeof errorTtlMs === "number" && Number.isFinite(errorTtlMs) ? Math.max(0, Math.trunc(errorTtlMs)) : DEFAULT_ERROR_CACHE_TTL_MS;
 
     this.maxInputCells = clampInt(options.limits?.maxInputCells ?? DEFAULT_RANGE_SAMPLE_LIMIT, { min: 1, max: 10_000 });
     this.maxUserMessageChars = clampInt(options.limits?.maxPromptChars ?? MAX_USER_MESSAGE_CHARS, {
@@ -306,7 +316,19 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
     }
 
     const cached = this.cache.get(cacheKey);
-    if (cached) return cached.value;
+    if (cached) {
+      if (cached.value === AI_CELL_ERROR) {
+        const ageMs = Date.now() - cached.updatedAtMs;
+        if (Number.isFinite(ageMs) && ageMs >= this.cacheErrorTtlMs) {
+          this.cache.delete(cacheKey);
+          this.saveCacheToStorage();
+        } else {
+          return cached.value;
+        }
+      } else {
+        return cached.value;
+      }
+    }
 
     if (this.inFlightByKey.has(cacheKey)) return AI_CELL_PLACEHOLDER;
 
