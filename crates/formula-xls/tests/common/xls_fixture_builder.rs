@@ -57,6 +57,8 @@ const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
 const RECORD_FORMULA: u16 = 0x0006;
+/// SHRFMLA [MS-XLS 2.4.277] stores a shared formula (rgce) for a range.
+const RECORD_SHRFMLA: u16 = 0x04BC;
 const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_AUTOFILTERINFO: u16 = 0x009D;
 const RECORD_SORT: u16 = 0x0090;
@@ -6397,6 +6399,15 @@ fn write_unicode_string_no_cch(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
+fn ptg_exp(row: u16, col: u16) -> Vec<u8> {
+    // PtgExp (0x01) payload: [rw: u16][col: u16]
+    let mut out = Vec::<u8>::new();
+    out.push(0x01);
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out
+}
+
 fn ptg_ref3d(ixti: u16, row: u16, col: u16) -> Vec<u8> {
     // PtgRef3d (0x3A) payload: [ixti: u16][row: u16][col: u16]
     let mut out = Vec::<u8>::new();
@@ -6578,6 +6589,65 @@ fn build_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
     globals[boundsheet_offset_positions[2]..boundsheet_offset_positions[2] + 4]
         .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
     globals.extend_from_slice(&build_simple_ref3d_formula_sheet_stream(xf_cell));
+
+    globals
+}
+
+fn build_shared_formula_sheet_name_sanitization_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: `Bad:Name` (invalid; will be sanitized to `Bad_Name` on import).
+    // - Sheet 1: `Ref`, with a **shared formula** in A1:A2 whose rgce references `Bad:Name!A1`
+    //   via `PtgRef3d`. The second cell (A2) uses `PtgExp` and must be resolved through the
+    //   `SHRFMLA` record.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // BoundSheet records.
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in ["Bad:Name", "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
+
+    // External reference tables used by 3D formula tokens.
+    // - SUPBOOK: internal workbook marker
+    // - EXTERNSHEET: one mapping for `Bad:Name` (sheet index 0)
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
+
+    // -- Sheet 1 ------------------------------------------------------------------
+    let sheet1_offset = globals.len();
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_shared_ref3d_shrfmla_sheet_stream(xf_cell));
 
     globals
 }
@@ -6880,6 +6950,52 @@ fn build_simple_ref3d_formula_sheet_stream(xf_cell: u16) -> Vec<u8> {
         &mut sheet,
         RECORD_FORMULA,
         &formula_cell(0, 0, xf_cell, 0.0, &rgce),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_shared_ref3d_shrfmla_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 2) cols [0, 1) (A1:A2)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&2u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Shared formula anchor: A1 formula token stream is PtgExp(A1), followed by SHRFMLA
+    // containing the shared rgce.
+    let ptgexp = ptg_exp(0, 0);
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 0, xf_cell, 0.0, &ptgexp),
+    );
+
+    // Shared rgce: reference Sheet0!A1 via ixti=0, and encode A1 as relative (no '$') so the
+    // decoded text is `Bad_Name!A1`.
+    let col_rel_flags: u16 = 0xC000; // rowRel + colRel bits set; col index = 0 (A)
+    let shared_rgce = ptg_ref3d(0, 0, col_rel_flags);
+    push_record(
+        &mut sheet,
+        RECORD_SHRFMLA,
+        &shrfmla_record(0, 1, 0, 0, &shared_rgce),
+    );
+
+    // Second cell in the shared range: A2 formula record containing PtgExp(A1).
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(1, 0, xf_cell, 0.0, &ptgexp),
     );
 
     push_record(&mut sheet, RECORD_EOF, &[]);
@@ -7269,6 +7385,25 @@ pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
 /// sanitization (similar to how internal hyperlinks are already rewritten).
 pub fn build_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_formula_sheet_name_sanitization_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where a sheet name is invalid and will be sanitized by the
+/// importer, but a **shared formula** (SHRFMLA + PtgExp) still references the original sheet via a
+/// 3D token (`PtgRef3d`).
+///
+/// This is used to validate BIFF-decoded shared formula rendering after sheet-name sanitization.
+pub fn build_shared_formula_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_shared_formula_sheet_name_sanitization_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -9721,6 +9856,21 @@ fn formula_cell(row: u16, col: u16, xf: u16, cached_result: f64, rgce: &[u8]) ->
     out.extend_from_slice(&0u16.to_le_bytes()); // grbit
     out.extend_from_slice(&0u32.to_le_bytes()); // chn
     out.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+    out.extend_from_slice(rgce);
+    out
+}
+
+fn shrfmla_record(rw_first: u16, rw_last: u16, col_first: u8, col_last: u8, rgce: &[u8]) -> Vec<u8> {
+    // SHRFMLA record payload (BIFF8) [MS-XLS 2.4.277].
+    //
+    // Minimal layout (RefU + cce + rgce):
+    //   [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cce: u16][rgce bytes]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.push(col_first);
+    out.push(col_last);
+    out.extend_from_slice(&(rgce.len() as u16).to_le_bytes());
     out.extend_from_slice(rgce);
     out
 }

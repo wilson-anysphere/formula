@@ -1577,24 +1577,8 @@ fn import_xls_path_with_biff_reader(
         (workbook_stream.as_deref(), biff_version, biff_codepage)
     {
         // Resolve BIFF sheet indices to the sheet names used by our output workbook.
-        let mut sheet_names_by_biff_idx: Vec<String> = biff_sheets
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .map(|s| s.name.clone())
-            .collect();
-
-        for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
-            let Some(biff_idx) = *maybe_biff_idx else {
-                continue;
-            };
-            let Some(final_name) = final_sheet_names_by_idx.get(cal_idx) else {
-                continue;
-            };
-            if biff_idx < sheet_names_by_biff_idx.len() {
-                sheet_names_by_biff_idx[biff_idx] = final_name.clone();
-            }
-        }
+        let sheet_names_by_biff_idx =
+            build_sheet_names_by_biff_idx(biff_sheets.as_deref(), &sheet_mapping, &final_sheet_names_by_idx);
 
         // Resolve BIFF sheet indices to WorksheetIds.
         let mut sheet_ids_by_biff_idx: Vec<Option<formula_model::WorksheetId>> =
@@ -1608,6 +1592,22 @@ fn import_xls_path_with_biff_reader(
             };
             if biff_idx < sheet_ids_by_biff_idx.len() {
                 sheet_ids_by_biff_idx[biff_idx] = Some(sheet_id);
+            }
+        }
+
+        // Best-effort: recover shared/array formulas that are stored as BIFF token streams but are
+        // not surfaced by calamine's `.xls` formula API (e.g. `SHRFMLA` + `PtgExp`).
+        if biff_version == biff::BiffVersion::Biff8 {
+            if let Some(biff_sheets) = biff_sheets.as_deref() {
+                import_biff8_shared_formulas(
+                    &mut out,
+                    workbook_stream,
+                    codepage,
+                    biff_sheets,
+                    &sheet_names_by_biff_idx,
+                    &sheet_ids_by_biff_idx,
+                    &mut warnings,
+                );
             }
         }
 
@@ -3184,6 +3184,215 @@ fn reconcile_biff_sheet_mapping(
     });
 
     (mapping, warning)
+}
+
+fn build_sheet_names_by_biff_idx(
+    biff_sheets: Option<&[biff::BoundSheetInfo]>,
+    sheet_mapping: &[Option<usize>],
+    final_sheet_names_by_idx: &[String],
+) -> Vec<String> {
+    let mut sheet_names_by_biff_idx: Vec<String> = biff_sheets
+        .unwrap_or_default()
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+
+    for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
+        let Some(biff_idx) = *maybe_biff_idx else {
+            continue;
+        };
+        let Some(final_name) = final_sheet_names_by_idx.get(cal_idx) else {
+            continue;
+        };
+        if biff_idx < sheet_names_by_biff_idx.len() {
+            sheet_names_by_biff_idx[biff_idx] = final_name.clone();
+        }
+    }
+
+    sheet_names_by_biff_idx
+}
+
+fn import_biff8_shared_formulas(
+    workbook: &mut Workbook,
+    workbook_stream: &[u8],
+    codepage: u16,
+    biff_sheets: &[biff::BoundSheetInfo],
+    sheet_names_by_biff_idx: &[String],
+    sheet_ids_by_biff_idx: &[Option<formula_model::WorksheetId>],
+    warnings: &mut Vec<ImportWarning>,
+) {
+    // BIFF8 shared formulas are encoded as:
+    // - FORMULA records whose rgce is a `PtgExp` token referencing the anchor cell, and
+    // - a SHRFMLA record following the anchor FORMULA record that contains the shared rgce stream.
+    //
+    // Calamine's `.xls` formula API (`worksheet_formula`) can omit formulas for cells that only
+    // contain `PtgExp`, so we recover them directly from the workbook stream.
+    //
+    // This currently focuses on SHRFMLA-based shared formulas; unsupported tokens are rendered
+    // best-effort by the rgce decoder.
+    const RECORD_FORMULA: u16 = 0x0006;
+    const RECORD_SHRFMLA: u16 = 0x04BC;
+    const PTG_EXP: u8 = 0x01;
+
+    let biff::supbook::SupBookTable {
+        supbooks,
+        warnings: supbook_warnings,
+    } = biff::supbook::parse_biff8_supbook_table(workbook_stream, codepage);
+    for w in supbook_warnings {
+        warnings.push(ImportWarning::new(format!(
+            "failed to import `.xls` shared formulas: {w}"
+        )));
+    }
+
+    let biff::externsheet::ExternSheetTable {
+        entries: externsheet_entries,
+        warnings: extern_warnings,
+    } = biff::externsheet::parse_biff_externsheet(workbook_stream, biff::BiffVersion::Biff8, codepage);
+    for w in extern_warnings {
+        warnings.push(ImportWarning::new(format!(
+            "failed to import `.xls` shared formulas: {w}"
+        )));
+    }
+
+    let defined_names: &[biff::rgce::DefinedNameMeta] = &[];
+    let ctx = biff::rgce::RgceDecodeContext {
+        codepage,
+        sheet_names: sheet_names_by_biff_idx,
+        externsheet: &externsheet_entries,
+        supbooks: &supbooks,
+        defined_names,
+    };
+
+    for (biff_idx, sheet_info) in biff_sheets.iter().enumerate() {
+        let Some(sheet_id) = sheet_ids_by_biff_idx.get(biff_idx).copied().flatten() else {
+            continue;
+        };
+        let Some(sheet) = workbook.sheet_mut(sheet_id) else {
+            continue;
+        };
+
+        if sheet_info.offset >= workbook_stream.len() {
+            warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` shared formulas for sheet `{}`: out-of-bounds stream offset {}",
+                sheet.name, sheet_info.offset
+            )));
+            continue;
+        }
+
+        let allows_continuation = |id: u16| id == RECORD_SHRFMLA;
+        let Ok(iter) = biff::records::LogicalBiffRecordIter::from_offset(
+            workbook_stream,
+            sheet_info.offset,
+            allows_continuation,
+        ) else {
+            warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` shared formulas for sheet `{}`: invalid substream offset {}",
+                sheet.name, sheet_info.offset
+            )));
+            continue;
+        };
+
+        // Map anchor (row,col) -> shared rgce token stream.
+        let mut shared_by_anchor: HashMap<(u16, u16), Vec<u8>> = HashMap::new();
+        // Collect (cell_row, cell_col, anchor_row, anchor_col) for PtgExp formulas.
+        let mut ptgexp_cells: Vec<(u16, u16, u16, u16)> = Vec::new();
+        let mut last_formula_cell: Option<(u16, u16)> = None;
+
+        for record in iter {
+            let record = match record {
+                Ok(r) => r,
+                Err(err) => {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` shared formulas for sheet `{}`: malformed BIFF record: {err}",
+                        sheet.name
+                    )));
+                    break;
+                }
+            };
+
+            // Stop at the next substream BOF; worksheet substream begins at `sheet_info.offset`.
+            if record.offset != sheet_info.offset && biff::records::is_bof_record(record.record_id) {
+                break;
+            }
+
+            match record.record_id {
+                RECORD_FORMULA => {
+                    let data = record.data.as_ref();
+                    if data.len() < 22 {
+                        continue;
+                    }
+                    let row = u16::from_le_bytes([data[0], data[1]]);
+                    let col = u16::from_le_bytes([data[2], data[3]]);
+                    last_formula_cell = Some((row, col));
+
+                    let cce = u16::from_le_bytes([data[20], data[21]]) as usize;
+                    if cce == 0 {
+                        continue;
+                    }
+                    if data.len() < 22 + cce {
+                        continue;
+                    }
+                    let rgce = &data[22..22 + cce];
+                    if rgce.len() >= 5 && rgce[0] == PTG_EXP {
+                        let anchor_row = u16::from_le_bytes([rgce[1], rgce[2]]);
+                        let anchor_col = u16::from_le_bytes([rgce[3], rgce[4]]);
+                        ptgexp_cells.push((row, col, anchor_row, anchor_col));
+                    }
+                }
+                RECORD_SHRFMLA => {
+                    let Some((anchor_row, anchor_col)) = last_formula_cell.take() else {
+                        continue;
+                    };
+                    let data = record.data.as_ref();
+                    if data.len() < 8 {
+                        continue;
+                    }
+                    // [rwFirst: u16][rwLast: u16][colFirst: u8][colLast: u8][cce: u16][rgce bytes]
+                    let cce = u16::from_le_bytes([data[6], data[7]]) as usize;
+                    if cce == 0 || data.len() < 8 + cce {
+                        continue;
+                    }
+                    let rgce = &data[8..8 + cce];
+                    shared_by_anchor.insert((anchor_row, anchor_col), rgce.to_vec());
+                }
+                biff::records::RECORD_EOF => break,
+                _ => {}
+            }
+        }
+
+        if ptgexp_cells.is_empty() || shared_by_anchor.is_empty() {
+            continue;
+        }
+
+        for (row, col, anchor_row, anchor_col) in ptgexp_cells {
+            let cell_ref = CellRef::new(row as u32, col as u32);
+            let anchor_cell = sheet.merged_regions.resolve_cell(cell_ref);
+
+            if sheet.formula(anchor_cell).is_some() {
+                continue;
+            }
+
+            let Some(shared_rgce) = shared_by_anchor.get(&(anchor_row, anchor_col)) else {
+                continue;
+            };
+
+            let decoded = biff::rgce::decode_biff8_rgce_with_base(
+                shared_rgce,
+                &ctx,
+                Some(biff::rgce::CellCoord::new(row as u32, col as u32)),
+            );
+
+            for warning in decoded.warnings {
+                warnings.push(ImportWarning::new(format!(
+                    "failed to import `.xls` shared formula in sheet `{}` at {}: {warning}",
+                    sheet.name,
+                    cell_ref.to_a1()
+                )));
+            }
+
+            sheet.set_formula(anchor_cell, Some(decoded.text));
+        }
+    }
 }
 
 fn sanitize_biff8_continued_name_records_for_calamine(stream: &[u8]) -> Option<Vec<u8>> {
