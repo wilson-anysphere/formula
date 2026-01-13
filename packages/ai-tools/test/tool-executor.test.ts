@@ -1127,6 +1127,42 @@ describe("ToolExecutor", () => {
     expect(denied.error?.code).toBe("permission_denied");
   });
 
+  it("fetch_external_data allowlist entries with default ports match even when the URL omits the port", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    const executor = new ToolExecutor(workbook, { allow_external_data: true, allowed_external_hosts: ["api.example.com:443"] });
+
+    const fetchMock = vi.fn(async (_url: string, _init?: any) => {
+      return new Response(JSON.stringify([{ ok: true }]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const httpsImplicitDefaultPort = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "https://api.example.com/data",
+        destination: "Sheet1!A1"
+      }
+    });
+    expect(httpsImplicitDefaultPort.ok).toBe(true);
+
+    const httpImplicitDefaultPort = await executor.execute({
+      name: "fetch_external_data",
+      parameters: {
+        source_type: "api",
+        url: "http://api.example.com/data",
+        destination: "Sheet1!A3"
+      }
+    });
+    expect(httpImplicitDefaultPort.ok).toBe(false);
+    expect(httpImplicitDefaultPort.error?.code).toBe("permission_denied");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("fetch_external_data allowlist supports IPv6 hosts (hostname-only and host:port)", async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: any) => {
       return new Response(JSON.stringify([{ ok: true }]), {

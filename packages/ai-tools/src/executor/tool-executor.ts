@@ -2780,7 +2780,10 @@ function ensureExternalUrlAllowed(url: URL, allowedHosts: string[]): void {
   };
 
   const urlHostname = normalizeHostname(url.hostname);
-  const urlPort = url.port;
+  // `URL.port` is empty when the URL uses the scheme default (80/443), even if the
+  // caller explicitly wrote `:443`/`:80`. Use the effective port so allowlist entries
+  // like `example.com:443` behave as expected.
+  const urlPort = url.port || (url.protocol === "http:" ? "80" : "443");
 
   const allowlist = allowedHosts.map(parseAllowedHostEntry).filter((entry): entry is AllowedHostEntry => entry !== null);
   const isAllowed = allowlist.some((entry) => {
