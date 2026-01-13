@@ -75,6 +75,16 @@ describe("DrawingOverlay viewport transforms", () => {
         },
         zOrder: 1,
       },
+      {
+        id: 3,
+        kind: { type: "shape" },
+        anchor: {
+          type: "absolute",
+          pos: { xEmu: pxToEmu(300), yEmu: pxToEmu(80) },
+          size: { cx: pxToEmu(10), cy: pxToEmu(10) },
+        },
+        zOrder: 2,
+      },
     ];
 
     const viewport: Viewport = {
@@ -93,12 +103,16 @@ describe("DrawingOverlay viewport transforms", () => {
     expect(strokeRects).toEqual([
       [0, 0, 10, 10], // frozen
       [150, 30, 10, 10], // scrolled (200-50, 60-30)
+      [250, 50, 10, 10], // absolute always scrolls (300-50, 80-30)
     ]);
 
     // Hit testing should use the same frozen-aware transform.
     const index = buildHitTestIndex(objects, geom);
     const hit = hitTestDrawings(index, viewport, 5, 5, geom);
     expect(hit?.object.id).toBe(1);
+
+    const absHit = hitTestDrawings(index, viewport, 251, 51, geom);
+    expect(absHit?.object.id).toBe(3);
   });
 
   it("applies viewport zoom to EMU-derived pixel geometry", async () => {
