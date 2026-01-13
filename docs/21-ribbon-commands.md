@@ -208,7 +208,8 @@ In `apps/desktop/src/commands/builtinKeybindings.ts`, add a binding that targets
 
 ### 3) Add the ribbon button (schema)
 
-In `apps/desktop/src/ribbon/ribbonSchema.ts`, add a button (e.g. Home → Font group) whose `id` matches the command id:
+In the appropriate per-tab schema module under `apps/desktop/src/ribbon/schema/` (for example `homeTab.ts` for the Home tab),
+add a button (e.g. Home → Font group) whose `id` matches the command id:
 
 ```ts
 {
