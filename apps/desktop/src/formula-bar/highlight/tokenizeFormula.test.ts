@@ -134,4 +134,12 @@ describe("tokenizeFormula", () => {
     const totalsRefs = totalsTokens.filter((t) => t.type === "reference");
     expect(totalsRefs.map((t) => t.text)).toEqual(["Table1[[#Totals],[Amount]]"]);
   });
+
+  it("tokenizes structured table specifiers (#All/#Headers/#Data/#Totals) as single reference tokens", () => {
+    const input = "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals])";
+    const refs = tokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    expect(refs).toEqual(["Table1[#All]", "Table1[#Headers]", "Table1[#Data]", "Table1[#Totals]"]);
+  });
 });

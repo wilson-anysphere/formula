@@ -32,4 +32,25 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(sharedRefs).toEqual(["𝔘!A1", "𐐷!B2"]);
     expect(desktopRefs).toEqual(sharedRefs);
   });
+
+  it("matches between packages for structured table specifiers and selectors", () => {
+    const input =
+      "=SUM(Table1[#All], Table1[#Headers], Table1[#Data], Table1[#Totals], Table1[[#Headers],[Amount]], Table1[[#Totals],[Amount]])";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const desktopRefs = desktopTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual([
+      "Table1[#All]",
+      "Table1[#Headers]",
+      "Table1[#Data]",
+      "Table1[#Totals]",
+      "Table1[[#Headers],[Amount]]",
+      "Table1[[#Totals],[Amount]]"
+    ]);
+    expect(desktopRefs).toEqual(sharedRefs);
+  });
 });
