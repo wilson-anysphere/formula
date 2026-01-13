@@ -115,12 +115,16 @@ export function suggestRanges(params) {
     // If we included the current row in the scan (active cell is in a different column),
     // extend the block downward so we capture the full contiguous run.
     if (contiguous && cellRef.col !== colIndex) {
+      const rawStartRow = contiguous.rawStartRow ?? contiguous.startRow;
+      const rawEndRow = contiguous.rawEndRow ?? contiguous.endRow;
+      const scannedSpan = Math.max(0, rawEndRow - rawStartRow + 1);
+      const remainingRows = Math.max(0, maxScanRows - scannedSpan);
       contiguous = extendContiguousBlockDown(
         surroundingCells,
         colIndex,
-        contiguous.rawStartRow ?? contiguous.startRow,
-        contiguous.rawEndRow ?? contiguous.endRow,
-        maxScanRows,
+        rawStartRow,
+        rawEndRow,
+        remainingRows,
         sheetName,
       );
     }
@@ -421,13 +425,13 @@ function findContiguousBlockAbove(ctx, col, fromRow, maxScanRows, sheetName) {
   };
 }
 
-function extendContiguousBlockDown(ctx, col, startRow, endRow, maxScanRows, sheetName) {
+function extendContiguousBlockDown(ctx, col, startRow, endRow, maxExtendRows, sheetName) {
   if (startRow < 0) return null;
   if (!Number.isInteger(startRow) || !Number.isInteger(endRow) || endRow < startRow) return null;
 
   let rawEndRow = endRow;
   let scanned = 0;
-  while (scanned < maxScanRows && !isEmptyCell(ctx.getCellValue(rawEndRow + 1, col, sheetName))) {
+  while (scanned < maxExtendRows && !isEmptyCell(ctx.getCellValue(rawEndRow + 1, col, sheetName))) {
     rawEndRow++;
     scanned++;
   }

@@ -118,6 +118,20 @@ test("suggestRanges returns the full contiguous block when the active cell is in
   assert.equal(suggestions[0].range, "A1:A10");
 });
 
+test("suggestRanges in-block expansion respects maxScanRows (does not double the cap)", () => {
+  const ctx = createColumnAContext(Array.from({ length: 1000 }, (_, i) => [i, i + 1])); // A1..A1000
+
+  const suggestions = suggestRanges({
+    currentArgText: "A",
+    cellRef: { row: 500, col: 1 }, // B501, inside the large block
+    surroundingCells: ctx,
+    maxScanRows: 200,
+  });
+
+  // With a 200-row cap, we should not extend downward beyond the scanned window.
+  assert.equal(suggestions[0].range, "A302:A501");
+});
+
 test("suggestRanges trims non-numeric header rows when scanning downwards", () => {
   const ctx = createColumnAContext([
     [1, "Header"], // A2
