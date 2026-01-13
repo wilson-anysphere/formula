@@ -21,6 +21,18 @@ function stripCssComments(css) {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+function stripJsComments(src) {
+  // Conservative comment stripping for lint-style assertions.
+  // This is not a full parser, but it's good enough to avoid false positives from comments.
+  return (
+    src
+      // Block comments
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      // Line comments
+      .replace(/(^|[^:])\/\/.*$/gm, "$1")
+  );
+}
+
 function collectCssFiles(dirPath) {
   /** @type {string[]} */
   const out = [];
@@ -31,6 +43,22 @@ function collectCssFiles(dirPath) {
       continue;
     }
     if (entry.isFile() && entry.name.endsWith(".css")) out.push(fullPath);
+  }
+  return out;
+}
+
+function collectSourceFiles(dirPath) {
+  /** @type {string[]} */
+  const out = [];
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectSourceFiles(fullPath));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    if (!/\.(?:ts|tsx|js|jsx)$/.test(entry.name)) continue;
+    out.push(fullPath);
   }
   return out;
 }
@@ -91,6 +119,63 @@ test("Desktop CSS transitions use motion tokens (so reduced motion disables anim
       );
     }
   }
+});
+
+test("Any smooth scrolling CSS is gated behind reduced motion overrides", () => {
+  const srcRoot = path.join(DESKTOP_ROOT, "src");
+  const files = collectCssFiles(srcRoot);
+
+  const offenders = [];
+  for (const filePath of files) {
+    const rawCss = fs.readFileSync(filePath, "utf8");
+    const css = stripCssComments(rawCss);
+    if (!/scroll-behavior\s*:\s*smooth\b/.test(css)) continue;
+
+    // Require an explicit reduced-motion override in the same file.
+    const hasReducedMotionOverride =
+      /prefers-reduced-motion\s*:\s*reduce/.test(css) &&
+      /scroll-behavior\s*:\s*auto\b/.test(css) &&
+      /data-reduced-motion\s*=\s*\"true\"/.test(css);
+
+    if (!hasReducedMotionOverride) {
+      offenders.push(path.relative(DESKTOP_ROOT, filePath));
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Expected any scroll-behavior: smooth usage to include reduced-motion overrides in the same file (missing in: ${offenders.join(
+      ", ",
+    )})`,
+  );
+});
+
+test("Any smooth scrolling JS is gated behind reduced motion checks", () => {
+  const srcRoot = path.join(DESKTOP_ROOT, "src");
+  const files = collectSourceFiles(srcRoot);
+
+  /** @type {string[]} */
+  const offenders = [];
+
+  const smoothBehaviorRe = /behavior\s*:\s*["']smooth["']/;
+  const allowedTernaryRe = /\?\s*["']auto["']\s*:\s*["']smooth["']/;
+  const reducedMotionHintRe = /prefers-reduced-motion|data-reduced-motion|getSystemReducedMotion|MEDIA\.reducedMotion/;
+
+  for (const filePath of files) {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const src = stripJsComments(raw);
+    if (!smoothBehaviorRe.test(src)) continue;
+    if (allowedTernaryRe.test(src)) continue;
+    if (reducedMotionHintRe.test(src)) continue;
+    offenders.push(path.relative(DESKTOP_ROOT, filePath));
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Found scroll behavior: \"smooth\" without reduced-motion gating in: ${offenders.join(", ")}`,
+  );
 });
 
 test("Sheet tabs disable smooth scrolling under reduced motion", () => {
