@@ -12,6 +12,7 @@ use formula_engine::locale::{
 };
 use formula_engine::what_if::EngineWhatIfModel;
 use formula_engine::what_if::goal_seek::{GoalSeek, GoalSeekParams};
+use formula_engine::pivot as pivot_engine;
 use formula_model::{
     display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS,
@@ -674,6 +675,40 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
     }
 }
 
+fn engine_value_to_pivot_value(value: EngineValue) -> pivot_engine::PivotValue {
+    match value {
+        EngineValue::Blank => pivot_engine::PivotValue::Blank,
+        EngineValue::Bool(b) => pivot_engine::PivotValue::Bool(b),
+        EngineValue::Number(n) => pivot_engine::PivotValue::Number(n),
+        EngineValue::Text(s) => pivot_engine::PivotValue::Text(s),
+        EngineValue::Entity(entity) => pivot_engine::PivotValue::Text(entity.display),
+        EngineValue::Record(record) => pivot_engine::PivotValue::Text(record.display),
+        EngineValue::Error(kind) => {
+            pivot_engine::PivotValue::Text(kind.as_code().to_string())
+        }
+        // Arrays should generally be spilled into grid cells. If one reaches pivot extraction,
+        // degrade to its top-left value for a scalar-like experience.
+        EngineValue::Array(arr) => engine_value_to_pivot_value(arr.top_left()),
+        // Degrade any other rich/non-scalar value (references, lambdas, spill markers, etc.) to
+        // its display string so the pivot engine can treat it as a grouping key.
+        other => pivot_engine::PivotValue::Text(other.to_string()),
+    }
+}
+
+fn pivot_value_to_json(value: pivot_engine::PivotValue) -> JsonValue {
+    match value {
+        pivot_engine::PivotValue::Blank => JsonValue::Null,
+        pivot_engine::PivotValue::Bool(b) => JsonValue::Bool(b),
+        pivot_engine::PivotValue::Text(s) => JsonValue::String(s),
+        pivot_engine::PivotValue::Number(n) => serde_json::Number::from_f64(n)
+            .map(JsonValue::Number)
+            .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
+        // The scalar WASM protocol has no first-class date type today; represent dates using their
+        // ISO string form (YYYY-MM-DD).
+        pivot_engine::PivotValue::Date(d) => JsonValue::String(d.to_string()),
+    }
+}
+
 /// Convert an engine value into a scalar workbook `input` representation.
 ///
 /// This differs from [`engine_value_to_json`] for text values: workbook inputs must preserve
@@ -1135,6 +1170,71 @@ impl WorkbookState {
 
     fn parse_range(range: &str) -> Result<Range, JsValue> {
         Range::from_a1(range).map_err(|_| js_err(format!("invalid range: {range}")))
+    }
+
+    fn read_range_values_as_pivot_values(
+        &self,
+        sheet: &str,
+        range: &Range,
+    ) -> Vec<Vec<pivot_engine::PivotValue>> {
+        let mut out = Vec::with_capacity(range.height() as usize);
+        for row in range.start.row..=range.end.row {
+            let mut row_values = Vec::with_capacity(range.width() as usize);
+            for col in range.start.col..=range.end.col {
+                let address = CellRef::new(row, col).to_a1();
+                let value = self.engine.get_cell_value(sheet, &address);
+                row_values.push(engine_value_to_pivot_value(value));
+            }
+            out.push(row_values);
+        }
+        out
+    }
+
+    fn get_pivot_schema_internal(
+        &self,
+        sheet: &str,
+        source_range_a1: &str,
+        sample_size: usize,
+    ) -> Result<pivot_engine::PivotSchema, JsValue> {
+        let sheet = self.require_sheet(sheet)?.to_string();
+        let range = Self::parse_range(source_range_a1)?;
+        let source = self.read_range_values_as_pivot_values(&sheet, &range);
+        let cache =
+            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+        Ok(cache.schema(sample_size))
+    }
+
+    fn calculate_pivot_writes_internal(
+        &self,
+        sheet: &str,
+        source_range_a1: &str,
+        destination_top_left_a1: &str,
+        config: &pivot_engine::PivotConfig,
+    ) -> Result<Vec<CellChange>, JsValue> {
+        let sheet = self.require_sheet(sheet)?.to_string();
+        let range = Self::parse_range(source_range_a1)?;
+        let destination = Self::parse_address(destination_top_left_a1)?;
+
+        let source = self.read_range_values_as_pivot_values(&sheet, &range);
+        let cache =
+            pivot_engine::PivotCache::from_range(&source).map_err(|err| js_err(err.to_string()))?;
+        let result =
+            pivot_engine::PivotEngine::calculate(&cache, config).map_err(|err| js_err(err.to_string()))?;
+
+        let writes = result.to_cell_writes(pivot_engine::CellRef {
+            row: destination.row,
+            col: destination.col,
+        });
+
+        let mut out = Vec::with_capacity(writes.len());
+        for write in writes {
+            out.push(CellChange {
+                sheet: sheet.clone(),
+                address: CellRef::new(write.row, write.col).to_a1(),
+                value: pivot_value_to_json(write.value),
+            });
+        }
+        Ok(out)
     }
 
     fn set_cell_internal(
@@ -2921,6 +3021,49 @@ impl WasmWorkbook {
         Ok(out.into())
     }
 
+    #[wasm_bindgen(js_name = "getPivotSchema")]
+    pub fn get_pivot_schema(
+        &self,
+        sheet: String,
+        source_range_a1: String,
+        sample_size: Option<u32>,
+    ) -> Result<JsValue, JsValue> {
+        ensure_rust_constructors_run();
+        let sample_size = sample_size.map(|s| s as usize).unwrap_or(20);
+        let schema = self
+            .inner
+            .get_pivot_schema_internal(&sheet, &source_range_a1, sample_size)?;
+        serde_wasm_bindgen::to_value(&schema).map_err(|err| js_err(err.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = "calculatePivot")]
+    pub fn calculate_pivot(
+        &self,
+        sheet: String,
+        source_range_a1: String,
+        destination_top_left_a1: String,
+        config: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        ensure_rust_constructors_run();
+        let config: pivot_engine::PivotConfig =
+            serde_wasm_bindgen::from_value(config).map_err(|err| js_err(err.to_string()))?;
+        let writes = self.inner.calculate_pivot_writes_internal(
+            &sheet,
+            &source_range_a1,
+            &destination_top_left_a1,
+            &config,
+        )?;
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PivotCalculationResultDto {
+            writes: Vec<CellChange>,
+        }
+
+        serde_wasm_bindgen::to_value(&PivotCalculationResultDto { writes })
+            .map_err(|err| js_err(err.to_string()))
+    }
+
     #[wasm_bindgen(js_name = "recalculate")]
     pub fn recalculate(&mut self, sheet: Option<String>) -> Result<JsValue, JsValue> {
         let changes = self.inner.recalculate_internal(sheet.as_deref())?;
@@ -4687,5 +4830,87 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn calculate_pivot_returns_cell_writes_for_basic_row_sum() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        // Source data (headers + records).
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("Category"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("Amount"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("A")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!(10.0))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!("A")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B3", json!(5.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A4", json!("B")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B4", json!(7.0)).unwrap();
+
+        // No formulas, but run a recalc to mirror typical usage where pivots reflect calculated
+        // values.
+        wb.recalculate_internal(None).unwrap();
+
+        let config = pivot_engine::PivotConfig {
+            row_fields: vec![pivot_engine::PivotField::new("Category")],
+            column_fields: vec![],
+            value_fields: vec![pivot_engine::ValueField {
+                source_field: "Amount".to_string(),
+                name: "Sum of Amount".to_string(),
+                aggregation: pivot_engine::AggregationType::Sum,
+                show_as: None,
+                base_field: None,
+                base_item: None,
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: pivot_engine::Layout::Tabular,
+            subtotals: pivot_engine::SubtotalPosition::None,
+            // Match Excel: no "Grand Total" column when there are no column fields.
+            grand_totals: pivot_engine::GrandTotals {
+                rows: true,
+                columns: false,
+            },
+        };
+
+        let writes = wb
+            .calculate_pivot_writes_internal(DEFAULT_SHEET, "A1:B4", "D1", &config)
+            .unwrap();
+
+        let expected = vec![
+            ("D1", JsonValue::String("Category".to_string())),
+            ("E1", JsonValue::String("Sum of Amount".to_string())),
+            ("D2", JsonValue::String("A".to_string())),
+            ("E2", json!(15.0)),
+            ("D3", JsonValue::String("B".to_string())),
+            ("E3", json!(7.0)),
+            ("D4", JsonValue::String("Grand Total".to_string())),
+            ("E4", json!(22.0)),
+        ];
+
+        assert_eq!(
+            writes.len(),
+            expected.len(),
+            "expected {expected:?}, got {writes:?}"
+        );
+
+        let mut got_by_address: HashMap<String, JsonValue> = HashMap::new();
+        for w in writes {
+            assert_eq!(w.sheet, DEFAULT_SHEET);
+            got_by_address.insert(w.address, w.value);
+        }
+
+        for (addr, expected_value) in expected {
+            let got = got_by_address
+                .get(addr)
+                .unwrap_or_else(|| panic!("missing write for {addr}, got {got_by_address:?}"));
+            assert_eq!(
+                got, &expected_value,
+                "unexpected value for {addr}: got {got:?}, expected {expected_value:?}"
+            );
+        }
     }
 }
