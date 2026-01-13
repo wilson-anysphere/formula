@@ -60,7 +60,9 @@ describe("FormulaBarView IME composition safety", () => {
     const tabDuringComposition = new KeyboardEvent("keydown", { key: "Tab", cancelable: true });
     view.textarea.dispatchEvent(tabDuringComposition);
 
-    expect(tabDuringComposition.defaultPrevented).toBe(false);
+    // While composing, Tab should not accept AI suggestions or commit, but should still
+    // prevent browser focus traversal out of the formula bar.
+    expect(tabDuringComposition.defaultPrevented).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
     expect(view.model.isEditing).toBe(true);
     expect(view.model.draft).toBe("=1+");
