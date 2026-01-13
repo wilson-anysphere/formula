@@ -310,16 +310,19 @@ fn key_display_string(key: &[Value], separator: &str) -> String {
         .join(separator)
 }
 fn cmp_value(a: &Value, b: &Value) -> Ordering {
+    fn sort_rank(v: &Value) -> u8 {
+        // Excel-like pivot ordering:
+        //   Number/Date < Text < Boolean < Blank
+        match v {
+            Value::Number(_) => 0,
+            Value::Text(_) => 1,
+            Value::Boolean(_) => 2,
+            Value::Blank => 3,
+        }
+    }
+
     match (a, b) {
-        (Value::Blank, Value::Blank) => Ordering::Equal,
-        (Value::Blank, _) => Ordering::Less,
-        (_, Value::Blank) => Ordering::Greater,
-        (Value::Boolean(a), Value::Boolean(b)) => a.cmp(b),
-        (Value::Boolean(_), _) => Ordering::Less,
-        (_, Value::Boolean(_)) => Ordering::Greater,
         (Value::Number(a), Value::Number(b)) => a.cmp(b),
-        (Value::Number(_), _) => Ordering::Less,
-        (_, Value::Number(_)) => Ordering::Greater,
         (Value::Text(a), Value::Text(b)) => {
             let a = a.as_ref();
             let b = b.as_ref();
@@ -329,12 +332,11 @@ fn cmp_value(a: &Value, b: &Value) -> Ordering {
             // overall ordering remains total (important because group keys are collected from hash
             // maps/sets).
             let ord = cmp_text_case_insensitive(a, b);
-            if ord != Ordering::Equal {
-                ord
-            } else {
-                a.cmp(b)
-            }
+            if ord != Ordering::Equal { ord } else { a.cmp(b) }
         }
+        (Value::Boolean(a), Value::Boolean(b)) => a.cmp(b),
+        (Value::Blank, Value::Blank) => Ordering::Equal,
+        _ => sort_rank(a).cmp(&sort_rank(b)),
     }
 }
 
@@ -2585,6 +2587,104 @@ mod tests {
             .collect();
 
         assert_eq!(got, vec!["a", "B", "b"]);
+    }
+
+    #[test]
+    fn cmp_value_sorts_mixed_types_like_excel_pivots() {
+        let mut values = vec![
+            Value::Blank,
+            true.into(),
+            false.into(),
+            2.0.into(),
+            1.0.into(),
+            "b".into(),
+            "a".into(),
+        ];
+
+        values.sort_by(cmp_value);
+
+        assert_eq!(
+            values,
+            vec![
+                1.0.into(),
+                2.0.into(),
+                "a".into(),
+                "b".into(),
+                false.into(),
+                true.into(),
+                Value::Blank,
+            ]
+        );
+
+        assert_eq!(cmp_value(&1.0.into(), &"x".into()), Ordering::Less);
+        assert_eq!(cmp_value(&"x".into(), &false.into()), Ordering::Less);
+        assert_eq!(cmp_value(&false.into(), &Value::Blank), Ordering::Less);
+    }
+
+    #[test]
+    fn pivot_sorting_is_deterministic_for_mixed_type_group_keys() {
+        fn build_model(rows: Vec<(Value, f64)>) -> DataModel {
+            let mut model = DataModel::new();
+            let mut fact = crate::Table::new("Fact", vec!["Key", "Amount"]);
+            for (key, amount) in rows {
+                fact.push_row(vec![key, amount.into()]).unwrap();
+            }
+            model.add_table(fact).unwrap();
+            model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+            model.add_measure("Rows", "COUNTROWS(Fact)").unwrap();
+            model
+        }
+
+        let rows_a = vec![
+            (2.0.into(), 10.0),
+            ("A".into(), 1.0),
+            (true.into(), 3.0),
+            (false.into(), 4.0),
+            (Value::Blank, 5.0),
+            (1.0.into(), 6.0),
+            ("B".into(), 7.0),
+            (Value::Blank, 8.0),
+            (2.0.into(), 9.0),
+        ];
+
+        // Same rows, different insertion order (should not affect pivot output ordering).
+        let rows_b = vec![
+            (Value::Blank, 8.0),
+            ("B".into(), 7.0),
+            (1.0.into(), 6.0),
+            (Value::Blank, 5.0),
+            (false.into(), 4.0),
+            (true.into(), 3.0),
+            ("A".into(), 1.0),
+            (2.0.into(), 9.0),
+            (2.0.into(), 10.0),
+        ];
+
+        let model_a = build_model(rows_a);
+        let model_b = build_model(rows_b);
+
+        let measures = vec![
+            PivotMeasure::new("Rows", "[Rows]").unwrap(),
+            PivotMeasure::new("Total", "[Total]").unwrap(),
+        ];
+        let group_by = vec![GroupByColumn::new("Fact", "Key")];
+
+        let result_a = pivot(&model_a, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+        let result_b = pivot(&model_b, "Fact", &group_by, &measures, &FilterContext::empty()).unwrap();
+
+        assert_eq!(result_a, result_b);
+        assert_eq!(
+            result_a.rows,
+            vec![
+                vec![1.0.into(), 1.into(), 6.0.into()],
+                vec![2.0.into(), 2.into(), 19.0.into()],
+                vec!["A".into(), 1.into(), 1.0.into()],
+                vec!["B".into(), 1.into(), 7.0.into()],
+                vec![false.into(), 1.into(), 4.0.into()],
+                vec![true.into(), 1.into(), 3.0.into()],
+                vec![Value::Blank, 2.into(), 13.0.into()],
+            ]
+        );
     }
 
     #[test]

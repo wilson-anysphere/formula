@@ -665,9 +665,9 @@ fn pivot_includes_blank_group_for_unmatched_relationship_keys() {
     assert_eq!(
         result.rows,
         vec![
-            vec![Value::Blank, 7.0.into()],
             vec![Value::from("East"), 10.0.into()],
             vec![Value::from("West"), 5.0.into()],
+            vec![Value::Blank, 7.0.into()],
         ]
     );
 
