@@ -19,4 +19,17 @@ describe("tokenizeFormula (cross-package)", () => {
     expect(sharedRefs).toEqual(["A1"]);
     expect(desktopRefs).toEqual(sharedRefs);
   });
+
+  it("matches between packages for non-BMP Unicode sheet names", () => {
+    const input = "=𝔘!A1+𐐷!B2";
+    const sharedRefs = sharedTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+    const desktopRefs = desktopTokenizeFormula(input)
+      .filter((t) => t.type === "reference")
+      .map((t) => t.text);
+
+    expect(sharedRefs).toEqual(["𝔘!A1", "𐐷!B2"]);
+    expect(desktopRefs).toEqual(sharedRefs);
+  });
 });
