@@ -59,6 +59,29 @@ pub struct PivotResultGrid {
     pub data: Vec<Vec<Value>>,
 }
 
+/// Options controlling how [`pivot_crosstab`] shapes the output grid.
+///
+/// This is intentionally small for MVP rendering. Future flags (grand totals, subtotals, compact
+/// layout, etc.) can be added without breaking the call signature by introducing
+/// `pivot_crosstab_with_options`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PivotCrosstabOptions {
+    /// Separator used to join multiple column-field values into a single column header label.
+    pub column_key_separator: &'static str,
+    /// If true, include the measure name in the column headers even when there is only a single
+    /// measure (e.g. `A - Total` instead of just `A`).
+    pub include_measure_name_when_single: bool,
+}
+
+impl Default for PivotCrosstabOptions {
+    fn default() -> Self {
+        Self {
+            column_key_separator: " - ",
+            include_measure_name_when_single: false,
+        }
+    }
+}
+
 fn header_value_display_string(value: &Value) -> String {
     match value {
         Value::Blank => "(blank)".to_string(),
@@ -75,14 +98,14 @@ fn header_value_display_string(value: &Value) -> String {
     }
 }
 
-fn key_display_string(key: &[Value]) -> String {
+fn key_display_string(key: &[Value], separator: &str) -> String {
     if key.is_empty() {
         return String::new();
     }
     key.iter()
         .map(header_value_display_string)
         .collect::<Vec<_>>()
-        .join(" - ")
+        .join(separator)
 }
 
 fn cmp_value(a: &Value, b: &Value) -> Ordering {
@@ -1177,6 +1200,28 @@ pub fn pivot_crosstab(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<PivotResultGrid> {
+    pivot_crosstab_with_options(
+        model,
+        base_table,
+        row_fields,
+        column_fields,
+        measures,
+        filter,
+        &PivotCrosstabOptions::default(),
+    )
+}
+
+/// Identical to [`pivot_crosstab`], but allows callers to control header formatting through
+/// [`PivotCrosstabOptions`].
+pub fn pivot_crosstab_with_options(
+    model: &DataModel,
+    base_table: &str,
+    row_fields: &[GroupByColumn],
+    column_fields: &[GroupByColumn],
+    measures: &[PivotMeasure],
+    filter: &FilterContext,
+    options: &PivotCrosstabOptions,
+) -> DaxResult<PivotResultGrid> {
     if measures.is_empty() {
         return Err(DaxError::Eval(
             "pivot_crosstab requires at least one measure".to_string(),
@@ -1195,7 +1240,7 @@ pub fn pivot_crosstab(
 
     let mut row_keys: HashSet<Vec<Value>> = HashSet::new();
     let mut col_keys: HashSet<Vec<Value>> = HashSet::new();
-    let mut cells: HashMap<(Vec<Value>, Vec<Value>), Vec<Value>> = HashMap::new();
+    let mut cells: HashMap<Vec<Value>, HashMap<Vec<Value>, Vec<Value>>> = HashMap::new();
 
     for row in &grouped.rows {
         if row.len() < value_start {
@@ -1207,7 +1252,10 @@ pub fn pivot_crosstab(
 
         row_keys.insert(row_key.clone());
         col_keys.insert(col_key.clone());
-        cells.insert((row_key, col_key), values);
+        cells
+            .entry(row_key)
+            .or_default()
+            .insert(col_key, values);
     }
 
     let mut row_keys: Vec<Vec<Value>> = row_keys.into_iter().collect();
@@ -1233,12 +1281,17 @@ pub fn pivot_crosstab(
         header.extend(measures.iter().map(|m| Value::from(m.name.clone())));
     } else {
         for col_key in &col_keys {
-            let key_label = key_display_string(col_key);
-            if measures.len() == 1 {
+            let key_label = key_display_string(col_key, options.column_key_separator);
+            let include_measure_suffix =
+                measures.len() > 1 || options.include_measure_name_when_single;
+            if !include_measure_suffix {
                 header.push(Value::from(key_label));
             } else {
                 for measure in measures {
-                    header.push(Value::from(format!("{key_label} - {}", measure.name)));
+                    header.push(Value::from(format!(
+                        "{key_label}{}{}",
+                        options.column_key_separator, measure.name
+                    )));
                 }
             }
         }
@@ -1248,12 +1301,15 @@ pub fn pivot_crosstab(
     // Body rows.
     for row_key in &row_keys {
         let mut out_row = row_key.clone();
+        let row_map = cells.get(row_key.as_slice());
         for col_key in &col_keys {
-            let values = cells
-                .get(&(row_key.clone(), col_key.clone()))
+            let values = row_map
+                .and_then(|m| m.get(col_key.as_slice()))
                 .cloned()
                 .unwrap_or_else(|| vec![Value::Blank; measures.len()]);
-            if measures.len() == 1 && col_key_len > 0 {
+            let include_measure_suffix =
+                measures.len() > 1 || options.include_measure_name_when_single;
+            if !include_measure_suffix && col_key_len > 0 {
                 out_row.push(values.into_iter().next().unwrap_or(Value::Blank));
             } else {
                 out_row.extend(values);

@@ -116,3 +116,36 @@ fn pivot_crosstab_with_no_column_fields_behaves_like_grouped_table() {
     );
 }
 
+#[test]
+fn pivot_crosstab_renders_blank_for_missing_row_column_combinations() {
+    let mut model = DataModel::new();
+    let mut fact = Table::new("Fact", vec!["Region", "Product", "Amount"]);
+    fact.push_row(vec!["East".into(), "A".into(), 10.0.into()])
+        .unwrap();
+    fact.push_row(vec!["East".into(), "B".into(), 5.0.into()])
+        .unwrap();
+    fact.push_row(vec!["West".into(), "A".into(), 7.0.into()])
+        .unwrap();
+    // Note: West/B is intentionally missing.
+    model.add_table(fact).unwrap();
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+
+    let result = pivot_crosstab(
+        &model,
+        "Fact",
+        &[GroupByColumn::new("Fact", "Region")],
+        &[GroupByColumn::new("Fact", "Product")],
+        &[PivotMeasure::new("Total", "[Total]").unwrap()],
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.data,
+        vec![
+            vec![Value::from("Fact[Region]"), Value::from("A"), Value::from("B")],
+            vec![Value::from("East"), 10.0.into(), 5.0.into()],
+            vec![Value::from("West"), 7.0.into(), Value::Blank],
+        ]
+    );
+}
