@@ -4665,13 +4665,25 @@ export class SpreadsheetApp {
   }
 
   fillDown(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.applyFillShortcut("down");
   }
 
   fillRight(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.applyFillShortcut("right");
   }
@@ -4691,7 +4703,13 @@ export class SpreadsheetApp {
   }
 
   insertDate(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
@@ -4699,7 +4717,13 @@ export class SpreadsheetApp {
   }
 
   insertTime(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("time");
     this.refresh();
@@ -4707,7 +4731,13 @@ export class SpreadsheetApp {
   }
 
   autoSum(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.isEditing()) return;
     this.autoSumSelection();
     this.refresh();
@@ -10296,7 +10326,13 @@ export class SpreadsheetApp {
 
   cutToClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
-    if (this.isReadOnly()) return Promise.resolve();
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return Promise.resolve();
+    }
     const promise = this.cutSelectionToClipboard();
     this.idle.track(promise);
     return promise.finally(() => {
@@ -10306,7 +10342,13 @@ export class SpreadsheetApp {
 
   pasteFromClipboard(): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return Promise.resolve();
-    if (this.isReadOnly()) return Promise.resolve();
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return Promise.resolve();
+    }
     const promise = this.pasteClipboardToSelection();
     this.idle.track(promise);
     return promise.finally(() => {
@@ -10358,6 +10400,7 @@ export class SpreadsheetApp {
 
     if (this.isReadOnly()) {
       e.preventDefault();
+      showCollabEditRejectedToast([{ sheetId: this.sheetId, rejectionKind: "format", rejectionReason: "permission" }]);
       return true;
     }
 
@@ -10493,14 +10536,26 @@ export class SpreadsheetApp {
 
     if (key === "x") {
       e.preventDefault();
-      if (this.isReadOnly()) return true;
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return true;
+      }
       this.idle.track(this.cutSelectionToClipboard());
       return true;
     }
 
     if (key === "v") {
       e.preventDefault();
-      if (this.isReadOnly()) return true;
+      if (this.isReadOnly()) {
+        const cell = this.selection.active;
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return true;
+      }
       this.idle.track(this.pasteClipboardToSelection());
       return true;
     }
