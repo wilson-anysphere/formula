@@ -109,7 +109,7 @@ const EXPECTED_PLATFORMS = [
     key: "linux-x86_64",
     label: "Linux (x86_64)",
     expectedAsset: {
-      description: `Linux updater bundle (*.AppImage)`,
+      description: `Linux updater bundle (*.AppImage; not .deb/.rpm)`,
       matches: (assetName) => assetName.endsWith(".AppImage"),
     },
   },
