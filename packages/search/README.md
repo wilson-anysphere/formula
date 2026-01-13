@@ -16,7 +16,7 @@ The API is designed to be:
 - Search order: by rows / by columns
 - Replace: next / all, across selection/sheet/workbook
 - Merged cells: treated as the top-left ("master") cell, matching Excel address semantics
-- Go To parser: A1 refs, sheet-qualified refs, named ranges, minimal table structured refs
+- Go To parser: A1 refs, sheet-qualified refs, named ranges, and table structured refs (including selectors like `#All`, `#Headers`, `#Data`, `#Totals`)
 
 ## API (high level)
 
