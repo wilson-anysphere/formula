@@ -31,3 +31,23 @@ test("ui.css disables smooth scrolling when reduced motion is enabled", () => {
   );
 });
 
+test("SheetTabStrip avoids smooth scrollBy when reduced motion is enabled", () => {
+  const sheetTabStripPath = path.join(__dirname, "..", "src", "sheets", "SheetTabStrip.tsx");
+  const src = fs.readFileSync(sheetTabStripPath, "utf8");
+
+  // Guardrail: don't hardcode smooth scrolling in JS without a reduced-motion escape hatch.
+  assert.doesNotMatch(
+    src,
+    /scrollBy\(\s*\{\s*left:\s*delta\s*,\s*behavior:\s*["']smooth["']\s*\}\s*\)/,
+  );
+
+  // Expect a conditional that can fall back to auto scrolling.
+  assert.match(
+    src,
+    /scrollBy\(\s*\{\s*left:\s*delta\s*,\s*behavior:\s*[^}]*\?\s*["']auto["']\s*:\s*["']smooth["'][^}]*\}\s*\)/,
+  );
+
+  // Ensure we respect both runtime + OS reduced motion signals.
+  assert.match(src, /data-reduced-motion/);
+  assert.match(src, /prefers-reduced-motion:\s*reduce/);
+});

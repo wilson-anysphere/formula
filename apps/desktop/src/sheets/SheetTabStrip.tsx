@@ -820,7 +820,14 @@ export function SheetTabStrip({
   const scrollTabsBy = (delta: number) => {
     const el = containerRef.current;
     if (!el) return;
-    el.scrollBy({ left: delta, behavior: "smooth" });
+    const reducedMotion =
+      (typeof document !== "undefined" &&
+        document.documentElement?.getAttribute("data-reduced-motion") === "true") ||
+      (typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+    el.scrollBy({ left: delta, behavior: reducedMotion ? "auto" : "smooth" });
   };
 
   const isSheetDrag = (dt: DataTransfer): boolean => {
