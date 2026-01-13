@@ -1,6 +1,6 @@
-use aes::{Aes128, Aes192, Aes256};
-use cbc::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use sha1::{Digest, Sha1};
+
+use formula_xlsx::offcrypto::{decrypt_aes_cbc_no_padding_in_place, AesCbcDecryptError};
 
 const ENCRYPTED_PACKAGE_SIZE_PREFIX_LEN: usize = 8;
 const ENCRYPTED_PACKAGE_SEGMENT_LEN: usize = 0x1000;
@@ -54,34 +54,6 @@ fn derive_segment_iv(salt: &[u8], segment_index: u32) -> [u8; AES_BLOCK_LEN] {
     let mut iv = [0u8; AES_BLOCK_LEN];
     iv.copy_from_slice(&digest[..AES_BLOCK_LEN]);
     iv
-}
-
-fn decrypt_aes_cbc_no_padding(
-    key: &[u8],
-    iv: &[u8; AES_BLOCK_LEN],
-    ciphertext: &[u8],
-    segment_index: u32,
-) -> Result<Vec<u8>, EncryptedPackageError> {
-    let mut buf = ciphertext.to_vec();
-
-    let res = match key.len() {
-        16 => cbc::Decryptor::<Aes128>::new_from_slices(key, iv)
-            .map_err(|_| EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() })?
-            .decrypt_padded_mut::<NoPadding>(&mut buf),
-        24 => cbc::Decryptor::<Aes192>::new_from_slices(key, iv)
-            .map_err(|_| EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() })?
-            .decrypt_padded_mut::<NoPadding>(&mut buf),
-        32 => cbc::Decryptor::<Aes256>::new_from_slices(key, iv)
-            .map_err(|_| EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() })?
-            .decrypt_padded_mut::<NoPadding>(&mut buf),
-        _ => return Err(EncryptedPackageError::InvalidAesKeyLength { key_len: key.len() }),
-    };
-
-    res.map_err(|_| EncryptedPackageError::SegmentDecryptFailed {
-        segment_index,
-    })?;
-
-    Ok(buf)
 }
 
 /// Decrypt an MS-OFFCRYPTO "Standard" (CryptoAPI) `EncryptedPackage` stream.
@@ -155,12 +127,18 @@ pub fn decrypt_standard_encrypted_package_stream(
         }
 
         let iv = derive_segment_iv(salt, segment_index);
-        let decrypted = decrypt_aes_cbc_no_padding(
-            key,
-            &iv,
-            &ciphertext[offset..offset + seg_len],
-            segment_index,
-        )?;
+        let mut decrypted = ciphertext[offset..offset + seg_len].to_vec();
+        decrypt_aes_cbc_no_padding_in_place(key, &iv, &mut decrypted).map_err(|err| match err {
+            AesCbcDecryptError::UnsupportedKeyLength(key_len) => {
+                EncryptedPackageError::InvalidAesKeyLength { key_len }
+            }
+            AesCbcDecryptError::InvalidIvLength(_) => EncryptedPackageError::SegmentDecryptFailed {
+                segment_index,
+            },
+            AesCbcDecryptError::InvalidCiphertextLength(ciphertext_len) => {
+                EncryptedPackageError::CiphertextLenNotBlockAligned { ciphertext_len }
+            }
+        })?;
 
         let remaining_needed = orig_size_usize - out.len();
         if decrypted.len() > remaining_needed {
@@ -190,6 +168,8 @@ pub fn decrypt_standard_encrypted_package_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aes::{Aes128, Aes192, Aes256};
+    use cbc::cipher::block_padding::NoPadding;
     use cbc::cipher::{BlockEncryptMut, KeyIvInit};
 
     fn fixed_key_16() -> Vec<u8> {
@@ -339,4 +319,3 @@ mod tests {
         );
     }
 }
-
