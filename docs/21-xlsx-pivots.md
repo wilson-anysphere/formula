@@ -190,9 +190,13 @@ Implementation: `crates/formula-xlsx/src/pivots/refresh.rs`.
 These are the current “sharp edges” where we either don’t parse enough to interpret the file, or we
 intentionally ignore fidelity-sensitive options:
 
-1) **`sharedItems` decoding for `<x>` cache record values**
-   - We parse `<x v="..."/>` as `PivotCacheValue::Index(u32)`, but we do not yet parse
-     `cacheField/sharedItems` tables from `pivotCacheDefinition*.xml` to map indices → actual values.
+1) **`sharedItems` decoding for `<x>` cache record values (partial)**
+   - We parse `<x v="..."/>` as `PivotCacheValue::Index(u32)` and parse
+     `pivotCacheDefinition*.xml` `cacheField/sharedItems` tables into `PivotCacheField.shared_items`.
+   - Callers can resolve indices → actual values via `PivotCacheDefinition::resolve_record_value`
+     (the pivot → engine bridge does this when building the source table).
+   - Remaining work: plumb shared-item resolution through slicer/timeline selection logic where
+     slicer cache items reference shared item indices.
 
 2) **Mapping slicers/timelines to specific cache fields**
    - We discover slicers/timelines and the pivot tables they are connected to, but we do not yet
@@ -209,10 +213,11 @@ intentionally ignore fidelity-sensitive options:
      not yet interpret sort settings or manual item ordering. This can affect both rendered output
      and recomputation consistency.
 
-5) **`showDataAs` fidelity**
-   - We parse `dataField@showDataAs` as a string, but we do not yet map it into pivot-engine “show
-     as” semantics (percent of total, difference from, running total, etc.). Current recomputation
-     is best-effort and ignores these display transforms.
+5) **`showDataAs` fidelity (partial)**
+   - We map `dataField@showDataAs` into pivot-engine `ValueField.show_as`, and also map
+     `baseField`/`baseItem` into engine `base_field`/`base_item` when possible.
+   - The pivot engine currently implements only a subset of Excel’s “Show Values As”
+     transformations; unsupported variants are treated as normal values.
 
 ---
 
@@ -221,9 +226,9 @@ intentionally ignore fidelity-sensitive options:
 This is the rough sequencing we expect to follow for pivot-related fidelity work:
 
 1) **Pivot cache value decoding**
-   - Parse `cacheField/sharedItems` from `pivotCacheDefinition*.xml`.
-   - Decode `<x>` indices in `pivotCacheRecords*.xml` into typed values (and plumb through to slicer
-     selection resolution).
+   - Parse `cacheField/sharedItems` from `pivotCacheDefinition*.xml`. (done)
+   - Decode `<x>` indices in `pivotCacheRecords*.xml` into typed values. (done for pivot-engine
+     source conversion; still needs plumbing into slicer selection resolution)
 
 2) **Slicers/timelines → cache field mapping**
    - Join `pivot_graph()` results with slicer/timeline cache metadata (`baseField`, `sourceName`,
@@ -235,8 +240,9 @@ This is the rough sequencing we expect to follow for pivot-related fidelity work
 
 4) **Pivot table display fidelity**
    - Parse and preserve sort/manual ordering.
-   - Map `showDataAs` into engine-level “show as” transformations and ensure we can round-trip the
-     corresponding XML without normalization.
+   - `showDataAs` mapping is now wired into the engine config; remaining work is to implement the
+     missing “show as” transformations and ensure we can round-trip the corresponding XML without
+     normalization.
 
 5) **Authoring/editing pivots**
    - Move beyond “preserve and parse” into “modify and write”: controlled updates to
