@@ -774,6 +774,23 @@ downgrade path**:
 
 This only works if older release assets remain available.
 
+### Windows downgrade notes (MSI / EXE)
+
+Windows installers often block installing an older version over a newer one. Formula’s Windows
+bundles are explicitly configured to **allow downgrades** via
+`bundle.windows.allowDowngrades: true` in `apps/desktop/src-tauri/tauri.conf.json`.
+
+Expected behavior when downgrading **manually** from the GitHub Releases page:
+
+- **NSIS `.exe` installer:** detects the newer installed version and shows a maintenance screen.
+  For the cleanest rollback, choose **“Uninstall before installing”**, then proceed with the
+  install.
+- **WiX `.msi` installer:** running an older MSI will remove the installed Formula version and
+  then install the selected version (major upgrade flow with downgrades enabled).
+
+If an installer refuses to proceed (e.g. “a newer version is already installed”), uninstall the
+newer version first from **Settings → Apps → Installed apps**, then install the older `.msi`/`.exe`.
+
 **Release hygiene requirements**
 
 1. **Do not delete prior GitHub Releases or assets.**

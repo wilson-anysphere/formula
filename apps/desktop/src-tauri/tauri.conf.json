@@ -127,7 +127,8 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
         "silent": true
-      }
+      },
+      "allowDowngrades": true
     }
   },
   "plugins": {
