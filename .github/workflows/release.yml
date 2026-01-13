@@ -343,6 +343,9 @@ jobs:
         run: cargo install wasm-pack --version ${{ env.WASM_PACK_VERSION }} --locked
 
       - name: Smoke check packaged cross-origin isolation (COOP/COEP)
+        # Optional: set `FORMULA_COI_CHECK_ALL_PLATFORMS=0` as a GitHub Actions variable to
+        # skip this step (useful if a runner/platform regression makes the check flaky).
+        if: vars.FORMULA_COI_CHECK_ALL_PLATFORMS != '0'
         run: pnpm -C apps/desktop check:coi
 
       - name: Build and upload release assets (macOS universal)
