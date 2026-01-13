@@ -22,6 +22,8 @@ export function getFunctionCallContext(formula: string, cursorIndex: number): Fu
 
   let i = 0;
   let inString = false;
+  let bracketDepth = 0;
+  let braceDepth = 0;
 
   while (i < cursor) {
     const ch = formula[i];
@@ -40,6 +42,30 @@ export function getFunctionCallContext(formula: string, cursorIndex: number): Fu
 
     if (ch === '"') {
       inString = true;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "[") {
+      bracketDepth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "]") {
+      bracketDepth = Math.max(0, bracketDepth - 1);
+      i += 1;
+      continue;
+    }
+
+    if (ch === "{") {
+      braceDepth += 1;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
       i += 1;
       continue;
     }
@@ -72,12 +98,14 @@ export function getFunctionCallContext(formula: string, cursorIndex: number): Fu
       continue;
     }
 
-    if (ch === ",") {
-      for (let s = stack.length - 1; s >= 0; s -= 1) {
-        const frame = stack[s];
-        if (frame.kind === "function") {
-          frame.argIndex += 1;
-          break;
+    if (ch === "," || ch === ";") {
+      if (bracketDepth === 0 && braceDepth === 0) {
+        for (let s = stack.length - 1; s >= 0; s -= 1) {
+          const frame = stack[s];
+          if (frame.kind === "function") {
+            frame.argIndex += 1;
+            break;
+          }
         }
       }
       i += 1;

@@ -15,6 +15,31 @@ describe("function context", () => {
     expect(ifContext).toEqual({ name: "IF", argIndex: 1 });
   });
 
+  it("getFunctionCallContext ignores commas inside structured references", () => {
+    const formula = "=SUM(Table1[[#All],[Amount]], 1)";
+    const cursor = formula.indexOf("Amount") + 1;
+    const context = getFunctionCallContext(formula, cursor);
+    expect(context).toEqual({ name: "SUM", argIndex: 0 });
+  });
+
+  it("getFunctionCallContext ignores commas inside array literals", () => {
+    const formula = "=SUM({1,2,3}, 4)";
+    const cursor = formula.indexOf("2");
+    const context = getFunctionCallContext(formula, cursor);
+    expect(context).toEqual({ name: "SUM", argIndex: 0 });
+  });
+
+  it("getFunctionCallContext supports semicolon argument separators", () => {
+    const formula = "=IF(A1>0;1;2)";
+    const insideTrue = formula.indexOf(";1;") + 1;
+    const trueContext = getFunctionCallContext(formula, insideTrue);
+    expect(trueContext).toEqual({ name: "IF", argIndex: 1 });
+
+    const insideFalse = formula.indexOf(";2)") + 1;
+    const falseContext = getFunctionCallContext(formula, insideFalse);
+    expect(falseContext).toEqual({ name: "IF", argIndex: 2 });
+  });
+
   it("getFunctionHint uses signature mapping and marks active parameter", () => {
     const formula = "=IF(A1, B1, C1)";
     const cursor = formula.indexOf("B1") + 1;
