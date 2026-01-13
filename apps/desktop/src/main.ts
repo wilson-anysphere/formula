@@ -2196,9 +2196,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.decreaseIndent": true,
             "home.number.numberFormat": true,
             "home.number.moreFormats": true,
-            "home.number.percent": true,
-            "home.number.accounting": true,
-            "home.number.date": true,
+            "format.numberFormat.percent": true,
+            "format.numberFormat.currency": true,
+            "format.numberFormat.date": true,
             "home.number.comma": true,
             "home.number.increaseDecimal": true,
             "home.number.decreaseDecimal": true,
@@ -9466,14 +9466,13 @@ mountRibbon(ribbonReactRoot, {
         openFormatCells();
         return;
 
-      case "home.number.percent":
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "percent"));
-        return;
-      case "home.number.accounting":
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "currency"));
-        return;
-      case "home.number.date":
-        applyFormattingToSelection("Number format", (doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
+      case "format.numberFormat.currency":
+      case "format.numberFormat.percent":
+      case "format.numberFormat.date":
+        executeBuiltinCommand(commandId);
+        // Formatting commands should leave the grid focused even if the underlying command
+        // is a no-op (e.g. selection guards).
+        app.focus();
         return;
       case "home.number.comma":
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {

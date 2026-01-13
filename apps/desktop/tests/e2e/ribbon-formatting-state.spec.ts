@@ -72,7 +72,7 @@ test.describe("ribbon formatting state", () => {
     const numberFormatLabel = numberFormatDropdown.locator(".ribbon-button__label");
     await expect(numberFormatLabel).toHaveText("General");
 
-    const percent = ribbon.locator('button[data-command-id="home.number.percent"]');
+    const percent = ribbon.locator('button[data-command-id="format.numberFormat.percent"]');
     await percent.scrollIntoViewIfNeeded();
     await percent.click();
 
