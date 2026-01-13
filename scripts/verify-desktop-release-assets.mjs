@@ -709,13 +709,28 @@ async function main() {
   console.log("Desktop release asset verification passed.");
 }
 
-try {
-  await main();
-} catch (err) {
-  if (err instanceof ActionableError) {
-    console.error(`\n${err.message}\n`);
-  } else {
-    console.error(err);
+const isMainModule =
+  typeof process.argv[1] === "string" &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMainModule) {
+  try {
+    await main();
+  } catch (err) {
+    if (err instanceof ActionableError) {
+      console.error(`\n${err.message}\n`);
+    } else {
+      console.error(err);
+    }
+    process.exit(1);
   }
-  process.exit(1);
 }
+
+export {
+  ActionableError,
+  filenameFromUrl,
+  findPlatformsObject,
+  isPrimaryBundleAssetName,
+  normalizeVersion,
+  validateLatestJson,
+};
