@@ -30,6 +30,9 @@ test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates appl
   const sheet = new Ycjs.Map();
   sheet.set("id", "sheet1");
   sheet.set("name", "Sheet1");
+  sheet.set("visibility", "hidden");
+  sheet.set("tabColor", "#00ff00");
+  sheet.set("view", { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 } });
   sheets.push([sheet]);
 
   const cells = remote.getMap("cells");
@@ -52,5 +55,10 @@ test("Yjs state extractors handle cross-instance nested Y.Maps (CJS updates appl
 
   const workbookState = workbookStateFromYjsDoc(doc);
   assert.ok(workbookState.sheets.some((s) => s.id === "sheet1"));
+  const meta = workbookState.sheets.find((s) => s.id === "sheet1");
+  assert.ok(meta);
+  assert.equal(meta.visibility, "hidden");
+  assert.equal(meta.tabColor, "FF00FF00");
+  assert.deepEqual(meta.view, { frozenRows: 2, frozenCols: 1 });
   assert.equal(workbookState.cellsBySheet.get("sheet1")?.cells.get("r0c0")?.value, 42);
 });
