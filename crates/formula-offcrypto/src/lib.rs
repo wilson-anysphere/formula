@@ -1379,12 +1379,15 @@ pub fn inspect_encryption_info(
     }
 
     let header_size = r.read_u32_le("EncryptionInfo.header_size")? as usize;
-    let header_bytes = r.take(header_size, "EncryptionHeader")?;
-    if header_bytes.len() < 8 * 4 {
-        return Err(OffcryptoError::Truncated {
-            context: "EncryptionHeader (missing fixed fields)",
+    const MIN_STANDARD_HEADER_SIZE: usize = 8 * 4;
+    const MAX_STANDARD_HEADER_SIZE: usize = 1024 * 1024;
+    if header_size < MIN_STANDARD_HEADER_SIZE || header_size > MAX_STANDARD_HEADER_SIZE {
+        return Err(OffcryptoError::InvalidEncryptionInfo {
+            context: "EncryptionInfo.header_size is out of bounds",
         });
     }
+
+    let header_bytes = r.take(header_size, "EncryptionHeader")?;
     let mut hr = Reader::new(header_bytes);
     let _flags = hr.read_u32_le("EncryptionHeader.flags")?;
     let _size_extra = hr.read_u32_le("EncryptionHeader.sizeExtra")?;

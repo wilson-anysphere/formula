@@ -51,6 +51,32 @@ where
     let total_size = reader.read_u64_le("EncryptedPackageHeader.original_size")?;
     let output_len = checked_output_len(total_size)?;
 
+    // Validate ciphertext framing before allocating based on attacker-controlled `total_size`.
+    //
+    // Each ciphertext segment is padded up to the AES block size (16). The total ciphertext length
+    // should therefore also be block-aligned, and must be large enough to cover the padded segment
+    // lengths implied by `total_size`.
+    let ciphertext_len = reader.remaining().len();
+    if ciphertext_len % AES_BLOCK_LEN != 0 {
+        return Err(OffcryptoError::InvalidCiphertextLength { len: ciphertext_len });
+    }
+
+    // Minimum ciphertext length implied by `total_size`.
+    let last_len = (total_size % ENCRYPTED_PACKAGE_SEGMENT_LEN as u64) as usize;
+    let full_bytes = total_size - (last_len as u64);
+    let required_ciphertext_len = if last_len == 0 {
+        full_bytes
+    } else {
+        full_bytes
+            .checked_add(padded_aes_len(last_len) as u64)
+            .ok_or(OffcryptoError::EncryptedPackageSizeOverflow { total_size })?
+    };
+    if required_ciphertext_len > ciphertext_len as u64 {
+        return Err(OffcryptoError::Truncated {
+            context: "EncryptedPackage.ciphertext_segment",
+        });
+    }
+
     let mut out = Vec::new();
     out.try_reserve_exact(output_len).map_err(|_| {
         OffcryptoError::EncryptedPackageAllocationFailed {
@@ -104,11 +130,12 @@ pub fn agile_decrypt_package(
             context: "EncryptedPackageHeader.original_size",
         });
     }
-    let total_size = u64::from_le_bytes(
-        encrypted_package[0..8]
-            .try_into()
-            .expect("slice length checked"),
-    );
+    let size_bytes: [u8; 8] = encrypted_package[..8]
+        .try_into()
+        .map_err(|_| OffcryptoError::Truncated {
+            context: "EncryptedPackageHeader.original_size",
+        })?;
+    let total_size = u64::from_le_bytes(size_bytes);
     let plausible_max = (encrypted_package.len() as u64).saturating_mul(2);
     if total_size > plausible_max {
         return Err(OffcryptoError::EncryptedPackageSizeOverflow { total_size });
