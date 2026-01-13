@@ -504,8 +504,6 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(calls).toEqual(["clearAuditing", "toggleAuditingPrecedents", "focus"]);
   });
 
-  });
-
   it("executes audit.toggleTransitive", async () => {
     const commandRegistry = new CommandRegistry();
     const layoutController = {
