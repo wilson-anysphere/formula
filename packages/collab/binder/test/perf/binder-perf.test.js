@@ -22,6 +22,7 @@
  *   PERF_BATCH_SIZE=1000      # updates per Yjs transaction (default: 1000)
  *   PERF_COLS=100             # controls row/col distribution (default: 100)
  *   PERF_KEY_ENCODING=canonical|legacy|rxc  # key format for Yjs writes (default: canonical)
+ *   PERF_SCENARIO=yjs-to-dc|dc-to-yjs|all   # run only one scenario (default: all)
  *   PERF_INCLUDE_GUARDS=0     # set to 0 to disable canRead/canEdit hooks (default: enabled)
  *   PERF_TIMEOUT_MS=600000    # overall test timeout; also used for internal waits (default: 10 min)
  *
@@ -38,7 +39,33 @@ import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 
 const RUN_PERF = process.env.FORMULA_RUN_COLLAB_BINDER_PERF === "1";
-const perfTest = RUN_PERF ? test : test.skip;
+const SCENARIO_FILTER = (process.env.PERF_SCENARIO ?? "").trim().toLowerCase();
+
+/**
+ * @param {"yjs-to-dc" | "dc-to-yjs"} scenario
+ */
+function shouldRunScenario(scenario) {
+  if (!SCENARIO_FILTER || SCENARIO_FILTER === "all") return true;
+  const normalized =
+    SCENARIO_FILTER === "yjs->dc" || SCENARIO_FILTER === "yjs_to_dc"
+      ? "yjs-to-dc"
+      : SCENARIO_FILTER === "dc->yjs" || SCENARIO_FILTER === "dc_to_yjs"
+        ? "dc-to-yjs"
+        : SCENARIO_FILTER;
+  return normalized === scenario;
+}
+
+/**
+ * @param {"yjs-to-dc" | "dc-to-yjs"} scenario
+ */
+function perfTestForScenario(scenario) {
+  if (!RUN_PERF) return test.skip;
+  if (!shouldRunScenario(scenario)) return test.skip;
+  return test;
+}
+
+const perfTestYjsToDc = perfTestForScenario("yjs-to-dc");
+const perfTestDcToYjs = perfTestForScenario("dc-to-yjs");
 
 const INCLUDE_GUARDS = process.env.PERF_INCLUDE_GUARDS !== "0";
 
@@ -201,7 +228,7 @@ class DocumentControllerPerfStub {
   }
 }
 
-perfTest(
+perfTestYjsToDc(
   "perf: binder applies many cell updates without pathological scaling",
   { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
@@ -352,7 +379,7 @@ perfTest(
   },
 );
 
-perfTest(
+perfTestDcToYjs(
   "perf: binder writes many DocumentController deltas to Yjs without pathological scaling",
   { timeout: PERF_TIMEOUT_MS, concurrency: 1 },
   async () => {
