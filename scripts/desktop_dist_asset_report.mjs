@@ -9,6 +9,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const BYTES_PER_MB = 1_000_000;
 const DEFAULT_TOP_N = 25;
 const DEFAULT_GROUP_DEPTH = 1;
+const DEFAULT_TYPE_LIMIT = 15;
 
 /**
  * @param {string} p
@@ -58,13 +59,14 @@ function usage() {
     "Desktop dist asset size report (top offenders + optional budgets).",
     "",
     "Usage:",
-    "  node scripts/desktop_dist_asset_report.mjs [--dist-dir <path>] [--top N] [--group-depth N] [--no-groups]",
+    "  node scripts/desktop_dist_asset_report.mjs [--dist-dir <path>] [--top N] [--group-depth N] [--no-groups] [--no-types]",
     "",
     "Options:",
     "  --dist-dir <path>   Directory to scan (default: apps/desktop/dist).",
     "  --top N             Number of largest files to show (default: 25).",
     "  --group-depth N     Group totals by the first N directory segments (default: 1).",
     "  --no-groups         Disable grouped totals output.",
+    "  --no-types          Disable file type totals output.",
     "",
     "Budgets (env vars):",
     "  FORMULA_DESKTOP_DIST_TOTAL_BUDGET_MB        Fail if total dist size exceeds this value.",
@@ -85,12 +87,13 @@ function parseArgs(argv) {
     args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
   }
 
-  /** @type {{ distDir: string, topN: number, groupDepth: number, groups: boolean }} */
+  /** @type {{ distDir: string, topN: number, groupDepth: number, groups: boolean, types: boolean }} */
   const out = {
     distDir: path.join(repoRoot, "apps", "desktop", "dist"),
     topN: DEFAULT_TOP_N,
     groupDepth: DEFAULT_GROUP_DEPTH,
     groups: true,
+    types: true,
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -103,6 +106,11 @@ function parseArgs(argv) {
 
     if (arg === "--no-groups" || arg === "--no-group") {
       out.groups = false;
+      continue;
+    }
+
+    if (arg === "--no-types" || arg === "--no-type") {
+      out.types = false;
       continue;
     }
 
@@ -386,6 +394,56 @@ function renderGroupedTotals(files, totalBytes, groupDepth) {
 }
 
 /**
+ * @param {Array<{ ext: string, sizeBytes: number }>} files
+ * @param {number} totalBytes
+ * @param {number} limit
+ * @returns {string[]}
+ */
+function renderTypeTotals(files, totalBytes, limit) {
+  /** @type {Map<string, { bytes: number, files: number }>} */
+  const types = new Map();
+  for (const f of files) {
+    const key = f.ext || "(none)";
+    const prev = types.get(key);
+    if (prev) {
+      prev.bytes += f.sizeBytes;
+      prev.files += 1;
+    } else {
+      types.set(key, { bytes: f.sizeBytes, files: 1 });
+    }
+  }
+
+  const sorted = Array.from(types.entries()).sort((a, b) => b[1].bytes - a[1].bytes);
+  const top = sorted.slice(0, limit);
+
+  /** @type {string[]} */
+  const lines = [];
+  lines.push("### File type totals");
+  lines.push("");
+  lines.push("| Type | Files | Size | Share |");
+  lines.push("| :---: | ---: | ---: | ---: |");
+
+  for (const [key, value] of top) {
+    const share = totalBytes > 0 ? `${((value.bytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
+    lines.push(
+      `| \`${key}\` | ${formatInt(value.files)} | ${formatBytesAndMb(value.bytes)} | ${share} |`,
+    );
+  }
+
+  if (sorted.length > top.length) {
+    const remainingFiles = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.files, 0);
+    const remainingBytes = sorted.slice(top.length).reduce((acc, [, v]) => acc + v.bytes, 0);
+    const share = totalBytes > 0 ? `${((remainingBytes / totalBytes) * 100).toFixed(1)}%` : "0.0%";
+    lines.push(
+      `| _(other)_ | ${formatInt(remainingFiles)} | ${formatBytesAndMb(remainingBytes)} | ${share} |`,
+    );
+  }
+
+  lines.push("");
+  return lines;
+}
+
+/**
  * @param {string} markdown
  */
 async function appendStepSummary(markdown) {
@@ -494,8 +552,9 @@ try {
     );
     const topLines = renderTopFilesTable(files, totalBytes, args.topN, singleBudgetMb);
     const groupLines = args.groups ? renderGroupedTotals(files, totalBytes, args.groupDepth) : [];
+    const typeLines = args.types ? renderTypeTotals(files, totalBytes, DEFAULT_TYPE_LIMIT) : [];
 
-    const markdown = [...headerLines, ...topLines, ...groupLines].join("\n");
+    const markdown = [...headerLines, ...topLines, ...groupLines, ...typeLines].join("\n");
     console.log(markdown);
     await appendStepSummary(markdown);
 

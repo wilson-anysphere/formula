@@ -77,6 +77,7 @@ This prints a Markdown report of:
 - total `dist/` size
 - the **largest files** (top 25 by default; use `--top N`)
 - **grouped totals** by directory prefix (top-level by default; use `--group-depth N`)
+- **file type totals** (by extension; disable with `--no-types`)
 
 Optional budget enforcement (MB = 1,000,000 bytes):
 

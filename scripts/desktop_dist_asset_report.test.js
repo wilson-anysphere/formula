@@ -52,6 +52,18 @@ test("desktop_dist_asset_report tolerates pnpm-style -- delimiter", () => {
   assert.doesNotMatch(proc.stdout, /### Grouped totals/);
 });
 
+test("desktop_dist_asset_report supports --no-types", () => {
+  const distDir = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-no-types-"));
+  createSizedFile(path.join(distDir, "assets", "a.bin"), 123);
+  const proc = spawnSync(process.execPath, [scriptPath, "--dist-dir", distDir, "--top", "1", "--no-types"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.match(proc.stdout, /## Desktop dist asset report/);
+  assert.doesNotMatch(proc.stdout, /### File type totals/);
+});
+
 test("desktop_dist_asset_report resolves missing relative --dist-dir against CWD (not repo root)", () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "formula-desktop-dist-cwd-"));
   const missingName = `missing-dist-${process.pid}-${Date.now()}`;
