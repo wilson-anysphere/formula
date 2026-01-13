@@ -230,3 +230,23 @@ test("semanticDiff: BigInt does not collide with string for move signatures", ()
   assert.equal(diff.removed[0].oldValue, 10n);
   assert.equal(diff.added[0].newValue, "10");
 });
+
+test("semanticDiff: does not throw on cyclic cell values (move detection)", () => {
+  /** @type {any} */
+  const beforeValue = { kind: "cycle" };
+  beforeValue.self = beforeValue;
+  /** @type {any} */
+  const afterValue = { kind: "cycle" };
+  afterValue.self = afterValue;
+
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { value: beforeValue },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 1)]: { value: afterValue },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.moved.length, 1);
+  assert.deepEqual(diff.moved[0].oldLocation, { row: 0, col: 0 });
+  assert.deepEqual(diff.moved[0].newLocation, { row: 0, col: 1 });
+});

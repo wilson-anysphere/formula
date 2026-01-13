@@ -56,10 +56,24 @@ export function parseCellKey(key) {
 
 /**
  * Stable stringify for objects so we can build deterministic signatures.
+ *
+ * This is intentionally defensive (cycle-safe) so diff helpers can be used in
+ * browser bundles without crashing on unexpected input graphs.
  * @param {any} value
  * @returns {string}
  */
 function stableStringify(value) {
+  /** @type {WeakSet<object>} */
+  const stack = new WeakSet();
+  return stableStringifyInner(value, stack);
+}
+
+/**
+ * @param {any} value
+ * @param {WeakSet<object>} stack
+ * @returns {string}
+ */
+function stableStringifyInner(value, stack) {
   if (value === null) return "null";
   const t = typeof value;
   if (t === "string") return JSON.stringify(value);
@@ -73,12 +87,50 @@ function stableStringify(value) {
   if (t === "undefined") return "undefined";
   // BigInt is not JSON-serializable; preserve type to avoid collisions with strings.
   if (t === "bigint") return `BigInt(${String(value)})`;
+  if (t === "symbol") return String(value);
   if (t === "function") return "\"[Function]\"";
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (t === "object") {
-    const keys = Object.keys(value).sort();
-    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
+
+  if (Array.isArray(value)) {
+    if (stack.has(value)) return "[Circular]";
+    stack.add(value);
+    try {
+      // Preserve array holes so `[ , ]` doesn't collapse to `[]`.
+      /** @type {string[]} */
+      const parts = [];
+      for (let i = 0; i < value.length; i += 1) {
+        if (!Object.prototype.hasOwnProperty.call(value, i)) {
+          parts.push("<hole>");
+        } else {
+          parts.push(stableStringifyInner(value[i], stack));
+        }
+      }
+      return `[${parts.join(",")}]`;
+    } finally {
+      stack.delete(value);
+    }
   }
+
+  if (t === "object") {
+    if (stack.has(value)) return "[Circular]";
+    stack.add(value);
+    try {
+      const tag = Object.prototype.toString.call(value);
+      if (tag === "[object Date]" && typeof value.toISOString === "function") {
+        return `Date(${value.toISOString()})`;
+      }
+      if (tag === "[object RegExp]") {
+        return `RegExp(${value.source},${value.flags})`;
+      }
+
+      const keys = Object.keys(value).sort();
+      const body = `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringifyInner(value[k], stack)}`).join(",")}}`;
+      // Prefix non-plain objects with their tag to avoid collisions with `{}`.
+      return tag === "[object Object]" ? body : `${tag}${body}`;
+    } finally {
+      stack.delete(value);
+    }
+  }
+
   return JSON.stringify(value);
 }
 
