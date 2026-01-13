@@ -8,6 +8,16 @@ export interface RibbonButtonProps {
   pressed?: boolean;
   labelOverride?: string;
   disabledOverride?: boolean;
+  /**
+   * Optional shortcut display override for the top-level ribbon control.
+   *
+   * This is plumbed through `RibbonGroup` from `RibbonUiState.shortcutById`.
+   */
+  shortcutOverride?: string;
+  /**
+   * Optional lookup table for dropdown menu items (keyed by menu item `id`).
+   */
+  shortcutById?: Record<string, string>;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -45,6 +55,8 @@ export const RibbonButton = React.memo(function RibbonButton({
   pressed,
   labelOverride,
   disabledOverride,
+  shortcutOverride,
+  shortcutById,
   onActivate,
 }: RibbonButtonProps) {
   const kind = button.kind ?? "button";
@@ -63,6 +75,8 @@ export const RibbonButton = React.memo(function RibbonButton({
   );
   const label = labelOverride ?? button.label;
   const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
+  const shortcut = shortcutOverride ?? shortcutById?.[button.id];
+  const title = shortcut ? `${button.ariaLabel} (${shortcut})` : button.ariaLabel;
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
@@ -173,7 +187,7 @@ export const RibbonButton = React.memo(function RibbonButton({
           requestAnimationFrame(() => focusLastMenuItem());
         }
       }}
-      title={button.ariaLabel}
+      title={title}
     >
       {iconNode ? (
         <span className="ribbon-button__icon" aria-hidden="true">
@@ -248,43 +262,54 @@ export const RibbonButton = React.memo(function RibbonButton({
             }
           }}
         >
-          {button.menuItems?.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              className="ribbon-dropdown__menuitem"
-              aria-label={item.ariaLabel}
-              tabIndex={-1}
-              disabled={item.disabled}
-              data-testid={item.testId}
-              data-command-id={item.id}
-              onClick={() => {
-                closeMenu();
-                onActivate?.({
-                  id: item.id,
-                  label: item.label,
-                  ariaLabel: item.ariaLabel,
-                  iconId: item.iconId,
-                  kind: "button",
-                  size: "small",
-                  testId: item.testId,
-                  disabled: item.disabled,
-                });
-                buttonRef.current?.focus();
-              }}
-            >
-              {(() => {
-                const menuIconNode = getRibbonIconNode(item.iconId);
-                return menuIconNode ? (
-                  <span className="ribbon-dropdown__icon" aria-hidden="true">
-                    {menuIconNode}
+          {button.menuItems?.map((item) => {
+            const itemShortcut = shortcutById?.[item.id];
+            const itemTitle = itemShortcut ? `${item.ariaLabel} (${itemShortcut})` : item.ariaLabel;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitem"
+                className="ribbon-dropdown__menuitem"
+                aria-label={item.ariaLabel}
+                title={itemTitle}
+                tabIndex={-1}
+                disabled={item.disabled}
+                data-testid={item.testId}
+                data-command-id={item.id}
+                onClick={() => {
+                  closeMenu();
+                  onActivate?.({
+                    id: item.id,
+                    label: item.label,
+                    ariaLabel: item.ariaLabel,
+                    iconId: item.iconId,
+                    kind: "button",
+                    size: "small",
+                    testId: item.testId,
+                    disabled: item.disabled,
+                  });
+                  buttonRef.current?.focus();
+                }}
+              >
+                {(() => {
+                  const menuIconNode = getRibbonIconNode(item.iconId);
+                  return menuIconNode ? (
+                    <span className="ribbon-dropdown__icon" aria-hidden="true">
+                      {menuIconNode}
+                    </span>
+                  ) : null;
+                })()}
+                <span className="ribbon-dropdown__label">{item.label}</span>
+                {itemShortcut ? (
+                  <span className="ribbon-dropdown__shortcut" aria-hidden="true">
+                    {itemShortcut}
                   </span>
-                ) : null;
-              })()}
-              <span className="ribbon-dropdown__label">{item.label}</span>
-            </button>
-          ))}
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>

@@ -697,6 +697,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   pressedById={mergedPressedById}
                   labelById={uiState.labelById}
                   disabledById={uiState.disabledById}
+                  shortcutById={uiState.shortcutById}
                   onActivateButton={activateButton}
                 />
               ))}

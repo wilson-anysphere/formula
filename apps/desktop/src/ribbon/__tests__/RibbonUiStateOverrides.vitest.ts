@@ -12,6 +12,7 @@ afterEach(() => {
       pressedById: Object.create(null),
       labelById: Object.create(null),
       disabledById: Object.create(null),
+      shortcutById: Object.create(null),
     });
   });
   document.body.innerHTML = "";
@@ -41,6 +42,7 @@ describe("Ribbon UI state overrides", () => {
         pressedById: { "format.toggleBold": true },
         labelById: Object.create(null),
         disabledById: Object.create(null),
+        shortcutById: Object.create(null),
       });
     });
 
@@ -61,10 +63,32 @@ describe("Ribbon UI state overrides", () => {
         pressedById: Object.create(null),
         labelById: { "home.number.numberFormat": "Percent" },
         disabledById: Object.create(null),
+        shortcutById: Object.create(null),
       });
     });
 
     expect(labelSpan()).toBe("Percent");
+    act(() => root.unmount());
+  });
+
+  it("includes shortcut hints in the button title when provided", () => {
+    const { container, root } = renderRibbon();
+    const copy = container.querySelector<HTMLButtonElement>('[data-command-id="home.clipboard.copy"]');
+    expect(copy).toBeInstanceOf(HTMLButtonElement);
+    expect(copy?.getAttribute("aria-label")).toBe("Copy");
+    expect(copy?.getAttribute("title")).toBe("Copy");
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: Object.create(null),
+        shortcutById: { "home.clipboard.copy": "Ctrl+C" },
+      });
+    });
+
+    expect(copy?.getAttribute("aria-label")).toBe("Copy");
+    expect(copy?.getAttribute("title")).toBe("Copy (Ctrl+C)");
     act(() => root.unmount());
   });
 });

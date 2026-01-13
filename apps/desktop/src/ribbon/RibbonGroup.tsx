@@ -8,10 +8,11 @@ export interface RibbonGroupProps {
   pressedById: Record<string, boolean>;
   labelById?: Record<string, string>;
   disabledById?: Record<string, boolean>;
+  shortcutById?: Record<string, string>;
   onActivateButton?: (button: RibbonButtonDefinition) => void;
 }
 
-export function RibbonGroup({ group, pressedById, labelById, disabledById, onActivateButton }: RibbonGroupProps) {
+export function RibbonGroup({ group, pressedById, labelById, disabledById, shortcutById, onActivateButton }: RibbonGroupProps) {
   return (
     <section className="ribbon-group" role="group" aria-label={group.label}>
       <div className="ribbon-group__content">
@@ -22,6 +23,8 @@ export function RibbonGroup({ group, pressedById, labelById, disabledById, onAct
             pressed={pressedById[button.id]}
             labelOverride={labelById?.[button.id]}
             disabledOverride={disabledById?.[button.id]}
+            shortcutOverride={shortcutById?.[button.id]}
+            shortcutById={shortcutById}
             onActivate={onActivateButton}
           />
         ))}

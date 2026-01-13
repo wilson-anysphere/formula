@@ -37,7 +37,8 @@ import { ThemeController } from "./theme/themeController.js";
 import { mountRibbon } from "./ribbon/index.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
-import { setRibbonUiState } from "./ribbon/ribbonUiState.js";
+import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
+import { deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -2062,6 +2063,7 @@ window.addEventListener("unload", () => {
 // responsive by throttling to one computation per animation frame.
 let ribbonFormatStateUpdateScheduled = false;
 let ribbonFormatStateUpdateRequested = false;
+let ribbonShortcutById: Record<string, string> = Object.create(null);
 
 function scheduleRibbonSelectionFormatStateUpdate(): void {
   ribbonFormatStateUpdateRequested = true;
@@ -2239,6 +2241,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       pressedById,
       labelById,
       disabledById,
+      shortcutById: ribbonShortcutById,
     });
   });
 }
@@ -5492,6 +5495,14 @@ if (
   });
   keybindingService.setBuiltinKeybindings(builtinKeybindingHints);
   const commandKeybindingDisplayIndex = keybindingService.getCommandKeybindingDisplayIndex();
+
+  const updateRibbonShortcuts = () => {
+    ribbonShortcutById = deriveRibbonShortcutById(commandKeybindingDisplayIndex);
+    // Preserve current pressed/label/disabled state while updating shortcut hints.
+    setRibbonUiState({ ...getRibbonUiStateSnapshot(), shortcutById: ribbonShortcutById });
+  };
+  updateRibbonShortcuts();
+
   // Split dispatch across phases:
   // - Capture: built-in keybindings only (needed for some global shortcuts).
   // - Bubble: extension keybindings only, so SpreadsheetApp can `preventDefault()` first for
@@ -5513,6 +5524,7 @@ if (
         ? (extensionHostManager.getContributedKeybindings() as ContributedKeybinding[])
         : [];
     keybindingService.setExtensionKeybindings(contributed);
+    updateRibbonShortcuts();
   };
 
   const activateOpenExtensionPanels = () => {
