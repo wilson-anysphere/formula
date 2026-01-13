@@ -13,23 +13,12 @@ type ApplyFormattingToSelection = (
   options?: { forceBatch?: boolean },
 ) => void;
 
-type OpenColorPicker = (
-  input: HTMLInputElement,
-  label: string,
-  apply: (sheetId: string, ranges: CellRange[], argb: string) => void,
-) => void;
-
 export function registerFormatFontDropdownCommands(params: {
   commandRegistry: CommandRegistry;
   category: string;
   applyFormattingToSelection: ApplyFormattingToSelection;
-  openColorPicker: OpenColorPicker;
-  getDocument: () => DocumentController;
-  fontColorPicker: HTMLInputElement;
-  fillColorPicker: HTMLInputElement;
 }): void {
-  const { commandRegistry, category, applyFormattingToSelection, openColorPicker, getDocument, fontColorPicker, fillColorPicker } =
-    params;
+  const { commandRegistry, category, applyFormattingToSelection } = params;
 
   commandRegistry.registerBuiltinCommand(
     "format.clearFormats",
@@ -98,10 +87,7 @@ export function registerFormatFontDropdownCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "format.borders.all",
     "All Borders",
-    () => {
-      const doc = getDocument();
-      applyFormattingToSelection("Borders", (_doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
-    },
+    () => applyFormattingToSelection("Borders", (doc, sheetId, ranges) => applyAllBorders(doc, sheetId, ranges)),
     { category },
   );
 
@@ -199,10 +185,7 @@ export function registerFormatFontDropdownCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "format.fillColor.moreColors",
     "Fill Color: More Colors…",
-    () => {
-      const doc = getDocument();
-      openColorPicker(fillColorPicker, "Fill color", (sheetId, ranges, argb) => setFillColor(doc, sheetId, ranges, argb));
-    },
+    () => commandRegistry.executeCommand("format.fillColor"),
     { category },
   );
 
@@ -211,7 +194,6 @@ export function registerFormatFontDropdownCommands(params: {
       commandId,
       title,
       () => {
-        const doc = getDocument();
         if (argb == null) {
           applyFormattingToSelection("Fill color", (doc, sheetId, ranges) => {
             let applied = true;
@@ -223,7 +205,7 @@ export function registerFormatFontDropdownCommands(params: {
           });
           return;
         }
-        applyFormattingToSelection("Fill color", (_doc, sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
+        applyFormattingToSelection("Fill color", (doc, sheetId, ranges) => setFillColor(doc, sheetId, ranges, argb));
       },
       { category },
     );
@@ -239,10 +221,7 @@ export function registerFormatFontDropdownCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "format.fontColor.moreColors",
     "Font Color: More Colors…",
-    () => {
-      const doc = getDocument();
-      openColorPicker(fontColorPicker, "Font color", (sheetId, ranges, argb) => setFontColor(doc, sheetId, ranges, argb));
-    },
+    () => commandRegistry.executeCommand("format.fontColor"),
     { category },
   );
 
@@ -266,8 +245,7 @@ export function registerFormatFontDropdownCommands(params: {
       commandId,
       title,
       () => {
-        const doc = getDocument();
-        applyFormattingToSelection("Font color", (_doc, sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+        applyFormattingToSelection("Font color", (doc, sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
       },
       { category },
     );
@@ -278,4 +256,3 @@ export function registerFormatFontDropdownCommands(params: {
   registerFontPreset("format.fontColor.red", "Font Color: Red", ["#", "FF", "FF0000"].join(""));
   registerFontPreset("format.fontColor.green", "Font Color: Green", ["#", "FF", "00FF00"].join(""));
 }
-

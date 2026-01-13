@@ -21,10 +21,6 @@ describe("registerFormatFontDropdownCommands", () => {
       commandRegistry: registry,
       category: "Format",
       applyFormattingToSelection: applyFormattingToSelection as any,
-      openColorPicker: vi.fn() as any,
-      getDocument: () => doc,
-      fontColorPicker: {} as any,
-      fillColorPicker: {} as any,
     });
 
     await registry.executeCommand("format.borders.top");
@@ -55,10 +51,6 @@ describe("registerFormatFontDropdownCommands", () => {
       commandRegistry: registry,
       category: "Format",
       applyFormattingToSelection: applyFormattingToSelection as any,
-      openColorPicker: vi.fn() as any,
-      getDocument: () => doc,
-      fontColorPicker: {} as any,
-      fillColorPicker: {} as any,
     });
 
     await registry.executeCommand("format.clearFormats");
@@ -66,4 +58,3 @@ describe("registerFormatFontDropdownCommands", () => {
     expect(setRangeFormat).toHaveBeenCalledWith("Sheet1", range, null, { label: "Clear formats" });
   });
 });
-

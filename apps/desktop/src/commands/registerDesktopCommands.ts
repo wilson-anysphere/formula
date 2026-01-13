@@ -13,6 +13,7 @@ import {
 } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
+import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
 import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
@@ -90,14 +91,6 @@ export function registerDesktopCommands(params: {
     { category: commandCategoryFormat },
   );
 
-  registerNumberFormatCommands({
-    commandRegistry,
-    applyFormattingToSelection,
-    getActiveCellNumberFormat,
-    t,
-    category: commandCategoryFormat,
-  });
-
   if (layoutController) {
     registerBuiltinCommands({
       commandRegistry,
@@ -110,7 +103,25 @@ export function registerDesktopCommands(params: {
       themeController,
       refreshRibbonUiState,
     });
+
+    // Home → Font dropdown actions are registered as canonical `format.*` commands so
+    // ribbon actions and the command palette share a single command surface.
+    registerFormatFontDropdownCommands({
+      commandRegistry,
+      category: commandCategoryFormat,
+      applyFormattingToSelection,
+    });
   }
+
+  // Register number formats after `registerBuiltinCommands` so the desktop shell can override
+  // any builtin wiring with the host-provided `applyFormattingToSelection` + `getActiveCellNumberFormat`.
+  registerNumberFormatCommands({
+    commandRegistry,
+    applyFormattingToSelection,
+    getActiveCellNumberFormat,
+    t,
+    category: commandCategoryFormat,
+  });
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
 

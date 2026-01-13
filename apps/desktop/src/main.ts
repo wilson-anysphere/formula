@@ -139,7 +139,6 @@ import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/in
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
-import { registerFormatFontDropdownCommands } from "./commands/registerFormatFontDropdownCommands.js";
 import { PAGE_LAYOUT_COMMANDS } from "./commands/registerPageLayoutCommands.js";
 import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommands.js";
 import { FORMAT_PAINTER_COMMAND_ID, registerFormatPainterCommand } from "./commands/formatPainterCommand.js";
@@ -7491,7 +7490,6 @@ registerFormatPainterCommand({
     }
   },
 });
-
 registerDataQueriesCommands({
   commandRegistry,
   layoutController: ribbonLayoutController,
@@ -7500,17 +7498,6 @@ registerDataQueriesCommands({
   notify,
   refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
   focusAfterExecute: () => app.focus(),
-});
-// Home → Font dropdown actions are registered as canonical `format.*` commands so
-// ribbon actions and the command palette share a single command surface.
-registerFormatFontDropdownCommands({
-  commandRegistry,
-  category: t("commandCategory.format"),
-  applyFormattingToSelection,
-  openColorPicker,
-  getDocument: () => app.getDocument(),
-  fontColorPicker,
-  fillColorPicker,
 });
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
