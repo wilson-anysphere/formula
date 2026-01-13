@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { extractSheetSchema } from "./schema.js";
-import { summarizeSheetSchema } from "./summarizeSheet.js";
+import { summarizeRegion, summarizeSheetSchema } from "./summarizeSheet.js";
 
 describe("summarizeSheetSchema", () => {
   function buildSchema() {
@@ -81,5 +81,28 @@ describe("summarizeSheetSchema", () => {
     expect(summary).toContain("[T\\]1\\|2]");
     // Headers should be escaped inside the bracketed list.
     expect(summary).toContain("h=[A\\|B|C\\]D|E\\\\F]");
+  });
+
+  it("summarizeRegion supports both tables and data regions", () => {
+    const schema = buildSchema();
+    expect(summarizeRegion(schema.tables[0]!)).toBe(
+      "T [SalesTable] r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
+    );
+    expect(summarizeRegion(schema.dataRegions[0]!)).toBe(
+      "R r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
+    );
+  });
+
+  it("can exclude tables or regions from the sheet summary", () => {
+    const schema = buildSchema();
+    const noTables = summarizeSheetSchema(schema, { includeTables: false, maxRegions: 1 });
+    expect(noTables).toContain("sheet=[Sheet1] tables=2 regions=2");
+    expect(noTables).not.toContain("\nT1 ");
+    expect(noTables).toContain("\nR1 ");
+
+    const noRegions = summarizeSheetSchema(schema, { includeRegions: false, maxTables: 1 });
+    expect(noRegions).toContain("sheet=[Sheet1] tables=2 regions=2");
+    expect(noRegions).toContain("\nT1 ");
+    expect(noRegions).not.toContain("\nR1 ");
   });
 });
