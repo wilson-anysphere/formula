@@ -4,16 +4,17 @@
 //! - BIFF `FILEPASS` parsing / encryption scheme classification
 //! - Crypto primitives (key derivation + verifier decryption) for BIFF8 RC4 and RC4 CryptoAPI
 //!
-//! Full workbook-stream record payload decryption is not yet implemented.
+//! BIFF workbook streams can indicate encryption/password protection with a `FILEPASS` record.
+//! BIFF record headers (record id + length) remain plaintext so parsers can iterate records, but
+//! record *payload* bytes after `FILEPASS` are encrypted.
 //!
-//! Supported FILEPASS variants (classification only):
-//! - BIFF5 XOR obfuscation
-//! - BIFF8 XOR obfuscation
-//! - BIFF8 RC4
-//! - BIFF8 RC4 CryptoAPI
+//! This module provides:
+//! - Best-effort parsing/classification of `FILEPASS` payloads.
+//! - In-place decryption of workbook stream bytes for supported schemes.
 
 #![allow(dead_code)]
 
+use md5::{Digest as _, Md5};
 use thiserror::Error;
 
 use super::{records, BiffVersion};
@@ -21,14 +22,22 @@ use super::{records, BiffVersion};
 pub(crate) mod cryptoapi;
 pub(crate) mod rc4;
 pub(crate) mod xor;
+/// BIFF8 RC4 encryption uses 1024-byte blocks for the record-data byte stream.
+///
+/// Record headers (record id + length) are not encrypted and must not contribute to the block
+/// position.
+const RC4_BLOCK_SIZE: usize = 1024;
 
 // BIFF8 FILEPASS.wEncryptionType values.
-// [MS-XLS] 2.4.117 (FilePass).
+// [MS-XLS] 2.4.105 (FILEPASS).
 const BIFF8_ENCRYPTION_TYPE_XOR: u16 = 0x0000;
 const BIFF8_ENCRYPTION_TYPE_RC4: u16 = 0x0001;
 
 // BIFF8 RC4 FILEPASS "subType" values (wEncryptionType==0x0001).
-// In BIFF8 these correspond to two different RC4-based layouts.
+//
+// In practice this corresponds to the `EncryptionInfo` major version:
+// - 0x0001 => legacy RC4 "Standard Encryption"
+// - 0x0002 => RC4 CryptoAPI
 const BIFF8_RC4_SUBTYPE_RC4: u16 = 0x0001;
 const BIFF8_RC4_SUBTYPE_CRYPTOAPI: u16 = 0x0002;
 
@@ -40,11 +49,11 @@ pub(crate) enum BiffEncryption {
     Biff8Xor { key: u16, verifier: u16 },
     /// BIFF8 RC4 encryption (legacy non-CryptoAPI).
     ///
-    /// The full FILEPASS payload is preserved for future decryption work.
+    /// The full FILEPASS payload is preserved so decryptors can parse algorithm details.
     Biff8Rc4 { filepass_payload: Vec<u8> },
     /// BIFF8 RC4 encryption using CryptoAPI.
     ///
-    /// The full FILEPASS payload is preserved for future decryption work.
+    /// The full FILEPASS payload is preserved so decryptors can parse algorithm details.
     Biff8Rc4CryptoApi { filepass_payload: Vec<u8> },
 }
 
@@ -136,19 +145,18 @@ pub(crate) fn parse_filepass_record(
 /// 1. Iterates BIFF records from offset 0 (record headers are plaintext).
 /// 2. Locates the workbook-global `FILEPASS` record.
 /// 3. Parses the FILEPASS payload to determine encryption scheme.
-/// 4. Dispatches to an algorithm-specific decryptor to decrypt record payloads *after*
-///    FILEPASS.
+/// 4. Dispatches to an algorithm-specific decryptor to decrypt record payloads *after* FILEPASS.
 ///
-/// Note: Bytes before FILEPASS are always plaintext; encryption begins immediately
-/// after the FILEPASS record.
+/// Note: Bytes before FILEPASS are always plaintext; encryption begins immediately after the
+/// FILEPASS record.
 pub(crate) fn decrypt_workbook_stream(
     workbook_stream: &mut [u8],
     password: &str,
 ) -> Result<(), DecryptError> {
     let biff_version = super::detect_biff_version(workbook_stream);
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)
-        .map_err(DecryptError::InvalidFilePass)?;
+    let mut iter =
+        records::BiffRecordIter::from_offset(workbook_stream, 0).map_err(DecryptError::InvalidFilePass)?;
 
     // Require a valid BIFF workbook stream (must start with BOF) to avoid accidentally treating
     // arbitrary byte buffers as encrypted just because they contain the FILEPASS record id.
@@ -171,8 +179,8 @@ pub(crate) fn decrypt_workbook_stream(
     while let Some(next) = iter.next() {
         let record = next.map_err(DecryptError::InvalidFilePass)?;
 
-        // The FILEPASS record only appears in the workbook globals substream. Stop scanning
-        // once we hit the next substream (BOF) or EOF.
+        // The FILEPASS record only appears in the workbook globals substream. Stop scanning once we
+        // hit the next substream (BOF) or EOF.
         if record.offset != 0 && records::is_bof_record(record.record_id) {
             break;
         }
@@ -193,9 +201,7 @@ pub(crate) fn decrypt_workbook_stream(
             .offset
             .checked_add(4)
             .and_then(|v| v.checked_add(record.data.len()))
-            .ok_or_else(|| {
-                DecryptError::InvalidFilePass("FILEPASS offset overflow".to_string())
-            })?;
+            .ok_or_else(|| DecryptError::InvalidFilePass("FILEPASS offset overflow".to_string()))?;
 
         return decrypt_after_filepass(&encryption, workbook_stream, encrypted_start, password);
     }
@@ -205,12 +211,10 @@ pub(crate) fn decrypt_workbook_stream(
 
 fn decrypt_after_filepass(
     encryption: &BiffEncryption,
-    _workbook_stream: &mut [u8],
-    _encrypted_start: usize,
-    _password: &str,
+    workbook_stream: &mut [u8],
+    encrypted_start: usize,
+    password: &str,
 ) -> Result<(), DecryptError> {
-    // We intentionally do *not* implement any crypto algorithms yet. This module's
-    // immediate goal is to establish module boundaries and correct FILEPASS parsing.
     match encryption {
         BiffEncryption::Biff5Xor { .. } => Err(DecryptError::UnsupportedEncryption(
             "BIFF5 XOR decryption not implemented".to_string(),
@@ -218,19 +222,285 @@ fn decrypt_after_filepass(
         BiffEncryption::Biff8Xor { .. } => Err(DecryptError::UnsupportedEncryption(
             "BIFF8 XOR decryption not implemented".to_string(),
         )),
-        BiffEncryption::Biff8Rc4 { .. } => Err(DecryptError::UnsupportedEncryption(
-            "BIFF8 RC4 decryption not implemented".to_string(),
-        )),
+        BiffEncryption::Biff8Rc4 { filepass_payload } => {
+            decrypt_biff8_rc4_standard(workbook_stream, encrypted_start, password, filepass_payload)
+        }
         BiffEncryption::Biff8Rc4CryptoApi { .. } => Err(DecryptError::UnsupportedEncryption(
             "BIFF8 RC4 CryptoAPI decryption not implemented".to_string(),
         )),
     }
 }
 
+/// Parsed BIFF8 RC4 FILEPASS payload for legacy "Standard Encryption".
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FilePassRc4 {
+    /// RC4 key length in bytes (either 5 bytes / 40-bit, or 16 bytes / 128-bit).
+    key_len: usize,
+    /// Random salt / "DocId" (16 bytes).
+    salt: [u8; 16],
+    /// Encrypted verifier (16 bytes).
+    encrypted_verifier: [u8; 16],
+    /// Encrypted verifier hash (16 bytes, MD5).
+    encrypted_verifier_hash: [u8; 16],
+}
+
+/// Minimal RC4 stream cipher implementation (KSA + PRGA).
+///
+/// We implement this locally to avoid pulling in a full crypto dependency just for legacy XLS
+/// decryption.
+#[derive(Clone)]
+struct Rc4 {
+    s: [u8; 256],
+    i: u8,
+    j: u8,
+}
+
+impl Rc4 {
+    fn new(key: &[u8]) -> Self {
+        debug_assert!(!key.is_empty());
+
+        let mut s = [0u8; 256];
+        for (idx, slot) in s.iter_mut().enumerate() {
+            *slot = idx as u8;
+        }
+
+        let mut j: u8 = 0;
+        for i in 0u16..=255 {
+            let key_byte = key[i as usize % key.len()];
+            j = j.wrapping_add(s[i as usize]).wrapping_add(key_byte);
+            s.swap(i as usize, j as usize);
+        }
+
+        Self { s, i: 0, j: 0 }
+    }
+
+    fn apply_keystream(&mut self, data: &mut [u8]) {
+        for b in data {
+            self.i = self.i.wrapping_add(1);
+            self.j = self.j.wrapping_add(self.s[self.i as usize]);
+            self.s.swap(self.i as usize, self.j as usize);
+            let idx = self.s[self.i as usize].wrapping_add(self.s[self.j as usize]);
+            let k = self.s[idx as usize];
+            *b ^= k;
+        }
+    }
+}
+
+fn parse_filepass_rc4(payload: &[u8]) -> Result<FilePassRc4, DecryptError> {
+    // FILEPASS payload begins with wEncryptionType (u16).
+    if payload.len() < 2 {
+        return Err(DecryptError::InvalidFilePass("truncated FILEPASS record".to_string()));
+    }
+    let encryption_type = u16::from_le_bytes([payload[0], payload[1]]);
+    if encryption_type != BIFF8_ENCRYPTION_TYPE_RC4 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X} (expected RC4)"
+        )));
+    }
+
+    // EncryptionInfo: major/minor version.
+    if payload.len() < 6 {
+        return Err(DecryptError::InvalidFilePass(
+            "truncated FILEPASS RC4 header".to_string(),
+        ));
+    }
+
+    let major = u16::from_le_bytes([payload[2], payload[3]]);
+    let minor = u16::from_le_bytes([payload[4], payload[5]]);
+
+    // Excel 97-2003 Standard Encryption uses major version 1.
+    if major != 1 {
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "unsupported FILEPASS RC4 major version {major} (expected 1 for Standard Encryption)"
+        )));
+    }
+
+    // Minor version determines key length:
+    // - 1 => 40-bit (5 bytes)
+    // - 2 => 128-bit (16 bytes)
+    let key_len = match minor {
+        1 => 5,
+        2 => 16,
+        _ => {
+            return Err(DecryptError::UnsupportedEncryption(format!(
+                "unsupported FILEPASS RC4 minor version {minor} (expected 1 or 2)"
+            )));
+        }
+    };
+
+    // Standard encryption stores: salt (16), encrypted verifier (16), encrypted verifier hash (16)
+    const EXPECTED_LEN: usize = 6 + 16 + 16 + 16;
+    if payload.len() < EXPECTED_LEN {
+        return Err(DecryptError::InvalidFilePass(format!(
+            "truncated FILEPASS RC4 payload (len={}, need at least {EXPECTED_LEN})",
+            payload.len()
+        )));
+    }
+
+    let salt = payload[6..22].try_into().expect("slice len");
+    let encrypted_verifier = payload[22..38].try_into().expect("slice len");
+    let encrypted_verifier_hash = payload[38..54].try_into().expect("slice len");
+
+    Ok(FilePassRc4 {
+        key_len,
+        salt,
+        encrypted_verifier,
+        encrypted_verifier_hash,
+    })
+}
+
+fn password_to_utf16le(password: &str) -> Vec<u8> {
+    // Excel 97-2003 passwords are limited to 15 characters for legacy RC4 encryption.
+    //
+    // Use UTF-16LE and truncate to 15 UTF-16 code units.
+    let mut out = Vec::with_capacity(password.len().min(15) * 2);
+    for u in password.encode_utf16().take(15) {
+        out.extend_from_slice(&u.to_le_bytes());
+    }
+    out
+}
+
+fn derive_rc4_intermediate_key(password: &str, salt: &[u8; 16]) -> [u8; 16] {
+    // [MS-OFFCRYPTO] "Standard Encryption" key derivation (Excel 97-2003 RC4):
+    // - password_hash = MD5(UTF16LE(password))
+    // - intermediate_key = MD5(password_hash + salt)
+    let password_bytes = password_to_utf16le(password);
+    let password_hash: [u8; 16] = Md5::digest(&password_bytes).into();
+
+    let mut h = Md5::new();
+    h.update(password_hash);
+    h.update(salt);
+    h.finalize().into()
+}
+
+fn derive_rc4_block_key(intermediate_key: &[u8; 16], block: u32) -> [u8; 16] {
+    // block_key = MD5(intermediate_key + block_index_le32)
+    let mut h = Md5::new();
+    h.update(intermediate_key);
+    h.update(block.to_le_bytes());
+    h.finalize().into()
+}
+
+/// Applies BIFF8 RC4 encryption/decryption to a byte stream representing *record data* (not record
+/// headers).
+///
+/// This is symmetric: applying it twice with the same key yields the original bytes.
+struct Rc4BiffStream {
+    intermediate_key: [u8; 16],
+    key_len: usize,
+    block: u32,
+    pos_in_block: usize,
+    cipher: Rc4,
+}
+
+impl Rc4BiffStream {
+    fn new(intermediate_key: [u8; 16], key_len: usize) -> Self {
+        let block_key = derive_rc4_block_key(&intermediate_key, 0);
+        let cipher = Rc4::new(&block_key[..key_len]);
+        Self {
+            intermediate_key,
+            key_len,
+            block: 0,
+            pos_in_block: 0,
+            cipher,
+        }
+    }
+
+    fn rekey(&mut self) {
+        let block_key = derive_rc4_block_key(&self.intermediate_key, self.block);
+        self.cipher = Rc4::new(&block_key[..self.key_len]);
+    }
+
+    fn apply(&mut self, mut data: &mut [u8]) {
+        while !data.is_empty() {
+            if self.pos_in_block == RC4_BLOCK_SIZE {
+                self.block = self.block.wrapping_add(1);
+                self.pos_in_block = 0;
+                self.rekey();
+            }
+            let remaining_in_block = RC4_BLOCK_SIZE - self.pos_in_block;
+            let n = remaining_in_block.min(data.len());
+            let (chunk, rest) = data.split_at_mut(n);
+            self.cipher.apply_keystream(chunk);
+            self.pos_in_block += n;
+            data = rest;
+        }
+    }
+}
+
+fn verify_rc4_password(filepass: &FilePassRc4, password: &str) -> Result<[u8; 16], DecryptError> {
+    let intermediate_key = derive_rc4_intermediate_key(password, &filepass.salt);
+    let block_key = derive_rc4_block_key(&intermediate_key, 0);
+    let mut rc4 = Rc4::new(&block_key[..filepass.key_len]);
+
+    // Decrypt verifier + verifier hash.
+    let mut buf = [0u8; 32];
+    buf[0..16].copy_from_slice(&filepass.encrypted_verifier);
+    buf[16..32].copy_from_slice(&filepass.encrypted_verifier_hash);
+    rc4.apply_keystream(&mut buf);
+
+    let verifier = &buf[0..16];
+    let verifier_hash = &buf[16..32];
+    let expected_hash: [u8; 16] = Md5::digest(verifier).into();
+
+    if verifier_hash != expected_hash {
+        return Err(DecryptError::WrongPassword);
+    }
+
+    Ok(intermediate_key)
+}
+
+fn decrypt_biff8_rc4_standard(
+    workbook_stream: &mut [u8],
+    encrypted_start: usize,
+    password: &str,
+    filepass_payload: &[u8],
+) -> Result<(), DecryptError> {
+    let filepass = parse_filepass_rc4(filepass_payload)?;
+    let intermediate_key = verify_rc4_password(&filepass, password)?;
+    let mut rc4_stream = Rc4BiffStream::new(intermediate_key, filepass.key_len);
+
+    // Decrypt record payloads after FILEPASS.
+    let mut offset = encrypted_start;
+    while offset < workbook_stream.len() {
+        let remaining = workbook_stream.len() - offset;
+        if remaining < 4 {
+            return Err(DecryptError::InvalidFilePass(
+                "truncated BIFF record header while decrypting".to_string(),
+            ));
+        }
+
+        let record_id = u16::from_le_bytes([workbook_stream[offset], workbook_stream[offset + 1]]);
+        let len =
+            u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]]) as usize;
+
+        let data_start = offset
+            .checked_add(4)
+            .ok_or_else(|| DecryptError::InvalidFilePass("BIFF record offset overflow".to_string()))?;
+        let data_end = data_start.checked_add(len).ok_or_else(|| {
+            DecryptError::InvalidFilePass("BIFF record length overflow".to_string())
+        })?;
+        if data_end > workbook_stream.len() {
+            return Err(DecryptError::InvalidFilePass(format!(
+                "BIFF record 0x{record_id:04X} at offset {offset} extends past end of stream while decrypting (len={}, end={data_end})",
+                workbook_stream.len()
+            )));
+        }
+
+        rc4_stream.apply(&mut workbook_stream[data_start..data_end]);
+        offset = data_end;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const RECORD_BOF: u16 = 0x0809;
+    const RECORD_EOF: u16 = 0x000A;
+    const RECORD_DUMMY: u16 = 0x00FC;
     fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + payload.len());
         out.extend_from_slice(&record_id.to_le_bytes());
@@ -239,6 +509,90 @@ mod tests {
         out
     }
 
+    fn make_filepass_rc4_record(password: &str, salt: [u8; 16], key_len: usize) -> Vec<u8> {
+        let (major, minor) = match key_len {
+            5 => (1u16, 1u16),
+            16 => (1u16, 2u16),
+            _ => panic!("unsupported key_len"),
+        };
+
+        let verifier: [u8; 16] = (0..16u8)
+            .map(|b| b.wrapping_mul(31))
+            .collect::<Vec<_>>()
+            .as_slice()
+            .try_into()
+            .unwrap();
+        let verifier_hash: [u8; 16] = Md5::digest(verifier).into();
+
+        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        let block_key = derive_rc4_block_key(&intermediate_key, 0);
+        let mut rc4 = Rc4::new(&block_key[..key_len]);
+
+        let mut buf = [0u8; 32];
+        buf[0..16].copy_from_slice(&verifier);
+        buf[16..32].copy_from_slice(&verifier_hash);
+        rc4.apply_keystream(&mut buf);
+
+        let encrypted_verifier = &buf[0..16];
+        let encrypted_verifier_hash = &buf[16..32];
+
+        let mut payload = Vec::with_capacity(54);
+        payload.extend_from_slice(&0x0001u16.to_le_bytes()); // wEncryptionType = RC4
+        payload.extend_from_slice(&major.to_le_bytes());
+        payload.extend_from_slice(&minor.to_le_bytes());
+        payload.extend_from_slice(&salt);
+        payload.extend_from_slice(encrypted_verifier);
+        payload.extend_from_slice(encrypted_verifier_hash);
+
+        record(records::RECORD_FILEPASS, &payload)
+    }
+
+    fn encrypt_record_payloads_in_place(
+        workbook_stream: &mut [u8],
+        encrypted_start: usize,
+        intermediate_key: [u8; 16],
+        key_len: usize,
+    ) -> Result<(), String> {
+        // Manual encryption reference: apply RC4 stream to record payload bytes only.
+        let mut block: u32 = 0;
+        let mut pos_in_block: usize = 0;
+        let mut block_key = derive_rc4_block_key(&intermediate_key, block);
+        let mut cipher = Rc4::new(&block_key[..key_len]);
+
+        let mut offset = encrypted_start;
+        while offset < workbook_stream.len() {
+            if workbook_stream.len() - offset < 4 {
+                return Err("truncated record header".to_string());
+            }
+            let len =
+                u16::from_le_bytes([workbook_stream[offset + 2], workbook_stream[offset + 3]])
+                    as usize;
+            let data_start = offset + 4;
+            let data_end = data_start + len;
+            if data_end > workbook_stream.len() {
+                return Err("record extends past end".to_string());
+            }
+
+            let mut data = &mut workbook_stream[data_start..data_end];
+            while !data.is_empty() {
+                if pos_in_block == RC4_BLOCK_SIZE {
+                    block = block.wrapping_add(1);
+                    pos_in_block = 0;
+                    block_key = derive_rc4_block_key(&intermediate_key, block);
+                    cipher = Rc4::new(&block_key[..key_len]);
+                }
+                let remaining_in_block = RC4_BLOCK_SIZE - pos_in_block;
+                let n = remaining_in_block.min(data.len());
+                let (chunk, rest) = data.split_at_mut(n);
+                cipher.apply_keystream(chunk);
+                pos_in_block += n;
+                data = rest;
+            }
+
+            offset = data_end;
+        }
+        Ok(())
+    }
     #[test]
     fn parses_biff5_xor_filepass() {
         let payload = [0x34, 0x12, 0x78, 0x56];
@@ -457,5 +811,91 @@ mod tests {
 
         let err = decrypt_workbook_stream(&mut stream, "pw").expect_err("expected error");
         assert!(matches!(err, DecryptError::InvalidFilePass(_)));
+    }
+
+    #[test]
+    fn rc4_decrypt_respects_record_headers_and_block_boundaries() {
+        let password = "secret";
+        let salt: [u8; 16] = (0..16u8).collect::<Vec<_>>()[..].try_into().unwrap();
+        let key_len = 16;
+
+        // Build a stream where the first encrypted record is exactly one block (1024 bytes), so the
+        // next record's first payload byte must use block 1 key. If the decryptor incorrectly counts
+        // record headers as encrypted data, it will misalign and fail this test.
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(RECORD_BOF, &[0u8; 16]));
+        let filepass_record = make_filepass_rc4_record(password, salt, key_len);
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&filepass_record);
+
+        let record_a_payload = vec![0x42u8; 1024];
+        plain.extend_from_slice(&record(RECORD_DUMMY, &record_a_payload));
+        let record_b_payload = vec![0x99u8];
+        plain.extend_from_slice(&record(RECORD_DUMMY, &record_b_payload));
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        // Encrypt in place using a reference implementation.
+        let mut encrypted = plain.clone();
+        let filepass_len = u16::from_le_bytes([
+            encrypted[filepass_offset + 2],
+            encrypted[filepass_offset + 3],
+        ]) as usize;
+        let encrypted_start = filepass_offset + 4 + filepass_len;
+
+        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
+            .expect("encrypt");
+
+        // Now decrypt and ensure we get the original plaintext.
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
+    }
+
+    #[test]
+    fn rc4_decrypt_large_synthetic_stream_is_deterministic() {
+        let password = "benchmark-password";
+        let salt: [u8; 16] = [
+            0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0,
+            0xF0, 0x00,
+        ];
+        let key_len = 16;
+
+        // Build a synthetic BIFF8-like workbook stream with many small records to exercise the
+        // per-record header skipping and 1024-byte RC4 block re-keying logic.
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&record(RECORD_BOF, &[0u8; 16]));
+        let filepass_record = make_filepass_rc4_record(password, salt, key_len);
+        let filepass_offset = plain.len();
+        plain.extend_from_slice(&filepass_record);
+
+        let mut seed: u32 = 0x1234_5678;
+        for i in 0..4000u32 {
+            // Simple LCG for deterministic payload bytes.
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            let len = 1 + (seed as usize % 64);
+            let mut payload = Vec::with_capacity(len);
+            let mut x = seed ^ i;
+            for _ in 0..len {
+                x = x.wrapping_mul(1103515245).wrapping_add(12345);
+                payload.push((x >> 16) as u8);
+            }
+            plain.extend_from_slice(&record(RECORD_DUMMY, &payload));
+        }
+        plain.extend_from_slice(&record(RECORD_EOF, &[]));
+
+        // Encrypt the record payloads after FILEPASS.
+        let mut encrypted = plain.clone();
+        let filepass_len = u16::from_le_bytes([
+            encrypted[filepass_offset + 2],
+            encrypted[filepass_offset + 3],
+        ]) as usize;
+        let encrypted_start = filepass_offset + 4 + filepass_len;
+        let intermediate_key = derive_rc4_intermediate_key(password, &salt);
+        encrypt_record_payloads_in_place(&mut encrypted, encrypted_start, intermediate_key, key_len)
+            .expect("encrypt");
+
+        // Decrypt and assert we recover the original bytes.
+        decrypt_workbook_stream(&mut encrypted, password).expect("decrypt");
+        assert_eq!(encrypted, plain);
     }
 }
