@@ -1057,7 +1057,32 @@ def main() -> int:
     reports_dir = triage_dir / "reports"
     reports = _load_reports(reports_dir)
     summary = _compute_summary(reports)
-    summary["run_url"] = _redact_run_url(summary.get("run_url"), privacy_mode=args.privacy_mode)
+
+    # If the dashboard is generated outside of CI (e.g. from a downloaded artifact), GitHub env
+    # vars may be missing. Prefer the triage run metadata from `index.json` when available.
+    index_path = triage_dir / "index.json"
+    if index_path.exists():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 (tooling)
+            index = None
+        if isinstance(index, dict):
+            # Prefer the triage run's metadata over local fallbacks (e.g. util.github_commit_sha()
+            # may fall back to `git rev-parse HEAD` on local machines, which can be misleading when
+            # analyzing an artifact from a different revision).
+            commit = index.get("commit")
+            if isinstance(commit, str) and commit:
+                summary["commit"] = commit
+            run_url = index.get("run_url")
+            if isinstance(run_url, str) and run_url:
+                summary["run_url"] = run_url
+
+    run_url = summary.get("run_url")
+    if isinstance(run_url, str) and run_url.startswith("sha256="):
+        # Already redacted by triage (privacy-mode=private). Avoid double hashing.
+        pass
+    else:
+        summary["run_url"] = _redact_run_url(run_url, privacy_mode=args.privacy_mode)
     timings = summary.get("timings") or {}
     if not isinstance(timings, dict):
         timings = {}
