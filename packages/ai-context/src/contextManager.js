@@ -2075,13 +2075,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
       endCol: Math.min(matrixColCount - 1, local.endCol),
     };
 
-    const matrix = [];
-    for (let r = clamped.startRow; r <= clamped.endRow; r++) {
-      const row = values[r] ?? [];
-      matrix.push(row.slice(clamped.startCol, clamped.endCol + 1));
-    }
-
-    entries.push(`${canonicalRange}:\n${matrixToTsv(matrix, { maxRows })}`);
+    entries.push(`${canonicalRange}:\n${valuesRangeToTsv(values, clamped, { maxRows })}`);
     included += 1;
   }
 
@@ -2090,17 +2084,51 @@ function buildRangeAttachmentSectionText(params, options = {}) {
 }
 
 /**
- * @param {unknown[][]} matrix
+ * Convert a sub-range of a sheet's value matrix to TSV without allocating a full
+ * intermediate matrix.
+ *
+ * Output matches the previous `matrixToTsv(slice2D(...))` behavior:
+ *  - tab-separated values
+ *  - empty cells -> ""
+ *  - ragged rows do not emit trailing tabs beyond the source row length
+ *  - ellipsis line when truncated
+ *
+ * @param {unknown[][]} values
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
  * @param {{ maxRows: number }} options
  */
-function matrixToTsv(matrix, options) {
+function valuesRangeToTsv(values, range, options) {
   const lines = [];
-  const limit = Math.min(matrix.length, options.maxRows);
-  for (let r = 0; r < limit; r++) {
-    const row = matrix[r];
-    lines.push((row ?? []).map((v) => (isCellEmpty(v) ? "" : String(v))).join("\t"));
+  const totalRows = range.endRow - range.startRow + 1;
+  const limit = Math.min(totalRows, options.maxRows);
+  for (let rOffset = 0; rOffset < limit; rOffset++) {
+    const row = values[range.startRow + rOffset];
+    if (!Array.isArray(row)) {
+      lines.push("");
+      continue;
+    }
+ 
+    const rowLen = row.length;
+    if (rowLen <= range.startCol) {
+      lines.push("");
+      continue;
+    }
+ 
+    const sliceLen = Math.max(0, Math.min(rowLen, range.endCol + 1) - range.startCol);
+    if (sliceLen === 0) {
+      lines.push("");
+      continue;
+    }
+ 
+    /** @type {string[]} */
+    const cells = new Array(sliceLen);
+    for (let cOffset = 0; cOffset < sliceLen; cOffset++) {
+      const v = row[range.startCol + cOffset];
+      cells[cOffset] = isCellEmpty(v) ? "" : String(v);
+    }
+    lines.push(cells.join("\t"));
   }
-  if (matrix.length > limit) lines.push(`… (${matrix.length - limit} more rows)`);
+  if (totalRows > limit) lines.push(`… (${totalRows - limit} more rows)`);
   return lines.join("\n");
 }
 

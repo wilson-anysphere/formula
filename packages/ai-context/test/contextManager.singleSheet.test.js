@@ -422,6 +422,39 @@ test("buildContext: maxChunkRows constructor option affects retrieved chunk prev
   assert.match(preview, /… \(3 more rows\)$/);
 });
 
+test("buildContext: attached range previews stream rows (avoid slicing full ranges)", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 10_000 });
+
+  const rowCount = 100;
+  const values = [];
+  for (let r = 0; r < rowCount; r++) {
+    const row = [`Row${r + 1}`];
+    let calls = 0;
+    row.slice = () => {
+      calls += 1;
+      // ContextManager copies each row once when building the capped sheet window.
+      // Any additional slice calls for rows beyond the preview limit indicate a regression
+      // back to allocating full matrices for attachment previews.
+      if (calls > 1 && r >= 30) {
+        throw new Error(`Unexpected row.slice() call for row ${r} while building attachment preview`);
+      }
+      return row;
+    };
+    values.push(row);
+  }
+
+  const sheet = makeSheet(values);
+  const out = await cm.buildContext({
+    sheet,
+    query: "anything",
+    sampleRows: 0,
+    attachments: [{ type: "range", reference: "Sheet1!A1:A100" }],
+  });
+
+  assert.match(out.promptContext, /Attached range data:/);
+  assert.match(out.promptContext, /… \(70 more rows\)/);
+});
+
 test("buildContext: splitRegions indexes multiple row windows for tall sheets", async () => {
   const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
   const values = [];
