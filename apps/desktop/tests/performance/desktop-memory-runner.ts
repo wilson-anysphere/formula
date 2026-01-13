@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -48,6 +48,7 @@ function parseArgs(argv: string[]): {
   targetMb: number;
   allowInCi: boolean;
   enforce: boolean;
+  jsonPath: string | null;
 } {
   const args = [...argv];
   const envRuns = Number(process.env.FORMULA_DESKTOP_MEMORY_RUNS ?? "") || 10;
@@ -69,6 +70,7 @@ function parseArgs(argv: string[]): {
     targetMb: Math.max(1, envTargetMb),
     allowInCi: false,
     enforce: envEnforce,
+    jsonPath: null as string | null,
   };
 
   while (args.length > 0) {
@@ -83,6 +85,7 @@ function parseArgs(argv: string[]): {
       if (Number.isFinite(raw) && raw > 0) out.targetMb = raw;
     } else if (arg === "--allow-ci") out.allowInCi = true;
     else if (arg === "--enforce") out.enforce = true;
+    else if ((arg === "--json" || arg === "--json-path") && args[0]) out.jsonPath = args.shift()!;
   }
 
   return out;
@@ -168,6 +171,8 @@ function processTreeRssKb(rootPid: number): number {
   const proc = spawnSync("ps", ["-ax", "-o", "pid=", "-o", "ppid=", "-o", "rss="], {
     encoding: "utf8",
     cwd: repoRoot,
+    // `ps -ax` can print many lines on CI runners; bump the buffer for safety.
+    maxBuffer: 5 * 1024 * 1024,
   });
   if (proc.error) throw proc.error;
   if (proc.status !== 0) {
@@ -197,6 +202,57 @@ function processTreeRssKb(rootPid: number): number {
     if (kids) stack.push(...kids);
   }
   return total;
+}
+
+function processTreeWorkingSetBytesWindows(rootPid: number): number {
+  // Aggregate in PowerShell to avoid streaming/parsing a huge JSON payload in Node.
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `$rootPid = ${rootPid}`,
+    "$procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, WorkingSetSize",
+    "$children = @{}",
+    "$ws = @{}",
+    "foreach ($p in $procs) {",
+    "  $pid = [int]$p.ProcessId",
+    "  $ppid = [int]$p.ParentProcessId",
+    "  if (-not $children.ContainsKey($ppid)) { $children[$ppid] = @() }",
+    "  $children[$ppid] += $pid",
+    "  $ws[$pid] = [int64]$p.WorkingSetSize",
+    "}",
+    "$stack = New-Object System.Collections.Generic.Stack[int]",
+    "$seen = New-Object System.Collections.Generic.HashSet[int]",
+    "$stack.Push($rootPid)",
+    "$total = [int64]0",
+    "while ($stack.Count -gt 0) {",
+    "  $pid = $stack.Pop()",
+    "  if (-not $seen.Add($pid)) { continue }",
+    "  if ($ws.ContainsKey($pid)) { $total += $ws[$pid] }",
+    "  if ($children.ContainsKey($pid)) { foreach ($c in $children[$pid]) { $stack.Push([int]$c) } }",
+    "}",
+    "Write-Output $total",
+  ].join("\n");
+
+  const proc = spawnSync("powershell", ["-NoProfile", "-Command", script], {
+    encoding: "utf8",
+    cwd: repoRoot,
+    maxBuffer: 1024 * 1024,
+  });
+  if (proc.error) throw proc.error;
+  if (proc.status !== 0) {
+    throw new Error(`powershell memory sampling failed (exit ${proc.status}):\n${proc.stderr}`);
+  }
+  const stdout = (proc.stdout ?? "").trim();
+  if (!stdout) return 0;
+  const bytes = Number(stdout);
+  if (!Number.isFinite(bytes) || bytes < 0) return 0;
+  return bytes;
+}
+
+function processTreeMemoryMb(rootPid: number): number {
+  if (process.platform === "win32") {
+    return processTreeWorkingSetBytesWindows(rootPid) / (1024 * 1024);
+  }
+  return processTreeRssKb(rootPid) / 1024;
 }
 
 async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Promise<number> {
@@ -340,7 +396,7 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
             const found = findDesktopPidUnderWrapperLinux(wrapperPid, binPath);
             if (found) rootPid = found;
           }
-          sampledRssMb = processTreeRssKb(rootPid) / 1024;
+          sampledRssMb = processTreeMemoryMb(rootPid);
         } catch (err) {
           terminateProcessTree(child, "force");
           try {
@@ -426,7 +482,7 @@ function printSummary(summary: Summary): void {
 }
 
 async function main(): Promise<void> {
-  const { runs, timeoutMs, settleMs, binPath: argBin, targetMb, allowInCi, enforce } = parseArgs(
+  const { runs, timeoutMs, settleMs, binPath: argBin, targetMb, allowInCi, enforce, jsonPath } = parseArgs(
     process.argv.slice(2),
   );
 
@@ -480,6 +536,29 @@ async function main(): Promise<void> {
   };
 
   printSummary(summary);
+
+  if (jsonPath) {
+    const outputPath = resolve(jsonPath);
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(
+      outputPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          platform: process.platform,
+          binPath,
+          runs: results.length,
+          settleMs,
+          targetMb,
+          samples: results,
+          summary,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  }
 
   if (enforce && summary.rssMb.p95 > summary.rssMb.targetMb) {
     process.exitCode = 1;

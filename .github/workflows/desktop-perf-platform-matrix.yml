@@ -122,12 +122,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p perf-artifacts
-          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-idle-memory-runner.ts \
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-memory-runner.ts \
             --runs 3 \
             --timeout-ms 30000 \
-            --idle-wait-ms 5000 \
-            --json perf-artifacts/desktop-idle-memory-metrics.json \
-            --allow-ci 2>&1 | tee perf-artifacts/desktop-idle-memory.log
+            --settle-ms 5000 \
+            --json perf-artifacts/desktop-memory-metrics.json \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-memory.log
 
       - name: Summarize + merge perf artifacts
         if: always()
@@ -148,7 +148,7 @@ jobs:
           }
           
           const startupPath = path.resolve("perf-artifacts/desktop-startup-metrics.json");
-          const memoryPath = path.resolve("perf-artifacts/desktop-idle-memory-metrics.json");
+          const memoryPath = path.resolve("perf-artifacts/desktop-memory-metrics.json");
           const startup = readJsonMaybe(startupPath);
           const idleMemory = readJsonMaybe(memoryPath);
           
@@ -202,10 +202,10 @@ jobs:
           if (idleMemory?.summary) {
             const m = idleMemory.summary;
             lines.push(
-              `| idleMemory.rss (mb) | ${fmt(m.idleRssMb?.p50, 1)} | ${fmt(m.idleRssMb?.p95, 1)} | idleWaitMs=${idleMemory.idleWaitMs ?? "n/a"} |`,
+              `| idleMemory.rss (mb) | ${fmt(m.rssMb?.p50, 1)} | ${fmt(m.rssMb?.p95, 1)} | settleMs=${idleMemory.settleMs ?? "n/a"} |`,
             );
           } else {
-            lines.push("| idleMemory | n/a | n/a | missing desktop-idle-memory-metrics.json |");
+            lines.push("| idleMemory | n/a | n/a | missing desktop-memory-metrics.json |");
           }
           
           lines.push("");
