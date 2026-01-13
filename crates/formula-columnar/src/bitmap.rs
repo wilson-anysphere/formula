@@ -52,6 +52,18 @@ impl BitVec {
         }
     }
 
+    pub fn with_len_all_false(bits: usize) -> Self {
+        if bits == 0 {
+            return Self::new();
+        }
+        let word_len = (bits + 63) / 64;
+        Self {
+            words: vec![0u64; word_len],
+            len: bits,
+            ones: 0,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.len
     }
@@ -112,6 +124,85 @@ impl BitVec {
 
     pub fn as_words(&self) -> &[u64] {
         &self.words
+    }
+
+    pub fn and_inplace(&mut self, other: &BitVec) {
+        debug_assert_eq!(self.len, other.len, "BitVec length mismatch");
+        let len = self.len;
+        let full_words = len / 64;
+        let rem_bits = len % 64;
+
+        let mut ones: usize = 0;
+        for i in 0..full_words {
+            let w = self.words.get_mut(i).expect("BitVec word missing");
+            *w &= other.words.get(i).copied().unwrap_or(0);
+            ones = ones.saturating_add(w.count_ones() as usize);
+        }
+
+        if rem_bits > 0 {
+            let mask = (1u64 << rem_bits) - 1;
+            if let Some(last) = self.words.get_mut(full_words) {
+                *last &= other.words.get(full_words).copied().unwrap_or(0);
+                *last &= mask;
+                ones = ones.saturating_add(last.count_ones() as usize);
+            }
+        } else if full_words < self.words.len() {
+            // Ensure any extra allocated words (shouldn't happen) are cleared.
+            for w in self.words.iter_mut().skip(full_words) {
+                *w = 0;
+            }
+        }
+
+        self.ones = ones;
+    }
+
+    pub fn or_inplace(&mut self, other: &BitVec) {
+        debug_assert_eq!(self.len, other.len, "BitVec length mismatch");
+        let len = self.len;
+        let full_words = len / 64;
+        let rem_bits = len % 64;
+
+        let mut ones: usize = 0;
+        for i in 0..full_words {
+            let w = self.words.get_mut(i).expect("BitVec word missing");
+            *w |= other.words.get(i).copied().unwrap_or(0);
+            ones = ones.saturating_add(w.count_ones() as usize);
+        }
+
+        if rem_bits > 0 {
+            let mask = (1u64 << rem_bits) - 1;
+            if let Some(last) = self.words.get_mut(full_words) {
+                *last |= other.words.get(full_words).copied().unwrap_or(0);
+                *last &= mask;
+                ones = ones.saturating_add(last.count_ones() as usize);
+            }
+        } else if full_words < self.words.len() {
+            for w in self.words.iter_mut().skip(full_words) {
+                *w = 0;
+            }
+        }
+
+        self.ones = ones;
+    }
+
+    pub fn not_inplace(&mut self) {
+        if self.len == 0 {
+            return;
+        }
+
+        for w in &mut self.words {
+            *w = !*w;
+        }
+
+        let rem_bits = self.len % 64;
+        if rem_bits != 0 {
+            let mask = (1u64 << rem_bits) - 1;
+            if let Some(last) = self.words.last_mut() {
+                *last &= mask;
+            }
+        }
+
+        self.ones = self.len.saturating_sub(self.ones);
     }
 
     /// Reconstruct a [`BitVec`] from a raw word buffer and a bit length.

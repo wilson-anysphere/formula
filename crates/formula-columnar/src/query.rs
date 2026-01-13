@@ -223,6 +223,374 @@ impl std::fmt::Display for QueryError {
 
 impl std::error::Error for QueryError {}
 
+/// Comparison operators supported by [`FilterExpr`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CmpOp {
+    Eq,
+    Ne,
+    Lt,
+    Lte,
+    Gt,
+    Gte,
+}
+
+/// A scalar literal used in a [`FilterExpr::Cmp`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterValue {
+    Number(f64),
+    Boolean(bool),
+    String(Arc<str>),
+}
+
+/// A small predicate AST that can be evaluated column-wise against a [`ColumnarTable`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterExpr {
+    And(Box<FilterExpr>, Box<FilterExpr>),
+    Or(Box<FilterExpr>, Box<FilterExpr>),
+    Not(Box<FilterExpr>),
+    Cmp {
+        col: usize,
+        op: CmpOp,
+        value: FilterValue,
+    },
+    IsNull {
+        col: usize,
+    },
+    IsNotNull {
+        col: usize,
+    },
+}
+
+/// Evaluate a filter expression and return a [`BitVec`] mask of matching rows.
+///
+/// Notes:
+/// - Comparisons treat NULL as "unknown" and therefore evaluate to `false` for filtering.
+/// - `IS NULL` / `IS NOT NULL` explicitly test the encoded validity bits.
+pub fn filter_mask(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, QueryError> {
+    eval_filter_expr(table, expr)
+}
+
+/// Materialize a filtered table using a previously computed row mask.
+pub fn filter_table(table: &ColumnarTable, mask: &BitVec) -> Result<ColumnarTable, QueryError> {
+    if mask.len() != table.row_count() {
+        return Err(QueryError::InternalInvariant("filter mask length must match table"));
+    }
+
+    let schema: Vec<ColumnSchema> = table.schema().to_vec();
+    let mut builder = ColumnarTableBuilder::new(schema, table.options());
+    let mut scratch_row: Vec<Value> = vec![Value::Null; table.column_count()];
+
+    for row in 0..table.row_count() {
+        if !mask.get(row) {
+            continue;
+        }
+        for col in 0..table.column_count() {
+            scratch_row[col] = table.get_cell(row, col);
+        }
+        builder.append_row(&scratch_row);
+    }
+
+    Ok(builder.finalize())
+}
+
+fn eval_filter_expr(table: &ColumnarTable, expr: &FilterExpr) -> Result<BitVec, QueryError> {
+    match expr {
+        FilterExpr::And(left, right) => {
+            let mut left_mask = eval_filter_expr(table, left)?;
+            let right_mask = eval_filter_expr(table, right)?;
+            left_mask.and_inplace(&right_mask);
+            Ok(left_mask)
+        }
+        FilterExpr::Or(left, right) => {
+            let mut left_mask = eval_filter_expr(table, left)?;
+            let right_mask = eval_filter_expr(table, right)?;
+            left_mask.or_inplace(&right_mask);
+            Ok(left_mask)
+        }
+        FilterExpr::Not(inner) => {
+            let mut mask = eval_filter_expr(table, inner)?;
+            mask.not_inplace();
+            Ok(mask)
+        }
+        FilterExpr::Cmp { col, op, value } => eval_filter_cmp(table, *col, *op, value),
+        FilterExpr::IsNull { col } => eval_filter_is_null(table, *col, true),
+        FilterExpr::IsNotNull { col } => eval_filter_is_null(table, *col, false),
+    }
+}
+
+fn eval_filter_cmp(
+    table: &ColumnarTable,
+    col: usize,
+    op: CmpOp,
+    value: &FilterValue,
+) -> Result<BitVec, QueryError> {
+    match value {
+        FilterValue::Number(v) => eval_filter_f64(table, col, op, *v),
+        FilterValue::Boolean(v) => eval_filter_bool(table, col, op, *v),
+        FilterValue::String(v) => eval_filter_string(table, col, op, v.as_ref()),
+    }
+}
+
+fn eval_filter_f64(table: &ColumnarTable, col: usize, op: CmpOp, rhs: f64) -> Result<BitVec, QueryError> {
+    let column_type = table
+        .schema()
+        .get(col)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    if column_type != ColumnType::Number {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter numeric comparison",
+        });
+    }
+
+    let chunks = table
+        .encoded_chunks(col)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    let rows = table.row_count();
+    let page = table.page_size_rows();
+
+    let mut out = BitVec::with_capacity_bits(rows);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        if base >= rows {
+            break;
+        }
+        let chunk_rows = (rows - base).min(chunk.len());
+
+        let EncodedChunk::Float(c) = chunk else {
+            return Err(QueryError::UnsupportedColumnType {
+                col,
+                column_type,
+                operation: "filter numeric comparison",
+            });
+        };
+
+        for i in 0..chunk_rows {
+            if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
+                out.push(false);
+                continue;
+            }
+            let v = c.values[i];
+            let passed = match op {
+                CmpOp::Eq => v == rhs,
+                CmpOp::Ne => v != rhs,
+                CmpOp::Lt => v < rhs,
+                CmpOp::Lte => v <= rhs,
+                CmpOp::Gt => v > rhs,
+                CmpOp::Gte => v >= rhs,
+            };
+            out.push(passed);
+        }
+    }
+
+    Ok(out)
+}
+
+fn eval_filter_bool(
+    table: &ColumnarTable,
+    col: usize,
+    op: CmpOp,
+    rhs: bool,
+) -> Result<BitVec, QueryError> {
+    let column_type = table
+        .schema()
+        .get(col)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    if column_type != ColumnType::Boolean {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter boolean comparison",
+        });
+    }
+
+    if !matches!(op, CmpOp::Eq | CmpOp::Ne) {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter boolean comparison",
+        });
+    }
+
+    let chunks = table
+        .encoded_chunks(col)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    let rows = table.row_count();
+    let page = table.page_size_rows();
+
+    let mut out = BitVec::with_capacity_bits(rows);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        if base >= rows {
+            break;
+        }
+        let chunk_rows = (rows - base).min(chunk.len());
+
+        let EncodedChunk::Bool(c) = chunk else {
+            return Err(QueryError::UnsupportedColumnType {
+                col,
+                column_type,
+                operation: "filter boolean comparison",
+            });
+        };
+
+        for i in 0..chunk_rows {
+            if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
+                out.push(false);
+                continue;
+            }
+            let byte = c.data[i / 8];
+            let bit = i % 8;
+            let v = ((byte >> bit) & 1) == 1;
+            let passed = match op {
+                CmpOp::Eq => v == rhs,
+                CmpOp::Ne => v != rhs,
+                _ => false,
+            };
+            out.push(passed);
+        }
+    }
+
+    Ok(out)
+}
+
+fn eval_filter_string(
+    table: &ColumnarTable,
+    col: usize,
+    op: CmpOp,
+    rhs: &str,
+) -> Result<BitVec, QueryError> {
+    let column_type = table
+        .schema()
+        .get(col)
+        .map(|s| s.column_type)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    if column_type != ColumnType::String {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter string comparison",
+        });
+    }
+
+    if !matches!(op, CmpOp::Eq | CmpOp::Ne) {
+        return Err(QueryError::UnsupportedColumnType {
+            col,
+            column_type,
+            operation: "filter string comparison",
+        });
+    }
+
+    let dict = table.dictionary(col).ok_or(QueryError::MissingDictionary { col })?;
+    let target = dict
+        .iter()
+        .enumerate()
+        .find_map(|(idx, s)| (s.as_ref() == rhs).then_some(idx as u32));
+
+    let chunks = table
+        .encoded_chunks(col)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    let rows = table.row_count();
+    let page = table.page_size_rows();
+
+    // Fast path: equality against a string not in the dictionary cannot match any non-null value.
+    if matches!(op, CmpOp::Eq) && target.is_none() {
+        return Ok(BitVec::with_len_all_false(rows));
+    }
+
+    let mut out = BitVec::with_capacity_bits(rows);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        if base >= rows {
+            break;
+        }
+        let chunk_rows = (rows - base).min(chunk.len());
+
+        let EncodedChunk::Dict(c) = chunk else {
+            return Err(QueryError::UnsupportedColumnType {
+                col,
+                column_type,
+                operation: "filter string comparison",
+            });
+        };
+
+        let mut cursor = U32SeqCursor::new(&c.indices);
+        for i in 0..chunk_rows {
+            let ix = cursor.next();
+            if c.validity.as_ref().is_some_and(|v| !v.get(i)) {
+                out.push(false);
+                continue;
+            }
+
+            let passed = match (op, target) {
+                (CmpOp::Eq, Some(t)) => ix == t,
+                (CmpOp::Ne, Some(t)) => ix != t,
+                (CmpOp::Ne, None) => true,
+                (CmpOp::Eq, None) => false,
+                _ => false,
+            };
+            out.push(passed);
+        }
+    }
+
+    Ok(out)
+}
+
+fn eval_filter_is_null(table: &ColumnarTable, col: usize, is_null: bool) -> Result<BitVec, QueryError> {
+    if col >= table.column_count() {
+        return Err(QueryError::ColumnOutOfBounds {
+            col,
+            column_count: table.column_count(),
+        });
+    }
+
+    let chunks = table
+        .encoded_chunks(col)
+        .ok_or(QueryError::ColumnOutOfBounds { col, column_count: table.column_count() })?;
+    let rows = table.row_count();
+    let page = table.page_size_rows();
+
+    // Fast paths when we don't have a validity bitmap (no nulls).
+    if chunks.iter().all(|c| match c {
+        EncodedChunk::Int(c) => c.validity.is_none(),
+        EncodedChunk::Float(c) => c.validity.is_none(),
+        EncodedChunk::Bool(c) => c.validity.is_none(),
+        EncodedChunk::Dict(c) => c.validity.is_none(),
+    }) {
+        return Ok(if is_null {
+            BitVec::with_len_all_false(rows)
+        } else {
+            BitVec::with_len_all_true(rows)
+        });
+    }
+
+    let mut out = BitVec::with_capacity_bits(rows);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let base = chunk_idx * page;
+        if base >= rows {
+            break;
+        }
+        let chunk_rows = (rows - base).min(chunk.len());
+
+        let validity = match chunk {
+            EncodedChunk::Int(c) => c.validity.as_ref(),
+            EncodedChunk::Float(c) => c.validity.as_ref(),
+            EncodedChunk::Bool(c) => c.validity.as_ref(),
+            EncodedChunk::Dict(c) => c.validity.as_ref(),
+        };
+
+        for i in 0..chunk_rows {
+            let row_is_null = validity.as_ref().is_some_and(|v| !v.get(i));
+            out.push(if is_null { row_is_null } else { !row_is_null });
+        }
+    }
+
+    Ok(out)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum KeyValue {
     Null,

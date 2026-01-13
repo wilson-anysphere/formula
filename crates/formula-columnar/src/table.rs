@@ -598,6 +598,28 @@ impl ColumnarTable {
         crate::query::group_by_rows(self, keys, aggs, rows)
     }
 
+    /// Evaluate a filter predicate and return a [`BitVec`] mask of matching rows.
+    pub fn filter_mask(
+        &self,
+        expr: &crate::query::FilterExpr,
+    ) -> Result<BitVec, crate::query::QueryError> {
+        crate::query::filter_mask(self, expr)
+    }
+
+    /// Materialize a filtered table using a previously computed mask.
+    pub fn filter_table(&self, mask: &BitVec) -> Result<ColumnarTable, crate::query::QueryError> {
+        crate::query::filter_table(self, mask)
+    }
+
+    /// Convenience helper that evaluates a predicate and materializes the filtered table.
+    pub fn filter(
+        &self,
+        expr: &crate::query::FilterExpr,
+    ) -> Result<ColumnarTable, crate::query::QueryError> {
+        let mask = crate::query::filter_mask(self, expr)?;
+        crate::query::filter_table(self, &mask)
+    }
+
     /// Hash join on a single key column.
     ///
     /// Returns row index mappings instead of materializing joined rows.

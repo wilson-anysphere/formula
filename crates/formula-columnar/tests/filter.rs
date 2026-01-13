@@ -1,0 +1,257 @@
+use formula_columnar::{
+    BitVec, CmpOp, ColumnSchema, ColumnType, ColumnarTable, ColumnarTableBuilder, FilterExpr,
+    FilterValue, PageCacheConfig, TableOptions, Value,
+};
+use std::sync::Arc;
+
+fn options() -> TableOptions {
+    TableOptions {
+        page_size_rows: 4,
+        cache: PageCacheConfig { max_entries: 4 },
+    }
+}
+
+fn build_table() -> ColumnarTable {
+    let schema = vec![
+        ColumnSchema {
+            name: "n".to_owned(),
+            column_type: ColumnType::Number,
+        },
+        ColumnSchema {
+            name: "b".to_owned(),
+            column_type: ColumnType::Boolean,
+        },
+        ColumnSchema {
+            name: "s".to_owned(),
+            column_type: ColumnType::String,
+        },
+    ];
+
+    let mut builder = ColumnarTableBuilder::new(schema, options());
+    let rows = vec![
+        vec![
+            Value::Number(1.0),
+            Value::Boolean(true),
+            Value::String(Arc::<str>::from("A")),
+        ],
+        vec![
+            Value::Number(2.0),
+            Value::Boolean(false),
+            Value::String(Arc::<str>::from("B")),
+        ],
+        vec![Value::Number(3.0), Value::Null, Value::Null],
+        vec![
+            Value::Null,
+            Value::Boolean(true),
+            Value::String(Arc::<str>::from("A")),
+        ],
+        vec![
+            Value::Number(2.0),
+            Value::Boolean(false),
+            Value::String(Arc::<str>::from("C")),
+        ],
+        vec![
+            Value::Number(4.0),
+            Value::Boolean(true),
+            Value::String(Arc::<str>::from("a")),
+        ],
+    ];
+    for row in rows {
+        builder.append_row(&row);
+    }
+    builder.finalize()
+}
+
+fn mask_to_bools(mask: &BitVec) -> Vec<bool> {
+    (0..mask.len()).map(|i| mask.get(i)).collect()
+}
+
+#[test]
+fn filter_numeric_comparisons() {
+    let table = build_table();
+
+    let eq = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Eq,
+            value: FilterValue::Number(2.0),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq),
+        vec![false, true, false, false, true, false]
+    );
+
+    let ne = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Ne,
+            value: FilterValue::Number(2.0),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne),
+        vec![true, false, true, false, false, true]
+    );
+
+    let lt = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Lt,
+            value: FilterValue::Number(3.0),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&lt),
+        vec![true, true, false, false, true, false]
+    );
+
+    let gte = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Gte,
+            value: FilterValue::Number(2.0),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&gte),
+        vec![false, true, true, false, true, true]
+    );
+}
+
+#[test]
+fn filter_boolean_and_nulls() {
+    let table = build_table();
+
+    let eq_true = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 1,
+            op: CmpOp::Eq,
+            value: FilterValue::Boolean(true),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_true),
+        vec![true, false, false, true, false, true]
+    );
+
+    let eq_false = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 1,
+            op: CmpOp::Eq,
+            value: FilterValue::Boolean(false),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_false),
+        vec![false, true, false, false, true, false]
+    );
+}
+
+#[test]
+fn filter_string_dictionary_and_case_sensitivity() {
+    let table = build_table();
+
+    let eq_a = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Eq,
+            value: FilterValue::String(Arc::<str>::from("A")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_a),
+        vec![true, false, false, true, false, false]
+    );
+
+    let eq_lower = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Eq,
+            value: FilterValue::String(Arc::<str>::from("a")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_lower),
+        vec![false, false, false, false, false, true]
+    );
+
+    let ne_a = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Ne,
+            value: FilterValue::String(Arc::<str>::from("A")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_a),
+        vec![false, true, false, false, true, true]
+    );
+
+    // String missing from the dictionary.
+    let eq_missing = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Eq,
+            value: FilterValue::String(Arc::<str>::from("Z")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&eq_missing),
+        vec![false, false, false, false, false, false]
+    );
+
+    let ne_missing = table
+        .filter_mask(&FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Ne,
+            value: FilterValue::String(Arc::<str>::from("Z")),
+        })
+        .unwrap();
+    assert_eq!(
+        mask_to_bools(&ne_missing),
+        vec![true, true, false, true, true, true]
+    );
+}
+
+#[test]
+fn filter_is_null_and_materialize_table() {
+    let table = build_table();
+
+    let is_null_n = table.filter_mask(&FilterExpr::IsNull { col: 0 }).unwrap();
+    assert_eq!(
+        mask_to_bools(&is_null_n),
+        vec![false, false, false, true, false, false]
+    );
+
+    let expr = FilterExpr::And(
+        Box::new(FilterExpr::Cmp {
+            col: 0,
+            op: CmpOp::Gte,
+            value: FilterValue::Number(2.0),
+        }),
+        Box::new(FilterExpr::Cmp {
+            col: 2,
+            op: CmpOp::Ne,
+            value: FilterValue::String(Arc::<str>::from("B")),
+        }),
+    );
+    let mask = table.filter_mask(&expr).unwrap();
+    assert_eq!(
+        mask_to_bools(&mask),
+        vec![false, false, false, false, true, true]
+    );
+
+    let filtered = table.filter_table(&mask).unwrap();
+    assert_eq!(filtered.row_count(), 2);
+    assert_eq!(filtered.column_count(), 3);
+
+    assert_eq!(filtered.get_cell(0, 0), Value::Number(2.0));
+    assert_eq!(filtered.get_cell(0, 1), Value::Boolean(false));
+    assert_eq!(filtered.get_cell(0, 2), Value::String(Arc::<str>::from("C")));
+
+    assert_eq!(filtered.get_cell(1, 0), Value::Number(4.0));
+    assert_eq!(filtered.get_cell(1, 1), Value::Boolean(true));
+    assert_eq!(filtered.get_cell(1, 2), Value::String(Arc::<str>::from("a")));
+}
+
