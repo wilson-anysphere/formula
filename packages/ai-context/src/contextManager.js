@@ -1,6 +1,6 @@
 import { RagIndex } from "./rag.js";
 import { DEFAULT_TOKEN_ESTIMATOR, packSectionsToTokenBudget, stableJsonStringify } from "./tokenBudget.js";
-import { randomSampleRows, stratifiedSampleRows } from "./sampling.js";
+import { headSampleRows, randomSampleRows, stratifiedSampleRows, systematicSampleRows } from "./sampling.js";
 import { classifyText, redactText } from "./dlp.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
 
@@ -59,7 +59,7 @@ export class ContextManager {
    *   query: string,
    *   attachments?: Attachment[],
    *   sampleRows?: number,
-   *   samplingStrategy?: "random" | "stratified",
+   *   samplingStrategy?: "random" | "stratified" | "head" | "systematic",
    *   stratifyByColumn?: number,
    *   signal?: AbortSignal,
    *   dlp?: {
@@ -211,13 +211,29 @@ export class ContextManager {
 
     const sampleRows = params.sampleRows ?? 20;
     const dataForSampling = sheetForContext.values; // already capped
-    const sampled =
-      params.samplingStrategy === "stratified"
-        ? stratifiedSampleRows(dataForSampling, sampleRows, {
-            getStratum: (row) => String(row[params.stratifyByColumn ?? 0] ?? ""),
-            seed: 1,
-          })
-        : randomSampleRows(dataForSampling, sampleRows, { seed: 1 });
+    let sampled;
+    switch (params.samplingStrategy) {
+      case "stratified": {
+        sampled = stratifiedSampleRows(dataForSampling, sampleRows, {
+          getStratum: (row) => String(row[params.stratifyByColumn ?? 0] ?? ""),
+          seed: 1,
+        });
+        break;
+      }
+      case "head": {
+        sampled = headSampleRows(dataForSampling, sampleRows);
+        break;
+      }
+      case "systematic": {
+        sampled = systematicSampleRows(dataForSampling, sampleRows, { seed: 1 });
+        break;
+      }
+      case "random":
+      default: {
+        sampled = randomSampleRows(dataForSampling, sampleRows, { seed: 1 });
+        break;
+      }
+    }
 
     const sections = [
       ...(dlpRedactedCells > 0

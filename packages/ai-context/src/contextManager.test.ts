@@ -38,6 +38,27 @@ describe("ContextManager promptContext", () => {
   });
 });
 
+describe("ContextManager samplingStrategy", () => {
+  it("supports samplingStrategy=head", async () => {
+    const cm = new ContextManager({ tokenBudgetTokens: 1_000_000, redactor: (text: string) => text });
+    const values = Array.from({ length: 10 }, (_v, i) => [`R${i}`]);
+    const sheet = { name: "Sheet1", values };
+
+    const out = await cm.buildContext({ sheet, query: "R", sampleRows: 3, samplingStrategy: "head" });
+    expect(out.sampledRows).toEqual(values.slice(0, 3));
+  });
+
+  it("supports samplingStrategy=systematic", async () => {
+    const cm = new ContextManager({ tokenBudgetTokens: 1_000_000, redactor: (text: string) => text });
+    const values = Array.from({ length: 10 }, (_v, i) => [`R${i}`]);
+    const sheet = { name: "Sheet1", values };
+
+    // `ContextManager` uses a fixed seed=1 for deterministic sampling.
+    const out = await cm.buildContext({ sheet, query: "R", sampleRows: 4, samplingStrategy: "systematic" });
+    expect(out.sampledRows).toEqual([values[1], values[4], values[6], values[9]]);
+  });
+});
+
 function buildPrettyPromptContext(params: {
   schema: unknown;
   attachments: unknown[];
@@ -72,4 +93,3 @@ function buildPrettyPromptContext(params: {
   sections.sort((a, b) => b.priority - a.priority);
   return sections.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
 }
-

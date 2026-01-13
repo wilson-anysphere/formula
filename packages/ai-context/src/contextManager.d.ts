@@ -30,7 +30,7 @@ export class ContextManager {
     query: string;
     attachments?: Attachment[];
     sampleRows?: number;
-    samplingStrategy?: "random" | "stratified";
+    samplingStrategy?: "random" | "stratified" | "head" | "systematic";
     stratifyByColumn?: number;
     signal?: AbortSignal;
     dlp?: any;
