@@ -464,11 +464,21 @@ export class ChunkedLocalStorageBinaryStorage {
       keysToRemove.push(key);
     }
 
-    for (const key of keysToRemove) storage.removeItem(key);
+    for (const key of keysToRemove) {
+      try {
+        storage.removeItem?.(key);
+      } catch {
+        // ignore
+      }
+    }
 
     // Also remove the legacy single-key entry (if it exists) so `load()` doesn't
     // fall back to stale data after a caller explicitly clears the store.
-    storage.removeItem(this.key);
+    try {
+      storage.removeItem?.(this.key);
+    } catch {
+      // ignore
+    }
   }
 }
 
