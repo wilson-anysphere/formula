@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 mod schema;
@@ -21,6 +21,54 @@ pub enum SortOrder {
     Manual,
 }
 
+/// Excel-style layout mode for pivot output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Layout {
+    Compact,
+    Outline,
+    Tabular,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self::Tabular
+    }
+}
+
+/// Where subtotals appear for a grouped field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtotalPosition {
+    Top,
+    Bottom,
+    None,
+}
+
+impl Default for SubtotalPosition {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Controls whether grand totals are produced for rows and/or columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrandTotals {
+    pub rows: bool,
+    pub columns: bool,
+}
+
+impl Default for GrandTotals {
+    fn default() -> Self {
+        // Match Excel defaults.
+        Self {
+            rows: true,
+            columns: true,
+        }
+    }
+}
+
 /// Value representation used for manual pivot-field ordering.
 ///
 /// This is intentionally lightweight and serde-friendly since it may cross IPC
@@ -35,6 +83,127 @@ pub enum PivotKeyPart {
     Bool(bool),
 }
 
+impl PivotKeyPart {
+    /// Human-friendly (Excel-like) string representation of a pivot item value.
+    pub fn display_string(&self) -> String {
+        match self {
+            PivotKeyPart::Blank => "(blank)".to_string(),
+            PivotKeyPart::Number(bits) => PivotValue::Number(f64::from_bits(*bits)).display_string(),
+            PivotKeyPart::Date(d) => d.to_string(),
+            PivotKeyPart::Text(s) => s.clone(),
+            PivotKeyPart::Bool(b) => b.to_string(),
+        }
+    }
+}
+
+/// Scalar value representation used for pivot caches and pivot output payloads.
+///
+/// This is the canonical serde format used across engine / XLSX / IPC:
+/// a tagged enum in the shape `{ "type": "...", "value": ... }`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+pub enum PivotValue {
+    Blank,
+    Number(f64),
+    Date(NaiveDate),
+    Text(String),
+    Bool(bool),
+}
+
+impl PivotValue {
+    /// Returns a canonical bit pattern for numeric pivot items.
+    ///
+    /// This matches Excel behavior where `0.0` and `-0.0` are treated as the same
+    /// item, and all NaN payloads are treated as the same item.
+    pub fn canonical_number_bits(n: f64) -> u64 {
+        if n == 0.0 {
+            // Treat -0.0 and 0.0 as identical (Excel renders them identically).
+            return 0.0_f64.to_bits();
+        }
+        if n.is_nan() {
+            // Canonicalize all NaNs so we don't emit multiple distinct "NaN" keys.
+            return f64::NAN.to_bits();
+        }
+        n.to_bits()
+    }
+
+    /// Converts this value into a typed key part suitable for grouping and sorting.
+    pub fn to_key_part(&self) -> PivotKeyPart {
+        match self {
+            PivotValue::Blank => PivotKeyPart::Blank,
+            PivotValue::Number(n) => PivotKeyPart::Number(Self::canonical_number_bits(*n)),
+            PivotValue::Date(d) => PivotKeyPart::Date(*d),
+            PivotValue::Text(s) => PivotKeyPart::Text(s.clone()),
+            PivotValue::Bool(b) => PivotKeyPart::Bool(*b),
+        }
+    }
+
+    /// Returns a display-oriented string for this pivot value (not a stable serialization).
+    pub fn display_string(&self) -> String {
+        match self {
+            PivotValue::Blank => String::new(),
+            PivotValue::Number(n) => {
+                // Keep it simple; Excel has more nuanced formatting.
+                if n.fract() == 0.0 {
+                    format!("{}", *n as i64)
+                } else {
+                    format!("{n}")
+                }
+            }
+            PivotValue::Date(d) => d.to_string(),
+            PivotValue::Text(s) => s.clone(),
+            PivotValue::Bool(b) => b.to_string(),
+        }
+    }
+
+    pub fn as_number(&self) -> Option<f64> {
+        match self {
+            PivotValue::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn is_blank(&self) -> bool {
+        matches!(self, PivotValue::Blank)
+    }
+}
+
+impl From<&str> for PivotValue {
+    fn from(value: &str) -> Self {
+        PivotValue::Text(value.to_string())
+    }
+}
+
+impl From<String> for PivotValue {
+    fn from(value: String) -> Self {
+        PivotValue::Text(value)
+    }
+}
+
+impl From<f64> for PivotValue {
+    fn from(value: f64) -> Self {
+        PivotValue::Number(value)
+    }
+}
+
+impl From<i64> for PivotValue {
+    fn from(value: i64) -> Self {
+        PivotValue::Number(value as f64)
+    }
+}
+
+impl From<NaiveDate> for PivotValue {
+    fn from(value: NaiveDate) -> Self {
+        PivotValue::Date(value)
+    }
+}
+
+impl From<bool> for PivotValue {
+    fn from(value: bool) -> Self {
+        PivotValue::Bool(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PivotField {
@@ -43,6 +212,25 @@ pub struct PivotField {
     pub sort_order: SortOrder,
     #[serde(default)]
     pub manual_sort: Option<Vec<PivotKeyPart>>,
+}
+
+impl PivotField {
+    pub fn new(source_field: impl Into<String>) -> Self {
+        Self {
+            source_field: source_field.into(),
+            sort_order: SortOrder::default(),
+            manual_sort: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterField {
+    pub source_field: String,
+    /// Allowed values. `None` means allow all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed: Option<HashSet<PivotKeyPart>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -113,6 +301,39 @@ pub struct ValueField {
     pub base_field: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_item: Option<String>,
+}
+
+/// Top-level pivot table configuration schema.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotConfig {
+    pub row_fields: Vec<PivotField>,
+    pub column_fields: Vec<PivotField>,
+    pub value_fields: Vec<ValueField>,
+    pub filter_fields: Vec<FilterField>,
+    #[serde(default)]
+    pub calculated_fields: Vec<CalculatedField>,
+    #[serde(default)]
+    pub calculated_items: Vec<CalculatedItem>,
+    pub layout: Layout,
+    pub subtotals: SubtotalPosition,
+    pub grand_totals: GrandTotals,
+}
+
+impl Default for PivotConfig {
+    fn default() -> Self {
+        Self {
+            row_fields: Vec::new(),
+            column_fields: Vec::new(),
+            value_fields: Vec::new(),
+            filter_fields: Vec::new(),
+            calculated_fields: Vec::new(),
+            calculated_items: Vec::new(),
+            layout: Layout::default(),
+            subtotals: SubtotalPosition::default(),
+            grand_totals: GrandTotals::default(),
+        }
+    }
 }
 
 impl From<&str> for ScalarValue {
@@ -533,3 +754,6 @@ impl PivotManager {
         filters
     }
 }
+
+#[cfg(test)]
+mod tests;
