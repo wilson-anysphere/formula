@@ -141,6 +141,7 @@ These scripts are designed to be safe to run locally:
 - **Size**:
   - `apps/desktop/dist` is the Vite-built frontend asset directory embedded/served by Tauri.
   - `target/**/formula-desktop` is the built desktop executable.
+  - Use `python3 scripts/desktop_binary_size_report.py` (cargo-bloat + llvm-size fallback) to see which Rust crates/symbols dominate the desktop binary size.
   - `target/**/release/bundle` contains installer artifacts when you run `cargo tauri build`.
 
 #### CI gating / overrides

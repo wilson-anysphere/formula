@@ -62,6 +62,13 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _relpath(path: Path, repo_root: Path) -> str:
+    try:
+        return str(path.relative_to(repo_root))
+    except ValueError:
+        return str(path)
+
+
 def _desktop_package_name(repo_root: Path) -> str:
     """
     The desktop Tauri shell has historically used both `desktop` and
@@ -222,6 +229,7 @@ def _render_markdown(
     bin_name: str,
     features: str,
     target: str | None,
+    repo_root: Path,
     target_dir: Path,
     bin_path: Path,
     bin_size_bytes: int | None,
@@ -250,8 +258,8 @@ def _render_markdown(
     lines.append(f"- Features: `{features}`")
     if target:
         lines.append(f"- Target: `{target}`")
-    lines.append(f"- Target dir: `{target_dir}`")
-    lines.append(f"- Binary path: `{bin_path}`")
+    lines.append(f"- Target dir: `{_relpath(target_dir, repo_root)}`")
+    lines.append(f"- Binary path: `{_relpath(bin_path, repo_root)}`")
     if bin_size_bytes is not None:
         lines.append(f"- Binary size: **{_human_bytes(bin_size_bytes)}** ({bin_size_bytes} bytes)")
     if limit_mb is None:
@@ -442,6 +450,7 @@ def main() -> int:
                 bin_name=bin_name,
                 features=features,
                 target=target,
+                repo_root=repo_root,
                 target_dir=target_dir,
                 bin_path=default_bin_path,
                 bin_size_bytes=bin_path.stat().st_size if bin_path.exists() else None,
@@ -468,7 +477,7 @@ def main() -> int:
         bin_path = existing
 
     if not bin_path.exists():
-        searched_lines = "\n".join(f"- `{p}`" for p in candidate_bin_paths[:8])
+        searched_lines = "\n".join(f"- `{_relpath(p, repo_root)}`" for p in candidate_bin_paths[:8])
         if len(candidate_bin_paths) > 8:
             searched_lines += "\n- …"
         md = _render_markdown(
@@ -476,6 +485,7 @@ def main() -> int:
             bin_name=bin_name,
             features=features,
             target=target,
+            repo_root=repo_root,
             target_dir=target_dir,
             bin_path=default_bin_path,
             bin_size_bytes=None,
@@ -589,6 +599,7 @@ def main() -> int:
         bin_name=bin_name,
         features=features,
         target=target,
+        repo_root=repo_root,
         target_dir=target_dir,
         bin_path=bin_path,
         bin_size_bytes=bin_size_bytes,
