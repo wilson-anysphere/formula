@@ -12,6 +12,16 @@ This package intentionally keeps the default/browser entry free of Node-only imp
 import { AIAuditRecorder, LocalStorageAIAuditStore } from "@formula/ai-audit";
 ```
 
+To hard-cap per-entry size (defense-in-depth for LocalStorage/IndexedDB quota limits), wrap any store:
+
+```ts
+import { BoundedAIAuditStore, LocalStorageAIAuditStore } from "@formula/ai-audit";
+
+const store = new BoundedAIAuditStore(new LocalStorageAIAuditStore(), {
+  max_entry_chars: 200_000,
+});
+```
+
 Or explicitly:
 
 ```ts

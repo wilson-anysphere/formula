@@ -96,6 +96,31 @@ export interface AIAuditStore {
 `listEntries(...)` supports filtering by `session_id`, `workbook_id`, `mode` (single or array), and `limit`.
 Stores return entries ordered newest-first.
 
+### Defense-in-depth: `BoundedAIAuditStore` (per-entry size cap)
+
+Even when upstream integrations try to keep audit payloads small (e.g. bounded tool result summaries),
+it is still possible for a single entry to grow unexpectedly large (prompt attachments, large tool
+parameters, etc).
+
+`BoundedAIAuditStore` is a lightweight wrapper that enforces a hard cap on the serialized size of
+each stored entry (default: **200k characters**). If an entry exceeds the cap, it stores a compacted
+copy that:
+
+- preserves filter-critical fields (`id`, `timestamp_ms`, `session_id`, `workbook_id`, `mode`, `model`)
+- replaces `input` with a truncated JSON string summary (with `audit_truncated` metadata)
+- truncates tool `parameters` and `audit_result_summary` similarly
+- drops full tool `result` payloads
+
+Example:
+
+```ts
+import { BoundedAIAuditStore, LocalStorageAIAuditStore } from "@formula/ai-audit/browser";
+
+const store = new BoundedAIAuditStore(new LocalStorageAIAuditStore(), {
+  max_entry_chars: 200_000,
+});
+```
+
 ### Memory store (ephemeral)
 
 - Class: `MemoryAIAuditStore`
