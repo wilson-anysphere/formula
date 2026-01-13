@@ -534,6 +534,75 @@ impl<P: KeychainProvider> DesktopStorageEncryption<P> {
         self
     }
 
+    /// Runs `operation`. If it fails because an encrypted store exists on disk but the
+    /// keyring is missing from the keychain (`DesktopStorageEncryptionError::MissingKeyRing`),
+    /// the store is reset to an empty encrypted store with a fresh keyring and the operation
+    /// is retried once.
+    ///
+    /// Returns `(result, recovered)` where `recovered` indicates whether the store was reset.
+    pub fn with_missing_keyring_recovery<T, F>(
+        &self,
+        mut operation: F,
+    ) -> Result<(T, bool), DesktopStorageEncryptionError>
+    where
+        F: FnMut() -> Result<T, DesktopStorageEncryptionError>,
+    {
+        match operation() {
+            Ok(value) => Ok((value, false)),
+            Err(DesktopStorageEncryptionError::MissingKeyRing) => {
+                self.reset_encrypted_store_for_missing_keyring()?;
+                Ok((operation()?, true))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn reset_encrypted_store_for_missing_keyring(&self) -> Result<(), DesktopStorageEncryptionError> {
+        // Preserve the schema version from disk if we can parse it (encrypted stores can be
+        // parsed without needing the keyring).
+        let schema_version = match read_store_file(&self.file_path)? {
+            StoreFile::Encrypted(encrypted) => encrypted.schema_version,
+            StoreFile::Plaintext(plain) => plain.schema_version,
+        };
+
+        eprintln!(
+            "[storage] WARNING: resetting encrypted store at {:?} because keyring was missing in the OS keychain (service={}, account={}). Existing data was discarded.",
+            self.file_path,
+            self.keychain_service,
+            self.keychain_account
+        );
+
+        // Create a fresh keyring and re-initialize the store as empty ciphertext.
+        //
+        // We write the on-disk store first (using the new keyring) to avoid leaving a state
+        // where the keychain contains a new keyring but the store still contains ciphertext
+        // encrypted with the old (now-missing) keyring. If we crash mid-recovery, the worst
+        // case is an encrypted empty store without a keyring, which will trigger recovery
+        // again on the next load.
+        let keyring = KeyRing::create();
+
+        let plaintext = serde_json::to_vec(&PlaintextStoreFile {
+            schema_version,
+            encrypted: false,
+            documents: BTreeMap::new(),
+        })?;
+        let aad = store_aad(schema_version, &self.aad_scope);
+        let envelope = keyring.encrypt(&plaintext, Some(&aad))?;
+
+        write_json_file(
+            &self.file_path,
+            &EncryptedStoreFile {
+                schema_version,
+                encrypted: true,
+                envelope,
+            },
+        )?;
+
+        self.store_keyring(&keyring)?;
+
+        Ok(())
+    }
+
     fn load_keyring(&self) -> Result<Option<KeyRing>, DesktopStorageEncryptionError> {
         let secret = self
             .keychain

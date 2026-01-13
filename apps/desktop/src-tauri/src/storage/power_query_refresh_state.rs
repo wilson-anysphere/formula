@@ -61,12 +61,18 @@ impl<P: KeychainProvider> PowerQueryRefreshStateStore<P> {
 
     pub fn load(&self, workbook_id: &str) -> Result<Option<JsonValue>, PowerQueryRefreshStateStoreError> {
         self.ensure_encrypted()?;
-        Ok(self.storage.load_document(workbook_id)?)
+        let (value, _recovered) = self
+            .storage
+            .with_missing_keyring_recovery(|| self.storage.load_document(workbook_id))?;
+        Ok(value)
     }
 
     pub fn save(&self, workbook_id: &str, state: JsonValue) -> Result<(), PowerQueryRefreshStateStoreError> {
         self.ensure_encrypted()?;
-        Ok(self.storage.save_document(workbook_id, state)?)
+        self.storage.with_missing_keyring_recovery(|| {
+            self.storage.save_document(workbook_id, state.clone())
+        })?;
+        Ok(())
     }
 }
 
@@ -78,7 +84,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::storage::encryption::InMemoryKeychainProvider;
+    use crate::storage::encryption::{InMemoryKeychainProvider, KeychainProvider};
 
     #[test]
     fn refresh_state_is_encrypted_at_rest_and_roundtrips() {
@@ -107,5 +113,58 @@ mod tests {
 
         let loaded = store.load("workbook-1").expect("load").expect("present");
         assert_eq!(loaded, state);
+    }
+
+    #[test]
+    fn missing_keyring_resets_store_and_allows_resaving() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("pq_refresh_state.json");
+
+        // Create an encrypted store with an existing keyring.
+        let store = PowerQueryRefreshStateStore::new(file_path.clone(), InMemoryKeychainProvider::default());
+        store
+            .save(
+                "workbook-1",
+                json!({ "some": { "state": "before-migration-1234567890" } }),
+            )
+            .expect("initial save");
+        assert!(file_path.is_file(), "expected store file to exist");
+
+        // Simulate a missing keychain entry on a new machine.
+        let new_keychain = InMemoryKeychainProvider::default();
+        let migrated = PowerQueryRefreshStateStore::new(file_path.clone(), new_keychain.clone());
+
+        // Loading should not error; it should reset the store and return None.
+        assert!(
+            migrated.load("workbook-1").expect("load after migration").is_none(),
+            "expected store to be reset and return None"
+        );
+
+        // Subsequent saves should succeed and remain encrypted.
+        migrated
+            .save(
+                "workbook-1",
+                json!({ "some": { "state": "after-recovery-1234567890" } }),
+            )
+            .expect("save after recovery");
+
+        let on_disk = fs::read_to_string(&file_path).expect("read store file after save");
+        assert!(on_disk.contains("\"encrypted\": true"));
+        assert!(
+            !on_disk.contains("after-recovery"),
+            "expected encrypted blob not to contain plaintext refresh state"
+        );
+
+        let loaded = migrated.load("workbook-1").expect("load").expect("present");
+        assert_eq!(loaded, json!({ "some": { "state": "after-recovery-1234567890" } }));
+
+        // Ensure the keyring was recreated.
+        let stored_keyring = new_keychain
+            .get_secret(
+                POWER_QUERY_REFRESH_STATE_KEYCHAIN_SERVICE,
+                POWER_QUERY_REFRESH_STATE_KEYCHAIN_ACCOUNT,
+            )
+            .expect("keychain get");
+        assert!(stored_keyring.is_some(), "expected keyring to be created during recovery");
     }
 }

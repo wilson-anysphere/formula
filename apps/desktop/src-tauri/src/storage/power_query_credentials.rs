@@ -86,7 +86,10 @@ impl<P: KeychainProvider> PowerQueryCredentialStore<P> {
 
     pub fn get(&self, scope_key: &str) -> Result<Option<PowerQueryCredentialEntry>, PowerQueryCredentialStoreError> {
         self.ensure_encrypted()?;
-        let Some(value) = self.storage.load_document(scope_key)? else {
+        let (value, _recovered) = self
+            .storage
+            .with_missing_keyring_recovery(|| self.storage.load_document(scope_key))?;
+        let Some(value) = value else {
             return Ok(None);
         };
         Ok(Some(serde_json::from_value(value)?))
@@ -98,21 +101,31 @@ impl<P: KeychainProvider> PowerQueryCredentialStore<P> {
             id: random_id(),
             secret,
         };
-        self.storage
-            .save_document(scope_key, serde_json::to_value(&entry)?)?;
+        let value = serde_json::to_value(&entry)?;
+        self.storage.with_missing_keyring_recovery(|| {
+            self.storage.save_document(scope_key, value.clone())
+        })?;
         Ok(entry)
     }
 
     pub fn delete(&self, scope_key: &str) -> Result<(), PowerQueryCredentialStoreError> {
         self.ensure_encrypted()?;
-        Ok(self.storage.delete_document(scope_key)?)
+        self.storage
+            .with_missing_keyring_recovery(|| self.storage.delete_document(scope_key))?;
+        Ok(())
     }
 
     pub fn list(&self) -> Result<Vec<PowerQueryCredentialListEntry>, PowerQueryCredentialStoreError> {
         self.ensure_encrypted()?;
+        let (doc_ids, _recovered) = self
+            .storage
+            .with_missing_keyring_recovery(|| self.storage.list_document_ids())?;
         let mut out = Vec::new();
-        for scope_key in self.storage.list_document_ids()? {
-            if let Some(value) = self.storage.load_document(&scope_key)? {
+        for scope_key in doc_ids {
+            let (value, _recovered) = self
+                .storage
+                .with_missing_keyring_recovery(|| self.storage.load_document(&scope_key))?;
+            if let Some(value) = value {
                 let parsed: PowerQueryCredentialEntry = serde_json::from_value(value)?;
                 out.push(PowerQueryCredentialListEntry {
                     scope_key,
@@ -136,7 +149,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::storage::encryption::InMemoryKeychainProvider;
+    use crate::storage::encryption::{InMemoryKeychainProvider, KeychainProvider};
 
     #[test]
     fn secrets_are_encrypted_at_rest_and_can_be_deleted() {
@@ -162,5 +175,65 @@ mod tests {
 
         store.delete("scope-key").expect("delete");
         assert!(store.get("scope-key").expect("get after delete").is_none());
+    }
+
+    #[test]
+    fn missing_keyring_resets_store_and_allows_reauthentication() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("pq_creds.json");
+
+        // First create an encrypted store with an existing keyring.
+        let store = PowerQueryCredentialStore::new(file_path.clone(), InMemoryKeychainProvider::default());
+        store
+            .set(
+                "scope-key",
+                json!({ "password": "supersecret-before-migration-1234567890" }),
+            )
+            .expect("initial set");
+        assert!(file_path.is_file(), "expected store file to exist");
+
+        // Simulate a profile migration where the encrypted file exists but the OS keychain entry
+        // (keyring) is missing.
+        let new_keychain = InMemoryKeychainProvider::default();
+        let migrated = PowerQueryCredentialStore::new(file_path.clone(), new_keychain.clone());
+
+        // The store should recover automatically and treat the missing credentials as absent.
+        assert!(
+            migrated.get("scope-key").expect("get after migration").is_none(),
+            "expected store to be reset and return None"
+        );
+
+        // Recovery should have re-initialized the store as encrypted-at-rest.
+        let on_disk = fs::read_to_string(&file_path).expect("read store file after recovery");
+        assert!(on_disk.contains("\"encrypted\": true"));
+
+        // Subsequent writes should succeed and remain encrypted.
+        migrated
+            .set(
+                "scope-key",
+                json!({ "password": "supersecret-after-recovery-1234567890" }),
+            )
+            .expect("set after recovery");
+        let on_disk = fs::read_to_string(&file_path).expect("read store file after set");
+        assert!(on_disk.contains("\"encrypted\": true"));
+        assert!(
+            !on_disk.contains("supersecret-after-recovery"),
+            "expected encrypted blob not to contain plaintext secret"
+        );
+
+        let recovered_secret = migrated.get("scope-key").expect("get recovered").expect("present");
+        assert_eq!(
+            recovered_secret.secret,
+            json!({ "password": "supersecret-after-recovery-1234567890" })
+        );
+
+        // Ensure a keyring was stored in the (new) keychain provider.
+        let stored_keyring = new_keychain
+            .get_secret(
+                POWER_QUERY_CREDENTIAL_KEYCHAIN_SERVICE,
+                POWER_QUERY_CREDENTIAL_KEYCHAIN_ACCOUNT,
+            )
+            .expect("keychain get");
+        assert!(stored_keyring.is_some(), "expected keyring to be created during recovery");
     }
 }
