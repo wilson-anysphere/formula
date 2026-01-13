@@ -590,6 +590,11 @@ export interface CollabSessionOptions {
      * Defaults to `true` when `keyForCell` returns a non-null key.
      */
     shouldEncryptCell?: (cell: CellAddress) => boolean;
+    /**
+     * When true, cell formatting (`format`) is included in the encrypted plaintext payload
+     * and removed from the shared Yjs cell map. Defaults to false for backwards compatibility.
+     */
+    encryptFormat?: boolean;
   };
 }
 
@@ -598,6 +603,11 @@ export interface CollabCell {
   formula: string | null;
   modified: number | null;
   modifiedBy: string | null;
+  /**
+   * Optional per-cell style object when `options.encryption.encryptFormat=true` and the cell
+   * is decrypted successfully. Omitted otherwise.
+   */
+  format?: unknown | null;
   /**
    * True when the cell is stored encrypted and this session cannot decrypt it
    * (so `value` is masked and `formula` is null).
@@ -718,6 +728,7 @@ export class CollabSession {
     | {
         keyForCell: (cell: CellAddress) => CellEncryptionKey | null;
         shouldEncryptCell?: (cell: CellAddress) => boolean;
+        encryptFormat?: boolean;
       }
     | null;
   private readonly docIdForEncryption: string;
@@ -1883,6 +1894,7 @@ export class CollabSession {
 
     const encRaw = cell.get("enc");
     if (encRaw !== undefined) {
+      const encryptFormat = Boolean(this.encryption?.encryptFormat);
       if (isEncryptedCellPayload(encRaw)) {
         if (!parsed) {
           return {
@@ -1890,6 +1902,7 @@ export class CollabSession {
             formula: null,
             modified: (cell.get("modified") ?? null) as number | null,
             modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+            ...(encryptFormat ? { format: null } : {}),
             encrypted: true,
           };
         }
@@ -1913,6 +1926,7 @@ export class CollabSession {
               formula: typeof (plaintext as any)?.formula === "string" ? (plaintext as any).formula : null,
               modified: (cell.get("modified") ?? null) as number | null,
               modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+              ...(encryptFormat ? { format: (plaintext as any)?.format ?? null } : {}),
             };
           } catch {
             // Decryption failed (wrong key, tampered payload, or AAD mismatch).
@@ -1926,6 +1940,7 @@ export class CollabSession {
         formula: null,
         modified: (cell.get("modified") ?? null) as number | null,
         modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
+        ...(Boolean(this.encryption?.encryptFormat) ? { format: null } : {}),
         encrypted: true,
       };
     }
@@ -2097,6 +2112,7 @@ export class CollabSession {
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    const encryptFormat = Boolean(this.encryption?.encryptFormat);
     const shouldEncrypt =
       existingEnc !== undefined ||
       (parsed
@@ -2122,8 +2138,66 @@ export class CollabSession {
     let encryptedPayload = null;
     if (shouldEncrypt) {
       if (!key) throw new Error(`Missing encryption key for cell ${cellKey}`);
+
+      let formatToEncrypt: any | null = null;
+      if (encryptFormat && parsed) {
+        // Preserve existing formatting while migrating it into the encrypted payload.
+        // Prefer decrypting the current payload when possible, otherwise fall back to any
+        // plaintext `format` key stored under legacy aliases.
+        if (existingEnc !== undefined && isEncryptedCellPayload(existingEnc) && key.keyId === existingEnc.keyId) {
+          try {
+            const plaintext = (await decryptCellPlaintext({
+              encrypted: existingEnc,
+              key,
+              context: {
+                docId: this.docIdForEncryption,
+                sheetId: parsed.sheetId,
+                row: parsed.row,
+                col: parsed.col,
+              },
+            })) as CellPlaintext;
+            const candidate = (plaintext as any)?.format ?? null;
+            if (candidate && typeof candidate === "object" && Object.keys(candidate as any).length === 0) {
+              formatToEncrypt = null;
+            } else if (candidate != null) {
+              formatToEncrypt = candidate;
+            }
+          } catch {
+            // Ignore: fall back to plaintext `format` lookup below.
+          }
+        }
+
+        if (formatToEncrypt == null) {
+          const keysToCheck = Array.from(
+            new Set([
+              cellKey,
+              makeCellKey(parsed),
+              `${parsed.sheetId}:${parsed.row},${parsed.col}`,
+              ...(parsed.sheetId === this.defaultSheetId ? [`r${parsed.row}c${parsed.col}`] : []),
+            ])
+          );
+          for (const key of keysToCheck) {
+            const ycell = getYMapCell(this.cells.get(key));
+            if (!ycell) continue;
+            const raw = ycell.get("format");
+            if (raw === undefined) continue;
+            if (raw && typeof raw === "object" && Object.keys(raw as any).length === 0) {
+              formatToEncrypt = null;
+            } else {
+              formatToEncrypt = raw ?? null;
+            }
+            break;
+          }
+        }
+      }
+
+      /** @type {any} */
+      const plaintext: any = { value: value ?? null, formula: null };
+      if (encryptFormat && formatToEncrypt != null) {
+        plaintext.format = formatToEncrypt;
+      }
       encryptedPayload = await encryptCellPlaintext({
-        plaintext: { value: value ?? null, formula: null },
+        plaintext,
         key,
         context: {
           docId: this.docIdForEncryption,
@@ -2173,6 +2247,7 @@ export class CollabSession {
           ycell.set("enc", encryptedPayload);
           ycell.delete("value");
           ycell.delete("formula");
+          if (encryptFormat) ycell.delete("format");
           ycell.set("modified", modified);
           if (userId) ycell.set("modifiedBy", userId);
         }
@@ -2230,6 +2305,7 @@ export class CollabSession {
     }
 
     const key = parsed && this.encryption ? this.encryption.keyForCell(parsed) : null;
+    const encryptFormat = Boolean(this.encryption?.encryptFormat);
     const wantsEncryption =
       existingEnc !== undefined ||
       (parsed
@@ -2240,8 +2316,64 @@ export class CollabSession {
     if (wantsEncryption) {
       if (!key) throw new Error(`Missing encryption key for cell ${cellKey}`);
 
+      let formatToEncrypt: any | null = null;
+      if (encryptFormat) {
+        // Preserve existing formatting while migrating it into the encrypted payload.
+        if (existingEnc !== undefined && isEncryptedCellPayload(existingEnc) && key.keyId === existingEnc.keyId) {
+          try {
+            const plaintext = (await decryptCellPlaintext({
+              encrypted: existingEnc,
+              key,
+              context: {
+                docId: this.docIdForEncryption,
+                sheetId: parsed.sheetId,
+                row: parsed.row,
+                col: parsed.col,
+              },
+            })) as CellPlaintext;
+            const candidate = (plaintext as any)?.format ?? null;
+            if (candidate && typeof candidate === "object" && Object.keys(candidate as any).length === 0) {
+              formatToEncrypt = null;
+            } else if (candidate != null) {
+              formatToEncrypt = candidate;
+            }
+          } catch {
+            // Ignore: fall back to plaintext `format` lookup below.
+          }
+        }
+
+        if (formatToEncrypt == null) {
+          const keysToCheck = Array.from(
+            new Set([
+              cellKey,
+              makeCellKey(parsed),
+              `${parsed.sheetId}:${parsed.row},${parsed.col}`,
+              ...(parsed.sheetId === this.defaultSheetId ? [`r${parsed.row}c${parsed.col}`] : []),
+            ])
+          );
+          for (const key of keysToCheck) {
+            const ycell = getYMapCell(this.cells.get(key));
+            if (!ycell) continue;
+            const raw = ycell.get("format");
+            if (raw === undefined) continue;
+            if (raw && typeof raw === "object" && Object.keys(raw as any).length === 0) {
+              formatToEncrypt = null;
+            } else {
+              formatToEncrypt = raw ?? null;
+            }
+            break;
+          }
+        }
+      }
+
+      /** @type {any} */
+      const plaintext: any = { value: null, formula: nextFormula || null };
+      if (encryptFormat && formatToEncrypt != null) {
+        plaintext.format = formatToEncrypt;
+      }
+
       const encryptedPayload = await encryptCellPlaintext({
-        plaintext: { value: null, formula: nextFormula || null },
+        plaintext,
         key,
         context: {
           docId: this.docIdForEncryption,
@@ -2274,6 +2406,7 @@ export class CollabSession {
           cell.set("enc", encryptedPayload);
           cell.delete("value");
           cell.delete("formula");
+          if (encryptFormat) cell.delete("format");
           cell.set("modified", modified);
           if (userId) cell.set("modifiedBy", userId);
         }

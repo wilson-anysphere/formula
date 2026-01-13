@@ -282,6 +282,7 @@ function normalizeFormula(value) {
  *   formula: string | null,
  *   format: any | undefined,
  *   formatKey: string | undefined,
+ *   hasEnc: boolean,
  *   maskedForEncryption?: boolean,
  * }} ParsedYjsCell
  */
@@ -291,6 +292,7 @@ function normalizeFormula(value) {
  * @param {{ sheetId: string, row: number, col: number }} cellRef
  * @param {{
  *   keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
+ *   encryptFormat?: boolean,
  * } | null} encryption
  * @param {string} docIdForEncryption
  * @param {(value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown} maskFn
@@ -299,12 +301,17 @@ function normalizeFormula(value) {
 async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, maskFn = defaultMaskCellValue) {
   let value;
   let formula;
+  let hasEnc = false;
   let maskedForEncryption = false;
+  const encryptFormat = Boolean(encryption?.encryptFormat);
+  /** @type {any | null} */
+  let decryptedPlaintext = null;
 
   // If `enc` is present, treat the cell as encrypted even if the payload is malformed.
   // This avoids accidentally falling back to plaintext fields.
   const encRaw = typeof cell.has === "function" ? (cell.has("enc") ? cell.get("enc") : undefined) : cell.get("enc");
   if (encRaw !== undefined) {
+    hasEnc = true;
     if (isEncryptedCellPayload(encRaw)) {
       const key = encryption?.keyForCell?.(cellRef) ?? null;
       if (key && key.keyId === encRaw.keyId) {
@@ -319,6 +326,7 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
               col: cellRef.col,
             },
           });
+          decryptedPlaintext = plaintext;
 
           const decryptedFormula = normalizeFormula(plaintext?.formula ?? null);
           if (decryptedFormula) {
@@ -354,14 +362,23 @@ async function readCellFromYjs(cell, cellRef, encryption, docIdForEncryption, ma
 
   let format = undefined;
   let formatKey = undefined;
-  if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
+  if (hasEnc && encryptFormat) {
+    // Confidentiality-first semantics:
+    // - If `enc` is present, do not read/use plaintext `format`.
+    // - Only apply formatting that was successfully decrypted from the encrypted payload.
+    const decryptedFormat = decryptedPlaintext?.format ?? null;
+    if (decryptedFormat != null) {
+      format = decryptedFormat;
+      formatKey = stableStringify(format);
+    }
+  } else if (typeof cell.has === "function" ? cell.has("format") : cell.get("format") !== undefined) {
     format = cell.get("format") ?? null;
     formatKey = stableStringify(format);
   }
   if (formula) {
-    return { value: null, formula, format, formatKey, maskedForEncryption };
+    return { value: null, formula, format, formatKey, hasEnc, maskedForEncryption };
   }
-  return { value, formula: null, format, formatKey, maskedForEncryption };
+  return { value, formula: null, format, formatKey, hasEnc, maskedForEncryption };
 }
 
 function sameNormalizedCell(a, b) {
@@ -393,6 +410,7 @@ function sameNormalizedCell(a, b) {
  *   encryption?: {
  *     keyForCell: (cell: { sheetId: string, row: number, col: number }) => { keyId: string, keyBytes: Uint8Array } | null,
  *     shouldEncryptCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
+ *     encryptFormat?: boolean,
  *   } | null,
  *   canReadCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
  *   canEditCell?: (cell: { sheetId: string, row: number, col: number }) => boolean,
@@ -747,10 +765,13 @@ export function bindYjsToDocumentController(options) {
     }
 
     if (encryptedCandidates.length > 0) {
+      const encryptFormat = Boolean(encryption?.encryptFormat);
       const chosen =
         encryptedCandidates.find((entry) => entry.rawKey === canonicalKey) ?? encryptedCandidates[0];
       const parsed = await readCellFromYjs(chosen.cell, cellRef, encryption, docIdForEncryption, maskFn);
-      if (parsed.formatKey === undefined && fallbackFormatKey !== undefined) {
+      // Back-compat: when `encryptFormat` is disabled (legacy behavior), allow plaintext
+      // formatting to remain readable even when value/formula are encrypted.
+      if (!encryptFormat && parsed.formatKey === undefined && fallbackFormatKey !== undefined) {
         return { ...parsed, format: fallbackFormat, formatKey: fallbackFormatKey };
       }
       return parsed;
@@ -803,7 +824,17 @@ export function bindYjsToDocumentController(options) {
       if (shouldMaskFormat) {
         styleId = 0;
       } else {
-        if (curr?.formatKey !== undefined) {
+        const encryptFormat = Boolean(encryption?.encryptFormat);
+        if (encryptFormat && curr?.hasEnc) {
+          // When format encryption is enabled, treat per-cell formatting as available only
+          // when it was decrypted successfully. Do not fall back to plaintext `format`.
+          if (curr.formatKey !== undefined) {
+            const format = curr.format ?? null;
+            styleId = format == null ? 0 : documentController.styleTable.intern(format);
+          } else {
+            styleId = 0;
+          }
+        } else if (curr?.formatKey !== undefined) {
           const format = curr.format ?? null;
           styleId = format == null ? 0 : documentController.styleTable.intern(format);
         } else if (prev?.formatKey !== undefined) {
@@ -1612,8 +1643,14 @@ export function bindYjsToDocumentController(options) {
         if (!key) {
           throw new Error(`Missing encryption key for cell ${canonicalKey}`);
         }
+        /** @type {any} */
+        const plaintext = { value: formula != null ? null : value, formula: formula ?? null };
+        // Opt-in: encrypt per-cell formatting alongside value/formula.
+        if (encryption?.encryptFormat && styleId !== 0) {
+          plaintext.format = format;
+        }
         encryptedPayload = await encryptCellPlaintext({
-          plaintext: { value: formula != null ? null : value, formula: formula ?? null },
+          plaintext,
           key,
           context: {
             docId: docIdForEncryption,
@@ -1695,10 +1732,12 @@ export function bindYjsToDocumentController(options) {
             cells.set(rawKey, cell);
           }
 
+          const encryptFormat = Boolean(encryption?.encryptFormat);
           if (encryptedPayload) {
             cell.set("enc", encryptedPayload);
             cell.delete("value");
             cell.delete("formula");
+            if (encryptFormat) cell.delete("format");
           } else {
             cell.delete("enc");
             if (formula != null) {
@@ -1714,10 +1753,15 @@ export function bindYjsToDocumentController(options) {
             }
           }
 
-          if (styleId === 0) {
-            cell.delete("format");
+          // When `encryptFormat` is enabled, encrypted cells must not leak plaintext `format`.
+          if (!encryptedPayload || !encryptFormat) {
+            if (styleId === 0) {
+              cell.delete("format");
+            } else {
+              cell.set("format", format);
+            }
           } else {
-            cell.set("format", format);
+            cell.delete("format");
           }
 
           cell.set("modified", Date.now());

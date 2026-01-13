@@ -125,3 +125,59 @@ test("CollabSession E2E cell encryption: encrypted in Yjs, decrypted with key, m
   docA.destroy();
   docB.destroy();
 });
+
+test("CollabSession E2E cell encryption: encryptFormat encrypts per-cell format and removes plaintext `format`", async () => {
+  const docId = "collab-session-encryption-test-doc-encryptFormat";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    encryption: { keyForCell: keyForA1, encryptFormat: true },
+  });
+  const sessionB = createCollabSession({
+    doc: docB,
+    encryption: { keyForCell: () => null, encryptFormat: true },
+  });
+
+  const style = { font: { bold: true } };
+
+  // Seed a plaintext format and then encrypt via `setCellValue`. The encrypted write should
+  // migrate `format` into the ciphertext and remove it from the shared Yjs map.
+  docA.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "plaintext");
+    cell.set("format", style);
+    sessionA.cells.set("Sheet1:0:0", cell);
+  });
+
+  await sessionA.setCellValue("Sheet1:0:0", "top-secret");
+
+  const raw = sessionA.cells.get("Sheet1:0:0");
+  assert.ok(raw, "expected Yjs cell map to exist");
+  assert.equal(raw.get("format"), undefined);
+  assert.ok(raw.get("enc"), "expected encrypted payload under `enc`");
+
+  const decrypted = await sessionA.getCell("Sheet1:0:0");
+  assert.deepEqual(decrypted?.format, style);
+
+  const masked = await sessionB.getCell("Sheet1:0:0");
+  assert.equal(masked?.value, "###");
+  assert.equal(masked?.encrypted, true);
+  assert.deepEqual(masked?.format, null);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});

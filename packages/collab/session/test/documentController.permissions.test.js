@@ -262,11 +262,7 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   const dcB = new DocumentController();
 
   const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
-  let binderB = await bindCollabSessionToDocumentController({
-    session: sessionB,
-    documentController: dcB,
-    maskCellFormat: true,
-  });
+  let binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB, maskCellFormat: true });
 
   // Edit through the DocumentController path so binder is responsible for encryption.
   dcA.setCellValue("Sheet1", "A1", "top-secret");
@@ -312,15 +308,80 @@ test("CollabSession↔DocumentController binder encrypts protected cells and dec
   binderB.destroy();
   sessionB.destroy();
   const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForA1 } });
-  binderB = await bindCollabSessionToDocumentController({
-    session: sessionBWithKey,
-    documentController: dcB,
-    maskCellFormat: true,
-  });
+  binderB = await bindCollabSessionToDocumentController({ session: sessionBWithKey, documentController: dcB, maskCellFormat: true });
 
   await waitForCondition(() => {
     const cell = dcB.getCell("Sheet1", "A1");
     return cell.value === "top-secret" && cell.styleId !== 0;
+  });
+
+  binderA.destroy();
+  binderB.destroy();
+  sessionA.destroy();
+  sessionBWithKey.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession↔DocumentController binder encryptFormat encrypts cell formatting and removes plaintext `format`", async () => {
+  const docId = "collab-session-documentController-encryption-test-doc-encryptFormat";
+  const docA = new Y.Doc({ guid: docId });
+  const docB = new Y.Doc({ guid: docId });
+  const disconnect = connectDocs(docA, docB);
+
+  const keyBytes = new Uint8Array(32).fill(7);
+  const keyForA1 = (cell) => {
+    if (cell.sheetId === "Sheet1" && cell.row === 0 && cell.col === 0) {
+      return { keyId: "k-range-1", keyBytes };
+    }
+    return null;
+  };
+
+  const sessionA = createCollabSession({ doc: docA, encryption: { keyForCell: keyForA1, encryptFormat: true } });
+  const sessionB = createCollabSession({ doc: docB, encryption: { keyForCell: () => null, encryptFormat: true } });
+
+  const dcA = new DocumentController();
+  const dcB = new DocumentController();
+
+  const binderA = await bindCollabSessionToDocumentController({ session: sessionA, documentController: dcA });
+  let binderB = await bindCollabSessionToDocumentController({ session: sessionB, documentController: dcB });
+
+  dcA.setCellValue("Sheet1", "A1", "top-secret");
+  dcA.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+
+  await waitForCondition(() => {
+    const cellA = dcA.getCell("Sheet1", "A1");
+    return cellA.value === "top-secret" && cellA.formula == null && cellA.styleId !== 0;
+  });
+
+  await waitForCondition(() => {
+    const cellB = dcB.getCell("Sheet1", "A1");
+    return cellB.value === "###" && cellB.formula == null && cellB.styleId === 0;
+  });
+
+  await waitForCondition(() => {
+    const cellMap = sessionA.cells.get("Sheet1:0:0");
+    return cellMap && typeof cellMap.get === "function" && cellMap.get("enc") != null;
+  });
+
+  const cellMap = sessionA.cells.get("Sheet1:0:0");
+  assert.ok(cellMap, "expected Yjs cell map to exist");
+  assert.equal(cellMap.get("value"), undefined);
+  assert.equal(cellMap.get("formula"), undefined);
+  assert.equal(cellMap.get("format"), undefined);
+  assert.ok(cellMap.get("enc"), "expected encrypted payload under `enc`");
+
+  // Now "grant" the key on B by recreating the session and re-binding.
+  binderB.destroy();
+  sessionB.destroy();
+  const sessionBWithKey = createCollabSession({ doc: docB, encryption: { keyForCell: keyForA1, encryptFormat: true } });
+  binderB = await bindCollabSessionToDocumentController({ session: sessionBWithKey, documentController: dcB });
+
+  await waitForCondition(() => {
+    const cellB = dcB.getCell("Sheet1", "A1");
+    const format = dcB.styleTable.get(cellB.styleId);
+    return cellB.value === "top-secret" && cellB.styleId !== 0 && format?.font?.bold === true;
   });
 
   binderA.destroy();
