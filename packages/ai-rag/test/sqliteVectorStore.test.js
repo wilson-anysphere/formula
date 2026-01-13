@@ -519,10 +519,10 @@ test(
       stmt.run(["bad-bytes", null, badBlob, "{}"]);
       stmt.free();
 
-      await assert.rejects(store.get("bad-bytes"), /Invalid vector blob length/);
-      await assert.rejects(store.list(), /Invalid vector blob length/);
+      await assert.rejects(store.get("bad-bytes"), /failed to decode stored vector blob: Invalid vector blob length/);
+      await assert.rejects(store.list(), /failed to decode stored vector blob for id=.*Invalid vector blob length/);
       await assert.rejects(store.list({ includeVector: false }), /invalid vector blob length/i);
-      await assert.rejects(store.query([1, 0, 0], 1), /Invalid vector blob length/);
+      await assert.rejects(store.query([1, 0, 0], 1), /dot\\(\\) failed to decode arg0 vector blob: Invalid vector blob length/);
     } finally {
       await store.close();
     }
