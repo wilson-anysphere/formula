@@ -117,7 +117,13 @@ describe("oauthRedirectIpc wiring", () => {
     // *after* the listener is registered. The Rust host queues `oauth-redirect` URLs until this
     // handshake occurs; breaking it can drop deep-link redirects on cold start.
     const source = readFileSync(new URL("../../main.ts", import.meta.url), "utf8").replace(/\r\n?/g, "\n");
-    const code = stripComments(source);
+    // Strip comments from a bounded region around the oauth-redirect wiring rather than the entire
+    // entrypoint. This keeps the guardrail resilient to unrelated patterns elsewhere in `main.ts`
+    // (e.g. regex literals) while still preventing commented-out wiring from satisfying the test.
+    const listenIndex = source.search(/\blisten\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["']/);
+    expect(listenIndex).toBeGreaterThanOrEqual(0);
+    const snippet = source.slice(Math.max(0, listenIndex - 2_000), Math.min(source.length, listenIndex + 6_000));
+    const code = stripComments(snippet);
 
     // 1) Ensure we listen for Rust -> JS oauth redirect events.
     expect(code).toMatch(/\blisten\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["']/);
@@ -125,7 +131,8 @@ describe("oauthRedirectIpc wiring", () => {
     // 2) Ensure we only emit readiness after the listener promise resolves.
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
     // and close equivalents (e.g. `await x; emit(...)`).
-    const emitReadyMatches = Array.from(code.matchAll(/\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/g));
+    // Count in the full entrypoint so we catch accidental early/unconditional emits elsewhere.
+    const emitReadyMatches = Array.from(source.matchAll(/\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/g));
     expect(emitReadyMatches).toHaveLength(1);
 
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
