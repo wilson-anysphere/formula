@@ -559,6 +559,69 @@ describe("DocumentCellProvider formatting integration", () => {
     });
   });
 
+  it("does not invalidate for pure sheetViewDeltas", () => {
+    class FakeDocument {
+      private readonly listeners = new Set<(payload: any) => void>();
+
+      getCell = vi.fn(() => ({ value: "hello", formula: null }));
+
+      on(event: string, listener: (payload: any) => void): () => void {
+        if (event !== "change") return () => {};
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      }
+
+      emitChange(payload: any): void {
+        for (const listener of this.listeners) listener(payload);
+      }
+    }
+
+    const doc = new FakeDocument();
+
+    const headerRows = 1;
+    const headerCols = 1;
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => "Sheet1",
+      headerRows,
+      headerCols,
+      rowCount: 10 + headerRows,
+      colCount: 10 + headerCols,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const updates: any[] = [];
+    const unsubscribe = provider.subscribe((update) => updates.push(update));
+
+    // Prime cache for A1 (doc 0,0 => grid 1,1).
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("hello");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    // Cache hit
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("hello");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+
+    // Emit a sheet-view-only delta; this should not invalidate the provider.
+    doc.emitChange({
+      deltas: [],
+      sheetViewDeltas: [{ sheetId: "Sheet1", frozenRows: 1 }],
+      rowStyleDeltas: [],
+      colStyleDeltas: [],
+      sheetStyleDeltas: [],
+      formatDeltas: [],
+      rangeRunDeltas: [],
+      recalc: false
+    });
+
+    unsubscribe();
+
+    expect(updates).toEqual([]);
+    // Cache should still be intact (no extra doc reads).
+    expect(provider.getCell(headerRows + 0, headerCols + 0)?.value).toBe("hello");
+    expect(doc.getCell).toHaveBeenCalledTimes(1);
+  });
+
   it("caches layered-format style resolution by style-id tuple", () => {
     const doc = new DocumentController();
 
