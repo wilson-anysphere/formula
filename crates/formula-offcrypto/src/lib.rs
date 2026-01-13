@@ -250,6 +250,8 @@ pub enum OffcryptoError {
     DecryptedPackageNotZip,
     /// `office-crypto` decryption failed.
     OfficeCrypto(office_crypto::DecryptError),
+    /// `office-crypto` panicked while attempting to decrypt.
+    OfficeCryptoPanic { message: String },
     /// I/O error while parsing the OLE container.
     Io(std::io::Error),
 }
@@ -319,6 +321,10 @@ impl PartialEq for OffcryptoError {
             (Self::MissingOleStream { stream: a }, Self::MissingOleStream { stream: b }) => a == b,
             (Self::DecryptedPackageNotZip, Self::DecryptedPackageNotZip) => true,
             (Self::OfficeCrypto(a), Self::OfficeCrypto(b)) => a.to_string() == b.to_string(),
+            (
+                Self::OfficeCryptoPanic { message: a },
+                Self::OfficeCryptoPanic { message: b },
+            ) => a == b,
             (Self::Io(a), Self::Io(b)) => a.kind() == b.kind() && a.to_string() == b.to_string(),
             _ => false,
         }
@@ -394,6 +400,9 @@ impl fmt::Display for OffcryptoError {
             ),
             OffcryptoError::OfficeCrypto(err) => {
                 write!(f, "office-crypto decryption failed: {err}")
+            }
+            OffcryptoError::OfficeCryptoPanic { message } => {
+                write!(f, "office-crypto decryption panicked: {message}")
             }
             OffcryptoError::Io(err) => write!(f, "io error: {err}"),
         }
@@ -1829,7 +1838,19 @@ pub fn decrypt_standard_ooxml_from_bytes(
     }
 
     // 2) Decrypt using upstream implementation.
-    let decrypted = office_crypto::decrypt_from_bytes(raw_ole, password)?;
+    let decrypted = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        office_crypto::decrypt_from_bytes(raw_ole, password)
+    })) {
+        Ok(res) => res?,
+        Err(panic) => {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            return Err(OffcryptoError::OfficeCryptoPanic { message: msg });
+        }
+    };
 
     // 3) Sanity-check the result is an OOXML ZIP.
     if !decrypted.starts_with(b"PK") {
@@ -1845,7 +1866,14 @@ fn read_ole_stream(raw_ole: &[u8], stream: &'static str) -> Result<Vec<u8>, Offc
     let mut s = match ole.open_stream(stream) {
         Ok(s) => s,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Err(OffcryptoError::MissingOleStream { stream });
+            let alt = format!("/{stream}");
+            match ole.open_stream(&alt) {
+                Ok(s) => s,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(OffcryptoError::MissingOleStream { stream });
+                }
+                Err(err) => return Err(OffcryptoError::Io(err)),
+            }
         }
         Err(err) => return Err(OffcryptoError::Io(err)),
     };
