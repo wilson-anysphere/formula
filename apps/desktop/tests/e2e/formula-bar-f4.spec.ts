@@ -11,6 +11,27 @@ test.describe("formula bar F4 toggles absolute/relative references", () => {
   const modes = ["legacy", "shared"] as const;
 
   for (const mode of modes) {
+    test(`F4 toggles references inside function calls (SUM(A1)) (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Start editing in the formula bar.
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=SUM(A1)");
+
+      // Place caret inside the A1 token.
+      await input.focus();
+      await page.keyboard.press("ArrowLeft"); // just before the closing paren
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=SUM($A$1)");
+
+      await page.keyboard.press("F4");
+      await expect(input).toHaveValue("=SUM(A$1)");
+    });
+
     test(`pressing F4 cycles absolute/relative modes for a reference token (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);

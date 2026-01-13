@@ -155,6 +155,8 @@ test.describe("Grid context menus", () => {
 
     // Hide row 2 (0-based row=1) using the row-header context menu.
     await selectRange(page, { startRow: 1, endRow: 1, startCol: 0, endCol: 0 }); // A2
+    const a3Before = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A3"));
+    if (!a3Before) throw new Error("Missing A3 rect");
     const a2 = await getActiveCellRect(page);
     await openGridContextMenuAt(page, "#grid", {
       x: a2.x - gridBox.x - 5,
@@ -164,6 +166,16 @@ test.describe("Grid context menus", () => {
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(menu).toBeHidden();
+
+    // Hiding the active row should move selection to the next visible row (Excel-like).
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 2, col: 0 });
+    // And the row should visually collapse (A3 shifts up).
+    await expect
+      .poll(async () => {
+        const rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A3"));
+        return rect?.y ?? Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThan((a3Before as any).y - 10);
 
     // Verify ArrowDown skips the hidden row (A1 -> A3).
     await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
@@ -191,6 +203,8 @@ test.describe("Grid context menus", () => {
 
     // Hide column B (0-based col=1) using the column-header context menu.
     await selectRange(page, { startRow: 0, endRow: 0, startCol: 1, endCol: 1 }); // B1
+    const c1Before = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("C1"));
+    if (!c1Before) throw new Error("Missing C1 rect");
     const b1 = await getActiveCellRect(page);
     await openGridContextMenuAt(page, "#grid", {
       x: b1.x - gridBox.x + b1.width / 2,
@@ -199,6 +213,16 @@ test.describe("Grid context menus", () => {
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(menu).toBeHidden();
+
+    // Hiding the active column should move selection to the next visible column (Excel-like).
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 0, col: 2 });
+    // And the column should visually collapse (C shifts left).
+    await expect
+      .poll(async () => {
+        const rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("C1"));
+        return rect?.x ?? Number.POSITIVE_INFINITY;
+      })
+      .toBeLessThan((c1Before as any).x - 10);
 
     // Verify ArrowRight skips the hidden column (A1 -> C1).
     await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
@@ -315,4 +339,3 @@ test.describe("Grid context menus", () => {
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
   });
 });
-
