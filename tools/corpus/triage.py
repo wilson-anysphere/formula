@@ -60,6 +60,63 @@ class LeakScanFailure:
     display_name: str
     findings: list[dict[str, str]]
 
+_PRIVACY_PUBLIC = "public"
+_PRIVACY_PRIVATE = "private"
+
+# Relationship types and namespaces often use these domains. We treat them as safe to emit even in
+# privacy-mode=private since they're standard schema URLs and don't embed customer-controlled data.
+_SAFE_SCHEMA_HOST_SUFFIXES = {
+    "schemas.openxmlformats.org",
+    "schemas.microsoft.com",
+}
+
+
+def _anonymized_display_name(*, sha256: str, original_name: str) -> str:
+    # Keep the extension as a lightweight hint (xlsx vs xlsm) while avoiding leaking the original
+    # filename. Fall back to `.xlsx` for unknown extensions.
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in (".xlsx", ".xlsm"):
+        suffix = ".xlsx"
+    return f"workbook-{sha256[:16]}{suffix}"
+
+
+def _is_safe_schema_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.casefold()
+    return any(
+        host == allowed or host.endswith(f".{allowed}") for allowed in _SAFE_SCHEMA_HOST_SUFFIXES
+    )
+
+
+def _redact_uri_like(text: str) -> str:
+    """Redact URI-like strings to avoid leaking custom domains in private corpus artifacts."""
+
+    import re
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        if _is_safe_schema_host(parsed.hostname):
+            return text
+        return f"sha256={_sha256_text(text)}"
+
+    # Non-http schemes (e.g. urn:) are still URI-like; hash them to be safe.
+    if parsed.scheme and ":" in text:
+        return f"sha256={_sha256_text(text)}"
+
+    # Content types are not URIs, but some custom producers embed domains (e.g. vnd.company.com.*).
+    # If the string contains something that *looks* like a hostname with a common TLD, hash it.
+    lowered = text.casefold()
+    if any(allowed in lowered for allowed in _SAFE_SCHEMA_HOST_SUFFIXES):
+        return text
+
+    # Keep this intentionally conservative: only hash if we see a likely TLD boundary.
+    if re.search(r"\.(com|net|org|io|ai|dev|edu|gov|local|internal|corp)\b", lowered):
+        return f"sha256={_sha256_text(text)}"
+
+    return text
+
 
 def _now_ms() -> float:
     return time.perf_counter() * 1000.0
@@ -69,14 +126,19 @@ def _step_ok(start_ms: float, *, details: dict[str, Any] | None = None) -> StepR
     return StepResult(status="ok", duration_ms=int(_now_ms() - start_ms), details=details)
 
 
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def _step_failed(start_ms: float, err: Exception) -> StepResult:
     # Triage reports are uploaded as artifacts for both public and private corpora. Avoid leaking
     # workbook content (sheet names, defined names, file paths, etc.) through exception strings by
     # hashing the message and emitting only the digest (mirrors the Rust helper behavior).
     msg = str(err)
-    digest = hashlib.sha256(msg.encode("utf-8")).hexdigest()
     return StepResult(
-        status="failed", duration_ms=int(_now_ms() - start_ms), error=f"sha256={digest}"
+        status="failed",
+        duration_ms=int(_now_ms() - start_ms),
+        error=f"sha256={_sha256_text(msg)}",
     )
 
 
@@ -655,10 +717,16 @@ def triage_workbook(
     diff_limit: int,
     recalc: bool,
     render_smoke: bool,
+    privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> dict[str, Any]:
+    sha = sha256_hex(workbook.data)
+    display_name = workbook.display_name
+    if privacy_mode == _PRIVACY_PRIVATE:
+        display_name = _anonymized_display_name(sha256=sha, original_name=workbook.display_name)
+
     report: dict[str, Any] = {
-        "display_name": workbook.display_name,
-        "sha256": sha256_hex(workbook.data),
+        "display_name": display_name,
+        "sha256": sha,
         "size_bytes": len(workbook.data),
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
@@ -674,6 +742,19 @@ def triage_workbook(
             if features.get("has_cell_images") is True:
                 cell_images = _extract_cell_images(z, zip_names)
                 if cell_images is not None:
+                    if privacy_mode == _PRIVACY_PRIVATE:
+                        # Redact any non-standard/custom URIs to avoid leaking corporate domains in
+                        # CI artifacts. Standard OpenXML/Microsoft schema URLs are allowlisted.
+                        for k in ("content_type", "workbook_rel_type", "root_namespace"):
+                            v = cell_images.get(k)
+                            if isinstance(v, str) and v:
+                                cell_images[k] = _redact_uri_like(v)
+                        rels_types = cell_images.get("rels_types")
+                        if isinstance(rels_types, list):
+                            cell_images["rels_types"] = [
+                                _redact_uri_like(v) if isinstance(v, str) and v else v
+                                for v in rels_types
+                            ]
                     report["cell_images"] = cell_images
             report["functions"] = dict(_extract_function_counts(z))
             style_stats, style_err = _extract_style_stats(z, zip_names)
@@ -773,6 +854,7 @@ def _triage_one_path(
     render_smoke: bool,
     leak_scan: bool,
     fernet_key: str | None,
+    privacy_mode: str = _PRIVACY_PUBLIC,
 ) -> dict[str, Any] | LeakScanFailure:
     """Worker entrypoint for triaging a single workbook path.
 
@@ -785,8 +867,13 @@ def _triage_one_path(
         if leak_scan:
             scan = scan_xlsx_bytes_for_leaks(wb.data)
             if not scan.ok:
+                display_name = wb.display_name
+                if privacy_mode == _PRIVACY_PRIVATE:
+                    display_name = _anonymized_display_name(
+                        sha256=sha256_hex(wb.data), original_name=wb.display_name
+                    )
                 return LeakScanFailure(
-                    display_name=wb.display_name,
+                    display_name=display_name,
                     findings=[
                         {
                             "kind": f.kind,
@@ -804,10 +891,23 @@ def _triage_one_path(
             diff_limit=diff_limit,
             recalc=recalc,
             render_smoke=render_smoke,
+            privacy_mode=privacy_mode,
         )
     except Exception as e:  # noqa: BLE001
+        sha: str | None
+        try:
+            sha = sha256_hex(path.read_bytes())
+        except Exception:  # noqa: BLE001
+            # Fall back to hashing the path itself so report file naming doesn't need to re-read
+            # the (possibly unreadable) input.
+            sha = _sha256_text(str(path))
+
+        display_name = path.name
+        if privacy_mode == _PRIVACY_PRIVATE:
+            display_name = _anonymized_display_name(sha256=sha, original_name=path.name)
         return {
-            "display_name": path.name,
+            "display_name": display_name,
+            "sha256": sha,
             "timestamp": utc_now_iso(),
             "commit": github_commit_sha(),
             "run_url": github_run_url(),
@@ -855,6 +955,7 @@ def _triage_paths(
     leak_scan: bool,
     fernet_key: str | None,
     jobs: int,
+    privacy_mode: str = _PRIVACY_PUBLIC,
     executor_cls: type[concurrent.futures.Executor] | None = None,
 ) -> list[dict[str, Any]] | LeakScanFailure:
     """Run triage over a list of workbook paths, possibly in parallel.
@@ -881,6 +982,7 @@ def _triage_paths(
                 render_smoke=render_smoke,
                 leak_scan=leak_scan,
                 fernet_key=fernet_key,
+                privacy_mode=privacy_mode,
             )
             if isinstance(res, LeakScanFailure):
                 return res
@@ -902,6 +1004,7 @@ def _triage_paths(
                 render_smoke=render_smoke,
                 leak_scan=leak_scan,
                 fernet_key=fernet_key,
+                privacy_mode=privacy_mode,
             )
             future_to_index[fut] = idx
 
@@ -942,6 +1045,16 @@ def main() -> int:
         "--expectations",
         type=Path,
         help="Optional JSON mapping display_name -> expected result fields (for regression gating).",
+    )
+    parser.add_argument(
+        "--privacy-mode",
+        choices=[_PRIVACY_PUBLIC, _PRIVACY_PRIVATE],
+        default=_PRIVACY_PUBLIC,
+        help=(
+            "Control redaction of triage reports. "
+            "`public` preserves filenames/URIs; `private` anonymizes display_name and hashes "
+            "custom URI-like strings (defense in depth for private corpus CI artifacts)."
+        ),
     )
     parser.add_argument(
         "--fernet-key-env",
@@ -994,6 +1107,7 @@ def main() -> int:
         leak_scan=args.leak_scan,
         fernet_key=fernet_key,
         jobs=args.jobs,
+        privacy_mode=args.privacy_mode,
     )
 
     if isinstance(triage_out, LeakScanFailure):

@@ -125,6 +125,23 @@ python -m tools.corpus.triage \
 Note: triage invokes a small Rust helper (built via `cargo`) to run the `formula-xlsx` round-trip and `xlsx-diff`
 structural comparison, so a Rust toolchain must be available.
 
+For the **private** corpus (or any environment where triage JSON is uploaded as an artifact), prefer
+`--privacy-mode private` to avoid leaking original filenames or custom URI domains:
+
+```bash
+python -m tools.corpus.triage \
+  --corpus-dir tools/corpus/private \
+  --out-dir tools/corpus/out/private \
+  --privacy-mode private
+```
+
+In `privacy-mode=private`:
+
+- `display_name` is replaced with a stable anonymized value: `workbook-<sha256[:16]>.xlsx`
+- custom URI-like strings (relationship types, namespaces, etc.) are replaced with `sha256=<digest>` unless
+  they use standard OpenXML/Microsoft schema hosts
+- expectation comparison (when `--expectations` is provided) uses the anonymized `display_name` keys
+
 ### Diff policy (ignored parts + calcChain)
 
 The `xlsx-diff` step classifies differences by severity:
@@ -166,7 +183,6 @@ This produces a privacy-safe summary:
 - `rels_critical_ids`: for `.rels` parts, the relationship Ids (`rId...`) involved in critical diffs
 
 The tool always writes a JSON summary file (default: `tools/corpus/out/minimize/<sha16>.json`).
-
 To fail fast on suspicious plaintext in a corpus directory:
 
 ```bash

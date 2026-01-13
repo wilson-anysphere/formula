@@ -138,6 +138,7 @@ jobs:
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
             --out-dir tools/corpus/out/private \
+            --privacy-mode private \
             "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard (private)
         run: |
