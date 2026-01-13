@@ -20,6 +20,7 @@ import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { URL, fileURLToPath } from "node:url";
 import crypto from "node:crypto";
+import { parseTauriUpdaterPubkey, parseTauriUpdaterSignature } from "./tauri-minisign.mjs";
 
 /**
  * @param {string} message
@@ -417,7 +418,9 @@ function expectNonEmptyString(key, value) {
 /**
  * Creates a Node.js public key object for an Ed25519 public key stored as raw bytes.
  *
- * Tauri stores updater keys as base64 strings, which decode to a 32-byte Ed25519 public key.
+ * Tauri stores updater keys as base64 strings. Modern Tauri versions print a base64 value that
+ * decodes to a minisign public key file (2-line text block). We parse that elsewhere and feed this
+ * helper the extracted raw 32-byte Ed25519 public key.
  * Node's crypto APIs expect a SPKI wrapper, so we construct:
  *   SubjectPublicKeyInfo  ::=  SEQUENCE  {
  *     algorithm         AlgorithmIdentifier,
@@ -437,142 +440,22 @@ function ed25519PublicKeyFromRaw(rawKey32) {
 }
 
 /**
- * Parse the updater public key stored in `tauri.conf.json` (`plugins.updater.pubkey`).
- *
- * Tauri stores the updater public key as a base64-encoded **minisign public key file**, e.g.:
- *
- * ```text
- * untrusted comment: minisign public key: <KEY_ID>
- * <BASE64_PAYLOAD>
- * ```
- *
- * The base64 payload decodes to 42 bytes:
- * - 2 bytes: ASCII "Ed" (algorithm marker)
- * - 8 bytes: key id (little-endian)
- * - 32 bytes: Ed25519 public key
- *
- * @param {string} pubkeyBase64
- */
-function parseTauriUpdaterPubkey(pubkeyBase64) {
-  /** @type {Buffer} */
-  let decoded;
-  try {
-    decoded = Buffer.from(pubkeyBase64.trim(), "base64");
-  } catch (err) {
-    throw new Error(
-      `Updater pubkey is not valid base64 (${err instanceof Error ? err.message : String(err)}).`,
-    );
-  }
-
-  const text = decoded.toString("utf8");
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  const base64Line = [...lines].reverse().find((l) => /^[A-Za-z0-9+/]+={0,2}$/.test(l));
-  if (!base64Line) {
-    throw new Error(
-      `Updater pubkey did not contain a minisign base64 payload line. Decoded text:\n${text}`,
-    );
-  }
-
-  const payload = Buffer.from(base64Line, "base64");
-  if (payload.length !== 42) {
-    throw new Error(
-      `Updater pubkey minisign payload decoded to ${payload.length} bytes (expected 42).`,
-    );
-  }
-
-  if (payload[0] !== 0x45 || payload[1] !== 0x64) {
-    throw new Error(
-      `Updater pubkey minisign payload does not start with "Ed" (expected 0x45 0x64).`,
-    );
-  }
-
-  const keyIdBytes = payload.subarray(2, 10);
-  const keyIdHex = Buffer.from(keyIdBytes).reverse().toString("hex").toUpperCase();
-  const publicKey = payload.subarray(10);
-  if (publicKey.length !== 32) {
-    throw new Error(
-      `Updater pubkey minisign payload contained ${publicKey.length} public key bytes (expected 32).`,
-    );
-  }
-
-  return { keyIdHex, publicKey };
-}
-
-/**
- * Parse a Tauri updater signature string.
- *
- * In GitHub Releases (tauri-action), `.sig` files and `latest.json.sig` are typically text files
- * containing base64. Depending on the Tauri/minisign version, the base64 may decode to either:
- *
- * - 64 bytes: raw Ed25519 signature bytes
- * - 74 bytes: minisign signature structure: "Ed" + key id (8) + signature (64)
- *
- * @param {string} signatureText
- */
-function parseTauriSignature(signatureText) {
-  const trimmed = signatureText.trim();
-  if (!trimmed) {
-    throw new Error("Signature file is empty.");
-  }
-
-  const candidates = trimmed.includes("\n")
-    ? trimmed
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter((l) => /^[A-Za-z0-9+/]+={0,2}$/.test(l))
-    : [trimmed];
-
-  for (const candidate of candidates) {
-    let bytes;
-    try {
-      bytes = Buffer.from(candidate, "base64");
-    } catch {
-      continue;
-    }
-
-    if (bytes.length === 64) {
-      return { signature: bytes, keyIdHex: null };
-    }
-
-    if (bytes.length === 74) {
-      if (bytes[0] !== 0x45 || bytes[1] !== 0x64) {
-        continue;
-      }
-      const keyIdBytes = bytes.subarray(2, 10);
-      const keyIdHex = Buffer.from(keyIdBytes).reverse().toString("hex").toUpperCase();
-      const signature = bytes.subarray(10);
-      if (signature.length === 64) {
-        return { signature, keyIdHex };
-      }
-    }
-  }
-
-  throw new Error(
-    `Signature did not decode to 64 raw bytes or a 74-byte minisign structure. First 200 chars:\n${trimmed.slice(0, 200)}`,
-  );
-}
-
-/**
  * @param {Buffer} latestJsonBytes
  * @param {string} signatureText
  * @param {string} pubkeyBase64
  */
 function verifyLatestJsonSignature(latestJsonBytes, signatureText, pubkeyBase64) {
-  const { signature, keyIdHex: sigKeyId } = parseTauriSignature(signatureText);
-  const { keyIdHex: pubKeyId, publicKey: rawPubkey } = parseTauriUpdaterPubkey(pubkeyBase64);
+  const { signatureBytes, keyId: sigKeyId } = parseTauriUpdaterSignature(signatureText, "latest.json.sig");
+  const { publicKeyBytes, keyId: pubKeyId } = parseTauriUpdaterPubkey(pubkeyBase64);
 
-  if (sigKeyId && sigKeyId !== pubKeyId) {
+  if (sigKeyId && pubKeyId && sigKeyId !== pubKeyId) {
     throw new Error(
       `latest.json.sig key id mismatch: signature uses ${sigKeyId}, but updater pubkey is ${pubKeyId}.`,
     );
   }
 
-  const publicKey = ed25519PublicKeyFromRaw(rawPubkey);
-  const ok = crypto.verify(null, latestJsonBytes, publicKey, signature);
+  const publicKey = ed25519PublicKeyFromRaw(publicKeyBytes);
+  const ok = crypto.verify(null, latestJsonBytes, publicKey, signatureBytes);
   if (!ok) {
     throw new Error(
       `latest.json.sig does not verify latest.json with the configured updater public key. This typically means latest.json and latest.json.sig were generated/uploaded inconsistently (race/overwrite).`,
@@ -769,7 +652,7 @@ async function main() {
 
   /** @type {string[]} */
   const errors = [];
-  /** @type {{ keyIdHex: string; publicKey: Buffer } | null} */
+  /** @type {{ keyId: string | null; publicKeyBytes: Buffer } | null} */
   let updaterPubkey = null;
 
   const manifestVersion = typeof manifest?.version === "string" ? manifest.version : "";
@@ -840,10 +723,13 @@ async function main() {
 
         // Ensure the signature string is plausibly a Tauri/minisign signature (base64 of either
         // raw 64-byte Ed25519 signature bytes or a minisign wrapper structure).
-        const { keyIdHex } = parseTauriSignature(/** @type {any} */ (entry).signature);
-        if (keyIdHex && updaterPubkey && keyIdHex !== updaterPubkey.keyIdHex) {
+        const { keyId } = parseTauriUpdaterSignature(
+          /** @type {any} */ (entry).signature,
+          `${target}.signature`,
+        );
+        if (keyId && updaterPubkey?.keyId && keyId !== updaterPubkey.keyId) {
           throw new Error(
-            `signature key id mismatch: expected ${updaterPubkey.keyIdHex} but got ${keyIdHex}`,
+            `signature key id mismatch: expected ${updaterPubkey.keyId} but got ${keyId}`,
           );
         }
       } catch (err) {
