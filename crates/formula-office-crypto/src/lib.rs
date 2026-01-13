@@ -69,12 +69,10 @@ pub fn decrypt_encrypted_package_ole(
     let mut ole = cfb::CompoundFile::open(cursor)?;
 
     let mut encryption_info = Vec::new();
-    ole.open_stream("EncryptionInfo")?
-        .read_to_end(&mut encryption_info)?;
+    open_stream(&mut ole, "EncryptionInfo")?.read_to_end(&mut encryption_info)?;
 
     let mut encrypted_package = Vec::new();
-    ole.open_stream("EncryptedPackage")?
-        .read_to_end(&mut encrypted_package)?;
+    open_stream(&mut ole, "EncryptedPackage")?.read_to_end(&mut encrypted_package)?;
 
     decrypt_encrypted_package(&encryption_info, &encrypted_package, password)
 }
@@ -137,7 +135,34 @@ fn decrypt_encrypted_package(
 }
 
 fn stream_exists<R: Read + std::io::Seek>(ole: &mut cfb::CompoundFile<R>, name: &str) -> bool {
-    ole.open_stream(name).is_ok()
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
+}
+
+fn open_stream<R: Read + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> Result<cfb::Stream<R>, OfficeCryptoError> {
+    match ole.open_stream(name) {
+        Ok(s) => Ok(s),
+        Err(err1) => {
+            let with_leading_slash = format!("/{name}");
+            match ole.open_stream(&with_leading_slash) {
+                Ok(s) => Ok(s),
+                Err(err2) if err1.kind() == std::io::ErrorKind::NotFound => {
+                    Err(OfficeCryptoError::InvalidFormat(format!(
+                        "missing OLE stream {name}: {err2}"
+                    )))
+                }
+                Err(err2) => Err(OfficeCryptoError::InvalidFormat(format!(
+                    "failed to open OLE stream {name}: {err1}; {err2}"
+                ))),
+            }
+        }
+    }
 }
 
 fn validate_decrypted_package(bytes: &[u8]) -> Result<(), OfficeCryptoError> {

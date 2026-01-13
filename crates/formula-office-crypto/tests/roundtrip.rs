@@ -3,6 +3,7 @@ use std::io::{Cursor, Write};
 use base64::Engine;
 use cipher::block_padding::NoPadding;
 use cipher::{BlockEncryptMut, KeyIvInit};
+use hmac::{Hmac, Mac};
 use sha2::Digest;
 
 use formula_office_crypto::{
@@ -12,6 +13,8 @@ use formula_office_crypto::{
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
 const BLOCK_KEY_VERIFIER_HASH_VALUE: &[u8; 8] = b"\xD7\xAA\x0F\x6D\x30\x61\x34\x4E";
 const BLOCK_KEY_ENCRYPTED_KEY_VALUE: &[u8; 8] = b"\x14\x6E\x0B\xE7\xAB\xAC\xD0\xD6";
+const BLOCK_KEY_INTEGRITY_HMAC_KEY: &[u8; 8] = b"\x5F\xB2\xAD\x01\x0C\xB9\xE1\xF6";
+const BLOCK_KEY_INTEGRITY_HMAC_VALUE: &[u8; 8] = b"\xA0\x67\x7F\x02\xB2\x2C\x84\x33";
 
 #[test]
 fn roundtrip_standard_encryption() {
@@ -221,26 +224,6 @@ fn encrypt_agile_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
     let enc_vhv_b64 = b64.encode(enc_vhv);
     let enc_kv_b64 = b64.encode(enc_kv);
 
-    // Dummy integrity fields (not validated by the library).
-    let dummy = b64.encode([0u8; 32]);
-
-    let xml = format!(
-        r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
-  <keyData saltSize="16" blockSize="16" keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
-  <dataIntegrity encryptedHmacKey="{dummy}" encryptedHmacValue="{dummy}"/>
-  <keyEncryptors>
-    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
-      <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
-        saltSize="16" blockSize="16" keyBits="256" spinCount="{spin_count}" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
-        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
-        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
-        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
-      </p:encryptedKey>
-    </keyEncryptor>
-  </keyEncryptors>
-</encryption>"#
-    );
-
     // Encrypt the package data in 4096-byte segments using a single package key and per-block IVs
     // derived from the keyData salt + block index.
     let mut encrypted_package = Vec::new();
@@ -265,6 +248,44 @@ fn encrypt_agile_ooxml_ole(plaintext: &[u8], password: &str) -> Vec<u8> {
         offset += seg_len;
         block += 1;
     }
+
+    // Integrity (HMAC over the EncryptedPackage stream).
+    //
+    // Match the crate's Agile writer: encryptedHmacKey/value are AES-CBC encrypted using the
+    // package key and IVs derived from the keyData salt + fixed block keys.
+    let hmac_key_plain = [0x22u8; 64];
+    let hmac_value_plain = hmac_sha512(&hmac_key_plain, &encrypted_package);
+
+    let iv_hmac_key =
+        sha512_digest(&[&salt_key_data[..], &BLOCK_KEY_INTEGRITY_HMAC_KEY[..]].concat());
+    let iv_hmac_key = &iv_hmac_key[..block_size];
+    let encrypted_hmac_key = aes256_cbc_encrypt(&package_key_plain, iv_hmac_key, &hmac_key_plain);
+
+    let iv_hmac_val =
+        sha512_digest(&[&salt_key_data[..], &BLOCK_KEY_INTEGRITY_HMAC_VALUE[..]].concat());
+    let iv_hmac_val = &iv_hmac_val[..block_size];
+    let encrypted_hmac_value =
+        aes256_cbc_encrypt(&package_key_plain, iv_hmac_val, &hmac_value_plain);
+
+    let encrypted_hmac_key_b64 = b64.encode(encrypted_hmac_key);
+    let encrypted_hmac_value_b64 = b64.encode(encrypted_hmac_value);
+
+    let xml = format!(
+        r#"<encryption xmlns="http://schemas.microsoft.com/office/2006/encryption">
+  <keyData saltSize="16" blockSize="16" keyBits="256" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_data_b64}"/>
+  <dataIntegrity encryptedHmacKey="{encrypted_hmac_key_b64}" encryptedHmacValue="{encrypted_hmac_value_b64}"/>
+  <keyEncryptors>
+    <keyEncryptor uri="http://schemas.microsoft.com/office/2006/keyEncryptor/password">
+      <p:encryptedKey xmlns:p="http://schemas.microsoft.com/office/2006/keyEncryptor/password"
+        saltSize="16" blockSize="16" keyBits="256" spinCount="{spin_count}" hashAlgorithm="SHA512" cipherAlgorithm="AES" cipherChaining="ChainingModeCBC" saltValue="{salt_key_encryptor_b64}">
+        <p:encryptedVerifierHashInput>{enc_vhi_b64}</p:encryptedVerifierHashInput>
+        <p:encryptedVerifierHashValue>{enc_vhv_b64}</p:encryptedVerifierHashValue>
+        <p:encryptedKeyValue>{enc_kv_b64}</p:encryptedKeyValue>
+      </p:encryptedKey>
+    </keyEncryptor>
+  </keyEncryptors>
+</encryption>"#
+    );
 
     // Build the EncryptionInfo stream.
     let version_major = 4u16;
@@ -310,6 +331,12 @@ fn sha512_digest(data: &[u8]) -> Vec<u8> {
     let mut hasher = sha2::Sha512::new();
     hasher.update(data);
     hasher.finalize().to_vec()
+}
+
+fn hmac_sha512(key: &[u8], data: &[u8]) -> [u8; 64] {
+    let mut mac: Hmac<sha2::Sha512> = Hmac::new_from_slice(key).expect("HMAC accepts any key size");
+    mac.update(data);
+    mac.finalize().into_bytes().into()
 }
 
 fn standard_derive_key_sha1(password: &str, salt: &[u8], key_bits: u32, block: u32) -> [u8; 16] {

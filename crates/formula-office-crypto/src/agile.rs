@@ -19,11 +19,7 @@ use zeroize::Zeroizing;
 const BLOCK_KEY_VERIFIER_HASH_INPUT: &[u8; 8] = b"\xFE\xA7\xD2\x76\x3B\x4B\x9E\x79";
 const BLOCK_KEY_VERIFIER_HASH_VALUE: &[u8; 8] = b"\xD7\xAA\x0F\x6D\x30\x61\x34\x4E";
 const BLOCK_KEY_ENCRYPTED_KEY_VALUE: &[u8; 8] = b"\x14\x6E\x0B\xE7\xAB\xAC\xD0\xD6";
-// The data integrity block keys are part of MS-OFFCRYPTO, but we currently do not validate the
-// HMAC. They are parsed for completeness.
-#[allow(dead_code)]
 const BLOCK_KEY_INTEGRITY_HMAC_KEY: &[u8; 8] = b"\x5F\xB2\xAD\x01\x0C\xB9\xE1\xF6";
-#[allow(dead_code)]
 const BLOCK_KEY_INTEGRITY_HMAC_VALUE: &[u8; 8] = b"\xA0\x67\x7F\x02\xB2\x2C\x84\x33";
 
 #[derive(Debug, Clone)]
@@ -230,6 +226,50 @@ pub(crate) fn decrypt_agile_encrypted_package(
         OfficeCryptoError::InvalidFormat("decrypted keyValue shorter than keyBytes".to_string())
     })?;
     let package_key: Zeroizing<Vec<u8>> = Zeroizing::new(package_key_bytes.to_vec());
+
+    // Validate data integrity (HMAC over the entire EncryptedPackage stream).
+    //
+    // The HMAC key/value are encrypted using the package key, with IVs derived from the keyData
+    // salt and fixed block keys.
+    let digest_len = info.key_data.hash_algorithm.digest_len();
+    let iv_hmac_key = derive_iv(
+        info.key_data.hash_algorithm,
+        &info.key_data.salt,
+        BLOCK_KEY_INTEGRITY_HMAC_KEY,
+        info.key_data.block_size,
+    );
+    let hmac_key_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+        &package_key,
+        &iv_hmac_key,
+        &info.data_integrity.encrypted_hmac_key,
+    )?);
+    let hmac_key_plain = hmac_key_plain.get(..digest_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat(
+            "decrypted encryptedHmacKey shorter than hash output".to_string(),
+        )
+    })?;
+
+    let iv_hmac_val = derive_iv(
+        info.key_data.hash_algorithm,
+        &info.key_data.salt,
+        BLOCK_KEY_INTEGRITY_HMAC_VALUE,
+        info.key_data.block_size,
+    );
+    let hmac_value_plain: Zeroizing<Vec<u8>> = Zeroizing::new(aes_cbc_decrypt(
+        &package_key,
+        &iv_hmac_val,
+        &info.data_integrity.encrypted_hmac_value,
+    )?);
+    let expected_hmac = hmac_value_plain.get(..digest_len).ok_or_else(|| {
+        OfficeCryptoError::InvalidFormat(
+            "decrypted encryptedHmacValue shorter than hash output".to_string(),
+        )
+    })?;
+
+    let computed_hmac = compute_hmac(info.key_data.hash_algorithm, hmac_key_plain, encrypted_package);
+    if !ct_eq(expected_hmac, &computed_hmac) {
+        return Err(OfficeCryptoError::IntegrityCheckFailed);
+    }
 
     // Decrypt the package data in 4096-byte segments.
     const SEGMENT_LEN: usize = 4096;

@@ -2257,6 +2257,7 @@ dependencies = [
  "cbc",
  "cfb 0.10.0",
  "cipher",
+ "getrandom 0.2.17",
  "hmac",
  "quick-xml 0.31.0",
  "rand 0.8.5",

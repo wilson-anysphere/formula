@@ -19,5 +19,10 @@ subtle = "2.6"
 thiserror = "1.0"
 zeroize = { version = "1.8", features = ["zeroize_derive"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# `rand` (used for the test/encryption helpers) pulls in `getrandom`, which requires the `js`
+# feature on `wasm32-unknown-unknown`.
+getrandom = { version = "0.2", features = ["js"] }
+
 [dev-dependencies]
 zip = { version = "2.1", default-features = false }
