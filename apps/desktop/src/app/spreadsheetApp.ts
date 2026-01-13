@@ -7745,7 +7745,9 @@ export class SpreadsheetApp {
 
     if (!selected) {
       overlay.setSelectedId(null);
-      void overlay.render([], viewport, { drawObjects: false });
+      void overlay.render([], viewport, { drawObjects: false }).catch((err) => {
+        console.warn("Chart selection overlay render failed", err);
+      });
       return;
     }
 
@@ -7757,7 +7759,9 @@ export class SpreadsheetApp {
       zOrder: 0,
     };
     overlay.setSelectedId(drawingId);
-    void overlay.render([obj], viewport, { drawObjects: false });
+    void overlay.render([obj], viewport, { drawObjects: false }).catch((err) => {
+      console.warn("Chart selection overlay render failed", err);
+    });
   }
 
   private hitTestChartAtClientPoint(clientX: number, clientY: number): {
@@ -8528,8 +8532,8 @@ export class SpreadsheetApp {
   private renderDrawings(sharedViewport?: GridViewportState): void {
     const viewport = this.getDrawingRenderViewport(sharedViewport);
     const objects = this.listDrawingObjectsForSheet();
-    void this.drawingOverlay.render(objects, viewport).catch(() => {
-      // Best-effort: avoid unhandled rejections from overlay rendering.
+    void this.drawingOverlay.render(objects, viewport).catch((err) => {
+      console.warn("Drawing overlay render failed", err);
     });
   }
 
