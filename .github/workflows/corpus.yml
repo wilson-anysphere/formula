@@ -85,6 +85,13 @@ jobs:
         with:
           name: corpus-public-${{ github.sha }}
           path: tools/corpus/out/public
+      - name: Upload corpus public summary (stable paths)
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-public-summary
+          path: |
+            tools/corpus/out/public/summary.json
+            tools/corpus/out/public/summary.md
 
   private-corpus:
     name: Private corpus triage (scheduled)
@@ -246,3 +253,12 @@ PY
         with:
           name: corpus-private-${{ github.sha }}
           path: tools/corpus/out/private
+      - name: Upload corpus private summary (stable paths)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-private-summary
+          path: |
+            tools/corpus/out/private/summary.json
+            tools/corpus/out/private/summary.md
+          if-no-files-found: ignore
