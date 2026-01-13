@@ -180,7 +180,7 @@
   z-index: 50;
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 6px;
   box-shadow: var(--shadow-surface);
   max-height: 320px;
@@ -212,7 +212,7 @@
   align-items: center;
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   cursor: default;
   color: var(--text-primary);
 }
@@ -248,15 +248,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .formula-bar-name-box-option[aria-selected="true"] .formula-bar-name-box-option-description {
@@ -482,7 +474,7 @@
   max-height: 280px;
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
   box-shadow: var(--shadow-surface);
 }
@@ -576,15 +568,7 @@
 }
 
 .formula-bar-hint-signature {
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -618,15 +602,7 @@
   /* Force preview onto its own line within the flex-wrapping hint body. */
   flex-basis: 100%;
   margin-top: 4px;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-tertiary);
@@ -697,7 +673,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -741,7 +717,7 @@
   align-items: center;
   justify-content: center;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -802,7 +778,7 @@
   max-width: 360px;
   background: var(--bg-primary);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-surface);
   font-size: 12px;
   color: var(--text-primary);
@@ -816,15 +792,7 @@
 
 .formula-range-preview-tooltip__header {
   font-weight: 700;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .formula-range-preview-tooltip__grid {
@@ -839,15 +807,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family:
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Monaco,
-    Consolas,
-    "Liberation Mono",
-    "Courier New",
-    monospace;
+  font-family: var(--font-mono);
 }
 
 .formula-range-preview-tooltip__summary {
