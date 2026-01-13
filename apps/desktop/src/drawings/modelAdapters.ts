@@ -135,6 +135,17 @@ function parseIdNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function parseSheetId(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return String(value);
+  return undefined;
+}
+
 function stableHash32(input: string): number {
   // FNV-1a 32-bit.
   let hash = 0x811c9dc5;
@@ -245,7 +256,10 @@ export function convertModelAnchorToUiAnchor(modelAnchorJson: unknown): Anchor {
   }
 }
 
-function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
+function convertModelDrawingObjectKind(
+  model: unknown,
+  context?: { sheetId?: string; drawingObjectId?: number },
+): DrawingObjectKind {
   const { tag, value } = unwrapPossiblyTaggedEnum(model, "DrawingObjectKind", { tagKeys: ["kind", "type"] });
   if (!isRecord(value)) throw new Error(`DrawingObjectKind.${tag} must be an object`);
   const normalized = normalizeEnumTag(tag);
@@ -279,7 +293,15 @@ function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
         return { type: "unknown", rawXml, label: label ?? graphicFramePlaceholderLabel(rawXml) ?? undefined };
       }
 
-      return { type: "chart", chartId: relId, label: label ?? `Chart (${relId})`, rawXml };
+      const sheetId = context?.sheetId;
+      const objectId = context?.drawingObjectId;
+      const chartId =
+        sheetId && objectId != null
+          ? `${sheetId}:${String(objectId)}`
+          : // Back-compat: when the sheet context isn't available, fall back to the drawing rel id.
+            relId;
+
+      return { type: "chart", chartId, label: label ?? `Chart (${relId})`, rawXml };
     }
     case "chart": {
       // UI/other internal representations may already use `{ type: "chart", chartId }`.
@@ -299,12 +321,16 @@ function convertModelDrawingObjectKind(model: unknown): DrawingObjectKind {
   }
 }
 
-export function convertModelDrawingObjectToUiDrawingObject(modelObjJson: unknown): DrawingObject {
+export function convertModelDrawingObjectToUiDrawingObject(
+  modelObjJson: unknown,
+  context?: { sheetId?: string | number },
+): DrawingObject {
   if (!isRecord(modelObjJson)) throw new Error("DrawingObject must be an object");
 
   const id = parseDrawingObjectId((modelObjJson as JsonRecord).id);
   const anchor = convertModelAnchorToUiAnchor((modelObjJson as JsonRecord).anchor);
-  const kind = convertModelDrawingObjectKind((modelObjJson as JsonRecord).kind);
+  const sheetId = parseSheetId(context?.sheetId);
+  const kind = convertModelDrawingObjectKind((modelObjJson as JsonRecord).kind, { sheetId, drawingObjectId: id });
 
   const zOrderValue = pick(modelObjJson, ["z_order", "zOrder"]);
   const zOrder = zOrderValue == null ? 0 : readNumber(zOrderValue, "DrawingObject.z_order");
@@ -466,13 +492,14 @@ export function convertModelImageStoreToUiImageStore(modelImagesJson: unknown): 
  */
 export function convertModelWorksheetDrawingsToUiDrawingObjects(modelWorksheetJson: unknown): DrawingObject[] {
   if (!isRecord(modelWorksheetJson)) return [];
+  const sheetId = parseSheetId(pick(modelWorksheetJson, ["id", "sheet_id", "sheetId"]));
   const drawingsValue = pick(modelWorksheetJson, ["drawings"]);
   if (!Array.isArray(drawingsValue)) return [];
 
   const out: DrawingObject[] = [];
   for (const obj of drawingsValue) {
     try {
-      out.push(convertModelDrawingObjectToUiDrawingObject(obj));
+      out.push(convertModelDrawingObjectToUiDrawingObject(obj, sheetId ? { sheetId } : undefined));
     } catch {
       // ignore
     }

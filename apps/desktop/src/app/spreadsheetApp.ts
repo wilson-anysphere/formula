@@ -8,6 +8,7 @@ import { emuToPx } from "../charts/overlay.js";
 import { ChartStore, type ChartRecord } from "../charts/chartStore";
 import { ChartRendererAdapter, type ChartStore as ChartRendererStore } from "../charts/chartRendererAdapter";
 import type { ChartModel } from "../charts/renderChart";
+import { FormulaChartModelStore } from "../charts/formulaChartModelStore";
 import { FALLBACK_CHART_THEME, type ChartTheme } from "../charts/theme";
 import { DrawingOverlay, pxToEmu, type GridGeometry as DrawingGridGeometry, type Viewport as DrawingViewport } from "../drawings/overlay";
 import type { DrawingObject, ImageEntry, ImageStore } from "../drawings/types";
@@ -586,6 +587,7 @@ export class SpreadsheetApp {
   private drawingCanvas: HTMLCanvasElement;
   private drawingOverlay: DrawingOverlay;
   private readonly drawingImages: ImageStore;
+  private readonly formulaChartModelStore = new FormulaChartModelStore();
   private drawingViewportMemo:
     | {
         width: number;
@@ -1609,6 +1611,7 @@ export class SpreadsheetApp {
       this.drawingCanvas,
       this.drawingImages,
       this.gridMode === "shared" ? sharedDrawingGeom : legacyDrawingGeom,
+      new ChartRendererAdapter(this.formulaChartModelStore),
     );
 
     if (this.gridMode === "shared") {
