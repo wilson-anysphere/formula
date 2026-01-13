@@ -8092,7 +8092,7 @@ export class SpreadsheetApp {
    * Viewport used for rendering on `drawingCanvas`, whose origin is already positioned
    * under the row/col headers (so headerOffsetX/Y are always 0).
    */
-  private getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
+  getDrawingRenderViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
 
     // The drawing canvas is positioned under headers so the overlay render coordinates
@@ -8136,7 +8136,7 @@ export class SpreadsheetApp {
    * Viewport used for hit testing + interactions on surfaces that include the row/col
    * headers (e.g. `selectionCanvas` in shared-grid mode).
    */
-  private getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
+  getDrawingInteractionViewport(sharedViewport?: GridViewportState): DrawingViewport {
     const layout = this.computeDrawingViewportLayout(sharedViewport);
     return {
       scrollX: this.scrollX,

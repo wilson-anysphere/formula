@@ -298,8 +298,8 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       sharedGrid.scrollTo(50, 10);
       const sharedViewport = sharedGrid.renderer.scroll.getViewportState();
 
-      const renderViewport = (app as any).getDrawingRenderViewport(sharedViewport);
-      const interactionViewport = (app as any).getDrawingInteractionViewport(sharedViewport);
+      const renderViewport = app.getDrawingRenderViewport(sharedViewport);
+      const interactionViewport = app.getDrawingInteractionViewport(sharedViewport);
 
       // Render viewport (drawingCanvas-local).
       expect(renderViewport.headerOffsetX).toBe(0);
