@@ -108,7 +108,7 @@ import { showCollabEditRejectedToast } from "../collab/editRejectionToast";
 import * as Y from "yjs";
 import { CommentManager, bindDocToStorage, createCommentManagerForDoc, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
-import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
+import { bindCollabSessionToDocumentController, createCollabSession, makeCellKey, type CollabSession } from "@formula/collab-session";
 import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 import { tryDeriveCollabSessionPermissionsFromJwtToken } from "../collab/jwt";
 import { getCollabUserIdentity, overrideCollabUserIdentityId, type CollabUserIdentity } from "../collab/userIdentity";
@@ -10978,6 +10978,29 @@ export class SpreadsheetApp {
   }
 
   private applyEdit(sheetId: string, cell: CellCoord, rawValue: string): void {
+    // In collab/permissioned contexts, `DocumentController.canEditCell` may filter out
+    // user edits entirely. Without a UX signal this can look like the UI "snapped back".
+    const canEditCell = (this.document as any)?.canEditCell;
+    if (typeof canEditCell === "function") {
+      try {
+        const allowed = Boolean(canEditCell.call(this.document, { sheetId, row: cell.row, col: cell.col }));
+        if (!allowed) {
+          showCollabEditRejectedToast([
+            {
+              sheetId,
+              row: cell.row,
+              col: cell.col,
+              rejectionKind: "cell",
+              rejectionReason: this.inferCollabEditRejectionReason({ sheetId, row: cell.row, col: cell.col }),
+            },
+          ]);
+          return;
+        }
+      } catch {
+        // Best-effort: fall through to attempting the edit.
+      }
+    }
+
     const original = this.document.getCell(sheetId, cell) as { value: unknown; formula: string | null };
     if (rawValue.trim() === "") {
       this.document.clearCell(sheetId, cell, { label: "Clear cell" });
@@ -10997,6 +11020,32 @@ export class SpreadsheetApp {
       return;
     }
     this.document.setCellInput(sheetId, cell, rawValue, { label: "Edit cell" });
+  }
+
+  private inferCollabEditRejectionReason(cell: { sheetId: string; row: number; col: number }): "permission" | "encryption" | "unknown" {
+    const session = this.collabSession;
+    if (!session) return "permission";
+
+    // Best-effort: infer missing-key encryption failures so the toast can be specific.
+    try {
+      const encryption = typeof (session as any).getEncryptionConfig === "function" ? (session as any).getEncryptionConfig() : null;
+      if (!encryption || typeof encryption.keyForCell !== "function") return "permission";
+
+      const key = encryption.keyForCell(cell) ?? null;
+      const shouldEncrypt =
+        typeof encryption.shouldEncryptCell === "function" ? Boolean(encryption.shouldEncryptCell(cell)) : key != null;
+
+      // If the cell is already encrypted in the shared doc, or encryption is required by
+      // config, and we don't have a key, treat this as an encryption rejection.
+      const cellKey = makeCellKey(cell);
+      const cellData = (session as any).cells?.get?.(cellKey) ?? null;
+      const hasEnc = cellData && typeof cellData.get === "function" ? cellData.get("enc") !== undefined : false;
+      if ((hasEnc || shouldEncrypt) && !key) return "encryption";
+    } catch {
+      // ignore
+    }
+
+    return "permission";
   }
 
   private commitFormulaBar(text: string, commit: FormulaBarCommit): void {
