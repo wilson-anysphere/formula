@@ -54,6 +54,7 @@ fn patch_sheet_bin_errors_when_formula_requires_rgcb_but_new_rgcb_is_none() {
             row: 0,
             col: 0,
             new_value: CellValue::Number(1.0),
+            new_style: None,
             new_formula: Some(rgce_memfunc_with_array()),
             new_rgcb: None,
             shared_string_index: None,
