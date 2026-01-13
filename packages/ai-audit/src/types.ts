@@ -88,5 +88,21 @@ export interface AuditListFilters {
   session_id?: string;
   workbook_id?: string;
   mode?: AIMode | AIMode[];
+  /**
+   * Exclusive upper bound on `timestamp_ms`.
+   */
+  before_timestamp_ms?: number;
+  /**
+   * Inclusive lower bound on `timestamp_ms`.
+   */
+  after_timestamp_ms?: number;
+  /**
+   * Stable pagination cursor.
+   *
+   * Results are ordered newest-first. When provided, the store should return
+   * entries strictly older than the cursor (older timestamp, or for equal
+   * timestamps, an `id` tiebreaker when `before_id` is present).
+   */
+  cursor?: { before_timestamp_ms: number; before_id?: string };
   limit?: number;
 }

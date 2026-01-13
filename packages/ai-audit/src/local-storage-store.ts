@@ -43,7 +43,7 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
-    const { session_id, workbook_id, mode, limit } = filters;
+    const { session_id, workbook_id, mode, limit, before_timestamp_ms, after_timestamp_ms, cursor } = filters;
     const nowMs = Date.now();
     const loaded = this.loadEntries();
     const entries = this.enforceAgeRetention(loaded, nowMs);
@@ -59,7 +59,16 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
       const modes = Array.isArray(mode) ? mode : [mode];
       filtered = filtered.filter((entry) => modes.includes(entry.mode));
     }
-    filtered.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
+    if (typeof after_timestamp_ms === "number") {
+      filtered = filtered.filter((entry) => entry.timestamp_ms >= after_timestamp_ms);
+    }
+    if (typeof before_timestamp_ms === "number") {
+      filtered = filtered.filter((entry) => entry.timestamp_ms < before_timestamp_ms);
+    }
+    if (cursor) {
+      filtered = filtered.filter((entry) => isEntryBeforeCursor(entry, cursor));
+    }
+    filtered.sort(compareEntriesNewestFirst);
     return typeof limit === "number" ? filtered.slice(0, limit) : filtered;
   }
 
@@ -115,6 +124,28 @@ export class LocalStorageAIAuditStore implements AIAuditStore {
     }
     return storage;
   }
+}
+
+function compareEntriesNewestFirst(a: AIAuditEntry, b: AIAuditEntry): number {
+  if (a.timestamp_ms !== b.timestamp_ms) return b.timestamp_ms - a.timestamp_ms;
+  return compareIdsDesc(a.id, b.id);
+}
+
+function compareIdsDesc(aId: string | undefined, bId: string | undefined): number {
+  const aVal = aId ?? "";
+  const bVal = bId ?? "";
+  if (aVal === bVal) return 0;
+  return aVal < bVal ? 1 : -1;
+}
+
+function isEntryBeforeCursor(
+  entry: AIAuditEntry,
+  cursor: NonNullable<AuditListFilters["cursor"]>,
+): boolean {
+  if (entry.timestamp_ms < cursor.before_timestamp_ms) return true;
+  if (entry.timestamp_ms > cursor.before_timestamp_ms) return false;
+  if (!cursor.before_id) return false;
+  return compareIdsDesc(entry.id, cursor.before_id) > 0;
 }
 
 function getLocalStorageOrNull(): Storage | null {

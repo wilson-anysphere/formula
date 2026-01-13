@@ -169,10 +169,28 @@ export class SqliteAIAuditStore implements AIAuditStore {
         params.push(...modes);
       }
     }
+    if (typeof filters.after_timestamp_ms === "number") {
+      where.push("timestamp_ms >= ?");
+      params.push(filters.after_timestamp_ms);
+    }
+    if (typeof filters.before_timestamp_ms === "number") {
+      where.push("timestamp_ms < ?");
+      params.push(filters.before_timestamp_ms);
+    }
+    if (filters.cursor) {
+      const cursor = filters.cursor;
+      if (cursor.before_id) {
+        where.push("(timestamp_ms < ? OR (timestamp_ms = ? AND id < ?))");
+        params.push(cursor.before_timestamp_ms, cursor.before_timestamp_ms, cursor.before_id);
+      } else {
+        where.push("timestamp_ms < ?");
+        params.push(cursor.before_timestamp_ms);
+      }
+    }
     if (where.length > 0) {
       sql += ` WHERE ${where.join(" AND ")}`;
     }
-    sql += " ORDER BY timestamp_ms DESC";
+    sql += " ORDER BY timestamp_ms DESC, id DESC";
     if (typeof filters.limit === "number") {
       sql += " LIMIT ?";
       params.push(filters.limit);
@@ -271,6 +289,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
       CREATE INDEX IF NOT EXISTS idx_ai_audit_log_workbook ON ai_audit_log(workbook_id);
       CREATE INDEX IF NOT EXISTS idx_ai_audit_log_mode ON ai_audit_log(mode);
       CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp ON ai_audit_log(timestamp_ms);
+      CREATE INDEX IF NOT EXISTS idx_ai_audit_log_timestamp_id ON ai_audit_log(timestamp_ms, id);
     `);
   }
 
@@ -289,7 +308,7 @@ export class SqliteAIAuditStore implements AIAuditStore {
         DELETE FROM ai_audit_log
         WHERE id IN (
           SELECT id FROM ai_audit_log
-          ORDER BY timestamp_ms DESC
+          ORDER BY timestamp_ms DESC, id DESC
           LIMIT -1 OFFSET ?
         );
       `);
