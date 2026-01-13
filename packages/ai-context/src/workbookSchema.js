@@ -41,7 +41,10 @@ function getSheetMatrix(sheet) {
  */
 function getSheetCellMap(sheet) {
   const cells = sheet?.cells;
-  if (cells instanceof Map) return cells;
+  // Accept either a real Map or any Map-like object that implements `.get()`.
+  // Some hosts wrap the underlying Map (proxy, custom class) while maintaining the
+  // same access pattern.
+  if (cells && typeof cells.get === "function") return cells;
   return null;
 }
 
