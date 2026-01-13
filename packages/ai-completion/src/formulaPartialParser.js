@@ -160,7 +160,7 @@ function getArgContext(input, openParenIndex, cursorPosition) {
   const baseDepth = 1;
   let depth = baseDepth;
   let argIndex = 0;
-  let lastCommaIndex = -1;
+  let lastArgSeparatorIndex = -1;
   let inString = false;
   let inSheetQuote = false;
   let bracketDepth = 0;
@@ -214,13 +214,13 @@ function getArgContext(input, openParenIndex, cursorPosition) {
     }
     if (ch === "(" && bracketDepth === 0) depth++;
     else if (ch === ")" && bracketDepth === 0) depth = Math.max(baseDepth, depth - 1);
-    else if (ch === "," && depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
+    else if ((ch === "," || ch === ";") && depth === baseDepth && bracketDepth === 0 && braceDepth === 0) {
       argIndex++;
-      lastCommaIndex = i;
+      lastArgSeparatorIndex = i;
     }
   }
 
-  let rawStart = lastCommaIndex === -1 ? openParenIndex + 1 : lastCommaIndex + 1;
+  let rawStart = lastArgSeparatorIndex === -1 ? openParenIndex + 1 : lastArgSeparatorIndex + 1;
   let start = rawStart;
   while (start < cursorPosition && /\s/.test(input[start])) start++;
   const currentArg = {
