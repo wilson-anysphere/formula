@@ -383,6 +383,22 @@ The policy engine can return decisions like **ALLOW**, **REDACT**, or **BLOCK** 
 
 Use this when you have real classification data (document/sheet/range/cell scopes) and need deterministic enforcement.
 
+#### AI policy knobs (`ai.cloudProcessing`)
+
+For cloud AI processing, the DLP policy rule (`DLP_ACTION.AI_CLOUD_PROCESSING` / `"ai.cloudProcessing"`) supports:
+
+- `maxAllowed`:
+  - the maximum classification level allowed to be sent to cloud AI (e.g. `"Confidential"`)
+  - anything **over** this threshold becomes **REDACT** or **BLOCK**
+- `redactDisallowed`:
+  - when `true`, over-threshold content produces a **REDACT** decision (call proceeds, but content must be redacted)
+  - when `false`, over-threshold content produces a **BLOCK** decision (do not call cloud AI)
+- `allowRestrictedContent`:
+  - when `true`, callers may opt into sending `"Restricted"` content by passing `dlp.includeRestrictedContent: true`
+  - when `false`, `"Restricted"` content is **always blocked** for cloud AI, even if the caller sets `includeRestrictedContent`
+
+`dlp.includeRestrictedContent` is therefore **not a bypass**; it is only honored when policy allows it.
+
 ### 2) Heuristic redaction — **defense-in-depth only**
 
 `classifyText()` / `redactText()` are small regex-based helpers (e.g., emails/SSNs/credit cards). They:
