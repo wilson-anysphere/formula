@@ -1,0 +1,69 @@
+import { describe, expect, it } from "vitest";
+
+import { extractSheetSchema } from "./schema.js";
+import { summarizeSheetSchema } from "./summarizeSheet.js";
+
+describe("summarizeSheetSchema", () => {
+  function buildSchema() {
+    return extractSheetSchema({
+      name: "Sheet1",
+      values: [
+        ["Product", "Sales", "Active"],
+        ["Alpha", 10, true],
+        ["Beta", 20, false],
+        [null, null, null],
+        [1, 2],
+        [3, 4],
+      ],
+      tables: [
+        { name: "SalesTable", range: "A1:C3" },
+        { name: "Matrix", range: "A5:B6" },
+      ],
+    });
+  }
+
+  it("produces a stable, compact output string", () => {
+    const schema = buildSchema();
+    const summary = summarizeSheetSchema(schema);
+
+    expect(summary).toBe(
+      [
+        "sheet=[Sheet1] tables=2 regions=2",
+        "T1 [SalesTable] r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
+        "T2 [Matrix] r=[Sheet1!A5:B6] rows=2 cols=2 hdr=0 h=[Column1|Column2] t=[number|number]",
+        "R1 r=[Sheet1!A1:C3] rows=2 cols=3 hdr=1 h=[Product|Sales|Active] t=[string|number|boolean]",
+        "R2 r=[Sheet1!A5:B6] rows=2 cols=2 hdr=0 h=[Column1|Column2] t=[number|number]",
+      ].join("\n"),
+    );
+  });
+
+  it("includes key facts (names, headers, inferred types)", () => {
+    const schema = buildSchema();
+    const summary = summarizeSheetSchema(schema);
+
+    expect(summary).toContain("[SalesTable]");
+    expect(summary).toContain("r=[Sheet1!A1:C3]");
+    expect(summary).toContain("h=[Product|Sales|Active]");
+    expect(summary).toContain("t=[string|number|boolean]");
+  });
+
+  it("respects verbosity caps (tables + headers)", () => {
+    const schema = buildSchema();
+    const summary = summarizeSheetSchema(schema, { maxTables: 1, maxHeadersPerTable: 2, maxTypesPerTable: 2, maxRegions: 1 });
+
+    // Table cap
+    expect(summary).toContain("tables=2");
+    expect(summary).toContain("T1 [SalesTable]");
+    expect(summary).not.toContain("[Matrix]");
+    expect(summary).toContain("T…+1");
+
+    // Header/type cap
+    expect(summary).toContain("h=[Product|Sales|…+1]");
+    expect(summary).toContain("t=[string|number|…+1]");
+
+    // Region cap
+    expect(summary).toContain("R1 r=[Sheet1!A1:C3]");
+    expect(summary).toContain("R…+1");
+  });
+});
+
