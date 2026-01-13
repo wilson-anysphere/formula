@@ -45,8 +45,6 @@ mod decrypt;
 pub mod diagnostics;
 mod formula_rewrite;
 
-pub use decrypt::DecryptError;
-
 #[derive(Clone, Copy, Debug)]
 struct DateTimeStyleIds {
     date: u32,
@@ -216,10 +214,26 @@ pub enum ImportError {
         "password required: workbook is password-protected/encrypted; use `import_xls_path_with_password(..)` to open it"
     )]
     EncryptedWorkbook,
+    #[error("invalid password")]
+    InvalidPassword,
+    #[error("unsupported `.xls` encryption scheme: {0}")]
+    UnsupportedEncryption(String),
     #[error("failed to decrypt `.xls`: {0}")]
-    Decrypt(#[from] DecryptError),
+    Decrypt(String),
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
+}
+
+impl From<decrypt::DecryptError> for ImportError {
+    fn from(err: decrypt::DecryptError) -> Self {
+        match err {
+            decrypt::DecryptError::WrongPassword => ImportError::InvalidPassword,
+            decrypt::DecryptError::UnsupportedEncryption(scheme) => {
+                ImportError::UnsupportedEncryption(scheme)
+            }
+            decrypt::DecryptError::InvalidFormat(msg) => ImportError::Decrypt(msg),
+        }
+    }
 }
 
 fn panic_payload_to_string(payload: &(dyn std::any::Any + Send)) -> String {

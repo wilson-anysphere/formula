@@ -7,9 +7,9 @@ use crate::ct::ct_eq;
 
 /// Errors returned while decrypting password-protected `.xls` BIFF8 workbooks.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
-pub enum DecryptError {
-    #[error("unsupported encryption scheme")]
-    UnsupportedEncryption,
+pub(crate) enum DecryptError {
+    #[error("unsupported encryption scheme: {0}")]
+    UnsupportedEncryption(String),
     #[error("wrong password")]
     WrongPassword,
     #[error("invalid encryption info: {0}")]
@@ -43,8 +43,8 @@ const PASSWORD_HASH_ITERATIONS: u32 = 50_000;
 fn map_biff_decrypt_error(err: crate::biff::encryption::DecryptError) -> DecryptError {
     match err {
         crate::biff::encryption::DecryptError::WrongPassword => DecryptError::WrongPassword,
-        crate::biff::encryption::DecryptError::UnsupportedEncryption(_) => {
-            DecryptError::UnsupportedEncryption
+        crate::biff::encryption::DecryptError::UnsupportedEncryption(scheme) => {
+            DecryptError::UnsupportedEncryption(scheme)
         }
         crate::biff::encryption::DecryptError::InvalidFilePass(message) => {
             DecryptError::InvalidFormat(message)
@@ -103,14 +103,19 @@ pub(crate) fn decrypt_biff_workbook_stream(
             return decrypt_biff8_workbook_stream_rc4_cryptoapi(workbook_stream, password);
         }
         if second_field != ENCRYPTION_SUBTYPE_STANDARD {
-            return Err(DecryptError::UnsupportedEncryption);
+            return Err(DecryptError::UnsupportedEncryption(format!(
+                "FILEPASS RC4 wEncryptionSubType=0x{second_field:04X}"
+            )));
         }
     } else if encryption_type != ENCRYPTION_TYPE_XOR {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X}"
+        )));
     }
 
     let mut out = workbook_stream.to_vec();
-    crate::biff::encryption::decrypt_workbook_stream(&mut out, password).map_err(map_biff_decrypt_error)?;
+    crate::biff::encryption::decrypt_workbook_stream(&mut out, password)
+        .map_err(map_biff_decrypt_error)?;
     crate::biff::records::mask_workbook_globals_filepass_record_id_in_place(&mut out);
     Ok(out)
 }
@@ -177,7 +182,10 @@ fn derive_key_material_legacy(password: &str, salt: &[u8]) -> Result<[u8; 20], D
     // This intentionally does *not* apply the 50,000-iteration hashing step used by other
     // CryptoAPI encodings.
     if salt.len() != 16 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::InvalidFormat(format!(
+            "CryptoAPI legacy salt length {} (expected 16)",
+            salt.len()
+        )));
     }
     let pw_bytes = utf16le_bytes(password);
     Ok(sha1_bytes(&[salt, &pw_bytes]))
@@ -331,7 +339,9 @@ fn parse_cryptoapi_encryption_info_legacy_filepass(
             DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
         })?;
     if encryption_type != ENCRYPTION_TYPE_RC4 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X} (expected 0x0001 for RC4)"
+        )));
     }
 
     let encryption_info =
@@ -339,7 +349,9 @@ fn parse_cryptoapi_encryption_info_legacy_filepass(
             DecryptError::InvalidFormat("FILEPASS missing wEncryptionInfo".to_string())
         })?;
     if encryption_info != ENCRYPTION_INFO_CRYPTOAPI_LEGACY {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::InvalidFormat(format!(
+            "FILEPASS RC4 wEncryptionInfo=0x{encryption_info:04X} (expected 0x0004)"
+        )));
     }
 
     let header_size =
@@ -954,22 +966,31 @@ impl PayloadRc4 {
 
 fn verify_password(info: &CryptoApiEncryptionInfo, password: &str) -> Result<[u8; 20], DecryptError> {
     if info.header.alg_id != CALG_RC4 || info.header.alg_id_hash != CALG_SHA1 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+            info.header.alg_id, info.header.alg_id_hash
+        )));
     }
 
     let key_size_bits = info.header.key_size_bits;
     if key_size_bits % 8 != 0 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
+        )));
     }
     let key_len = (key_size_bits / 8) as usize;
     if !matches!(key_len, 5 | 7 | 16) {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits}"
+        )));
     }
 
     let verifier_hash_size = info.verifier.verifier_hash_size as usize;
     if verifier_hash_size != 20 {
         // Office 97-2003 CryptoAPI RC4 uses SHA1 verifier hashes.
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI verifierHashSize={verifier_hash_size}"
+        )));
     }
 
     // Derive the base key material and decrypt the verifier using block 0.
@@ -1004,21 +1025,30 @@ fn verify_password_legacy(
     password: &str,
 ) -> Result<[u8; 20], DecryptError> {
     if info.header.alg_id != CALG_RC4 || info.header.alg_id_hash != CALG_SHA1 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI AlgID=0x{:08X} AlgIDHash=0x{:08X}",
+            info.header.alg_id, info.header.alg_id_hash
+        )));
     }
 
     let key_size_bits = info.header.key_size_bits;
     if key_size_bits % 8 != 0 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits} (not byte-aligned)"
+        )));
     }
     let key_len = (key_size_bits / 8) as usize;
     if !matches!(key_len, 5 | 7 | 16) {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI keySizeBits={key_size_bits}"
+        )));
     }
 
     let verifier_hash_size = info.verifier.verifier_hash_size as usize;
     if verifier_hash_size != 20 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "CryptoAPI verifierHashSize={verifier_hash_size}"
+        )));
     }
 
     let key_material = derive_key_material_legacy(password, &info.verifier.salt)?;
@@ -1065,7 +1095,9 @@ fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionIn
     })?;
 
     if encryption_type != ENCRYPTION_TYPE_RC4 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X}"
+        )));
     }
 
     let encryption_subtype = read_u16_le(payload, 2).ok_or_else(|| {
@@ -1076,7 +1108,9 @@ fn parse_filepass_record_payload(payload: &[u8]) -> Result<CryptoApiEncryptionIn
     })?;
 
     if encryption_subtype != ENCRYPTION_SUBTYPE_CRYPTOAPI {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS RC4 wEncryptionSubType=0x{encryption_subtype:04X}"
+        )));
     }
 
     if payload.len() < 8 {
@@ -1166,7 +1200,9 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
         DecryptError::InvalidFormat("FILEPASS missing wEncryptionType".to_string())
     })?;
     if encryption_type != ENCRYPTION_TYPE_RC4 {
-        return Err(DecryptError::UnsupportedEncryption);
+        return Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS wEncryptionType=0x{encryption_type:04X}"
+        )));
     }
     let second_field = read_u16_le(filepass_payload, 2).ok_or_else(|| {
         DecryptError::InvalidFormat("FILEPASS missing subtype/encryption info".to_string())
@@ -1308,7 +1344,9 @@ pub(crate) fn decrypt_biff8_workbook_stream_rc4_cryptoapi(
 
             Ok(out)
         }
-        _ => Err(DecryptError::UnsupportedEncryption),
+        _ => Err(DecryptError::UnsupportedEncryption(format!(
+            "FILEPASS RC4 wEncryptionSubType/wEncryptionInfo=0x{second_field:04X}"
+        ))),
     }
 }
 
@@ -1339,7 +1377,7 @@ mod tests {
         //   u16 verifier
         let payload = [0x00, 0x00, 0x34, 0x12, 0x78, 0x56];
         let err = parse_filepass_record_payload(&payload).expect_err("expected error");
-        assert_eq!(err, DecryptError::UnsupportedEncryption);
+        assert!(matches!(err, DecryptError::UnsupportedEncryption(_)));
     }
 
     #[test]
@@ -1347,7 +1385,7 @@ mod tests {
         // RC4 "standard" (non-CryptoAPI) has wEncryptionType==0x0001 but a different subtype.
         let payload = [0x01, 0x00, 0x01, 0x00];
         let err = parse_filepass_record_payload(&payload).expect_err("expected error");
-        assert_eq!(err, DecryptError::UnsupportedEncryption);
+        assert!(matches!(err, DecryptError::UnsupportedEncryption(_)));
     }
 
     #[test]

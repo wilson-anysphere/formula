@@ -161,10 +161,7 @@ fn decrypts_rc4_standard_biff8_xls() {
 fn rc4_standard_wrong_password_errors() {
     let err = formula_xls::import_xls_path_with_password(fixture_path(), "wrong password")
         .expect_err("expected wrong password error");
-    assert!(matches!(
-        err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-    ));
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]
@@ -182,7 +179,7 @@ fn rc4_standard_unsupported_version_errors() {
         .expect_err("expected unsupported encryption error");
     assert!(matches!(
         err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::UnsupportedEncryption)
+        formula_xls::ImportError::UnsupportedEncryption(_)
     ));
 }
 

@@ -923,24 +923,23 @@ pub fn open_workbook_model_with_options(
             if let Some(password) = opts.password.as_deref() {
                 match xls::import_xls_path_with_password(path, password) {
                     Ok(result) => Ok(result.workbook),
-                    Err(xls::ImportError::Decrypt(err)) => match err {
-                        xls::DecryptError::WrongPassword => Err(Error::InvalidPassword {
-                            path: path.to_path_buf(),
-                        }),
-                        xls::DecryptError::UnsupportedEncryption => Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: "legacy `.xls` FILEPASS encryption scheme not supported"
-                                .to_string(),
-                        }),
-                        xls::DecryptError::InvalidFormat(message) => Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: format!(
-                                "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
-                            ),
-                        }),
-                    },
                     Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
                         path: path.to_path_buf(),
+                    }),
+                    Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    }),
+                    Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
+                        Err(Error::UnsupportedEncryption {
+                            path: path.to_path_buf(),
+                            kind: scheme,
+                        })
+                    }
+                    Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
+                        path: path.to_path_buf(),
+                        kind: format!(
+                            "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                        ),
                     }),
                     Err(source) => Err(Error::OpenXls {
                         path: path.to_path_buf(),
@@ -2193,24 +2192,23 @@ pub fn open_workbook_with_options(
             if let Some(password) = opts.password.as_deref() {
                 match xls::import_xls_path_with_password(path, password) {
                     Ok(result) => Ok(Workbook::Xls(result)),
-                    Err(xls::ImportError::Decrypt(err)) => match err {
-                        xls::DecryptError::WrongPassword => Err(Error::InvalidPassword {
-                            path: path.to_path_buf(),
-                        }),
-                        xls::DecryptError::UnsupportedEncryption => Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: "legacy `.xls` FILEPASS encryption scheme not supported"
-                                .to_string(),
-                        }),
-                        xls::DecryptError::InvalidFormat(message) => Err(Error::UnsupportedEncryption {
-                            path: path.to_path_buf(),
-                            kind: format!(
-                                "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
-                            ),
-                        }),
-                    },
                     Err(xls::ImportError::EncryptedWorkbook) => Err(Error::PasswordRequired {
                         path: path.to_path_buf(),
+                    }),
+                    Err(xls::ImportError::InvalidPassword) => Err(Error::InvalidPassword {
+                        path: path.to_path_buf(),
+                    }),
+                    Err(xls::ImportError::UnsupportedEncryption(scheme)) => {
+                        Err(Error::UnsupportedEncryption {
+                            path: path.to_path_buf(),
+                            kind: scheme,
+                        })
+                    }
+                    Err(xls::ImportError::Decrypt(message)) => Err(Error::UnsupportedEncryption {
+                        path: path.to_path_buf(),
+                        kind: format!(
+                            "legacy `.xls` FILEPASS encryption metadata is invalid: {message}"
+                        ),
                     }),
                     Err(source) => Err(Error::OpenXls {
                         path: path.to_path_buf(),

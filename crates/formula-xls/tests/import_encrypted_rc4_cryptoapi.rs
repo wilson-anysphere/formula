@@ -173,10 +173,7 @@ fn decrypts_rc4_cryptoapi_biff8_xls() {
 fn rc4_cryptoapi_wrong_password_errors() {
     let err = formula_xls::import_xls_path_with_password(fixture_path(), "wrong password")
         .expect_err("expected wrong password error");
-    assert!(matches!(
-        err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::WrongPassword)
-    ));
+    assert!(matches!(err, formula_xls::ImportError::InvalidPassword));
 }
 
 #[test]
@@ -212,8 +209,13 @@ fn rc4_cryptoapi_unsupported_algorithm_errors() {
 
     let err = formula_xls::import_xls_path_with_password(tmp.path(), PASSWORD)
         .expect_err("expected unsupported encryption error");
-    assert!(matches!(
-        err,
-        formula_xls::ImportError::Decrypt(formula_xls::DecryptError::UnsupportedEncryption)
-    ));
+    let msg = err.to_string();
+    assert!(
+        matches!(err, formula_xls::ImportError::UnsupportedEncryption(_)),
+        "expected ImportError::UnsupportedEncryption, got {err:?} ({msg})"
+    );
+    assert!(
+        msg.contains("AlgID") || msg.contains("algorithm") || msg.contains("AES"),
+        "expected unsupported-encryption error message to mention algorithm; got: {msg}"
+    );
 }
