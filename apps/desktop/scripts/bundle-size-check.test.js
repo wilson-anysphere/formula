@@ -55,6 +55,7 @@ test("reports sizes and exits 0 with no budgets", () => {
 
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /Desktop bundle size/i);
+  assert.match(proc.stdout, /Total JS \(dist\/assets\/\*\*\/\*\.js\)/);
   assert.match(proc.stdout, /Total JS \(dist\/\*\*\/\*\.js\)/);
   assert.match(proc.stdout, /Entry JS \(script tags\)/);
   assert.match(proc.stdout, /assets\/entry\.js/);
