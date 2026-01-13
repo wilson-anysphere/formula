@@ -10,6 +10,17 @@ use tempfile::tempdir;
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
 
+fn ptg_str(s: &str) -> Vec<u8> {
+    // PtgStr (0x17): [cch:u16][utf16 chars...]
+    let mut out = vec![0x17];
+    let units: Vec<u16> = s.encode_utf16().collect();
+    out.extend_from_slice(&(units.len() as u16).to_le_bytes());
+    for unit in units {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
 fn read_zip_part(path: &Path, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
@@ -248,6 +259,128 @@ fn streaming_shared_strings_save_converting_shared_string_cell_to_formula_decrem
     let sheet_out = read_zip_part(&output_path, "xl/worksheets/sheet1.bin");
     let (id_out, _) = find_cell_record(&sheet_out, 0, 0).expect("find A1 record in output");
     assert_eq!(id_out, 0x0009, "expected output A1 to be BrtFmlaNum");
+
+    let sst_out = read_zip_part(&output_path, "xl/sharedStrings.bin");
+    let stats_out = read_shared_strings_stats(&sst_out);
+    assert_eq!(
+        stats_out.total_count,
+        Some(stats_in.total_count.unwrap().saturating_sub(1))
+    );
+    assert_eq!(stats_out.unique_count, stats_in.unique_count);
+    assert_eq!(stats_out.si_count, stats_in.si_count);
+    assert_eq!(stats_out.strings, stats_in.strings);
+}
+
+#[test]
+fn shared_strings_save_converting_shared_string_cell_to_formula_string_decrements_total_count() {
+    let input_bytes = build_sst_fixture_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &input_bytes).expect("write input workbook");
+
+    let sst_in = read_zip_part(&input_path, "xl/sharedStrings.bin");
+    let stats_in = read_shared_strings_stats(&sst_in);
+    assert_eq!(stats_in.total_count, Some(1));
+    assert_eq!(stats_in.unique_count, Some(2));
+    assert_eq!(stats_in.si_count, 2);
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let rgce = ptg_str("New");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("New".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(rgce.clone()),
+            new_rgcb: None,
+            new_formula_flags: None,
+            // Even if the caller passes an `isst`, formula cached strings are stored inline and
+            // should not reference the shared string table.
+            shared_string_index: Some(0),
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let wb_out = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb_out.read_sheet(0).expect("read output sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("New".to_string()));
+    let formula = a1.formula.as_ref().expect("A1 should now be a formula cell");
+    assert_eq!(formula.rgce, rgce);
+
+    let sheet_out = read_zip_part(&output_path, "xl/worksheets/sheet1.bin");
+    let (id_out, _) = find_cell_record(&sheet_out, 0, 0).expect("find A1 record in output");
+    assert_eq!(id_out, 0x0008, "expected output A1 to be BrtFmlaString");
+
+    let sst_out = read_zip_part(&output_path, "xl/sharedStrings.bin");
+    let stats_out = read_shared_strings_stats(&sst_out);
+    assert_eq!(
+        stats_out.total_count,
+        Some(stats_in.total_count.unwrap().saturating_sub(1))
+    );
+    assert_eq!(stats_out.unique_count, stats_in.unique_count);
+    assert_eq!(stats_out.si_count, stats_in.si_count);
+    assert_eq!(stats_out.strings, stats_in.strings);
+}
+
+#[test]
+fn streaming_shared_strings_save_converting_shared_string_cell_to_formula_string_decrements_total_count() {
+    let input_bytes = build_sst_fixture_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &input_bytes).expect("write input workbook");
+
+    let sst_in = read_zip_part(&input_path, "xl/sharedStrings.bin");
+    let stats_in = read_shared_strings_stats(&sst_in);
+    assert_eq!(stats_in.total_count, Some(1));
+    assert_eq!(stats_in.unique_count, Some(2));
+    assert_eq!(stats_in.si_count, 2);
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open workbook");
+    let rgce = ptg_str("New");
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("New".to_string()),
+            new_style: None,
+            clear_formula: false,
+            new_formula: Some(rgce.clone()),
+            new_rgcb: None,
+            new_formula_flags: None,
+            shared_string_index: Some(0),
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
+
+    let wb_out = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb_out.read_sheet(0).expect("read output sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| (c.row, c.col) == (0, 0))
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("New".to_string()));
+    let formula = a1.formula.as_ref().expect("A1 should now be a formula cell");
+    assert_eq!(formula.rgce, rgce);
+
+    let sheet_out = read_zip_part(&output_path, "xl/worksheets/sheet1.bin");
+    let (id_out, _) = find_cell_record(&sheet_out, 0, 0).expect("find A1 record in output");
+    assert_eq!(id_out, 0x0008, "expected output A1 to be BrtFmlaString");
 
     let sst_out = read_zip_part(&output_path, "xl/sharedStrings.bin");
     let stats_out = read_shared_strings_stats(&sst_out);
