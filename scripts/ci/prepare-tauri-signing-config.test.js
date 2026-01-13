@@ -144,3 +144,27 @@ test("fails fast when FORMULA_REQUIRE_CODESIGN=1 and required secrets are missin
   // In enforcement mode we should fail before mutating the config.
   assert.equal(config.bundle.macOS.signingIdentity, undefined);
 });
+
+test("disables Windows code signing in the config when secrets are missing", () => {
+  const cfg = { bundle: { windows: { certificateThumbprint: "ABCDEF" } } };
+  const { proc, config, githubEnv } = runWithConfig({ RUNNER_OS: "Windows" }, cfg);
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(config.bundle.windows.certificateThumbprint, null);
+  assert.equal(githubEnv.trim(), "");
+});
+
+test("exports Windows signing secrets when configured", () => {
+  const cfg = { bundle: { windows: { certificateThumbprint: null } } };
+  const { proc, config, githubEnv } = runWithConfig(
+    {
+      RUNNER_OS: "Windows",
+      WINDOWS_CERTIFICATE: "base64pfx",
+      WINDOWS_CERTIFICATE_PASSWORD: "pw",
+    },
+    cfg,
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  assert.equal(config.bundle.windows.certificateThumbprint, null);
+  assert.match(githubEnv, /\bWINDOWS_CERTIFICATE<</);
+  assert.match(githubEnv, /\bWINDOWS_CERTIFICATE_PASSWORD<</);
+});
