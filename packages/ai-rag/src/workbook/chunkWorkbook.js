@@ -262,16 +262,44 @@ function detectRegions(sheet, predicate, opts) {
   const map = getSheetCellMap(sheet);
   if (map) {
     /**
+     * Parse a non-negative integer from a substring without allocating intermediate strings.
+     * Treat empty/whitespace-only segments as 0 (matching `Number("")` -> 0).
+     *
+     * @param {string} text
+     * @param {number} start
+     * @param {number} end
+     * @returns {number | null}
+     */
+    function parseNonNegativeInt(text, start, end) {
+      // Trim ASCII whitespace.
+      while (start < end && text.charCodeAt(start) <= 32) start += 1;
+      while (end > start && text.charCodeAt(end - 1) <= 32) end -= 1;
+      if (start >= end) return 0;
+      let acc = 0;
+      for (let i = start; i < end; i += 1) {
+        const code = text.charCodeAt(i);
+        if (code < 48 || code > 57) return null;
+        acc = acc * 10 + (code - 48);
+      }
+      return acc;
+    }
+
+    /**
      * @param {string} key
      */
     function parseRowColKey(key) {
       const raw = String(key);
-      const delimiter = raw.includes(",") ? "," : raw.includes(":") ? ":" : null;
-      if (!delimiter) return null;
-      const parts = raw.split(delimiter);
-      if (parts.length !== 2) return null;
-      const row = Number(parts[0]);
-      const col = Number(parts[1]);
+      const commaIdx = raw.indexOf(",");
+      const colonIdx = commaIdx >= 0 ? -1 : raw.indexOf(":");
+      const idx = commaIdx >= 0 ? commaIdx : colonIdx;
+      if (idx < 0) return null;
+      const delimiter = commaIdx >= 0 ? "," : ":";
+      // Reject keys that contain more than one delimiter (e.g. "1,2,3").
+      if (raw.indexOf(delimiter, idx + 1) !== -1) return null;
+
+      const row = parseNonNegativeInt(raw, 0, idx);
+      const col = parseNonNegativeInt(raw, idx + 1, raw.length);
+      if (row == null || col == null) return null;
       if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) return null;
       return { row, col };
     }
