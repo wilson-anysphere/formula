@@ -202,6 +202,56 @@ class CorpusMinimizeTests(unittest.TestCase):
             any(p["part"] == "xl/theme/theme1.xml" for p in summary["parts_with_diffs"])
         )
 
+    def test_minimize_workbook_sets_round_trip_failure_kind(self) -> None:
+        def fake_run_rust_triage(  # type: ignore[no-untyped-def]
+            *_args, workbook_name: str, diff_limit: int, **_kwargs
+        ):
+            self.assertEqual(workbook_name, "book.xlsx")
+            self.assertGreaterEqual(diff_limit, 0)
+            return {
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 1, "warning": 0, "info": 0, "total": 1},
+                            "equal": False,
+                            "critical_parts": ["xl/styles.xml"],
+                            "parts_with_diffs": [
+                                {
+                                    "part": "xl/styles.xml",
+                                    "group": "styles",
+                                    "critical": 1,
+                                    "warning": 0,
+                                    "info": 0,
+                                    "total": 1,
+                                }
+                            ],
+                            "top_differences": [],
+                        },
+                    }
+                },
+                "result": {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "round_trip_fail_on": "critical",
+                },
+            }
+
+        original = minimize_mod.triage_mod._run_rust_triage  # noqa: SLF001 (test patch)
+        try:
+            minimize_mod.triage_mod._run_rust_triage = fake_run_rust_triage  # type: ignore[assignment]
+            summary = minimize_mod.minimize_workbook(
+                WorkbookInput(display_name="book.xlsx", data=b"dummy"),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+            )
+        finally:
+            minimize_mod.triage_mod._run_rust_triage = original  # type: ignore[assignment]
+
+        self.assertEqual(summary.get("round_trip_failure_kind"), "round_trip_styles")
+
     def test_minimize_workbook_reruns_only_for_all_critical_rels_diffs(self) -> None:
         calls: list[int] = []
 

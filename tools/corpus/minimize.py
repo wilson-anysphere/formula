@@ -363,6 +363,14 @@ def minimize_workbook(
         "critical_part_hashes": critical_part_hashes,
     }
 
+    # Provide the same actionable round-trip diff bucketing as `tools.corpus.triage` reports when
+    # round-trip fails. This is privacy-safe: it only uses OPC part names and part-group labels.
+    if out.get("round_trip_ok") is False:
+        out["round_trip_failure_kind"] = (
+            triage_mod.infer_round_trip_failure_kind(rust_out)  # noqa: SLF001 (internal reuse)
+            or "round_trip_other"
+        )
+
     if critical_part_hashes_error:
         out["critical_part_hashes_error"] = critical_part_hashes_error
 
