@@ -3,6 +3,7 @@ use crate::openxml::{
 };
 use crate::package::{XlsxError, XlsxPackage};
 use crate::sheet_metadata::parse_workbook_sheets;
+use crate::DateSystem;
 use chrono::NaiveDate;
 use formula_engine::date::{serial_to_ymd, ExcelDateSystem};
 use formula_model::pivots::slicers::{RowFilter, SlicerSelection, TimelineSelection};
@@ -204,6 +205,12 @@ impl XlsxPackage {
 }
 
 fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, XlsxError> {
+    let date_system = package
+        .part("xl/workbook.xml")
+        .and_then(|bytes| parse_workbook_date_system(bytes).ok())
+        .unwrap_or_default();
+    let excel_date_system = date_system.to_engine_date_system();
+
     let slicer_parts = package
         .part_names()
         .filter(|name| name.starts_with("xl/slicers/") && name.ends_with(".xml"))
@@ -375,11 +382,12 @@ fn parse_pivot_slicer_parts(package: &XlsxPackage) -> Result<PivotSlicerParts, X
             &sheet_name_by_part,
         );
 
-        let mut selection = parse_timeline_selection(xml).unwrap_or_default();
+        let mut selection = parse_timeline_selection(xml, excel_date_system).unwrap_or_default();
         if (selection.start.is_none() || selection.end.is_none()) && cache_part.is_some() {
             if let Some(cache_part) = cache_part.as_deref() {
                 if let Some(bytes) = package.part(cache_part) {
-                    if let Ok(cache_selection) = parse_timeline_selection(bytes) {
+                    if let Ok(cache_selection) = parse_timeline_selection(bytes, excel_date_system)
+                    {
                         if selection.start.is_none() {
                             selection.start = cache_selection.start;
                         }
@@ -740,7 +748,10 @@ mod slicer_cache_selection_tests {
     }
 }
 
-fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxError> {
+fn parse_timeline_selection(
+    xml: &[u8],
+    date_system: ExcelDateSystem,
+) -> Result<TimelineSelectionState, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -771,7 +782,7 @@ fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxEr
                                 && (key.eq_ignore_ascii_case(b"val")
                                     || key.eq_ignore_ascii_case(b"value"))))
                     {
-                        selection.start = normalize_timeline_date(&value);
+                        selection.start = normalize_timeline_date(&value, date_system);
                     }
 
                     if selection.end.is_none()
@@ -783,7 +794,7 @@ fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxEr
                                 && (key.eq_ignore_ascii_case(b"val")
                                     || key.eq_ignore_ascii_case(b"value"))))
                     {
-                        selection.end = normalize_timeline_date(&value);
+                        selection.end = normalize_timeline_date(&value, date_system);
                     }
                 }
             }
@@ -796,7 +807,7 @@ fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxEr
     Ok(selection)
 }
 
-fn normalize_timeline_date(value: &str) -> Option<String> {
+fn normalize_timeline_date(value: &str, date_system: ExcelDateSystem) -> Option<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return None;
@@ -827,9 +838,9 @@ fn normalize_timeline_date(value: &str) -> Option<String> {
         ));
     }
 
-    // Fallback: interpret as an Excel serial date (1900 system, Lotus bug enabled).
+    // Fallback: interpret as an Excel serial date using the workbook date system.
     if let Ok(serial) = trimmed.parse::<i32>() {
-        if let Ok(date) = serial_to_ymd(serial, ExcelDateSystem::EXCEL_1900) {
+        if let Ok(date) = serial_to_ymd(serial, date_system) {
             return Some(format!(
                 "{:04}-{:02}-{:02}",
                 date.year, date.month, date.day
@@ -838,6 +849,41 @@ fn normalize_timeline_date(value: &str) -> Option<String> {
     }
 
     None
+}
+
+fn parse_workbook_date_system(xml: &[u8]) -> Result<DateSystem, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+
+    let mut date_system = DateSystem::V1900;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(start) | Event::Empty(start) => {
+                let element_name = start.name();
+                let tag = local_name(element_name.as_ref());
+                if tag.eq_ignore_ascii_case(b"workbookPr") {
+                    for attr in start.attributes().with_checks(false) {
+                        let attr = attr?;
+                        let key = local_name(attr.key.as_ref());
+                        if key.eq_ignore_ascii_case(b"date1904") {
+                            let value = attr.unescape_value()?.into_owned();
+                            if parse_excel_bool(&value).unwrap_or(false) {
+                                date_system = DateSystem::V1904;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(date_system)
 }
 
 #[derive(Debug)]
