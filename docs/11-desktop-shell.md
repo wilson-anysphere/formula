@@ -124,9 +124,9 @@ This reports:
 - the built desktop binary size (`target/**/formula-desktop`)
 - if present, installer/bundle artifacts under `target/**/release/bundle` (via `scripts/desktop_bundle_size_report.py`)
 
-Bundle size gating knobs (used by the release workflow):
+Installer artifact size gating knobs (used by the release workflow; DMG/MSI/AppImage/etc):
 
-- `FORMULA_BUNDLE_SIZE_LIMIT_MB` (default: 50)
+- `FORMULA_BUNDLE_SIZE_LIMIT_MB` (default: 50MB per artifact)
 - `FORMULA_ENFORCE_BUNDLE_SIZE=1` to fail when any artifact exceeds the limit
 
 ---
