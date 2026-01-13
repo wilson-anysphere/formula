@@ -105,9 +105,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
-            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install wasm-pack (required for @formula/engine WASM build)
         if: steps.desktop_bench.outputs.run == 'true' && steps.wasm-pack-cache.outputs.cache-hit != 'true'
@@ -182,9 +182,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-bloat
-          key: cargo-bloat-${{ runner.os }}-${{ runner.arch }}-locked
+          key: cargo-bloat-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-locked
           restore-keys: |
-            cargo-bloat-${{ runner.os }}-${{ runner.arch }}-
+            cargo-bloat-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install cargo-bloat
         if: steps.desktop_bench.outputs.run == 'true' && steps.cargo-bloat-cache.outputs.cache-hit != 'true'

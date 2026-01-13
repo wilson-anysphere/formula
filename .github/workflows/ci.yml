@@ -163,9 +163,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/wasm-pack
-          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-v${{ env.WASM_PACK_VERSION }}
+          # Include the pinned Rust toolchain hash so Rust upgrades force a fresh wasm-pack install
+          # (ensuring CI validates the new toolchain can still build the required cargo-installed tools).
+          key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}-v${{ env.WASM_PACK_VERSION }}
           restore-keys: |
-            wasm-pack-${{ runner.os }}-${{ runner.arch }}-
+            wasm-pack-${{ runner.os }}-${{ runner.arch }}-rust-${{ hashFiles('rust-toolchain.toml') }}-
 
       - name: Install wasm-pack
         if: steps.wasm-pack-cache.outputs.cache-hit != 'true'
