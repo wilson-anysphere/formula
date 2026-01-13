@@ -96,5 +96,104 @@ describe("drawing anchor normalization", () => {
     expect(resizedFrom.from.cell.col).toBe(0);
     expect(resizedFrom.from.offset.xEmu).toBeCloseTo(pxToEmu(35));
   });
-});
 
+  it("resizes absolute anchors from edge handles", () => {
+    const anchor: Anchor = {
+      type: "absolute",
+      pos: { xEmu: pxToEmu(10), yEmu: pxToEmu(20) },
+      size: { cx: pxToEmu(100), cy: pxToEmu(50) },
+    };
+
+    const resizedE = resizeAnchor(anchor, "e", 10, 0, geom);
+    expect(resizedE.type).toBe("absolute");
+    if (resizedE.type !== "absolute") throw new Error("unexpected anchor type");
+    expect(resizedE.pos.xEmu).toBeCloseTo(anchor.pos.xEmu);
+    expect(resizedE.size.cx).toBeCloseTo(pxToEmu(110));
+
+    const resizedW = resizeAnchor(anchor, "w", 10, 0, geom);
+    expect(resizedW.type).toBe("absolute");
+    if (resizedW.type !== "absolute") throw new Error("unexpected anchor type");
+    expect(resizedW.pos.xEmu).toBeCloseTo(pxToEmu(20));
+    expect(resizedW.size.cx).toBeCloseTo(pxToEmu(90));
+
+    const resizedS = resizeAnchor(anchor, "s", 0, 5, geom);
+    expect(resizedS.type).toBe("absolute");
+    if (resizedS.type !== "absolute") throw new Error("unexpected anchor type");
+    expect(resizedS.pos.yEmu).toBeCloseTo(anchor.pos.yEmu);
+    expect(resizedS.size.cy).toBeCloseTo(pxToEmu(55));
+
+    const resizedN = resizeAnchor(anchor, "n", 0, 5, geom);
+    expect(resizedN.type).toBe("absolute");
+    if (resizedN.type !== "absolute") throw new Error("unexpected anchor type");
+    expect(resizedN.pos.yEmu).toBeCloseTo(pxToEmu(25));
+    expect(resizedN.size.cy).toBeCloseTo(pxToEmu(45));
+  });
+
+  it("resizes oneCell anchors from edge handles without crossing cells", () => {
+    const anchor: Anchor = {
+      type: "oneCell",
+      from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(5), yEmu: pxToEmu(7) } },
+      size: { cx: pxToEmu(40), cy: pxToEmu(30) },
+    };
+
+    const resizedE = resizeAnchor(anchor, "e", 10, 0, geom);
+    expect(resizedE.type).toBe("oneCell");
+    if (resizedE.type !== "oneCell") throw new Error("unexpected anchor type");
+    expect(resizedE.from.cell).toEqual(anchor.from.cell);
+    expect(resizedE.from.offset.xEmu).toBeCloseTo(anchor.from.offset.xEmu);
+    expect(resizedE.size.cx).toBeCloseTo(pxToEmu(50));
+
+    const resizedW = resizeAnchor(anchor, "w", 10, 0, geom);
+    expect(resizedW.type).toBe("oneCell");
+    if (resizedW.type !== "oneCell") throw new Error("unexpected anchor type");
+    expect(resizedW.from.cell).toEqual(anchor.from.cell);
+    expect(resizedW.from.offset.xEmu).toBeCloseTo(pxToEmu(15));
+    expect(resizedW.size.cx).toBeCloseTo(pxToEmu(30));
+
+    const resizedS = resizeAnchor(anchor, "s", 0, 5, geom);
+    expect(resizedS.type).toBe("oneCell");
+    if (resizedS.type !== "oneCell") throw new Error("unexpected anchor type");
+    expect(resizedS.from.cell).toEqual(anchor.from.cell);
+    expect(resizedS.from.offset.yEmu).toBeCloseTo(anchor.from.offset.yEmu);
+    expect(resizedS.size.cy).toBeCloseTo(pxToEmu(35));
+
+    const resizedN = resizeAnchor(anchor, "n", 0, 5, geom);
+    expect(resizedN.type).toBe("oneCell");
+    if (resizedN.type !== "oneCell") throw new Error("unexpected anchor type");
+    expect(resizedN.from.cell).toEqual(anchor.from.cell);
+    expect(resizedN.from.offset.yEmu).toBeCloseTo(pxToEmu(12));
+    expect(resizedN.size.cy).toBeCloseTo(pxToEmu(25));
+  });
+
+  it("resizes twoCell anchors from edge handles", () => {
+    const anchor: Anchor = {
+      type: "twoCell",
+      from: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(0), yEmu: pxToEmu(0) } },
+      to: { cell: { row: 0, col: 0 }, offset: { xEmu: pxToEmu(20), yEmu: pxToEmu(10) } },
+    };
+
+    const resizedE = resizeAnchor(anchor, "e", 10, 0, geom);
+    expect(resizedE.type).toBe("twoCell");
+    if (resizedE.type !== "twoCell") throw new Error("unexpected anchor type");
+    expect(resizedE.from).toEqual(anchor.from);
+    expect(resizedE.to.offset.xEmu).toBeCloseTo(pxToEmu(30));
+
+    const resizedW = resizeAnchor(anchor, "w", 10, 0, geom);
+    expect(resizedW.type).toBe("twoCell");
+    if (resizedW.type !== "twoCell") throw new Error("unexpected anchor type");
+    expect(resizedW.to).toEqual(anchor.to);
+    expect(resizedW.from.offset.xEmu).toBeCloseTo(pxToEmu(10));
+
+    const resizedS = resizeAnchor(anchor, "s", 0, 5, geom);
+    expect(resizedS.type).toBe("twoCell");
+    if (resizedS.type !== "twoCell") throw new Error("unexpected anchor type");
+    expect(resizedS.from).toEqual(anchor.from);
+    expect(resizedS.to.offset.yEmu).toBeCloseTo(pxToEmu(15));
+
+    const resizedN = resizeAnchor(anchor, "n", 0, 5, geom);
+    expect(resizedN.type).toBe("twoCell");
+    if (resizedN.type !== "twoCell") throw new Error("unexpected anchor type");
+    expect(resizedN.to).toEqual(anchor.to);
+    expect(resizedN.from.offset.yEmu).toBeCloseTo(pxToEmu(5));
+  });
+});
