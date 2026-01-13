@@ -83,6 +83,16 @@ test("exposes Prometheus metrics in text format", async (t) => {
   const health = await fetch(`${server.httpUrl}/healthz`);
   assert.equal(health.status, 200);
   assert.equal(health.headers.get("cache-control"), "no-store");
+  const healthBody = (await health.json()) as {
+    rssBytes?: unknown;
+    heapUsedBytes?: unknown;
+    heapTotalBytes?: unknown;
+    eventLoopDelayMs?: unknown;
+  };
+  assert.equal(typeof healthBody.rssBytes, "number");
+  assert.equal(typeof healthBody.heapUsedBytes, "number");
+  assert.equal(typeof healthBody.heapTotalBytes, "number");
+  assert.equal(typeof healthBody.eventLoopDelayMs, "number");
 
   const ready = await fetch(`${server.httpUrl}/readyz`);
   assert.equal(ready.status, 200);
@@ -135,13 +145,37 @@ test("supports HTTPS/WSS when SYNC_SERVER_TLS_CERT_PATH and SYNC_SERVER_TLS_KEY_
 
   const health = await httpsRequestText(`${server.httpUrl}/healthz`);
   assert.equal(health.status, 200);
-  assert.match(health.body, /\"status\":\"ok\"/);
+  const healthJson = JSON.parse(health.body) as {
+    status?: unknown;
+    rssBytes?: unknown;
+    heapUsedBytes?: unknown;
+    heapTotalBytes?: unknown;
+    eventLoopDelayMs?: unknown;
+  };
+  assert.equal(healthJson.status, "ok");
+  assert.equal(typeof healthJson.rssBytes, "number");
+  assert.equal(typeof healthJson.heapUsedBytes, "number");
+  assert.equal(typeof healthJson.heapTotalBytes, "number");
+  assert.equal(typeof healthJson.eventLoopDelayMs, "number");
 
   const stats = await httpsRequestText(`${server.httpUrl}/internal/stats`, {
     headers: { "x-internal-admin-token": "admin-token" },
   });
   assert.equal(stats.status, 200);
-  assert.match(stats.body, /\"ok\":true/);
+  const statsJson = JSON.parse(stats.body) as {
+    ok?: unknown;
+    rssBytes?: unknown;
+    heapUsedBytes?: unknown;
+    heapTotalBytes?: unknown;
+    eventLoopDelayMs?: unknown;
+    connections?: { activeDocs?: unknown };
+  };
+  assert.equal(statsJson.ok, true);
+  assert.equal(typeof statsJson.rssBytes, "number");
+  assert.equal(typeof statsJson.heapUsedBytes, "number");
+  assert.equal(typeof statsJson.heapTotalBytes, "number");
+  assert.equal(typeof statsJson.eventLoopDelayMs, "number");
+  assert.equal(typeof statsJson.connections?.activeDocs, "number");
 
   const ws = new WebSocket(`${server.wsUrl}/tls-doc?token=test-token`, {
     rejectUnauthorized: false,

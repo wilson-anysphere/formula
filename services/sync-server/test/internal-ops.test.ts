@@ -203,8 +203,20 @@ test("internal endpoints require x-internal-admin-token", async (t) => {
   });
   assert.equal(ok.status, 200);
   assert.equal(ok.headers.get("cache-control"), "no-store");
-  const body = (await ok.json()) as { tombstonesCount?: unknown };
+  const body = (await ok.json()) as {
+    tombstonesCount?: unknown;
+    rssBytes?: unknown;
+    heapUsedBytes?: unknown;
+    heapTotalBytes?: unknown;
+    eventLoopDelayMs?: unknown;
+    connections?: { activeDocs?: unknown };
+  };
   assert.equal(typeof body.tombstonesCount, "number");
+  assert.equal(typeof body.rssBytes, "number");
+  assert.equal(typeof body.heapUsedBytes, "number");
+  assert.equal(typeof body.heapTotalBytes, "number");
+  assert.equal(typeof body.eventLoopDelayMs, "number");
+  assert.equal(typeof body.connections?.activeDocs, "number");
 });
 
 test("purge creates tombstone and prevents doc resurrection", async (t) => {
