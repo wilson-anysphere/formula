@@ -1,4 +1,4 @@
-# `ai-context`
+# `@formula/ai-context`
 
 Utilities for turning large spreadsheets into **LLM-friendly context** safely and predictably.
 
@@ -11,7 +11,9 @@ This package focuses on:
 - **Message trimming**: trim/summarize conversation history to fit a model context window.
 - **DLP hooks**: integrate structured DLP policy enforcement (block/redact) plus heuristic redaction helpers.
 
-> Note: This repo uses ESM. All examples below import from `packages/ai-context/src/index.js` via a path relative to this README: `./src/index.js`.
+> Note: This repo uses ESM. The public entrypoint is `packages/ai-context/src/index.js`.
+>
+> Since this README lives in `packages/ai-context/`, the examples use the equivalent relative import: `./src/index.js`.
 
 ---
 
@@ -30,6 +32,7 @@ import {
   // Token budgeting
   createHeuristicTokenEstimator,
   estimateTokens,
+  estimateToolDefinitionTokens,
   packSectionsToTokenBudget,
   stableJsonStringify,
 
@@ -153,8 +156,7 @@ For workbook-scale retrieval (multiple sheets, persistent indexing, incremental 
 
 ```js
 import { ContextManager } from "./src/index.js";
-import { HashEmbedder } from "../ai-rag/src/embedding/hashEmbedder.js";
-import { InMemoryVectorStore } from "../ai-rag/src/store/inMemoryVectorStore.js";
+import { HashEmbedder, InMemoryVectorStore } from "../ai-rag/src/index.js";
 
 // A SpreadsheetApi-like adapter. `workbookFromSpreadsheetApi` (ai-rag) only needs:
 // - listSheets(): string[]
@@ -283,6 +285,43 @@ They are **not** a substitute for structured DLP.
   - If you must serialize them into prompts, **redact first** and ensure structured DLP policy allows it.
 - Heuristic redaction is incomplete by design. Do not rely on it for compliance.
 
+### Example: enforcing structured DLP when building context
+
+```js
+import { ContextManager } from "./src/index.js";
+import { createDefaultOrgPolicy, DlpViolationError } from "../security/dlp/index.js";
+
+const policy = createDefaultOrgPolicy();
+const cm = new ContextManager();
+
+try {
+  const ctx = await cm.buildContext({
+    sheet,
+    query,
+    dlp: {
+      documentId: "doc-123",
+      // sheetId is optional; defaults to `sheet.name` when omitted.
+      policy,
+      // Provide either:
+      // - classificationRecords: [{ selector, classification }, ...]
+      // - classificationStore: { list(documentId) => [{ selector, classification }, ...] }
+      classificationRecords: [],
+      auditLogger: { log: (event) => console.debug("DLP audit", event) },
+    },
+  });
+
+  // Send only `ctx.promptContext` to the model.
+  console.log(ctx.promptContext);
+} catch (err) {
+  if (err instanceof DlpViolationError) {
+    // Show a user-facing message and do not call cloud LLMs with blocked content.
+    console.error(err.message);
+    return;
+  }
+  throw err;
+}
+```
+
 ---
 
 ## Token budgeting (how it works, how to tune it)
@@ -325,9 +364,14 @@ It then fits your message list into `allowed_prompt_tokens` by keeping system me
   - tool schemas (if any)
   - conversation history (via `trimMessagesToBudget`)
   - spreadsheet context (via `ContextManager.tokenBudgetTokens`)
+- If you are using tool calling, include tool schema tokens in your budgeting:
+  ```js
+  import { estimateToolDefinitionTokens, createHeuristicTokenEstimator } from "./src/index.js";
+  const estimator = createHeuristicTokenEstimator();
+  const toolTokens = estimateToolDefinitionTokens(tools, estimator);
+  ```
 - **Tune what drives size**:
   - `ContextManager.tokenBudgetTokens`: total context size.
   - `buildContext({ sampleRows })`: fewer rows → smaller prompts.
   - `buildWorkbookContext({ topK })`: fewer retrieved chunks → smaller prompts.
   - `createHeuristicTokenEstimator({ charsPerToken })`: adjust if your text is far from English-like (still approximate).
-
