@@ -49,7 +49,11 @@ pub struct EncodedColumn {
 #[derive(Clone, Debug)]
 pub struct Column {
     schema: ColumnSchema,
-    chunks: Vec<EncodedChunk>,
+    // `ColumnarTable` is frequently stored behind `Arc` and must be cloned when an `Arc` is not
+    // uniquely owned (e.g. during calculated-column fallbacks). The encoded chunks can be large,
+    // so keep them behind an `Arc` to make cloning cheap without changing the public
+    // `EncodedChunk` / `EncodedColumn` API.
+    chunks: Arc<Vec<EncodedChunk>>,
     stats: ColumnStats,
     dictionary: Option<Arc<Vec<Arc<str>>>>,
     distinct: Option<DistinctCounter>,
@@ -284,7 +288,7 @@ impl ColumnarTable {
         for col in columns {
             out_cols.push(Column {
                 schema: col.schema,
-                chunks: col.chunks,
+                chunks: Arc::new(col.chunks),
                 stats: col.stats,
                 dictionary: col.dictionary,
                 distinct: None,
@@ -1349,6 +1353,11 @@ impl MutableIntColumn {
             distinct,
         } = col;
 
+        let chunks = match Arc::try_unwrap(chunks) {
+            Ok(chunks) => chunks,
+            Err(chunks) => (*chunks).clone(),
+        };
+
         let (distinct_base, distinct) = match distinct {
             Some(counter) => (0, counter),
             None => {
@@ -1692,7 +1701,7 @@ impl MutableIntColumn {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
             schema: self.schema.clone(),
-            chunks,
+            chunks: Arc::new(chunks),
             stats: self.stats(),
             dictionary: None,
             distinct,
@@ -1704,7 +1713,7 @@ impl MutableIntColumn {
         let distinct = (self.distinct_base == 0).then(|| self.distinct);
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats,
             dictionary: None,
             distinct,
@@ -1737,6 +1746,11 @@ impl MutableFloatColumn {
             dictionary: _,
             distinct,
         } = col;
+
+        let chunks = match Arc::try_unwrap(chunks) {
+            Ok(chunks) => chunks,
+            Err(chunks) => (*chunks).clone(),
+        };
 
         let (distinct_base, distinct) = match distinct {
             Some(counter) => (0, counter),
@@ -2003,7 +2017,7 @@ impl MutableFloatColumn {
         let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
         Column {
             schema: self.schema.clone(),
-            chunks,
+            chunks: Arc::new(chunks),
             stats: self.stats(),
             dictionary: None,
             distinct,
@@ -2015,7 +2029,7 @@ impl MutableFloatColumn {
         let distinct = (self.distinct_base == 0).then(|| self.distinct);
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats,
             dictionary: None,
             distinct,
@@ -2044,6 +2058,11 @@ impl MutableBoolColumn {
             dictionary: _,
             distinct: _,
         } = col;
+
+        let chunks = match Arc::try_unwrap(chunks) {
+            Ok(chunks) => chunks,
+            Err(chunks) => (*chunks).clone(),
+        };
 
         let true_count = stats.sum.unwrap_or(0.0).round().max(0.0) as u64;
         Self {
@@ -2297,7 +2316,7 @@ impl MutableBoolColumn {
         }
         Column {
             schema: self.schema.clone(),
-            chunks,
+            chunks: Arc::new(chunks),
             stats: self.stats(),
             dictionary: None,
             distinct: None,
@@ -2308,7 +2327,7 @@ impl MutableBoolColumn {
         let stats = self.stats();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats,
             dictionary: None,
             distinct: None,
@@ -2341,6 +2360,11 @@ impl MutableDictColumn {
             dictionary,
             distinct: _,
         } = col;
+
+        let chunks = match Arc::try_unwrap(chunks) {
+            Ok(chunks) => chunks,
+            Err(chunks) => (*chunks).clone(),
+        };
 
         let dict = dictionary.unwrap_or_else(|| Arc::new(Vec::new()));
         let mut dict_map = HashMap::with_capacity(dict.len());
@@ -2642,7 +2666,7 @@ impl MutableDictColumn {
         }
         Column {
             schema: self.schema.clone(),
-            chunks,
+            chunks: Arc::new(chunks),
             stats: self.stats(),
             dictionary: Some(self.dictionary.clone()),
             distinct: None,
@@ -2653,7 +2677,7 @@ impl MutableDictColumn {
         let stats = self.stats();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats,
             dictionary: Some(self.dictionary),
             distinct: None,
@@ -2731,7 +2755,7 @@ impl<'a> TableScan<'a> {
         }
 
         let mut sum = 0f64;
-        for chunk in &column.chunks {
+        for chunk in column.chunks.iter() {
             match chunk {
                 EncodedChunk::Float(c) => {
                     if let Some(validity) = &c.validity {
@@ -3386,7 +3410,7 @@ impl IntBuilder {
         self.flush();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: None,
             distinct: Some(self.distinct),
@@ -3463,7 +3487,7 @@ impl FloatBuilder {
         self.flush();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: None,
             distinct: Some(self.distinct),
@@ -3546,7 +3570,7 @@ impl BoolBuilder {
         self.flush();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: None,
             distinct: None,
@@ -3654,7 +3678,7 @@ impl DictBuilder {
         self.flush();
         Column {
             schema: self.schema,
-            chunks: self.chunks,
+            chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: Some(Arc::new(self.dictionary)),
             distinct: None,
@@ -3855,5 +3879,92 @@ mod tests {
 
         assert_eq!(table.scan().filter_eq_i64(0, 10), vec![0, 3]);
         assert_eq!(table.scan().filter_in_i64(0, &[11, 10]), vec![0, 2, 3]);
+
+    }
+
+    #[test]
+    fn cloning_columnar_table_preserves_reads_and_group_by_results() {
+        use crate::query::AggSpec;
+
+        let schema = vec![
+            ColumnSchema {
+                name: "cat".to_owned(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "x".to_owned(),
+                column_type: ColumnType::Number,
+            },
+        ];
+
+        let options = TableOptions {
+            page_size_rows: 4,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        for i in 0..10 {
+            let cat = if i % 2 == 0 { "A" } else { "B" };
+            builder.append_row(&[
+                Value::String(Arc::<str>::from(cat)),
+                Value::Number(i as f64),
+            ]);
+        }
+        let table = builder.finalize();
+        let cloned = table.clone();
+
+        // Ensure the clone shares the encoded chunk backing storage.
+        for (orig_col, cloned_col) in table.columns.iter().zip(cloned.columns.iter()) {
+            assert!(Arc::ptr_eq(&orig_col.chunks, &cloned_col.chunks));
+        }
+
+        for row in 0..=table.row_count() {
+            for col in 0..table.column_count() {
+                assert_eq!(table.get_cell(row, col), cloned.get_cell(row, col));
+            }
+        }
+
+        let keys = [0usize];
+        let aggs = [AggSpec::count_rows(), AggSpec::sum_f64(1)];
+        let grouped = table.group_by(&keys, &aggs).unwrap().to_values();
+        let grouped_cloned = cloned.group_by(&keys, &aggs).unwrap().to_values();
+        assert_eq!(grouped, grouped_cloned);
+    }
+
+    #[test]
+    fn into_mutable_roundtrip_works_after_clone() {
+        let schema = vec![
+            ColumnSchema {
+                name: "cat".to_owned(),
+                column_type: ColumnType::String,
+            },
+            ColumnSchema {
+                name: "x".to_owned(),
+                column_type: ColumnType::Number,
+            },
+        ];
+
+        let options = TableOptions {
+            page_size_rows: 4,
+            cache: PageCacheConfig { max_entries: 4 },
+        };
+
+        let mut builder = ColumnarTableBuilder::new(schema, options);
+        builder.append_row(&[Value::String(Arc::<str>::from("A")), Value::Number(1.0)]);
+        builder.append_row(&[Value::String(Arc::<str>::from("B")), Value::Number(2.0)]);
+        let table = builder.finalize();
+
+        // Converting a cloned table to mutable forces recovery of chunk ownership (may clone the
+        // underlying `Vec<EncodedChunk>`), but must remain correct.
+        let mut mutable = table.clone().into_mutable();
+        mutable.append_row(&[Value::String(Arc::<str>::from("C")), Value::Number(3.0)]);
+        let frozen = mutable.freeze();
+
+        assert_eq!(frozen.row_count(), 3);
+        assert_eq!(frozen.column_count(), 2);
+        assert_eq!(frozen.get_cell(0, 0), table.get_cell(0, 0));
+        assert_eq!(frozen.get_cell(1, 0), table.get_cell(1, 0));
+        assert_eq!(frozen.get_cell(2, 0), Value::String(Arc::<str>::from("C")));
+        assert_eq!(frozen.get_cell(2, 1), Value::Number(3.0));
     }
 }
