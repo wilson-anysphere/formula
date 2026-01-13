@@ -1,7 +1,10 @@
 # Encrypted workbook fixtures
 
-This directory is the canonical location for password-protected / encrypted Excel workbook fixtures
-used by tests that validate **format detection** and **error handling**.
+This directory is the canonical location for **password-to-open / encrypted** Excel workbook
+fixtures used by tests that validate **format detection** and **error handling**.
+
+This is **file encryption** (“Encrypt with Password”), not workbook/worksheet protection (“password
+to edit”).
 
 ## Why this is separate from `fixtures/xlsx/`
 
