@@ -130,9 +130,7 @@ test("buildContext: schema metadata updates (namedRanges) do not force re-indexi
 });
 
 test("buildContext: LRU cache eviction removes old sheet chunks from the in-memory store", async () => {
-  const cm = new ContextManager({ tokenBudgetTokens: 1000 });
-  // Force eviction quickly.
-  cm._sheetIndexCacheLimit = 2;
+  const cm = new ContextManager({ tokenBudgetTokens: 1000, sheetIndexCacheLimit: 2 });
 
   const sheetA = makeSheet(
     [

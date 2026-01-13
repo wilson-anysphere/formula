@@ -93,6 +93,13 @@ export class ContextManager {
      * will reuse the previously indexed chunks instead of re-embedding.
      */
     cacheSheetIndex?: boolean;
+    /**
+     * Maximum number of sheet index entries cached per ContextManager instance.
+     *
+     * Defaults to 32. When the cache evicts an active sheet entry, its in-memory
+     * RAG chunks are also removed from the underlying store to keep memory bounded.
+     */
+    sheetIndexCacheLimit?: number;
     workbookRag?: WorkbookRagOptions;
     /**
      * Safety cap for the number of rows included from `sheet.values` when building

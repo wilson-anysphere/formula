@@ -277,6 +277,7 @@ export class ContextManager {
    *   tokenBudgetTokens?: number,
    *   ragIndex?: RagIndex,
    *   cacheSheetIndex?: boolean,
+   *   sheetIndexCacheLimit?: number,
    *   workbookRag?: WorkbookRagOptions,
    *   maxContextRows?: number,
    *   maxContextCells?: number,
@@ -306,7 +307,10 @@ export class ContextManager {
     this.cacheSheetIndex = options.cacheSheetIndex ?? true;
     /** @type {Map<string, { signature: string, schemaSignature: string, schema: any, sheetName: string }>} */
     this._sheetIndexCache = new Map();
-    this._sheetIndexCacheLimit = DEFAULT_SHEET_INDEX_CACHE_LIMIT;
+    this._sheetIndexCacheLimit = Math.max(
+      1,
+      normalizeNonNegativeInt(options.sheetIndexCacheLimit, DEFAULT_SHEET_INDEX_CACHE_LIMIT),
+    );
     /** @type {Map<string, string>} */
     this._sheetNameToActiveCacheKey = new Map();
   }
