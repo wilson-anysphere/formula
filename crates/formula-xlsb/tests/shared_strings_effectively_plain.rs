@@ -65,6 +65,31 @@ fn build_shared_strings_bin_effectively_plain(rich_text: &str, phonetic_text: &s
     out
 }
 
+fn build_shared_strings_bin_rich(text: &str) -> Vec<u8> {
+    // Build:
+    //   BrtSST(totalCount=0, uniqueCount=1)
+    //   BrtSI(flags=RICH, text, cRun=1, StrRun[0])
+    //   BrtSSTEnd
+    let mut out = Vec::new();
+
+    let mut sst = Vec::new();
+    sst.extend_from_slice(&0u32.to_le_bytes()); // totalCount
+    sst.extend_from_slice(&1u32.to_le_bytes()); // uniqueCount
+    write_record(&mut out, SST, &sst);
+
+    let mut si = Vec::new();
+    si.push(0x01); // rich flag
+    write_utf16_string(&mut si, text);
+    si.extend_from_slice(&1u32.to_le_bytes()); // cRun = 1
+                                               // StrRun (8 bytes): [ich:u32][ifnt:u16][reserved:u16]
+    si.extend_from_slice(&[0u8; 8]);
+    write_record(&mut out, SI, &si);
+
+    write_record(&mut out, SST_END, &[]);
+
+    out
+}
+
 fn read_zip_part(path: &str, part_path: &str) -> Vec<u8> {
     let file = File::open(path).expect("open xlsb");
     let mut zip = zip::ZipArchive::new(file).expect("open zip");
@@ -188,6 +213,7 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_value: CellValue::Text(rich_text.to_string()),
                 new_style: None,
                 new_formula: None,
+                new_formula_flags: None,
                 new_rgcb: None,
                 new_formula_flags: None,
                 shared_string_index: None,
@@ -198,6 +224,7 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
                 new_value: CellValue::Text(phonetic_text.to_string()),
                 new_style: None,
                 new_formula: None,
+                new_formula_flags: None,
                 new_rgcb: None,
                 new_formula_flags: None,
                 shared_string_index: None,
@@ -255,4 +282,51 @@ fn shared_strings_writer_reuses_effectively_plain_flagged_si_records() {
             .value,
         CellValue::Text(phonetic_text.to_string())
     );
+}
+
+#[test]
+fn shared_strings_writer_does_not_reuse_true_rich_si_records_as_plain() {
+    let text = "RichFlagWithRuns";
+    let shared_strings_bin = build_shared_strings_bin_rich(text);
+
+    let mut builder = XlsbFixtureBuilder::new();
+    builder.set_shared_strings_bin_override(shared_strings_bin);
+    let bytes = builder.build_bytes();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, &bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open input workbook");
+    wb.save_with_cell_edits_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text(text.to_string()),
+            new_style: None,
+            new_formula: None,
+            new_formula_flags: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_shared_strings");
+
+    let sheet_bin = read_zip_part(output_path.to_str().unwrap(), "xl/worksheets/sheet1.bin");
+    let (id, payload) = find_cell_record(&sheet_bin, 0, 0).expect("find A1 record");
+    assert_eq!(id, CELL_ISST, "expected BrtCellIsst/STRING record id");
+    assert_eq!(
+        u32::from_le_bytes(payload[8..12].try_into().unwrap()),
+        1,
+        "expected A1 to reference an appended plain shared string, not rich index 0"
+    );
+
+    let shared_strings_out = read_zip_part(output_path.to_str().unwrap(), "xl/sharedStrings.bin");
+    let counts = read_shared_strings_counts(&shared_strings_out);
+    assert_eq!(counts.total, 1);
+    assert_eq!(counts.unique, 2);
+    assert_eq!(counts.si_records, 2);
 }
