@@ -269,8 +269,8 @@ dialog.print-preview-dialog::backdrop {
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 2px;
+  padding: 2px 8px;
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -286,12 +286,18 @@ dialog.print-preview-dialog::backdrop {
 .statusbar__main {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.statusbar__main > * {
   min-width: 0;
 }
 
 .statusbar__item {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-secondary);
 }
 
@@ -348,7 +354,7 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar-mode {
-  padding: 2px 8px;
+  padding: 1px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg-primary);
@@ -363,18 +369,106 @@ dialog.print-preview-dialog::backdrop {
 }
 
 .statusbar button {
-  padding: 4px 8px;
+  padding: 0 8px;
+  height: 22px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  font: inherit;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.statusbar button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.statusbar button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.statusbar button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.statusbar button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .statusbar select {
-  padding: 4px 8px;
+  padding: 0 8px;
+  height: 22px;
   border: 1px solid var(--border);
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  line-height: 20px;
+  min-width: 0;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.statusbar select:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.statusbar select:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+@media (max-width: 900px) {
+  .statusbar [data-testid="selection-sum"],
+  .statusbar [data-testid="selection-avg"],
+  .statusbar [data-testid="selection-count"] {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .statusbar__main {
+    gap: 6px;
+  }
+
+  .statusbar [data-testid="status-zoom"] {
+    display: none;
+  }
+
+  .statusbar__collab > span:first-child {
+    display: none;
+  }
+
+  .statusbar__collab {
+    max-width: 200px;
+  }
+}
+
+@media (max-width: 700px) {
+  .statusbar__main {
+    gap: 4px;
+  }
+
+  .statusbar button,
+  .statusbar select {
+    padding: 0 6px;
+  }
+
+  .statusbar [data-testid="sheet-position"] {
+    display: none;
+  }
 }
