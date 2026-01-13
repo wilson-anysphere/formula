@@ -3053,6 +3053,7 @@ export class SpreadsheetApp {
     this.chartModels.clear();
     this.dirtyChartIds.clear();
     this.conflictUiContainer = null;
+    (this.drawingOverlay as DrawingOverlay | null)?.destroy();
     this.root.replaceChildren();
   }
 

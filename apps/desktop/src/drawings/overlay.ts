@@ -339,6 +339,16 @@ export class DrawingOverlay {
     this.renderAbort = abort;
     const signal = abort?.signal;
 
+    const liveIds =
+      this.shapeTextCache.size > 0
+        ? (() => {
+            const ids = new Set<number>();
+            for (const obj of objects) ids.add(obj.id);
+            return ids;
+          })()
+        : null;
+
+    try {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, viewport.width, viewport.height);
 
@@ -498,6 +508,7 @@ export class DrawingOverlay {
           const textLayout = cachedText.parsed;
           const textParsed = textLayout !== null;
           const hasText = textLayout ? textLayout.textRuns.map((r) => r.text).join("").trim().length > 0 : false;
+          const canRenderText = hasText && typeof (ctx as any).measureText === "function";
 
           let rendered = false;
           let spec: ShapeRenderSpec | null = null;
@@ -508,12 +519,12 @@ export class DrawingOverlay {
           }
 
           if (spec) {
-            const specToDraw = hasText ? { ...spec, label: undefined } : spec;
+            const specToDraw = canRenderText ? { ...spec, label: undefined } : spec;
             withClip(() => {
               try {
                 withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
                   drawShape(ctx, localRect, specToDraw, colors, cssVarStyle);
-                  if (hasText) {
+                  if (canRenderText) {
                     renderShapeText(ctx, localRect, textLayout!, { defaultColor: colors.placeholderLabel });
                   }
                 });
@@ -527,7 +538,7 @@ export class DrawingOverlay {
 
           // If we couldn't render the shape geometry but we did successfully parse text,
           // still render the text within the anchored bounds (and skip placeholders).
-          if (hasText) {
+          if (canRenderText) {
             withClip(() => {
               withObjectTransform(ctx, screenRect, obj.transform, (localRect) => {
                 ctx.save();
@@ -629,6 +640,17 @@ export class DrawingOverlay {
         }
       }
     }
+    } finally {
+      // Prune cached shape text layouts for objects that no longer exist.
+      //
+      // `shapeTextCache` is keyed by drawing id and can otherwise grow unbounded across
+      // delete/undo/redo sessions.
+      if (liveIds) {
+        for (const id of this.shapeTextCache.keys()) {
+          if (!liveIds.has(id)) this.shapeTextCache.delete(id);
+        }
+      }
+    }
   }
 
   /**
@@ -664,12 +686,14 @@ export class DrawingOverlay {
     // Cancel any in-flight render and release cached bitmap resources.
     this.renderAbort?.abort();
     this.renderAbort = null;
+    this.renderSeq += 1;
     this.bitmapCache.clear();
     this.shapeTextCache.clear();
     this.cssVarStyle = undefined;
     this.colorTokens = null;
     this.orderedObjects = [];
     this.orderedObjectsSource = null;
+    this.selectedId = null;
   }
 }
 
