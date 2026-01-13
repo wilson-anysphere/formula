@@ -232,7 +232,7 @@ jobs:
         #
         # Only enforce when we're publishing to a GitHub Release (tag push or workflow_dispatch upload=true).
         if: steps.params.outputs.upload == 'true' && (github.repository == 'wilson-anysphere/formula' || secrets.TAURI_PRIVATE_KEY != '')
-        run: node scripts/ci/check-tauri-updater-secrets.mjs
+        run: node scripts/check-updater-signing-secrets.mjs
         env:
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
