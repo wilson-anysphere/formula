@@ -193,3 +193,47 @@ test("createYjsSpreadsheetDocAdapter.applyState works when the target doc contai
   // The origin is already asserted in the existing applyState origin test; this
   // test focuses on foreign-placeholder tolerance.
 });
+
+test("createYjsSpreadsheetDocAdapter.on('update') returns an unsubscribe function (no excluded roots)", (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  const adapter = createYjsSpreadsheetDocAdapter(doc);
+
+  let updates = 0;
+  const unsubscribe = adapter.on("update", () => {
+    updates += 1;
+  });
+
+  assert.equal(typeof unsubscribe, "function");
+
+  doc.getMap("cells").set("Sheet1:0:0", "alpha");
+  assert.equal(updates, 1);
+
+  unsubscribe();
+  doc.getMap("cells").set("Sheet1:0:1", "beta");
+  assert.equal(updates, 1);
+});
+
+test("createYjsSpreadsheetDocAdapter.on('update') returns an unsubscribe function (excluded roots filter)", (t) => {
+  const doc = new Y.Doc();
+  t.after(() => doc.destroy());
+  const adapter = createYjsSpreadsheetDocAdapter(doc, { excludeRoots: ["internal"] });
+
+  let updates = 0;
+  const unsubscribe = adapter.on("update", () => {
+    updates += 1;
+  });
+  assert.equal(typeof unsubscribe, "function");
+
+  // Updates to excluded roots should not be surfaced.
+  doc.getMap("internal").set("k", "v");
+  assert.equal(updates, 0);
+
+  // Workbook updates should still be surfaced.
+  doc.getMap("cells").set("Sheet1:0:0", "alpha");
+  assert.equal(updates, 1);
+
+  unsubscribe();
+  doc.getMap("cells").set("Sheet1:0:1", "beta");
+  assert.equal(updates, 1);
+});
