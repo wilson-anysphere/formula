@@ -39,7 +39,17 @@ export class LocalStorageBinaryStorage {
     if (!storage) return null;
     const encoded = storage.getItem(this.key);
     if (!encoded) return null;
-    return fromBase64(encoded);
+    try {
+      return fromBase64(encoded);
+    } catch {
+      // Corrupted base64 payload; clear it so future loads can recover.
+      try {
+        storage.removeItem?.(this.key);
+      } catch {
+        // ignore
+      }
+      return null;
+    }
   }
 
   async save(data) {
@@ -51,7 +61,7 @@ export class LocalStorageBinaryStorage {
   async remove() {
     const storage = getLocalStorageOrNull();
     if (!storage) return;
-    storage.removeItem(this.key);
+    storage.removeItem?.(this.key);
   }
 }
 

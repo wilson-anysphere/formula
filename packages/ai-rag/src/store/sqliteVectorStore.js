@@ -161,6 +161,20 @@ export class SqliteVectorStore {
     this._registerFunctions();
   }
 
+  /**
+   * @param {{
+   *   storage?: any,
+   *   dimension: number,
+   *   autoSave?: boolean,
+   *   resetOnCorrupt?: boolean,
+   *   locateFile?: (file: string, prefix?: string) => string
+   * }} opts
+   * @param {boolean} [opts.resetOnCorrupt]
+   *   When true (default), any failure to load/validate an existing persisted
+   *   database causes the underlying storage to be cleared (via `storage.remove()`
+   *   when available) and a fresh empty database to be created. When false, the
+   *   initialization error is rethrown.
+   */
   static async create(opts) {
     if (!opts || !Number.isFinite(opts.dimension) || opts.dimension <= 0) {
       throw new Error("SqliteVectorStore requires a positive dimension");
@@ -173,61 +187,86 @@ export class SqliteVectorStore {
     }
 
     const storage = opts.storage ?? new InMemoryBinaryStorage();
-    // The vector store is a derived cache (it can always be re-indexed). If the
-    // embedding dimension changes between versions/configurations, the safest
-    // user experience is to reset the persisted DB and allow re-indexing rather
-    // than hard-failing on startup.
+    // The vector store is a derived cache (it can always be re-indexed). By
+    // default we prefer a resilient startup experience, automatically clearing
+    // invalid/incompatible persisted bytes and allowing callers to re-index.
+    const resetOnCorrupt = opts.resetOnCorrupt ?? true;
     const resetOnDimensionMismatch = opts.resetOnDimensionMismatch ?? true;
     const SQL = await getSqlJs(opts.locateFile);
-    const existing = await storage.load();
+
+    async function clearPersistedBytes() {
+      const remove = storage?.remove;
+      if (typeof remove !== "function") return;
+      try {
+        await remove.call(storage);
+      } catch {
+        // ignore
+      }
+    }
+
+    let existing = null;
+    try {
+      existing = await storage.load();
+    } catch (err) {
+      if (!resetOnCorrupt) throw err;
+      await clearPersistedBytes();
+      existing = null;
+    }
     const hadExisting = Boolean(existing);
 
-    const autoSave = opts.autoSave ?? true;
-
-    let db = existing ? new SQL.Database(existing) : new SQL.Database();
-    let store = new SqliteVectorStore(db, {
-      storage,
-      dimension: opts.dimension,
-      autoSave,
-    });
-
-    try {
+    /**
+     * @param {any} db
+     */
+    function initStore(db) {
+      const store = new SqliteVectorStore(db, {
+        storage,
+        dimension: opts.dimension,
+        autoSave: opts.autoSave ?? true,
+      });
       store._ensureMeta(opts.dimension);
-    } catch (err) {
-      // Only reset for the specific "dimension mismatch" case. Other failures
-      // (e.g. corrupt DB bytes) should still surface to callers.
-      const message = err instanceof Error ? err.message : String(err);
-      const isDimMismatch = message.includes("SqliteVectorStore dimension mismatch");
-      if (!isDimMismatch || !resetOnDimensionMismatch) throw err;
+      store._ensureSchemaVersion();
+      return store;
+    }
 
+    /** @type {SqliteVectorStore} */
+    let store;
+    if (!existing) {
+      store = initStore(new SQL.Database());
+      return store;
+    }
+
+    let db = null;
+    try {
+      db = new SQL.Database(existing);
+      store = initStore(db);
+    } catch (err) {
       try {
-        store._db?.close?.();
+        db?.close?.();
       } catch {
         // ignore
       }
 
-      // Best-effort clear persisted bytes.
-      if (typeof storage.remove === "function") {
-        await storage.remove();
+      const message = err instanceof Error ? err.message : String(err);
+      const isDimMismatch = message.includes("SqliteVectorStore dimension mismatch");
+      if (isDimMismatch) {
+        if (!resetOnDimensionMismatch) throw err;
+      } else {
+        if (!resetOnCorrupt) throw err;
       }
 
-      db = new SQL.Database();
-      store = new SqliteVectorStore(db, {
-        storage,
-        dimension: opts.dimension,
-        autoSave,
-      });
-      store._ensureMeta(opts.dimension);
+      await clearPersistedBytes();
+      store = initStore(new SQL.Database());
 
-      // Overwrite whatever was previously persisted so future launches don't
-      // repeatedly hit the mismatch path.
-      store._ensureSchemaVersion();
-      store._dirty = true;
-      await store._persist();
-      return store;
+      // Best-effort persist the empty DB so future opens don't repeatedly hit the
+      // mismatch/corruption path even if `remove()` isn't supported.
+      try {
+        store._dirty = true;
+        await store._persist();
+      } catch {
+        // ignore
+      }
     }
 
-    store._ensureSchemaVersion();
     // If we migrated an existing database and autoSave is enabled, persist the
     // migrated schema immediately so subsequent opens don't re-run the migration
     // work (and so incremental indexing benefits right away).

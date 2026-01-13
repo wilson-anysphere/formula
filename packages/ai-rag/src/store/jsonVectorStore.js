@@ -33,12 +33,22 @@ function base64ToFloat32Vector(encoded) {
  */
 export class JsonVectorStore extends InMemoryVectorStore {
   /**
-   * @param {{ storage?: any, dimension: number, autoSave?: boolean }} opts
+   * @param {{
+   *   storage?: any,
+   *   dimension: number,
+   *   autoSave?: boolean,
+   *   resetOnCorrupt?: boolean
+   * }} opts
+   * @param {boolean} [opts.resetOnCorrupt]
+   *   When true, invalid persisted payloads are cleared (via `storage.remove()` when
+   *   available) and the store loads as empty. When false, invalid payloads are
+   *   ignored but left in storage (matching the historical behaviour).
    */
   constructor(opts) {
     super({ dimension: opts.dimension });
     this._storage = opts.storage ?? new InMemoryBinaryStorage();
     this._autoSave = opts.autoSave ?? true;
+    this._resetOnCorrupt = opts.resetOnCorrupt ?? true;
     this._loaded = false;
     this._dirty = false;
     // Serialize `storage.save()` calls to prevent lost updates when multiple
@@ -51,6 +61,17 @@ export class JsonVectorStore extends InMemoryVectorStore {
     this._batchDepth = 0;
   }
 
+  async _maybeResetOnCorrupt() {
+    if (!this._resetOnCorrupt) return;
+    const remove = this._storage?.remove;
+    if (typeof remove !== "function") return;
+    try {
+      await remove.call(this._storage);
+    } catch {
+      // ignore
+    }
+  }
+
   /**
    * Load records from storage (idempotent).
    */
@@ -58,7 +79,14 @@ export class JsonVectorStore extends InMemoryVectorStore {
     if (this._loaded) return;
     this._loaded = true;
 
-    const data = await this._storage.load();
+    let data;
+    try {
+      data = await this._storage.load();
+    } catch (err) {
+      await this._maybeResetOnCorrupt();
+      if (this._resetOnCorrupt) return;
+      throw err;
+    }
     if (!data) return;
 
     let parsed;
@@ -66,6 +94,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
       const raw = new TextDecoder().decode(data);
       parsed = JSON.parse(raw);
     } catch {
+      await this._maybeResetOnCorrupt();
       return;
     }
 
@@ -77,6 +106,7 @@ export class JsonVectorStore extends InMemoryVectorStore {
       parsed.dimension !== this.dimension ||
       !Array.isArray(parsed.records)
     ) {
+      await this._maybeResetOnCorrupt();
       return;
     }
 
@@ -91,10 +121,21 @@ export class JsonVectorStore extends InMemoryVectorStore {
               metadata: r.metadata,
             }));
     } catch {
+      await this._maybeResetOnCorrupt();
       return;
     }
 
-    await super.upsert(records);
+    try {
+      await super.upsert(records);
+    } catch (err) {
+      await this._maybeResetOnCorrupt();
+      // Ensure we still proceed as an empty store when resetOnCorrupt is enabled.
+      if (this._resetOnCorrupt) {
+        this._records.clear();
+        return;
+      }
+      throw err;
+    }
   }
 
   async _persist() {

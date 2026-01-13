@@ -17,7 +17,6 @@ export class LocalStorageBinaryStorage implements BinaryStorage {
   save(data: Uint8Array): Promise<void>;
   remove(): Promise<void>;
 }
-
 export class ChunkedLocalStorageBinaryStorage implements BinaryStorage {
   constructor(opts: { workbookId: string; namespace?: string; chunkSizeChars?: number });
   readonly key: string;
