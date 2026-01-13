@@ -2372,6 +2372,7 @@ dependencies = [
  "formula-dax",
  "formula-engine",
  "formula-model",
+ "formula-office-crypto",
  "formula-xlsx",
  "getrandom 0.2.17",
  "js-sys",
@@ -2381,6 +2382,7 @@ dependencies = [
  "unicode-normalization",
  "wasm-bindgen",
  "wasm-bindgen-test",
+ "zip 2.4.2",
 ]
 
 [[package]]

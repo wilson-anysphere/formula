@@ -2285,3 +2285,38 @@ fn from_xlsx_bytes_populates_calc_settings_via_get_calc_settings() {
     assert_eq!(settings.iterative.max_iterations, 10);
     assert!((settings.iterative.max_change - 0.0001).abs() < 1e-12);
 }
+
+#[wasm_bindgen_test]
+fn from_encrypted_xlsx_bytes_decrypts_and_loads_workbook() {
+    let plaintext: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../formula-xlsx/tests/fixtures/rt_simple.xlsx"
+    ));
+    let password = "secret-password";
+
+    // Encrypt the fixture in-process so the test can run fully in wasm without committed binary
+    // encrypted fixtures.
+    //
+    // Use modest (non-production) parameters to keep wasm-bindgen-test runtime reasonable.
+    let encrypted = formula_office_crypto::encrypt_package_to_ole(
+        plaintext,
+        password,
+        formula_office_crypto::EncryptOptions {
+            key_bits: 128,
+            hash_algorithm: formula_office_crypto::HashAlgorithm::Sha256,
+            spin_count: 1_000,
+            ..Default::default()
+        },
+    )
+    .expect("encrypt");
+    let wb =
+        WasmWorkbook::from_encrypted_xlsx_bytes(&encrypted, password.to_string()).expect("load");
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.value, JsonValue::String("Hello".to_string()));
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 42.0);
+}

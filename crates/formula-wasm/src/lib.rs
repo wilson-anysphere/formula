@@ -3561,6 +3561,9 @@ impl WasmWorkbook {
 
     #[wasm_bindgen(js_name = "fromXlsxBytes")]
     pub fn from_xlsx_bytes(bytes: &[u8]) -> Result<WasmWorkbook, JsValue> {
+        // Ensure the function registry is populated before parsing any workbook formulas.
+        ensure_rust_constructors_run();
+
         let model = formula_xlsx::read_workbook_model_from_bytes(bytes)
             .map_err(|err| js_err(err.to_string()))?;
 
@@ -3826,6 +3829,71 @@ impl WasmWorkbook {
         }
 
         Ok(WasmWorkbook { inner: wb })
+    }
+
+    #[wasm_bindgen(js_name = "fromEncryptedXlsxBytes")]
+    pub fn from_encrypted_xlsx_bytes(bytes: &[u8], password: String) -> Result<WasmWorkbook, JsValue> {
+        if !formula_office_crypto::is_encrypted_ooxml_ole(bytes) {
+            // Not an Office-encrypted OLE container; fall back to the plaintext XLSX loader.
+            return Self::from_xlsx_bytes(bytes);
+        }
+
+        let decrypted = formula_office_crypto::decrypt_encrypted_package_ole(bytes, &password)
+            .map_err(|err| match err {
+                formula_office_crypto::OfficeCryptoError::InvalidPassword => js_err("invalid password"),
+                formula_office_crypto::OfficeCryptoError::InvalidFormat(message)
+                    if message.contains("ZIP archive") =>
+                {
+                    js_err(
+                        "decrypted payload is not an `.xlsx` ZIP package; only encrypted `.xlsx` is supported for now",
+                    )
+                }
+                other => js_err(other.to_string()),
+            })?;
+
+        // Office-encrypted containers can wrap arbitrary payloads (e.g. XLS, XLSB, even DOCX). For
+        // now we only support decrypting XLSX (ZIP + `xl/workbook.xml`).
+        if decrypted.len() < 2 || &decrypted[..2] != b"PK" {
+            return Err(js_err(
+                "decrypted payload is not an `.xlsx` ZIP package; only encrypted `.xlsx` is supported for now",
+            ));
+        }
+
+        let cursor = std::io::Cursor::new(decrypted.as_slice());
+        let archive = zip::ZipArchive::new(cursor)
+            .map_err(|err| js_err(format!("decrypted payload is not a valid ZIP archive: {err}")))?;
+
+        let mut has_workbook_xml = false;
+        let mut has_workbook_bin = false;
+        for name in archive.file_names() {
+            // Normalize ZIP entry names to forward slashes (Excel uses `/`, but tolerate `\`).
+            let mut normalized = name.trim_start_matches('/');
+            let replaced;
+            if normalized.contains('\\') {
+                replaced = normalized.replace('\\', "/");
+                normalized = &replaced;
+            }
+            if normalized.eq_ignore_ascii_case("xl/workbook.xml") {
+                has_workbook_xml = true;
+            } else if normalized.eq_ignore_ascii_case("xl/workbook.bin") {
+                has_workbook_bin = true;
+            }
+            if has_workbook_xml || has_workbook_bin {
+                break;
+            }
+        }
+
+        if has_workbook_xml {
+            return Self::from_xlsx_bytes(&decrypted);
+        }
+        if has_workbook_bin {
+            return Err(js_err(
+                "decrypted payload appears to be an `.xlsb` workbook; only encrypted `.xlsx` is supported for now",
+            ));
+        }
+        Err(js_err(
+            "decrypted payload is a ZIP file but does not appear to be an `.xlsx` workbook (missing `xl/workbook.xml`)",
+        ))
     }
 
     #[wasm_bindgen(js_name = "setSheetDimensions")]

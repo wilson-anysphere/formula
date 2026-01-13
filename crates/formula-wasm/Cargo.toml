@@ -26,6 +26,7 @@ dax = ["dep:formula-dax"]
 [dependencies]
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
+formula-office-crypto = { path = "../formula-office-crypto" }
 formula-xlsx = { path = "../formula-xlsx" }
 formula-dax = { path = "../formula-dax", optional = true, features = ["pivot-model"] }
 getrandom = { version = "0.2", features = ["js"] }
@@ -35,6 +36,7 @@ serde-wasm-bindgen = "0.6"
 serde_json = "1"
 unicode-normalization = "0.1.25"
 wasm-bindgen = "0.2"
+zip = { version = "2.1", default-features = false, features = ["deflate"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
