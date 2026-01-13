@@ -93,3 +93,82 @@ test("searchWorkbookRag honors workbookId filtering", async () => {
   assert.ok(results.every((r) => r.metadata.title !== "Salaries"));
 });
 
+test("searchWorkbookRag respects AbortSignal", async () => {
+  const embedder = new HashEmbedder({ dimension: 8 });
+  const store = new InMemoryVectorStore({ dimension: 8 });
+
+  const abortController = new AbortController();
+  abortController.abort();
+
+  await assert.rejects(
+    searchWorkbookRag({
+      queryText: "revenue",
+      workbookId: "wb",
+      topK: 1,
+      vectorStore: store,
+      embedder,
+      signal: abortController.signal,
+    }),
+    { name: "AbortError" }
+  );
+});
+
+test("searchWorkbookRag forwards workbookId + signal and avoids oversampling when rerank/dedupe are disabled", async () => {
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
+  /** @type {{ embed: number, query: number, queryTopK: number | null }} */
+  const calls = { embed: 0, query: 0, queryTopK: null };
+
+  const embedder = {
+    /**
+     * @param {string[]} texts
+     * @param {{ signal?: AbortSignal }} [options]
+     */
+    async embedTexts(texts, options = {}) {
+      calls.embed += 1;
+      assert.deepEqual(texts, ["hello"]);
+      assert.equal(options.signal, signal);
+      return [[1, 0, 0]];
+    },
+  };
+
+  const vectorStore = {
+    /**
+     * @param {ArrayLike<number>} vector
+     * @param {number} topK
+     * @param {{ workbookId?: string, signal?: AbortSignal }} [opts]
+     */
+    async query(vector, topK, opts = {}) {
+      calls.query += 1;
+      calls.queryTopK = topK;
+      assert.deepEqual(Array.from(vector), [1, 0, 0]);
+      assert.equal(opts.workbookId, "wb");
+      assert.equal(opts.signal, signal);
+      return [
+        {
+          id: "a",
+          score: 1,
+          metadata: { workbookId: "wb" },
+        },
+      ];
+    },
+  };
+
+  const results = await searchWorkbookRag({
+    queryText: "hello",
+    workbookId: "wb",
+    topK: 1,
+    vectorStore,
+    embedder,
+    rerank: false,
+    dedupe: false,
+    signal,
+  });
+
+  assert.equal(calls.embed, 1);
+  assert.equal(calls.query, 1);
+  assert.equal(calls.queryTopK, 1);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].id, "a");
+});
