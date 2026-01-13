@@ -92,7 +92,8 @@ test("CollabSession sheet view binder syncs frozen panes + axis overrides withou
 test("CollabSession sheet view binder does not write view state into Yjs when session role is read-only", async () => {
   const doc = new Y.Doc();
   const session = createCollabSession({ doc });
-  // Viewer/commenter roles can make local-only view changes, but must not mutate the shared doc.
+  // Viewer/commenter roles must not mutate the shared doc (even if a caller applies local-only
+  // view changes in the UI).
   session.setPermissions({ role: "viewer", rangeRestrictions: [], userId: "viewer-1" });
 
   const dc = new DocumentController();

@@ -319,15 +319,17 @@ function sameNormalizedCell(a, b) {
  *   /**
  *    * Controls whether DocumentController-driven shared-state writes (sheet view state,
  *    * sheet-level formatting defaults, etc) are allowed to be persisted into the Yjs
- *    * document.
- *    *
- *    * In read-only collab roles (viewer/commenter), the UI may still allow local-only
- *    * interactions like freeze panes and resizing rows/cols. Those interactions should
- *    * *not* mutate the shared CRDT.
- *    *
- *    * Defaults to `true`.
- *    *\/
- *   canWriteSharedState?: boolean | (() => boolean),
+  *    * document.
+  *    *
+  *    * In non-edit collab roles (viewer/commenter), the UI should generally disable
+  *    * workbook mutations (including sheet view state / formatting defaults). This
+  *    * hook is defense-in-depth: it prevents any DocumentController-emitted shared
+  *    * state deltas (startup races, programmatic calls, etc) from being written into
+  *    * the shared CRDT.
+  *    *
+  *    * Defaults to `true`.
+  *    *\/
+  *   canWriteSharedState?: boolean | (() => boolean),
  *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
  *   /**
  *    * When true, suppress per-cell formatting for masked cells (unreadable due to

@@ -2859,9 +2859,10 @@ export async function bindCollabSessionToDocumentController(options: {
     encryption: session.getEncryptionConfig(),
     canReadCell: (cell) => session.canReadCell(cell),
     canEditCell: (cell) => session.canEditCell(cell),
-    // In read-only collab roles (viewer/commenter) we still want to allow
-    // local-only UI changes (freeze panes, row/col sizing, sheet formatting
-    // defaults), but those must not be written into the shared Yjs document.
+    // In non-edit collab roles (viewer/commenter), shared-state writes (sheet view state,
+    // sheet-level formatting defaults, etc) must not be written into the shared Yjs
+    // document. Some UI paths may still emit these deltas (startup races, programmatic
+    // calls, etc); this guard is defense-in-depth.
     canWriteSharedState: () => !session.isReadOnly(),
     permissions: sessionPermissions
       ? {
