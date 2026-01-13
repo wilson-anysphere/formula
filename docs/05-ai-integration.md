@@ -547,6 +547,9 @@ Spreadsheet tool calling is **provider-agnostic** and shared across Chat, Inline
 
 - Spreadsheet tool execution happens in [`packages/ai-tools/src/executor/tool-executor.ts`](../packages/ai-tools/src/executor/tool-executor.ts).
   - Enforces range limits (e.g. `max_read_range_cells`) and (when configured) DLP policy at execution time.
+  - **Formula values (opt-in):** by default, formula cells are treated as having “no value” (returned as `null` by `read_range`, ignored by numeric ops, compared by formula text for sort/filter).
+    - To support real spreadsheet backends that store both `{ formula, value }`, set `ToolExecutorOptions.include_formula_values = true`.
+    - DLP-safe default: when DLP is configured, formula values are only surfaced/used when the range-level DLP decision is **ALLOW** (no redaction). Under **REDACT**, formula-derived values are treated as `null` to avoid inference/exfiltration.
 - The LLM-facing adapter is [`packages/ai-tools/src/llm/integration.ts`](../packages/ai-tools/src/llm/integration.ts) (`SpreadsheetLLMToolExecutor`),
   which connects the ToolExecutor to a host `SpreadsheetApi` (desktop uses `DocumentControllerSpreadsheetApi`).
 - Desktop `SpreadsheetApi` implementation: [`apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts`](../apps/desktop/src/ai/tools/documentControllerSpreadsheetApi.ts)
