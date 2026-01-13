@@ -704,20 +704,34 @@ export class YjsVersionStore {
       if (typeof expectedChunks === "number" && expectedChunks >= 0 && isYArray(chunksArr)) {
         const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
         if (actual >= expectedChunks) {
-          finalizeIds.add(key);
-          return;
+          // Only finalize records that are likely to be readable via `getVersion`.
+          // If required metadata is missing/corrupted, keep it incomplete so it
+          // can be deleted via the staleness policy below.
+          const schemaVersion = value.get("schemaVersion") ?? 1;
+          const kind = value.get("kind");
+          const timestampMs = value.get("timestampMs");
+          const kindValid = kind === "snapshot" || kind === "checkpoint" || kind === "restore";
+          if (schemaVersion === 1 && kindValid && typeof timestampMs === "number" && Number.isFinite(timestampMs)) {
+            finalizeIds.add(key);
+            return;
+          }
         }
       }
 
       // Prefer `createdAtMs` if present (newer schema), falling back to the
       // version timestamp for backwards compatibility.
       const createdAtMs = value.get("createdAtMs");
-      const ts =
+      let ts =
         typeof createdAtMs === "number"
           ? createdAtMs
           : typeof value.get("timestampMs") === "number"
             ? value.get("timestampMs")
             : 0;
+
+      // Defensive: clamp timestamps to avoid "future" records never becoming stale
+      // (can happen with clock skew or older clients without createdAtMs).
+      if (!Number.isFinite(ts) || ts < 0) ts = 0;
+      if (ts > nowMs) ts = nowMs;
 
       if (nowMs - ts >= olderThanMs) staleIds.add(key);
     });
@@ -735,6 +749,11 @@ export class YjsVersionStore {
         if (typeof expectedChunks !== "number" || expectedChunks < 0 || !isYArray(chunksArr)) continue;
         const actual = typeof chunksArr.length === "number" ? chunksArr.length : chunksArr.toArray().length;
         if (actual < expectedChunks) continue;
+        const schemaVersion = raw.get("schemaVersion") ?? 1;
+        const kind = raw.get("kind");
+        const timestampMs = raw.get("timestampMs");
+        const kindValid = kind === "snapshot" || kind === "checkpoint" || kind === "restore";
+        if (schemaVersion !== 1 || !kindValid || typeof timestampMs !== "number" || !Number.isFinite(timestampMs)) continue;
         raw.set("snapshotComplete", true);
       }
 

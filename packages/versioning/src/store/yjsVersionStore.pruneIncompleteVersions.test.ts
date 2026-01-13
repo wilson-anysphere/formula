@@ -191,4 +191,77 @@ describe("YjsVersionStore: pruneIncompleteVersions()", () => {
     expect((doc.getMap("versions").get("recoverable") as any)?.get?.("snapshotComplete")).toBe(true);
     expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual(["recoverable"]);
   });
+
+  it("does not finalize (and instead prunes) malformed records missing required metadata", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "broken");
+      record.set("kind", "snapshot");
+      // Invalid type; getVersion would throw if snapshotComplete flipped true.
+      record.set("timestampMs", "not-a-number");
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 1);
+      record.set("snapshotComplete", false);
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([7, 8, 9])]);
+      record.set("snapshotChunks", chunks);
+      versions.set("broken", record);
+      order.push(["broken"]);
+    }, "test");
+
+    await store.pruneIncompleteVersions({ olderThanMs: 0 });
+    expect(doc.getMap("versions").get("broken")).toBeUndefined();
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
+  });
+
+  it("treats future timestamps as 'now' so they can still be pruned", async () => {
+    const doc = new Y.Doc();
+    const store = new YjsVersionStore({
+      doc,
+      writeMode: "stream",
+      chunkSize: 1024,
+      maxChunksPerTransaction: 2,
+    });
+
+    doc.transact(() => {
+      const versions = doc.getMap("versions");
+      const meta = doc.getMap("versionsMeta");
+      const order = new Y.Array<string>();
+      meta.set("order", order);
+
+      const record = new Y.Map<any>();
+      record.set("schemaVersion", 1);
+      record.set("id", "future");
+      record.set("kind", "snapshot");
+      record.set("timestampMs", Date.now() + 60_000);
+      record.set("compression", "none");
+      record.set("snapshotEncoding", "chunks");
+      record.set("snapshotChunkCountExpected", 2);
+      record.set("snapshotComplete", false);
+      const chunks = new Y.Array<Uint8Array>();
+      chunks.push([new Uint8Array([1])]);
+      record.set("snapshotChunks", chunks);
+      versions.set("future", record);
+      order.push(["future"]);
+    }, "test");
+
+    await store.pruneIncompleteVersions({ olderThanMs: 0 });
+    expect(doc.getMap("versions").get("future")).toBeUndefined();
+    expect((doc.getMap("versionsMeta").get("order") as any)?.toArray?.()).toEqual([]);
+  });
 });
