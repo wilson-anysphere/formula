@@ -146,6 +146,7 @@ describe("Ribbon ↔ CommandRegistry coverage", () => {
       refreshRibbonUiState: () => {},
       applyFormattingToSelection: () => {},
       getActiveCellNumberFormat: () => null,
+      getActiveCellIndentLevel: () => 0,
       openFormatCells: () => {},
       showQuickPick: async () => null,
       pageLayoutHandlers: {
