@@ -41,6 +41,19 @@ function tokenize(text) {
     .filter(Boolean);
 }
 
+const DEFAULT_TOKEN_CACHE_SIZE = 50_000;
+
+function shouldEnableDebugCounters() {
+  // Keep `HashEmbedder` browser-safe (no hard dependency on Node globals), but
+  // still make it possible to validate cache hits in `node --test` suites.
+  const proc = typeof globalThis !== "undefined" ? globalThis.process : undefined;
+  return Boolean(
+    proc &&
+      (proc.env?.NODE_ENV === "test" ||
+        (Array.isArray(proc.execArgv) && proc.execArgv.includes("--test")))
+  );
+}
+
 function fnv1a32(str) {
   let hash = 0x811c9dc5;
   for (let i = 0; i < str.length; i += 1) {
@@ -72,10 +85,26 @@ function fnv1a32(str) {
  */
 export class HashEmbedder {
   /**
-   * @param {{ dimension?: number }} [opts]
+   * @param {{ dimension?: number, cacheSize?: number }} [opts]
    */
   constructor(opts) {
     this._dimension = opts?.dimension ?? 384;
+    const cacheSizeOpt = opts?.cacheSize;
+    const cacheSize =
+      cacheSizeOpt === undefined ? DEFAULT_TOKEN_CACHE_SIZE : cacheSizeOpt;
+    this._tokenCacheMaxSize =
+      typeof cacheSize === "number" && Number.isFinite(cacheSize) && cacheSize > 0
+        ? Math.floor(cacheSize)
+        : 0;
+    this._tokenCache =
+      this._tokenCacheMaxSize > 0 ? new Map() : null;
+
+    if (shouldEnableDebugCounters()) {
+      Object.defineProperty(this, "_debug", {
+        value: { tokenCacheHits: 0, tokenCacheMisses: 0, tokenCacheClears: 0 },
+        enumerable: false,
+      });
+    }
   }
 
   get dimension() {
@@ -89,6 +118,42 @@ export class HashEmbedder {
     // logic can safely force a re-embed of existing vector stores (by changing
     // this string, index cache keys will change).
     return `hash:v2:${this._dimension}`;
+  }
+
+  /**
+   * @param {string} token
+   * @returns {{ idx: number, sign: number }}
+   */
+  _tokenToIndexSign(token) {
+    // Signed hashing reduces the positive similarity bias from collisions.
+    // Use a high bit so sign isn't trivially determined by `idx` for even dimensions.
+    const cache = this._tokenCache;
+    if (!cache) {
+      const h = fnv1a32(token);
+      return { idx: h % this._dimension, sign: (h & 0x80000000) === 0 ? 1 : -1 };
+    }
+
+    const cached = cache.get(token);
+    if (cached) {
+      // @ts-ignore - `_debug` is a test-only internal.
+      if (this._debug) this._debug.tokenCacheHits += 1;
+      return cached;
+    }
+
+    // @ts-ignore - `_debug` is a test-only internal.
+    if (this._debug) this._debug.tokenCacheMisses += 1;
+
+    const h = fnv1a32(token);
+    const value = { idx: h % this._dimension, sign: (h & 0x80000000) === 0 ? 1 : -1 };
+
+    if (cache.size >= this._tokenCacheMaxSize) {
+      cache.clear();
+      // @ts-ignore - `_debug` is a test-only internal.
+      if (this._debug) this._debug.tokenCacheClears += 1;
+    }
+
+    cache.set(token, value);
+    return value;
   }
 
   /**
@@ -111,11 +176,7 @@ export class HashEmbedder {
 
     for (const [token, tf] of termFreq) {
       throwIfAborted(signal);
-      const h = fnv1a32(token);
-      const idx = h % this._dimension;
-      // Signed hashing reduces the positive similarity bias from collisions.
-      // Use a high bit so sign isn't trivially determined by `idx` for even dimensions.
-      const sign = (h & 0x80000000) === 0 ? 1 : -1;
+      const { idx, sign } = this._tokenToIndexSign(token);
       // Light TF damping: repeated tokens matter, but sublinearly.
       const w = Math.sqrt(tf);
       vec[idx] += sign * w;

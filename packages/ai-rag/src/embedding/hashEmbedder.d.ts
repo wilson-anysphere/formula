@@ -8,7 +8,7 @@
  * embedding service can replace this.
  */
 export class HashEmbedder {
-  constructor(opts?: { dimension?: number });
+  constructor(opts?: { dimension?: number; cacheSize?: number });
   readonly dimension: number;
   readonly name: string;
   embedTexts(texts: string[], options?: { signal?: AbortSignal }): Promise<Float32Array[]>;
