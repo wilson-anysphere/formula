@@ -85,8 +85,82 @@ function encodeUtf8(text) {
   return Buffer.from(text, "utf8");
 }
 
+/**
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function encodeBase64(bytes) {
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+  if (typeof btoa === "function") {
+    // Chunk to avoid call stack limits for large images.
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+  throw new Error("Base64 encoding is not supported in this environment");
+}
+
+/**
+ * @param {string} base64
+ * @returns {Uint8Array}
+ */
+function decodeBase64(base64) {
+  // eslint-disable-next-line no-undef
+  if (typeof Buffer !== "undefined") return Uint8Array.from(Buffer.from(base64, "base64"));
+  if (typeof atob === "function") {
+    const binary = atob(base64);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  }
+  throw new Error("Base64 decoding is not supported in this environment");
+}
+
+/**
+ * Deep-clone a JSON-serializable value.
+ *
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+function cloneJsonSerializable(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * @param {any} a
+ * @param {any} b
+ * @returns {boolean}
+ */
+function jsonSerializableEquals(a, b) {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Strict "JSON object" check used for persisted drawing schemas.
+ *
+ * This intentionally rejects class instances like Map/Set/Date to avoid lossy snapshot encodes.
+ *
+ * @param {any} value
+ * @returns {value is Record<string, any>}
+ */
+function isJsonObject(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
 }
 
 /**
@@ -258,6 +332,42 @@ function normalizeFormula(formula) {
  *   before: string[],
  *   after: string[],
  * }} SheetOrderDelta
+ */
+
+/**
+ * Workbook-scoped image store entry.
+ *
+ * `bytes` should be the original binary payload (PNG/JPEG/etc) and is treated as opaque by the controller.
+ *
+ * @typedef {{
+ *   bytes: Uint8Array,
+ *   mimeType?: string | null,
+ * }} ImageEntry
+ */
+
+/**
+ * Image store delta (undoable).
+ *
+ * `before`/`after` are `null` for add/delete operations respectively.
+ *
+ * @typedef {{
+ *   imageId: string,
+ *   before: ImageEntry | null,
+ *   after: ImageEntry | null,
+ * }} ImageDelta
+ */
+
+/**
+ * Drawings delta (undoable).
+ *
+ * This controller treats drawing entries as opaque JSON-serializable objects. Consumers should use a
+ * stable schema (aligned with `formula-model` when possible).
+ *
+ * @typedef {{
+ *   sheetId: string,
+ *   before: any[],
+ *   after: any[],
+ * }} DrawingDelta
  */
 
 /**
@@ -461,6 +571,8 @@ function sheetViewStateEquals(a, b) {
  *   deltasBySheetView: Map<string, SheetViewDelta>,
  *   deltasByFormat: Map<string, FormatDelta>,
  *   deltasByRangeRun: Map<string, RangeRunDelta>,
+ *   deltasByDrawing: Map<string, DrawingDelta>,
+ *   deltasByImage: Map<string, ImageDelta>,
  *   deltasBySheetMeta: Map<string, SheetMetaDelta>,
  *   sheetOrderDelta: SheetOrderDelta | null,
  * }} HistoryEntry
@@ -585,6 +697,72 @@ function cloneSheetOrderDelta(delta) {
 }
 
 /**
+ * @param {Uint8Array | null | undefined} a
+ * @param {Uint8Array | null | undefined} b
+ * @returns {boolean}
+ */
+function bytesEqual(a, b) {
+  if (a === b) return true;
+  const al = a ? a.length : 0;
+  const bl = b ? b.length : 0;
+  if (al !== bl) return false;
+  if (!a || !b) return false;
+  for (let i = 0; i < al; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * @param {ImageEntry} entry
+ * @returns {ImageEntry}
+ */
+function cloneImageEntry(entry) {
+  const bytes = entry?.bytes instanceof Uint8Array ? entry.bytes.slice() : new Uint8Array();
+  /** @type {ImageEntry} */
+  const out = { bytes };
+  if (entry && "mimeType" in entry) out.mimeType = entry.mimeType ?? null;
+  return out;
+}
+
+/**
+ * @param {ImageEntry | null | undefined} a
+ * @param {ImageEntry | null | undefined} b
+ * @returns {boolean}
+ */
+function imageEntryEquals(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return a == null && b == null;
+  const aMime = "mimeType" in a ? a.mimeType ?? null : null;
+  const bMime = "mimeType" in b ? b.mimeType ?? null : null;
+  return aMime === bMime && bytesEqual(a.bytes, b.bytes);
+}
+
+/**
+ * @param {ImageDelta} delta
+ * @returns {ImageDelta}
+ */
+function cloneImageDelta(delta) {
+  return {
+    imageId: delta.imageId,
+    before: delta.before ? cloneImageEntry(delta.before) : null,
+    after: delta.after ? cloneImageEntry(delta.after) : null,
+  };
+}
+
+/**
+ * @param {DrawingDelta} delta
+ * @returns {DrawingDelta}
+ */
+function cloneDrawingDelta(delta) {
+  return {
+    sheetId: delta.sheetId,
+    before: Array.isArray(delta.before) ? cloneJsonSerializable(delta.before) : [],
+    after: Array.isArray(delta.after) ? cloneJsonSerializable(delta.after) : [],
+  };
+}
+
+/**
  * @param {HistoryEntry} entry
  * @returns {CellDelta[]}
  */
@@ -647,6 +825,26 @@ function entryRangeRunDeltas(entry) {
 function entrySheetMetaDeltas(entry) {
   const deltas = Array.from(entry.deltasBySheetMeta.values()).map(cloneSheetMetaDelta);
   deltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {DrawingDelta[]}
+ */
+function entryDrawingDeltas(entry) {
+  const deltas = Array.from(entry.deltasByDrawing.values()).map(cloneDrawingDelta);
+  deltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {ImageDelta[]}
+ */
+function entryImageDeltas(entry) {
+  const deltas = Array.from(entry.deltasByImage.values()).map(cloneImageDelta);
+  deltas.sort((a, b) => (a.imageId < b.imageId ? -1 : a.imageId > b.imageId ? 1 : 0));
   return deltas;
 }
 
@@ -773,6 +971,30 @@ function invertSheetMetaDeltas(deltas) {
     sheetId: d.sheetId,
     before: d.after ? cloneSheetMetaState(d.after) : null,
     after: d.before ? cloneSheetMetaState(d.before) : null,
+  }));
+}
+
+/**
+ * @param {DrawingDelta[]} deltas
+ * @returns {DrawingDelta[]}
+ */
+function invertDrawingDeltas(deltas) {
+  return deltas.map((d) => ({
+    sheetId: d.sheetId,
+    before: Array.isArray(d.after) ? cloneJsonSerializable(d.after) : [],
+    after: Array.isArray(d.before) ? cloneJsonSerializable(d.before) : [],
+  }));
+}
+
+/**
+ * @param {ImageDelta[]} deltas
+ * @returns {ImageDelta[]}
+ */
+function invertImageDeltas(deltas) {
+  return deltas.map((d) => ({
+    imageId: d.imageId,
+    before: d.after ? cloneImageEntry(d.after) : null,
+    after: d.before ? cloneImageEntry(d.before) : null,
   }));
 }
 
@@ -1691,6 +1913,24 @@ export class DocumentController {
     /** @type {Map<string, SheetMetaState>} */
     this.sheetMeta = new Map();
 
+    /**
+     * Workbook-scoped image store for in-cell/floating images.
+     *
+     * Keys are stable `imageId` strings. Values contain the binary payload plus optional mime type.
+     *
+     * @type {Map<string, ImageEntry>}
+     */
+    this.images = new Map();
+
+    /**
+     * Per-sheet drawings list (floating images/shapes/chart placeholders).
+     *
+     * Drawing objects must be JSON-serializable (so they can survive snapshots/undo/redo).
+     *
+     * @type {Map<string, any[]>}
+     */
+    this.drawingsBySheet = new Map();
+
     /** @type {HistoryEntry[]} */
     this.history = [];
     this.cursor = 0;
@@ -1748,6 +1988,8 @@ export class DocumentController {
    *     colStyleDeltas: Array<{ sheetId: string, col: number, beforeStyleId: number, afterStyleId: number }>,
    *     sheetStyleDeltas: Array<{ sheetId: string, beforeStyleId: number, afterStyleId: number }>,
    *     rangeRunDeltas: RangeRunDelta[],
+   *     drawingDeltas: DrawingDelta[],
+   *     imageDeltas: Array<{ imageId: string, before: { mimeType: string | null, byteLength: number } | null, after: { mimeType: string | null, byteLength: number } | null }>,
    *     source?: string,
    *     recalc?: boolean,
    *   }
@@ -1817,6 +2059,8 @@ export class DocumentController {
         this.activeBatch.deltasBySheetView.size > 0 ||
         this.activeBatch.deltasByFormat.size > 0 ||
         this.activeBatch.deltasByRangeRun.size > 0 ||
+        this.activeBatch.deltasByDrawing.size > 0 ||
+        this.activeBatch.deltasByImage.size > 0 ||
         this.activeBatch.deltasBySheetMeta.size > 0 ||
         this.activeBatch.sheetOrderDelta != null)
     ) {
@@ -2088,6 +2332,198 @@ export class DocumentController {
   }
 
   /**
+   * Return the drawings list for a sheet.
+   *
+   * The returned value is a deep clone so callers can treat it as immutable.
+   *
+   * @param {string} sheetId
+   * @returns {any[]}
+   */
+  getSheetDrawings(sheetId) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) return [];
+    const drawings = this.drawingsBySheet.get(id);
+    return Array.isArray(drawings) ? cloneJsonSerializable(drawings) : [];
+  }
+
+  /**
+   * Replace the drawings list for a sheet.
+   *
+   * This is undoable and persisted in `encodeState()` snapshots.
+   *
+   * @param {string} sheetId
+   * @param {any[]} nextDrawings
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setSheetDrawings(sheetId, nextDrawings, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    // Ensure the sheet exists (DocumentController historically materializes sheets lazily).
+    this.model.getCell(id, 0, 0);
+
+    const beforeRaw = this.drawingsBySheet.get(id) ?? [];
+    const before = Array.isArray(beforeRaw) ? cloneJsonSerializable(beforeRaw) : [];
+
+    const rawList = Array.isArray(nextDrawings) ? nextDrawings : [];
+    /** @type {any[]} */
+    const after = [];
+    for (const raw of rawList) {
+      if (!isJsonObject(raw)) {
+        throw new Error("Drawings must be JSON objects");
+      }
+      const drawingId = String(raw.id ?? "").trim();
+      if (!drawingId) throw new Error("Drawing.id must be a non-empty string");
+      if (!("anchor" in raw)) throw new Error("Drawing.anchor is required");
+      if (!("kind" in raw)) throw new Error("Drawing.kind is required");
+      const zOrder = Number(raw.zOrder);
+      if (!Number.isFinite(zOrder)) throw new Error("Drawing.zOrder must be a finite number");
+      const cloned = cloneJsonSerializable(raw);
+      cloned.id = drawingId;
+      cloned.zOrder = zOrder;
+      after.push(cloned);
+    }
+
+    if (jsonSerializableEquals(before, after)) return;
+    this.#applyUserWorkbookEdits({ drawingDeltas: [{ sheetId: id, before, after }] }, options);
+  }
+
+  /**
+   * Convenience helper to append a drawing to the end of a sheet's drawing list.
+   *
+   * @param {string} sheetId
+   * @param {any} drawing
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  insertDrawing(sheetId, drawing, options = {}) {
+    const existing = this.getSheetDrawings(sheetId);
+    this.setSheetDrawings(sheetId, [...existing, drawing], options);
+  }
+
+  /**
+   * Convenience helper to update a drawing by id.
+   *
+   * @param {string} sheetId
+   * @param {string} drawingId
+   * @param {Record<string, any> | ((drawing: any) => any)} patchOrUpdater
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  updateDrawing(sheetId, drawingId, patchOrUpdater, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    const targetId = String(drawingId ?? "").trim();
+    if (!targetId) throw new Error("Drawing id cannot be empty");
+
+    const existing = this.getSheetDrawings(id);
+    const idx = existing.findIndex((d) => isJsonObject(d) && d.id === targetId);
+    if (idx === -1) return;
+
+    const current = existing[idx];
+    let next;
+    if (typeof patchOrUpdater === "function") {
+      next = patchOrUpdater(cloneJsonSerializable(current));
+    } else if (patchOrUpdater && typeof patchOrUpdater === "object") {
+      next = { ...current, ...patchOrUpdater };
+    } else {
+      throw new Error("patchOrUpdater must be an object or function");
+    }
+
+    if (!isJsonObject(next)) throw new Error("Drawing updates must produce a JSON object");
+    next.id = targetId;
+
+    const updated = existing.slice();
+    updated[idx] = next;
+    this.setSheetDrawings(id, updated, options);
+  }
+
+  /**
+   * Convenience helper to delete a drawing by id.
+   *
+   * @param {string} sheetId
+   * @param {string} drawingId
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  deleteDrawing(sheetId, drawingId, options = {}) {
+    const id = String(sheetId ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    const targetId = String(drawingId ?? "").trim();
+    if (!targetId) throw new Error("Drawing id cannot be empty");
+
+    const existing = this.getSheetDrawings(id);
+    const next = existing.filter((d) => !(isJsonObject(d) && d.id === targetId));
+    if (next.length === existing.length) return;
+    this.setSheetDrawings(id, next, options);
+  }
+
+  /**
+   * Get an image entry from the workbook-scoped image store.
+   *
+   * The returned value is a deep clone so callers can treat it as immutable.
+   *
+   * @param {string} imageId
+   * @returns {ImageEntry | null}
+   */
+  getImage(imageId) {
+    const id = String(imageId ?? "").trim();
+    if (!id) return null;
+    const entry = this.images.get(id);
+    return entry ? cloneImageEntry(entry) : null;
+  }
+
+  /**
+   * Set an image entry in the workbook-scoped image store.
+   *
+   * This is undoable and persisted in `encodeState()` snapshots.
+   *
+   * @param {string} imageId
+   * @param {{ bytes: Uint8Array, mimeType?: string | null }} entry
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setImage(imageId, entry, options = {}) {
+    const id = String(imageId ?? "").trim();
+    if (!id) throw new Error("Image id cannot be empty");
+    if (!entry || typeof entry !== "object") throw new Error("Image entry must be an object");
+    const bytes = entry.bytes;
+    if (!(bytes instanceof Uint8Array)) throw new Error("Image entry bytes must be a Uint8Array");
+
+    const mimeTypeRaw = "mimeType" in entry ? entry.mimeType : undefined;
+    let mimeType = undefined;
+    if (mimeTypeRaw === undefined) {
+      mimeType = undefined;
+    } else if (mimeTypeRaw === null) {
+      mimeType = null;
+    } else if (typeof mimeTypeRaw === "string") {
+      mimeType = mimeTypeRaw;
+    } else {
+      throw new Error("Image mimeType must be a string or null");
+    }
+
+    /** @type {ImageEntry} */
+    const after = { bytes: bytes.slice() };
+    if (mimeTypeRaw !== undefined) after.mimeType = mimeType;
+
+    const beforeEntry = this.images.get(id) ?? null;
+    const before = beforeEntry ? cloneImageEntry(beforeEntry) : null;
+    if (imageEntryEquals(before, after)) return;
+
+    this.#applyUserWorkbookEdits({ imageDeltas: [{ imageId: id, before, after }] }, options);
+  }
+
+  /**
+   * Delete an image from the workbook-scoped image store.
+   *
+   * @param {string} imageId
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  deleteImage(imageId, options = {}) {
+    const id = String(imageId ?? "").trim();
+    if (!id) throw new Error("Image id cannot be empty");
+    const beforeEntry = this.images.get(id);
+    if (!beforeEntry) return;
+    const before = cloneImageEntry(beforeEntry);
+    this.#applyUserWorkbookEdits({ imageDeltas: [{ imageId: id, before, after: null }] }, options);
+  }
+
+  /**
    * Return sheet ids whose visibility is "visible", in the current sheet order.
    *
    * @returns {string[]}
@@ -2340,6 +2776,8 @@ export class DocumentController {
 
     const beforeMeta = this.getSheetMeta(id) ?? this.#defaultSheetMeta(id);
     const afterOrder = beforeOrder.filter((s) => s !== id);
+    const beforeDrawingsRaw = this.drawingsBySheet.get(id) ?? [];
+    const beforeDrawings = Array.isArray(beforeDrawingsRaw) ? cloneJsonSerializable(beforeDrawingsRaw) : [];
 
     /** @type {CellDelta[]} */
     const cellDeltas = [];
@@ -2392,6 +2830,7 @@ export class DocumentController {
         sheetViewDeltas,
         formatDeltas,
         rangeRunDeltas,
+        drawingDeltas: beforeDrawings.length > 0 ? [{ sheetId: id, before: beforeDrawings, after: [] }] : [],
         sheetMetaDeltas: [{ sheetId: id, before: beforeMeta, after: null }],
         sheetOrderDelta: { before: beforeOrder, after: afterOrder },
       },
@@ -3426,7 +3865,29 @@ export class DocumentController {
 
     // Include a redundant explicit `sheetOrder` so downstream snapshot consumers can preserve
     // ordering even if they manipulate/sort the `sheets` array.
-    return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheetOrder: sheetIds, sheets }));
+    /** @type {any} */
+    const snapshot = { schemaVersion: 1, sheetOrder: sheetIds, sheets };
+
+    const images = Array.from(this.images.entries())
+      .map(([id, entry]) => {
+        /** @type {any} */
+        const out = { id, bytesBase64: encodeBase64(entry.bytes) };
+        if (entry && "mimeType" in entry) out.mimeType = entry.mimeType ?? null;
+        return out;
+      })
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    if (images.length > 0) snapshot.images = images;
+
+    /** @type {Record<string, any[]>} */
+    const drawingsBySheet = {};
+    for (const sheetId of sheetIds) {
+      const drawings = this.drawingsBySheet.get(sheetId);
+      if (!Array.isArray(drawings) || drawings.length === 0) continue;
+      drawingsBySheet[sheetId] = cloneJsonSerializable(drawings);
+    }
+    if (Object.keys(drawingsBySheet).length > 0) snapshot.drawingsBySheet = drawingsBySheet;
+
+    return encodeUtf8(JSON.stringify(snapshot));
   }
 
   /**
@@ -3451,6 +3912,39 @@ export class DocumentController {
     let nextRangeRuns = new Map();
     /** @type {Map<string, SheetMetaState>} */
     const nextSheetMeta = new Map();
+    /** @type {Map<string, any[]>} */
+    let nextDrawingsBySheet = new Map();
+    /** @type {Map<string, ImageEntry>} */
+    const nextImages = new Map();
+
+    const rawImages = Array.isArray(parsed?.images) ? parsed.images : [];
+    for (const image of rawImages) {
+      const id = typeof image?.id === "string" ? image.id.trim() : "";
+      if (!id) continue;
+      const bytesBase64 = typeof image?.bytesBase64 === "string" ? image.bytesBase64 : null;
+      if (!bytesBase64) continue;
+      let bytes;
+      try {
+        bytes = decodeBase64(bytesBase64);
+      } catch {
+        continue;
+      }
+      const mimeTypeRaw = "mimeType" in (image ?? {}) ? image.mimeType : undefined;
+      let mimeType = undefined;
+      if (mimeTypeRaw === undefined) {
+        mimeType = undefined;
+      } else if (mimeTypeRaw === null) {
+        mimeType = null;
+      } else if (typeof mimeTypeRaw === "string") {
+        mimeType = mimeTypeRaw;
+      } else {
+        mimeType = null;
+      }
+      /** @type {ImageEntry} */
+      const entry = { bytes };
+      if (mimeTypeRaw !== undefined) entry.mimeType = mimeType;
+      nextImages.set(id, entry);
+    }
 
     const normalizeFormatOverrides = (raw, axisKey) => {
       /** @type {Map<number, number>} */
@@ -3574,6 +4068,33 @@ export class DocumentController {
       nextRangeRuns.set(sheet.id, normalizeFormatRunsByCol(sheet?.formatRunsByCol));
     }
 
+    const rawDrawingsBySheet = parsed?.drawingsBySheet;
+    if (rawDrawingsBySheet && typeof rawDrawingsBySheet === "object" && !Array.isArray(rawDrawingsBySheet)) {
+      for (const [rawSheetId, rawList] of Object.entries(rawDrawingsBySheet)) {
+        if (typeof rawSheetId !== "string" || !rawSheetId) continue;
+        if (!nextSheets.has(rawSheetId)) continue;
+        if (!Array.isArray(rawList)) continue;
+
+        /** @type {any[]} */
+        const drawings = [];
+        for (const raw of rawList) {
+          if (!isJsonObject(raw)) continue;
+          const drawingId = typeof raw.id === "string" ? raw.id.trim() : "";
+          if (!drawingId) continue;
+          if (!("anchor" in raw) || !("kind" in raw)) continue;
+          const zOrder = Number(raw.zOrder);
+          if (!Number.isFinite(zOrder)) continue;
+          const cloned = cloneJsonSerializable(raw);
+          cloned.id = drawingId;
+          cloned.zOrder = zOrder;
+          drawings.push(cloned);
+        }
+        if (drawings.length > 0) {
+          nextDrawingsBySheet.set(rawSheetId, drawings);
+        }
+      }
+    }
+
     // Prefer an explicit sheet order field when present, falling back to the ordering
     // of the `sheets` array itself (legacy behavior).
     const rawSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder : [];
@@ -3609,6 +4130,7 @@ export class DocumentController {
         nextViews = reorderBySheetIds(nextViews);
         nextFormats = reorderBySheetIds(nextFormats);
         nextRangeRuns = reorderBySheetIds(nextRangeRuns);
+        nextDrawingsBySheet = reorderBySheetIds(nextDrawingsBySheet);
       }
     }
 
@@ -3709,6 +4231,34 @@ export class DocumentController {
       }
     }
 
+    /** @type {DrawingDelta[]} */
+    const drawingDeltas = [];
+    const drawingSheetIds = new Set([...this.drawingsBySheet.keys(), ...nextDrawingsBySheet.keys()]);
+    for (const sheetId of drawingSheetIds) {
+      const beforeRaw = this.drawingsBySheet.get(sheetId) ?? [];
+      const afterRaw = nextDrawingsBySheet.get(sheetId) ?? [];
+      const before = Array.isArray(beforeRaw) ? cloneJsonSerializable(beforeRaw) : [];
+      const after = Array.isArray(afterRaw) ? cloneJsonSerializable(afterRaw) : [];
+      if (jsonSerializableEquals(before, after)) continue;
+      drawingDeltas.push({ sheetId, before, after });
+    }
+    drawingDeltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
+
+    /** @type {ImageDelta[]} */
+    const imageDeltas = [];
+    const imageIds = new Set([...this.images.keys(), ...nextImages.keys()]);
+    for (const imageId of imageIds) {
+      const beforeEntry = this.images.get(imageId) ?? null;
+      const afterEntry = nextImages.get(imageId) ?? null;
+      if (imageEntryEquals(beforeEntry, afterEntry)) continue;
+      imageDeltas.push({
+        imageId,
+        before: beforeEntry ? cloneImageEntry(beforeEntry) : null,
+        after: afterEntry ? cloneImageEntry(afterEntry) : null,
+      });
+    }
+    imageDeltas.sort((a, b) => (a.imageId < b.imageId ? -1 : a.imageId > b.imageId ? 1 : 0));
+
     // Ensure all snapshot sheet ids exist even when they contain no cells (the model is otherwise
     // lazily materialized via reads/writes).
     for (const sheetId of nextSheetIds) {
@@ -3755,7 +4305,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, [], null, {
+    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, drawingDeltas, imageDeltas, [], null, {
       recalc: false,
       emitChange: true,
       source: "applyState",
@@ -3807,7 +4357,7 @@ export class DocumentController {
 
     const recalc = options.recalc ?? true;
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], [], [], [], null, { recalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], [], [], [], null, { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     //
@@ -3839,7 +4389,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -3868,7 +4418,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], deltas, [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -3897,7 +4447,7 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], [], deltas, [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], [], deltas, [], [], [], null, { recalc: false, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     if (options.markDirty !== false) {
@@ -3994,6 +4544,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4020,6 +4572,8 @@ export class DocumentController {
         batch.deltasBySheetView.size === 0 &&
         batch.deltasByFormat.size === 0 &&
         batch.deltasByRangeRun.size === 0 &&
+        batch.deltasByDrawing.size === 0 &&
+        batch.deltasByImage.size === 0 &&
         batch.deltasBySheetMeta.size === 0 &&
         batch.sheetOrderDelta == null)
     ) {
@@ -4046,6 +4600,8 @@ export class DocumentController {
         colStyleDeltas: [],
         sheetStyleDeltas: [],
         rangeRunDeltas: [],
+        drawingDeltas: [],
+        imageDeltas: [],
         sheetMetaDeltas: [],
         sheetOrderDelta: null,
         source: "endBatch",
@@ -4072,6 +4628,8 @@ export class DocumentController {
           batch.deltasBySheetView.size > 0 ||
           batch.deltasByFormat.size > 0 ||
           batch.deltasByRangeRun.size > 0 ||
+          batch.deltasByDrawing.size > 0 ||
+          batch.deltasByImage.size > 0 ||
           batch.deltasBySheetMeta.size > 0 ||
           batch.sheetOrderDelta != null),
     );
@@ -4087,15 +4645,27 @@ export class DocumentController {
       const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
       const inverseFormats = invertFormatDeltas(entryFormatDeltas(batch));
       const inverseRangeRuns = invertRangeRunDeltas(entryRangeRunDeltas(batch));
+      const inverseDrawings = invertDrawingDeltas(entryDrawingDeltas(batch));
+      const inverseImages = invertImageDeltas(entryImageDeltas(batch));
       const inverseSheetMeta = invertSheetMetaDeltas(entrySheetMetaDeltas(batch));
       const inverseSheetOrder = invertSheetOrderDelta(batch.sheetOrderDelta);
       const sheetStructureChanged = sheetMetaDeltasAffectRecalc(inverseSheetMeta);
-      this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, inverseSheetMeta, inverseSheetOrder, {
-        recalc: false,
-        emitChange: true,
-        source: "cancelBatch",
-        sheetStructureChanged,
-      });
+      this.#applyEdits(
+        inverseCells,
+        inverseViews,
+        inverseFormats,
+        inverseRangeRuns,
+        inverseDrawings,
+        inverseImages,
+        inverseSheetMeta,
+        inverseSheetOrder,
+        {
+          recalc: false,
+          emitChange: true,
+          source: "cancelBatch",
+          sheetStructureChanged,
+        },
+      );
     }
 
     this.engine?.endBatch?.();
@@ -4116,6 +4686,8 @@ export class DocumentController {
         colStyleDeltas: [],
         sheetStyleDeltas: [],
         rangeRunDeltas: [],
+        drawingDeltas: [],
+        imageDeltas: [],
         sheetMetaDeltas: [],
         sheetOrderDelta: null,
         source: "cancelBatch",
@@ -4139,12 +4711,16 @@ export class DocumentController {
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
     const rangeRunDeltas = entryRangeRunDeltas(entry);
+    const drawingDeltas = entryDrawingDeltas(entry);
+    const imageDeltas = entryImageDeltas(entry);
     const sheetMetaDeltas = entrySheetMetaDeltas(entry);
     const sheetOrderDelta = cloneSheetOrderDelta(entry.sheetOrderDelta);
     const inverseCells = invertDeltas(cellDeltas);
     const inverseViews = invertSheetViewDeltas(viewDeltas);
     const inverseFormats = invertFormatDeltas(formatDeltas);
     const inverseRangeRuns = invertRangeRunDeltas(rangeRunDeltas);
+    const inverseDrawings = invertDrawingDeltas(drawingDeltas);
+    const inverseImages = invertImageDeltas(imageDeltas);
     const inverseSheetMeta = invertSheetMetaDeltas(sheetMetaDeltas);
     const inverseSheetOrder = invertSheetOrderDelta(sheetOrderDelta);
     this.cursor -= 1;
@@ -4154,12 +4730,22 @@ export class DocumentController {
 
     const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
     const shouldRecalc = cellDeltasAffectRecalc(cellDeltas) || sheetStructureChanged;
-    this.#applyEdits(inverseCells, inverseViews, inverseFormats, inverseRangeRuns, inverseSheetMeta, inverseSheetOrder, {
+    this.#applyEdits(
+      inverseCells,
+      inverseViews,
+      inverseFormats,
+      inverseRangeRuns,
+      inverseDrawings,
+      inverseImages,
+      inverseSheetMeta,
+      inverseSheetOrder,
+      {
       recalc: shouldRecalc,
       emitChange: true,
       source: "undo",
       sheetStructureChanged,
-    });
+      },
+    );
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -4176,6 +4762,8 @@ export class DocumentController {
     const viewDeltas = entrySheetViewDeltas(entry);
     const formatDeltas = entryFormatDeltas(entry);
     const rangeRunDeltas = entryRangeRunDeltas(entry);
+    const drawingDeltas = entryDrawingDeltas(entry);
+    const imageDeltas = entryImageDeltas(entry);
     const sheetMetaDeltas = entrySheetMetaDeltas(entry);
     const sheetOrderDelta = cloneSheetOrderDelta(entry.sheetOrderDelta);
     this.cursor += 1;
@@ -4185,12 +4773,22 @@ export class DocumentController {
 
     const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
     const shouldRecalc = cellDeltasAffectRecalc(cellDeltas) || sheetStructureChanged;
-    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, {
+    this.#applyEdits(
+      cellDeltas,
+      viewDeltas,
+      formatDeltas,
+      rangeRunDeltas,
+      drawingDeltas,
+      imageDeltas,
+      sheetMetaDeltas,
+      sheetOrderDelta,
+      {
       recalc: shouldRecalc,
       emitChange: true,
       source: "redo",
       sheetStructureChanged,
-    });
+      },
+    );
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -4212,7 +4810,7 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(deltas);
-    this.#applyEdits(deltas, [], [], [], [], null, { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], [], [], [], [], null, { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -4220,7 +4818,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(deltas, [], [], [], [], null, options);
+    this.#commitOrMergeHistoryEntry(deltas, [], [], [], [], [], [], null, options);
   }
 
   /**
@@ -4235,6 +4833,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4261,6 +4861,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4286,6 +4888,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4312,6 +4916,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4330,6 +4936,60 @@ export class DocumentController {
   }
 
   /**
+   * @param {DrawingDelta[]} deltas
+   */
+  #mergeDrawingsIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
+      };
+    }
+    for (const delta of deltas) {
+      const existing = this.activeBatch.deltasByDrawing.get(delta.sheetId);
+      if (!existing) {
+        this.activeBatch.deltasByDrawing.set(delta.sheetId, cloneDrawingDelta(delta));
+      } else {
+        existing.after = Array.isArray(delta.after) ? cloneJsonSerializable(delta.after) : [];
+      }
+    }
+  }
+
+  /**
+   * @param {ImageDelta[]} deltas
+   */
+  #mergeImagesIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+        deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
+        deltasBySheetMeta: new Map(),
+        sheetOrderDelta: null,
+      };
+    }
+    for (const delta of deltas) {
+      const existing = this.activeBatch.deltasByImage.get(delta.imageId);
+      if (!existing) {
+        this.activeBatch.deltasByImage.set(delta.imageId, cloneImageDelta(delta));
+      } else {
+        existing.after = delta.after ? cloneImageEntry(delta.after) : null;
+      }
+    }
+  }
+
+  /**
    * @param {SheetMetaDelta[]} deltas
    */
   #mergeSheetMetaIntoBatch(deltas) {
@@ -4340,6 +5000,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4366,6 +5028,8 @@ export class DocumentController {
         deltasBySheetView: new Map(),
         deltasByFormat: new Map(),
         deltasByRangeRun: new Map(),
+        deltasByDrawing: new Map(),
+        deltasByImage: new Map(),
         deltasBySheetMeta: new Map(),
         sheetOrderDelta: null,
       };
@@ -4386,7 +5050,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, [], [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeSheetViewIntoBatch(deltas);
@@ -4394,7 +5058,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], deltas, [], [], [], null, options);
+    this.#commitOrMergeHistoryEntry([], deltas, [], [], [], [], [], null, options);
   }
 
   /**
@@ -4405,7 +5069,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], [], deltas, [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], [], deltas, [], [], [], [], null, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeFormatIntoBatch(deltas);
@@ -4413,7 +5077,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], [], deltas, [], [], null, options);
+    this.#commitOrMergeHistoryEntry([], [], deltas, [], [], [], [], null, options);
   }
 
   /**
@@ -4443,7 +5107,11 @@ export class DocumentController {
     const source = typeof options?.source === "string" ? options.source : undefined;
 
     // Formatting changes should never trigger formula recalc.
-    this.#applyEdits(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], null, { recalc: false, emitChange: true, source });
+    this.#applyEdits(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], [], [], null, {
+      recalc: false,
+      emitChange: true,
+      source,
+    });
 
     if (this.batchDepth > 0) {
       if (filteredHasCells) this.#mergeIntoBatch(cellDeltas);
@@ -4452,7 +5120,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], null, options);
+    this.#commitOrMergeHistoryEntry(cellDeltas ?? [], [], [], rangeRunDeltas ?? [], [], [], [], null, options);
   }
 
   /**
@@ -4483,7 +5151,7 @@ export class DocumentController {
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, [], formatDeltas, rangeRunDeltas, [], null, {
+    this.#applyEdits(cellDeltas, [], formatDeltas, rangeRunDeltas, [], [], [], null, {
       recalc: shouldRecalc,
       emitChange: true,
       source,
@@ -4497,7 +5165,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, rangeRunDeltas, [], null, options);
+    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, rangeRunDeltas, [], [], [], null, options);
   }
 
   /**
@@ -4511,6 +5179,8 @@ export class DocumentController {
    *   sheetViewDeltas?: SheetViewDelta[],
    *   formatDeltas?: FormatDelta[],
    *   rangeRunDeltas?: RangeRunDelta[],
+   *   drawingDeltas?: DrawingDelta[],
+   *   imageDeltas?: ImageDelta[],
    *   sheetMetaDeltas?: SheetMetaDelta[],
    *   sheetOrderDelta?: SheetOrderDelta | null,
    * }} deltas
@@ -4521,6 +5191,8 @@ export class DocumentController {
     const sheetViewDeltas = Array.isArray(deltas?.sheetViewDeltas) ? deltas.sheetViewDeltas : [];
     const formatDeltas = Array.isArray(deltas?.formatDeltas) ? deltas.formatDeltas : [];
     const rangeRunDeltas = Array.isArray(deltas?.rangeRunDeltas) ? deltas.rangeRunDeltas : [];
+    const drawingDeltas = Array.isArray(deltas?.drawingDeltas) ? deltas.drawingDeltas : [];
+    const imageDeltas = Array.isArray(deltas?.imageDeltas) ? deltas.imageDeltas : [];
     const sheetMetaDeltas = Array.isArray(deltas?.sheetMetaDeltas) ? deltas.sheetMetaDeltas : [];
     const sheetOrderDelta = deltas?.sheetOrderDelta ? cloneSheetOrderDelta(deltas.sheetOrderDelta) : null;
 
@@ -4535,16 +5207,20 @@ export class DocumentController {
     const hasViews = sheetViewDeltas.length > 0;
     const hasFormats = formatDeltas.length > 0;
     const hasRangeRuns = rangeRunDeltas.length > 0;
+    const hasDrawings = drawingDeltas.length > 0;
+    const hasImages = imageDeltas.length > 0;
     const hasSheetMeta = sheetMetaDeltas.length > 0;
     const hasSheetOrder = Boolean(sheetOrderDelta);
-    if (!hasCells && !hasViews && !hasFormats && !hasRangeRuns && !hasSheetMeta && !hasSheetOrder) return;
+    if (!hasCells && !hasViews && !hasFormats && !hasRangeRuns && !hasDrawings && !hasImages && !hasSheetMeta && !hasSheetOrder) {
+      return;
+    }
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const sheetStructureChanged = sheetMetaDeltasAffectRecalc(sheetMetaDeltas);
     const shouldRecalc =
       this.batchDepth === 0 && (cellDeltasAffectRecalc(filteredCells) || sheetStructureChanged);
 
-    this.#applyEdits(filteredCells, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, {
+    this.#applyEdits(filteredCells, sheetViewDeltas, formatDeltas, rangeRunDeltas, drawingDeltas, imageDeltas, sheetMetaDeltas, sheetOrderDelta, {
       recalc: shouldRecalc,
       emitChange: true,
       source,
@@ -4556,6 +5232,8 @@ export class DocumentController {
       if (hasViews) this.#mergeSheetViewIntoBatch(sheetViewDeltas);
       if (hasFormats) this.#mergeFormatIntoBatch(formatDeltas);
       if (hasRangeRuns) this.#mergeRangeRunIntoBatch(rangeRunDeltas);
+      if (hasDrawings) this.#mergeDrawingsIntoBatch(drawingDeltas);
+      if (hasImages) this.#mergeImagesIntoBatch(imageDeltas);
       if (hasSheetMeta) this.#mergeSheetMetaIntoBatch(sheetMetaDeltas);
       if (hasSheetOrder) this.#mergeSheetOrderIntoBatch(sheetOrderDelta);
       this.#emitDirty();
@@ -4567,6 +5245,8 @@ export class DocumentController {
       sheetViewDeltas,
       formatDeltas,
       rangeRunDeltas,
+      drawingDeltas,
+      imageDeltas,
       sheetMetaDeltas,
       sheetOrderDelta,
       options,
@@ -4578,11 +5258,25 @@ export class DocumentController {
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
    * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {DrawingDelta[]} drawingDeltas
+   * @param {ImageDelta[]} imageDeltas
    * @param {SheetMetaDelta[]} sheetMetaDeltas
    * @param {SheetOrderDelta | null} sheetOrderDelta
    * @param {{ label?: string, mergeKey?: string }} options
    */
-  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, options) {
+  #commitOrMergeHistoryEntry(
+    cellDeltas,
+    sheetViewDeltas,
+    formatDeltas,
+    rangeRunDeltas,
+    drawingDeltas,
+    imageDeltas,
+    sheetMetaDeltas,
+    sheetOrderDelta,
+    options,
+  ) {
+    drawingDeltas = Array.isArray(drawingDeltas) ? drawingDeltas : [];
+    imageDeltas = Array.isArray(imageDeltas) ? imageDeltas : [];
     sheetMetaDeltas = Array.isArray(sheetMetaDeltas) ? sheetMetaDeltas : [];
     sheetOrderDelta = sheetOrderDelta ? cloneSheetOrderDelta(sheetOrderDelta) : null;
     // If we have redo history, truncate it before pushing a new edit.
@@ -4650,6 +5344,24 @@ export class DocumentController {
         }
       }
 
+      for (const delta of drawingDeltas) {
+        const existing = entry.deltasByDrawing.get(delta.sheetId);
+        if (!existing) {
+          entry.deltasByDrawing.set(delta.sheetId, cloneDrawingDelta(delta));
+        } else {
+          existing.after = Array.isArray(delta.after) ? cloneJsonSerializable(delta.after) : [];
+        }
+      }
+
+      for (const delta of imageDeltas) {
+        const existing = entry.deltasByImage.get(delta.imageId);
+        if (!existing) {
+          entry.deltasByImage.set(delta.imageId, cloneImageDelta(delta));
+        } else {
+          existing.after = delta.after ? cloneImageEntry(delta.after) : null;
+        }
+      }
+
       for (const delta of sheetMetaDeltas) {
         const existing = entry.deltasBySheetMeta.get(delta.sheetId);
         if (!existing) {
@@ -4686,6 +5398,8 @@ export class DocumentController {
       deltasBySheetView: new Map(),
       deltasByFormat: new Map(),
       deltasByRangeRun: new Map(),
+      deltasByDrawing: new Map(),
+      deltasByImage: new Map(),
       deltasBySheetMeta: new Map(),
       sheetOrderDelta: null,
     };
@@ -4704,6 +5418,14 @@ export class DocumentController {
 
     for (const delta of rangeRunDeltas) {
       entry.deltasByRangeRun.set(rangeRunKey(delta.sheetId, delta.col), cloneRangeRunDelta(delta));
+    }
+
+    for (const delta of drawingDeltas) {
+      entry.deltasByDrawing.set(delta.sheetId, cloneDrawingDelta(delta));
+    }
+
+    for (const delta of imageDeltas) {
+      entry.deltasByImage.set(delta.imageId, cloneImageDelta(delta));
     }
 
     for (const delta of sheetMetaDeltas) {
@@ -4734,6 +5456,8 @@ export class DocumentController {
       entry.deltasBySheetView.size === 0 &&
       entry.deltasByFormat.size === 0 &&
       entry.deltasByRangeRun.size === 0 &&
+      entry.deltasByDrawing.size === 0 &&
+      entry.deltasByImage.size === 0 &&
       entry.deltasBySheetMeta.size === 0 &&
       entry.sheetOrderDelta == null
     ) {
@@ -4752,11 +5476,23 @@ export class DocumentController {
    * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {FormatDelta[]} formatDeltas
    * @param {RangeRunDelta[]} rangeRunDeltas
+   * @param {DrawingDelta[]} drawingDeltas
+   * @param {ImageDelta[]} imageDeltas
    * @param {SheetMetaDelta[]} sheetMetaDeltas
    * @param {SheetOrderDelta | null} sheetOrderDelta
    * @param {{ recalc: boolean, emitChange: boolean, source?: string, sheetStructureChanged?: boolean }} options
    */
-  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, rangeRunDeltas, sheetMetaDeltas, sheetOrderDelta, options) {
+  #applyEdits(
+    cellDeltas,
+    sheetViewDeltas,
+    formatDeltas,
+    rangeRunDeltas,
+    drawingDeltas,
+    imageDeltas,
+    sheetMetaDeltas,
+    sheetOrderDelta,
+    options,
+  ) {
     const contentChangedSheetIds = new Set();
     // Apply to the canonical model first.
     for (const delta of formatDeltas) {
@@ -4796,12 +5532,36 @@ export class DocumentController {
       if (!cellContentEquals(delta.before, delta.after)) contentChangedSheetIds.add(delta.sheetId);
     }
 
+    for (const delta of drawingDeltas) {
+      if (!delta) continue;
+      const sheetId = delta.sheetId;
+      const after = Array.isArray(delta.after) ? cloneJsonSerializable(delta.after) : [];
+      if (after.length > 0) {
+        // Drawings are sheet-scoped; materialize the sheet if needed.
+        this.model.getCell(sheetId, 0, 0);
+        this.drawingsBySheet.set(sheetId, after);
+      } else {
+        this.drawingsBySheet.delete(sheetId);
+      }
+    }
+
+    for (const delta of imageDeltas) {
+      if (!delta) continue;
+      const imageId = delta.imageId;
+      if (!delta.after) {
+        this.images.delete(imageId);
+      } else {
+        this.images.set(imageId, cloneImageEntry(delta.after));
+      }
+    }
+
     for (const delta of sheetMetaDeltas) {
       if (!delta) continue;
       if (delta.after == null) {
         // Sheet deletion.
         this.sheetMeta.delete(delta.sheetId);
         this.model.sheets.delete(delta.sheetId);
+        this.drawingsBySheet.delete(delta.sheetId);
         continue;
       }
 
@@ -4834,7 +5594,11 @@ export class DocumentController {
     // `sheetStructureChanged` covers:
     // - applyState sheet add/remove
     // - undoable sheet add/delete operations
-    const shouldBumpContentVersion = Boolean(options?.sheetStructureChanged) || contentChangedSheetIds.size > 0;
+    const shouldBumpContentVersion =
+      Boolean(options?.sheetStructureChanged) ||
+      contentChangedSheetIds.size > 0 ||
+      (Array.isArray(drawingDeltas) && drawingDeltas.length > 0) ||
+      (Array.isArray(imageDeltas) && imageDeltas.length > 0);
 
     /** @type {CellChange[] | null} */
     let engineChanges = null;
@@ -4886,11 +5650,34 @@ export class DocumentController {
         this.model.setCell(delta.sheetId, delta.row, delta.col, delta.before);
       }
 
+      for (const delta of drawingDeltas) {
+        if (!delta) continue;
+        const sheetId = delta.sheetId;
+        const before = Array.isArray(delta.before) ? cloneJsonSerializable(delta.before) : [];
+        if (before.length > 0) {
+          this.model.getCell(sheetId, 0, 0);
+          this.drawingsBySheet.set(sheetId, before);
+        } else {
+          this.drawingsBySheet.delete(sheetId);
+        }
+      }
+
+      for (const delta of imageDeltas) {
+        if (!delta) continue;
+        const imageId = delta.imageId;
+        if (!delta.before) {
+          this.images.delete(imageId);
+        } else {
+          this.images.set(imageId, cloneImageEntry(delta.before));
+        }
+      }
+
       for (const delta of sheetMetaDeltas) {
         if (!delta) continue;
         if (delta.before == null) {
           this.sheetMeta.delete(delta.sheetId);
           this.model.sheets.delete(delta.sheetId);
+          this.drawingsBySheet.delete(delta.sheetId);
           continue;
         }
         this.model.getCell(delta.sheetId, 0, 0);
@@ -4968,6 +5755,16 @@ export class DocumentController {
         colStyleDeltas,
         sheetStyleDeltas,
         rangeRunDeltas: rangeRunDeltas.map(cloneRangeRunDelta),
+        drawingDeltas: drawingDeltas.map(cloneDrawingDelta),
+        imageDeltas: imageDeltas.map((d) => ({
+          imageId: d.imageId,
+          before: d.before
+            ? { mimeType: ("mimeType" in d.before ? d.before.mimeType : null) ?? null, byteLength: d.before.bytes?.length ?? 0 }
+            : null,
+          after: d.after
+            ? { mimeType: ("mimeType" in d.after ? d.after.mimeType : null) ?? null, byteLength: d.after.bytes?.length ?? 0 }
+            : null,
+        })),
         sheetMetaDeltas: sheetMetaDeltas.map(cloneSheetMetaDelta),
         sheetOrderDelta: sheetOrderDelta ? cloneSheetOrderDelta(sheetOrderDelta) : null,
         recalc: options.recalc,
