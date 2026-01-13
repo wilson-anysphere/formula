@@ -34,7 +34,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.92.0
       - uses: Swatinem/rust-cache@v2
 
       # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent

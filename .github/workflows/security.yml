@@ -47,7 +47,7 @@ jobs:
           corepack prepare pnpm@9 --activate
 
       - name: Setup Rust (stable + clippy)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.92.0
         with:
           components: clippy
 
