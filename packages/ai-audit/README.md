@@ -20,7 +20,7 @@ const store = await createDefaultAIAuditStore();
 // Or configure retention and backend selection:
 const configured = await createDefaultAIAuditStore({
   max_entries: 10_000,
-  max_age_ms: 30 * 24 * 60 * 60 * 1000,
+  max_age_ms: 30 * 24 * 60 * 60 * 1000, // 30 days
   // `bounded` is enabled by default (defense-in-depth against oversized entries).
   // bounded: false,
   // prefer: "indexeddb" | "localstorage" | "memory",
