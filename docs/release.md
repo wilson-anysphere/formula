@@ -739,32 +739,32 @@ are attached:
 
    Check the machine type of the installed/bundled executable using `dumpbin` (Visual Studio tools):
 
-    ```bat
-    REM From a "Developer Command Prompt for VS"
-    dumpbin /headers path\to\formula-desktop.exe | findstr /i machine
+   ```bat
+   REM From a "Developer Command Prompt for VS"
+   dumpbin /headers path\to\formula-desktop.exe | findstr /i machine
 
-    REM x64  => machine (8664)
-    REM arm64 => machine (AA64)
-    ```
+   REM x64  => machine (8664)
+   REM arm64 => machine (AA64)
+   ```
 
    If Authenticode signing is enabled, verify signatures:
 
    ```bat
-    signtool verify /pa /v path\to\installer.exe
-    signtool verify /pa /v path\to\installer.msi
-    ```
+   signtool verify /pa /v path\to\installer.exe
+   signtool verify /pa /v path\to\installer.msi
+   ```
 
-    ### Windows: WebView2 install smoke test (clean VM)
+   ### Windows: WebView2 install smoke test (clean VM)
 
-    On a clean Windows VM **without** WebView2 (or after uninstalling **Microsoft Edge WebView2 Runtime**),
-    run the installer. It should install WebView2 via the configured Evergreen bootstrapper and then
-    the app should launch successfully. (This requires an internet connection when using the bootstrapper modes.)
+   On a clean Windows VM **without** WebView2 (or after uninstalling **Microsoft Edge WebView2 Runtime**),
+   run the installer. It should install WebView2 via the configured Evergreen bootstrapper and then
+   the app should launch successfully. (This requires an internet connection when using the bootstrapper modes.)
 
-    ### Linux: inspect dependencies + `ldd` smoke check
+   ### Linux: inspect dependencies + `ldd` smoke check
 
-    ```bash
-    # Dependency metadata (ensure the runtime deps are present)
-    deb="$(ls Formula*.deb | head -n 1)"
+   ```bash
+   # Dependency metadata (ensure the runtime deps are present)
+   deb="$(ls Formula*.deb | head -n 1)"
    rpm="$(ls Formula*.rpm | head -n 1)"
 
    dpkg -I "$deb"
