@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 class ActionableError extends Error {
@@ -287,11 +288,24 @@ async function listAllReleaseAssets(repo, releaseId, token) {
 }
 
 /**
- * @param {{ name: string; browser_download_url: string }} asset
+ * Download a release asset using the GitHub REST API `asset.url` endpoint
+ * (not `browser_download_url`) so it works for private repos too.
+ *
+ * @param {{ name: string; url?: string; browser_download_url?: string }} asset
  * @param {string} token
  */
 async function downloadReleaseAssetText(asset, token) {
-  const res = await fetchGitHub(asset.browser_download_url, {
+  const downloadUrl =
+    typeof asset.url === "string" && asset.url.length > 0
+      ? asset.url
+      : asset.browser_download_url;
+  if (typeof downloadUrl !== "string" || downloadUrl.trim().length === 0) {
+    throw new ActionableError(`Release asset "${asset.name}" is missing a download URL.`, [
+      `Expected GitHub API to provide "url" or "browser_download_url".`,
+    ]);
+  }
+
+  const res = await fetchGitHub(downloadUrl, {
     token,
     accept: "application/octet-stream",
   });
@@ -300,18 +314,28 @@ async function downloadReleaseAssetText(asset, token) {
     throw new ActionableError(`Failed to download release asset "${asset.name}".`, [
       `${res.status} ${res.statusText}`,
       body ? `Response: ${body}` : "Response body was empty.",
-      `URL: ${asset.browser_download_url}`,
+      `URL: ${downloadUrl}`,
     ]);
   }
   return await res.text();
 }
 
 /**
- * @param {{ name: string; size?: number; browser_download_url: string }} asset
+ * @param {{ name: string; size?: number; url?: string; browser_download_url?: string }} asset
  * @param {string} token
  */
 async function sha256OfReleaseAsset(asset, token) {
-  const res = await fetchGitHub(asset.browser_download_url, {
+  const downloadUrl =
+    typeof asset.url === "string" && asset.url.length > 0
+      ? asset.url
+      : asset.browser_download_url;
+  if (typeof downloadUrl !== "string" || downloadUrl.trim().length === 0) {
+    throw new ActionableError(`Release asset "${asset.name}" is missing a download URL.`, [
+      `Expected GitHub API to provide "url" or "browser_download_url".`,
+    ]);
+  }
+
+  const res = await fetchGitHub(downloadUrl, {
     token,
     accept: "application/octet-stream",
   });
@@ -320,7 +344,7 @@ async function sha256OfReleaseAsset(asset, token) {
     throw new ActionableError(`Failed to download asset for hashing: "${asset.name}".`, [
       `${res.status} ${res.statusText}`,
       body ? `Response: ${body}` : "Response body was empty.",
-      `URL: ${asset.browser_download_url}`,
+      `URL: ${downloadUrl}`,
     ]);
   }
   if (!res.body) {
@@ -328,8 +352,10 @@ async function sha256OfReleaseAsset(asset, token) {
   }
 
   const hash = createHash("sha256");
-  // `res.body` is a WHATWG ReadableStream in Node 18+; it supports async iteration.
-  for await (const chunk of res.body) {
+  // `res.body` is a WHATWG ReadableStream. Convert to a Node stream so we can
+  // reliably async-iterate across Node versions.
+  const nodeStream = Readable.fromWeb(res.body);
+  for await (const chunk of nodeStream) {
     hash.update(chunk);
   }
   return hash.digest("hex");
@@ -553,7 +579,11 @@ async function main() {
 
   const primaryAssets = assets
     .filter((asset) => asset && typeof asset === "object")
-    .filter((asset) => typeof asset.name === "string" && typeof asset.browser_download_url === "string")
+    .filter(
+      (asset) =>
+        typeof asset.name === "string" &&
+        (typeof asset.url === "string" || typeof asset.browser_download_url === "string")
+    )
     .filter((asset) => !asset.name.endsWith(".sig"))
     .filter((asset) => isPrimaryBundleAssetName(asset.name))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -594,4 +624,3 @@ try {
   }
   process.exit(1);
 }
-
