@@ -59,7 +59,7 @@ impl ValueLocaleConfig {
 
     #[must_use]
     pub fn for_locale_id(id: &str) -> Option<Self> {
-        match id {
+        match super::normalize_locale_id(id)? {
             "en-US" => Some(Self::en_us()),
             "de-DE" => Some(Self::de_de()),
             "fr-FR" => Some(Self::fr_fr()),
@@ -68,4 +68,3 @@ impl ValueLocaleConfig {
         }
     }
 }
-

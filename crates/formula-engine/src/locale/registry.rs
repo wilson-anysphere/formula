@@ -304,7 +304,7 @@ pub static ES_ES: FormulaLocale = FormulaLocale {
 };
 
 pub fn get_locale(id: &str) -> Option<&'static FormulaLocale> {
-    match id {
+    match super::normalize_locale_id(id)? {
         "en-US" => Some(&EN_US),
         "de-DE" => Some(&DE_DE),
         "fr-FR" => Some(&FR_FR),
