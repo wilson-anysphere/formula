@@ -6,6 +6,13 @@
 */
 
 .conflict-ui-overlay {
+  /* Local spacing tokens (kept in sync with tightened shell/workspace density). */
+  --conflict-ui-inset: 12px;
+  --conflict-ui-padding: 10px;
+  --conflict-ui-gap: 12px;
+  --conflict-ui-gap-sm: 8px;
+  --conflict-ui-gap-xs: 6px;
+
   position: absolute;
   inset: 0;
   z-index: 50;
@@ -16,53 +23,53 @@
 .conflict-ui-toast-root,
 .structural-conflict-ui-toast-root {
   position: absolute;
-  bottom: 16px;
+  bottom: var(--conflict-ui-inset);
   /* `pointer-events: none` is inherited from the overlay container; re-enable so the UI is interactive. */
   pointer-events: auto;
 }
 
 .conflict-ui-toast-root {
-  left: 16px;
+  left: var(--conflict-ui-inset);
 }
 
 .structural-conflict-ui-toast-root {
-  right: 16px;
+  right: var(--conflict-ui-inset);
 }
 
 .conflict-ui-dialog-root,
 .structural-conflict-ui-dialog-root {
   position: absolute;
-  top: 16px;
+  top: var(--conflict-ui-inset);
   max-width: min(720px, 92vw);
   max-height: min(560px, 92vh);
   overflow: auto;
   background: var(--dialog-bg);
   border: 1px solid var(--dialog-border);
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: var(--radius);
+  padding: var(--conflict-ui-padding);
   box-shadow: var(--dialog-shadow);
   /* `pointer-events: none` is inherited from the overlay container; re-enable so the UI is interactive. */
   pointer-events: auto;
 }
 
 .conflict-ui-dialog-root {
-  left: 16px;
+  left: var(--conflict-ui-inset);
 }
 
 .structural-conflict-ui-dialog-root {
-  right: 16px;
+  right: var(--conflict-ui-inset);
 }
 
 .conflict-dialog__body {
   display: flex;
-  gap: 16px;
+  gap: var(--conflict-ui-gap);
 }
 
 .conflict-dialog__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--conflict-ui-gap-sm);
+  margin-top: var(--conflict-ui-gap);
 }
 
 .conflict-dialog__panel {
@@ -75,16 +82,16 @@
 }
 
 .conflict-dialog__manual-editor {
-  margin-top: 12px;
+  margin-top: var(--conflict-ui-gap);
 }
 
 .conflict-dialog__manual-label {
-  margin-top: 8px;
+  margin-top: var(--conflict-ui-gap-sm);
 }
 
 .conflict-dialog__formula-diff {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: var(--conflict-ui-gap);
+  padding-top: var(--conflict-ui-gap);
   border-top: 1px solid var(--dialog-border);
 }
 
@@ -93,5 +100,5 @@
   font-size: 12px;
   line-height: 16px;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: var(--conflict-ui-gap-xs);
 }
