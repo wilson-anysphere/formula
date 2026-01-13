@@ -57,7 +57,11 @@ pub struct PivotTableDefinition {
     pub row_fields: Vec<u32>,
     /// `<colFields>` -> `<field x="...">` indices (in order).
     pub col_fields: Vec<u32>,
-    /// `<pageFields>` -> `<field x="...">` / `<pageField fld="...">` indices (in order).
+    /// `<pageFields>` -> `<pageField>` entries (in order).
+    pub page_field_entries: Vec<PivotTablePageField>,
+    /// `<pageFields>` -> field indices (in order).
+    ///
+    /// This is a compatibility view over [`PivotTableDefinition::page_field_entries`].
     pub page_fields: Vec<u32>,
     /// `<dataFields>` -> `<dataField>` entries (in order).
     pub data_fields: Vec<PivotTableDataField>,
@@ -94,6 +98,7 @@ impl PivotTableDefinition {
             pivot_fields: Vec::new(),
             row_fields: Vec::new(),
             col_fields: Vec::new(),
+            page_field_entries: Vec::new(),
             page_fields: Vec::new(),
             data_fields: Vec::new(),
         };
@@ -128,6 +133,9 @@ impl PivotTableDefinition {
             }
             buf.clear();
         }
+
+        // Keep legacy `page_fields` in sync with the richer `page_field_entries`.
+        def.page_fields = def.page_field_entries.iter().map(|pf| pf.fld).collect();
 
         Ok(def)
     }
@@ -197,6 +205,19 @@ pub struct PivotTableStyleInfo {
     pub show_col_stripes: Option<bool>,
     pub show_last_column: Option<bool>,
     pub show_first_column: Option<bool>,
+}
+
+/// An entry inside `<pageFields>` describing a report filter ("page field").
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PivotTablePageField {
+    /// Field index (`pageField@fld`).
+    pub fld: u32,
+    /// Selected item index (`pageField@item`), often `-1` for `(All)`.
+    pub item: Option<i32>,
+    /// `pageField@hier` / `pageField@hierarchical` when present.
+    pub hierarchical: Option<bool>,
+    /// `pageField@multipleItemSelectionAllowed` when present.
+    pub multiple_item_selection_allowed: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -316,7 +337,10 @@ fn handle_start_element(
                     match ctx {
                         FieldContext::Row => def.row_fields.push(v),
                         FieldContext::Col => def.col_fields.push(v),
-                        FieldContext::Page => def.page_fields.push(v),
+                        FieldContext::Page => def.page_field_entries.push(PivotTablePageField {
+                            fld: v,
+                            ..PivotTablePageField::default()
+                        }),
                         FieldContext::Data => {}
                     }
                 }
@@ -327,13 +351,31 @@ fn handle_start_element(
 
     // Some pivot tables use `<pageField fld="...">` for page fields.
     if tag.eq_ignore_ascii_case(b"pageField") && *context == Some(FieldContext::Page) {
+        let mut fld: Option<u32> = None;
+        let mut item: Option<i32> = None;
+        let mut hierarchical: Option<bool> = None;
+        let mut multiple_item_selection_allowed: Option<bool> = None;
         for attr in start.attributes().with_checks(false) {
             let attr = attr?;
-            if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"fld") {
-                if let Ok(v) = attr.unescape_value()?.parse::<u32>() {
-                    def.page_fields.push(v);
-                }
+            let key = local_name(attr.key.as_ref());
+            let value = attr.unescape_value()?.into_owned();
+            if key.eq_ignore_ascii_case(b"fld") {
+                fld = value.parse::<u32>().ok();
+            } else if key.eq_ignore_ascii_case(b"item") {
+                item = value.parse::<i32>().ok();
+            } else if key.eq_ignore_ascii_case(b"hier") || key.eq_ignore_ascii_case(b"hierarchical") {
+                hierarchical = parse_bool(&value);
+            } else if key.eq_ignore_ascii_case(b"multipleItemSelectionAllowed") {
+                multiple_item_selection_allowed = parse_bool(&value);
             }
+        }
+        if let Some(fld) = fld {
+            def.page_field_entries.push(PivotTablePageField {
+                fld,
+                item,
+                hierarchical,
+                multiple_item_selection_allowed,
+            });
         }
         return Ok(());
     }
@@ -550,7 +592,7 @@ mod tests {
   name="PivotTable1"
   cacheId="1">
   <x:pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="true" showColHeaders="false"></x:pivotTableStyleInfo>
-</x:pivotTableDefinition>"#;
+ </x:pivotTableDefinition>"#;
 
         let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
             .expect("parse pivotTableDefinition");
@@ -559,6 +601,39 @@ mod tests {
         assert_eq!(style.name.as_deref(), Some("PivotStyleLight16"));
         assert_eq!(style.show_row_headers, Some(true));
         assert_eq!(style.show_col_headers, Some(false));
+    }
+
+    #[test]
+    fn parses_page_field_item_selection() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <pageFields count="2">
+    <pageField fld="2" item="3"/>
+    <pageField fld="5" item="-1"/>
+  </pageFields>
+</pivotTableDefinition>"#;
+
+        let parsed = PivotTableDefinition::parse("xl/pivotTables/pivotTable1.xml", xml)
+            .expect("parse pivotTableDefinition");
+
+        assert_eq!(
+            parsed.page_field_entries,
+            vec![
+                PivotTablePageField {
+                    fld: 2,
+                    item: Some(3),
+                    hierarchical: None,
+                    multiple_item_selection_allowed: None,
+                },
+                PivotTablePageField {
+                    fld: 5,
+                    item: Some(-1),
+                    hierarchical: None,
+                    multiple_item_selection_allowed: None,
+                },
+            ]
+        );
+        assert_eq!(parsed.page_fields, vec![2, 5]);
     }
 
     #[test]
