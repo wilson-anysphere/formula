@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # Pin CI Node.js major (keep in sync with release.yml) to reduce drift between
+  # what CI tests and what tagged releases build.
+  NODE_VERSION: 22
+
 jobs:
   conflict-marker-guard:
     name: "Guard: no merge conflict markers"
@@ -107,7 +112,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       
       - name: Setup Rust toolchain (wasm32)
@@ -223,7 +228,7 @@ jobs:
       - name: Setup Node (for static preflight scripts)
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
       - name: Validate macOS entitlements (hardened runtime)
         run: node scripts/check-macos-entitlements.mjs
       - uses: dtolnay/rust-toolchain@stable
@@ -256,7 +261,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -276,7 +281,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Run TabCompletionEngine micro-benchmark
         run: node packages/ai-completion/bench/tabCompletionEngine.bench.mjs --ci
@@ -297,7 +302,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
