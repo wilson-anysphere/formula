@@ -793,6 +793,7 @@ export class YjsVersionStore {
     const prunedIds = Array.from(staleIds);
     this.doc.transact(() => {
       for (const [id, ts] of markIncompleteSince) {
+        if (staleIds.has(id) || finalizeIds.has(id)) continue;
         const raw = this.versions.get(id);
         if (!isYMap(raw)) continue;
         // If the record completed after we scanned, don't write a stale marker.
@@ -827,6 +828,9 @@ export class YjsVersionStore {
           continue;
         }
         raw.set("snapshotComplete", true);
+        // Record is now complete; clear any staleness marker we might have added
+        // during earlier cleanup passes.
+        if (raw.get("incompleteSinceMs") != null) raw.delete("incompleteSinceMs");
       }
 
       for (const id of staleIds) this.versions.delete(id);
