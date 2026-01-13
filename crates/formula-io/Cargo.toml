@@ -16,6 +16,11 @@ vba = ["formula-xlsx/vba"]
 #
 # This is currently used to gate integration tests while decryption support is landing.
 encrypted-workbooks = []
+# MS-OFFCRYPTO parsing/verifier helpers and fuzz tests.
+#
+# Keep this separate from the main decryption feature so we can run hardening tests without
+# necessarily enabling end-to-end encrypted workbook fixtures.
+offcrypto = []
 
 [dependencies]
 base64 = "0.22"

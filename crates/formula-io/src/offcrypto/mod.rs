@@ -7,6 +7,11 @@
 //! `EncryptedPackage` payload is decrypted in **0x200-byte** blocks with per-block keys derived from
 //! the password + salt + a 50000-iteration SHA-1 spin loop. That variant is documented in
 //! `docs/offcrypto-standard-cryptoapi-rc4.md`.
+//!
+//! Separately, we keep small self-contained parsers/verifiers here that are intended to be safe on
+//! untrusted inputs (no panics and bounded allocations). Property-based tests for these helpers are
+//! gated behind the `formula-io/offcrypto` feature so CI can run hardening without enabling all
+//! encrypted workbook fixtures.
 
 pub mod cryptoapi;
 pub mod encrypted_package;

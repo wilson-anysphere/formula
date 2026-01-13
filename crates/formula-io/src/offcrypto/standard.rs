@@ -202,6 +202,12 @@ pub fn parse_encryption_info_standard(bytes: &[u8]) -> Result<StandardEncryption
         });
     }
 
+    // MS-OFFCRYPTO `EncryptionInfo.Flags` (distinct from `EncryptionHeader.flags`).
+    //
+    // We currently do not interpret these bits for Standard encryption, but they are part of the
+    // on-disk stream layout.
+    let _flags = r.read_u32_le("flags")?;
+
     let header_size_u32 = r.read_u32_le("headerSize")?;
     if header_size_u32 < ENCRYPTION_HEADER_FIXED_LEN as u32 {
         return Err(OffcryptoError::InvalidHeaderSize {
@@ -216,7 +222,78 @@ pub fn parse_encryption_info_standard(bytes: &[u8]) -> Result<StandardEncryption
     let verifier_bytes = r.read_bytes(r.remaining(), "EncryptionVerifier")?;
     let verifier = parse_encryption_verifier(verifier_bytes)?;
 
+    validate_parsed_standard_encryption_info(&header, &verifier)?;
+
     Ok(StandardEncryptionInfo { header, verifier })
+}
+
+fn validate_parsed_standard_encryption_info(
+    header: &EncryptionHeader,
+    verifier: &EncryptionVerifier,
+) -> Result<(), OffcryptoError> {
+    // Ensure we only return `Ok(_)` for structures that `verify_password_standard` can evaluate
+    // without returning an error. This keeps the API ergonomic for callers and avoids
+    // "successfully parsed but unverifiable" states.
+
+    // Validate supported algorithms.
+    match header.alg_id {
+        CALG_RC4 | CALG_AES_128 | CALG_AES_192 | CALG_AES_256 => {}
+        other => return Err(OffcryptoError::UnsupportedAlgId { alg_id: other }),
+    }
+    let hash_len = match header.alg_id_hash {
+        CALG_SHA1 => 20usize,
+        CALG_MD5 => 16usize,
+        other => return Err(OffcryptoError::UnsupportedAlgIdHash { alg_id_hash: other }),
+    };
+
+    // Validate key size semantics against the downstream `CryptDeriveKey` implementation.
+    let key_size_bits = header.key_size;
+    if key_size_bits == 0 || key_size_bits % 8 != 0 {
+        return Err(OffcryptoError::InvalidKeySize { key_size_bits });
+    }
+    let key_len = (key_size_bits / 8) as usize;
+    if key_len > hash_len.saturating_mul(2) {
+        return Err(OffcryptoError::InvalidKeySize { key_size_bits });
+    }
+
+    // AES requires an exact key size.
+    match header.alg_id {
+        CALG_AES_128 if key_size_bits != 128 => {
+            return Err(OffcryptoError::InvalidKeySize { key_size_bits })
+        }
+        CALG_AES_192 if key_size_bits != 192 => {
+            return Err(OffcryptoError::InvalidKeySize { key_size_bits })
+        }
+        CALG_AES_256 if key_size_bits != 256 => {
+            return Err(OffcryptoError::InvalidKeySize { key_size_bits })
+        }
+        _ => {}
+    }
+
+    // Validate verifier hash sizing. The encrypted blob may include padding (AES), but the
+    // declared verifierHashSize must fit in the decrypted bytes and be no longer than the hash
+    // output.
+    let verifier_hash_size = verifier.verifier_hash_size as usize;
+    if verifier_hash_size == 0 || verifier_hash_size > hash_len {
+        return Err(OffcryptoError::InvalidVerifierHashSize {
+            verifier_hash_size: verifier.verifier_hash_size,
+        });
+    }
+    if verifier_hash_size > verifier.encrypted_verifier_hash.len() {
+        return Err(OffcryptoError::InvalidVerifierHashSize {
+            verifier_hash_size: verifier.verifier_hash_size,
+        });
+    }
+
+    // AES verifier material is encrypted as a single CBC stream and thus must be block-aligned.
+    if matches!(header.alg_id, CALG_AES_128 | CALG_AES_192 | CALG_AES_256) {
+        let ciphertext_len = 16 + verifier.encrypted_verifier_hash.len();
+        if ciphertext_len % AES_BLOCK_SIZE != 0 {
+            return Err(OffcryptoError::InvalidAesCiphertextLength { len: ciphertext_len });
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_encryption_header(bytes: &[u8]) -> Result<EncryptionHeader, OffcryptoError> {
@@ -530,6 +607,7 @@ mod tests {
         let mut out = Vec::new();
         out.extend_from_slice(&STANDARD_MAJOR_VERSION.to_le_bytes());
         out.extend_from_slice(&STANDARD_MINOR_VERSION.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // EncryptionInfo.Flags
 
         let mut header_bytes = Vec::new();
         header_bytes.extend_from_slice(&header.flags.to_le_bytes());
