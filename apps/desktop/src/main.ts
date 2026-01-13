@@ -7402,14 +7402,32 @@ registerDesktopCommands({
         return;
       }
 
-      void hideTauriWindow().catch((err) => {
-        console.error("Failed to close window:", err);
-        showToast(`Failed to close window: ${String(err)}`, "error");
-      });
+      void (async () => {
+        try {
+          // Best-effort prompt to avoid data loss if the host close-request wiring isn't installed.
+          if (isDirtyForUnsavedChangesPrompts()) {
+            const discard = await nativeDialogs.confirm(t("prompt.unsavedChangesDiscardConfirm"));
+            if (!discard) return;
+          }
+          await hideTauriWindow();
+        } catch (err) {
+          console.error("Failed to close window:", err);
+          showToast(`Failed to close window: ${String(err)}`, "error");
+        }
+      })();
     },
     quit: () => {
       if (!handleCloseRequestForRibbon) {
-        showDesktopOnlyToast("Quitting is available in the desktop app.");
+        const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+        if (!invokeAvailable) {
+          showDesktopOnlyToast("Quitting is available in the desktop app.");
+          return;
+        }
+
+        void requestAppQuit().catch((err) => {
+          console.error("Failed to quit app:", err);
+          showToast(`Failed to quit app: ${String(err)}`, "error");
+        });
         return;
       }
       void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
