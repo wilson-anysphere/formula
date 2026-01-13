@@ -269,6 +269,11 @@ The command:
 2) runs triage on the resulting bytes, and
 3) updates `tools/corpus/public/expectations.json` (refusing to overwrite unless `--force` is passed).
 
+Optional knobs:
+
+- reduce report size: `--diff-limit 10`
+- enable heavier checks (slower): `--recalc --render-smoke`
+
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
 The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures
