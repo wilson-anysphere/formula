@@ -24,7 +24,7 @@ use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
 use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use std::sync::OnceLock;
 use thiserror::Error;
@@ -2201,6 +2201,7 @@ impl Engine {
                                     cols,
                                     cols_by_sheet: &column_cache.by_sheet,
                                     slice_mode,
+                                    trace: None,
                                 };
                                 let base = bytecode::CellCoord {
                                     row: k.addr.row as i32,
@@ -2277,6 +2278,7 @@ impl Engine {
                                                         cols,
                                                         cols_by_sheet: &column_cache.by_sheet,
                                                         slice_mode,
+                                                        trace: None,
                                                     };
                                                     let base = bytecode::CellCoord {
                                                         row: k.addr.row as i32,
@@ -2363,6 +2365,7 @@ impl Engine {
                                 cols,
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
+                                trace: None,
                             };
                             let base = bytecode::CellCoord {
                                 row: k.addr.row as i32,
@@ -2397,6 +2400,8 @@ impl Engine {
                 };
 
                 let trace = RefCell::new(crate::eval::DependencyTrace::default());
+                let bytecode_trace = Mutex::new(crate::eval::DependencyTrace::default());
+                let mut used_bytecode_trace = false;
 
                 let value = match compiled {
                     CompiledFormula::Ast(expr) => {
@@ -2413,6 +2418,10 @@ impl Engine {
                     }
                     CompiledFormula::Bytecode(bc) => {
                         if !bytecode_default_bounds {
+                            // The bytecode engine assumes Excel's fixed worksheet bounds. When any
+                            // sheet grows beyond the default dimensions, evaluate via the AST
+                            // evaluator so whole-row/whole-column references resolve against
+                            // dynamic sheet sizes.
                             let evaluator =
                                 crate::eval::Evaluator::new_with_date_system_and_locales(
                                     &snapshot,
@@ -2425,8 +2434,7 @@ impl Engine {
                                 .with_dependency_trace(&trace);
                             evaluator.eval_formula(&bc.ast)
                         } else {
-                            // Dynamic dependency tracing is only supported for AST formulas. Fallback
-                            // to bytecode evaluation without dependency updates.
+                            used_bytecode_trace = true;
                             let cols = column_cache.by_sheet.get(k.sheet).unwrap_or(&empty_cols);
                             let slice_mode = slice_mode_for_program(&bc.program);
                             let grid = EngineBytecodeGrid {
@@ -2435,6 +2443,7 @@ impl Engine {
                                 cols,
                                 cols_by_sheet: &column_cache.by_sheet,
                                 slice_mode,
+                                trace: Some(&bytecode_trace),
                             };
                             let base = bytecode::CellCoord {
                                 row: k.addr.row as i32,
@@ -2454,9 +2463,17 @@ impl Engine {
                     value_changes.as_deref_mut(),
                 );
 
-                let CompiledFormula::Ast(expr) = compiled else {
-                    continue;
+                let traced_precedents = if used_bytecode_trace {
+                    let guard = match bytecode_trace.lock() {
+                        Ok(g) => g,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    guard.precedents()
+                } else {
+                    trace.borrow().precedents()
                 };
+
+                let expr = compiled.ast();
 
                 let cell_id = cell_id_from_key(*k);
                 let old_precedents: HashSet<Precedent> =
@@ -2476,7 +2493,7 @@ impl Engine {
                         _ => None,
                     })
                     .collect();
-                for reference in trace.borrow().precedents() {
+                for reference in traced_precedents {
                     let crate::functions::SheetId::Local(sheet_id) = reference.sheet_id else {
                         // External references can't be represented in the internal dependency graph yet.
                         // They are treated as volatile and surfaced via the precedents API instead.
@@ -7492,6 +7509,7 @@ struct EngineBytecodeGrid<'a> {
     cols: &'a HashMap<i32, BytecodeColumn>,
     cols_by_sheet: &'a [HashMap<i32, BytecodeColumn>],
     slice_mode: ColumnSliceMode,
+    trace: Option<&'a Mutex<crate::eval::DependencyTrace>>,
 }
 
 impl<'a> EngineBytecodeGrid<'a> {
@@ -7568,6 +7586,43 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
                     .map(engine_value_to_bytecode)
             })
             .unwrap_or(bytecode::Value::Empty)
+    }
+
+    fn record_reference(
+        &self,
+        sheet: usize,
+        start: bytecode::CellCoord,
+        end: bytecode::CellCoord,
+    ) {
+        let Some(trace) = self.trace else {
+            return;
+        };
+        let (Ok(start_row), Ok(start_col), Ok(end_row), Ok(end_col)) = (
+            u32::try_from(start.row),
+            u32::try_from(start.col),
+            u32::try_from(end.row),
+            u32::try_from(end.col),
+        ) else {
+            return;
+        };
+
+        // Dependency tracing is only used for the engine's internal dependency graph, which does
+        // not represent external workbooks yet. Bytecode evaluation currently only supports local
+        // sheet ids, so record as local precedents.
+        let reference = crate::functions::Reference {
+            sheet_id: crate::functions::SheetId::Local(sheet),
+            start: CellAddr {
+                row: start_row,
+                col: start_col,
+            },
+            end: CellAddr { row: end_row, col: end_col },
+        };
+
+        let mut guard = match trace.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.record_reference(reference);
     }
 
     fn sheet_id(&self) -> usize {
@@ -12691,6 +12746,66 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_dependency_trace_engine_updates_dependents_from_bytecode_eval() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_value("Sheet1", "A1", Value::Number(10.0))
+            .unwrap();
+        engine.set_cell_formula("Sheet1", "B1", "=1").unwrap();
+
+        // Force B1 to be treated as a dynamic-dependency formula, but swap in a bytecode program
+        // that dereferences A1 via a reference value. This validates that bytecode evaluation can
+        // produce dynamic dependency traces that the engine consumes to update its calc graph.
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let b1_addr = parse_a1("B1").unwrap();
+        let cell = engine.workbook.sheets[sheet_id]
+            .cells
+            .get_mut(&b1_addr)
+            .expect("B1 stored");
+
+        cell.dynamic_deps = true;
+        let ast = cell
+            .compiled
+            .as_ref()
+            .expect("compiled")
+            .ast()
+            .clone();
+
+        let mut program =
+            bytecode::Program::new(Arc::from("bytecode_dependency_trace_engine_test"));
+        program.range_refs.push(bytecode::RangeRef::new(
+            bytecode::Ref::new(0, 0, true, true), // A1
+            bytecode::Ref::new(0, 0, true, true), // A1
+        ));
+        program
+            .instrs
+            .push(bytecode::Instruction::new(bytecode::OpCode::LoadRange, 0, 0));
+
+        cell.compiled = Some(CompiledFormula::Bytecode(BytecodeFormula {
+            ast,
+            program: Arc::new(program),
+        }));
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
+
+        let dependents = engine.dependents("Sheet1", "A1").unwrap();
+        assert!(
+            dependents.contains(&PrecedentNode::Cell {
+                sheet: 0,
+                addr: CellAddr { row: 0, col: 1 } // B1
+            }),
+            "B1 should become a dependent of A1 after bytecode dependency tracing"
+        );
+
+        engine
+            .set_cell_value("Sheet1", "A1", Value::Number(20.0))
+            .unwrap();
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(20.0));
+    }
+
+    #[test]
     fn engine_bytecode_grid_column_slice_rejects_out_of_bounds_columns() {
         let mut engine = Engine::new();
         engine.ensure_sheet("Sheet1");
@@ -12722,6 +12837,7 @@ mod tests {
             cols: &cols,
             cols_by_sheet: std::slice::from_ref(&cols),
             slice_mode: ColumnSliceMode::IgnoreNonNumeric,
+            trace: None,
         };
 
         assert!(

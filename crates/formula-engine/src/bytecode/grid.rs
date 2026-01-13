@@ -14,6 +14,20 @@ pub trait Grid: Sync {
         self.get_value(coord)
     }
 
+    /// Record that a cell/range reference was dereferenced during evaluation.
+    ///
+    /// The bytecode runtime invokes this hook when it materializes reference values (e.g. turning a
+    /// `Value::Range` into an array) or scans ranges for functions like `SUM`.
+    ///
+    /// Engine-side grids can override this to collect dynamic dependency information for formulas
+    /// whose precedents are not statically known (e.g. `OFFSET`, `INDIRECT`).
+    #[inline]
+    fn record_reference(&self, sheet: usize, start: CellCoord, end: CellCoord) {
+        let _ = sheet;
+        let _ = start;
+        let _ = end;
+    }
+
     /// Source worksheet id for the grid.
     ///
     /// This is used for deterministic volatile behavior in the bytecode backend (e.g. RAND,

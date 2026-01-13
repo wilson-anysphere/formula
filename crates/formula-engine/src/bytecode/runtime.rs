@@ -1001,29 +1001,35 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
 
             // Single-cell ranges return that cell.
             if range.row_start == range.row_end && range.col_start == range.col_end {
-                return grid.get_value(CellCoord {
+                let coord = CellCoord {
                     row: range.row_start,
                     col: range.col_start,
-                });
+                };
+                grid.record_reference(grid.sheet_id(), coord, coord);
+                return grid.get_value(coord);
             }
 
             // 1D ranges intersect on the matching row/column.
             if range.col_start == range.col_end {
                 if base.row >= range.row_start && base.row <= range.row_end {
-                    return grid.get_value(CellCoord {
+                    let coord = CellCoord {
                         row: base.row,
                         col: range.col_start,
-                    });
+                    };
+                    grid.record_reference(grid.sheet_id(), coord, coord);
+                    return grid.get_value(coord);
                 }
                 return Value::Error(ErrorKind::Value);
             }
 
             if range.row_start == range.row_end {
                 if base.col >= range.col_start && base.col <= range.col_end {
-                    return grid.get_value(CellCoord {
+                    let coord = CellCoord {
                         row: range.row_start,
                         col: base.col,
-                    });
+                    };
+                    grid.record_reference(grid.sheet_id(), coord, coord);
+                    return grid.get_value(coord);
                 }
                 return Value::Error(ErrorKind::Value);
             }
@@ -1034,6 +1040,7 @@ pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -
                 && base.col >= range.col_start
                 && base.col <= range.col_end
             {
+                grid.record_reference(grid.sheet_id(), base, base);
                 return grid.get_value(base);
             }
 
@@ -1071,24 +1078,28 @@ fn apply_implicit_intersection_sheet_range(
 
     // Single-cell ranges return that cell.
     if range.row_start == range.row_end && range.col_start == range.col_end {
+        let coord = CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        };
+        grid.record_reference(area.sheet, coord, coord);
         return grid.get_value_on_sheet(
             area.sheet,
-            CellCoord {
-                row: range.row_start,
-                col: range.col_start,
-            },
+            coord,
         );
     }
 
     // 1D ranges intersect on the matching row/column.
     if range.col_start == range.col_end {
         if base.row >= range.row_start && base.row <= range.row_end {
+            let coord = CellCoord {
+                row: base.row,
+                col: range.col_start,
+            };
+            grid.record_reference(area.sheet, coord, coord);
             return grid.get_value_on_sheet(
                 area.sheet,
-                CellCoord {
-                    row: base.row,
-                    col: range.col_start,
-                },
+                coord,
             );
         }
         return Value::Error(ErrorKind::Value);
@@ -1096,12 +1107,14 @@ fn apply_implicit_intersection_sheet_range(
 
     if range.row_start == range.row_end {
         if base.col >= range.col_start && base.col <= range.col_end {
+            let coord = CellCoord {
+                row: range.row_start,
+                col: base.col,
+            };
+            grid.record_reference(area.sheet, coord, coord);
             return grid.get_value_on_sheet(
                 area.sheet,
-                CellCoord {
-                    row: range.row_start,
-                    col: base.col,
-                },
+                coord,
             );
         }
         return Value::Error(ErrorKind::Value);
@@ -1113,6 +1126,7 @@ fn apply_implicit_intersection_sheet_range(
         && base.col >= range.col_start
         && base.col <= range.col_end
     {
+        grid.record_reference(area.sheet, base, base);
         return grid.get_value_on_sheet(area.sheet, base);
     }
 
@@ -1393,6 +1407,18 @@ fn deref_range_dynamic(grid: &dyn Grid, range: ResolvedRange) -> Value {
         return Value::Error(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() == 1 && range.cols() == 1 {
         return grid.get_value(CellCoord {
             row: range.row_start,
@@ -1431,6 +1457,18 @@ fn deref_range_dynamic_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRa
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Value::Error(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() == 1 && range.cols() == 1 {
         return grid.get_value_on_sheet(
@@ -3799,6 +3837,18 @@ fn and_range(
         return Some(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -3880,6 +3930,18 @@ fn or_range(
     if !range_in_bounds(grid, range) {
         return Some(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
@@ -3981,6 +4043,18 @@ fn and_range_on_sheet(
         return Some(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -4080,6 +4154,18 @@ fn or_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Some(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -4751,6 +4837,18 @@ fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<Er
         return Some(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut best_error: Option<(i32, i32, ErrorKind)> = None;
@@ -4855,6 +4953,18 @@ fn xor_range_on_sheet(
             ErrorKind::Ref,
         ));
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -8189,6 +8299,18 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         if !range_in_bounds(grid, *table) {
             return Value::Error(ErrorKind::Ref);
         }
+
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: table.row_start,
+                col: table.col_start,
+            },
+            CellCoord {
+                row: table.row_end,
+                col: table.col_end,
+            },
+        );
     }
 
     let col_index = match coerce_to_i64(&args[2]) {
@@ -8301,6 +8423,18 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         if !range_in_bounds(grid, *table) {
             return Value::Error(ErrorKind::Ref);
         }
+
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: table.row_start,
+                col: table.col_start,
+            },
+            CellCoord {
+                row: table.row_end,
+                col: table.col_end,
+            },
+        );
     }
 
     let row_index = match coerce_to_i64(&args[2]) {
@@ -8429,6 +8563,18 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         if !range_in_bounds(grid, *range) {
             return Value::Error(ErrorKind::Ref);
         }
+
+        grid.record_reference(
+            grid.sheet_id(),
+            CellCoord {
+                row: range.row_start,
+                col: range.col_start,
+            },
+            CellCoord {
+                row: range.row_end,
+                col: range.col_end,
+            },
+        );
     }
 
     let pos = match lookup_array {
@@ -8640,6 +8786,19 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             if !range_in_bounds(grid, lookup_range) {
                 return Value::Error(ErrorKind::Ref);
             }
+
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: lookup_range.row_start,
+                    col: lookup_range.col_start,
+                },
+                CellCoord {
+                    row: lookup_range.row_end,
+                    col: lookup_range.col_end,
+                },
+            );
+
             let Some((shape, len)) = resolved_range_1d_shape_len(lookup_range) else {
                 return Value::Error(ErrorKind::Value);
             };
@@ -8769,6 +8928,17 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             if !range_in_bounds(grid, lookup_range) {
                 return Value::Error(ErrorKind::Ref);
             }
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: lookup_range.row_start,
+                    col: lookup_range.col_start,
+                },
+                CellCoord {
+                    row: lookup_range.row_end,
+                    col: lookup_range.col_end,
+                },
+            );
             LookupVector::Range(lookup_range)
         }
         Value::Array(arr) => LookupVector::Array(arr),
@@ -8781,6 +8951,17 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             if !range_in_bounds(grid, return_range) {
                 return Value::Error(ErrorKind::Ref);
             }
+            grid.record_reference(
+                grid.sheet_id(),
+                CellCoord {
+                    row: return_range.row_start,
+                    col: return_range.col_start,
+                },
+                CellCoord {
+                    row: return_range.row_end,
+                    col: return_range.col_end,
+                },
+            );
             ReturnArray::Range(return_range)
         }
         Value::Array(arr) => ReturnArray::Array(arr),
@@ -9583,6 +9764,18 @@ fn count_if_range_criteria(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
@@ -9629,6 +9822,18 @@ fn count_if_range_criteria_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -9900,6 +10105,18 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut sum = 0.0;
@@ -9973,6 +10190,18 @@ fn sum_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut sum = 0.0;
@@ -10042,6 +10271,18 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
@@ -10126,6 +10367,18 @@ fn sum_count_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut sum = 0.0;
@@ -10206,6 +10459,18 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
@@ -10245,6 +10510,18 @@ fn count_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
@@ -10283,6 +10560,18 @@ fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKin
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
@@ -10329,6 +10618,18 @@ fn counta_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut count = 0usize;
@@ -10369,6 +10670,18 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
 
@@ -10421,6 +10734,18 @@ fn countblank_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
@@ -10469,6 +10794,18 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
@@ -10543,6 +10880,18 @@ fn min_range_on_sheet(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
             let mut out: Option<f64> = None;
@@ -10612,6 +10961,18 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
@@ -10685,6 +11046,18 @@ fn max_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -10760,6 +11133,18 @@ fn count_if_range(
         return Err(ErrorKind::Ref);
     }
 
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
+
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells() {
             let mut count = 0usize;
@@ -10815,6 +11200,18 @@ fn count_if_range_on_sheet(
     if !range_in_bounds_on_sheet(grid, sheet, range) {
         return Err(ErrorKind::Ref);
     }
+
+    grid.record_reference(
+        sheet,
+        CellCoord {
+            row: range.row_start,
+            col: range.col_start,
+        },
+        CellCoord {
+            row: range.row_end,
+            col: range.col_end,
+        },
+    );
 
     if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
         if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
@@ -10902,6 +11299,32 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
     if a.rows() != b.rows() || a.cols() != b.cols() {
         return Err(ErrorKind::Value);
     }
+
+    // SUMPRODUCT reads values from *both* ranges; record both rectangles once so dynamic dependency
+    // tracing stays compact (no per-cell events).
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: a.row_start,
+            col: a.col_start,
+        },
+        CellCoord {
+            row: a.row_end,
+            col: a.col_end,
+        },
+    );
+    grid.record_reference(
+        grid.sheet_id(),
+        CellCoord {
+            row: b.row_start,
+            col: b.col_start,
+        },
+        CellCoord {
+            row: b.row_end,
+            col: b.col_end,
+        },
+    );
+
     let rows = a.rows();
     let cols = a.cols();
 
@@ -11149,6 +11572,74 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
 mod tests {
     use super::*;
     use crate::bytecode::ColumnarGrid;
+
+    #[test]
+    fn bytecode_dependency_trace_deref_value_dynamic_records_reference() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct TracingGrid {
+            values: HashMap<(i32, i32), Value>,
+            trace: Mutex<Vec<(usize, CellCoord, CellCoord)>>,
+        }
+
+        impl Grid for TracingGrid {
+            fn get_value(&self, coord: CellCoord) -> Value {
+                self.values
+                    .get(&(coord.row, coord.col))
+                    .cloned()
+                    .unwrap_or(Value::Empty)
+            }
+
+            fn sheet_id(&self) -> usize {
+                0
+            }
+
+            fn record_reference(&self, sheet: usize, start: CellCoord, end: CellCoord) {
+                self.trace.lock().unwrap().push((sheet, start, end));
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                (10, 10)
+            }
+        }
+
+        let grid = TracingGrid::default();
+
+        // Program: push a range reference, then return it (Vm::eval will dynamically dereference).
+        let mut program = crate::bytecode::Program::new(Arc::from("trace_test"));
+        program.range_refs.push(RangeRef::new(
+            Ref::new(0, 0, true, true), // A1
+            Ref::new(1, 1, true, true), // B2
+        ));
+        program
+            .instrs
+            .push(crate::bytecode::Instruction::new(crate::bytecode::OpCode::LoadRange, 0, 0));
+
+        let mut vm = crate::bytecode::Vm::new();
+        let _ = vm.eval(
+            &program,
+            &grid,
+            0,
+            CellCoord { row: 0, col: 0 },
+            &crate::LocaleConfig::en_us(),
+        );
+
+        let trace = grid.trace.lock().unwrap().clone();
+        assert_eq!(
+            trace,
+            vec![(
+                0,
+                CellCoord { row: 0, col: 0 },
+                CellCoord { row: 1, col: 1 }
+            )]
+        );
+    }
 
     struct SparsePanicGrid {
         bounds: (i32, i32),
