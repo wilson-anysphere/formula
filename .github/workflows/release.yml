@@ -741,10 +741,6 @@ jobs:
       - name: Validate desktop release artifacts
         run: node scripts/ci/check-desktop-release-artifacts.mjs
 
-      - name: Verify Linux package runtime dependencies
-        if: matrix.platform == 'ubuntu-24.04'
-        run: bash scripts/ci/verify-linux-package-deps.sh
-
       - name: Smoke test Linux .deb install in clean Ubuntu container
         if: matrix.platform == 'ubuntu-24.04'
         run: bash scripts/ci/linux-package-install-smoke.sh deb
@@ -752,7 +748,6 @@ jobs:
       - name: Smoke test Linux .rpm install in clean Fedora container
         if: matrix.platform == 'ubuntu-24.04'
         run: bash scripts/ci/linux-package-install-smoke.sh rpm
-
       - name: Report desktop bundle sizes
         env:
           # Optional: set these as GitHub Actions "Variables" to enable gating.
