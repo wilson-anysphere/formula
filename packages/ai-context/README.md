@@ -30,6 +30,8 @@ This package focuses on:
 import {
   // Schema / sampling
   extractSheetSchema,
+  summarizeSheetSchema,
+  summarizeRegion,
   randomSampleRows,
   stratifiedSampleRows,
 
@@ -101,7 +103,7 @@ Many APIs in this package also accept `signal?: AbortSignal` to allow cancellati
 `extractSheetSchema()` produces a compact representation of what’s in a sheet: detected data regions, headers, inferred types, and a few sample values per column.
 
 ```js
-import { extractSheetSchema, redactText, stableJsonStringify } from "./src/index.js";
+import { extractSheetSchema, summarizeSheetSchema, redactText } from "./src/index.js";
 
 const sheet = {
   name: "Transactions",
@@ -119,8 +121,11 @@ const schema = extractSheetSchema(sheet);
 // - `schema` may contain snippets of real cell content (e.g., sample values).
 // - Do NOT send the raw object to a cloud model without redaction/policy checks.
 //
-// For quick demos you can use heuristic redaction on the *serialized* form:
-const schemaForPrompt = redactText(stableJsonStringify(schema));
+// For prompt context, prefer `summarizeSheetSchema(schema)` which is:
+// - deterministic + compact
+// - schema-first (headers/types/row counts)
+// - does NOT include sample cell values from `TableSchema.columns[*].sampleValues`
+const schemaForPrompt = redactText(summarizeSheetSchema(schema));
 
 const prompt = [
   "You are helping a user understand a spreadsheet.",

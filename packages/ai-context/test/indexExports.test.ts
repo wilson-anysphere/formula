@@ -13,7 +13,7 @@ describe("ai-context TS entrypoint", () => {
     writeFileSync(
       tmpFile,
       [
-        'import { ContextManager, classifyText, chunkSheetByRegions, extractSheetSchema, parseA1Range, trimMessagesToBudget } from "../src/index.js";',
+        'import { ContextManager, classifyText, chunkSheetByRegions, extractSheetSchema, parseA1Range, summarizeSheetSchema, trimMessagesToBudget } from "../src/index.js";',
         "",
         'const range = parseA1Range("Sheet1!A1:B2");',
         "range.startRow satisfies number;",
@@ -24,6 +24,9 @@ describe("ai-context TS entrypoint", () => {
         "  values: [[\"Header\", \"Value\"], [\"A\", 1]],",
         "});",
         "schema.dataRegions[0]?.range satisfies string;",
+        "",
+        "const summary = summarizeSheetSchema(schema);",
+        "summary satisfies string;",
         "",
         "const chunks = chunkSheetByRegions({ name: \"Sheet1\", values: [[1]] });",
         "chunks[0]?.metadata.type satisfies \"region\";",
@@ -50,6 +53,9 @@ describe("ai-context TS entrypoint", () => {
         "",
         "// @ts-expect-error - classifyText expects a string.",
         "classifyText(1);",
+        "",
+        "// @ts-expect-error - summarizeSheetSchema expects a SheetSchema.",
+        "summarizeSheetSchema({});",
         "",
         "// @ts-expect-error - buildContext requires a query string.",
         "cm.buildContext({ sheet: { name: \"Sheet1\", values: [[1]] } });",
@@ -100,4 +106,3 @@ describe("ai-context TS entrypoint", () => {
     }
   });
 });
-
