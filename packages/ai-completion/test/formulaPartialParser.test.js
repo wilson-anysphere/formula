@@ -77,3 +77,23 @@ test("parsePartialFormula ignores ';' inside quoted sheet names", () => {
   assert.equal(parsed.argIndex, 1);
   assert.equal(parsed.currentArg?.text, "A");
 });
+
+test("parsePartialFormula ignores ';' inside string literals", () => {
+  const registry = new FunctionRegistry();
+  const input = '=SUM("a;b"; A';
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  // Only the semicolon *after* the string literal should split args.
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
+
+test("parsePartialFormula ignores ';' inside structured references", () => {
+  const registry = new FunctionRegistry();
+  const input = "=SUM(Table1[Amount;USD]; A";
+  const parsed = parsePartialFormula(input, input.length, registry);
+
+  // Only the semicolon *after* the structured ref should split args.
+  assert.equal(parsed.argIndex, 1);
+  assert.equal(parsed.currentArg?.text, "A");
+});
