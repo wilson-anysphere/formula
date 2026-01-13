@@ -16,6 +16,7 @@ use crate::{
     PrintTitles, Range, SheetPrintSettings, SheetVisibility, Style, StyleTable, TabColor, Table,
     ThemePalette, WorkbookPrintSettings, WorkbookProtection, WorkbookView, Worksheet, WorksheetId,
 };
+use crate::pivots::PivotTableModel;
 use crate::table::{validate_table_name, TableError, TableIdentifier};
 
 /// Identifier for a workbook.
@@ -66,6 +67,15 @@ pub struct Workbook {
     /// Defined names (named ranges / constants / formulas).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub defined_names: Vec<DefinedName>,
+
+    /// Pivot table definitions.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        rename = "pivotTables",
+        alias = "pivot_tables"
+    )]
+    pub pivot_tables: Vec<PivotTableModel>,
 
     /// Workbook print settings (print area/titles, page setup, margins, scaling, manual breaks).
     #[serde(default, skip_serializing_if = "WorkbookPrintSettings::is_empty")]
@@ -177,6 +187,7 @@ impl Workbook {
             theme: ThemePalette::default(),
             workbook_protection: WorkbookProtection::default(),
             defined_names: Vec::new(),
+            pivot_tables: Vec::new(),
             print_settings: WorkbookPrintSettings::default(),
             view: WorkbookView::default(),
             next_sheet_id: 1,
@@ -1175,6 +1186,8 @@ impl<'de> Deserialize<'de> for Workbook {
             workbook_protection: WorkbookProtection,
             #[serde(default)]
             defined_names: Vec<DefinedName>,
+            #[serde(default, rename = "pivotTables", alias = "pivot_tables")]
+            pivot_tables: Vec<PivotTableModel>,
             #[serde(default)]
             print_settings: WorkbookPrintSettings,
             #[serde(default)]
@@ -1193,6 +1206,7 @@ impl<'de> Deserialize<'de> for Workbook {
 
         let sheets = helper.sheets;
         let defined_names = helper.defined_names;
+        let pivot_tables = helper.pivot_tables;
 
         let next_sheet_id = sheets
             .iter()
@@ -1235,6 +1249,7 @@ impl<'de> Deserialize<'de> for Workbook {
             theme: helper.theme,
             workbook_protection: helper.workbook_protection,
             defined_names,
+            pivot_tables,
             print_settings,
             view,
             next_sheet_id,

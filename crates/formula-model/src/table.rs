@@ -36,7 +36,8 @@ pub enum TableError {
 ///
 /// Excel tables are workbook-scoped by name, but APIs may still need to refer to
 /// tables by either their name or stable `id`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum TableIdentifier {
     Name(String),
     Id(u32),

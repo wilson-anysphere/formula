@@ -5,9 +5,14 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 mod schema;
+mod model;
 pub mod slicers;
 
 pub use schema::{CalculatedField, CalculatedItem};
+pub use model::{
+    FilterField, GrandTotals, Layout, PivotCacheId, PivotConfig, PivotDestination, PivotSource,
+    PivotTableModel, SubtotalPosition,
+};
 
 pub type PivotTableId = Uuid;
 pub type PivotChartId = Uuid;

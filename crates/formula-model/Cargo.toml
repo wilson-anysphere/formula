@@ -15,12 +15,12 @@ formula-format = { path = "../formula-format" }
 thiserror = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
 ordered-float = "4"
-uuid = { version = "1" }
+uuid = { version = "1", features = ["serde"] }
 unicode-normalization = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `uuid` requires an explicit RNG backend on `wasm32-unknown-unknown`.
-uuid = { version = "1", features = ["rng-getrandom"] }
+uuid = { version = "1", features = ["rng-getrandom", "serde"] }
 # `uuid` + other deps pull `getrandom` which needs opting into a WASM backend.
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
@@ -28,6 +28,6 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 # Random UUID generation relies on OS entropy sources that are not available on
 # `wasm32-unknown-unknown` without JS glue. Keep v4 generation for native
 # targets, but build without it for wasm (see `formula-model/src/lib.rs`).
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 [dev-dependencies]
 serde_json = "1.0"
