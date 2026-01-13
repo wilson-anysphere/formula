@@ -12,6 +12,167 @@ fn push_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
 }
 
 #[test]
+fn materializes_shared_formulas_with_ptgexp_coordinate_payload_layouts() {
+    // `PtgExp` appears in the wild with multiple coordinate payload shapes:
+    // - BIFF12-ish: row u32 + col u32 (8 bytes)
+    // - BIFF12-ish: row u32 + col u16 (6 bytes)
+    // - BIFF8-ish: row u16 + col u16 (4 bytes)
+    // Additionally, some producers include extra trailing bytes after the coordinates.
+    //
+    // This test synthesizes a single worksheet stream with one shared-formula anchor and
+    // multiple dependent cells, each using a different `PtgExp` payload layout.
+
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+    const WORKSHEET_BEGIN: u32 = 0x0081;
+    const WORKSHEET_END: u32 = 0x0082;
+    const SHEETDATA_BEGIN: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const DIMENSION: u32 = 0x0094;
+
+    const ROW: u32 = 0x0000;
+    const FMLA_NUM: u32 = 0x0009;
+    const SHR_FMLA: u32 = 0x0010;
+
+    let mut sheet = Vec::new();
+    push_record(&mut sheet, WORKSHEET_BEGIN, &[]);
+
+    // BrtWsDim: cover B1:B5 (rows 0..4, col 1).
+    let mut dim = Vec::new();
+    dim.extend_from_slice(&0u32.to_le_bytes());
+    dim.extend_from_slice(&4u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    push_record(&mut sheet, DIMENSION, &dim);
+
+    push_record(&mut sheet, SHEETDATA_BEGIN, &[]);
+
+    // Row 0
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // Shared formula over B1:B5:
+    //   B1: A1+1
+    //   B2: A2+1
+    //   ...
+    let mut shr_fmla = Vec::new();
+    // Range: r1=0, r2=4, c1=1, c2=1.
+    shr_fmla.extend_from_slice(&0u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&4u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+
+    // Base rgce: PtgRefN(row_off=0,col_off=-1) + 1 + +
+    let base_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x2C); // PtgRefN
+        v.extend_from_slice(&0i32.to_le_bytes());
+        v.extend_from_slice(&(-1i16).to_le_bytes());
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    shr_fmla.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    shr_fmla.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, SHR_FMLA, &shr_fmla);
+
+    // B1 full formula (PtgRef A1 + 1 +)
+    let full_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x24); // PtgRef
+        v.extend_from_slice(&0u32.to_le_bytes()); // row=0
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col=0, row+col relative
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    let mut b1 = Vec::new();
+    b1.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b1.extend_from_slice(&0u32.to_le_bytes()); // style
+    b1.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b1.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b1.extend_from_slice(&(full_rgce.len() as u32).to_le_bytes());
+    b1.extend_from_slice(&full_rgce);
+    push_record(&mut sheet, FMLA_NUM, &b1);
+
+    // Helper to emit a BrtFmlaNum cell in column B for a given row.
+    let mut push_ptgexp_cell = |row_idx: u32, ptgexp: &[u8]| {
+        push_record(&mut sheet, ROW, &row_idx.to_le_bytes());
+        let mut cell = Vec::new();
+        cell.extend_from_slice(&1u32.to_le_bytes()); // col B
+        cell.extend_from_slice(&0u32.to_le_bytes()); // style
+        cell.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+        cell.extend_from_slice(&0u16.to_le_bytes()); // flags
+        cell.extend_from_slice(&(ptgexp.len() as u32).to_le_bytes());
+        cell.extend_from_slice(ptgexp);
+        push_record(&mut sheet, FMLA_NUM, &cell);
+    };
+
+    // B2: BIFF8-style (row u16 + col u16).
+    let ptgexp_u16_u16: [u8; 5] = [0x01, 0x00, 0x00, 0x01, 0x00];
+    push_ptgexp_cell(1, &ptgexp_u16_u16);
+
+    // B3: BIFF12-ish (row u32 + col u16).
+    let ptgexp_u32_u16: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x01);
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v
+    };
+    push_ptgexp_cell(2, &ptgexp_u32_u16);
+
+    // B4: BIFF12-ish (row u32 + col u32).
+    let ptgexp_u32_u32: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x01);
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&1u32.to_le_bytes());
+        v
+    };
+    push_ptgexp_cell(3, &ptgexp_u32_u32);
+
+    // B5: row u32 + col u32, plus extra trailing bytes (seen in the wild).
+    let ptgexp_u32_u32_trailing: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x01);
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&1u32.to_le_bytes());
+        v.extend_from_slice(&[0xAA, 0xBB, 0xCC]); // trailing bytes
+        v
+    };
+    push_ptgexp_cell(4, &ptgexp_u32_u32_trailing);
+
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    push_record(&mut sheet, WORKSHEET_END, &[]);
+
+    let parsed = parse_sheet_bin(&mut Cursor::new(sheet), &[]).expect("parse synthetic sheet");
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+
+    let b1 = cells.remove(&(0, 1)).expect("B1 present");
+    assert_eq!(
+        b1.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("A1+1")
+    );
+
+    for (row, expected) in &[(1u32, "A2+1"), (2, "A3+1"), (3, "A4+1"), (4, "A5+1")] {
+        let cell = cells.remove(&(*row, 1)).expect("dependent cell present");
+        assert_eq!(
+            cell.formula.as_ref().and_then(|f| f.text.as_deref()),
+            Some(*expected),
+            "row {row}"
+        );
+        // Ensure the shared formula was materialized (not left as PtgExp).
+        assert_eq!(
+            cell.formula.as_ref().unwrap().rgce.first().copied(),
+            Some(0x24),
+            "row {row}"
+        );
+    }
+}
+
+#[test]
 fn materializes_shared_formulas_via_ptgexp() {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const WORKSHEET_BEGIN: u32 = 0x0081;
