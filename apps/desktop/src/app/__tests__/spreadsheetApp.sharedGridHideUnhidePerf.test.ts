@@ -87,6 +87,24 @@ function withAllocationGuards(fn: () => void): { elapsedMs: number; mapSetCalls:
   let mapSetCalls = 0;
 
   const GuardedArray = new Proxy(originalArray, {
+    get(target, prop, receiver) {
+      // Catch `Array.from({ length: N })` patterns which allocate based on the `length` property.
+      if (prop === "from") {
+        return function guardedFrom(arrayLike: unknown, mapFn?: unknown, thisArg?: unknown) {
+          const length =
+            arrayLike && (typeof arrayLike === "object" || typeof arrayLike === "function")
+              ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                Number((arrayLike as any).length)
+              : NaN;
+          if (Number.isFinite(length) && length > MAX_ARRAY_LENGTH) {
+            throw new Error(`Unexpected large Array allocation via Array.from: length=${length}`);
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (originalArray.from as any)(arrayLike as any, mapFn as any, thisArg as any);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
     construct(target, args) {
       if (args.length === 1 && typeof args[0] === "number" && args[0] > MAX_ARRAY_LENGTH) {
         throw new Error(`Unexpected large Array allocation: length=${args[0]}`);
