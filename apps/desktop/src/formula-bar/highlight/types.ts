@@ -1,33 +1,9 @@
-export type FormulaTokenType =
-  | "whitespace"
-  | "operator"
-  | "punctuation"
-  | "number"
-  | "string"
-  | "function"
-  | "identifier"
-  | "reference"
-  | "error"
-  | "unknown";
+import type { FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
+
+export type { FormulaToken, FormulaTokenType } from "@formula/spreadsheet-frontend/formula/tokenizeFormula";
 
 export type HighlightKind =
-  | "whitespace"
-  | "operator"
-  | "punctuation"
-  | "number"
-  | "string"
-  | "function"
-  | "identifier"
-  | "reference"
-  | "error"
-  | "unknown";
-
-export type FormulaToken = {
-  type: FormulaTokenType;
-  text: string;
-  start: number;
-  end: number;
-};
+  FormulaTokenType;
 
 export type HighlightSpan = {
   kind: HighlightKind;
