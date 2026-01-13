@@ -1,7 +1,8 @@
 import { InMemoryVectorStore, type VectorRecord, type VectorSearchResult } from "./inMemoryVectorStore.js";
+import type { BinaryStorage } from "./binaryStorage.js";
 
 export class JsonVectorStore extends InMemoryVectorStore {
-  constructor(opts: { storage?: any; dimension: number; autoSave?: boolean; resetOnCorrupt?: boolean });
+  constructor(opts: { storage?: BinaryStorage; dimension: number; autoSave?: boolean; resetOnCorrupt?: boolean });
   load(): Promise<void>;
 
   batch<T>(fn: () => Promise<T> | T): Promise<T>;
