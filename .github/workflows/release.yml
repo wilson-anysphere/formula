@@ -832,13 +832,24 @@ jobs:
           # Tauri bundles normally live under `src-tauri/target/release/bundle`, but can also
           # end up under `src-tauri/target/<triple>/release/bundle` if `--target` is used.
           bundle_roots=()
-          for root in "apps/desktop/src-tauri/target" "target"; do
+          # Prefer `CARGO_TARGET_DIR` if it's set (some Tauri builds export it), but also scan the
+          # common workspace/default target roots.
+          if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+            cargo_target_dir="${CARGO_TARGET_DIR}"
+            if [[ "${cargo_target_dir}" != /* ]]; then
+              cargo_target_dir="${PWD}/${cargo_target_dir}"
+            fi
+            if [[ -d "${cargo_target_dir}" ]]; then
+              bundle_roots+=("${cargo_target_dir}")
+            fi
+          fi
+          for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
             if [[ -d "$root" ]]; then
               bundle_roots+=("$root")
             fi
           done
           if ((${#bundle_roots[@]} == 0)); then
-            echo "Expected Tauri target directory not found. Looked in: apps/desktop/src-tauri/target and target" >&2
+            echo "Expected Tauri target directory not found. Looked in: CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-} apps/desktop/src-tauri/target apps/desktop/target target" >&2
             exit 1
           fi
 
