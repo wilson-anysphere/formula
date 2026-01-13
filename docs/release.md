@@ -975,6 +975,9 @@ The release workflow reports the size of each generated installer/bundle artifac
 AppImage / DEB / RPM / etc) in the GitHub Actions **step summary**, and **fails tagged releases** if
 any artifact exceeds the per-artifact size budget (default: **50 MB**).
 
+For debugging, the workflow also writes a machine-readable JSON report (via the `--json` flag) and
+uploads it as a GitHub Actions artifact named `desktop-bundle-size-report-*`.
+
 Note: this is an **installer artifact** budget (DMG/MSI/AppImage/etc), not the **frontend asset
 download size** budget (compressed JS/CSS/WASM; see `pnpm -C apps/desktop check:bundle-size` and
 `python scripts/desktop_size_report.py`).
