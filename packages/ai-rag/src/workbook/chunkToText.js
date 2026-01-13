@@ -30,7 +30,7 @@ function formatScalar(value) {
     const text = /** @type {any} */ (value)?.text;
     if (typeof text === "string") return formatScalar(text);
     try {
-      const json = JSON.stringify(value);
+      const json = JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? String(v) : v));
       if (typeof json === "string") {
         // Empty objects are rarely useful in cell context; treat as blank.
         if (json === "{}") return "";

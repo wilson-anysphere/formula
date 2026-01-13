@@ -101,6 +101,19 @@ test("chunkToText formats object cell values via JSON for stable output", () => 
   assert.match(text, /Meta=\{"foo":"bar"\}/);
 });
 
+test("chunkToText JSON-stringifies objects containing BigInt properties", () => {
+  const chunk = {
+    kind: "table",
+    title: "Example",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 1, c1: 0 },
+    cells: [[{ v: "Meta" }], [{ v: { big: 1n } }]],
+  };
+
+  const text = chunkToText(chunk, { sampleRows: 1 });
+  assert.match(text, /Meta=\{"big":"1"\}/);
+});
+
 test("chunkToText formats Error values with name + message", () => {
   const chunk = {
     kind: "table",
