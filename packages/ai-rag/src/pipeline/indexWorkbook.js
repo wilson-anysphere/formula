@@ -164,6 +164,9 @@ export async function indexWorkbook(params) {
           embedder.embedTexts(batchTexts, { signal }),
           signal
         );
+        // Preserve AbortSignal semantics: if callers cancel while/after the embedder resolves,
+        // surface AbortError before validating embedder output.
+        throwIfAborted(signal);
         if (!Array.isArray(batchVectors)) {
           throw new Error(
             `embedder.embedTexts returned a non-array result; expected an array of length ${batchTexts.length}`
