@@ -80,6 +80,32 @@ impl HashAlgorithm {
             }
         }
     }
+
+    /// Hash a single buffer using this algorithm.
+    pub fn hash(self, bytes: &[u8]) -> Vec<u8> {
+        match self {
+            HashAlgorithm::Sha1 => {
+                let mut h = sha1::Sha1::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            HashAlgorithm::Sha256 => {
+                let mut h = sha2::Sha256::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            HashAlgorithm::Sha384 => {
+                let mut h = sha2::Sha384::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+            HashAlgorithm::Sha512 => {
+                let mut h = sha2::Sha512::new();
+                h.update(bytes);
+                h.finalize().to_vec()
+            }
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

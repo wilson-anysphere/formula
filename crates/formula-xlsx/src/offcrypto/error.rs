@@ -13,7 +13,7 @@ pub type Result<T> = std::result::Result<T, OffCryptoError>;
 pub enum OffCryptoError {
     // --- High-level capability / compatibility -------------------------------------------------
     #[error(
-        "unsupported OOXML encryption version {major}.{minor}; only Agile Encryption (4.4) is supported"
+        "unsupported OOXML encryption version {major}.{minor}; supported versions are Agile Encryption (4.4) and Standard Encryption (3.2)"
     )]
     UnsupportedEncryptionVersion { major: u16, minor: u16 },
 
@@ -101,6 +101,9 @@ pub enum OffCryptoError {
     IntegrityMismatch,
 
     // --- Structural errors ---------------------------------------------------------------------
+    #[error("EncryptionInfo stream is too short ({len} bytes)")]
+    EncryptionInfoTooShort { len: usize },
+
     #[error("EncryptedPackage stream is too short ({len} bytes)")]
     EncryptedPackageTooShort { len: usize },
 
@@ -116,6 +119,10 @@ pub enum OffCryptoError {
         declared_len: usize,
         available_len: usize,
     },
+
+    // --- Standard (CryptoAPI) parsing ----------------------------------------------------------
+    #[error("Standard EncryptionInfo is malformed: {reason}")]
+    StandardEncryptionInfoMalformed { reason: String },
 }
 
 impl From<std::str::Utf8Error> for OffCryptoError {

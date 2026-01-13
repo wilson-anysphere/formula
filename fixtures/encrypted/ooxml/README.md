@@ -9,7 +9,7 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 
 ## Passwords
 
-- `agile.xlsx` / `standard.xlsx`: `password`
+- `agile.xlsx` / `standard.xlsx` / `agile-large.xlsx` / `standard-large.xlsx`: `password`
 - `agile-empty-password.xlsx`: empty string (`""`)
 
 ## Fixtures
@@ -25,6 +25,20 @@ ZIP-based XLSX round-trip corpus (e.g. `xlsx-diff::collect_fixture_paths`).
 - `agile-empty-password.xlsx` – Agile encrypted OOXML with an **empty** open password.
   - `EncryptionInfo` header version **Major 4 / Minor 4**
   - Decrypts to `plaintext.xlsx` with password `""`
+- `plaintext-large.xlsx` – unencrypted ZIP-based workbook, intentionally **> 4096 bytes**.
+  - Copied from `fixtures/xlsx/basic/comments.xlsx`.
+- `agile-large.xlsx` – Agile encrypted OOXML.
+  - `EncryptionInfo` header version **Major 4 / Minor 4**
+  - Decrypts to `plaintext-large.xlsx` with password `password`
+- `standard-large.xlsx` – Standard encrypted OOXML.
+  - `EncryptionInfo` header version **Major 3 / Minor 2**
+  - Decrypts to `plaintext-large.xlsx` with password `password`
+
+### Why the `*-large.xlsx` fixtures exist
+
+Agile encryption processes the plaintext package in **4096-byte segments**. Since `plaintext.xlsx` is
+< 4096 bytes, decrypting it only exercises the single-segment path. The `*-large.xlsx` fixtures make
+sure we cover **multi-segment** decryption.
 
 ## Usage in tests
 
@@ -48,7 +62,12 @@ You can inspect an encrypted OOXML container (and confirm Agile vs Standard) wit
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard.xlsx
 bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-empty-password.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/agile-large.xlsx
+bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- fixtures/encrypted/ooxml/standard-large.xlsx
 ```
+
+See `docs/21-encrypted-workbooks.md` for details on OOXML encryption containers (`EncryptionInfo` /
+`EncryptedPackage`).
 
 ## Provenance
 
@@ -56,8 +75,13 @@ These fixtures are **synthetic** and **safe-to-ship**. They contain no proprieta
 
 ## Generation notes
 
-The committed fixture binaries were generated using Python and
-[`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
+The committed fixture binaries were generated using a mix of tooling:
+
+- The baseline fixtures were generated using Python and
+  [`msoffcrypto-tool`](https://github.com/nolze/msoffcrypto-tool) **5.4.2**.
+- `agile-large.xlsx` was generated using the Rust
+  [`ms-offcrypto-writer`](https://crates.io/crates/ms-offcrypto-writer) crate (with a deterministic
+  RNG seed) so it includes `dataIntegrity` and is compatible with our strict Agile decryptor.
 
 Implementation detail: `msoffcrypto-tool` includes a minimal OLE writer that does not correctly
 handle an `EncryptedPackage` stream **≤ 4096 bytes**. Since `plaintext.xlsx` is tiny, the ciphertext

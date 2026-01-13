@@ -9,8 +9,8 @@
 //!   descriptor).
 //! - `EncryptedPackage`: the encrypted bytes of the original ZIP/OPC package.
 //!
-//! This module focuses on the `[MS-OFFCRYPTO]` **Agile Encryption** scheme (the default in modern
-//! Office).
+//! This module supports the `[MS-OFFCRYPTO]` **Agile Encryption** scheme (the default in modern
+//! Office) as well as the older **Standard Encryption** scheme used by Office 2007-era files.
 //!
 //! In addition to higher-level parsing/decryption routines, this module also exposes small,
 //! reusable crypto primitives (password hashing, key derivation, IV derivation) used by Agile
@@ -56,6 +56,7 @@ mod agile_decrypt;
 mod crypto;
 mod encryption_info;
 mod error;
+mod ooxml;
 mod rc4;
 
 #[allow(unused_imports)]
@@ -87,6 +88,7 @@ pub use encryption_info::{
 };
 
 pub use error::{OffCryptoError, Result};
+pub use ooxml::decrypt_ooxml_encrypted_package;
 
 use std::io::{Read, Seek};
 
