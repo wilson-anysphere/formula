@@ -139,6 +139,7 @@ fn parse_series(series_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic
         style: None,
         marker: None,
         points: Vec::new(),
+        plot_index: None,
     }
 }
 

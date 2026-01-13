@@ -78,7 +78,51 @@ pub enum PlotAreaModel {
     Line(LineChartModel),
     Pie(PieChartModel),
     Scatter(ScatterChartModel),
+    Combo(ComboPlotAreaModel),
     Unknown { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComboPlotAreaModel {
+    pub charts: Vec<ComboChartEntry>,
+}
+
+/// A stable index range into [`ChartModel::series`] for a given subplot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesIndexRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ComboChartEntry {
+    Bar {
+        #[serde(flatten)]
+        model: BarChartModel,
+        series: SeriesIndexRange,
+    },
+    Line {
+        #[serde(flatten)]
+        model: LineChartModel,
+        series: SeriesIndexRange,
+    },
+    Pie {
+        #[serde(flatten)]
+        model: PieChartModel,
+        series: SeriesIndexRange,
+    },
+    Scatter {
+        #[serde(flatten)]
+        model: ScatterChartModel,
+        series: SeriesIndexRange,
+    },
+    Unknown {
+        name: String,
+        series: SeriesIndexRange,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -185,6 +229,10 @@ pub struct SeriesModel {
     /// Per-point overrides (`c:ser/c:dPt`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<SeriesPointStyle>,
+    /// If this chart has multiple subplots (combo chart), the index of the
+    /// subplot within the combo plot area.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plot_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

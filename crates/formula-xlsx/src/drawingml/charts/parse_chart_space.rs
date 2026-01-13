@@ -1,8 +1,9 @@
 use formula_model::charts::{
     AxisKind, AxisModel, AxisPosition, AxisScalingModel, BarChartModel, ChartDiagnostic,
-    ChartDiagnosticLevel, ChartKind, ChartModel, LegendModel, LegendPosition, LineChartModel,
-    NumberFormatModel, PieChartModel, PlotAreaModel, ScatterChartModel, SeriesData, SeriesModel,
-    SeriesNumberData, SeriesPointStyle, SeriesTextData, TextModel,
+    ChartDiagnosticLevel, ChartKind, ChartModel, ComboChartEntry, ComboPlotAreaModel,
+    LegendModel, LegendPosition, LineChartModel, NumberFormatModel, PieChartModel, PlotAreaModel,
+    ScatterChartModel, SeriesData, SeriesIndexRange, SeriesModel, SeriesNumberData,
+    SeriesPointStyle, SeriesTextData, TextModel,
 };
 use formula_model::RichText;
 use roxmltree::{Document, Node};
@@ -146,22 +147,68 @@ fn parse_plot_area_chart(
         );
     };
 
-    if chart_elems.len() > 1 {
-        warn(
-            diagnostics,
-            "plotArea contains multiple chart types; only the first is currently modeled",
-        );
+    let chart_kind = map_chart_kind(primary_chart.tag_name().name());
+
+    if chart_elems.len() == 1 {
+        let plot_area = parse_plot_area_model(primary_chart, &chart_kind, diagnostics);
+        let series = primary_chart
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "ser")
+            .map(|ser| parse_series(ser, diagnostics, None))
+            .collect();
+        return (chart_kind, plot_area, series);
     }
 
-    let chart_kind = map_chart_kind(primary_chart.tag_name().name());
-    let plot_area = parse_plot_area_model(primary_chart, &chart_kind, diagnostics);
-    let series = primary_chart
-        .children()
-        .filter(|n| n.is_element() && n.tag_name().name() == "ser")
-        .map(|ser| parse_series(ser, diagnostics))
-        .collect();
+    // Combo chart: multiple chart types are present in the same plotArea.
+    let mut charts = Vec::new();
+    let mut series = Vec::new();
 
-    (chart_kind, plot_area, series)
+    for (plot_index, chart_node) in chart_elems.iter().copied().enumerate() {
+        let subplot_kind = map_chart_kind(chart_node.tag_name().name());
+        let subplot_plot_area = parse_plot_area_model(chart_node, &subplot_kind, diagnostics);
+
+        let start = series.len();
+        for ser in chart_node
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name() == "ser")
+        {
+            series.push(parse_series(ser, diagnostics, Some(plot_index)));
+        }
+        let end = series.len();
+
+        let series_range = SeriesIndexRange { start, end };
+        let entry = match subplot_plot_area {
+            PlotAreaModel::Bar(model) => ComboChartEntry::Bar {
+                model,
+                series: series_range,
+            },
+            PlotAreaModel::Line(model) => ComboChartEntry::Line {
+                model,
+                series: series_range,
+            },
+            PlotAreaModel::Pie(model) => ComboChartEntry::Pie {
+                model,
+                series: series_range,
+            },
+            PlotAreaModel::Scatter(model) => ComboChartEntry::Scatter {
+                model,
+                series: series_range,
+            },
+            PlotAreaModel::Combo(_) => unreachable!("nested combo plot area is not supported"),
+            PlotAreaModel::Unknown { name } => ComboChartEntry::Unknown {
+                name,
+                series: series_range,
+            },
+        };
+
+        charts.push(entry);
+    }
+
+    (
+        chart_kind,
+        PlotAreaModel::Combo(ComboPlotAreaModel { charts }),
+        series,
+    )
 }
 
 fn parse_plot_area_model(
@@ -198,7 +245,11 @@ fn parse_plot_area_model(
     }
 }
 
-fn parse_series(series_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic>) -> SeriesModel {
+fn parse_series(
+    series_node: Node<'_, '_>,
+    diagnostics: &mut Vec<ChartDiagnostic>,
+    plot_index: Option<usize>,
+) -> SeriesModel {
     let name = series_node
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "tx")
@@ -249,6 +300,7 @@ fn parse_series(series_node: Node<'_, '_>, diagnostics: &mut Vec<ChartDiagnostic
         style,
         marker,
         points,
+        plot_index,
     }
 }
 
