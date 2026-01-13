@@ -372,20 +372,16 @@ jobs:
             throw "Expected bundle directory not found: $bundleDir"
           }
 
-          # Mirror the release workflow's Windows bundle detection so we don't pass just because
-          # helper executables (e.g. WebView2 bootstrapper) landed somewhere under bundle/.
-          $msi = @(Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue)
-          $exe = @()
-          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
-          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
-          # Exclude WebView2 helper installers; we only care about the Formula installer(s).
-          $exe = @($exe | Where-Object { $_.Name -notmatch '^MicrosoftEdgeWebview2' })
-
-          if ($exe.Count -eq 0) { throw "No .exe installer found under $bundleDir/nsis or $bundleDir/nsis-web (expected NSIS)." }
-          if ($msi.Count -eq 0) { throw "No .msi installer found under $bundleDir/msi (expected WiX)." }
+          # Use the shared validator so the smoke workflow matches release CI behavior.
+          ./scripts/validate-windows-bundles.ps1 -BundleDir $bundleDir -RequireExe -RequireMsi
 
           "## Windows ARM64 bundles" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $exe = @()
+          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+          $exe += @(Get-ChildItem -Path (Join-Path $bundleDir "nsis-web") -Recurse -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+          $exe = @($exe | Where-Object { $_.Name -notmatch '^MicrosoftEdgeWebview2' })
+          $msi = @(Get-ChildItem -Path (Join-Path $bundleDir "msi") -Recurse -File -Filter "*.msi" -ErrorAction SilentlyContinue)
           $files = @($exe + $msi) | Sort-Object FullName
           foreach ($f in $files) {
             $rel = $f.FullName.Replace((Resolve-Path ".").Path + "\", "")
