@@ -16,7 +16,7 @@ use std::ffi::{c_void, CStr};
 
 use super::{
     normalize_base64_str, string_within_limit, ClipboardContent, ClipboardError, ClipboardWritePayload,
-    MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES,
+    MAX_DECODED_IMAGE_BYTES, MAX_PNG_BYTES, MAX_TEXT_BYTES, MAX_TIFF_BYTES,
 };
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
@@ -29,11 +29,6 @@ const TYPE_HTML: &str = "public.html"; // NSPasteboardTypeHTML
 const TYPE_RTF: &str = "public.rtf"; // NSPasteboardTypeRTF
 const TYPE_PNG: &str = "public.png"; // NSPasteboardTypePNG
 const TYPE_TIFF: &str = "public.tiff"; // NSPasteboardTypeTIFF
-
-// TIFF clipboard payloads are often significantly larger than the corresponding PNG encoding (e.g.
-// uncompressed pixel buffers). Allow reading a larger TIFF payload so we can still convert to PNG
-// for IPC transport, while keeping the final PNG under `MAX_PNG_BYTES`.
-const MAX_TIFF_BYTES: usize = 4 * MAX_PNG_BYTES;
 
 // NSBitmapImageFileType values (from AppKit).
 const NSBITMAP_IMAGE_FILE_TYPE_TIFF: usize = 0; // NSBitmapImageFileTypeTIFF
@@ -264,7 +259,7 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
     //
     // Many consumers (including built-in macOS apps) accept compressed TIFF, and the compression
     // can drastically reduce size compared to uncompressed RGBA (which would quickly exceed our
-    // `MAX_PNG_BYTES` limit for moderately-sized images).
+    // `MAX_TIFF_BYTES` limit for moderately-sized images).
     let compression_key = nsstring_from_str("NSImageCompressionMethod")?;
     let compression_value: *mut AnyObject = objc2::msg_send![
         objc2::class!(NSNumber),
@@ -302,13 +297,13 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
             "converted TIFF was empty".to_string(),
         ));
     }
-    if len > MAX_PNG_BYTES {
+    if len > MAX_TIFF_BYTES {
         return Err(ClipboardError::OperationFailed(format!(
-            "converted TIFF exceeds maximum size ({MAX_PNG_BYTES} bytes)"
+            "converted TIFF exceeds maximum size ({MAX_TIFF_BYTES} bytes)"
         )));
     }
 
-    let bytes = nsdata_to_vec(tiff_data, MAX_PNG_BYTES);
+    let bytes = nsdata_to_vec(tiff_data, MAX_TIFF_BYTES);
     if bytes.is_empty() {
         return Err(ClipboardError::OperationFailed(
             "failed to copy converted TIFF bytes".to_string(),
@@ -460,7 +455,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
             // Many AppKit apps prefer TIFF even when PNG is present.
             if bytes.len() <= MAX_PNG_BYTES {
                 if let Ok(tiff) = png_to_tiff_bytes(bytes) {
-                    if !tiff.is_empty() && tiff.len() <= MAX_PNG_BYTES {
+                    if !tiff.is_empty() && tiff.len() <= MAX_TIFF_BYTES {
                         // Best-effort: if the TIFF representation fails to attach, still keep the
                         // PNG/text representations so the clipboard isn't left empty.
                         if let (Ok(ty_tiff), Ok(tiff_data)) =
@@ -497,6 +492,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 mod tests {
     use super::*;
     use base64::Engine as _;
+    use png::{BitDepth, ColorType, Compression, Encoder, FilterType};
 
     fn png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
         const SIG: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -574,5 +570,80 @@ mod tests {
         let dims_after = png_dimensions(&png2).expect("valid png output");
 
         assert_eq!(dims_before, dims_after);
+    }
+
+    fn generate_large_compressible_png() -> Vec<u8> {
+        // Construct a fairly large RGBA image whose PNG representation stays below `MAX_PNG_BYTES`
+        // thanks to PNG filtering + DEFLATE, while its TIFF representation is typically much larger.
+        //
+        // The exact TIFF size depends on AppKit's encoder, so we use a pattern that tends to defeat
+        // dictionary compression (LZW) more than it defeats DEFLATE on filtered scanlines.
+        let width: u32 = 2200;
+        let height: u32 = 2200;
+        let row_len = width as usize * 4;
+        let mut pixels = vec![0u8; row_len * height as usize];
+
+        // Fill each scanline as a byte-wise random walk with small deltas (0..=3). When encoded
+        // with the Sub filter, most bytes become small deltas, which compress extremely well in
+        // PNG. After decoding, the raw bytes appear much less repetitive, yielding a larger TIFF.
+        let mut state: u32 = 0x1234_5678;
+        for y in 0..height as usize {
+            let mut v: u8 = (y & 0xFF) as u8;
+            let base = y * row_len;
+            for i in 0..row_len {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                let delta = ((state >> 30) & 0x3) as u8; // 0..=3
+                v = v.wrapping_add(delta);
+                pixels[base + i] = v;
+            }
+        }
+
+        let mut out = Vec::new();
+        {
+            let mut encoder = Encoder::new(&mut out, width, height);
+            encoder.set_color(ColorType::Rgba);
+            encoder.set_depth(BitDepth::Eight);
+            encoder.set_filter(FilterType::Sub);
+            encoder.set_compression(Compression::Best);
+            let mut writer = encoder.write_header().expect("png header");
+            writer
+                .write_image_data(&pixels)
+                .expect("write png image data");
+        }
+        out
+    }
+
+    #[test]
+    fn png_to_tiff_allows_larger_than_png_cap() {
+        // AppKit is not thread-safe. The Rust test harness may execute unit tests on worker
+        // threads, so avoid calling into AppKit unless we're already on the process main thread.
+        let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
+        if !is_main {
+            return;
+        }
+
+        let png = generate_large_compressible_png();
+        assert!(
+            png.len() <= MAX_PNG_BYTES,
+            "expected generated PNG to be within MAX_PNG_BYTES ({}), got {} bytes",
+            MAX_PNG_BYTES,
+            png.len()
+        );
+
+        // The regression we're guarding against: TIFF generation should be allowed even when the
+        // resulting TIFF is larger than our PNG IPC cap, up to `MAX_TIFF_BYTES`.
+        let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
+        assert!(
+            tiff.len() > MAX_PNG_BYTES,
+            "expected TIFF output to exceed MAX_PNG_BYTES ({}), got {} bytes",
+            MAX_PNG_BYTES,
+            tiff.len()
+        );
+        assert!(
+            tiff.len() <= MAX_TIFF_BYTES,
+            "expected TIFF output to be within MAX_TIFF_BYTES ({}), got {} bytes",
+            MAX_TIFF_BYTES,
+            tiff.len()
+        );
     }
 }

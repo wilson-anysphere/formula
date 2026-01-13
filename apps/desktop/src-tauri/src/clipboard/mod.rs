@@ -20,6 +20,15 @@ mod retry;
 /// clipboard items are omitted (not treated as an error).
 pub const MAX_PNG_BYTES: usize = 5 * 1024 * 1024;
 
+/// Maximum number of raw TIFF bytes we will read/write on the macOS clipboard.
+///
+/// Some native macOS apps prefer `public.tiff` on the pasteboard even when PNG is present.
+/// Unfortunately, TIFF encodings can be significantly larger than their PNG equivalents for the
+/// same image. We therefore allow a larger (but still bounded) TIFF payload size so we can attach
+/// TIFF representations for interoperability without weakening IPC guardrails (PNG is still capped
+/// at [`MAX_PNG_BYTES`]).
+pub const MAX_TIFF_BYTES: usize = 4 * MAX_PNG_BYTES;
+
 /// Maximum number of UTF-8 bytes we will read for string clipboard formats (text/plain, text/html,
 /// text/rtf).
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
@@ -94,7 +103,7 @@ fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
 /// This is intentionally larger than [`MAX_PNG_BYTES`] because decoded pixel buffers are
 /// uncompressed, but still bounded to avoid exhausting memory.
 #[cfg(any(target_os = "macos", test))]
-const MAX_DECODED_IMAGE_BYTES: usize = 4 * MAX_IMAGE_BYTES;
+const MAX_DECODED_IMAGE_BYTES: usize = MAX_TIFF_BYTES;
 
 #[cfg(any(target_os = "macos", test))]
 fn decoded_rgba_len(width: u32, height: u32) -> Option<usize> {
