@@ -194,7 +194,10 @@ dialog.print-preview-dialog::backdrop {
   width: 100%;
   height: 100%;
   outline: none;
-  background: var(--bg-primary);
+  /* Use grid-scoped tokens so the canvas/DOM overlays can be themed independently of
+     the broader application surfaces. */
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
   user-select: none;
   /* Prevent DOM overlays (charts, scrollbars, outline buttons) from spilling
      outside the grid viewport while we virtualize with negative coordinates. */
@@ -204,7 +207,7 @@ dialog.print-preview-dialog::backdrop {
 .grid-root:focus-visible {
   /* Show a stable keyboard focus ring around the grid region (separate from the
      active-cell selection border) so F6-driven focus cycling has a clear affordance. */
-  box-shadow: inset 0 0 0 2px var(--selection-border);
+  box-shadow: inset 0 0 0 2px var(--formula-grid-selection-border, var(--selection-border));
 }
 
 .grid-canvas {
@@ -227,10 +230,10 @@ dialog.print-preview-dialog::backdrop {
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--formula-grid-line, var(--border));
   border-radius: 2px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
   font: 12px/12px var(--font-sans);
   cursor: pointer;
 }
@@ -248,12 +251,12 @@ dialog.print-preview-dialog::backdrop {
   z-index: 10;
   box-sizing: border-box;
   padding: 2px 4px;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--formula-grid-selection-border, var(--accent));
   outline: none;
   resize: none;
   font: 14px/20px var(--font-sans);
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--formula-grid-bg, var(--bg-primary));
+  color: var(--formula-grid-cell-text, var(--text-primary));
   overflow: hidden;
 }
 
