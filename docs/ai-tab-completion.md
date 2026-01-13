@@ -190,32 +190,48 @@ Range suggestions are implemented in `packages/ai-completion/src/rangeSuggester.
 
 ### Current algorithm (today)
 
-`suggestRanges({ currentArgText, cellRef, surroundingCells, sheetName?, maxScanRows? })`:
+`suggestRanges({ currentArgText, cellRef, surroundingCells, sheetName?, maxScanRows?, maxScanCols? })`:
 
-1. **Accepts only simple prefixes**
+1. **Accepts only simple A1 prefixes (pure-insertion friendly)**
    - Regex: `^(\$?)([A-Za-z]{1,3})(?:(\$?)(\d+))?$`
    - Examples that work: `A`, `$A`, `A1`, `$A$1`
-   - Examples that do *not* work today: `A:A`, `A1:B`, `A1:B10`, `Table1[Col]`
+   - Examples that do *not* work today: `A:A`, `A1:`, `A1:B`, `A1:B10`, `Table1[Col]`
+   - The suggester does not “repair” references by inserting missing characters *before* the caret; it only proposes a longer token that starts with the user-typed prefix (so UIs can treat it as a pure insertion).
 
-2. **Find a contiguous non-empty block in that column**
-   - If the user provided a row (`A5`), scan **down** from that start cell.
-   - Otherwise, scan **up** from the row above the current cell, skipping blank separators until the nearest non-empty cell, then expanding up through the contiguous block.
+2. **Find a contiguous non-empty block in the typed column**
+   - If the user provided a row (`A5`), treat that cell as the start and scan **down** until the first empty cell (`reason: contiguous_down_from_start`).
+     - If the explicitly provided start cell is empty, no contiguous-block suggestion is produced.
+   - Otherwise (user typed only a column, like `A`):
+     - First scan **up** from the row above the current cell, skipping blank separators to find the nearest non-empty cell, then expand to the full contiguous block (`reason: contiguous_above_current_cell`).
+     - **Downward scan fallback:** if there is no data above (within the scan budget), scan **down** from the row below the current cell using the same “skip blanks then expand” logic (`reason: contiguous_below_current_cell`).
 
-3. **Hard bounds**
-   - Scans are capped by `maxScanRows` (default **500**) to avoid runaway reads on large sheets.
-
-4. **Numeric trimming heuristic**
+3. **Numeric trimming heuristic (implicit scans)**
    - If a block is “mostly numeric”, non-numeric *edge* cells are treated as header/footer and trimmed (common for a text header row above numeric data).
+   - This trimming is only applied when inferring a block above/below the current cell (not when the user explicitly types a start row like `A5`).
 
-5. **Return two candidates**
-   - `A1:A10` (contiguous block, higher confidence)
-   - `A:A` (entire column, lower confidence)
+4. **Optional 2D table range suggestion (expand to the right)**
+   - When a contiguous vertical block is found, the suggester also tries to expand that block **to the right** into a rectangular 2D range (e.g. `A1:D10`).
+     - When available, the table detector uses the *untrimmed* block (before numeric header trimming) so the resulting 2D range can include a header row.
+   - It grows column-by-column until it hits:
+     - an entirely empty column (a “gap”), or
+     - a column whose non-empty coverage over the rows is too low (currently `< 0.6`)
+   - This is bounded by `maxScanCols` and returned with `reason` strings like `contiguous_table_above_current_cell` / `contiguous_table_down_from_start` (the table range is appended after the “entire column” suggestion for compatibility).
+
+5. **Return up to three candidates**
+   - `A1:A10` (contiguous 1D block, higher confidence)
+   - `A:A` (entire column, lower confidence; always included)
+   - optional `A1:D10` (2D table block)
+
+### Hard bounds / caps
+
+- `maxScanRows` (default **500**) caps vertical scanning (and therefore the number of rows inspected for table detection).
+- `maxScanCols` (default **50**) caps rightward table expansion.
 
 ### Limits / known gaps
 
 This is not a full “current region” detector. In particular, it:
-- only suggests *single-column* ranges
-- doesn’t scan left/right to infer rectangular regions
+- only expands **to the right** from the typed column (it does not scan left to find a table’s true start column)
+- doesn’t infer row-only/horizontal ranges
 - doesn’t look at formatting/table borders
 - doesn’t try to repair invalid/incomplete references beyond the simple prefix regex
 
