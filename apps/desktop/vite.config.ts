@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { visualizer } from "rollup-plugin-visualizer";
 import { defineConfig } from "vite";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -24,6 +25,7 @@ const tauriConfigPath = fileURLToPath(new URL("./src-tauri/tauri.conf.json", imp
 const tauriCsp = (JSON.parse(readFileSync(tauriConfigPath, "utf8")) as any)?.app?.security?.csp as unknown;
 const isE2E = process.env.FORMULA_E2E === "1";
 const isPlaywright = process.env.FORMULA_E2E === "0" || process.env.FORMULA_E2E === "1";
+const isBundleAnalyze = process.env.VITE_BUNDLE_ANALYZE === "1";
 const cacheDir =
   process.env.FORMULA_E2E === "1"
     ? "node_modules/.vite-e2e-csp"
@@ -80,7 +82,23 @@ export default defineConfig({
   // params for ad-hoc overrides, but allow env-based configuration for packaged
   // builds where query params are harder to inject.
   envPrefix: ["VITE_", "DESKTOP_LOAD_"],
-  plugins: [resolveJsToTs()],
+  plugins: [
+    resolveJsToTs(),
+    ...(isBundleAnalyze
+      ? [
+          visualizer({
+            filename: "dist/bundle-stats.html",
+            template: "treemap",
+            gzipSize: true,
+            brotliSize: true,
+          }),
+          visualizer({
+            filename: "dist/bundle-stats.json",
+            template: "raw-data",
+          }),
+        ]
+      : []),
+  ],
   resolve: {
     alias: [
       { find: "@formula/extension-api", replacement: extensionApiEntry },

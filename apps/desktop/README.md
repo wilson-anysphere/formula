@@ -1,5 +1,20 @@
 # Formula Desktop (Vite/Webview)
 
+## Bundle analysis (renderer build)
+
+To inspect which chunks/dependencies dominate the desktop renderer bundle, run:
+
+```bash
+pnpm -C apps/desktop build:analyze
+```
+
+This enables `rollup-plugin-visualizer` via `VITE_BUNDLE_ANALYZE=1` and writes the report(s) to:
+
+- `apps/desktop/dist/bundle-stats.html` (interactive treemap)
+- `apps/desktop/dist/bundle-stats.json` (raw data)
+
+Normal builds (`pnpm -C apps/desktop build`) are unchanged unless `VITE_BUNDLE_ANALYZE=1` is set.
+
 ## Workbook load limits (snapshot loading)
 
 When opening a workbook in the desktop app, the renderer fetches a **cell snapshot** from the backend to populate the UI.

@@ -9,6 +9,7 @@
     "prebuild": "pnpm -w build:wasm",
     "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",
     "build": "node scripts/ensure-pyodide-assets.mjs && vite build",
+    "build:analyze": "VITE_BUNDLE_ANALYZE=1 pnpm build",
     "preview": "vite preview --port 4174 --strictPort",
     "check:coi": "node scripts/check-cross-origin-isolation.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
@@ -49,6 +50,7 @@
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@types/node": "^22.10.1",
+    "rollup-plugin-visualizer": "^5.12.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^2.1.8"
