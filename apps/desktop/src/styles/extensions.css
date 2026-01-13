@@ -16,22 +16,43 @@
 .extensions-panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .extensions-panel__toolbar {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .extensions-panel__button {
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
-  padding: 8px 10px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
   font: inherit;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.extensions-panel__button:not(:disabled):hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.extensions-panel__button:not(:disabled):active {
+  background: var(--bg-active);
+}
+
+.extensions-panel__button:focus-visible {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
 .extensions-panel__button:disabled {
@@ -45,20 +66,20 @@
 
 .extensions-panel__card {
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--bg-primary);
-  padding: 12px;
+  padding: 10px;
 }
 
 .extensions-panel__card-title {
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .extensions-panel__card-id {
   font-size: 12px;
   color: var(--text-secondary);
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .extensions-panel__error {
@@ -67,22 +88,22 @@
 }
 
 .extensions-panel__section {
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .extensions-panel__section-title {
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .extensions-panel__section-title--spaced {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .extensions-panel__permissions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .extensions-panel__empty {
@@ -92,17 +113,17 @@
 .extensions-panel__installed-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .extensions-panel__installed-item {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: var(--radius);
+  padding: 8px 10px;
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .extensions-panel__installed-item-id {
@@ -135,9 +156,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-secondary);
 }
@@ -179,7 +200,7 @@
 .extensions-panel__reset-row {
   display: flex;
   justify-content: flex-end;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .extensions-panel__reset-button {
@@ -189,19 +210,19 @@
 .extensions-panel__commands {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .extensions-panel__command-row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
 }
 
 .extensions-panel__command-button {
   flex: 1 1 auto;
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--bg-secondary);
 }
 
@@ -209,7 +230,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .extensions-panel__command-title {
@@ -232,7 +253,7 @@
 }
 
 .extensions-panel__command-args-button {
-  padding: 10px 12px;
+  padding: 8px 10px;
   white-space: nowrap;
   background: var(--bg-secondary);
 }
@@ -240,12 +261,12 @@
 .extensions-panel__panels {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .extensions-panel__panel-button {
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 10px;
   background: var(--bg-secondary);
 }
 
