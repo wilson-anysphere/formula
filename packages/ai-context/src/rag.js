@@ -44,6 +44,32 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
+/**
+ * Tokenize text for hash embeddings.
+ *
+ * Keep this broadly aligned with `packages/ai-rag`'s HashEmbedder tokenizer:
+ * - split on punctuation/whitespace
+ * - treat underscores as separators (common in spreadsheet headers / identifiers)
+ * - split camelCase/PascalCase + digit boundaries so `RevenueByRegion2024` matches
+ *   `revenue by region 2024`
+ *
+ * @param {string} text
+ */
+function tokenize(text) {
+  const raw = String(text);
+  const separated = raw
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([A-Za-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([A-Za-z])/g, "$1 $2");
+
+  return separated
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean);
+}
+
 export class HashEmbedder {
   /**
    * @param {{ dimension?: number }} [options]
@@ -68,7 +94,7 @@ export class HashEmbedder {
     const signal = options.signal;
     throwIfAborted(signal);
     const vec = Array.from({ length: this.dimension }, () => 0);
-    const tokens = text.toLowerCase().match(/[a-z0-9_]+/g) ?? [];
+    const tokens = tokenize(text);
     for (const token of tokens) {
       throwIfAborted(signal);
       const h = hashString(token);
