@@ -89,10 +89,20 @@ export function toBase64(data) {
   }
 
   // Browser fallback.
-  let binary = "";
-  for (const byte of data) binary += String.fromCharCode(byte);
+  // Avoid byte-by-byte string concatenation (O(n^2) in many JS engines) by
+  // building the binary string in reasonably sized chunks.
+  const chunkSize = 0x8000;
+  /** @type {string[]} */
+  const chunks = [];
+  for (let i = 0; i < data.length; i += chunkSize) {
+    const chunk = data.subarray(i, i + chunkSize);
+    // `String.fromCharCode` expects a list of numbers. Passing a TypedArray via
+    // `apply` keeps this browser-safe while avoiding large argument lists.
+    // eslint-disable-next-line prefer-spread
+    chunks.push(String.fromCharCode.apply(null, chunk));
+  }
   // eslint-disable-next-line no-undef
-  return btoa(binary);
+  return btoa(chunks.join(""));
 }
 
 /**
@@ -105,6 +115,13 @@ export function fromBase64(encoded) {
   // eslint-disable-next-line no-undef
   const binary = atob(encoded);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  // Fill in chunks to keep the hot loop simple for large payloads.
+  const chunkSize = 0x8000;
+  for (let i = 0; i < binary.length; i += chunkSize) {
+    const end = Math.min(i + chunkSize, binary.length);
+    for (let j = i; j < end; j += 1) {
+      bytes[j] = binary.charCodeAt(j);
+    }
+  }
   return bytes;
 }

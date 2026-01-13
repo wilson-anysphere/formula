@@ -83,3 +83,36 @@ test("LocalStorageBinaryStorage returns null when missing", async () => {
   const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "missing" });
   expect(await storage.load()).toBeNull();
 });
+
+test("LocalStorageBinaryStorage round-trips multi-MB payloads via browser base64 fallback", async () => {
+  const storage = new LocalStorageBinaryStorage({ namespace: "formula.test.rag", workbookId: "large" });
+
+  // ~3MB payload (base64-encoded value is ~4MB). Large enough to stress the browser
+  // base64 path without exceeding typical localStorage quotas in jsdom.
+  const size = 3 * 1024 * 1024;
+  const bytes = new Uint8Array(size);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = i % 256;
+
+  const originalBuffer = (globalThis as any).Buffer;
+  try {
+    // Force the browser code-path (chunked btoa/atob conversion).
+    (globalThis as any).Buffer = undefined;
+
+    await storage.save(bytes);
+    const loaded = await storage.load();
+
+    expect(loaded).toBeInstanceOf(Uint8Array);
+    expect(loaded?.byteLength).toBe(bytes.byteLength);
+
+    // Compare without creating huge intermediate arrays / diffs.
+    const a = loaded as Uint8Array;
+    let equal = a.length === bytes.length;
+    for (let i = 0; equal && i < a.length; i += 1) {
+      if (a[i] !== bytes[i]) equal = false;
+    }
+    expect(equal).toBe(true);
+  } finally {
+    getTestLocalStorage().clear();
+    (globalThis as any).Buffer = originalBuffer;
+  }
+});
