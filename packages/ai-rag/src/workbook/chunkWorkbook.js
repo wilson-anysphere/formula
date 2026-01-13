@@ -166,8 +166,7 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
-    for (const start of entries) {
+    for (const start of coords.values()) {
       throwIfAborted(signal);
       const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
@@ -339,8 +338,7 @@ function detectRegions(sheet, predicate, opts) {
     /** @type {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[]} */
     const components = [];
 
-    const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
-    for (const start of entries) {
+    for (const start of coords.values()) {
       throwIfAborted(signal);
       const startKey = packCoordKey(start.row, start.col);
       if (visited.has(startKey)) continue;
