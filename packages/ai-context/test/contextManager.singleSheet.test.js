@@ -189,6 +189,21 @@ test("buildContext: maxContextRows option truncates rows", async () => {
   assert.equal(out.retrieved[0].range, "Sheet1!A1:A3");
 });
 
+test("buildContext: per-call maxContextRows override truncates rows", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextRows: 100 });
+  const sheet = makeSheet([
+    ["r1"],
+    ["r2"],
+    ["r3"],
+    ["r4"],
+    ["r5"],
+  ]);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100, limits: { maxContextRows: 2 } });
+  assert.equal(out.sampledRows.length, 2);
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:A2");
+});
+
 test("buildContext: maxContextCells option truncates columns", async () => {
   // 10 rows x 5 cols => 50 cells. Cap to 20 total => 2 cols per row (floor(20/10)=2).
   const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextCells: 20 });
@@ -199,6 +214,17 @@ test("buildContext: maxContextCells option truncates columns", async () => {
   assert.equal(out.sampledRows.length, 10);
   assert.ok(out.sampledRows.every((row) => row.length === 2));
   assert.equal(out.retrieved[0].range, "Sheet1!A1:B10");
+});
+
+test("buildContext: per-call maxContextCells override truncates columns", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000, maxContextCells: 200_000 });
+  const values = Array.from({ length: 10 }, (_v, r) => [`r${r}c1`, `r${r}c2`, `r${r}c3`]);
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({ sheet, query: "anything", sampleRows: 100, limits: { maxContextCells: 10 } });
+  assert.equal(out.sampledRows.length, 10);
+  assert.ok(out.sampledRows.every((row) => row.length === 1));
+  assert.equal(out.retrieved[0].range, "Sheet1!A1:A10");
 });
 
 test("buildContext: maxContextCells also caps rows when maxContextRows is larger", async () => {
