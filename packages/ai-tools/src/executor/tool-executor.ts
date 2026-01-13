@@ -1024,94 +1024,195 @@ export class ToolExecutor {
       );
     }
     const cells = this.spreadsheet.readRange(range);
-    const includeFormulaValues = Boolean(this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW));
-    const entries: Array<{ cell: string; value: number }> = [];
+    // Only surface formula values when there is no DLP configured, or DLP is in pure ALLOW mode.
+    // Under REDACT, formula values are treated as unsafe (may depend on restricted cells).
+    const includeFormulaValues = Boolean(
+      this.options.include_formula_values && (!dlp || dlp.decision.decision === DLP_DECISION.ALLOW)
+    );
     let redactedCellCount = 0;
-    for (let r = 0; r < cells.length; r++) {
-      for (let c = 0; c < cells[r]!.length; c++) {
-        const rowIndex = range.startRow + r;
-        const colIndex = range.startCol + c;
-        // Under DLP REDACT we exclude disallowed cells from anomaly computations entirely.
-        // Otherwise, even "safe" outputs (e.g. z-score) can become an inference channel for
-        // restricted values via the returned scores.
-        if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
-          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
-            redactedCellCount++;
-            continue;
-          }
-        }
-        const cell = cells[r]![c]!;
-        const numeric = toNumber(cell, { includeFormulaValues });
-        if (numeric === null) continue;
-        entries.push({
-          cell: this.formatCellForUser({ sheet: range.sheet, row: range.startRow + r, col: range.startCol + c }),
-          value: numeric
-        });
-      }
-    }
-
-    if (entries.length === 0) {
-      switch (method) {
-        case "zscore":
-        case "iqr":
-        case "isolation_forest":
-          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-          return { range: formattedRange, method, anomalies: [] };
-        default: {
-          const exhaustive: never = method;
-          throw new Error(`Unsupported detect_anomalies method: ${exhaustive}`);
-        }
-      }
-    }
 
     switch (method) {
       case "zscore": {
+        // Avoid materializing `{cell,value}` objects for every numeric cell. This tool can be
+        // called on ranges near `max_tool_range_cells`; for those inputs, creating and
+        // retaining per-cell A1 strings causes unnecessary memory pressure.
+        //
+        // Instead, compute mean/stdev in a first streaming pass (Welford), then do a second
+        // pass to collect only the anomaly records (capped to `max_detect_anomalies`).
         const threshold = params.threshold ?? 3;
-        const mean = entries.reduce((sum, e) => sum + e.value, 0) / entries.length;
-        const variance =
-          entries.length > 1
-            ? entries.reduce((sum, e) => sum + (e.value - mean) ** 2, 0) / (entries.length - 1)
-            : 0;
+        let count = 0;
+        let mean = 0;
+        let m2 = 0;
+        for (let r = 0; r < cells.length; r++) {
+          const row = cells[r]!;
+          for (let c = 0; c < row.length; c++) {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            // Under DLP REDACT we exclude disallowed cells from anomaly computations entirely.
+            // Otherwise, even "safe" outputs (e.g. z-score) can become an inference channel for
+            // restricted values via the returned scores.
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+                redactedCellCount++;
+                continue;
+              }
+            }
+            const numeric = toNumber(row[c]!, { includeFormulaValues });
+            if (numeric === null) continue;
+            count += 1;
+            const delta = numeric - mean;
+            mean += delta / count;
+            const delta2 = numeric - mean;
+            m2 += delta * delta2;
+          }
+        }
+
+        if (count === 0) {
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          return { range: formattedRange, method, anomalies: [] };
+        }
+
+        const variance = count > 1 ? m2 / (count - 1) : 0;
         const stdev = Math.sqrt(variance);
         if (stdev === 0) {
           if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
           return { range: formattedRange, method, anomalies: [] };
         }
-        const anomalies = entries
-          .map((e) => ({ ...e, score: (e.value - mean) / stdev }))
-          .filter((e) => Math.abs(e.score) >= threshold)
-          .map((e) => ({ cell: e.cell, value: e.value, score: e.score }));
+
+        const max = Math.max(0, this.options.max_detect_anomalies);
+        const anomalies: Array<{ cell: string; value: number | null; score: number | null }> = [];
+        let total = 0;
+        for (let r = 0; r < cells.length; r++) {
+          const row = cells[r]!;
+          for (let c = 0; c < row.length; c++) {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+                continue;
+              }
+            }
+            const value = toNumber(row[c]!, { includeFormulaValues });
+            if (value === null) continue;
+            const score = (value - mean) / stdev;
+            if (Math.abs(score) < threshold) continue;
+            total += 1;
+            if (anomalies.length < max) {
+              anomalies.push({
+                cell: this.formatCellForUser({ sheet: range.sheet, row: rowIndex, col: colIndex }),
+                value,
+                score
+              });
+            }
+          }
+        }
+
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-        const capped = capList(anomalies, this.options.max_detect_anomalies);
+        const truncated = total > anomalies.length;
         return {
           range: formattedRange,
           method,
-          anomalies: capped.items,
-          ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+          anomalies,
+          ...(truncated ? { truncated: true, total_anomalies: total } : {})
         };
       }
       case "iqr": {
         const multiplier = params.threshold ?? 1.5;
-        const sorted = [...entries].sort((a, b) => a.value - b.value);
-        const sortedValues = sorted.map((e) => e.value);
-        const q1 = quantileSorted(sortedValues, 0.25);
-        const q3 = quantileSorted(sortedValues, 0.75);
+        // We still need to materialize numeric values to compute quantiles, but we avoid
+        // allocating per-cell A1 strings until after we determine which indices are
+        // anomalous.
+        const values: number[] = [];
+        for (let r = 0; r < cells.length; r++) {
+          const row = cells[r]!;
+          for (let c = 0; c < row.length; c++) {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+                redactedCellCount++;
+                continue;
+              }
+            }
+            const numeric = toNumber(row[c]!, { includeFormulaValues });
+            if (numeric === null) continue;
+            values.push(numeric);
+          }
+        }
+
+        if (values.length === 0) {
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          return { range: formattedRange, method, anomalies: [] };
+        }
+
+        values.sort((a, b) => a - b);
+        const q1 = quantileSorted(values, 0.25);
+        const q3 = quantileSorted(values, 0.75);
         const iqr = q3 - q1;
         const low = q1 - multiplier * iqr;
         const high = q3 + multiplier * iqr;
-        const anomalies = entries
-          .filter((e) => e.value < low || e.value > high)
-          .map((e) => ({ cell: e.cell, value: e.value }));
+
+        const max = Math.max(0, this.options.max_detect_anomalies);
+        const anomalies: Array<{ cell: string; value: number | null }> = [];
+        let total = 0;
+        for (let r = 0; r < cells.length; r++) {
+          const row = cells[r]!;
+          for (let c = 0; c < row.length; c++) {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+                continue;
+              }
+            }
+            const value = toNumber(row[c]!, { includeFormulaValues });
+            if (value === null) continue;
+            if (value >= low && value <= high) continue;
+            total += 1;
+            if (anomalies.length < max) {
+              anomalies.push({
+                cell: this.formatCellForUser({ sheet: range.sheet, row: rowIndex, col: colIndex }),
+                value
+              });
+            }
+          }
+        }
+
         if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
-        const capped = capList(anomalies, this.options.max_detect_anomalies);
+        const truncated = total > anomalies.length;
         return {
           range: formattedRange,
           method,
-          anomalies: capped.items,
-          ...(capped.truncated ? { truncated: true, total_anomalies: capped.total } : {})
+          anomalies,
+          ...(truncated ? { truncated: true, total_anomalies: total } : {})
         };
       }
       case "isolation_forest": {
+        const entries: Array<{ cell: string; value: number }> = [];
+        for (let r = 0; r < cells.length; r++) {
+          const row = cells[r]!;
+          for (let c = 0; c < row.length; c++) {
+            const rowIndex = range.startRow + r;
+            const colIndex = range.startCol + c;
+            if (dlp && dlp.decision.decision === DLP_DECISION.REDACT) {
+              if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+                redactedCellCount++;
+                continue;
+              }
+            }
+            const numeric = toNumber(row[c]!, { includeFormulaValues });
+            if (numeric === null) continue;
+            entries.push({
+              cell: this.formatCellForUser({ sheet: range.sheet, row: rowIndex, col: colIndex }),
+              value: numeric
+            });
+          }
+        }
+
+        if (entries.length === 0) {
+          if (dlp) this.logToolDlpDecision({ tool: "detect_anomalies", range, dlp, redactedCellCount });
+          return { range: formattedRange, method, anomalies: [] };
+        }
+
         const values = entries.map((entry) => entry.value);
         const seed = fnv1a32(`${formattedRange}|isolation_forest`);
         const scores = isolationForestScores(values, { seed });
