@@ -10,6 +10,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .triage import infer_round_trip_failure_kind
 from .util import ensure_dir, github_commit_sha, github_run_url, utc_now_iso, write_json
 
 
@@ -333,7 +334,6 @@ def _append_trend_file(
     write_json(trend_path, entries)
     return entries, prev
 
-
 def _timing_stats(values: list[int]) -> dict[str, Any]:
     values_sorted = sorted(values)
     if not values_sorted:
@@ -379,6 +379,255 @@ def _compute_timings(reports: list[dict[str, Any]]) -> dict[str, Any]:
                 durations[step].append(int(duration))
 
     return {step: _timing_stats(vals) for step, vals in durations.items()}
+
+
+def _round_trip_failure_kind(report: dict[str, Any]) -> str | None:
+    kind = report.get("round_trip_failure_kind")
+    if isinstance(kind, str) and kind:
+        return kind
+    return infer_round_trip_failure_kind(report)
+
+
+def _compute_summary(reports: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute the JSON summary structure consumed by the dashboard markdown/trend files."""
+
+    total = len(reports)
+    open_ok = sum(1 for r in reports if r.get("result", {}).get("open_ok") is True)
+    calc_ok = sum(1 for r in reports if r.get("result", {}).get("calculate_ok") is True)
+    render_ok = sum(1 for r in reports if r.get("result", {}).get("render_ok") is True)
+    rt_ok = sum(1 for r in reports if r.get("result", {}).get("round_trip_ok") is True)
+
+    calc_attempted = sum(
+        1 for r in reports if _attempted(r.get("result", {}).get("calculate_ok"))
+    )
+    render_attempted = sum(
+        1 for r in reports if _attempted(r.get("result", {}).get("render_ok"))
+    )
+
+    failures_by_category: Counter[str] = Counter()
+    failures_by_round_trip_failure_kind: Counter[str] = Counter()
+    failing_function_counts: Counter[str] = Counter()
+    failing_feature_counts: Counter[str] = Counter()
+    failing_diff_fingerprint_counts: Counter[str] = Counter()
+    failing_diff_fingerprint_samples: dict[str, dict[str, str]] = {}
+    diff_totals: Counter[str] = Counter()
+    diff_part_critical: Counter[str] = Counter()
+    diff_part_total: Counter[str] = Counter()
+    diff_part_group_critical: Counter[str] = Counter()
+    diff_part_group_total: Counter[str] = Counter()
+    passing_cellxfs: list[int] = []
+    failing_cellxfs: list[int] = []
+    failing_cellxfs_by_workbook: list[tuple[int, str]] = []
+    round_trip_fail_on_values: set[str] = set()
+
+    for r in reports:
+        res = r.get("result", {})
+        rt_fail_on = res.get("round_trip_fail_on")
+        if isinstance(rt_fail_on, str) and rt_fail_on:
+            round_trip_fail_on_values.add(rt_fail_on)
+
+        failed = any(
+            res.get(k) is False for k in ("open_ok", "calculate_ok", "render_ok", "round_trip_ok")
+        )
+        cellxfs_val = (r.get("style_stats") or {}).get("cellXfs")
+        cellxfs: int | None = cellxfs_val if isinstance(cellxfs_val, int) else None
+
+        if failed:
+            failures_by_category[r.get("failure_category", "unknown")] += 1
+            for fn, cnt in (r.get("functions") or {}).items():
+                failing_function_counts[fn] += int(cnt)
+            for feat, enabled in (r.get("features") or {}).items():
+                if enabled is True:
+                    failing_feature_counts[feat] += 1
+            if cellxfs is not None:
+                failing_cellxfs.append(cellxfs)
+                failing_cellxfs_by_workbook.append((cellxfs, r.get("display_name", "?")))
+
+            # Fingerprint top diffs (privacy-safe) to find the most common diff patterns across
+            # failing workbooks.
+            diff_step = (r.get("steps") or {}).get("diff") or {}
+            diff_details = diff_step.get("details") if isinstance(diff_step, dict) else None
+            if isinstance(diff_details, dict):
+                top_diffs = diff_details.get("top_differences")
+                if isinstance(top_diffs, list):
+                    for entry in top_diffs:
+                        if not isinstance(entry, dict):
+                            continue
+                        fp = entry.get("fingerprint")
+                        if not isinstance(fp, str) or not fp:
+                            continue
+                        failing_diff_fingerprint_counts[fp] += 1
+                        if fp not in failing_diff_fingerprint_samples:
+                            failing_diff_fingerprint_samples[fp] = {
+                                "part": entry.get("part") or "",
+                                "path": entry.get("path") or "",
+                                "kind": entry.get("kind") or "",
+                            }
+        else:
+            if cellxfs is not None:
+                passing_cellxfs.append(cellxfs)
+
+        # Higher-signal round-trip bucket based on which OPC parts changed.
+        if r.get("failure_category") == "round_trip_diff":
+            kind = _round_trip_failure_kind(r) or "round_trip_other"
+            failures_by_round_trip_failure_kind[kind] += 1
+
+        for key, out_key in [
+            ("diff_critical_count", "critical"),
+            ("diff_warning_count", "warning"),
+            ("diff_info_count", "info"),
+        ]:
+            val = res.get(key)
+            if isinstance(val, int):
+                diff_totals[out_key] += val
+
+        diff_step = (r.get("steps") or {}).get("diff") or {}
+        diff_details = diff_step.get("details") or {}
+        parts_with_diffs = diff_details.get("parts_with_diffs")
+        part_groups = diff_details.get("part_groups") or {}
+        if not isinstance(part_groups, dict):
+            part_groups = {}
+        if isinstance(parts_with_diffs, list):
+            for row in parts_with_diffs:
+                if not isinstance(row, dict):
+                    continue
+                part = row.get("part")
+                if not isinstance(part, str) or not part:
+                    continue
+                group = row.get("group")
+                if not isinstance(group, str) or not group:
+                    group = part_groups.get(part)
+                if not isinstance(group, str) or not group:
+                    group = None
+                critical = row.get("critical")
+                warning = row.get("warning")
+                info = row.get("info")
+                total_part = row.get("total")
+                if isinstance(critical, int):
+                    diff_part_critical[part] += critical
+                    if group is not None:
+                        diff_part_group_critical[group] += critical
+                if isinstance(total_part, int):
+                    diff_part_total[part] += total_part
+                    if group is not None:
+                        diff_part_group_total[group] += total_part
+                else:
+                    # Back-compat: older schemas might not provide `total`.
+                    part_sum = 0
+                    for v in (critical, warning, info):
+                        if isinstance(v, int):
+                            part_sum += v
+                    if part_sum:
+                        diff_part_total[part] += part_sum
+                        if group is not None:
+                            diff_part_group_total[group] += part_sum
+
+    top_diff_parts_critical = [
+        {"part": part, "count": count}
+        for part, count in sorted(diff_part_critical.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        if count > 0
+    ]
+    top_diff_parts_total = [
+        {"part": part, "count": count}
+        for part, count in sorted(diff_part_total.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+        if count > 0
+    ]
+
+    top_diff_part_groups_critical = [
+        {"group": group, "count": count}
+        for group, count in sorted(
+            diff_part_group_critical.items(), key=lambda kv: (-kv[1], kv[0])
+        )[:10]
+        if count > 0
+    ]
+    top_diff_part_groups_total = [
+        {"group": group, "count": count}
+        for group, count in sorted(
+            diff_part_group_total.items(), key=lambda kv: (-kv[1], kv[0])
+        )[:10]
+        if count > 0
+    ]
+
+    style_summary: dict[str, Any] = {}
+    if passing_cellxfs or failing_cellxfs:
+        style_summary["cellXfs"] = {
+            "passing": {
+                "count": len(passing_cellxfs),
+                "avg": _mean(passing_cellxfs),
+                "median": _median(passing_cellxfs),
+            },
+            "failing": {
+                "count": len(failing_cellxfs),
+                "avg": _mean(failing_cellxfs),
+                "median": _median(failing_cellxfs),
+            },
+        }
+    if failing_cellxfs_by_workbook:
+        failing_cellxfs_by_workbook.sort(key=lambda x: (-x[0], x[1]))
+        style_summary["top_failing_by_cellXfs"] = [
+            {"workbook": name, "cellXfs": cellxfs}
+            for cellxfs, name in failing_cellxfs_by_workbook[:20]
+        ]
+
+    timings = _compute_timings(reports)
+    summary: dict[str, Any] = {
+        "timestamp": utc_now_iso(),
+        "commit": github_commit_sha(),
+        "run_url": github_run_url(),
+        "round_trip_fail_on": (
+            sorted(round_trip_fail_on_values)[0]
+            if len(round_trip_fail_on_values) == 1
+            else sorted(round_trip_fail_on_values)
+            if round_trip_fail_on_values
+            else None
+        ),
+        "counts": {
+            "total": total,
+            "open_ok": open_ok,
+            "calculate_ok": calc_ok,
+            "calculate_attempted": calc_attempted,
+            "render_ok": render_ok,
+            "render_attempted": render_attempted,
+            "round_trip_ok": rt_ok,
+        },
+        "rates": {
+            "open": _rate(open_ok, total),
+            # Calculate/render steps are optional. When disabled, their results are `SKIP` and
+            # should not be counted as failures.
+            "calculate": (calc_ok / calc_attempted) if calc_attempted else None,
+            "render": (render_ok / render_attempted) if render_attempted else None,
+            "round_trip": _rate(rt_ok, total),
+        },
+        "round_trip_size_overhead": _round_trip_size_overhead(reports),
+        "failures_by_category": dict(failures_by_category),
+        "failures_by_round_trip_failure_kind": dict(failures_by_round_trip_failure_kind),
+        "diff_totals": dict(diff_totals),
+        "timings": timings,
+        "top_diff_parts_critical": top_diff_parts_critical,
+        "top_diff_parts_total": top_diff_parts_total,
+        "top_diff_part_groups_critical": top_diff_part_groups_critical,
+        "top_diff_part_groups_total": top_diff_part_groups_total,
+        "top_functions_in_failures": [
+            {"function": fn, "count": cnt} for fn, cnt in failing_function_counts.most_common(50)
+        ],
+        "top_features_in_failures": [
+            {"feature": feat, "count": cnt} for feat, cnt in failing_feature_counts.most_common(50)
+        ],
+        "top_diff_fingerprints_in_failures": [
+            {
+                "fingerprint": fp,
+                "count": cnt,
+                "part": (failing_diff_fingerprint_samples.get(fp) or {}).get("part", ""),
+                "path": (failing_diff_fingerprint_samples.get(fp) or {}).get("path", ""),
+                "kind": (failing_diff_fingerprint_samples.get(fp) or {}).get("kind", ""),
+            }
+            for fp, cnt in failing_diff_fingerprint_counts.most_common(20)
+        ],
+    }
+    if style_summary:
+        summary["style"] = style_summary
+
+    return summary
 
 def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) -> str:
     counts = summary["counts"]
@@ -574,8 +823,10 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         lines.append("")
     lines.append("## Per-workbook")
     lines.append("")
-    lines.append("| Workbook | Open | Calculate | Render | Round-trip | Diff (C/W/I) | Failure category |")
-    lines.append("|---|---:|---:|---:|---:|---:|---|")
+    lines.append(
+        "| Workbook | Open | Calculate | Render | Round-trip | Diff (C/W/I) | Failure category | Round-trip kind |"
+    )
+    lines.append("|---|---:|---:|---:|---:|---:|---|---|")
     for r in reports:
         res = r.get("result", {})
         diff_cell = ""
@@ -596,6 +847,7 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
                     _status(res.get("round_trip_ok")),
                     diff_cell,
                     r.get("failure_category", ""),
+                    (_round_trip_failure_kind(r) or "") if r.get("failure_category") == "round_trip_diff" else "",
                 ]
             )
             + " |"
@@ -609,6 +861,16 @@ def _markdown_summary(summary: dict[str, Any], reports: list[dict[str, Any]]) ->
         lines.append("| Category | Count |")
         lines.append("|---|---:|")
         for k, v in sorted(failures.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"| {k} | {v} |")
+        lines.append("")
+
+    rt_kinds = summary.get("failures_by_round_trip_failure_kind", {})
+    if rt_kinds:
+        lines.append("## Round-trip failures by kind")
+        lines.append("")
+        lines.append("| Kind | Count |")
+        lines.append("|---|---:|")
+        for k, v in sorted(rt_kinds.items(), key=lambda kv: (-kv[1], kv[0])):
             lines.append(f"| {k} | {v} |")
         lines.append("")
 
@@ -729,238 +991,10 @@ def main() -> int:
 
     reports_dir = triage_dir / "reports"
     reports = _load_reports(reports_dir)
-
-    total = len(reports)
-    open_ok = sum(1 for r in reports if r.get("result", {}).get("open_ok") is True)
-    calc_ok = sum(
-        1 for r in reports if r.get("result", {}).get("calculate_ok") is True
-    )
-    render_ok = sum(1 for r in reports if r.get("result", {}).get("render_ok") is True)
-    rt_ok = sum(1 for r in reports if r.get("result", {}).get("round_trip_ok") is True)
-
-    calc_attempted = sum(
-        1 for r in reports if _attempted(r.get("result", {}).get("calculate_ok"))
-    )
-    render_attempted = sum(
-        1 for r in reports if _attempted(r.get("result", {}).get("render_ok"))
-    )
-
-    failures_by_category: Counter[str] = Counter()
-    failing_function_counts: Counter[str] = Counter()
-    failing_feature_counts: Counter[str] = Counter()
-    failing_diff_fingerprint_counts: Counter[str] = Counter()
-    failing_diff_fingerprint_samples: dict[str, dict[str, str]] = {}
-    diff_totals: Counter[str] = Counter()
-    diff_part_critical: Counter[str] = Counter()
-    diff_part_total: Counter[str] = Counter()
-    diff_part_group_critical: Counter[str] = Counter()
-    diff_part_group_total: Counter[str] = Counter()
-    passing_cellxfs: list[int] = []
-    failing_cellxfs: list[int] = []
-    failing_cellxfs_by_workbook: list[tuple[int, str]] = []
-    round_trip_fail_on_values: set[str] = set()
-
-    for r in reports:
-        res = r.get("result", {})
-        rt_fail_on = res.get("round_trip_fail_on")
-        if isinstance(rt_fail_on, str) and rt_fail_on:
-            round_trip_fail_on_values.add(rt_fail_on)
-        failed = any(
-            res.get(k) is False
-            for k in ("open_ok", "calculate_ok", "render_ok", "round_trip_ok")
-        )
-        cellxfs_val = (r.get("style_stats") or {}).get("cellXfs")
-        cellxfs: int | None = cellxfs_val if isinstance(cellxfs_val, int) else None
-        if failed:
-            failures_by_category[r.get("failure_category", "unknown")] += 1
-            for fn, cnt in (r.get("functions") or {}).items():
-                failing_function_counts[fn] += int(cnt)
-            for feat, enabled in (r.get("features") or {}).items():
-                if enabled is True:
-                    failing_feature_counts[feat] += 1
-            if cellxfs is not None:
-                failing_cellxfs.append(cellxfs)
-                failing_cellxfs_by_workbook.append((cellxfs, r.get("display_name", "?")))
-
-            diff_step = (r.get("steps") or {}).get("diff") or {}
-            diff_details = diff_step.get("details") if isinstance(diff_step, dict) else None
-            if isinstance(diff_details, dict):
-                top_diffs = diff_details.get("top_differences")
-                if isinstance(top_diffs, list):
-                    for entry in top_diffs:
-                        if not isinstance(entry, dict):
-                            continue
-                        fp = entry.get("fingerprint")
-                        if not isinstance(fp, str) or not fp:
-                            continue
-                        failing_diff_fingerprint_counts[fp] += 1
-                        if fp not in failing_diff_fingerprint_samples:
-                            failing_diff_fingerprint_samples[fp] = {
-                                "part": entry.get("part") or "",
-                                "path": entry.get("path") or "",
-                                "kind": entry.get("kind") or "",
-                            }
-        else:
-            if cellxfs is not None:
-                passing_cellxfs.append(cellxfs)
-
-        for key, out_key in [
-            ("diff_critical_count", "critical"),
-            ("diff_warning_count", "warning"),
-            ("diff_info_count", "info"),
-        ]:
-            val = res.get(key)
-            if isinstance(val, int):
-                diff_totals[out_key] += val
-
-        diff_step = (r.get("steps") or {}).get("diff") or {}
-        diff_details = diff_step.get("details") or {}
-        parts_with_diffs = diff_details.get("parts_with_diffs")
-        part_groups = diff_details.get("part_groups") or {}
-        if not isinstance(part_groups, dict):
-            part_groups = {}
-        if isinstance(parts_with_diffs, list):
-            for row in parts_with_diffs:
-                if not isinstance(row, dict):
-                    continue
-                part = row.get("part")
-                if not isinstance(part, str) or not part:
-                    continue
-                group = row.get("group")
-                if not isinstance(group, str) or not group:
-                    group = part_groups.get(part)
-                if not isinstance(group, str) or not group:
-                    group = None
-                critical = row.get("critical")
-                warning = row.get("warning")
-                info = row.get("info")
-                total = row.get("total")
-                if isinstance(critical, int):
-                    diff_part_critical[part] += critical
-                    if group is not None:
-                        diff_part_group_critical[group] += critical
-                if isinstance(total, int):
-                    diff_part_total[part] += total
-                    if group is not None:
-                        diff_part_group_total[group] += total
-                else:
-                    # Back-compat: older schemas might not provide `total`.
-                    part_sum = 0
-                    for v in (critical, warning, info):
-                        if isinstance(v, int):
-                            part_sum += v
-                    if part_sum:
-                        diff_part_total[part] += part_sum
-                        if group is not None:
-                            diff_part_group_total[group] += part_sum
-
-    top_diff_parts_critical = [
-        {"part": part, "count": count}
-        for part, count in sorted(diff_part_critical.items(), key=lambda kv: (-kv[1], kv[0]))[
-            :10
-        ]
-        if count > 0
-    ]
-    top_diff_parts_total = [
-        {"part": part, "count": count}
-        for part, count in sorted(diff_part_total.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
-        if count > 0
-    ]
-
-    top_diff_part_groups_critical = [
-        {"group": group, "count": count}
-        for group, count in sorted(
-            diff_part_group_critical.items(), key=lambda kv: (-kv[1], kv[0])
-        )[:10]
-        if count > 0
-    ]
-    top_diff_part_groups_total = [
-        {"group": group, "count": count}
-        for group, count in sorted(
-            diff_part_group_total.items(), key=lambda kv: (-kv[1], kv[0])
-        )[:10]
-        if count > 0
-    ]
-
-    style_summary: dict[str, Any] = {}
-    if passing_cellxfs or failing_cellxfs:
-        style_summary["cellXfs"] = {
-            "passing": {
-                "count": len(passing_cellxfs),
-                "avg": _mean(passing_cellxfs),
-                "median": _median(passing_cellxfs),
-            },
-            "failing": {
-                "count": len(failing_cellxfs),
-                "avg": _mean(failing_cellxfs),
-                "median": _median(failing_cellxfs),
-            },
-        }
-    if failing_cellxfs_by_workbook:
-        failing_cellxfs_by_workbook.sort(key=lambda x: (-x[0], x[1]))
-        style_summary["top_failing_by_cellXfs"] = [
-            {"workbook": name, "cellXfs": cellxfs}
-            for cellxfs, name in failing_cellxfs_by_workbook[:20]
-        ]
-
-    timings = _compute_timings(reports)
-    summary: dict[str, Any] = {
-        "timestamp": utc_now_iso(),
-        "commit": github_commit_sha(),
-        "run_url": github_run_url(),
-        "round_trip_fail_on": (
-            sorted(round_trip_fail_on_values)[0]
-            if len(round_trip_fail_on_values) == 1
-            else sorted(round_trip_fail_on_values)
-            if round_trip_fail_on_values
-            else None
-        ),
-        "counts": {
-            "total": total,
-            "open_ok": open_ok,
-            "calculate_ok": calc_ok,
-            "calculate_attempted": calc_attempted,
-            "render_ok": render_ok,
-            "render_attempted": render_attempted,
-            "round_trip_ok": rt_ok,
-        },
-        "rates": {
-            "open": _rate(open_ok, total),
-            # Calculate/render steps are optional. When disabled, their results are `SKIP` and
-            # should not be counted as failures.
-            "calculate": (calc_ok / calc_attempted) if calc_attempted else None,
-            "render": (render_ok / render_attempted) if render_attempted else None,
-            "round_trip": _rate(rt_ok, total),
-        },
-        "round_trip_size_overhead": _round_trip_size_overhead(reports),
-        "failures_by_category": dict(failures_by_category),
-        "diff_totals": dict(diff_totals),
-        "timings": timings,
-        "top_diff_parts_critical": top_diff_parts_critical,
-        "top_diff_parts_total": top_diff_parts_total,
-        "top_diff_part_groups_critical": top_diff_part_groups_critical,
-        "top_diff_part_groups_total": top_diff_part_groups_total,
-        "top_functions_in_failures": [
-            {"function": fn, "count": cnt}
-            for fn, cnt in failing_function_counts.most_common(50)
-        ],
-        "top_features_in_failures": [
-            {"feature": feat, "count": cnt}
-            for feat, cnt in failing_feature_counts.most_common(50)
-        ],
-        "top_diff_fingerprints_in_failures": [
-            {
-                "fingerprint": fp,
-                "count": cnt,
-                "part": (failing_diff_fingerprint_samples.get(fp) or {}).get("part", ""),
-                "path": (failing_diff_fingerprint_samples.get(fp) or {}).get("path", ""),
-                "kind": (failing_diff_fingerprint_samples.get(fp) or {}).get("kind", ""),
-            }
-            for fp, cnt in failing_diff_fingerprint_counts.most_common(20)
-        ],
-    }
-    if style_summary:
-        summary["style"] = style_summary
+    summary = _compute_summary(reports)
+    timings = summary.get("timings") or {}
+    if not isinstance(timings, dict):
+        timings = {}
 
     summary.update(_part_change_ratio_summary(reports))
 

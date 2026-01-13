@@ -61,6 +61,146 @@ def _compute_diff_ignore(*, diff_ignore: list[str], use_default: bool) -> set[st
     return ignore
 
 
+def _normalize_part_name(part_name: str) -> str:
+    # OPC part names should use forward slashes and never start with `/`, but be tolerant since
+    # we ingest reports from multiple sources (including synthetic/unit-test fixtures).
+    return part_name.replace("\\", "/").lstrip("/")
+
+
+def _extract_critical_diff_parts(report: dict[str, Any]) -> set[str]:
+    """Return normalized part names that contain CRITICAL diffs, if available.
+
+    Prefers the Rust helper's privacy-safe per-part breakdown (`parts_with_diffs`) when present.
+    Falls back to scanning the truncated `top_differences` list.
+    """
+
+    parts: set[str] = set()
+
+    def _add_part(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        normalized = _normalize_part_name(value)
+        if normalized:
+            parts.add(normalized)
+
+    def _add_parts_from_seq(value: Any) -> None:
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    _add_part(item)
+                elif isinstance(item, dict):
+                    part = item.get("part") or item.get("name")
+                    if not isinstance(part, str):
+                        continue
+                    # Common shapes:
+                    # - {"part": "...", "severity": "CRITICAL"}
+                    # - {"part": "...", "critical": 3, "warning": 0, "info": 0}
+                    sev = item.get("severity") or item.get("max_severity")
+                    if isinstance(sev, str) and sev.upper() in ("CRITICAL", "CRIT"):
+                        _add_part(part)
+                        continue
+                    for key in (
+                        "critical",
+                        "critical_count",
+                        "critical_diffs",
+                        "critical_diff_count",
+                    ):
+                        cnt = item.get(key)
+                        if isinstance(cnt, bool):
+                            if cnt:
+                                _add_part(part)
+                            break
+                        if isinstance(cnt, int) and cnt > 0:
+                            _add_part(part)
+                            break
+                        if isinstance(cnt, str) and cnt.isdigit() and int(cnt) > 0:
+                            _add_part(part)
+                            break
+        elif isinstance(value, dict):
+            # Some producers may emit {part_name: {critical: N, ...}}.
+            for part, details in value.items():
+                if not isinstance(part, str):
+                    continue
+                if isinstance(details, dict):
+                    cnt = details.get("critical") or details.get("critical_count")
+                    if isinstance(cnt, int) and cnt > 0:
+                        _add_part(part)
+                    elif isinstance(cnt, str) and cnt.isdigit() and int(cnt) > 0:
+                        _add_part(part)
+                    else:
+                        sev = details.get("severity") or details.get("max_severity")
+                        if isinstance(sev, str) and sev.upper() in ("CRITICAL", "CRIT"):
+                            _add_part(part)
+
+    # Prefer the per-part diff breakdown if present (newer Rust helper).
+    steps = report.get("steps")
+    diff_step = steps.get("diff") if isinstance(steps, dict) else None
+    diff_details = diff_step.get("details") if isinstance(diff_step, dict) else {}
+    res = report.get("result") or {}
+
+    for container in (diff_details, res):
+        if not isinstance(container, dict):
+            continue
+        pwd = container.get("parts_with_diffs")
+        if pwd is None:
+            continue
+        if isinstance(pwd, dict):
+            # Expected shape: {"critical": [...], "warning": [...], "info": [...]}.
+            for key in ("critical", "CRITICAL"):
+                if key in pwd:
+                    _add_parts_from_seq(pwd.get(key))
+                    break
+            else:
+                # Alternate shape: {part_name: {critical: N, ...}}.
+                _add_parts_from_seq(pwd)
+        else:
+            _add_parts_from_seq(pwd)
+
+        if parts:
+            return parts
+
+    # Fallback: scan the truncated list of diff entries.
+    top = diff_details.get("top_differences") if isinstance(diff_details, dict) else None
+    if isinstance(top, list):
+        for entry in top:
+            if not isinstance(entry, dict):
+                continue
+            if (entry.get("severity") or "").upper() != "CRITICAL":
+                continue
+            _add_part(entry.get("part"))
+
+    return parts
+
+
+def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
+    """Return a high-signal category for round-trip diffs.
+
+    This is intentionally privacy-safe: it only looks at OPC part names (no XML paths/values).
+    """
+
+    res = report.get("result", {})
+    if not isinstance(res, dict) or res.get("round_trip_ok") is not False:
+        return None
+
+    critical_parts = {p.casefold() for p in _extract_critical_diff_parts(report)}
+    if not critical_parts:
+        return "round_trip_other"
+
+    if all(p.endswith(".rels") for p in critical_parts):
+        return "round_trip_rels"
+
+    if "[content_types].xml" in critical_parts:
+        return "round_trip_content_types"
+
+    if "xl/styles.xml" in critical_parts:
+        return "round_trip_styles"
+
+    if any(p.startswith("xl/worksheets/") for p in critical_parts):
+        return "round_trip_worksheets"
+
+    return "round_trip_other"
+
+
 @dataclass(frozen=True)
 class StepResult:
     status: str  # ok | failed | skipped
@@ -882,6 +1022,7 @@ def triage_workbook(
         report["failure_category"] = "render_error"
     elif res.get("round_trip_ok") is False:
         report["failure_category"] = "round_trip_diff"
+        report["round_trip_failure_kind"] = infer_round_trip_failure_kind(report) or "round_trip_other"
 
     return report
 
