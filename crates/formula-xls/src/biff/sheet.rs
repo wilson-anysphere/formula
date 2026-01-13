@@ -1933,7 +1933,7 @@ fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usiz
     // Prefer NUL-terminated candidates; otherwise prefer the shorter byte length.
     candidates.sort_by_key(|(_s, consumed, ends_with_nul)| (!*ends_with_nul, *consumed));
     let (s, consumed, _nul) = candidates.into_iter().next().expect("non-empty candidates");
-    Ok((s, consumed))
+    Ok((trim_at_first_nul(s), consumed))
 }
 
 fn parse_hyperlink_string(input: &[u8], codepage: u16) -> Result<(String, usize), String> {

@@ -1273,6 +1273,26 @@ pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a URL hyperlink whose URL moniker contains an embedded
+/// NUL character followed by trailing garbage.
+///
+/// The importer should truncate the URL at the first NUL for best-effort compatibility.
+pub fn build_url_hyperlink_embedded_nul_fixture_xls() -> Vec<u8> {
+    let url = "https://example.com\0ignored";
+    let workbook_stream =
+        build_hyperlink_workbook_stream("UrlNul", hlink_external_url(0, 0, 0, 0, url, "Example", "Tooltip"));
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing an AutoFilter range with an active filter state
 /// (`FILTERMODE`).
 ///

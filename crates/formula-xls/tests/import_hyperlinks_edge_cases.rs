@@ -73,3 +73,24 @@ fn warns_and_skips_malformed_hyperlink_records() {
     );
 }
 
+#[test]
+fn trims_embedded_nuls_in_url_moniker_strings() {
+    let bytes = xls_fixture_builder::build_url_hyperlink_embedded_nul_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result.workbook.sheet_by_name("UrlNul").expect("UrlNul missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::ExternalUrl {
+            uri: "https://example.com".to_string()
+        }
+    );
+    assert_eq!(link.display.as_deref(), Some("Example"));
+    // Tooltip doesn't contain NULs in this fixture.
+    assert_eq!(link.tooltip.as_deref(), Some("Tooltip"));
+    assert!(result.warnings.is_empty(), "warnings={:?}", result.warnings);
+}
