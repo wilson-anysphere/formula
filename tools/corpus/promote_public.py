@@ -302,6 +302,13 @@ def main() -> int:
             print(f"Sanitization failed: {e}")
             return 1
 
+    if display_name.casefold().endswith(".xlsb") and not args.confirm_sanitized:
+        print(
+            "XLSB leak scanning is not supported. "
+            "Provide an already-sanitized XLSB and pass --confirm-sanitized."
+        )
+        return 1
+
     if not args.confirm_sanitized:
         try:
             scan = scan_xlsx_bytes_for_leaks(workbook_bytes, plaintext_strings=args.leak_scan_string)

@@ -307,6 +307,35 @@ class PromotePublicCLITests(unittest.TestCase):
             self.assertEqual(rc, 1)
             self.assertIn("Leak scan failed", stdout.getvalue())
 
+    def test_main_requires_confirm_for_xlsb(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="promote-public-cli-test-") as td:
+            tmp = Path(td)
+            public_dir = tmp / "public"
+            triage_out = tmp / "triage"
+            input_path = tmp / "input.xlsb"
+            input_path.write_bytes(b"not really xlsb")
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                with mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "promote_public.py",
+                        "--input",
+                        str(input_path),
+                        "--name",
+                        "case",
+                        "--public-dir",
+                        str(public_dir),
+                        "--triage-out",
+                        str(triage_out),
+                    ],
+                ):
+                    rc = promote_mod.main()
+            self.assertEqual(rc, 1)
+            self.assertIn("XLSB leak scanning is not supported", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
