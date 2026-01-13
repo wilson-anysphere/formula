@@ -7309,7 +7309,6 @@ fn relationships_root_is_prefix_only(rels_xml: &[u8]) -> Result<bool, WriteError
     }
     Ok(false)
 }
-
 fn relationship_id_and_target_by_type(
     rels_xml: &[u8],
     rel_type: &str,

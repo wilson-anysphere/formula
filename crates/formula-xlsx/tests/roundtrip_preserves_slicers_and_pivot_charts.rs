@@ -60,6 +60,22 @@ fn roundtrip_preserves_slicers_timelines_and_pivot_charts() -> Result<(), Box<dy
         Some("xl/pivotTables/pivotTable1.xml")
     );
 
+    let charts_with_placement = package.pivot_chart_parts_with_placement()?;
+    assert_eq!(charts_with_placement.len(), charts.len());
+    assert_eq!(charts_with_placement[0].chart, charts[0]);
+    assert_eq!(
+        charts_with_placement[0].placed_on_drawings,
+        vec!["xl/drawings/drawing1.xml"]
+    );
+    assert!(
+        charts_with_placement[0]
+            .placed_on_sheets
+            .iter()
+            .any(|sheet| sheet == "xl/worksheets/sheet1.xml"),
+        "expected pivot chart to be placed on sheet1.xml, got {:?}",
+        charts_with_placement[0].placed_on_sheets
+    );
+
     let roundtrip_bytes = package.write_to_bytes()?;
     let roundtrip = XlsxPackage::from_bytes(&roundtrip_bytes)?;
     for entry in [

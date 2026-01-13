@@ -109,7 +109,7 @@ pub use patch::{
 pub use pivots::{
     cache_records::{pivot_cache_datetime_to_naive_date, PivotCacheRecordsReader, PivotCacheValue},
     graph::{PivotTableInstance, XlsxPivotGraph},
-    pivot_charts::PivotChartPart,
+    pivot_charts::{PivotChartPart, PivotChartWithPlacement},
     slicers::{
         slicer_selection_to_engine_filter_field, slicer_selection_to_engine_filter_field_with_resolver,
         slicer_selection_to_row_filter, slicer_selection_to_row_filter_with_resolver,

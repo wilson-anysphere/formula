@@ -24,6 +24,7 @@ const KEY_ENCRYPTOR_URI_PASSWORD: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/password";
 const KEY_ENCRYPTOR_URI_CERTIFICATE: &str =
     "http://schemas.microsoft.com/office/2006/keyEncryptor/certificate";
+
 #[derive(Debug, Clone)]
 struct KeyData {
     salt_value: Vec<u8>,
@@ -123,22 +124,25 @@ fn decrypt_agile_package_key_from_password(
         };
 
     let verifier_input_iv = match iv_derivation {
-        PasswordKeyIvDerivation::SaltValue => salt_iv
-            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::SaltValue => {
+            salt_iv.expect("salt iv should be set when using SaltValue derivation")
+        }
         PasswordKeyIvDerivation::Derived => derived_verifier_input_iv
             .as_deref()
             .expect("derived verifier input iv should be set when using Derived derivation"),
     };
     let verifier_hash_iv = match iv_derivation {
-        PasswordKeyIvDerivation::SaltValue => salt_iv
-            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::SaltValue => {
+            salt_iv.expect("salt iv should be set when using SaltValue derivation")
+        }
         PasswordKeyIvDerivation::Derived => derived_verifier_hash_iv
             .as_deref()
             .expect("derived verifier hash iv should be set when using Derived derivation"),
     };
     let key_value_iv = match iv_derivation {
-        PasswordKeyIvDerivation::SaltValue => salt_iv
-            .expect("salt iv should be set when using SaltValue derivation"),
+        PasswordKeyIvDerivation::SaltValue => {
+            salt_iv.expect("salt iv should be set when using SaltValue derivation")
+        }
         PasswordKeyIvDerivation::Derived => derived_key_value_iv
             .as_deref()
             .expect("derived key value iv should be set when using Derived derivation"),
