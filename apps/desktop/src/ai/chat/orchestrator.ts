@@ -9,7 +9,6 @@ import type { TokenEstimator } from "../../../../../packages/ai-context/src/toke
 import {
   createHeuristicTokenEstimator,
   estimateToolDefinitionTokens,
-  stableJsonStringify,
 } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 
@@ -38,39 +37,10 @@ import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpr
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
 import { getDesktopAIAuditStore } from "../audit/auditStore.js";
 import { maybeGetAiCloudDlpOptions } from "../dlp/aiDlp.js";
+import { computeDlpCacheKey } from "../dlp/dlpCacheKey.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { getDesktopToolPolicy } from "../toolPolicy.js";
 import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
-
-function normalizeClassificationRecordsForCacheKey(
-  records: unknown,
-): Array<{ selector: unknown; classification: unknown }> {
-  const list = Array.isArray(records) ? records : [];
-  const normalized = list.map((record) => ({
-    selector: (record as any)?.selector ?? null,
-    classification: (record as any)?.classification ?? null,
-  }));
-
-  // Make the cache key stable even if callers return records in different orders.
-  const keyed = normalized.map((r) => ({ key: stableJsonStringify(r), value: r }));
-  keyed.sort((a, b) => a.key.localeCompare(b.key));
-  return keyed.map((r) => r.value);
-}
-
-function workbookContextBuilderDlpKey(params: { dlp: any }): string {
-  const dlp = params.dlp;
-  if (!dlp) return "dlp:none";
-
-  const includeRestrictedContent = Boolean(dlp?.includeRestrictedContent ?? false);
-  const classificationRecords =
-    dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp?.documentId) ?? [];
-
-  return stableJsonStringify({
-    includeRestrictedContent,
-    policy: dlp?.policy ?? null,
-    classificationRecords: normalizeClassificationRecordsForCacheKey(classificationRecords),
-  });
-}
 
 export type AiChatAttachment =
   | { type: "range"; reference: string; data?: unknown }
@@ -420,7 +390,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
     let workbookContext: any;
     try {
       throwIfAborted(signal);
-      const dlpKey = workbookContextBuilderDlpKey({ dlp });
+      const dlpKey = computeDlpCacheKey(dlp);
       if (!cachedContextBuilder || cachedContextBuilderDlpKey !== dlpKey) {
         cachedContextBuilder = createContextBuilder();
         cachedContextBuilderDlpKey = dlpKey;

@@ -10,6 +10,7 @@ import {
 import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { createDesktopRag } from "./index.js";
+import { computeDlpCacheKey } from "../dlp/dlpCacheKey.js";
 
 function createAbortError(message = "Aborted"): Error {
   const err = new Error(message);
@@ -96,36 +97,6 @@ export interface DesktopRagServiceOptions {
 }
 
 type DesktopRag = Awaited<ReturnType<typeof createDesktopRag>>;
-
-function normalizeClassificationRecordsForCacheKey(
-  records: unknown,
-): Array<{ selector: unknown; classification: unknown }> {
-  const list = Array.isArray(records) ? records : [];
-  const normalized = list.map((record) => ({
-    selector: (record as any)?.selector ?? null,
-    classification: (record as any)?.classification ?? null,
-  }));
-
-  // Make the cache key stable even if callers return records in different orders.
-  const keyed = normalized.map((r) => ({ key: stableJsonStringify(r), value: r }));
-  keyed.sort((a, b) => a.key.localeCompare(b.key));
-  return keyed.map((r) => r.value);
-}
-
-function dlpCacheKeyFor(params: { dlp: any }): string {
-  const dlp = params.dlp;
-  if (!dlp) return "dlp:none";
-
-  const includeRestrictedContent = Boolean(dlp?.includeRestrictedContent ?? false);
-  const classificationRecords =
-    dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp?.documentId) ?? [];
-
-  return stableJsonStringify({
-    includeRestrictedContent,
-    policy: dlp?.policy ?? null,
-    classificationRecords: normalizeClassificationRecordsForCacheKey(classificationRecords),
-  });
-}
 
 function sheetNamesCacheKeyFor(params: { spreadsheet: any }): string {
   const spreadsheet = params.spreadsheet;
@@ -376,7 +347,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
     // DLP mode: only skip workbook scans when both the workbook version AND the DLP inputs
     // (policy/classifications/includeRestrictedContent) match the last indexed state.
-    const dlpKey = dlpCacheKeyFor({ dlp: params.dlp });
+    const dlpKey = computeDlpCacheKey(params.dlp);
     const sheetNamesKeyNow = sheetNamesCacheKeyFor({ spreadsheet: params.spreadsheet });
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
