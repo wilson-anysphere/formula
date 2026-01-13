@@ -746,7 +746,6 @@ fn parse_vertical_page_breaks_record(
         );
     }
 }
-
 /// Best-effort parse of worksheet print/page setup settings (margins, scaling, paper size, etc).
 ///
 /// This scan is resilient to malformed records: payload-level parse failures are surfaced as
@@ -954,6 +953,14 @@ pub(crate) fn parse_biff_sheet_print_settings(
     if fit_to_page {
         if let (Some(width), Some(height)) = (setup_fit_width, setup_fit_height) {
             page_setup.scaling = Scaling::FitTo { width, height };
+        } else {
+            // Some `.xls` writers omit or truncate the SETUP record even when fit-to-page is
+            // enabled. Preserve the fit-to-page *mode* even when the target dimensions are
+            // unavailable.
+            page_setup.scaling = Scaling::FitTo {
+                width: 0,
+                height: 0,
+            };
         }
     } else {
         let scale = setup_scale.unwrap_or(100);
@@ -969,7 +976,6 @@ pub(crate) fn parse_biff_sheet_print_settings(
 
     Ok(out)
 }
-
 #[derive(Debug, Clone, Copy)]
 struct Window2Flags {
     show_grid_lines: bool,

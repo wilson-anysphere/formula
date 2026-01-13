@@ -522,6 +522,25 @@ pub fn build_print_settings_calamine_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Sheet1` where
+/// `WSBOOL.fFitToPage=1` (fit-to-page enabled) but the worksheet substream omits the `SETUP` record.
+///
+/// Some `.xls` writers omit `SETUP` even when fit-to-page is enabled; the importer should preserve
+/// the scaling intent as `Scaling::FitTo { width: 0, height: 0 }`.
+pub fn build_fit_to_page_without_setup_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_fit_to_page_without_setup_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where the worksheet name is invalid and will be sanitized by the
 /// importer, but at least one defined name still refers to the original (invalid) sheet name.
 pub fn build_sanitized_sheet_name_defined_name_fixture_xls() -> Vec<u8> {
@@ -5803,6 +5822,44 @@ fn build_print_settings_calamine_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_fit_to_page_without_setup_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_fit_to_page_without_setup_sheet_stream(xf_general);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+
+    globals
+}
+
 fn build_sanitized_sheet_name_defined_name_collision_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -6272,6 +6329,40 @@ fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
         RECORD_NUMBER,
         &number_cell(0, 0, xf_general, 0.0),
     );
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_fit_to_page_without_setup_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // WSBOOL with fFitToPage bit set (bit 8) but no SETUP record.
+    //
+    // We keep the other bits consistent with the `build_outline_sheet_stream` fixture so the
+    // value resembles Excel output.
+    let wsbool: u16 = 0x0C01 | 0x0100;
+    push_record(&mut sheet, RECORD_WSBOOL, &wsbool.to_le_bytes());
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 0.0),
+    );
+
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
 }
