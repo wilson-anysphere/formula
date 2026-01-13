@@ -56,7 +56,7 @@ pub struct Column {
     chunks: Arc<Vec<EncodedChunk>>,
     stats: ColumnStats,
     dictionary: Option<Arc<Vec<Arc<str>>>>,
-    distinct: Option<DistinctCounter>,
+    distinct: Option<Arc<DistinctCounter>>,
 }
 
 impl Column {
@@ -1359,7 +1359,13 @@ impl MutableIntColumn {
         };
 
         let (distinct_base, distinct) = match distinct {
-            Some(counter) => (0, counter),
+            Some(counter) => {
+                let counter = match Arc::try_unwrap(counter) {
+                    Ok(counter) => counter,
+                    Err(counter) => (*counter).clone(),
+                };
+                (0, counter)
+            }
             None => {
                 // We do not have the base distinct sketch (e.g. the table came from
                 // `ColumnarTable::from_encoded`). Reconstruct it from the encoded pages so
@@ -1698,7 +1704,7 @@ impl MutableIntColumn {
         if let Some(chunk) = self.encoded_current_chunk() {
             chunks.push(chunk);
         }
-        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
+        let distinct = (self.distinct_base == 0).then(|| Arc::new(self.distinct.clone()));
         Column {
             schema: self.schema.clone(),
             chunks: Arc::new(chunks),
@@ -1710,7 +1716,7 @@ impl MutableIntColumn {
 
     fn into_column(self) -> Column {
         let stats = self.stats();
-        let distinct = (self.distinct_base == 0).then(|| self.distinct);
+        let distinct = (self.distinct_base == 0).then(|| Arc::new(self.distinct));
         Column {
             schema: self.schema,
             chunks: Arc::new(self.chunks),
@@ -1753,7 +1759,13 @@ impl MutableFloatColumn {
         };
 
         let (distinct_base, distinct) = match distinct {
-            Some(counter) => (0, counter),
+            Some(counter) => {
+                let counter = match Arc::try_unwrap(counter) {
+                    Ok(counter) => counter,
+                    Err(counter) => (*counter).clone(),
+                };
+                (0, counter)
+            }
             None => {
                 let mut counter = DistinctCounter::new();
                 for chunk in &chunks {
@@ -2014,7 +2026,7 @@ impl MutableFloatColumn {
         if let Some(chunk) = self.encoded_current_chunk() {
             chunks.push(chunk);
         }
-        let distinct = (self.distinct_base == 0).then(|| self.distinct.clone());
+        let distinct = (self.distinct_base == 0).then(|| Arc::new(self.distinct.clone()));
         Column {
             schema: self.schema.clone(),
             chunks: Arc::new(chunks),
@@ -2026,7 +2038,7 @@ impl MutableFloatColumn {
 
     fn into_column(self) -> Column {
         let stats = self.stats();
-        let distinct = (self.distinct_base == 0).then(|| self.distinct);
+        let distinct = (self.distinct_base == 0).then(|| Arc::new(self.distinct));
         Column {
             schema: self.schema,
             chunks: Arc::new(self.chunks),
@@ -3413,7 +3425,7 @@ impl IntBuilder {
             chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: None,
-            distinct: Some(self.distinct),
+            distinct: Some(Arc::new(self.distinct)),
         }
     }
 }
@@ -3490,7 +3502,7 @@ impl FloatBuilder {
             chunks: Arc::new(self.chunks),
             stats: self.stats,
             dictionary: None,
-            distinct: Some(self.distinct),
+            distinct: Some(Arc::new(self.distinct)),
         }
     }
 }
@@ -3916,6 +3928,11 @@ mod tests {
         // Ensure the clone shares the encoded chunk backing storage.
         for (orig_col, cloned_col) in table.columns.iter().zip(cloned.columns.iter()) {
             assert!(Arc::ptr_eq(&orig_col.chunks, &cloned_col.chunks));
+            match (&orig_col.distinct, &cloned_col.distinct) {
+                (Some(a), Some(b)) => assert!(Arc::ptr_eq(a, b)),
+                (None, None) => {}
+                _ => panic!("cloned table should preserve distinct sketch presence"),
+            }
         }
 
         for row in 0..=table.row_count() {
