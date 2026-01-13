@@ -1763,9 +1763,10 @@ export class FormulaBarView {
         }
 
         let meta = referenceBySpanKey.get(`${span.start}:${span.end}`) ?? null;
-        if (!meta && span.kind === "reference") {
-          // Engine-backed syntax error highlighting can split reference spans; preserve
-          // reference colors by falling back to a containment lookup.
+        if (!meta && span.kind !== "error") {
+          // The formula highlighter may split a logical reference into multiple spans (e.g. structured
+          // refs like `Table1[Amount]`, or engine-backed syntax error highlighting). Preserve reference
+          // colors by falling back to a containment lookup.
           const containing = coloredReferences.find((ref) => ref.start <= span.start && span.end <= ref.end) ?? null;
           if (containing) {
             meta = {

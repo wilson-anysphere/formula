@@ -67,4 +67,3 @@ describe("FormulaBarView structured reference highlights", () => {
     host.remove();
   });
 });
-
