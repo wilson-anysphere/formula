@@ -6,7 +6,11 @@ export type StartupTimings = {
   windowVisibleMs?: number;
   /**
    * Monotonic ms since native process start, reported by the Rust host.
-   * (`startup:webview-loaded`)
+   *
+   * This is recorded from Rust as soon as the native WebView reports that the
+   * initial page load/navigation finished (`startup:webview-loaded`). It does
+   * not include renderer JS bootstrap time; use `ttiMs` / `ttiFrontendMs` for
+   * "app is interactive".
    */
   webviewLoadedMs?: number;
   /**
@@ -114,8 +118,12 @@ export async function installStartupTimingsListeners(): Promise<void> {
 }
 
 /**
- * Notify the Rust host that the webview has started executing JS and is ready to
- * receive startup timing events.
+ * Notify the Rust host that the frontend has installed its startup timing
+ * listeners and is ready to receive startup timing events.
+ *
+ * Note: `webviewLoadedMs` is recorded in Rust via a native page-load callback.
+ * Calling this is safe and will not overwrite earlier host-recorded timings; it
+ * may re-emit cached metrics so late listeners can still observe them.
  *
  * No-op outside of Tauri.
  */

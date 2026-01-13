@@ -123,6 +123,12 @@ struct StartupTimingsSnapshot {
 struct StartupMetrics {
     start: Instant,
     window_visible_ms: Option<u64>,
+    /// Monotonic ms since native process start when the *main webview finished its initial page
+    /// load/navigation* (Tauri `PageLoadEvent::Finished`).
+    ///
+    /// This is intentionally recorded from Rust (via a page-load callback) so it is independent
+    /// from frontend bootstrap timing. In particular, it does **not** include any JS execution
+    /// time, event listener installation, or "time-to-interactive" work in the renderer.
     webview_loaded_ms: Option<u64>,
     tti_ms: Option<u64>,
     logged: bool,
@@ -213,6 +219,10 @@ fn should_log_startup_metrics() -> bool {
 
 #[tauri::command]
 fn report_startup_webview_loaded(app: tauri::AppHandle, state: State<'_, SharedStartupMetrics>) {
+    // The frontend calls this once it has installed its startup listeners (so early-emitted
+    // events aren't dropped). The primary `webview_loaded_ms` measurement is recorded from Rust
+    // via `Builder::on_page_load` when the main webview finishes its initial navigation; this
+    // command is idempotent and will not overwrite an earlier host-recorded timestamp.
     let shared = state.inner().clone();
     let (window_visible_ms, webview_loaded_ms, snapshot) = {
         let mut metrics = shared.lock().unwrap();
@@ -851,6 +861,7 @@ fn main() {
     // cold start time-to-window-visible / time-to-interactive.
     let startup_metrics: SharedStartupMetrics =
         Arc::new(Mutex::new(StartupMetrics::new(Instant::now())));
+    let startup_metrics_for_page_load = startup_metrics.clone();
 
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
     let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
@@ -974,6 +985,38 @@ fn main() {
         .manage(oauth_loopback_state)
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
+        .on_page_load(move |window, payload| {
+            // Best-effort startup instrumentation: record when the *native webview* finishes
+            // loading the initial app page. This is intentionally independent of frontend JS
+            // bootstrap timing.
+            if window.label() != "main" {
+                return;
+            }
+
+            // Only record once, and only when the page load finished.
+            let finished = matches!(payload.event(), tauri::PageLoadEvent::Finished);
+            if !finished {
+                return;
+            }
+
+            let (webview_loaded_ms, snapshot) = {
+                let mut metrics = match startup_metrics_for_page_load.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+
+                if metrics.webview_loaded_ms.is_some() {
+                    return;
+                }
+
+                let webview_loaded_ms = metrics.record_webview_loaded();
+                let snapshot = metrics.snapshot();
+                (webview_loaded_ms, snapshot)
+            };
+
+            let _ = window.emit("startup:webview-loaded", webview_loaded_ms);
+            let _ = window.emit("startup:metrics", snapshot);
+        })
         // NOTE: IPC hardening / capabilities (Tauri v2)
         //
         // We avoid `core:default` and instead grant only the plugin APIs the frontend uses
