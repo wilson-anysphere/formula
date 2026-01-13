@@ -3737,6 +3737,29 @@ fn emit_name(
     out: &mut Vec<u8>,
     class: PtgClass,
 ) -> Result<(), EncodeError> {
+    // Sheet-span defined-name references are encoded via `PtgNameX` with an `ixti` that points at
+    // the sheet range (mirrors 3D ref encoding). The decoded/canonical text form uses a single
+    // quoted identifier prefix (e.g. `'Sheet1:Sheet3'!MyName`), which the small-scope formula
+    // parser represents as a "sheet" string containing `:`.
+    //
+    // Excel sheet names cannot contain `:`, so this representation is unambiguous.
+    if let Some(sheet) = name.sheet.as_deref() {
+        if let Some((first, last)) = sheet.split_once(':') {
+            let ixti = extern_sheet_range_index_with_fallback(ctx, first, last)
+                .ok_or_else(|| EncodeError::UnknownSheet(sheet.to_string()))?;
+            let name_index = ctx
+                .namex_defined_name_index_for_ixti(ixti, &name.name)
+                .ok_or_else(|| EncodeError::UnknownName {
+                    name: name.name.clone(),
+                })?;
+
+            out.push(ptg_with_class(PTG_NAMEX, class));
+            out.extend_from_slice(&ixti.to_le_bytes());
+            out.extend_from_slice(&name_index.to_le_bytes());
+            return Ok(());
+        }
+    }
+
     let idx = ctx
         .name_index(&name.name, name.sheet.as_deref())
         .ok_or_else(|| EncodeError::UnknownName {
@@ -4236,7 +4259,7 @@ impl<'a> FormulaParser<'a> {
 
         let sheet_name = match sheet_spec {
             SheetSpec::Single(s) => Some(s),
-            SheetSpec::Range(_, _) => None,
+            SheetSpec::Range(first, last) => Some(format!("{first}:{last}")),
         };
 
         Ok(Some(Expr::Name(NameRef {

@@ -410,7 +410,6 @@ impl WorkbookContext {
         }
     }
 
-    #[cfg(feature = "write")]
     pub(crate) fn namex_defined_name_index_for_ixti(&self, ixti: u16, name: &str) -> Option<u16> {
         let supbook_index = self.namex_ixti_supbooks.get(&ixti).copied().unwrap_or(ixti);
         let normalized_name = normalize_key(name);

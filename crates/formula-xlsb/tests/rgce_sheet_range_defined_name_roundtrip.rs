@@ -1,9 +1,11 @@
-#![cfg(feature = "write")]
-
 use std::io::{Cursor, Write};
 
 use formula_xlsb::biff12_varint;
-use formula_xlsb::rgce::{decode_rgce_with_context, encode_rgce_with_context_ast, CellCoord};
+use formula_xlsb::rgce::{decode_rgce_with_context, CellCoord};
+#[cfg(feature = "write")]
+use formula_xlsb::rgce::encode_rgce_with_context_ast;
+#[cfg(not(feature = "write"))]
+use formula_xlsb::rgce::encode_rgce_with_context;
 use formula_xlsb::XlsbWorkbook;
 use pretty_assertions::assert_eq;
 use tempfile::NamedTempFile;
@@ -135,19 +137,25 @@ fn build_fixture_bytes() -> Vec<u8> {
 }
 
 #[test]
-fn ast_encoder_roundtrips_sheet_range_scoped_defined_name_via_namex() {
+fn encoder_roundtrips_sheet_range_scoped_defined_name_via_namex() {
     let bytes = build_fixture_bytes();
     let tmp = write_temp_xlsb(&bytes);
 
     let wb = XlsbWorkbook::open(tmp.path()).expect("open xlsb");
     let ctx = wb.workbook_context();
 
-    let encoded_unquoted = encode_rgce_with_context_ast(
-        "=Sheet1:Sheet3!MyName",
-        ctx,
-        CellCoord::new(0, 0),
-    )
-    .expect("encode");
+    let encoded_unquoted = {
+        #[cfg(feature = "write")]
+        {
+            encode_rgce_with_context_ast("=Sheet1:Sheet3!MyName", ctx, CellCoord::new(0, 0))
+                .expect("encode")
+        }
+        #[cfg(not(feature = "write"))]
+        {
+            encode_rgce_with_context("=Sheet1:Sheet3!MyName", ctx, CellCoord::new(0, 0))
+                .expect("encode")
+        }
+    };
     assert_eq!(
         encoded_unquoted.rgce,
         vec![
@@ -157,15 +165,20 @@ fn ast_encoder_roundtrips_sheet_range_scoped_defined_name_via_namex() {
         ]
     );
 
-    let encoded_quoted = encode_rgce_with_context_ast(
-        "='Sheet1:Sheet3'!MyName",
-        ctx,
-        CellCoord::new(0, 0),
-    )
-    .expect("encode");
+    let encoded_quoted = {
+        #[cfg(feature = "write")]
+        {
+            encode_rgce_with_context_ast("='Sheet1:Sheet3'!MyName", ctx, CellCoord::new(0, 0))
+                .expect("encode")
+        }
+        #[cfg(not(feature = "write"))]
+        {
+            encode_rgce_with_context("='Sheet1:Sheet3'!MyName", ctx, CellCoord::new(0, 0))
+                .expect("encode")
+        }
+    };
     assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
 
     let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, ctx).expect("decode");
     assert_eq!(decoded, "'Sheet1:Sheet3'!MyName");
 }
-
