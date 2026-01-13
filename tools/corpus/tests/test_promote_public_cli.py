@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
@@ -8,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 import tools.corpus.promote_public as promote_mod
 from tools.corpus.util import sha256_hex
@@ -44,7 +46,7 @@ class PromotePublicCLITests(unittest.TestCase):
 
             xlsx_bytes = _make_minimal_xlsx()
             fixture_path = public_dir / "case.xlsx.b64"
-            fixture_path.write_bytes(__import__("base64").encodebytes(xlsx_bytes))
+            fixture_path.write_bytes(base64.encodebytes(xlsx_bytes))
 
             (public_dir / "expectations.json").write_text(
                 json.dumps(
@@ -67,7 +69,7 @@ class PromotePublicCLITests(unittest.TestCase):
 
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
-                    with unittest.mock.patch.object(
+                    with mock.patch.object(
                         sys,
                         "argv",
                         [
@@ -112,7 +114,7 @@ class PromotePublicCLITests(unittest.TestCase):
                 def _run(argv: list[str]) -> int:
                     stdout = io.StringIO()
                     with contextlib.redirect_stdout(stdout):
-                        with unittest.mock.patch.object(sys, "argv", argv):
+                        with mock.patch.object(sys, "argv", argv):
                             return promote_mod.main()
 
                 argv = [
@@ -171,7 +173,7 @@ class PromotePublicCLITests(unittest.TestCase):
                 )
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
-                    with unittest.mock.patch.object(
+                    with mock.patch.object(
                         sys,
                         "argv",
                         [
@@ -202,7 +204,7 @@ class PromotePublicCLITests(unittest.TestCase):
                 )
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
-                    with unittest.mock.patch.object(
+                    with mock.patch.object(
                         sys,
                         "argv",
                         [
@@ -223,7 +225,7 @@ class PromotePublicCLITests(unittest.TestCase):
                 # With --force it should overwrite.
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
-                    with unittest.mock.patch.object(
+                    with mock.patch.object(
                         sys,
                         "argv",
                         [
@@ -258,7 +260,7 @@ class PromotePublicCLITests(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                with unittest.mock.patch.object(
+                with mock.patch.object(
                     sys,
                     "argv",
                     [
@@ -286,7 +288,7 @@ class PromotePublicCLITests(unittest.TestCase):
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                with unittest.mock.patch.object(
+                with mock.patch.object(
                     sys,
                     "argv",
                     [
