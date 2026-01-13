@@ -12,6 +12,7 @@
 use crate::backend::TableBackend;
 use crate::model::{
     Cardinality, CrossFilterDirection, DataModel, RelationshipInfo, RelationshipPathDirection,
+    RowSet,
 };
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::value::Value;
@@ -2138,8 +2139,21 @@ impl DaxEngine {
                 return Ok(Value::Blank);
             }
 
-            let Some(to_row) = rel_info.to_index.get(&key).copied() else {
+            let Some(to_row_set) = rel_info.to_index.get(&key) else {
                 return Ok(Value::Blank);
+            };
+            let to_row = match to_row_set {
+                RowSet::One(row) => *row,
+                RowSet::Many(rows) => {
+                    if rows.len() == 1 {
+                        rows[0]
+                    } else {
+                        return Err(DaxError::Eval(format!(
+                            "RELATED is ambiguous: key {key} matches multiple rows in {} (relationship {})",
+                            rel_info.rel.to_table, rel_info.rel.name
+                        )));
+                    }
+                }
             };
 
             row = to_row;
@@ -2540,10 +2554,22 @@ impl DaxEngine {
                                             break;
                                         }
 
-                                        let Some(to_row) = rel_info.to_index.get(&fk).copied()
-                                        else {
+                                        let Some(to_row_set) = rel_info.to_index.get(&fk) else {
                                             ok = false;
                                             break;
+                                        };
+                                        let to_row = match to_row_set {
+                                            RowSet::One(row) => *row,
+                                            RowSet::Many(rows) => {
+                                                if rows.len() == 1 {
+                                                    rows[0]
+                                                } else {
+                                                    return Err(DaxError::Eval(format!(
+                                                        "SUMMARIZE grouping is ambiguous: key {fk} matches multiple rows in {} (relationship {})",
+                                                        rel_info.rel.to_table, rel_info.rel.name
+                                                    )));
+                                                }
+                                            }
                                         };
                                         current_row = to_row;
                                     }
@@ -2869,10 +2895,22 @@ impl DaxEngine {
                                             .relationships()
                                             .get(hop.relationship_idx)
                                             .expect("valid relationship idx");
-                                        let Some(to_row) = rel_info.to_index.get(&fk).copied()
-                                        else {
+                                        let Some(to_row_set) = rel_info.to_index.get(&fk) else {
                                             failed = true;
                                             break;
+                                        };
+                                        let to_row = match to_row_set {
+                                            RowSet::One(row) => *row,
+                                            RowSet::Many(rows) => {
+                                                if rows.len() == 1 {
+                                                    rows[0]
+                                                } else {
+                                                    return Err(DaxError::Eval(format!(
+                                                        "SUMMARIZECOLUMNS grouping is ambiguous: key {fk} matches multiple rows in {} (relationship {})",
+                                                        rel_info.rel.to_table, rel_info.rel.name
+                                                    )));
+                                                }
+                                            }
                                         };
                                         current_row = to_row;
                                         current_table_ref =
@@ -3311,7 +3349,7 @@ fn propagate_filter(
             let allowed_keys: Vec<&Value> = relationship
                 .to_index
                 .iter()
-                .filter_map(|(key, &row)| to_set.get(row).copied().unwrap_or(false).then_some(key))
+                .filter_map(|(key, rows)| rows.any_allowed(to_set).then_some(key))
                 .collect();
 
             let from_set = sets
@@ -3386,12 +3424,14 @@ fn propagate_filter(
                 if !any_allowed {
                     continue;
                 }
-                let Some(&to_row) = relationship.to_index.get(key) else {
+                let Some(to_rows) = relationship.to_index.get(key) else {
                     continue;
                 };
-                if to_set.get(to_row).copied().unwrap_or(false) {
-                    next[to_row] = true;
-                }
+                to_rows.for_each_row(|to_row| {
+                    if to_set.get(to_row).copied().unwrap_or(false) {
+                        next[to_row] = true;
+                    }
+                });
             }
 
             let changed = to_set.iter().zip(&next).any(|(prev, next)| *prev && !*next);

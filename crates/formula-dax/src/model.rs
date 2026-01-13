@@ -2,6 +2,7 @@ use crate::backend::{AggregationSpec, ColumnarTableBackend, InMemoryTableBackend
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
 use crate::parser::Expr;
 use crate::value::Value;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -322,10 +323,55 @@ pub struct DataModel {
     pub(crate) calculated_columns: Vec<CalculatedColumn>,
 }
 
+/// A compact representation of the set of rows that share the same relationship key on the
+/// "to" side of a relationship.
+///
+/// For the common `OneToMany` case, keys are unique and we store a single row index without
+/// allocating.
+#[derive(Clone, Debug)]
+pub(crate) enum RowSet {
+    One(usize),
+    Many(Vec<usize>),
+}
+
+impl RowSet {
+    pub(crate) fn push(&mut self, row: usize) {
+        match self {
+            RowSet::One(existing) => {
+                let mut rows = Vec::with_capacity(2);
+                rows.push(*existing);
+                rows.push(row);
+                *self = RowSet::Many(rows);
+            }
+            RowSet::Many(rows) => rows.push(row),
+        }
+    }
+
+    pub(crate) fn any_allowed(&self, allowed: &[bool]) -> bool {
+        match self {
+            RowSet::One(row) => allowed.get(*row).copied().unwrap_or(false),
+            RowSet::Many(rows) => rows
+                .iter()
+                .any(|row| allowed.get(*row).copied().unwrap_or(false)),
+        }
+    }
+
+    pub(crate) fn for_each_row(&self, mut f: impl FnMut(usize)) {
+        match self {
+            RowSet::One(row) => f(*row),
+            RowSet::Many(rows) => {
+                for &row in rows {
+                    f(row);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct RelationshipInfo {
     pub(crate) rel: Relationship,
-    pub(crate) to_index: HashMap<Value, usize>,
+    pub(crate) to_index: HashMap<Value, RowSet>,
     pub(crate) from_index: HashMap<Value, Vec<usize>>,
 }
 
@@ -483,7 +529,9 @@ impl DataModel {
                     }
                 })?;
                 let key = full_row.get(to_idx).cloned().unwrap_or(Value::Blank);
-                if rel_info.to_index.contains_key(&key) {
+                // Keys on the "to" side must be unique for 1:* and 1:1 relationships.
+                if rel.cardinality != Cardinality::ManyToMany && rel_info.to_index.contains_key(&key)
+                {
                     self.tables
                         .get_mut(table)
                         .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?
@@ -550,7 +598,21 @@ impl DataModel {
         }
 
         for (rel_idx, key) in to_index_updates {
-            self.relationships[rel_idx].to_index.insert(key, row_index);
+            match self.relationships[rel_idx].rel.cardinality {
+                Cardinality::OneToMany | Cardinality::OneToOne => {
+                    self.relationships[rel_idx]
+                        .to_index
+                        .insert(key, RowSet::One(row_index));
+                }
+                Cardinality::ManyToMany => match self.relationships[rel_idx].to_index.entry(key) {
+                    Entry::Vacant(v) => {
+                        v.insert(RowSet::One(row_index));
+                    }
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().push(row_index);
+                    }
+                },
+            }
         }
 
         for rel_info in &mut self.relationships {
@@ -602,22 +664,27 @@ impl DataModel {
                 column: to_col.clone(),
             })?;
 
-        if relationship.cardinality == Cardinality::ManyToMany {
-            return Err(DaxError::UnsupportedCardinality {
-                relationship: relationship.name.clone(),
-                cardinality: relationship.cardinality,
-            });
-        }
-
-        let mut to_index = HashMap::<Value, usize>::new();
+        let mut to_index = HashMap::<Value, RowSet>::new();
         for row in 0..to_table.row_count() {
             let value = to_table.value_by_idx(row, to_idx).unwrap_or(Value::Blank);
-            if to_index.insert(value.clone(), row).is_some() {
-                return Err(DaxError::NonUniqueKey {
-                    table: relationship.to_table.clone(),
-                    column: to_col.clone(),
-                    value: value.clone(),
-                });
+            match relationship.cardinality {
+                Cardinality::OneToMany | Cardinality::OneToOne => {
+                    if to_index.insert(value.clone(), RowSet::One(row)).is_some() {
+                        return Err(DaxError::NonUniqueKey {
+                            table: relationship.to_table.clone(),
+                            column: to_col.clone(),
+                            value: value.clone(),
+                        });
+                    }
+                }
+                Cardinality::ManyToMany => match to_index.entry(value) {
+                    Entry::Vacant(v) => {
+                        v.insert(RowSet::One(row));
+                    }
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().push(row);
+                    }
+                },
             }
         }
 
@@ -642,7 +709,6 @@ impl DataModel {
         }
 
         if relationship.enforce_referential_integrity {
-            let to_values: HashSet<Value> = to_index.keys().cloned().collect();
             for row in 0..from_table.row_count() {
                 let value = from_table
                     .value_by_idx(row, from_idx)
@@ -650,7 +716,7 @@ impl DataModel {
                 if value.is_blank() {
                     continue;
                 }
-                if !to_values.contains(&value) {
+                if !to_index.contains_key(&value) {
                     return Err(DaxError::ReferentialIntegrityViolation {
                         relationship: relationship.name.clone(),
                         from_table: relationship.from_table.clone(),

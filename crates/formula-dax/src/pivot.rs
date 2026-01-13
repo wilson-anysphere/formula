@@ -1,6 +1,6 @@
 use crate::backend::{AggregationKind, AggregationSpec, TableBackend};
 use crate::engine::{DaxError, DaxResult, FilterContext, RowContext};
-use crate::model::RelationshipPathDirection;
+use crate::model::{RelationshipPathDirection, RowSet};
 use crate::parser::{BinaryOp, Expr, UnaryOp};
 use crate::{DaxEngine, DataModel, Value};
 use std::borrow::Cow;
@@ -147,14 +147,12 @@ fn cmp_key(a: &[Value], b: &[Value]) -> Ordering {
 
 struct RelatedHop<'a> {
     from_idx: usize,
-    to_index: &'a std::collections::HashMap<Value, usize>,
+    to_index: &'a std::collections::HashMap<Value, RowSet>,
     to_table: &'a crate::model::Table,
 }
 
 enum GroupKeyAccessor<'a> {
-    Base {
-        idx: usize,
-    },
+    Base { idx: usize },
     RelatedPath {
         hops: Vec<RelatedHop<'a>>,
         to_column_idx: usize,
@@ -268,7 +266,7 @@ fn fill_group_key(
     base_table: &crate::model::Table,
     row: usize,
     out: &mut Vec<Value>,
-) {
+) -> DaxResult<()> {
     out.clear();
     for accessor in accessors {
         let value = match accessor {
@@ -290,9 +288,22 @@ fn fill_group_key(
                         ok = false;
                         break;
                     }
-                    let Some(&to_row) = hop.to_index.get(&key) else {
+                    let Some(to_row_set) = hop.to_index.get(&key) else {
                         ok = false;
                         break;
+                    };
+                    let to_row = match to_row_set {
+                        RowSet::One(row) => *row,
+                        RowSet::Many(rows) => {
+                            if rows.len() == 1 {
+                                rows[0]
+                            } else {
+                                return Err(DaxError::Eval(format!(
+                                    "pivot related group key is ambiguous: key {key} matches multiple rows in {}",
+                                    hop.to_table.name()
+                                )));
+                            }
+                        }
                     };
                     current_table = hop.to_table;
                     current_row = to_row;
@@ -308,6 +319,7 @@ fn fill_group_key(
         };
         out.push(value);
     }
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -1457,7 +1469,7 @@ fn pivot_planned_row_group_by(
     let mut key_buf: Vec<Value> = Vec::with_capacity(group_by.len());
 
     let mut process_row = |row: usize| -> DaxResult<()> {
-        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf);
+        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf)?;
 
         if let Some(states) = groups.get_mut(key_buf.as_slice()) {
             for (state, spec) in states.iter_mut().zip(&agg_specs) {
@@ -1531,7 +1543,7 @@ fn pivot_row_scan(
     // Build the set of groups by scanning the base table rows. This ensures we only create
     // groups that actually exist in the fact table under the current filter context.
     let mut process_row = |row: usize| -> DaxResult<()> {
-        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf);
+        fill_group_key(&group_key_accessors, table_ref, row, &mut key_buf)?;
         let _ = seen.insert(key_buf.clone());
         Ok(())
     };
