@@ -105,6 +105,22 @@ test("chunk splitting: repeats header row in later window chunks when a region h
   assert.equal(second.text.split("\n")[0], "Region\tRevenue");
 });
 
+test("chunk splitting + origin: header repetition uses the correct origin-adjusted header row", () => {
+  const values = [["H1", "H2"]];
+  for (let i = 0; i < 10; i++) values.push([`R${i + 1}`, i + 1]);
+  const sheet = { name: "My Sheet", origin: { row: 4, col: 2 }, values };
+
+  const chunks = chunkSheetByRegions(sheet, { splitByRowWindows: true, maxChunkRows: 3, rowOverlap: 0 });
+  assert.ok(chunks.length > 1);
+
+  // Absolute A1 range should include the origin offset.
+  assert.equal(chunks[0].range, "'My Sheet'!C5:D7");
+
+  const second = chunks[1];
+  assert.equal(second.text.split("\n")[0], "H1\tH2");
+  assert.match(second.range, /^'My Sheet'!C8:D10$/);
+});
+
   const tallSheet = makeSheet(80);
   const tallChunks = chunkSheetByRegions(tallSheet, { splitByRowWindows: true });
   assert.ok(tallChunks.length > 1);
