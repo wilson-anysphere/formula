@@ -5,9 +5,6 @@ use std::collections::HashSet;
 
 #[test]
 fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
-    let mut allowed = HashSet::new();
-    allowed.insert(PivotKeyPart::Text("East".to_string()));
-
     let cfg = PivotConfig {
         row_fields: vec![PivotField::new("Region")],
         column_fields: vec![PivotField::new("Product")],
@@ -22,7 +19,7 @@ fn pivot_config_serde_roundtrips_with_calculated_fields_and_items() {
         }],
         filter_fields: vec![FilterField {
             source_field: "Region".to_string(),
-            allowed: Some(allowed),
+            allowed: Some(HashSet::from([PivotKeyPart::Text("East".to_string())])),
         }],
         calculated_fields: vec![CalculatedField {
             name: "Profit".to_string(),
