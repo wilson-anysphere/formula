@@ -78,5 +78,49 @@ describe("ImageBitmapCache", () => {
     await cache.get(b);
     expect(createImageBitmapMock).toHaveBeenCalledTimes(4);
   });
-});
 
+  it("does not repopulate the cache from a stale in-flight decode after invalidate()", async () => {
+    const bitmap1 = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmap2 = { close: vi.fn() } as unknown as ImageBitmap;
+
+    let resolve1!: (value: ImageBitmap) => void;
+    const p1 = new Promise<ImageBitmap>((res) => {
+      resolve1 = res;
+    });
+
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => p1)
+      .mockImplementationOnce(() => Promise.resolve(bitmap2));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    const entry = createEntry("img_1");
+
+    const first = cache.get(entry);
+    cache.invalidate(entry.id);
+    resolve1(bitmap1);
+    await expect(first).resolves.toBe(bitmap1);
+
+    // Should trigger a new decode since the stale one was invalidated.
+    await cache.get(entry);
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("clear() closes all cached bitmaps", async () => {
+    const bitmapA = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmapB = { close: vi.fn() } as unknown as ImageBitmap;
+    const createImageBitmapMock = vi.fn()
+      .mockImplementationOnce(() => Promise.resolve(bitmapA))
+      .mockImplementationOnce(() => Promise.resolve(bitmapB));
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 10 });
+    await cache.get(createEntry("a"));
+    await cache.get(createEntry("b"));
+
+    cache.clear();
+
+    expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapB as any).close).toHaveBeenCalledTimes(1);
+  });
+});

@@ -8,14 +8,25 @@ import type { ImageEntry } from "./types";
  */
 export class ImageBitmapCache {
   /**
-   * Decoded bitmap LRU. Map insertion order is used for recency tracking:
+   * LRU entries keyed by image id.
+   *
+   * `Map` insertion order represents recency:
    * - newest entries are at the end
    * - oldest entries are at the start
+   *
+   * Entries exist as soon as `get()` is called, even while the decode is still
+   * pending. This means LRU order reflects *access time*, not decode completion
+   * time (important when decodes resolve out-of-order).
    */
-  private readonly bitmaps = new Map<string, ImageBitmap>();
-  /** In-flight decodes, used to dedupe concurrent `get()` calls. */
-  private readonly inflight = new Map<string, Promise<ImageBitmap>>();
+  private readonly entries = new Map<
+    string,
+    {
+      promise: Promise<ImageBitmap>;
+      bitmap?: ImageBitmap;
+    }
+  >();
   private maxEntries: number;
+  private decodedCount = 0;
 
   constructor(options?: { maxEntries?: number }) {
     const max = options?.maxEntries;
@@ -28,20 +39,18 @@ export class ImageBitmapCache {
   }
 
   get(entry: ImageEntry): Promise<ImageBitmap> {
-    const cached = this.bitmaps.get(entry.id);
-    if (cached) {
+    const id = entry.id;
+    const existing = this.entries.get(id);
+    if (existing) {
       // Mark as most-recently-used.
-      this.bitmaps.delete(entry.id);
-      this.bitmaps.set(entry.id, cached);
-      return Promise.resolve(cached);
+      this.entries.delete(id);
+      this.entries.set(id, existing);
+      return existing.promise;
     }
 
-    const existing = this.inflight.get(entry.id);
-    if (existing) return existing;
-
-    const id = entry.id;
     const promise = ImageBitmapCache.decode(entry);
-    this.inflight.set(id, promise);
+    const record = { promise, bitmap: undefined as ImageBitmap | undefined };
+    this.entries.set(id, record);
 
     // Once the decode finishes, populate the LRU cache *only if* this promise is
     // still the active in-flight request for the image id. This prevents stale
@@ -49,25 +58,34 @@ export class ImageBitmapCache {
     // cache.
     void promise.then(
       (bitmap) => {
-        if (this.inflight.get(id) !== promise) return;
-        this.inflight.delete(id);
+        const current = this.entries.get(id);
+        if (current !== record || current.promise !== promise) return;
 
         // A max size of 0 means caching is disabled. Still dedupe the in-flight
         // request, but don't store the decoded bitmap (and do not close it,
         // since the caller owns the resolved value).
-        if (this.maxEntries === 0) return;
+        if (this.maxEntries === 0) {
+          this.entries.delete(id);
+          return;
+        }
 
-        // Insert as most-recently-used. If something already existed (should be
-        // rare, but can happen due to races), close it before replacing.
-        const prior = this.bitmaps.get(id);
-        if (prior) ImageBitmapCache.tryClose(prior);
-        this.bitmaps.delete(id);
-        this.bitmaps.set(id, bitmap);
+        // This is the first time the entry has resolved; attach the bitmap and
+        // count it toward the cache size.
+        if (!record.bitmap) {
+          record.bitmap = bitmap;
+          this.decodedCount++;
+        } else if (record.bitmap !== bitmap) {
+          // Should be impossible, but keep accounting correct if it happens.
+          ImageBitmapCache.tryClose(record.bitmap);
+          record.bitmap = bitmap;
+        }
+
         this.evictIfNeeded();
       },
       () => {
-        if (this.inflight.get(id) === promise) {
-          this.inflight.delete(id);
+        const current = this.entries.get(id);
+        if (current === record && current.promise === promise) {
+          this.entries.delete(id);
         }
       },
     );
@@ -76,31 +94,36 @@ export class ImageBitmapCache {
   }
 
   invalidate(imageId: string): void {
-    // Removing an entry should drop the cached bitmap (if any) and ensure a
-    // pending decode can't later repopulate the cache.
-    const existing = this.bitmaps.get(imageId);
-    if (existing) {
-      this.bitmaps.delete(imageId);
-      ImageBitmapCache.tryClose(existing);
+    const existing = this.entries.get(imageId);
+    if (!existing) return;
+
+    this.entries.delete(imageId);
+    if (existing.bitmap) {
+      this.decodedCount--;
+      ImageBitmapCache.tryClose(existing.bitmap);
     }
-    this.inflight.delete(imageId);
   }
 
   clear(): void {
-    for (const bitmap of this.bitmaps.values()) {
-      ImageBitmapCache.tryClose(bitmap);
+    for (const entry of this.entries.values()) {
+      if (entry.bitmap) ImageBitmapCache.tryClose(entry.bitmap);
     }
-    this.bitmaps.clear();
-    this.inflight.clear();
+    this.entries.clear();
+    this.decodedCount = 0;
   }
 
   private evictIfNeeded(): void {
-    while (this.bitmaps.size > this.maxEntries) {
-      const oldest = this.bitmaps.entries().next().value as [string, ImageBitmap] | undefined;
-      if (!oldest) return;
-      const [id, bitmap] = oldest;
-      this.bitmaps.delete(id);
-      ImageBitmapCache.tryClose(bitmap);
+    while (this.decodedCount > this.maxEntries) {
+      let evicted = false;
+      for (const [id, entry] of this.entries) {
+        if (!entry.bitmap) continue;
+        this.entries.delete(id);
+        this.decodedCount--;
+        ImageBitmapCache.tryClose(entry.bitmap);
+        evicted = true;
+        break;
+      }
+      if (!evicted) return;
     }
   }
 
