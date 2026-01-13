@@ -291,6 +291,10 @@ Optional knobs:
 - enable heavier checks (slower): `--recalc --render-smoke`
 - refresh expectations for an existing fixture: run with `--force`
 
+Note: when `--input` already points at the canonical `tools/corpus/public/*.b64` fixture and an expectations entry is
+present, the command exits successfully without running triage (no Rust toolchain required). Pass `--force` to re-run
+triage and refresh the expectations entry.
+
 ### Generate a unified compatibility scorecard (corpus + Excel-oracle)
 
 The corpus dashboard captures **read + round-trip** behavior, while the Excel-oracle harness captures

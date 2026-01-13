@@ -37,6 +37,9 @@ By default the command refuses to overwrite existing fixtures/expectations; re-r
 Note: the command runs corpus triage (same as `python -m tools.corpus.triage`), which builds/executes a small Rust
 helper binary. A Rust toolchain is required locally.
 
+If you run the command on an existing `tools/corpus/public/*.b64` fixture that already has an expectations entry,
+it will **skip triage** and exit successfully (no Rust required). Use `--force` to refresh expectations.
+
 Tip: you can reduce triage report size by lowering the diff entry cap:
 
 ```bash
