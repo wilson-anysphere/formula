@@ -182,3 +182,13 @@ fn updater_rs_privileged_commands_enforce_origin_guards() {
         assert_ipc_origin_checks(&updater_rs, file, cmd);
     }
 }
+
+#[test]
+fn tray_status_rs_commands_enforce_origin_guards() {
+    let tray_status_rs = read_repo_file("src/tray_status.rs");
+    let file = "src/tray_status.rs";
+
+    for cmd in ["set_tray_status"] {
+        assert_ipc_origin_checks(&tray_status_rs, file, cmd);
+    }
+}

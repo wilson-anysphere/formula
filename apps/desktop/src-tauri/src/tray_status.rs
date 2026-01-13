@@ -2,6 +2,8 @@ use std::sync::Mutex;
 
 use tauri::tray::TrayIcon;
 
+use crate::ipc_origin;
+
 #[derive(Default)]
 pub struct TrayStatusState {
     tray: Mutex<Option<TrayIcon>>,
@@ -100,8 +102,13 @@ impl TrayStatusState {
 /// - `error`
 #[tauri::command]
 pub fn set_tray_status(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, TrayStatusState>,
     status: String,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "tray status updates", ipc_origin::Verb::Are)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "tray status updates", ipc_origin::Verb::Are)?;
+
     state.inner().update_status(&status)
 }
