@@ -7109,18 +7109,22 @@ export class SpreadsheetApp {
   }
 
   private updateStatus(): void {
-    this.status.activeCell.textContent = cellToA1(this.selection.active);
+    const activeCell = this.selection.active;
+    const activeA1 = cellToA1(activeCell);
+    this.status.activeCell.textContent = activeA1;
     const selectionRangeText =
       this.selection.ranges.length === 1 ? rangeToA1(this.selection.ranges[0]) : `${this.selection.ranges.length} ranges`;
     this.status.selectionRange.textContent = selectionRangeText;
-    this.status.activeValue.textContent = this.getCellDisplayValue(this.selection.active);
+
+    // `getCellDisplayValue` internally recomputes the computed value. We need the computed value
+    // anyway for the formula bar, so compute once and reuse to avoid duplicate formula evaluation.
+    const computed = this.getCellComputedValue(activeCell);
+    this.status.activeValue.textContent = computed == null ? "" : this.formatCellValueForDisplay(activeCell, computed);
     this.updateSelectionStats();
 
     if (this.formulaBar) {
-      const address = cellToA1(this.selection.active);
-      const input = this.getCellInputText(this.selection.active);
-      const value = this.getCellComputedValue(this.selection.active);
-      this.formulaBar.setActiveCell({ address, input, value, nameBox: selectionRangeText });
+      const input = this.formulaBar.isEditing() ? "" : this.getCellInputText(activeCell);
+      this.formulaBar.setActiveCell({ address: activeA1, input, value: computed, nameBox: selectionRangeText });
       if (!this.formulaBar.isEditing()) {
         this.formulaBarCompletion?.update();
       }

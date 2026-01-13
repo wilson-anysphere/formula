@@ -168,4 +168,41 @@ describe("SpreadsheetApp formula bar name box selection range", () => {
     root.remove();
     formulaBar.remove();
   });
+
+  it("does not overwrite the name box while the user is typing", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+
+    const address = formulaBar.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
+    expect(address).not.toBeNull();
+
+    address!.focus();
+    address!.value = "Z99";
+
+    // Selection changes should not clobber the user's in-progress typing.
+    app.selectRange(
+      {
+        range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 }, // A1:B3
+      },
+      { scrollIntoView: false, focus: false },
+    );
+    expect(address!.value).toBe("Z99");
+
+    // Esc should revert to the latest selection display value.
+    address!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(address!.value).toBe("A1:B3");
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
 });
