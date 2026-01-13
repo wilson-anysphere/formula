@@ -2024,6 +2024,49 @@ fn crossfilter_none_can_disable_relationship_inside_calculate() {
 }
 
 #[test]
+fn count_and_counta_respect_types_and_filters() {
+    let mut model = DataModel::new();
+    let mut t = Table::new("T", vec!["Col"]);
+    t.push_row(vec![1.0.into()]).unwrap();
+    t.push_row(vec![Value::Blank]).unwrap();
+    t.push_row(vec!["x".into()]).unwrap();
+    t.push_row(vec![true.into()]).unwrap();
+    model.add_table(t).unwrap();
+
+    let engine = DaxEngine::new();
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNT(T[Col])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 1.into());
+
+    let value = engine
+        .evaluate(
+            &model,
+            "COUNTA(T[Col])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+    assert_eq!(value, 3.into());
+
+    let filter = FilterContext::empty().with_column_equals("T", "Col", "x".into());
+    let value = engine
+        .evaluate(&model, "COUNT(T[Col])", &filter, &RowContext::default())
+        .unwrap();
+    assert_eq!(value, 0.into());
+
+    let value = engine
+        .evaluate(&model, "COUNTA(T[Col])", &filter, &RowContext::default())
+        .unwrap();
+    assert_eq!(value, 1.into());
+}
+
+#[test]
 fn relationship_does_not_filter_facts_when_dimension_is_unfiltered() {
     // When referential integrity is not enforced, tabular models include fact rows whose
     // foreign key has no match in the dimension. Those rows should only be removed when the

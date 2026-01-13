@@ -46,6 +46,88 @@ impl PivotMeasure {
     }
 }
 
+/// Excel-style aggregation modes for pivot value fields.
+///
+/// These map onto a subset of DAX scalar aggregations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueFieldAggregation {
+    Sum,
+    Average,
+    Min,
+    Max,
+    /// Count numeric values (Excel "Count Numbers").
+    CountNumbers,
+    /// Count non-blank values (Excel "Count").
+    Count,
+    /// Count distinct values (if the higher layer exposes it).
+    DistinctCount,
+    // Unsupported (for now).
+    Product,
+    StdDev,
+    StdDevP,
+    Var,
+    VarP,
+}
+
+/// Higher-level pivot configuration for a single value field ("Values" area).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValueFieldSpec {
+    pub source_field: String,
+    pub name: String,
+    pub aggregation: ValueFieldAggregation,
+}
+
+fn looks_like_measure_ref(source_field: &str) -> bool {
+    let source_field = source_field.trim();
+    source_field.starts_with('[') && source_field.ends_with(']')
+}
+
+fn normalize_column_ref(base_table: &str, source_field: &str) -> String {
+    let source_field = source_field.trim();
+    if source_field.contains('[') && source_field.ends_with(']') && !source_field.starts_with('[') {
+        source_field.to_string()
+    } else {
+        format!("{base_table}[{source_field}]")
+    }
+}
+
+/// Build DAX pivot measures for a list of Excel-style value field specs.
+///
+/// Mapping notes:
+/// - `ValueFieldAggregation::Count` maps to DAX `COUNTA(...)` (counts non-blank values).
+/// - `ValueFieldAggregation::CountNumbers` maps to DAX `COUNT(...)` (counts numeric values).
+pub fn measures_from_value_fields(
+    base_table: &str,
+    value_fields: &[ValueFieldSpec],
+) -> DaxResult<Vec<PivotMeasure>> {
+    value_fields
+        .iter()
+        .map(|vf| {
+            let source = vf.source_field.trim();
+            if looks_like_measure_ref(source) {
+                return PivotMeasure::new(vf.name.clone(), source.to_string());
+            }
+
+            let column_ref = normalize_column_ref(base_table, source);
+            let expr = match vf.aggregation {
+                ValueFieldAggregation::Sum => format!("SUM({column_ref})"),
+                ValueFieldAggregation::Average => format!("AVERAGE({column_ref})"),
+                ValueFieldAggregation::Min => format!("MIN({column_ref})"),
+                ValueFieldAggregation::Max => format!("MAX({column_ref})"),
+                ValueFieldAggregation::CountNumbers => format!("COUNT({column_ref})"),
+                ValueFieldAggregation::Count => format!("COUNTA({column_ref})"),
+                ValueFieldAggregation::DistinctCount => format!("DISTINCTCOUNT({column_ref})"),
+                other => {
+                    return Err(DaxError::Eval(format!(
+                        "pivot value field aggregation {other:?} is not supported yet"
+                    )))
+                }
+            };
+            PivotMeasure::new(vf.name.clone(), expr)
+        })
+        .collect()
+}
+
 /// The result of a pivot/group-by query.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PivotResult {
@@ -1898,6 +1980,86 @@ mod tests {
     };
     use std::sync::Arc;
     use std::time::Instant;
+
+    #[test]
+    fn measures_from_value_fields_generates_measures_and_column_aggs() {
+        let value_fields = vec![
+            ValueFieldSpec {
+                source_field: "[Total Sales]".into(),
+                name: "Total Sales".into(),
+                aggregation: ValueFieldAggregation::Sum,
+            },
+            ValueFieldSpec {
+                source_field: "Amount".into(),
+                name: "Sum of Amount".into(),
+                aggregation: ValueFieldAggregation::Sum,
+            },
+            ValueFieldSpec {
+                source_field: "Sales[Amount]".into(),
+                name: "Average Amount".into(),
+                aggregation: ValueFieldAggregation::Average,
+            },
+            ValueFieldSpec {
+                source_field: " Amount ".into(),
+                name: "Min Amount".into(),
+                aggregation: ValueFieldAggregation::Min,
+            },
+            ValueFieldSpec {
+                source_field: "Amount".into(),
+                name: "Max Amount".into(),
+                aggregation: ValueFieldAggregation::Max,
+            },
+            ValueFieldSpec {
+                source_field: "Amount".into(),
+                name: "CountNums Amount".into(),
+                aggregation: ValueFieldAggregation::CountNumbers,
+            },
+            ValueFieldSpec {
+                source_field: "Amount".into(),
+                name: "Count Amount".into(),
+                aggregation: ValueFieldAggregation::Count,
+            },
+            ValueFieldSpec {
+                source_field: "Amount".into(),
+                name: "Distinct Amount".into(),
+                aggregation: ValueFieldAggregation::DistinctCount,
+            },
+        ];
+
+        let measures = measures_from_value_fields("Fact", &value_fields).unwrap();
+        let expressions: Vec<&str> = measures.iter().map(|m| m.expression.as_str()).collect();
+        assert_eq!(
+            expressions,
+            vec![
+                "[Total Sales]",
+                "SUM(Fact[Amount])",
+                "AVERAGE(Sales[Amount])",
+                "MIN(Fact[Amount])",
+                "MAX(Fact[Amount])",
+                "COUNT(Fact[Amount])",
+                "COUNTA(Fact[Amount])",
+                "DISTINCTCOUNT(Fact[Amount])",
+            ]
+        );
+    }
+
+    #[test]
+    fn measures_from_value_fields_errors_on_unsupported_aggs() {
+        let value_fields = vec![ValueFieldSpec {
+            source_field: "Amount".into(),
+            name: "Product Amount".into(),
+            aggregation: ValueFieldAggregation::Product,
+        }];
+
+        let err = measures_from_value_fields("Fact", &value_fields).unwrap_err();
+        match err {
+            DaxError::Eval(message) => {
+                assert!(message.contains("Product"));
+                assert!(message.contains("not supported"));
+            }
+            other => panic!("expected eval error, got {other:?}"),
+        }
+    }
 
     #[test]
     fn pivot_benchmark_old_vs_new_columnar() {

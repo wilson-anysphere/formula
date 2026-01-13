@@ -40,8 +40,9 @@ pub use crate::model::{
     Cardinality, CrossFilterDirection, DataModel, Measure, Relationship, Table,
 };
 pub use crate::pivot::{
-    pivot, pivot_crosstab, pivot_crosstab_with_options, GroupByColumn, PivotCrosstabOptions,
-    PivotMeasure, PivotResult, PivotResultGrid,
+    measures_from_value_fields, pivot, pivot_crosstab, pivot_crosstab_with_options, GroupByColumn,
+    PivotCrosstabOptions, PivotMeasure, PivotResult, PivotResultGrid, ValueFieldAggregation,
+    ValueFieldSpec,
 };
 pub use crate::value::Value;
 

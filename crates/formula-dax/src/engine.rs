@@ -1204,6 +1204,7 @@ impl DaxEngine {
                 ))
             }
         };
+
         let table_ref = model
             .table(table)
             .ok_or_else(|| DaxError::UnknownTable(table.into()))?;
@@ -1214,6 +1215,7 @@ impl DaxEngine {
                 column: column.to_string(),
             })?;
 
+        // Fast path: for columnar numeric columns, COUNT == non-blank count.
         if filter.is_empty() {
             if let (Some(non_blank), Some(is_numeric)) = (
                 table_ref.stats_non_blank_count(idx),
@@ -1227,13 +1229,22 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut count = 0usize;
-        for row in rows {
-            if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
-                count += 1;
+        if filter.is_empty() {
+            for row in 0..table_ref.row_count() {
+                if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
+                    count += 1;
+                }
+            }
+        } else {
+            let rows = resolve_table_rows(model, filter, table)?;
+            for row in rows {
+                if matches!(table_ref.value_by_idx(row, idx), Some(Value::Number(_))) {
+                    count += 1;
+                }
             }
         }
+
         Ok(Value::from(count as i64))
     }
 
@@ -1267,17 +1278,30 @@ impl DaxEngine {
             }
         }
 
-        let rows = resolve_table_rows(model, filter, table)?;
         let mut count = 0usize;
-        for row in rows {
-            if !table_ref
-                .value_by_idx(row, idx)
-                .unwrap_or(Value::Blank)
-                .is_blank()
-            {
-                count += 1;
+        if filter.is_empty() {
+            for row in 0..table_ref.row_count() {
+                if !table_ref
+                    .value_by_idx(row, idx)
+                    .unwrap_or(Value::Blank)
+                    .is_blank()
+                {
+                    count += 1;
+                }
+            }
+        } else {
+            let rows = resolve_table_rows(model, filter, table)?;
+            for row in rows {
+                if !table_ref
+                    .value_by_idx(row, idx)
+                    .unwrap_or(Value::Blank)
+                    .is_blank()
+                {
+                    count += 1;
+                }
             }
         }
+
         Ok(Value::from(count as i64))
     }
 
@@ -1305,8 +1329,8 @@ impl DaxEngine {
                 column: column.to_string(),
             })?;
 
-        let include_virtual_blank = blank_row_allowed(filter, table)
-            && virtual_blank_row_exists(model, filter, table)?;
+        let include_virtual_blank =
+            blank_row_allowed(filter, table) && virtual_blank_row_exists(model, filter, table)?;
 
         if filter.is_empty() {
             if let Some(non_blank) = table_ref.stats_non_blank_count(idx) {
