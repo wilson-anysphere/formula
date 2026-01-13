@@ -1,11 +1,38 @@
 import type { AIAuditEntry, AuditListFilters } from "./types.ts";
 import type { AIAuditStore } from "./store.ts";
 
+export interface MemoryAIAuditStoreOptions {
+  /**
+   * Maximum number of entries to keep (newest retained). If unset, entries are unbounded.
+   */
+  max_entries?: number;
+  /**
+   * Maximum age in milliseconds. Entries older than (now - max_age_ms) are dropped
+   * at write-time. If unset, age-based retention is disabled.
+   */
+  max_age_ms?: number;
+}
+
 export class MemoryAIAuditStore implements AIAuditStore {
   private readonly entries: AIAuditEntry[] = [];
+  private readonly maxEntries?: number;
+  private readonly maxAgeMs?: number;
+
+  constructor(options: MemoryAIAuditStoreOptions = {}) {
+    const maxEntries = options.max_entries;
+    if (typeof maxEntries === "number" && Number.isFinite(maxEntries) && maxEntries > 0) {
+      this.maxEntries = Math.floor(maxEntries);
+    }
+
+    const maxAgeMs = options.max_age_ms;
+    if (typeof maxAgeMs === "number" && Number.isFinite(maxAgeMs) && maxAgeMs > 0) {
+      this.maxAgeMs = maxAgeMs;
+    }
+  }
 
   async logEntry(entry: AIAuditEntry): Promise<void> {
     this.entries.push(cloneAuditEntry(entry));
+    this.enforceRetention();
   }
 
   async listEntries(filters: AuditListFilters = {}): Promise<AIAuditEntry[]> {
@@ -20,6 +47,31 @@ export class MemoryAIAuditStore implements AIAuditStore {
     }
     results.sort((a, b) => b.timestamp_ms - a.timestamp_ms);
     return typeof limit === "number" ? results.slice(0, limit) : results;
+  }
+
+  private enforceRetention(): void {
+    const maxAgeMs = this.maxAgeMs;
+    if (typeof maxAgeMs === "number" && Number.isFinite(maxAgeMs) && maxAgeMs > 0) {
+      const cutoff = Date.now() - maxAgeMs;
+      let writeIndex = 0;
+      for (const entry of this.entries) {
+        if (entry.timestamp_ms >= cutoff) {
+          this.entries[writeIndex++] = entry;
+        }
+      }
+      this.entries.length = writeIndex;
+    }
+
+    const maxEntries = this.maxEntries;
+    if (
+      typeof maxEntries === "number" &&
+      Number.isFinite(maxEntries) &&
+      maxEntries > 0 &&
+      this.entries.length > maxEntries
+    ) {
+      this.entries.sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+      this.entries.splice(0, this.entries.length - maxEntries);
+    }
   }
 }
 
