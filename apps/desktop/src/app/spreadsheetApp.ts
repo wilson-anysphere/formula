@@ -1569,10 +1569,9 @@ export class SpreadsheetApp {
              this.syncSelectionFromSharedGrid();
              this.updateStatus();
            },
-           onRequestCellEdit: (request) => {
-             if (this.isReadOnly()) return;
-             this.openEditorFromSharedGrid(request);
-           },
+            onRequestCellEdit: (request) => {
+              this.openEditorFromSharedGrid(request);
+            },
              onAxisSizeChange: (change) => {
                this.onSharedGridAxisSizeChange(change);
              },
@@ -4568,7 +4567,13 @@ export class SpreadsheetApp {
   }
 
   openCellEditorAtActiveCell(): void {
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const cell = this.selection.active;
+      showCollabEditRejectedToast([
+        { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+      ]);
+      return;
+    }
     if (this.inlineEditController.isOpen()) return;
     if (this.editor.isOpen()) return;
     if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
@@ -4680,7 +4685,17 @@ export class SpreadsheetApp {
 
   private openEditorFromSharedGrid(request: { row: number; col: number; initialKey?: string }): void {
     if (!this.sharedGrid) return;
-    if (this.isReadOnly()) return;
+    if (this.isReadOnly()) {
+      const headerRows = this.sharedHeaderRows();
+      const headerCols = this.sharedHeaderCols();
+      if (request.row >= headerRows && request.col >= headerCols) {
+        const docCell = this.docCellFromGridCell({ row: request.row, col: request.col });
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: docCell.row, col: docCell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+      }
+      return;
+    }
     if (this.editor.isOpen()) return;
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
@@ -9486,8 +9501,13 @@ export class SpreadsheetApp {
       // In-cell editing should never start while the formula bar is actively editing (range selection mode).
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
-      if (this.isReadOnly()) return;
       const cell = this.selection.active;
+      if (this.isReadOnly()) {
+        showCollabEditRejectedToast([
+          { sheetId: this.sheetId, row: cell.row, col: cell.col, rejectionKind: "cell", rejectionReason: "permission" },
+        ]);
+        return;
+      }
       const bounds = this.getCellRect(cell);
       if (!bounds) return;
       const initialValue = this.getCellInputText(cell);
