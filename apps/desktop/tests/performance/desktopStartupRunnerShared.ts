@@ -421,6 +421,11 @@ export async function runOnce({
         return;
       }
 
+      // If the desktop process exited before we captured metrics, attempt to kill the full
+      // process tree anyway. Some WebView runtimes can keep helper processes alive even after
+      // the parent crashes/exits.
+      terminateProcessTree(child, 'force');
+
       settle(
         'reject',
         new Error(`Desktop process exited before reporting metrics (code=${code}, signal=${signal})`),

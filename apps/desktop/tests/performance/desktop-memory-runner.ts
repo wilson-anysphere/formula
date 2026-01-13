@@ -454,6 +454,10 @@ async function runOnce(binPath: string, timeoutMs: number, settleMs: number): Pr
         return;
       }
 
+      // If the desktop process exits early (before we sample memory), still attempt to kill the
+      // full process tree. WebView helpers can survive parent crashes and leak across runs.
+      terminateProcessTree(child, "force");
+
       if (captured) {
         settle(
           "reject",
