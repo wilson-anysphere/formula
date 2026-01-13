@@ -736,8 +736,8 @@ are attached:
    - Updater metadata: `latest.json` and `latest.json.sig`
    - `SHA256SUMS.txt` (SHA256 checksums for all release assets)
    - macOS (**universal**): `.dmg` (installer) + `.app.tar.gz` (updater payload)
-   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `x64` in the filename)
-   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, usually includes `arm64` in the filename)
+   - Windows **x64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `x64` / `x86_64`)
+   - Windows **ARM64**: installers (WiX `.msi` **and** NSIS `.exe`, filename typically includes `arm64` / `aarch64`)
    - Linux: `.AppImage` + `.deb` + `.rpm`
 
    This repo requires Tauri updater signing for tagged releases, so expect `.sig` signature files to
