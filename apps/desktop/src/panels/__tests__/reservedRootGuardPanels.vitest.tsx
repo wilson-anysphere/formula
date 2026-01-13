@@ -323,4 +323,44 @@ describe("sync-server reserved root guard disconnect UX", () => {
       root2.unmount();
     });
   });
+
+  it("tracks provider.ws replacement via provider 'status' events", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws1 = new FakeBrowserWebSocket();
+    const ws2 = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws1);
+    const session = { doc: new Y.Doc({ guid: "doc-6" }), provider, presence: null } as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    await act(async () => {
+      provider.ws = ws2;
+      provider.emit("status", { status: "connected" });
+      await flushPromises();
+    });
+
+    await act(async () => {
+      ws2.emitClose(1008, "reserved root mutation");
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

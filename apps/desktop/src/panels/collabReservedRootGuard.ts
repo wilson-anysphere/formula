@@ -144,7 +144,13 @@ export function listenForProviderCloseEvents(provider: any | null, onClose: (inf
   const refreshWsListener = () => {
     try {
       const nextWs = (provider as any).ws;
-      if (!nextWs || nextWs === currentWs) return;
+      if (nextWs === currentWs) return;
+      if (!nextWs) {
+        wsDisposer?.();
+        wsDisposer = null;
+        currentWs = null;
+        return;
+      }
       wsDisposer?.();
       currentWs = nextWs;
       wsDisposer = attachWsCloseListener(nextWs, onClose);
