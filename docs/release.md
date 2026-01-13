@@ -952,9 +952,23 @@ command -v desktop-file-validate >/dev/null && desktop-file-validate "$desktop_f
 After the workflow completes, open the GitHub Release (draft) and confirm the expected artifacts
 are attached:
 
-Note: the in-app updater downloads whatever URLs `latest.json` points at (per-platform). Installers
-like `.dmg` / `.msi` / `.deb` are for **manual** installation; auto-update uses the **updater
-payload** artifacts referenced by `latest.json` (see `docs/desktop-updater-target-mapping.md`).
+Note: the in-app updater downloads whatever URLs `latest.json` points at (per-platform). The
+auto-update artifact is not always the same file you’d choose for manual install (see
+`docs/desktop-updater-target-mapping.md`):
+
+- macOS: updater uses `*.app.tar.gz` (not the `.dmg`)
+- Linux: updater uses `*.AppImage` (not `.deb`/`.rpm`)
+- Windows: updater uses the installer referenced in `latest.json` (`.msi` preferred; `.exe` also allowed)
+
+Quick reference (auto-update vs manual install):
+
+| Target key (`latest.json.platforms`) | Auto-update asset (`platforms[key].url`) | Manual install |
+| --- | --- | --- |
+| `darwin-universal` | `*.app.tar.gz` (or `*.tar.gz` updater archive) | `.dmg` |
+| `windows-x86_64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
+| `windows-aarch64` | `.msi` (preferred) or `.exe` | `.msi` / `.exe` |
+| `linux-x86_64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
+| `linux-aarch64` | `*.AppImage` | `.deb` / `.rpm` (AppImage optional) |
 
 ### One-liner: release smoke test
 
@@ -1013,19 +1027,19 @@ node scripts/release-smoke-test.mjs --tag vX.Y.Z --repo owner/name --local-bundl
 
    Quick check (after downloading `latest.json` to your current directory):
 
-   ```bash
-   python - <<'PY'
-   import json
-   data = json.load(open("latest.json", encoding="utf-8"))
-   keys = sorted((data.get("platforms") or {}).keys())
-   print("\n".join(keys) if keys else "(no platforms found)")
-   PY
-   ```
+    ```bash
+    python - <<'PY'
+    import json
+    data = json.load(open("latest.json", encoding="utf-8"))
+    keys = sorted((data.get("platforms") or {}).keys())
+    print("\n".join(keys) if keys else "(no platforms found)")
+    PY
+    ```
 
-     Also confirm each platform entry points at the **updater-consumed** asset type:
-     - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
-     - `windows-*` → `*.msi` (preferred; updater runs the Windows Installer) or `*.exe` (depending on updater strategy)
-     - `linux-*` → `*.AppImage`
+   Also confirm each platform entry points at the **updater-consumed** asset type:
+   - `darwin-*` → `*.app.tar.gz` (preferred) or another `*.tar.gz` updater archive
+   - `windows-*` → `*.msi` (preferred; updater runs the Windows Installer) or `*.exe` (depending on updater strategy)
+   - `linux-*` → `*.AppImage`
 
 3. Download the artifacts and do quick sanity checks:
 
