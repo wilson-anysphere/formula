@@ -57,6 +57,8 @@ export interface Viewport {
   width: number;
   height: number;
   dpr: number;
+  /** Grid zoom factor. Defaults to 1. */
+  zoom?: number;
   /**
    * Frozen pane counts in *sheet-space* (i.e. they do not include any synthetic
    * header rows/cols used by shared-grid mode).
@@ -97,30 +99,31 @@ export interface ChartRenderer {
   renderToCanvas(ctx: CanvasRenderingContext2D, chartId: string, rect: Rect): void;
 }
 
-export function anchorToRectPx(anchor: Anchor, geom: GridGeometry): Rect {
+export function anchorToRectPx(anchor: Anchor, geom: GridGeometry, zoom: number = 1): Rect {
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   switch (anchor.type) {
     case "oneCell": {
       const origin = geom.cellOriginPx(anchor.from.cell);
       return {
-        x: origin.x + emuToPx(anchor.from.offset.xEmu),
-        y: origin.y + emuToPx(anchor.from.offset.yEmu),
-        width: emuToPx(anchor.size.cx),
-        height: emuToPx(anchor.size.cy),
+        x: origin.x + emuToPx(anchor.from.offset.xEmu) * scale,
+        y: origin.y + emuToPx(anchor.from.offset.yEmu) * scale,
+        width: emuToPx(anchor.size.cx) * scale,
+        height: emuToPx(anchor.size.cy) * scale,
       };
     }
     case "twoCell": {
       const fromOrigin = geom.cellOriginPx(anchor.from.cell);
       const toOrigin = geom.cellOriginPx(anchor.to.cell);
 
-      const x1 = fromOrigin.x + emuToPx(anchor.from.offset.xEmu);
-      const y1 = fromOrigin.y + emuToPx(anchor.from.offset.yEmu);
+      const x1 = fromOrigin.x + emuToPx(anchor.from.offset.xEmu) * scale;
+      const y1 = fromOrigin.y + emuToPx(anchor.from.offset.yEmu) * scale;
 
       // In DrawingML, `to` specifies the cell *containing* the bottom-right
       // corner (i.e. the first cell strictly outside the shape when the corner
       // lies on a grid boundary). The absolute end point is therefore the
       // origin of the `to` cell plus the offsets.
-      const x2 = toOrigin.x + emuToPx(anchor.to.offset.xEmu);
-      const y2 = toOrigin.y + emuToPx(anchor.to.offset.yEmu);
+      const x2 = toOrigin.x + emuToPx(anchor.to.offset.xEmu) * scale;
+      const y2 = toOrigin.y + emuToPx(anchor.to.offset.yEmu) * scale;
 
       return {
         x: Math.min(x1, x2),
@@ -131,10 +134,10 @@ export function anchorToRectPx(anchor: Anchor, geom: GridGeometry): Rect {
     }
     case "absolute":
       return {
-        x: emuToPx(anchor.pos.xEmu),
-        y: emuToPx(anchor.pos.yEmu),
-        width: emuToPx(anchor.size.cx),
-        height: emuToPx(anchor.size.cy),
+        x: emuToPx(anchor.pos.xEmu) * scale,
+        y: emuToPx(anchor.pos.yEmu) * scale,
+        width: emuToPx(anchor.size.cx) * scale,
+        height: emuToPx(anchor.size.cy) * scale,
       };
   }
 }
@@ -184,6 +187,7 @@ export class DrawingOverlay {
     const colors = resolveOverlayColorTokens();
     const ordered = [...objects].sort((a, b) => a.zOrder - b.zOrder);
     const drawObjects = options?.drawObjects !== false;
+    const zoom = viewport.zoom ?? 1;
 
     const paneLayout = resolvePaneLayout(viewport, this.geom);
     const viewportRect = { x: 0, y: 0, width: viewport.width, height: viewport.height };
@@ -193,7 +197,7 @@ export class DrawingOverlay {
         if (seq !== this.renderSeq) return;
         if (signal?.aborted) return;
         if (seq !== this.renderSeq) return;
-        const rect = anchorToRectPx(obj.anchor, this.geom);
+        const rect = anchorToRectPx(obj.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(obj.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
         const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;
@@ -424,7 +428,7 @@ export class DrawingOverlay {
     if (this.selectedId != null) {
       const selected = objects.find((o) => o.id === this.selectedId);
       if (selected) {
-        const rect = anchorToRectPx(selected.anchor, this.geom);
+        const rect = anchorToRectPx(selected.anchor, this.geom, zoom);
         const pane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         const scrollX = pane.inFrozenCols ? 0 : viewport.scrollX;
         const scrollY = pane.inFrozenRows ? 0 : viewport.scrollY;

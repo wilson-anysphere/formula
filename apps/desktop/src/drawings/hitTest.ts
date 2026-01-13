@@ -60,6 +60,8 @@ export interface HitTestIndex {
   /** Indices of objects that were too large to bucket efficiently. */
   global: number[];
   bucketSizePx: number;
+  /** Zoom used when computing `bounds`. */
+  zoom: number;
   /** Geometry used to derive sheet-space bounds (also used for frozen-pane layout fallbacks). */
   geom: GridGeometry;
   /** Object id -> index into `ordered` / `bounds` (useful for selection/cursor logic). */
@@ -95,10 +97,17 @@ export function buildHitTestIndex(
      * the `global` list instead of inserted into every bucket.
      */
     maxBucketsPerObject?: number;
+    /**
+     * Zoom factor used when mapping EMU offsets/sizes to pixels.
+     *
+     * Defaults to 1, matching the overlay behavior when `viewport.zoom` is not provided.
+     */
+    zoom?: number;
   },
 ): HitTestIndex {
   const bucketSizePx = Math.max(1, Math.floor(opts?.bucketSizePx ?? 256));
   const maxBucketsPerObject = Math.max(1, Math.floor(opts?.maxBucketsPerObject ?? 256));
+  const zoom = Number.isFinite(opts?.zoom) && (opts!.zoom as number) > 0 ? (opts!.zoom as number) : 1;
 
   // Walk from top to bottom (highest zOrder first).
   const ordered = [...objects].sort((a, b) => b.zOrder - a.zOrder);
@@ -114,7 +123,7 @@ export function buildHitTestIndex(
   for (let i = 0; i < ordered.length; i += 1) {
     const obj = ordered[i]!;
     byId.set(obj.id, i);
-    const rect = anchorToRectPx(obj.anchor, geom);
+    const rect = anchorToRectPx(obj.anchor, geom, zoom);
     bounds[i] = rect;
     let aabb = rect;
     let cos = 1;
@@ -175,7 +184,7 @@ export function buildHitTestIndex(
     }
   }
 
-  return { ordered, bounds, aabbs, transformCos, transformSin, transformFlags, buckets, global, bucketSizePx, geom, byId };
+  return { ordered, bounds, aabbs, transformCos, transformSin, transformFlags, buckets, global, bucketSizePx, geom, byId, zoom };
 }
 
 function hitTestCandidateIndex(
@@ -311,6 +320,34 @@ export function hitTestDrawings(
   const sheetX = x - headerOffsetX + scrollX;
   const sheetY = y - headerOffsetY + scrollY;
 
+  const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+  if (Math.abs(zoom - index.zoom) > 1e-6) {
+    // Zoom changes affect EMU->px conversions; fall back to a linear scan (still
+    // respecting z-order) if the caller didn't rebuild the index for the current
+    // zoom. This keeps hit testing consistent with `DrawingOverlay.render()`.
+    const hasFrozenPanes = frozenRows !== 0 || frozenCols !== 0;
+    for (const obj of index.ordered) {
+      if (hasFrozenPanes) {
+        const anchor = obj.anchor;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+        if (objInFrozenRows !== inFrozenRows || objInFrozenCols !== inFrozenCols) continue;
+      }
+
+      const rect = anchorToRectPx(obj.anchor, geom, zoom);
+      if (pointInRect(sheetX, sheetY, rect)) {
+        const screen = {
+          x: rect.x - scrollX + headerOffsetX,
+          y: rect.y - scrollY + headerOffsetY,
+          width: rect.width,
+          height: rect.height,
+        };
+        return { object: obj, bounds: screen };
+      }
+    }
+    return null;
+  }
+
   const hitIndex = hitTestCandidateIndex(index, sheetX, sheetY, frozenRows, frozenCols, inFrozenRows, inFrozenCols);
   if (hitIndex == null) return null;
 
@@ -398,6 +435,23 @@ export function hitTestDrawingsObject(
   const scrollY = inFrozenRows ? 0 : viewport.scrollY;
   const sheetX = x - headerOffsetX + scrollX;
   const sheetY = y - headerOffsetY + scrollY;
+
+  const zoom = Number.isFinite(viewport.zoom) && (viewport.zoom as number) > 0 ? (viewport.zoom as number) : 1;
+  if (Math.abs(zoom - index.zoom) > 1e-6) {
+    const hasFrozenPanes = frozenRows !== 0 || frozenCols !== 0;
+    for (const obj of index.ordered) {
+      if (hasFrozenPanes) {
+        const anchor = obj.anchor;
+        const objInFrozenRows = anchor.type !== "absolute" && anchor.from.cell.row < frozenRows;
+        const objInFrozenCols = anchor.type !== "absolute" && anchor.from.cell.col < frozenCols;
+        if (objInFrozenRows !== inFrozenRows || objInFrozenCols !== inFrozenCols) continue;
+      }
+
+      const rect = anchorToRectPx(obj.anchor, geom, zoom);
+      if (pointInRect(sheetX, sheetY, rect)) return obj;
+    }
+    return null;
+  }
 
   const hitIndex = hitTestCandidateIndex(index, sheetX, sheetY, frozenRows, frozenCols, inFrozenRows, inFrozenCols);
   return hitIndex == null ? null : index.ordered[hitIndex]!;
