@@ -9,8 +9,10 @@ type VersionManagerLike = {
   getVersion(versionId: string): Promise<{ snapshot: Uint8Array } | null>;
 };
 
+type SheetMetaChange = { id: string; field: string; before: unknown; after: unknown };
+
 type WorkbookDiff = {
-  sheets: { added: unknown[]; removed: unknown[]; renamed: unknown[]; moved: unknown[]; metaChanged?: unknown[] };
+  sheets: { added: unknown[]; removed: unknown[]; renamed: unknown[]; moved: unknown[]; metaChanged?: SheetMetaChange[] };
   cellsBySheet: Array<{
     sheetId: string;
     sheetName: string | null;
@@ -78,6 +80,14 @@ function summarizeCellContent(opts: { value?: unknown; formula?: string | null; 
   if (formula) return formula;
   if (opts.value === null || opts.value === undefined) return "∅";
   return summarizeJson(opts.value);
+}
+
+function formatSheetMetaField(field: string): string {
+  if (field === "visibility") return "Visibility";
+  if (field === "tabColor") return "Tab color";
+  if (field === "view.frozenRows") return "Frozen rows";
+  if (field === "view.frozenCols") return "Frozen columns";
+  return field;
 }
 
 function FormulaDiffView({
@@ -206,9 +216,10 @@ export function VersionHistoryCompareSection({
       return;
     }
 
+    const metaChangedIds = new Set((diff.sheets?.metaChanged ?? []).map((c) => c.id));
     setSelectedSheetId((prev) => {
       if (prev && entries.some((e) => e.sheetId === prev)) return prev;
-      const preferred = entries.find((e) => hasAnyCellChanges(e.diff)) ?? entries[0];
+      const preferred = entries.find((e) => hasAnyCellChanges(e.diff) || metaChangedIds.has(e.sheetId)) ?? entries[0];
       return preferred?.sheetId ?? null;
     });
   }, [diff]);
@@ -252,10 +263,15 @@ export function VersionHistoryCompareSection({
 
   const sheetOptions = useMemo(() => {
     if (!diff) return [];
+    const metaCounts = new Map<string, number>();
+    for (const change of diff.sheets?.metaChanged ?? []) {
+      metaCounts.set(change.id, (metaCounts.get(change.id) ?? 0) + 1);
+    }
     return (diff.cellsBySheet ?? []).map((entry) => {
       const name = sheetDisplayName(entry.sheetId, entry.sheetName, sheetNameResolver);
-      const changes = hasAnyCellChanges(entry.diff);
-      const suffix = changes ? "" : " (no changes)";
+      const metaCount = metaCounts.get(entry.sheetId) ?? 0;
+      const cellChanges = hasAnyCellChanges(entry.diff);
+      const suffix = cellChanges || metaCount > 0 ? (metaCount > 0 && !cellChanges ? ` (meta: ${metaCount})` : "") : " (no changes)";
       return { sheetId: entry.sheetId, displayName: `${name}${suffix}`, rawName: name };
     });
   }, [diff, sheetNameResolver]);
@@ -409,14 +425,48 @@ export function VersionHistoryCompareSection({
 
                 const any = groups.some((g) => g.items.length > 0);
 
-                return (
-                  <>
-                    {!any ? <div className="collab-version-history__sheet-diff-empty">No cell changes on this sheet.</div> : null}
+                 return (
+                   <>
+                     {(() => {
+                       const meta = (diff.sheets?.metaChanged ?? []).filter((c) => c.id === selectedSheet.sheetId);
+                       if (meta.length === 0) return null;
+                       return (
+                         <div className="collab-version-history__diff-group">
+                           <div className="collab-version-history__diff-group-title">Sheet metadata ({meta.length})</div>
+                           <div className="collab-version-history__diff-group-list">
+                             {meta.map((change, idx) => (
+                               <div
+                                 key={`meta-${idx}`}
+                                 className="collab-version-history__diff-row collab-version-history__diff-row--modified"
+                               >
+                                 <div className="collab-version-history__diff-row-header">
+                                   <span className="collab-version-history__diff-cell-ref">{formatSheetMetaField(change.field)}</span>
+                                 </div>
+                                 <div className="collab-version-history__diff-row-body">
+                                   <div className="collab-version-history__diff-row-values">
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">Before:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(change.before)}</span>
+                                     </div>
+                                     <div className="collab-version-history__diff-row-value">
+                                       <span className="collab-version-history__diff-row-label">After:</span>{" "}
+                                       <span className="collab-version-history__diff-value">{summarizeJson(change.after)}</span>
+                                     </div>
+                                   </div>
+                                 </div>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+                       );
+                     })()}
 
-                    {groups.map((g) => {
-                      if (g.items.length === 0) return null;
-                      return (
-                        <div key={g.key} className="collab-version-history__diff-group">
+                     {!any ? <div className="collab-version-history__sheet-diff-empty">No cell changes on this sheet.</div> : null}
+
+                     {groups.map((g) => {
+                       if (g.items.length === 0) return null;
+                       return (
+                         <div key={g.key} className="collab-version-history__diff-group">
                           <div className="collab-version-history__diff-group-title">
                             {g.label} ({g.items.length})
                           </div>
