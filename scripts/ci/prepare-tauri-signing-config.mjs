@@ -6,8 +6,7 @@
  * so local builds work without Developer ID certificates installed. In CI we want:
  *   - unsigned builds to succeed cleanly on forks/dry-runs (no secrets)
  *   - signed/notarized builds to use the explicit `APPLE_SIGNING_IDENTITY` provided by secrets
- *     when available (avoid ambiguous identity selection when multiple certs exist). If no
- *     identity is provided, we fall back to the generic "Developer ID Application" selector.
+ *     (avoid ambiguous identity selection when multiple certs exist).
  *
  * This script:
  *   1) Detects whether macOS/Windows signing (and macOS notarization) secrets are present.
@@ -109,6 +108,8 @@ function log(message) {
 function main() {
   const requireCodesign = isTruthy(process.env.FORMULA_REQUIRE_CODESIGN);
   const runnerOs = getRunnerOs();
+  const isMacRunner = runnerOs === "macOS";
+  const isWindowsRunner = runnerOs === "Windows";
 
   if (requireCodesign) {
     const missing = [];
@@ -146,17 +147,19 @@ function main() {
 
   const hasAppleCert = envHasValue("APPLE_CERTIFICATE");
   const hasAppleCertPassword = envHasValue("APPLE_CERTIFICATE_PASSWORD");
-  // Treat the signing identity as optional: if missing, we fall back to the config's current
-  // identity (or a safe default) so forks/dry-runs can still opt into signing by providing only
-  // a certificate + password.
-  const hasMacSigningSecrets = hasAppleCert && hasAppleCertPassword;
+  const hasAppleSigningIdentity = envHasValue("APPLE_SIGNING_IDENTITY");
+  const hasMacSigningSecrets =
+    isMacRunner && hasAppleCert && hasAppleCertPassword && hasAppleSigningIdentity;
 
   const hasAppleNotarizationSecrets =
-    envHasValue("APPLE_ID") && envHasValue("APPLE_PASSWORD") && envHasValue("APPLE_TEAM_ID");
+    isMacRunner &&
+    envHasValue("APPLE_ID") &&
+    envHasValue("APPLE_PASSWORD") &&
+    envHasValue("APPLE_TEAM_ID");
 
   const hasWindowsCert = envHasValue("WINDOWS_CERTIFICATE");
   const hasWindowsCertPassword = envHasValue("WINDOWS_CERTIFICATE_PASSWORD");
-  const hasWindowsSigningSecrets = hasWindowsCert && hasWindowsCertPassword;
+  const hasWindowsSigningSecrets = isWindowsRunner && hasWindowsCert && hasWindowsCertPassword;
 
   /** @type {any} */
   let config;
@@ -173,60 +176,64 @@ function main() {
 
   let changed = false;
 
-  if (!hasMacSigningSecrets) {
-    const currentIdentity = config?.bundle?.macOS?.signingIdentity;
-    if (currentIdentity !== null) {
-      config.bundle ??= {};
-      config.bundle.macOS ??= {};
-      config.bundle.macOS.signingIdentity = null;
-      changed = true;
-      log(
-        `macOS code signing secrets not fully configured; setting bundle.macOS.signingIdentity=null for this run.`
-      );
+  if (isMacRunner) {
+    if (!hasMacSigningSecrets) {
+      const currentIdentity = config?.bundle?.macOS?.signingIdentity;
+      if (currentIdentity !== null) {
+        config.bundle ??= {};
+        config.bundle.macOS ??= {};
+        config.bundle.macOS.signingIdentity = null;
+        changed = true;
+        log(
+          `macOS code signing secrets not fully configured; setting bundle.macOS.signingIdentity=null for this run.`
+        );
+      } else {
+        log(`macOS code signing secrets not detected; config already has signing disabled.`);
+      }
     } else {
-      log(`macOS code signing secrets not detected; config already has signing disabled.`);
-    }
-  } else {
-    const explicitIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim() ?? "";
-    const currentIdentity = config?.bundle?.macOS?.signingIdentity;
-
-    const desiredIdentity =
-      explicitIdentity.length > 0
-        ? explicitIdentity
-        : typeof currentIdentity === "string" && currentIdentity.trim().length > 0
-          ? currentIdentity
-          : "Developer ID Application";
-
-    if (currentIdentity !== desiredIdentity) {
-      config.bundle ??= {};
-      config.bundle.macOS ??= {};
-      config.bundle.macOS.signingIdentity = desiredIdentity;
-      changed = true;
-      log(
-        explicitIdentity.length > 0
-          ? `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to explicit APPLE_SIGNING_IDENTITY for this run.`
-          : `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to ${JSON.stringify(desiredIdentity)} for this run.`
-      );
-    } else {
-      log(`macOS code signing secrets detected; leaving bundle.macOS.signingIdentity unchanged.`);
+      const explicitIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim() ?? "";
+      if (explicitIdentity.length === 0) {
+        // Should be unreachable because `hasMacSigningSecrets` requires a non-empty identity, but
+        // keep the branch so the script is robust against future changes.
+        log(
+          `macOS code signing secrets detected but APPLE_SIGNING_IDENTITY is empty; leaving bundle.macOS.signingIdentity unchanged.`
+        );
+      } else {
+        const currentIdentity = config?.bundle?.macOS?.signingIdentity;
+        if (currentIdentity !== explicitIdentity) {
+          config.bundle ??= {};
+          config.bundle.macOS ??= {};
+          config.bundle.macOS.signingIdentity = explicitIdentity;
+          changed = true;
+          log(
+            `macOS code signing secrets detected; setting bundle.macOS.signingIdentity to explicit APPLE_SIGNING_IDENTITY for this run.`
+          );
+        } else {
+          log(
+            `macOS code signing secrets detected; bundle.macOS.signingIdentity already matches APPLE_SIGNING_IDENTITY.`
+          );
+        }
+      }
     }
   }
 
-  if (!hasWindowsSigningSecrets) {
-    const currentThumbprint = config?.bundle?.windows?.certificateThumbprint;
-    if (currentThumbprint !== null && currentThumbprint !== undefined) {
-      config.bundle ??= {};
-      config.bundle.windows ??= {};
-      config.bundle.windows.certificateThumbprint = null;
-      changed = true;
-      log(
-        `Windows code signing secrets not detected; setting bundle.windows.certificateThumbprint=null for this run.`
-      );
+  if (isWindowsRunner) {
+    if (!hasWindowsSigningSecrets) {
+      const currentThumbprint = config?.bundle?.windows?.certificateThumbprint;
+      if (currentThumbprint !== null && currentThumbprint !== undefined) {
+        config.bundle ??= {};
+        config.bundle.windows ??= {};
+        config.bundle.windows.certificateThumbprint = null;
+        changed = true;
+        log(
+          `Windows code signing secrets not detected; setting bundle.windows.certificateThumbprint=null for this run.`
+        );
+      } else {
+        log(`Windows code signing secrets not detected; config already has signing disabled.`);
+      }
     } else {
-      log(`Windows code signing secrets not detected; config already has signing disabled.`);
+      log(`Windows code signing secrets detected; leaving bundle.windows.certificateThumbprint unchanged.`);
     }
-  } else {
-    log(`Windows code signing secrets detected; leaving bundle.windows.certificateThumbprint unchanged.`);
   }
 
   if (changed) {
@@ -237,19 +244,20 @@ function main() {
   if (hasMacSigningSecrets) {
     exportGithubEnv("APPLE_CERTIFICATE", process.env.APPLE_CERTIFICATE ?? "");
     exportGithubEnv("APPLE_CERTIFICATE_PASSWORD", process.env.APPLE_CERTIFICATE_PASSWORD ?? "");
-    if (envHasValue("APPLE_SIGNING_IDENTITY")) {
-      exportGithubEnv("APPLE_SIGNING_IDENTITY", process.env.APPLE_SIGNING_IDENTITY ?? "");
-    }
+    exportGithubEnv("APPLE_SIGNING_IDENTITY", process.env.APPLE_SIGNING_IDENTITY ?? "");
   }
 
-  // Notarization should only run when signing is enabled and all notarization creds are present.
-  if (hasMacSigningSecrets && hasAppleNotarizationSecrets) {
-    exportGithubEnv("APPLE_ID", process.env.APPLE_ID ?? "");
-    exportGithubEnv("APPLE_PASSWORD", process.env.APPLE_PASSWORD ?? "");
-    exportGithubEnv("APPLE_TEAM_ID", process.env.APPLE_TEAM_ID ?? "");
-    log(`macOS notarization credentials detected; notarization will be enabled.`);
-  } else {
-    log(`macOS notarization credentials not fully configured; notarization will be skipped.`);
+  // Notarization should only run on macOS runners, and only when signing is enabled and all
+  // notarization creds are present.
+  if (isMacRunner) {
+    if (hasMacSigningSecrets && hasAppleNotarizationSecrets) {
+      exportGithubEnv("APPLE_ID", process.env.APPLE_ID ?? "");
+      exportGithubEnv("APPLE_PASSWORD", process.env.APPLE_PASSWORD ?? "");
+      exportGithubEnv("APPLE_TEAM_ID", process.env.APPLE_TEAM_ID ?? "");
+      log(`macOS notarization credentials detected; notarization will be enabled.`);
+    } else {
+      log(`macOS notarization credentials not fully configured; notarization will be skipped.`);
+    }
   }
 
   if (hasWindowsSigningSecrets) {
