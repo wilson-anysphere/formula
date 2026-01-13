@@ -60,6 +60,7 @@ describe("ai-context TS entrypoint", () => {
         '"phone_number" satisfies typeof dlp.findings[number];',
         '"api_key" satisfies typeof dlp.findings[number];',
         '"iban" satisfies typeof dlp.findings[number];',
+        '"private_key" satisfies typeof dlp.findings[number];',
         "",
         "const ragIndex = new RagIndex();",
         "const { schema: indexedSchema, chunkCount } = await ragIndex.indexSheet(",

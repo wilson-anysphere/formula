@@ -1,4 +1,4 @@
-export type DlpFinding = "email" | "ssn" | "credit_card" | "phone_number" | "api_key" | "iban";
+export type DlpFinding = "email" | "ssn" | "credit_card" | "phone_number" | "api_key" | "iban" | "private_key";
 export type DlpLevel = "public" | "sensitive";
 
 export function classifyText(text: string): { level: DlpLevel; findings: DlpFinding[] };
