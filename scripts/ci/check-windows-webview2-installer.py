@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 """
-Release guardrail: ensure Windows installers will install WebView2 if it is missing.
+Release guardrail: ensure Windows installers make WebView2 available.
 
-Formula's Windows build uses the Microsoft Edge WebView2 Evergreen Runtime. On machines where
-WebView2 is not already installed, the installer must be able to install it automatically.
+Formula's Windows build uses the Microsoft Edge WebView2 runtime. On machines where WebView2 is
+not already installed, the installer must ensure the runtime is available (either by bundling a
+bootstrapper/offline installer, or by shipping a fixed runtime in the app bundle).
 
 This script inspects the *produced* Windows installers under `**/target/**/release/bundle/**`
-and asserts that they contain a reference to the WebView2 bootstrapper/offline installer.
+and asserts that they contain a reference to:
+  - the WebView2 Evergreen bootstrapper (`MicrosoftEdgeWebView2Setup.exe`), or
+  - an offline runtime installer, or
+  - a fixed runtime payload (detected via well-known runtime file names, e.g. `msedgewebview2.exe`).
 
 We intentionally validate the built artifacts (not just tauri.conf.json) so CI fails if the
 bundler behavior ever regresses.
@@ -31,6 +35,8 @@ WEBVIEW2_MARKER_STRINGS = [
     "MicrosoftEdgeWebView2Setup.exe",
     # Evergreen standalone/offline installers (less common, much larger).
     "MicrosoftEdgeWebView2RuntimeInstaller",
+    # Fixed runtime bundle (when using webviewInstallMode.type = "fixedRuntime").
+    "msedgewebview2.exe",
 ]
 
 
