@@ -12,6 +12,16 @@ export interface DesktopAIAuditStoreOptions {
    */
   storageKey?: string;
   /**
+   * Hard cap (in characters) for the serialized size of a single audit entry.
+   *
+   * This is enforced via `BoundedAIAuditStore` before writing to the underlying
+   * sqlite/localStorage store to avoid persistence failures when entries grow
+   * unexpectedly large (quota limits).
+   *
+   * Defaults to `200_000`.
+   */
+  maxEntryChars?: number;
+  /**
    * Maximum number of audit entries to retain in the sqlite-backed store.
    *
    * Defaults to 10k entries.
@@ -90,6 +100,7 @@ async function createSqliteBackedStore(params: { storageKey: string; retentionMa
 
 async function resolveDesktopAIAuditStore(options: DesktopAIAuditStoreOptions = {}): Promise<AIAuditStore> {
   const storageKey = options.storageKey ?? DESKTOP_AI_AUDIT_DB_STORAGE_KEY;
+  const maxEntryChars = options.maxEntryChars;
   const retentionMaxEntries = options.retentionMaxEntries ?? DEFAULT_RETENTION_MAX_ENTRIES;
   const retentionMaxAgeMs = options.retentionMaxAgeMs ?? DEFAULT_RETENTION_MAX_AGE_MS;
 
@@ -100,7 +111,7 @@ async function resolveDesktopAIAuditStore(options: DesktopAIAuditStoreOptions = 
     // Best-effort fallback: keep audit logging functional even if sql.js fails to load
     // (e.g. blocked WASM fetch).
     return new LocalStorageAIAuditStore();
-  }).then((store) => new BoundedAIAuditStore(store));
+  }).then((store) => new BoundedAIAuditStore(store, maxEntryChars ? { max_entry_chars: maxEntryChars } : undefined));
   storePromiseByKey.set(storageKey, promise);
   return promise;
 }

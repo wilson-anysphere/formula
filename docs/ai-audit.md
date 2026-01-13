@@ -121,6 +121,10 @@ const store = new BoundedAIAuditStore(new LocalStorageAIAuditStore(), {
 });
 ```
 
+In the desktop app, the default audit store factory (`apps/desktop/src/ai/audit/auditStore.ts`)
+wraps the persisted store with `BoundedAIAuditStore` so oversized entries cannot break local
+persistence.
+
 ### Memory store (ephemeral)
 
 - Class: `MemoryAIAuditStore`
