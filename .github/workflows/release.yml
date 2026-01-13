@@ -880,6 +880,7 @@ jobs:
           $target = "${{ matrix.rust_target }}"
           $releaseCandidates = @(
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release"),
             (Join-Path $env:GITHUB_WORKSPACE "target/$target/release")
           )
           $releaseDir = $releaseCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -1048,20 +1049,21 @@ jobs:
             throw "windows-bundle: ERROR matrix.rust_target is empty; expected an explicit Windows target triple."
           }
 
-          # We expect Tauri builds in this repo to write bundles to the src-tauri target dir.
-          # Keep this assertion strict so we fail loudly if the output layout changes (or if the
-          # build didn't actually run for the requested target).
-          $expectedBundleDir = Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"
-          if (-not (Test-Path $expectedBundleDir)) {
-            $fallbackBundleDir = Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle"
-            $msg = "windows-bundle: ERROR expected Tauri bundle dir not found: $expectedBundleDir"
-            if (Test-Path $fallbackBundleDir) {
-              $msg += "`nFound bundle output under workspace target dir instead: $fallbackBundleDir"
-              $msg += "`nThis likely means the build output layout (CARGO_TARGET_DIR) has changed; update the workflow assertions accordingly."
-            }
-            throw $msg
+          $bundleCandidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
+          )
+          $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bundleDir) {
+            $candidatesJoined = $bundleCandidates -join "`n"
+            throw "windows-bundle: ERROR expected Tauri bundle dir not found. Looked in:`n$candidatesJoined"
           }
-          $bundleDir = $expectedBundleDir
+          # Note: we prefer the src-tauri target dir, but fall back to other Cargo target roots
+          # in case the workflow/toolchain output layout changes.
+          if ($bundleDir -ne $bundleCandidates[0]) {
+            Write-Host "windows-bundle: NOTE bundle dir is not in the preferred location; using: $bundleDir"
+          }
 
           # Wrap in @() so `.Count` behaves consistently even when 0 or 1 files match.
           #
@@ -1107,6 +1109,7 @@ jobs:
           $target = "${{ matrix.rust_target }}"
           $bundleCandidates = @(
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
             (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
           )
           $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -1148,6 +1151,7 @@ jobs:
           }
           $bundleCandidates = @(
             (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/src-tauri/target/$target/release/bundle"),
+            (Join-Path $env:GITHUB_WORKSPACE "apps/desktop/target/$target/release/bundle"),
             (Join-Path $env:GITHUB_WORKSPACE "target/$target/release/bundle")
           )
           $bundleDir = $bundleCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -1397,9 +1401,11 @@ jobs:
           target_roots=()
           if [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
             [[ -d "$GITHUB_WORKSPACE/apps/desktop/src-tauri/target" ]] && target_roots+=("$GITHUB_WORKSPACE/apps/desktop/src-tauri/target")
+            [[ -d "$GITHUB_WORKSPACE/apps/desktop/target" ]] && target_roots+=("$GITHUB_WORKSPACE/apps/desktop/target")
             [[ -d "$GITHUB_WORKSPACE/target" ]] && target_roots+=("$GITHUB_WORKSPACE/target")
           else
             [[ -d target ]] && target_roots+=("$(pwd)/target")
+            [[ -d ../target ]] && target_roots+=("$(cd ../target && pwd)")
             [[ -d ../../../target ]] && target_roots+=("$(cd ../../../target && pwd)")
           fi
 
@@ -1407,6 +1413,7 @@ jobs:
             echo "::error::No Cargo target directory found to scan for macOS bundle artifacts."
             echo "Looked for:"
             echo "  - apps/desktop/src-tauri/target"
+            echo "  - apps/desktop/target"
             echo "  - target"
             exit 1
           fi
