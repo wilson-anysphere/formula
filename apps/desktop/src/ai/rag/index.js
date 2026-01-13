@@ -15,9 +15,8 @@ import {
  */
 function defaultSqliteStorage(workbookId) {
   const namespace = "formula.desktop.rag.sqlite";
-  const hasIndexedDB =
-    // eslint-disable-next-line no-undef
-    typeof indexedDB !== "undefined" || (globalThis && "indexedDB" in globalThis && globalThis.indexedDB);
+  const idb = globalThis?.indexedDB;
+  const hasIndexedDB = idb && typeof idb.open === "function";
 
   // Prefer IndexedDB for large SQLite exports (binary storage + higher quotas).
   if (hasIndexedDB) {
