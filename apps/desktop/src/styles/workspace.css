@@ -298,6 +298,41 @@
   color: var(--warning);
 }
 
+.collab-panel__message button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.collab-panel__message button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.collab-panel__message button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.collab-panel__message button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.collab-panel__message button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .collab-branch-manager {
   flex: 1;
   min-height: 0;
@@ -326,6 +361,41 @@
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+}
+
+.collab-version-history button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.collab-version-history button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.collab-version-history button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.collab-version-history button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.collab-version-history button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .collab-version-history__create {
@@ -684,6 +754,68 @@
   margin-bottom: 12px;
 }
 
+.branch-manager__new-branch input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  outline: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.branch-manager__new-branch input:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.branch-manager__new-branch input:disabled {
+  opacity: 0.5;
+}
+
+.branch-manager button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.branch-manager button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.branch-manager button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.branch-manager button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.branch-manager button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .branch-manager__list {
   list-style: none;
   padding: 0;
@@ -735,6 +867,41 @@
   min-height: 0;
   overflow: auto;
   padding: 12px;
+}
+
+.branch-merge button {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.branch-merge button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.branch-merge button:active:not(:disabled) {
+  background: var(--bg-active);
+}
+
+.branch-merge button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.branch-merge button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .branch-merge__permission-warning {
