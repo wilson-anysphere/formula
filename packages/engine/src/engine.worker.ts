@@ -660,12 +660,12 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
               result = null;
               break;
             case "setWorkbookFileMetadata":
-              if (typeof (wb as any).setWorkbookFileMetadata !== "function") {
-                throw new Error(
-                  "setWorkbookFileMetadata: WasmWorkbook.setWorkbookFileMetadata is not available in this WASM build"
-                );
+              // Optional API: older WASM bundles may not expose workbook-level file metadata.
+              // Treat missing support as a no-op so callers (and DocumentController hydration)
+              // don't fail hard when running against a minimal build.
+              if (typeof (wb as any).setWorkbookFileMetadata === "function") {
+                (wb as any).setWorkbookFileMetadata(params.directory ?? null, params.filename ?? null);
               }
-              (wb as any).setWorkbookFileMetadata(params.directory ?? null, params.filename ?? null);
               result = null;
               break;
             case "setCellStyleId":

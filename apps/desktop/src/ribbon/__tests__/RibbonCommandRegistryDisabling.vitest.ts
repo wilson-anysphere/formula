@@ -389,7 +389,7 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     }
   });
 
-  it("keeps registered menu items enabled while disabling unregistered ones", () => {
+  it("keeps dropdown triggers enabled when their menu items are registered as commands", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
     const schema: RibbonSchema = {
@@ -424,6 +424,11 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     };
 
     const commandRegistry = new CommandRegistry();
+    // These commands are CommandRegistry-backed in the real desktop app, so the baseline
+    // disabling logic should keep them enabled when they are registered (even if the dropdown
+    // trigger itself is not a registered command).
+    commandRegistry.registerBuiltinCommand("home.cells.format.rowHeight", "Row Height…", () => {});
+    commandRegistry.registerBuiltinCommand("home.cells.format.columnWidth", "Column Width…", () => {});
     commandRegistry.registerBuiltinCommand("file.save.save", "Save", () => {});
     const baselineDisabledById = computeRibbonDisabledByIdFromCommandRegistry(commandRegistry, { schema });
 
@@ -464,10 +469,10 @@ describe("CommandRegistry-backed ribbon disabling", () => {
     expect(colWidth).toBeInstanceOf(HTMLButtonElement);
     expect(save).toBeInstanceOf(HTMLButtonElement);
 
-    // Row/column sizing menu items are backed by CommandRegistry commands, so they should be disabled
-    // when the registry does not register them.
-    expect(rowHeight?.disabled).toBe(true);
-    expect(colWidth?.disabled).toBe(true);
+    // Row/column sizing menu items are backed by CommandRegistry commands, so they should remain enabled
+    // when the registry registers them (even if the dropdown trigger id itself is not a registered command).
+    expect(rowHeight?.disabled).toBe(false);
+    expect(colWidth?.disabled).toBe(false);
 
     // Registered menu items remain enabled even when other menu items are disabled.
     expect(save?.disabled).toBe(false);

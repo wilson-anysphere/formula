@@ -197,6 +197,9 @@ describe("OrganizeSheetsDialog", () => {
     const input = dialog!.querySelector<HTMLInputElement>('[data-testid="organize-sheet-rename-input-S2"]');
     expect(input).toBeInstanceOf(HTMLInputElement);
 
+    const saveBtn = dialog!.querySelector<HTMLButtonElement>('[data-testid="organize-sheet-rename-save-S2"]');
+    expect(saveBtn).toBeInstanceOf(HTMLButtonElement);
+
     await act(async () => {
       setTextInputValue(input as HTMLInputElement, "Budget2024");
       input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));

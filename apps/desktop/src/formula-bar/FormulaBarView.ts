@@ -3143,13 +3143,13 @@ export class FormulaBarView {
           previewEl.dataset.argStart = String(activeArg.span.start);
           previewEl.dataset.argEnd = String(activeArg.span.end);
 
-        const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
-        const displayArgText = formatArgumentPreviewExpression(activeArg.argText);
-        previewEl.textContent = `↳ ${displayArgText}  →  ${rhs}`;
-        body.appendChild(previewEl);
-      } else {
-        this.#clearArgumentPreviewState();
-      }
+          const rhs = this.#argumentPreviewPending ? "…" : formatArgumentPreviewValue(this.#argumentPreviewValue);
+          const displayArgText = formatArgumentPreviewExpression(activeArg.argText);
+          previewEl.textContent = `↳ ${displayArgText}  →  ${rhs}`;
+          body.appendChild(previewEl);
+        } else {
+          this.#clearArgumentPreviewState();
+        }
       }
 
       panel.appendChild(title);

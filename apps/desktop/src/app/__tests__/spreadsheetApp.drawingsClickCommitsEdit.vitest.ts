@@ -76,19 +76,30 @@ function createRoot(): HTMLElement {
 }
 
 function dispatchPointerEvent(
-  target: HTMLElement,
+  target: EventTarget,
   type: "pointerdown" | "pointerup",
   coords: { x: number; y: number },
   opts: { pointerId?: number; pointerType?: string; button?: number } = {}
 ): void {
-  const event = new Event(type, { bubbles: true, cancelable: true }) as any;
-  Object.defineProperty(event, "clientX", { value: coords.x });
-  Object.defineProperty(event, "clientY", { value: coords.y });
-  Object.defineProperty(event, "offsetX", { value: coords.x });
-  Object.defineProperty(event, "offsetY", { value: coords.y });
-  Object.defineProperty(event, "pointerId", { value: opts.pointerId ?? 1 });
-  Object.defineProperty(event, "pointerType", { value: opts.pointerType ?? "mouse" });
-  Object.defineProperty(event, "button", { value: opts.button ?? 0 });
+  const pointerId = opts.pointerId ?? 1;
+  const pointerType = opts.pointerType ?? "mouse";
+  const button = opts.button ?? 0;
+  const base = { bubbles: true, cancelable: true, clientX: coords.x, clientY: coords.y, pointerId, pointerType, button };
+  const event =
+    typeof (globalThis as any).PointerEvent === "function"
+      ? new (globalThis as any).PointerEvent(type, base)
+      : (() => {
+          const e = new MouseEvent(type, base);
+          Object.assign(e, { pointerId, pointerType });
+          return e;
+        })();
+  // Ensure offsetX/Y exist so any handlers that rely on them behave consistently.
+  try {
+    Object.defineProperty(event, "offsetX", { configurable: true, value: coords.x });
+    Object.defineProperty(event, "offsetY", { configurable: true, value: coords.y });
+  } catch {
+    // Ignore if the environment disallows redefining these properties.
+  }
   target.dispatchEvent(event);
 }
 
@@ -142,7 +153,7 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status);
+    const app = new SpreadsheetApp(root, status, { enableDrawingInteractions: true });
 
     const objects: DrawingObject[] = [
       {
@@ -156,7 +167,9 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
         zOrder: 0,
       },
     ];
-    app.setDrawingObjects(objects);
+    // Seed in the backing document so any redraws triggered by committing the edit
+    // don't clobber the in-memory drawings list.
+    (app.getDocument() as any).setSheetDrawings(app.getCurrentSheetId(), objects);
 
     // Begin editing the active cell (A1).
     root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
@@ -164,15 +177,15 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     expect(editor).not.toBeNull();
     editor!.value = "Hello";
 
-    const selectionCanvas = (app as any).selectionCanvas as HTMLCanvasElement;
-    const cellRect = app.getCellRectA1("A1");
-    expect(cellRect).not.toBeNull();
+    const drawingRect = app.getDrawingRectPx(1);
+    expect(drawingRect).not.toBeNull();
 
     // Hit inside the drawing bounds (anchored at A1 with 0 offset).
-    const hitX = cellRect!.x + 10;
-    const hitY = cellRect!.y + 10;
-    dispatchPointerEvent(selectionCanvas, "pointerdown", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
-    dispatchPointerEvent(selectionCanvas, "pointerup", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+    const hitX = drawingRect!.x + 10;
+    const hitY = drawingRect!.y + 10;
+
+    dispatchPointerEvent(root, "pointerdown", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
+    dispatchPointerEvent(root, "pointerup", { x: hitX, y: hitY }, { pointerId: 1, pointerType: "mouse", button: 0 });
 
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
@@ -401,7 +414,7 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
       activeValue: document.createElement("div"),
     };
 
-    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const app = new SpreadsheetApp(root, status, { formulaBar, enableDrawingInteractions: true });
 
     const objects: DrawingObject[] = [
       {
@@ -415,7 +428,7 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
         zOrder: 0,
       },
     ];
-    app.setDrawingObjects(objects);
+    (app.getDocument() as any).setSheetDrawings(app.getCurrentSheetId(), objects);
 
     // Put the formula bar into formula editing mode (draft starts with "=").
     app.setFormulaBarDraft("=A1");
@@ -522,7 +535,7 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
         zOrder: 0,
       },
     ];
-    app.setDrawingObjects(objects);
+    (app.getDocument() as any).setSheetDrawings(app.getCurrentSheetId(), objects);
 
     // Put the formula bar into formula editing mode (draft starts with "=").
     app.setFormulaBarDraft("=A1");
@@ -547,7 +560,6 @@ describe("SpreadsheetApp drawings click behavior while editing", () => {
     root.remove();
     formulaBar.remove();
   });
-
   it("does not intercept drawing hits while the formula bar is in formula range selection mode (shared grid + drawing interactions enabled)", () => {
     process.env.DESKTOP_GRID_MODE = "shared";
 

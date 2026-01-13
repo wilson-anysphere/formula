@@ -73,32 +73,43 @@ mod builtins_text;
 mod builtins_text_dbcs;
 mod builtins_thai;
 
-// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
-// contains no otherwise-referenced symbols. Force-link every module that contains
-// `inventory::submit!` registrations so `inventory::iter::<FunctionSpec>` sees the full
-// built-in function set under `wasm-bindgen-test`.
+// On wasm targets, `inventory` registrations can be dropped by the linker if the codegen unit
+// contains no otherwise-referenced symbols (common when everything is registered via
+// `inventory::submit!`). This leads to missing built-ins at runtime (e.g. `SORT()` returning
+// `#NAME?`).
+//
+// Force-link every module that contains `inventory::submit!` registrations by referencing each
+// module's `__force_link()` function. We intentionally "use" these function pointers via
+// `black_box` so the optimizer cannot prove the calls are no-ops and remove the references during
+// LTO.
 #[cfg(target_arch = "wasm32")]
-#[used]
-static FORCE_LINK_BUILTINS: &[fn()] = &[
-    builtins_array::__force_link,
-    builtins_date_time::__force_link,
-    builtins_dynamic_arrays::__force_link,
-    builtins_dynamic_array_textsplit::__force_link,
-    builtins_information::__force_link,
-    builtins_lambda::__force_link,
-    builtins_logical::__force_link,
-    builtins_logical_extended::__force_link,
-    builtins_lookup::__force_link,
-    builtins_math::__force_link,
-    builtins_math_matrix::__force_link,
-    builtins_math_extended::__force_link,
-    builtins_select::__force_link,
-    builtins_reference::__force_link,
-    builtins_statistical::__force_link,
-    builtins_statistical_distributions::__force_link,
-    builtins_text::__force_link,
-    financial::__force_link,
-];
+fn force_link_inventory_modules() {
+    let builtins: &[fn()] = &[
+        builtins_array::__force_link,
+        builtins_date_time::__force_link,
+        builtins_dynamic_arrays::__force_link,
+        builtins_dynamic_array_textsplit::__force_link,
+        builtins_information::__force_link,
+        builtins_lambda::__force_link,
+        builtins_logical::__force_link,
+        builtins_logical_extended::__force_link,
+        builtins_lookup::__force_link,
+        builtins_math::__force_link,
+        builtins_math_matrix::__force_link,
+        builtins_math_extended::__force_link,
+        builtins_select::__force_link,
+        builtins_reference::__force_link,
+        builtins_statistical::__force_link,
+        builtins_statistical_distributions::__force_link,
+        builtins_text::__force_link,
+        financial::__force_link,
+    ];
+
+    for f in builtins {
+        let f = std::hint::black_box(*f);
+        f();
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {
@@ -478,6 +489,9 @@ pub fn iter_function_specs() -> impl Iterator<Item = &'static FunctionSpec> {
 fn registry() -> &'static HashMap<String, &'static FunctionSpec> {
     static REGISTRY: OnceLock<HashMap<String, &'static FunctionSpec>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
+        #[cfg(target_arch = "wasm32")]
+        force_link_inventory_modules();
+
         let mut map = HashMap::new();
         for spec in inventory::iter::<FunctionSpec> {
             map.insert(spec.name.to_ascii_uppercase(), spec);

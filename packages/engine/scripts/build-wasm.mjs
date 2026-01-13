@@ -440,6 +440,10 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     "--target",
     "web",
     "--release",
+    // Binaryen's wasm-opt validator can lag behind newly-emitted wasm features
+    // (e.g. bulk memory ops, non-trapping float-to-int). Skip wasm-opt so engine
+    // builds remain stable across environments.
+    "--no-opt",
     "--out-dir",
     buildOutDir,
     "--out-name",

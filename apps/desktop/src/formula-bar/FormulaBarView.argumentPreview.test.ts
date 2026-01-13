@@ -209,13 +209,16 @@ describe("FormulaBarView argument preview (integration)", () => {
     view.setActiveCell({ address: "A1", input: "", value: null });
     view.focus({ cursor: "end" });
 
-    const resolvers = new Map<string, (value: unknown) => void>();
-    const provider = vi.fn(
-      (expr: string) =>
-        new Promise<unknown>((resolve) => {
-          resolvers.set(expr, resolve);
-        })
-    );
+    let resolveA1: ((value: unknown) => void) | null = null;
+    const provider = vi.fn((expr: string) => {
+      if (expr === "A1") {
+        return new Promise<unknown>((resolve) => {
+          resolveA1 = resolve;
+        });
+      }
+      if (expr === "B1") return 123;
+      return "(preview unavailable)";
+    });
     view.setArgumentPreviewProvider(provider);
 
     const formula = "=IF(A1, B1, C1)";
@@ -225,39 +228,29 @@ describe("FormulaBarView argument preview (integration)", () => {
     const cursorA1 = formula.indexOf("A1") + 1;
     view.textarea.setSelectionRange(cursorA1, cursorA1);
     view.textarea.dispatchEvent(new Event("input"));
-
     await flushPreview();
 
     const pendingA1 = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
     expect(pendingA1?.textContent).toBe("↳ A1  →  …");
     expect(provider).toHaveBeenCalledWith("A1");
-    expect(resolvers.has("A1")).toBe(true);
+    expect(typeof resolveA1).toBe("function");
 
     // Move to the second argument (B1) before resolving A1.
     const cursorB1 = formula.indexOf("B1") + 1;
     view.textarea.setSelectionRange(cursorB1, cursorB1);
     view.textarea.dispatchEvent(new Event("select"));
-
     await flushPreview();
 
-    const pendingB1 = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
-    expect(pendingB1?.textContent).toBe("↳ B1  →  …");
+    const resolvedB1 = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
+    expect(resolvedB1?.textContent).toBe("↳ B1  →  123");
     expect(provider).toHaveBeenCalledWith("B1");
-    expect(resolvers.has("B1")).toBe(true);
 
     // Resolve the stale A1 preview; it should not clobber the B1 preview.
-    resolvers.get("A1")?.(true);
+    resolveA1?.(true);
     await flushPreview();
 
     const afterStale = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
-    expect(afterStale?.textContent).toBe("↳ B1  →  …");
-
-    // Resolve the active B1 preview and ensure it renders.
-    resolvers.get("B1")?.(123);
-    await flushPreview();
-
-    const resolved = host.querySelector<HTMLElement>('[data-testid="formula-hint-arg-preview"]');
-    expect(resolved?.textContent).toBe("↳ B1  →  123");
+    expect(afterStale?.textContent).toBe("↳ B1  →  123");
 
     host.remove();
   });

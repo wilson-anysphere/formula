@@ -331,12 +331,15 @@ describe("SpreadsheetApp collab persistence", () => {
     });
 
     const collabSession = createMockCollabSession();
-    const setPermissionsSpy = vi.fn((perms: any) => {
-      if (Array.isArray(perms?.rangeRestrictions) && perms.rangeRestrictions.some((r: unknown) => r == null || typeof r !== "object")) {
+    const setPermissionsSpy = collabSession.setPermissions as ReturnType<typeof vi.fn>;
+    setPermissionsSpy.mockImplementation((perms: any) => {
+      if (
+        Array.isArray(perms?.rangeRestrictions) &&
+        perms.rangeRestrictions.some((r: unknown) => r == null || typeof r !== "object")
+      ) {
         throw new Error("rangeRestrictions[0] invalid: restriction must be an object");
       }
     });
-    collabSession.setPermissions = setPermissionsSpy;
 
     mocks.createCollabSession.mockImplementationOnce(() => collabSession);
 
@@ -359,6 +362,9 @@ describe("SpreadsheetApp collab persistence", () => {
       });
     }).not.toThrow();
 
+    // SpreadsheetApp may wrap `collabSession.setPermissions` to keep the UI in sync
+    // with permission changes. Assert against the original spy so this test stays
+    // stable even when the method is wrapped.
     expect(setPermissionsSpy).toHaveBeenCalledTimes(2);
     expect(setPermissionsSpy.mock.calls[0]?.[0]).toMatchObject({
       role: "editor",

@@ -127,38 +127,30 @@ if (typeof (globalThis as any).PointerEvent === "undefined" && typeof (globalThi
   }
 }
 
-// JSDOM supports PointerEvent shims, but does not implement pointer capture APIs.
-// SpreadsheetApp/drawing interactions call `setPointerCapture` / `releasePointerCapture`
-// to keep drag gestures consistent across iframes/canvases. Provide no-op stubs so
-// unit tests can exercise pointer-driven flows without crashing.
-if (typeof (globalThis as any).HTMLElement === "function") {
-  const proto = (globalThis as any).HTMLElement.prototype as any;
+// JSDOM does not always implement pointer capture APIs (`setPointerCapture`, etc). SpreadsheetApp uses
+// pointer capture to keep drag/selection gestures consistent; provide no-op shims so unit tests
+// that dispatch pointer events do not crash.
+if (typeof (globalThis as any).Element === "function") {
+  const proto = (globalThis as any).Element.prototype as any;
   if (typeof proto.setPointerCapture !== "function") {
     try {
-      Object.defineProperty(proto, "setPointerCapture", {
-        configurable: true,
-        value: () => {
-          // no-op
-        },
-      });
+      Object.defineProperty(proto, "setPointerCapture", { configurable: true, value: () => {} });
     } catch {
-      proto.setPointerCapture = () => {
-        // no-op
-      };
+      proto.setPointerCapture = () => {};
     }
   }
   if (typeof proto.releasePointerCapture !== "function") {
     try {
-      Object.defineProperty(proto, "releasePointerCapture", {
-        configurable: true,
-        value: () => {
-          // no-op
-        },
-      });
+      Object.defineProperty(proto, "releasePointerCapture", { configurable: true, value: () => {} });
     } catch {
-      proto.releasePointerCapture = () => {
-        // no-op
-      };
+      proto.releasePointerCapture = () => {};
+    }
+  }
+  if (typeof proto.hasPointerCapture !== "function") {
+    try {
+      Object.defineProperty(proto, "hasPointerCapture", { configurable: true, value: () => false });
+    } catch {
+      proto.hasPointerCapture = () => false;
     }
   }
 }

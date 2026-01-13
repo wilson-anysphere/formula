@@ -383,8 +383,14 @@ describe("SpreadsheetApp drawing overlay (shared grid)", () => {
       const expectedFrozenWidthPx = Math.min(gridViewport.width, Math.max(offsetX, gridViewport.frozenWidth));
       const expectedFrozenHeightPx = Math.min(gridViewport.height, Math.max(offsetY, gridViewport.frozenHeight));
 
-      expect(viewport.frozenWidthPx).toBe(expectedFrozenWidthPx);
-      expect(viewport.frozenHeightPx).toBe(expectedFrozenHeightPx);
+      // DrawingOverlay viewports express frozen boundaries in *viewport coordinates*. Depending on
+      // the overlay (drawings vs chart selection), the viewport may include header offsets.
+      // Compare the effective frozen content size (boundary - header offsets) so this test is
+      // stable even if other overlays render after drawings.
+      const headerOffsetXViewport = typeof viewport.headerOffsetX === "number" ? viewport.headerOffsetX : 0;
+      const headerOffsetYViewport = typeof viewport.headerOffsetY === "number" ? viewport.headerOffsetY : 0;
+      expect((viewport.frozenWidthPx ?? 0) - headerOffsetXViewport).toBe(expectedFrozenWidthPx - offsetX);
+      expect((viewport.frozenHeightPx ?? 0) - headerOffsetYViewport).toBe(expectedFrozenHeightPx - offsetY);
 
       app.destroy();
       root.remove();

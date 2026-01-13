@@ -86,8 +86,16 @@ export class PresenceManager {
     this.now = now;
     this.staleAfterMs =
       typeof staleAfterMs === "number" && Number.isFinite(staleAfterMs) && staleAfterMs >= 0 ? staleAfterMs : null;
-    this._setTimeout = setTimeoutFn ?? globalThis.setTimeout;
-    this._clearTimeout = clearTimeoutFn ?? globalThis.clearTimeout;
+    // Ensure we call timer functions with a safe `this` binding.
+    //
+    // Some environments (notably browser globals) implement `setTimeout` / `clearTimeout`
+    // as methods that throw `Illegal invocation` when called with an unexpected receiver.
+    // Since we store the functions on `this` and invoke them via `this._setTimeout(...)`,
+    // bind them to `globalThis` so the receiver is always valid.
+    const setTimeoutImpl = setTimeoutFn ?? globalThis.setTimeout;
+    const clearTimeoutImpl = clearTimeoutFn ?? globalThis.clearTimeout;
+    this._setTimeout = typeof setTimeoutImpl === "function" ? setTimeoutImpl.bind(globalThis) : setTimeoutImpl;
+    this._clearTimeout = typeof clearTimeoutImpl === "function" ? clearTimeoutImpl.bind(globalThis) : clearTimeoutImpl;
     this._staleEvictionTimeoutId = null;
     /** @type {Map<Function, { includeOtherSheets: boolean }>} */
     this._listeners = new Map();
