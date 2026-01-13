@@ -60,9 +60,9 @@ export function CollabBranchManagerPanel({
     // but keeps the feature usable even when `SYNC_SERVER_MAX_MESSAGE_BYTES` is tuned low.
     const chunkSize = 8 * 1024;
     const maxChunksPerTransaction = 2;
-
+ 
     const proc = (globalThis as any).process;
-    const isNodeRuntime = Boolean(proc?.versions?.node);
+    const isNodeRuntime = Boolean(proc?.versions?.node) && proc?.release?.name === "node";
     const CompressionStreamCtor = (globalThis as any).CompressionStream as any;
     const DecompressionStreamCtor = (globalThis as any).DecompressionStream as any;
 

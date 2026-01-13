@@ -16,7 +16,9 @@ const UTF8_DECODER = new TextDecoder();
 
 function isNodeRuntime() {
   const proc = /** @type {any} */ (globalThis.process);
-  return Boolean(proc?.versions?.node);
+  // Require `process.release.name === "node"` to avoid false positives from lightweight
+  // `process` polyfills some bundlers inject into browser environments.
+  return Boolean(proc?.versions?.node) && proc?.release?.name === "node";
 }
 
 async function importNodeZlib() {
