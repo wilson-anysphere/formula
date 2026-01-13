@@ -1334,6 +1334,27 @@ pub fn build_fit_to_clamp_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single worksheet with malformed/truncated page setup
+/// records.
+///
+/// This exercises the importer's best-effort BIFF page setup parsing:
+/// - truncated `SETUP` record payload (<34 bytes)
+/// - truncated `LEFTMARGIN` record payload (<8 bytes)
+/// - truncated `HORIZONTALPAGEBREAKS` record where `cbrk` claims more entries than present
+pub fn build_page_setup_malformed_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_page_setup_malformed_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 fn build_page_break_cbrk_cap_sheet_stream(xf_cell: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
@@ -9581,6 +9602,80 @@ fn build_manual_page_breaks_sheet_stream(xf_general: u16) -> Vec<u8> {
         vertical.extend_from_slice(&0u16.to_le_bytes()); // rowEnd
     }
     push_record(&mut sheet, RECORD_VERTICALPAGEBREAKS, &vertical);
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_page_setup_malformed_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table: 16 style XFs + 1 cell XF.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "PageSetupMalformed");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    let sheet_offset = globals.len();
+    let sheet = build_page_setup_malformed_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_page_setup_malformed_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) (A1).
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Truncated SETUP record payload (<34 bytes).
+    //
+    // Use an empty payload so the parser can't accidentally apply partially-present fields (e.g.
+    // SETUP.grbit orientation), keeping the resulting page setup at defaults.
+    push_record(&mut sheet, RECORD_SETUP, &[]);
+    // Truncated margin record payload (<8 bytes).
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &[0u8; 4]);
+    // Truncated HORIZONTALPAGEBREAKS: cbrk=2 but no Brk entries present.
+    let breaks = 2u16.to_le_bytes();
+    push_record(&mut sheet, RECORD_HORIZONTALPAGEBREAKS, &breaks);
+
+    // A1: a single cell so calamine reports a non-empty range.
+    push_record(
+        &mut sheet,
+        RECORD_NUMBER,
+        &number_cell(0, 0, xf_general, 1.0),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
