@@ -336,7 +336,7 @@ impl PartialEq for OffcryptoError {
                 Self::UnsupportedEncryption {
                     encryption_type: b,
                 },
-                ) => a == b,
+            ) => a == b,
             (Self::MissingOleStream { stream: a }, Self::MissingOleStream { stream: b }) => a == b,
             (Self::DecryptedPackageNotZip, Self::DecryptedPackageNotZip) => true,
             (Self::OfficeCrypto(a), Self::OfficeCrypto(b)) => a.to_string() == b.to_string(),

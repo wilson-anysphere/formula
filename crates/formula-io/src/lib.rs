@@ -52,7 +52,7 @@ pub enum Error {
         version_minor: u16,
     },
     #[error(
-        "encrypted workbook not supported: workbook `{path}` is password-protected/encrypted; remove password protection in Excel and try again"
+        "password required: workbook `{path}` is password-protected/encrypted (legacy `.xls` encryption); provide the password to open it"
     )]
     EncryptedWorkbook { path: PathBuf },
     #[error(

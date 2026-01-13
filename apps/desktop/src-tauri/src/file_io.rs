@@ -898,7 +898,7 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
     // of trying to route them through the legacy `.xls` importer.
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
         anyhow::bail!(
-            "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
+            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
             path.display()
         );
     }
@@ -943,7 +943,7 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
         anyhow::bail!(
-            "encrypted workbook not supported: workbook `{}` is password-protected/encrypted; remove password protection in Excel and try again",
+            "password required: workbook `{}` is password-protected/encrypted; provide the password to open it",
             path.display()
         );
     }
