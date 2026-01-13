@@ -1,4 +1,5 @@
 import type { CellAddress, CollabSession } from "@formula/collab-session";
+import { getYArray } from "@formula/collab-yjs-utils";
 import * as Y from "yjs";
 
 export const ENCRYPTED_RANGES_METADATA_KEY = "encryptedRanges";
@@ -11,17 +12,6 @@ export type EncryptedRange = {
   endCol: number;
   keyId: string;
 };
-
-function isYArray(value: unknown): value is Y.Array<unknown> {
-  if (value instanceof Y.Array) return true;
-  if (!value || typeof value !== "object") return false;
-  const maybe = value as any;
-  // Duck-type so we tolerate mixed Yjs module instances.
-  if (typeof maybe.toArray !== "function") return false;
-  if (typeof maybe.observeDeep !== "function") return false;
-  if (typeof maybe.unobserveDeep !== "function") return false;
-  return true;
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -79,7 +69,7 @@ function cellInRange(cell: CellAddress, range: EncryptedRange): boolean {
 
 function ensureEncryptedRangesArray(metadata: Y.Map<unknown>): Y.Array<unknown> {
   const existing = metadata.get(ENCRYPTED_RANGES_METADATA_KEY);
-  const yarr = isYArray(existing) ? existing : null;
+  const yarr = getYArray(existing);
   if (yarr) return yarr;
 
   const next = new Y.Array<unknown>();
@@ -93,7 +83,8 @@ function ensureEncryptedRangesArray(metadata: Y.Map<unknown>): Y.Array<unknown> 
 
 function readEncryptedRanges(metadata: Y.Map<unknown>): EncryptedRange[] {
   const raw = metadata.get(ENCRYPTED_RANGES_METADATA_KEY);
-  const entries = isYArray(raw) ? raw.toArray() : Array.isArray(raw) ? raw : [];
+  const yArr = getYArray(raw);
+  const entries = yArr ? yArr.toArray() : Array.isArray(raw) ? raw : [];
   const out: EncryptedRange[] = [];
   for (const entry of entries) {
     const range = normalizeEncryptedRange(entry);
@@ -180,4 +171,3 @@ export class EncryptedRangeManager {
     return Boolean(this.getKeyIdForCell(cell));
   }
 }
-
