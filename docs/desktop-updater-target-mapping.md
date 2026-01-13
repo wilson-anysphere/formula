@@ -64,5 +64,5 @@ The table below documents what each platform key should point to in `latest.json
   - `jq '.platforms | keys' latest.json`
   - `jq -r '.platforms["windows-aarch64"].url' latest.json`
 
-- To validate a downloaded manifest + signature offline:
-  - `node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.json.sig`
+- To validate a downloaded manifest signature offline:
+  - `node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig`

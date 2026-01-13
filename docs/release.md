@@ -115,11 +115,17 @@ GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
   node scripts/verify-tauri-updater-assets.mjs vX.Y.Z
 ```
 
-If you already downloaded the manifest files (no GitHub API access needed), you can validate just
-the required platform keys with:
+If you already downloaded the manifest files (no GitHub API access needed), you can validate the
+updater manifest signature offline with:
 
 ```bash
-node scripts/verify-tauri-latest-json.mjs --manifest latest.json --sig latest.json.sig
+node scripts/ci/verify-updater-manifest-signature.mjs latest.json latest.json.sig
+```
+
+To inspect the required platform keys in the manifest:
+
+```bash
+jq '.platforms | keys' latest.json
 ```
 
 Note: `scripts/verify-tauri-latest-json.mjs` delegates to the lower-level validator
