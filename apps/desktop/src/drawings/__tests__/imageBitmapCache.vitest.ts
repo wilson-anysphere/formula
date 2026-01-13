@@ -123,4 +123,41 @@ describe("ImageBitmapCache", () => {
     expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
     expect((bitmapB as any).close).toHaveBeenCalledTimes(1);
   });
+
+  it("evicts based on access time (not decode completion order)", async () => {
+    const bitmapA = { close: vi.fn() } as unknown as ImageBitmap;
+    const bitmapB = { close: vi.fn() } as unknown as ImageBitmap;
+
+    let resolveA!: (value: ImageBitmap) => void;
+    let resolveB!: (value: ImageBitmap) => void;
+    const pA = new Promise<ImageBitmap>((res) => {
+      resolveA = res;
+    });
+    const pB = new Promise<ImageBitmap>((res) => {
+      resolveB = res;
+    });
+
+    const createImageBitmapMock = vi.fn().mockImplementationOnce(() => pA).mockImplementationOnce(() => pB);
+    vi.stubGlobal("createImageBitmap", createImageBitmapMock as unknown as typeof createImageBitmap);
+
+    const cache = new ImageBitmapCache({ maxEntries: 1 });
+
+    const promiseA = cache.get(createEntry("a"));
+    const promiseB = cache.get(createEntry("b"));
+
+    // Resolve out-of-order: B first, then A.
+    resolveB(bitmapB);
+    await expect(promiseB).resolves.toBe(bitmapB);
+
+    resolveA(bitmapA);
+    await expect(promiseA).resolves.toBe(bitmapA);
+
+    // `a` was accessed before `b`, so `a` should be evicted even though it resolved later.
+    expect((bitmapA as any).close).toHaveBeenCalledTimes(1);
+    expect((bitmapB as any).close).not.toHaveBeenCalled();
+
+    // Re-requesting `a` should require a new decode.
+    await cache.get(createEntry("a"));
+    expect(createImageBitmapMock).toHaveBeenCalledTimes(3);
+  });
 });
