@@ -65,7 +65,8 @@ fn preset_to_argb(preset: &str) -> Option<u32> {
     // We only map the most common names used by Excel charts/shapes.
     //
     // Spec reference: ECMA-376 5th ed. Part 1, §20.1.2.3.30 (PresetColorVal).
-    Some(match preset {
+    let key = preset.trim().to_ascii_lowercase();
+    Some(match key.as_str() {
         "black" => 0xFF000000,
         "white" => 0xFFFFFFFF,
         "red" => 0xFFFF0000,
@@ -75,8 +76,8 @@ fn preset_to_argb(preset: &str) -> Option<u32> {
         "cyan" | "aqua" => 0xFF00FFFF,
         "magenta" | "fuchsia" => 0xFFFF00FF,
         "gray" | "grey" => 0xFF808080,
-        "ltGray" => 0xFFC0C0C0,
-        "dkGray" => 0xFF404040,
+        "ltgray" | "ltgrey" => 0xFFC0C0C0,
+        "dkgray" | "dkgrey" => 0xFF404040,
         // Less common, but still seen in Office-generated documents.
         "orange" => 0xFFFFA500,
         "brown" => 0xFFA52A2A,
