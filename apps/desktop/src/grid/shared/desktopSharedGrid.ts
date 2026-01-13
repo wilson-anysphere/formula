@@ -299,7 +299,13 @@ export class DesktopSharedGrid {
       this.renderer.subscribeViewport(
         () => {
           this.syncScrollbars();
-          this.emitScroll();
+          // Only emit scroll notifications once the grid has a real viewport size. This avoids
+          // dispatching an initial `{ width: 0, height: 0 }` viewport from the constructor-time
+          // `setFrozen()` call before the host has a chance to run the first `resize()`.
+          const viewport = this.renderer.getViewportState();
+          if (viewport.width > 0 || viewport.height > 0) {
+            this.emitScroll();
+          }
         },
         { animationFrame: true }
       )
@@ -442,8 +448,6 @@ export class DesktopSharedGrid {
     const before = this.renderer.getZoom();
     this.renderer.setZoom(zoom);
     if (this.renderer.getZoom() === before) return;
-    this.syncScrollbars();
-    this.emitScroll();
     // `renderer.setZoom()` already schedules a repaint via `markAllDirty()`, but
     // request an additional frame in case the grid is already mid-frame.
     this.renderer.requestRender();
@@ -712,8 +716,6 @@ export class DesktopSharedGrid {
 
         renderer.setZoom(nextZoom, { anchorX: point.x, anchorY: point.y });
         if (renderer.getZoom() === startZoom) return;
-        this.syncScrollbars();
-        this.emitScroll();
         return;
       }
 
@@ -1694,8 +1696,6 @@ export class DesktopSharedGrid {
           renderer.setRowHeight(drag.index, Math.max(MIN_ROW_HEIGHT * renderer.getZoom(), drag.startSize + delta));
         }
 
-        this.syncScrollbars();
-        this.emitScroll();
         return;
       }
 
@@ -1859,8 +1859,6 @@ export class DesktopSharedGrid {
           const defaultSize = hit.kind === "col" ? renderer.scroll.cols.defaultSize : renderer.scroll.rows.defaultSize;
           const nextSize =
             hit.kind === "col" ? renderer.autoFitCol(hit.index, { maxWidth: 500 }) : renderer.autoFitRow(hit.index, { maxHeight: 500 });
-          this.syncScrollbars();
-          this.emitScroll();
 
           if (nextSize !== prevSize) {
             this.callbacks.onAxisSizeChange?.({
@@ -2209,7 +2207,5 @@ export class DesktopSharedGrid {
     if (this.selectionCanvasViewportOrigin) {
       this.cacheViewportOrigin();
     }
-    this.syncScrollbars();
-    this.emitScroll();
   }
 }
