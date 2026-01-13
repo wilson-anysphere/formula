@@ -56,7 +56,18 @@ function main() {
   }
 
   const normalized = timestampUrl.trim();
-  if (!normalized.toLowerCase().startsWith("https://")) {
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    die(
+      `windows-timestamp: ERROR bundle.windows.timestampUrl must be a valid absolute URL (${relConfigPath}).\n` +
+        `Got: ${JSON.stringify(normalized)}`,
+    );
+    return;
+  }
+
+  if (parsed.protocol !== "https:") {
     die(
       `windows-timestamp: ERROR bundle.windows.timestampUrl must use HTTPS (${relConfigPath}).\n` +
         `Got: ${JSON.stringify(normalized)}`,
@@ -68,4 +79,3 @@ function main() {
 }
 
 main();
-

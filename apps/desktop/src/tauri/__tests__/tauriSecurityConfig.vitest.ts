@@ -38,10 +38,8 @@ describe("tauri.conf.json security guardrails", () => {
     const config = loadTauriConfig();
     const timestampUrl = config?.bundle?.windows?.timestampUrl as unknown;
     expect(typeof timestampUrl, "expected bundle.windows.timestampUrl to be a string").toBe("string");
-    expect(
-      (timestampUrl as string).startsWith("https://"),
-      `bundle.windows.timestampUrl must use HTTPS (got: ${String(timestampUrl)})`,
-    ).toBe(true);
+    const parsed = new URL(String(timestampUrl));
+    expect(parsed.protocol).toBe("https:");
   });
 
   it("configures Windows installers to bootstrap the WebView2 runtime when missing", () => {
