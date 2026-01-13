@@ -1748,7 +1748,6 @@ impl DaxEngine {
             row_ctx: &RowContext,
             env: &mut VarEnv,
             keep_filters: bool,
-            env: &mut VarEnv,
             clear_columns: &mut HashSet<(String, String)>,
             row_filters: &mut Vec<(String, HashSet<usize>)>,
         ) -> DaxResult<()> {
@@ -1870,7 +1869,6 @@ impl DaxEngine {
                     row_ctx,
                     env,
                     keep_filters,
-                    env,
                     &mut clear_columns,
                     &mut row_filters,
                 )?,
@@ -1887,7 +1885,6 @@ impl DaxEngine {
                         row_ctx,
                         env,
                         keep_filters,
-                        env,
                         &mut clear_columns,
                         &mut row_filters,
                     )?

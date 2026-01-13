@@ -227,7 +227,63 @@ fn cmp_value(a: &Value, b: &Value) -> Ordering {
         (Value::Number(a), Value::Number(b)) => a.cmp(b),
         (Value::Number(_), _) => Ordering::Less,
         (_, Value::Number(_)) => Ordering::Greater,
-        (Value::Text(a), Value::Text(b)) => a.as_ref().cmp(b.as_ref()),
+        (Value::Text(a), Value::Text(b)) => {
+            let a = a.as_ref();
+            let b = b.as_ref();
+
+            // Pivot tables in Excel sort text case-insensitively by default. Use a casefolded
+            // comparison as the primary key, with a deterministic case-sensitive tiebreak so the
+            // overall ordering remains total (important because group keys are collected from hash
+            // maps/sets).
+            let ord = cmp_text_case_insensitive(a, b);
+            if ord != Ordering::Equal {
+                ord
+            } else {
+                a.cmp(b)
+            }
+        }
+    }
+}
+
+fn cmp_text_case_insensitive(a: &str, b: &str) -> Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        return cmp_ascii_case_insensitive(a, b);
+    }
+
+    // Compare using Unicode-aware uppercasing so semantics match Excel-like case-insensitive
+    // ordering for non-ASCII text (e.g. ß -> SS).
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            },
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
     }
 }
 
@@ -2102,6 +2158,51 @@ mod tests {
             }
             other => panic!("expected eval error, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cmp_value_text_sort_is_case_insensitive_with_case_sensitive_tiebreak() {
+        // Primary comparison should be case-insensitive (Excel-like), so "a" sorts before "B".
+        assert_eq!(cmp_value(&Value::from("a"), &Value::from("B")), Ordering::Less);
+
+        // Tiebreak should be case-sensitive to keep ordering total/deterministic.
+        assert_eq!(cmp_value(&Value::from("B"), &Value::from("b")), Ordering::Less);
+
+        let mut values = vec![Value::from("b"), Value::from("a"), Value::from("B")];
+        values.sort_by(cmp_value);
+        assert_eq!(values, vec![Value::from("a"), Value::from("B"), Value::from("b")]);
+    }
+
+    #[test]
+    fn pivot_group_key_sorting_matches_case_insensitive_text_order() {
+        let mut model = DataModel::new();
+        let mut fact = crate::Table::new("Fact", vec!["Group"]);
+        // Insert in an order that would be incorrect under a case-sensitive ASCII compare ("B"
+        // would come before "a").
+        fact.push_row(vec![Value::from("b")]).unwrap();
+        fact.push_row(vec![Value::from("a")]).unwrap();
+        fact.push_row(vec![Value::from("B")]).unwrap();
+        model.add_table(fact).unwrap();
+
+        let result = pivot(
+            &model,
+            "Fact",
+            &[GroupByColumn::new("Fact", "Group")],
+            &[],
+            &FilterContext::empty(),
+        )
+        .unwrap();
+
+        let got: Vec<&str> = result
+            .rows
+            .iter()
+            .map(|row| match &row[0] {
+                Value::Text(s) => s.as_ref(),
+                other => panic!("expected text group key, got {other:?}"),
+            })
+            .collect();
+
+        assert_eq!(got, vec!["a", "B", "b"]);
     }
 
     #[test]
