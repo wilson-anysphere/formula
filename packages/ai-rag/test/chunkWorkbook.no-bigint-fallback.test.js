@@ -1,0 +1,39 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+test("chunkWorkbook: works when BigInt is unavailable (string coord keys fallback)", async () => {
+  const originalBigInt = globalThis.BigInt;
+  try {
+    // Simulate runtimes that don't have BigInt (older browsers / JS engines).
+    // `chunkWorkbook` should still parse and fall back to string coord keys.
+    // @ts-ignore - test override
+    globalThis.BigInt = undefined;
+
+    const url = new URL("../src/workbook/chunkWorkbook.js", import.meta.url);
+    url.search = "noBigInt=1";
+    const mod = await import(url.href);
+    const chunkWorkbook = mod.chunkWorkbook;
+
+    const row = 9_000_000_000;
+    const cells = new Map();
+    cells.set(`${row},0`, { value: "A" });
+    cells.set(`${row},1`, { value: "B" });
+
+    const workbook = {
+      id: "wb-no-bigint",
+      sheets: [{ name: "Sheet1", cells }],
+      tables: [],
+      namedRanges: [],
+    };
+
+    const chunks = chunkWorkbook(workbook);
+    const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+    assert.equal(dataRegions.length, 1);
+    assert.deepEqual(dataRegions[0].rect, { r0: row, c0: 0, r1: row, c1: 1 });
+    assert.equal(dataRegions[0].cells[0][0].v, "A");
+    assert.equal(dataRegions[0].cells[0][1].v, "B");
+  } finally {
+    globalThis.BigInt = originalBigInt;
+  }
+});
+
