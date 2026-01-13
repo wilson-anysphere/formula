@@ -58,6 +58,12 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
 
         { id: "inc", vector: [1, 0, 0], metadata: { workbookId: "wb-include", label: "Inc" } },
 
+        // Tie-breaking: insert out-of-order ids with identical vectors so stores must
+        // return deterministic results when scores are equal.
+        { id: "tie-b", vector: [1, 0, 0], metadata: { workbookId: "wb-tie", label: "Tie B" } },
+        { id: "tie-a", vector: [1, 0, 0], metadata: { workbookId: "wb-tie", label: "Tie A" } },
+        { id: "tie-c", vector: [0, 1, 0], metadata: { workbookId: "wb-tie", label: "Tie C" } },
+
         { id: "q-best", vector: [1, 0, 0], metadata: { workbookId: "wb-query", label: "best" } },
         { id: "q-0.8", vector: unitVec(0.8), metadata: { workbookId: "wb-query", label: "0.8" } },
         { id: "q-0.6", vector: unitVec(0.6), metadata: { workbookId: "wb-query", label: "0.6" } },
@@ -117,6 +123,20 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
         );
         assert.ok(hits[0].score >= hits[1].score);
         assert.ok(hits[1].score >= hits[2].score);
+      });
+
+      await t.test("query breaks score ties by id (ascending)", async () => {
+        const top1 = await store.query([1, 0, 0], 1, { workbookId: "wb-tie" });
+        assert.deepEqual(
+          top1.map((h) => h.id),
+          ["tie-a"]
+        );
+
+        const hits = await store.query([1, 0, 0], 2, { workbookId: "wb-tie" });
+        assert.deepEqual(
+          hits.map((h) => h.id),
+          ["tie-a", "tie-b"]
+        );
       });
 
       await t.test("query with filter returns up to topK matching results", async () => {
