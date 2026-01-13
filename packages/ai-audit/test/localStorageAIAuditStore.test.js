@@ -6,6 +6,7 @@ import { MemoryAIAuditStore } from "../src/memory-store.ts";
 
 const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 const originalStructuredCloneDescriptor = Object.getOwnPropertyDescriptor(globalThis, "structuredClone");
+const originalDateNow = Date.now;
 
 function restoreLocalStorage() {
   if (originalLocalStorageDescriptor) {
@@ -35,6 +36,28 @@ function makeEntry(id, session_id) {
     model: "test-model",
     tool_calls: [],
   };
+}
+
+class MemoryLocalStorage {
+  constructor() {
+    this.data = new Map();
+  }
+
+  getItem(key) {
+    return this.data.get(key) ?? null;
+  }
+
+  setItem(key, value) {
+    this.data.set(key, value);
+  }
+
+  removeItem(key) {
+    this.data.delete(key);
+  }
+
+  clear() {
+    this.data.clear();
+  }
 }
 
 test("LocalStorageAIAuditStore falls back to memory when localStorage is missing", async () => {
@@ -117,5 +140,82 @@ test("Audit stores fall back to JSON cloning when structuredClone is missing", a
   } finally {
     restoreLocalStorage();
     restoreStructuredClone();
+  }
+});
+
+test("LocalStorageAIAuditStore enforces max_age_ms on logEntry()", async () => {
+  let now = 1_000_000;
+  Date.now = () => now;
+
+  try {
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    const key = "audit_test_max_age_log";
+    const store = new LocalStorageAIAuditStore({ key, max_age_ms: 1_000 });
+
+    await store.logEntry(makeEntry("old", "s1"));
+
+    // Advance beyond max_age_ms then log a new entry; the old one should be purged at write-time.
+    now += 1_500;
+    await store.logEntry(makeEntry("new", "s1"));
+
+    const raw = globalThis.localStorage.getItem(key);
+    assert.ok(raw);
+    const parsed = JSON.parse(raw);
+    assert.deepEqual(
+      parsed.map((entry) => entry.id),
+      ["new"],
+    );
+  } finally {
+    Date.now = originalDateNow;
+    restoreLocalStorage();
+  }
+});
+
+test("LocalStorageAIAuditStore enforces max_age_ms on listEntries() (best-effort purge)", async () => {
+  let now = 2_000_000;
+  Date.now = () => now;
+
+  try {
+    Object.defineProperty(globalThis, "localStorage", { value: new MemoryLocalStorage(), configurable: true });
+
+    const key = "audit_test_max_age_list";
+    const store = new LocalStorageAIAuditStore({ key, max_age_ms: 1_000 });
+    await store.logEntry(makeEntry("old", "s1"));
+
+    // No new writes; listEntries() should still purge expired entries.
+    now += 1_500;
+    const entries = await store.listEntries({ session_id: "s1" });
+    assert.equal(entries.length, 0);
+
+    const raw = globalThis.localStorage.getItem(key);
+    assert.ok(raw);
+    assert.deepEqual(JSON.parse(raw), []);
+  } finally {
+    Date.now = originalDateNow;
+    restoreLocalStorage();
+  }
+});
+
+test("LocalStorageAIAuditStore enforces max_age_ms in memory fallback", async () => {
+  let now = 3_000_000;
+  Date.now = () => now;
+
+  try {
+    Object.defineProperty(globalThis, "localStorage", { value: undefined, configurable: true, writable: true });
+
+    const store = new LocalStorageAIAuditStore({ key: "audit_test_max_age_memory", max_age_ms: 1_000 });
+    await store.logEntry(makeEntry("old", "s1"));
+
+    now += 1_500;
+    assert.deepEqual(await store.listEntries({ session_id: "s1" }), []);
+
+    // If listEntries() only filtered without persisting the purge, rewinding time could
+    // make the old entry appear again.
+    now -= 1_400;
+    assert.deepEqual(await store.listEntries({ session_id: "s1" }), []);
+  } finally {
+    Date.now = originalDateNow;
+    restoreLocalStorage();
   }
 });
