@@ -141,9 +141,11 @@ python -m tools.corpus.triage \
 
 In `privacy-mode=private`:
 
-- `display_name` is replaced with a stable anonymized value: `workbook-<sha256[:16]>.xlsx`
+- `display_name` is replaced with a stable anonymized value: `workbook-<sha256[:16]>.{xlsx,xlsm,xlsb}`
+  (preserves the input extension when known)
 - custom URI-like strings (relationship types, namespaces, etc.) are replaced with `sha256=<digest>` unless
-  they use standard OpenXML/Microsoft schema hosts
+  they use standard OpenXML/Microsoft schema hosts (this also redacts expanded XML namespaces embedded in
+  diff paths like `{http://example.com/ns}attr`)
 - expectation comparison (when `--expectations` is provided) uses the anonymized `display_name` keys
 
 ### Diff policy (ignored parts + calcChain)
