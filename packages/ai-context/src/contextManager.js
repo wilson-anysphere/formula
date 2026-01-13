@@ -1958,6 +1958,9 @@ function redactStructuredValue(value, redactor, options = {}) {
   const includeRestrictedContent = options.includeRestrictedContent ?? false;
   const policyAllowsRestrictedContent = options.policyAllowsRestrictedContent ?? false;
   const restrictedAllowed = includeRestrictedContent && policyAllowsRestrictedContent;
+  // Cycle detection for arbitrarily nested user-provided attachment objects.
+  // Use WeakSet so redaction does not retain references beyond this call.
+  const seen = options._seen ?? new WeakSet();
   throwIfAborted(signal);
 
   if (typeof value === "string") {
@@ -1982,14 +1985,31 @@ function redactStructuredValue(value, redactor, options = {}) {
   if (typeof value !== "object") return value;
   if (value instanceof Date) return value;
 
+  // Avoid infinite recursion for cyclic structures.
+  if (seen.has(value)) {
+    return /** @type {T} */ ("[REDACTED]");
+  }
+  seen.add(value);
+
+  // Typed arrays / ArrayBuffers can contain arbitrary bytes and can be very large. Avoid
+  // enumerating them into JSON (and avoid leaking raw bytes) under DLP redaction.
+  if (typeof ArrayBuffer !== "undefined") {
+    if (value instanceof ArrayBuffer) {
+      return /** @type {T} */ ("[REDACTED]");
+    }
+    if (typeof ArrayBuffer.isView === "function" && ArrayBuffer.isView(value)) {
+      return /** @type {T} */ ("[REDACTED]");
+    }
+  }
+
   if (value instanceof Map) {
     /** @type {Map<any, any>} */
     const out = new Map();
     for (const [k, v] of value.entries()) {
       throwIfAborted(signal);
       out.set(
-        redactStructuredValue(k, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
-        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
+        redactStructuredValue(k, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent, _seen: seen }),
+        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent, _seen: seen }),
       );
     }
     return /** @type {T} */ (out);
@@ -2000,7 +2020,9 @@ function redactStructuredValue(value, redactor, options = {}) {
     const out = new Set();
     for (const v of value.values()) {
       throwIfAborted(signal);
-      out.add(redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }));
+      out.add(
+        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent, _seen: seen }),
+      );
     }
     return /** @type {T} */ (out);
   }
@@ -2008,22 +2030,30 @@ function redactStructuredValue(value, redactor, options = {}) {
   if (Array.isArray(value)) {
     return /** @type {T} */ (
       value.map((v) =>
-        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent }),
+        redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent, _seen: seen }),
       )
     );
   }
 
   const proto = Object.getPrototypeOf(value);
-  if (proto !== Object.prototype && proto !== null) {
-    // Avoid walking exotic objects (Map, Set, class instances).
-    return value;
+  const entries = Object.entries(value);
+  if (entries.length === 0) return value;
+  // For class instances and other non-plain objects, fall back to a shallow key/value
+  // projection matching how JSON/stableJsonStringify will serialize them.
+  if (proto !== Object.prototype && proto !== null && entries.length > 200) {
+    return /** @type {T} */ ("[REDACTED]");
   }
 
   /** @type {any} */
   const out = {};
-  for (const [key, v] of Object.entries(value)) {
+  for (const [key, v] of entries) {
     throwIfAborted(signal);
-    out[key] = redactStructuredValue(v, redactor, { signal, includeRestrictedContent, policyAllowsRestrictedContent });
+    out[key] = redactStructuredValue(v, redactor, {
+      signal,
+      includeRestrictedContent,
+      policyAllowsRestrictedContent,
+      _seen: seen,
+    });
   }
   return out;
 }

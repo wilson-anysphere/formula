@@ -224,3 +224,74 @@ test("buildContext: DLP REDACT deep-redacts Map/Set values inside attachments", 
   assert.doesNotMatch(out.promptContext, /alice@example\.com/);
   assert.match(out.promptContext, /\[REDACTED\]/);
 });
+
+test("buildContext: DLP REDACT deep-redacts class instance attachment data", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  class SecretPayload {
+    constructor() {
+      this.ssn = "123-45-6789";
+    }
+  }
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    attachments: [
+      {
+        type: "chart",
+        reference: "ClassAttachment",
+        data: new SecretPayload(),
+      },
+    ],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
+
+test("buildContext: DLP REDACT handles cyclic attachment data without crashing", async () => {
+  const cm = new ContextManager({
+    tokenBudgetTokens: 1_000_000,
+    redactor: (text) => text,
+  });
+
+  const cyclic = { note: "123-45-6789" };
+  cyclic.self = cyclic;
+
+  const out = await cm.buildContext({
+    sheet: {
+      name: "Sheet1",
+      values: [["Email"], ["alice@example.com"]],
+    },
+    query: "anything",
+    attachments: [
+      {
+        type: "chart",
+        reference: "CycleAttachment",
+        data: cyclic,
+      },
+    ],
+    dlp: {
+      documentId: "doc-1",
+      sheetId: "Sheet1",
+      policy: makePolicy(),
+      classificationRecords: [],
+    },
+  });
+
+  assert.doesNotMatch(out.promptContext, /123-45-6789/);
+  assert.match(out.promptContext, /\[REDACTED\]/);
+});
