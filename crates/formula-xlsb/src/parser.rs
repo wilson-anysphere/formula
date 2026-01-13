@@ -1266,6 +1266,77 @@ mod tests {
         // The worksheet parser should only attempt rgce decoding once per formula cell.
         assert_eq!(formula_decode_attempts(), 3);
     }
+
+    #[test]
+    fn parse_ptg_exp_candidates_handles_multiple_coordinate_payload_layouts() {
+        // `PtgExp` payloads appear in the wild in multiple layouts; we keep all plausible
+        // interpretations so shared-formula materialization can match an actual `BrtShrFmla`
+        // anchor.
+
+        // BIFF8-style: row u16, col u16 (4-byte payload).
+        let rgce_u16_u16 = vec![0x01, 0x34, 0x12, 0xBC, 0x0A]; // row=0x1234, col=0x0ABC
+        assert_eq!(
+            parse_ptg_exp_candidates(&rgce_u16_u16),
+            Some(vec![(0x1234, 0x0ABC)])
+        );
+
+        // BIFF12-ish: row u32, col u16 (6-byte payload). Choose a row whose high u16 portion is a
+        // plausible column index so we can observe both candidates.
+        let row_u32: u32 = 0x0002_0010; // little-endian bytes: 10 00 02 00
+        let col_u16: u16 = 5;
+        let rgce_u32_u16 = {
+            let mut v = Vec::new();
+            v.push(0x01);
+            v.extend_from_slice(&row_u32.to_le_bytes());
+            v.extend_from_slice(&col_u16.to_le_bytes());
+            v
+        };
+        // Candidates are ordered by how many bytes they consume (newest formats first).
+        assert_eq!(
+            parse_ptg_exp_candidates(&rgce_u32_u16),
+            Some(vec![(row_u32, col_u16 as u32), (0x0010, 0x0002)])
+        );
+
+        // BIFF12-ish: row u32, col u32 (8-byte payload). The u32/u32 and u32/u16 interpretations
+        // yield the same coordinate for valid column ranges, but we still want to preserve both
+        // candidates for robustness.
+        let col_u32: u32 = 7;
+        let rgce_u32_u32 = {
+            let mut v = Vec::new();
+            v.push(0x01);
+            v.extend_from_slice(&row_u32.to_le_bytes());
+            v.extend_from_slice(&col_u32.to_le_bytes());
+            v
+        };
+        assert_eq!(
+            parse_ptg_exp_candidates(&rgce_u32_u32),
+            Some(vec![(row_u32, col_u32), (row_u32, col_u32), (0x0010, 0x0002)])
+        );
+
+        // Some producers include trailing bytes after the coordinates; we should still return the
+        // same candidate list.
+        let rgce_u32_u32_trailing = {
+            let mut v = rgce_u32_u32.clone();
+            v.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+            v
+        };
+        assert_eq!(
+            parse_ptg_exp_candidates(&rgce_u32_u32_trailing),
+            Some(vec![(row_u32, col_u32), (row_u32, col_u32), (0x0010, 0x0002)])
+        );
+
+        // Trailing bytes after a u32/u16 payload should not prevent parsing. Use non-zero trailing
+        // bytes so the u32/u32 interpretation is rejected by the col bounds check.
+        let rgce_u32_u16_trailing = {
+            let mut v = rgce_u32_u16.clone();
+            v.extend_from_slice(&0x1234u16.to_le_bytes());
+            v
+        };
+        assert_eq!(
+            parse_ptg_exp_candidates(&rgce_u32_u16_trailing),
+            Some(vec![(row_u32, col_u16 as u32), (0x0010, 0x0002)])
+        );
+    }
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
