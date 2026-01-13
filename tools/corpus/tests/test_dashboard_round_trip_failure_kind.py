@@ -126,6 +126,43 @@ class DashboardRoundTripFailureKindTests(unittest.TestCase):
             },
         )
 
+    def test_dashboard_infers_kind_for_warning_fail_on(self) -> None:
+        # If round_trip_ok is false due to a WARN diff (fail-on=warning), we should still bucket
+        # based on the WARN-changing parts/groups rather than falling back to round_trip_other.
+        reports = [
+            {
+                "display_name": "warn_styles.xlsx",
+                "failure_category": "round_trip_diff",
+                "result": {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "round_trip_fail_on": "warning",
+                    "diff_critical_count": 0,
+                    "diff_warning_count": 1,
+                    "diff_info_count": 0,
+                },
+                "steps": {
+                    "diff": {
+                        "details": {
+                            "parts_with_diffs": [
+                                {
+                                    "part": "xl/styles.xml",
+                                    "group": "styles",
+                                    "critical": 0,
+                                    "warning": 1,
+                                    "info": 0,
+                                    "total": 1,
+                                }
+                            ]
+                        }
+                    }
+                },
+            }
+        ]
+
+        summary = _compute_summary(reports)
+        self.assertEqual(summary["failures_by_round_trip_failure_kind"], {"round_trip_styles": 1})
+
 
 if __name__ == "__main__":
     unittest.main()

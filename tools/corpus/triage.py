@@ -172,8 +172,121 @@ def _extract_critical_diff_parts(report: dict[str, Any]) -> set[str]:
     return parts
 
 
-def _extract_critical_diff_part_groups(report: dict[str, Any]) -> set[str]:
-    """Return diff part-group names containing CRITICAL diffs, if available.
+def _round_trip_fail_on(report: dict[str, Any]) -> str:
+    res = report.get("result")
+    if isinstance(res, dict):
+        fail_on = res.get("round_trip_fail_on")
+        if isinstance(fail_on, str):
+            fail_on = fail_on.casefold().strip()
+            if fail_on in ("critical", "warning", "info"):
+                return fail_on
+    return "critical"
+
+
+def _extract_failure_diff_parts(report: dict[str, Any]) -> set[str]:
+    """Return normalized part names that contain diffs that contribute to round_trip_ok=False.
+
+    Uses `result.round_trip_fail_on` to decide which severities count as a failure.
+    Prefers the Rust helper's per-part summaries (`parts_with_diffs`) when present and falls back to
+    scanning the (truncated) `top_differences` list.
+    """
+
+    fail_on = _round_trip_fail_on(report)
+    parts: set[str] = set()
+
+    def _add_part(value: Any) -> None:
+        if not isinstance(value, str):
+            return
+        normalized = _normalize_part_name(value)
+        if normalized:
+            parts.add(normalized)
+
+    def _row_has_failure_diff(row: dict[str, Any]) -> bool:
+        def _int_field(key: str) -> int:
+            v = row.get(key)
+            if isinstance(v, bool):
+                return 0
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str) and v.isdigit():
+                return int(v)
+            return 0
+
+        critical = _int_field("critical")
+        warning = _int_field("warning")
+        info = _int_field("info")
+        total = _int_field("total") or (critical + warning + info)
+
+        if fail_on == "critical":
+            return critical > 0
+        if fail_on == "warning":
+            return critical > 0 or warning > 0
+        return total > 0
+
+    def _severity_counts_as_failure(sev: str) -> bool:
+        sev = (sev or "").upper()
+        if fail_on == "critical":
+            return sev == "CRITICAL"
+        if fail_on == "warning":
+            return sev in ("CRITICAL", "WARN", "WARNING")
+        return sev in ("CRITICAL", "WARN", "WARNING", "INFO")
+
+    steps = report.get("steps")
+    diff_step = steps.get("diff") if isinstance(steps, dict) else None
+    diff_details = diff_step.get("details") if isinstance(diff_step, dict) else {}
+    res = report.get("result") or {}
+
+    for container in (diff_details, res):
+        if not isinstance(container, dict):
+            continue
+        pwd = container.get("parts_with_diffs")
+        if pwd is None:
+            continue
+
+        # Newer schema: list of `{part, critical, warning, info, total, ...}`.
+        if isinstance(pwd, list):
+            for row in pwd:
+                if not isinstance(row, dict):
+                    continue
+                if not _row_has_failure_diff(row):
+                    continue
+                _add_part(row.get("part"))
+            if parts:
+                return parts
+
+        # Older schema: dict like {"critical": [...], "warning": [...], ...}.
+        if isinstance(pwd, dict):
+            wanted_keys: tuple[str, ...]
+            if fail_on == "critical":
+                wanted_keys = ("critical", "CRITICAL")
+            elif fail_on == "warning":
+                wanted_keys = ("critical", "CRITICAL", "warning", "WARN", "WARNING")
+            else:
+                wanted_keys = ("critical", "CRITICAL", "warning", "WARN", "WARNING", "info", "INFO")
+
+            for key in wanted_keys:
+                seq = pwd.get(key)
+                if isinstance(seq, list):
+                    for item in seq:
+                        _add_part(item)
+            if parts:
+                return parts
+
+    # Fallback: scan truncated top differences.
+    top = diff_details.get("top_differences") if isinstance(diff_details, dict) else None
+    if isinstance(top, list):
+        for entry in top:
+            if not isinstance(entry, dict):
+                continue
+            if not _severity_counts_as_failure(entry.get("severity") or ""):
+                continue
+            _add_part(entry.get("part"))
+
+    return parts
+
+
+def _extract_failure_diff_part_groups(report: dict[str, Any]) -> set[str]:
+    """Return diff part-group names that contain diffs contributing to round_trip_ok=False.
 
     Uses the Rust helper's per-part summaries when present:
     - `parts_with_diffs`: list of `{part, group, critical, ...}`
@@ -182,6 +295,7 @@ def _extract_critical_diff_part_groups(report: dict[str, Any]) -> set[str]:
     Returns normalized, lowercase group names (e.g. `rels`, `content_types`).
     """
 
+    fail_on = _round_trip_fail_on(report)
     groups: set[str] = set()
 
     steps = report.get("steps")
@@ -207,7 +321,25 @@ def _extract_critical_diff_part_groups(report: dict[str, Any]) -> set[str]:
                 if not isinstance(row, dict):
                     continue
                 critical = row.get("critical")
-                if isinstance(critical, bool) or not isinstance(critical, int) or critical <= 0:
+                warning = row.get("warning")
+                info = row.get("info")
+                total = row.get("total")
+                if isinstance(critical, bool) or not isinstance(critical, int):
+                    critical = 0
+                if isinstance(warning, bool) or not isinstance(warning, int):
+                    warning = 0
+                if isinstance(info, bool) or not isinstance(info, int):
+                    info = 0
+                if isinstance(total, bool) or not isinstance(total, int):
+                    total = critical + warning + info
+
+                if fail_on == "critical":
+                    ok = critical > 0
+                elif fail_on == "warning":
+                    ok = critical > 0 or warning > 0
+                else:
+                    ok = total > 0
+                if not ok:
                     continue
                 _add_group(row.get("group"))
             if groups:
@@ -241,32 +373,32 @@ def infer_round_trip_failure_kind(report: dict[str, Any]) -> str | None:
 
     # Prefer Rust helper part-group labels when available. This is more stable across formats
     # (xlsx vs xlsb) and avoids fragile path-prefix heuristics.
-    critical_groups = _extract_critical_diff_part_groups(report)
-    if critical_groups:
-        if critical_groups == {"rels"}:
+    failure_groups = _extract_failure_diff_part_groups(report)
+    if failure_groups:
+        if failure_groups == {"rels"}:
             return "round_trip_rels"
-        if "content_types" in critical_groups:
+        if "content_types" in failure_groups:
             return "round_trip_content_types"
-        if "styles" in critical_groups:
+        if "styles" in failure_groups:
             return "round_trip_styles"
-        if any(g.startswith("worksheet") for g in critical_groups):
+        if any(g.startswith("worksheet") for g in failure_groups):
             return "round_trip_worksheets"
         return "round_trip_other"
 
-    critical_parts = {p.casefold() for p in _extract_critical_diff_parts(report)}
-    if not critical_parts:
+    failure_parts = {p.casefold() for p in _extract_failure_diff_parts(report)}
+    if not failure_parts:
         return "round_trip_other"
 
-    if all(p.endswith(".rels") for p in critical_parts):
+    if all(p.endswith(".rels") for p in failure_parts):
         return "round_trip_rels"
 
-    if "[content_types].xml" in critical_parts:
+    if "[content_types].xml" in failure_parts:
         return "round_trip_content_types"
 
-    if "xl/styles.xml" in critical_parts:
+    if "xl/styles.xml" in failure_parts:
         return "round_trip_styles"
 
-    if any(p.startswith("xl/worksheets/") for p in critical_parts):
+    if any(p.startswith("xl/worksheets/") for p in failure_parts):
         return "round_trip_worksheets"
 
     return "round_trip_other"
