@@ -792,7 +792,11 @@ function compactAttachmentsForPrompt(attachments: AiChatAttachment[]): AiChatAtt
   return attachments.map((a) => {
     const out: AiChatAttachment = { type: a.type, reference: a.reference } as any;
     if (a.data !== undefined) {
-      out.data = compactAttachmentData(a.data, { maxChars: MAX_ATTACHMENT_DATA_CHARS_FOR_PROMPT, forceTruncate: false });
+      // Prompts may be sent to cloud models. Never forward raw selection/table payloads
+      // (even when small) because they can contain copied workbook values and would bypass
+      // DLP redaction paths.
+      const forceTruncate = a.type === "range" || a.type === "table";
+      out.data = compactAttachmentData(a.data, { maxChars: MAX_ATTACHMENT_DATA_CHARS_FOR_PROMPT, forceTruncate });
     }
     return out;
   });

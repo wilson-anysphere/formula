@@ -1444,6 +1444,62 @@ describe("ai chat orchestrator", () => {
     expect(writeCell?.requiresApproval).toBe(true);
   });
 
+  it("never forwards small table/range attachment data to the model prompt (prompt + audit)", async () => {
+    const controller = new DocumentController();
+    seed2x2(controller);
+
+    const requests: any[] = [];
+    const llmClient = {
+      async chat(request: any) {
+        requests.push(request);
+        return { message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } };
+      },
+    };
+
+    const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_no_raw_table_prompt" });
+
+    // Keep the test focused on prompt/audit behavior; no need to exercise workbook RAG.
+    // Echo attachments back so they show up in promptContext (system prompt) too.
+    const ragService = {
+      async getContextManager() {
+        return new ContextManager({ tokenBudgetTokens: 800 });
+      },
+      async buildWorkbookContextFromSpreadsheetApi(params: any) {
+        return { retrieved: [], attachments: params.attachments };
+      },
+      async dispose() {},
+    };
+
+    const orchestrator = createAiChatOrchestrator({
+      documentController: controller,
+      workbookId: "wb_no_raw_table_prompt",
+      llmClient: llmClient as any,
+      model: "mock-model",
+      getActiveSheetId: () => "Sheet1",
+      auditStore,
+      sessionId: "session_no_raw_table_prompt",
+      ragService: ragService as any,
+      strictToolVerification: false,
+    });
+
+    const secret = "TOP SECRET";
+    const attachments = [{ type: "table" as const, reference: "Sheet1!A1:B2", data: { snapshot: secret } }];
+
+    await orchestrator.sendMessage({ text: "Hello", history: [], attachments });
+
+    expect(requests).toHaveLength(1);
+    const systemMessage = (requests[0]?.messages ?? []).find((m: any) => m?.role === "system");
+    const userMessage = (requests[0]?.messages ?? []).find((m: any) => m?.role === "user");
+    expect(systemMessage).toBeTruthy();
+    expect(userMessage).toBeTruthy();
+    expect(systemMessage.content).not.toContain(secret);
+    expect(userMessage.content).not.toContain(secret);
+
+    const entries = await auditStore.listEntries({ session_id: "session_no_raw_table_prompt" });
+    expect(entries).toHaveLength(1);
+    expect(JSON.stringify((entries[0] as any)?.input)).not.toContain(secret);
+  });
+
   it("compacts large attachment data in prompts and audit logs", async () => {
     const controller = new DocumentController();
     seed2x2(controller);
