@@ -2388,6 +2388,19 @@ export class SpreadsheetApp {
           }
         },
         onHoverRangeWithText: (range, refText) => {
+          const allowed = this.isFormulaRangePreviewAllowed(refText);
+          if (!allowed) {
+            // Avoid showing misleading previews/outlines for sheet-qualified refs, named ranges, or table refs
+            // that point at a different sheet than the active one.
+            this.hideFormulaRangePreviewTooltip();
+            this.referencePreview = null;
+            if (this.sharedGrid) {
+              this.sharedGrid.clearRangeSelection();
+            } else {
+              this.renderReferencePreview();
+            }
+            return;
+          }
           this.updateFormulaRangePreviewTooltip(range, refText);
         },
         onReferenceHighlights: (highlights) => {
@@ -5886,6 +5899,51 @@ export class SpreadsheetApp {
     tooltip.classList.remove("formula-range-preview-tooltip--visible");
   }
 
+  private resolveFormulaRangePreviewTargetSheet(refText: string | null): { explicit: boolean; sheetId: string | null } {
+    const rawText = typeof refText === "string" ? refText.trim() : "";
+    if (!rawText) return { explicit: false, sheetId: null };
+
+    const { sheetName } = splitSheetQualifier(rawText);
+    if (sheetName) {
+      return { explicit: true, sheetId: this.resolveSheetIdByName(sheetName) };
+    }
+
+    // Named ranges can point at a specific sheet (even though the identifier itself is unqualified).
+    // When possible, resolve the name so we can avoid previewing the wrong sheet.
+    const entry: any = this.searchWorkbook.getName(rawText);
+    const nameSheet = typeof entry?.sheetName === "string" ? entry.sheetName.trim() : "";
+    if (nameSheet) {
+      return { explicit: true, sheetId: this.resolveSheetIdByName(nameSheet) };
+    }
+
+    // Structured table refs (e.g. `Table1[Amount]`) can also belong to a specific sheet.
+    const bracket = rawText.indexOf("[");
+    if (bracket > 0) {
+      const tableName = rawText.slice(0, bracket).trim();
+      if (tableName) {
+        const table: any = this.searchWorkbook.getTable(tableName);
+        const tableSheet =
+          typeof table?.sheetName === "string"
+            ? table.sheetName.trim()
+            : typeof table?.sheet === "string"
+              ? table.sheet.trim()
+              : "";
+        if (tableSheet) {
+          return { explicit: true, sheetId: this.resolveSheetIdByName(tableSheet) };
+        }
+      }
+    }
+
+    return { explicit: false, sheetId: null };
+  }
+
+  private isFormulaRangePreviewAllowed(refText: string | null): boolean {
+    const { explicit, sheetId } = this.resolveFormulaRangePreviewTargetSheet(refText);
+    if (!explicit) return true;
+    if (!sheetId) return false;
+    return sheetId.toLowerCase() === this.sheetId.toLowerCase();
+  }
+
   private updateFormulaRangePreviewTooltip(range: A1RangeAddress | null, refText: string | null): void {
     const tooltip = this.formulaRangePreviewTooltip;
     if (!tooltip) return;
@@ -5895,46 +5953,13 @@ export class SpreadsheetApp {
       return;
     }
 
-    const rawText = typeof refText === "string" ? refText.trim() : "";
-    const { sheetName } = splitSheetQualifier(rawText);
-    const resolvedSheetForPreview = (() => {
-      if (sheetName) {
-        return this.resolveSheetIdByName(sheetName);
-      }
-
-      // Named ranges can point at a specific sheet (even though the identifier itself is unqualified).
-      // When possible, resolve the name so we can avoid previewing the wrong sheet.
-      if (rawText) {
-        const entry: any = this.searchWorkbook.getName(rawText);
-        const nameSheet = typeof entry?.sheetName === "string" ? entry.sheetName.trim() : "";
-        if (nameSheet) return this.resolveSheetIdByName(nameSheet);
-
-        // Structured table refs (e.g. `Table1[Amount]`) can also belong to a specific sheet.
-        // Resolve the table metadata so previews don't accidentally show cells from the active sheet.
-        const bracket = rawText.indexOf("[");
-        if (bracket > 0) {
-          const tableName = rawText.slice(0, bracket).trim();
-          if (tableName) {
-            const table: any = this.searchWorkbook.getTable(tableName);
-            const tableSheet =
-              typeof table?.sheetName === "string"
-                ? table.sheetName.trim()
-                : typeof table?.sheet === "string"
-                  ? table.sheet.trim()
-                  : "";
-            if (tableSheet) return this.resolveSheetIdByName(tableSheet);
-          }
-        }
-      }
-      return null;
-    })();
-
-    if (resolvedSheetForPreview && resolvedSheetForPreview.toLowerCase() !== this.sheetId.toLowerCase()) {
-      // For sheet-qualified refs (and named ranges that target another sheet), only preview when the
-      // referenced sheet is currently active (don't auto-switch).
+    if (!this.isFormulaRangePreviewAllowed(refText)) {
       this.hideFormulaRangePreviewTooltip();
       return;
     }
+
+    const rawText = typeof refText === "string" ? refText.trim() : "";
+    const { sheetName } = splitSheetQualifier(rawText);
 
     const startRow = Math.min(range.start.row, range.end.row);
     const endRow = Math.max(range.start.row, range.end.row);
