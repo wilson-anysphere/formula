@@ -9,7 +9,7 @@ import type {
   CellProvider,
   CellStyle
 } from "../model/CellProvider";
-import { toColumnName } from "../a11y/a11y";
+import { toA1Address, toColumnName } from "../a11y/a11y";
 import { CanvasGrid, type GridApi } from "../react/CanvasGrid";
 
 function cellKey(row: number, col: number): string {
@@ -396,7 +396,7 @@ export function CellFormattingDemo(): React.ReactElement {
     const headerCols = 1;
     const row0 = selection.row - headerRows;
     const col0 = selection.col - headerCols;
-    if (row0 >= 0 && col0 >= 0) return `${toColumnName(col0)}${row0 + 1}`;
+    if (row0 >= 0 && col0 >= 0) return toA1Address(row0, col0);
     return `R${selection.row + 1}C${selection.col + 1}`;
   })();
 
@@ -409,8 +409,8 @@ export function CellFormattingDemo(): React.ReactElement {
     const endRow0 = selectionRange.endRow - headerRows - 1;
     const endCol0 = selectionRange.endCol - headerCols - 1;
     if (startRow0 < 0 || startCol0 < 0 || endRow0 < 0 || endCol0 < 0) return null;
-    const start = `${toColumnName(startCol0)}${startRow0 + 1}`;
-    const end = `${toColumnName(endCol0)}${endRow0 + 1}`;
+    const start = toA1Address(startRow0, startCol0);
+    const end = toA1Address(endRow0, endCol0);
     return start === end ? start : `${start}:${end}`;
   })();
 
