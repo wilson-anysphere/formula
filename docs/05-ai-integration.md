@@ -232,12 +232,12 @@ interface Attachment {
    - "What would you recommend based on this data?"
 
 4. **Execute actions**
-    - "Create a pivot table showing sales by region"
-    - "Format column B as currency"
-    - "Add a chart of monthly revenue"
+   - "Create a pivot table showing sales by region"
+   - "Format column B as currency"
+   - "Add a chart of monthly revenue"
 
-    Implementation note: pivot creation/refresh is a cross-crate workflow (model schema + engine compute + optional Data Model);
-    see [ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
+   Implementation note: pivot creation/refresh is a cross-crate workflow (model schema + engine compute + optional Data Model).
+   See [ADR-0005: PivotTables ownership and data flow across crates](./adr/ADR-0005-pivot-tables-ownership-and-data-flow.md).
 
 **Implementation notes (actual):**
 - The desktop chat panel uses a single React-agnostic orchestrator: [`apps/desktop/src/ai/chat/orchestrator.ts`](../apps/desktop/src/ai/chat/orchestrator.ts) (`createAiChatOrchestrator` / `sendMessage`).
