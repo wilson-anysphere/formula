@@ -268,6 +268,25 @@ pub fn build_merged_non_anchor_conflicting_blank_formats_fixture_xls() -> Vec<u8
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture with a merged region (`A1:B1`) where the only `FORMULA` record is
+/// stored on the non-anchor cell (`B1`).
+///
+/// The importer should normalize formulas inside merged regions to the top-left anchor (`A1`),
+/// matching the model semantics for values/styles/comments/hyperlinks.
+pub fn build_merged_non_anchor_formula_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_merged_non_anchor_formula_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture that references an out-of-range XF index in a cell record, where
 /// the workbook contains **no** non-General number formats.
 ///
@@ -5005,6 +5024,46 @@ fn build_merged_non_anchor_conflicting_blank_formats_workbook_stream() -> Vec<u8
     globals
 }
 
+fn build_merged_non_anchor_formula_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF (required by some readers).
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "MergedFormula");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_merged_non_anchor_formula_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_out_of_range_xf_no_formats_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -8485,6 +8544,43 @@ fn build_merged_formatted_blank_sheet_stream(xf_percent: u16) -> Vec<u8> {
 
     // B1: BLANK record with percent format.
     push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 1, xf_percent));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_merged_non_anchor_formula_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 2)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1 (A..B)
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // MERGEDCELLS [MS-XLS 2.4.139]: 1 range, A1:B1.
+    let mut merged = Vec::<u8>::new();
+    merged.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+    merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst (A)
+    merged.extend_from_slice(&1u16.to_le_bytes()); // colLast (B)
+    push_record(&mut sheet, RECORD_MERGEDCELLS, &merged);
+
+    // B1: FORMULA record (non-anchor). Use a simple parseable rgce token stream: `1+1`.
+    let rgce: [u8; 7] = [0x1E, 0x01, 0x00, 0x1E, 0x01, 0x00, 0x03];
+    push_record(
+        &mut sheet,
+        RECORD_FORMULA,
+        &formula_cell(0, 1, xf_general, 2.0, &rgce),
+    );
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet

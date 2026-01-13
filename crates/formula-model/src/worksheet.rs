@@ -1122,14 +1122,15 @@ impl Worksheet {
     pub fn set_formula(&mut self, cell_ref: CellRef, formula: Option<String>) {
         let formula = formula.and_then(|formula| crate::normalize_formula_text(&formula));
 
-        let key = CellKey::from(cell_ref);
+        let anchor = self.merged_regions.resolve_cell(cell_ref);
+        let key = CellKey::from(anchor);
 
         match self.cells.get_mut(&key) {
             Some(cell) => {
                 cell.formula = formula;
                 if cell.is_truly_empty() {
                     self.cells.remove(&key);
-                    self.on_cell_removed(cell_ref);
+                    self.on_cell_removed(anchor);
                 }
             }
             None => {
@@ -1137,11 +1138,11 @@ impl Worksheet {
                 let mut cell = Cell::default();
                 cell.formula = Some(formula);
                 self.cells.insert(key, cell);
-                self.on_cell_inserted(cell_ref);
+                self.on_cell_inserted(anchor);
             }
         }
 
-        self.invalidate_conditional_formatting_cells([cell_ref]);
+        self.invalidate_conditional_formatting_cells([anchor]);
     }
 
     /// Set a cell formula using an A1 reference.
