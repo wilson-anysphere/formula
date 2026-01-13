@@ -1,4 +1,3 @@
-import type { DocumentController } from "../document/documentController.js";
 import type { CommandRegistry } from "../extensions/commandRegistry.js";
 import {
   applyAllBorders,
@@ -9,7 +8,8 @@ import {
 
 type ApplyFormattingToSelection = (
   label: string,
-  fn: (doc: DocumentController, sheetId: string, ranges: CellRange[]) => void | boolean,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fn: (doc: any, sheetId: string, ranges: CellRange[]) => void | boolean,
   options?: { forceBatch?: boolean },
 ) => void;
 

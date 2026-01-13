@@ -13,9 +13,9 @@ import {
 } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
-import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
 import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
+import { registerFormatFontDropdownCommands } from "./registerFormatFontDropdownCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
 import { registerWorkbenchFileCommands, type WorkbenchFileCommandHandlers } from "./registerWorkbenchFileCommands.js";

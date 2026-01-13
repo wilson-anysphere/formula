@@ -7504,6 +7504,7 @@ registerDataQueriesCommands({
   refreshRibbonUiState: scheduleRibbonSelectionFormatStateUpdate,
   focusAfterExecute: () => app.focus(),
 });
+
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
     queuedInvoke ?? ((globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined) ?? null;
