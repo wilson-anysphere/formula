@@ -44,6 +44,7 @@ import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
 import { computeRibbonDisabledByIdFromCommandRegistry } from "./ribbon/ribbonCommandRegistryDisabling.js";
 import { getRibbonUiStateSnapshot, setRibbonUiState } from "./ribbon/ribbonUiState.js";
 import { deriveRibbonAriaKeyShortcutsById, deriveRibbonShortcutById } from "./ribbon/ribbonShortcuts.js";
+import { MAX_AXIS_RESIZE_INDICES, promptAndApplyAxisSizing, selectedColIndices, selectedRowIndices } from "./ribbon/axisSizing.js";
 
 import type { CellRange as GridCellRange } from "@formula/grid";
 
@@ -5442,103 +5443,8 @@ if (
     return { area: "cell", row: picked.row - headerRows, col: picked.col - headerCols };
   };
 
-  // Resizing large selections by enumerating per-row/col overrides can allocate huge JS objects
-  // (and, in shared-grid mode, select-all can hit Excel-scale limits).
-  //
-  // Hard-cap this at a value that stays safe with the current `DocumentController.setRowHeight` /
-  // `setColWidth` implementation.
-  const MAX_AXIS_RESIZE_INDICES = 10_000;
-  const MAX_ROW_HEIGHT_ROWS = MAX_AXIS_RESIZE_INDICES;
-  const MAX_COL_WIDTH_COLS = MAX_AXIS_RESIZE_INDICES;
-
-  const selectedRowIndices = (ranges: Range[] = app.getSelectionRanges()): number[] => {
-    const rows = new Set<number>();
-    for (const range of ranges) {
-      const r = normalizeSelectionRange(range);
-      for (let row = r.startRow; row <= r.endRow; row += 1) rows.add(row);
-    }
-    return [...rows].sort((a, b) => a - b);
-  };
-
-  const selectedColIndices = (ranges: Range[] = app.getSelectionRanges()): number[] => {
-    const cols = new Set<number>();
-    for (const range of ranges) {
-      const r = normalizeSelectionRange(range);
-      for (let col = r.startCol; col <= r.endCol; col += 1) cols.add(col);
-    }
-    return [...cols].sort((a, b) => a - b);
-  };
-
-  const applyRowHeight = async () => {
-    // `selectedRowIndices()` enumerates every row in every selection range into a Set.
-    // On Excel-scale sheets, this can freeze/crash the UI (e.g. select-all => 1M rows).
-    // Guard here so we reject huge selections *before* prompting for input.
-    const selection = app.getSelectionRanges();
-    let rowUpperBound = 0;
-    for (const range of selection) {
-      const r = normalizeSelectionRange(range);
-      rowUpperBound += Math.max(0, r.endRow - r.startRow + 1);
-      if (rowUpperBound > MAX_ROW_HEIGHT_ROWS) break;
-    }
-    if (rowUpperBound > MAX_ROW_HEIGHT_ROWS) {
-      showToast("Selection too large to resize rows. Select fewer rows and try again.", "warning");
-      return;
-    }
-
-    const input = await showInputBox({ prompt: "Row Height", placeHolder: "Enter a row height (px)" });
-    if (input == null) return;
-    const height = Number(input);
-    if (!Number.isFinite(height) || height <= 0) {
-      showToast("Row height must be a positive number.", "error");
-      return;
-    }
-
-    const sheetId = app.getCurrentSheetId();
-    const rows = selectedRowIndices(selection);
-    if (rows.length === 0) return;
-
-    const doc = app.getDocument();
-    doc.beginBatch({ label: "Row Height" });
-    for (const row of rows) {
-      doc.setRowHeight(sheetId, row, height, { label: "Row Height" });
-    }
-    doc.endBatch();
-  };
-
-  const applyColWidth = async () => {
-    // `selectedColIndices()` enumerates every column in every selection range into a Set.
-    // Keep this bounded so Excel-scale select-all (16k cols) doesn't cause huge allocations.
-    const selection = app.getSelectionRanges();
-    let colUpperBound = 0;
-    for (const range of selection) {
-      const r = normalizeSelectionRange(range);
-      colUpperBound += Math.max(0, r.endCol - r.startCol + 1);
-      if (colUpperBound > MAX_COL_WIDTH_COLS) break;
-    }
-    if (colUpperBound > MAX_COL_WIDTH_COLS) {
-      showToast("Selection too large to resize columns. Select fewer columns and try again.", "warning");
-      return;
-    }
-
-    const input = await showInputBox({ prompt: "Column Width", placeHolder: "Enter a column width (px)" });
-    if (input == null) return;
-    const width = Number(input);
-    if (!Number.isFinite(width) || width <= 0) {
-      showToast("Column width must be a positive number.", "error");
-      return;
-    }
-
-    const sheetId = app.getCurrentSheetId();
-    const cols = selectedColIndices(selection);
-    if (cols.length === 0) return;
-
-    const doc = app.getDocument();
-    doc.beginBatch({ label: "Column Width" });
-    for (const col of cols) {
-      doc.setColWidth(sheetId, col, width, { label: "Column Width" });
-    }
-    doc.endBatch();
-  };
+  const applyRowHeight = () => promptAndApplyAxisSizing(app, "rowHeight", { isEditing: isSpreadsheetEditing });
+  const applyColWidth = () => promptAndApplyAxisSizing(app, "colWidth", { isEditing: isSpreadsheetEditing });
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const allowEditCommands = !isSpreadsheetEditing();
@@ -8639,7 +8545,6 @@ function handleRibbonCommand(commandId: string): void {
         });
         return;
       }
-
       case "home.alignment.orientation.angleCounterclockwise":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
           let applied = true;
@@ -8693,6 +8598,16 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "home.alignment.orientation.formatCellAlignment":
         executeBuiltinCommand("format.openFormatCells");
+        return;
+      case "home.cells.format":
+        // This command is a dropdown with menu items; the top-level command is not expected
+        // to fire when the menu is present. Keep this as a fallback.
+        return;
+      case "home.cells.format.rowHeight":
+        void promptAndApplyAxisSizing(app, "rowHeight", { isEditing: isSpreadsheetEditing });
+        return;
+      case "home.cells.format.columnWidth":
+        void promptAndApplyAxisSizing(app, "colWidth", { isEditing: isSpreadsheetEditing });
         return;
       case "format.openFormatCells":
       case "home.number.formatCells": // legacy ribbon schema id
