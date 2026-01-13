@@ -42,9 +42,6 @@ export const enUS = {
   "chat.cancel": "Cancel",
   "chat.cancelled": "Cancelled.",
   "chat.errorWithMessage": "Error: {message}",
-  "chat.attachmentsApiPlaceholder":
-    "Attachments API placeholder: this panel supports range/formula/table/chart references, but wiring to the selection manager is pending.",
-  "chat.addRangeDemo": "+ Range (demo)",
   "comments.title": "Comments",
   "comments.cellLabel": "Cell {cellRef}",
   "comments.selectCell": "Select a cell",
