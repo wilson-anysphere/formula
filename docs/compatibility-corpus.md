@@ -54,6 +54,7 @@ The sanitization pipeline is implemented in `tools/corpus/sanitize.py` and suppo
   - formula cached values are removed (to avoid leaking computed results)
   - formula **string literals** are also redacted/hardened to prevent secrets surviving in formulas
   - pivot cache records/items are cleared (pivot caches can otherwise retain full plaintext copies of source data)
+    - See [`docs/21-xlsx-pivots.md`](./21-xlsx-pivots.md) for the relevant OpenXML parts (`xl/pivotCache/*`).
   - conditional formatting + data validation formulas (and their string literals) are hardened as well
   - dialog sheets/macrosheets (and chart sheets) are sanitized like normal worksheets (same cell redaction rules)
 - **Hash strings** (`--hash-strings --hash-salt ...`)
