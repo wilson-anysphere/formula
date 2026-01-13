@@ -1,2 +1,4 @@
 [tools]
-pnpm = "9"
+# Keep tool versions aligned with CI/release workflows for reproducible builds.
+node = "22"
+pnpm = "9.0.0"
