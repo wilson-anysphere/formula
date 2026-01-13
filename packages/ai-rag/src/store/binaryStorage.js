@@ -151,6 +151,17 @@ export class ChunkedLocalStorageBinaryStorage {
       }
       return null;
     }
+    // Guard against corrupted metadata that could otherwise hang the main thread
+    // by attempting to load an absurd number of chunks.
+    const MAX_CHUNKS = 10_000;
+    if (chunks > MAX_CHUNKS) {
+      try {
+        await this.remove();
+      } catch {
+        // ignore
+      }
+      return null;
+    }
 
     // Decode chunk-by-chunk when possible (avoids joining a potentially huge
     // base64 string in memory). Fall back to concatenating and decoding when

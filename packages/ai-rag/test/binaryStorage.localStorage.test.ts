@@ -246,6 +246,22 @@ test("ChunkedLocalStorageBinaryStorage clears corrupted base64 chunk payloads on
   }
 });
 
+test("ChunkedLocalStorageBinaryStorage clears absurd chunk counts in meta (corruption guard)", async () => {
+  const storage = new ChunkedLocalStorageBinaryStorage({
+    namespace: "formula.test.rag",
+    workbookId: "corrupt-meta-huge",
+    chunkSizeChars: 8,
+  });
+
+  const ls = getTestLocalStorage();
+  ls.setItem(`${storage.key}:meta`, JSON.stringify({ chunks: 20_000 }));
+  ls.setItem(`${storage.key}:0`, "AAAA");
+
+  const loaded = await storage.load();
+  expect(loaded).toBeNull();
+  expect(listKeysWithPrefix(ls, `${storage.key}:`)).toEqual([]);
+});
+
 test("ChunkedLocalStorageBinaryStorage does not corrupt existing data if a save fails mid-write", async () => {
   const storage = new ChunkedLocalStorageBinaryStorage({
     namespace: "formula.test.rag",
