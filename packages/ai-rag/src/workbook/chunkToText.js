@@ -152,7 +152,7 @@ export function chunkToText(chunk, opts) {
         const f = cells[r][c]?.f;
         if (!f) continue;
         const addr = cellToA1(chunk.rect.r0 + r, chunk.rect.c0 + c);
-        formulas.push(`${addr}:${String(f).replace(/\s+/g, " ").trim()}`);
+        formulas.push(`${addr}:${formatScalar(f)}`);
       }
     }
     if (formulas.length) lines.push(`FORMULAS: ${formulas.join(" | ")}`);

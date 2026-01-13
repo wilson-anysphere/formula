@@ -87,3 +87,18 @@ test("chunkToText includes A1-like cell addresses for formulaRegion samples", ()
   assert.match(text, /E1:=SUM\(B2:B3\)/);
   assert.match(text, /E2:=B2\/C2/);
 });
+
+test("chunkToText truncates long formulas inside formulaRegion samples", () => {
+  const longFormula = `=${"A".repeat(80)}`;
+  const chunk = {
+    kind: "formulaRegion",
+    title: "Formula region A1",
+    sheetName: "Sheet1",
+    rect: { r0: 0, c0: 0, r1: 0, c1: 0 },
+    cells: [[{ f: longFormula }]],
+  };
+
+  const text = chunkToText(chunk);
+  assert.match(text, /A1:=A{56}\.\.\./);
+  assert.doesNotMatch(text, /A{80}/);
+});
