@@ -855,6 +855,38 @@ fn parse_series_text_data(
             formula: num.formula,
             cache,
             multi_cache: None,
+            literal: None,
+        });
+    }
+
+    if let Some(str_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "strLit")
+    {
+        let values = parse_str_cache(str_lit, diagnostics, context);
+        return Some(SeriesTextData {
+            formula: None,
+            cache: values.clone(),
+            multi_cache: None,
+            literal: values,
+        });
+    }
+
+    if let Some(num_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "numLit")
+    {
+        warn(
+            diagnostics,
+            format!("{context}: numeric category axis detected; values will be stringified"),
+        );
+        let (values, _format_code) = parse_num_cache(num_lit, diagnostics, context);
+        let cache = values.map(|vals| vals.into_iter().map(|v| v.to_string()).collect());
+        return Some(SeriesTextData {
+            formula: None,
+            cache: cache.clone(),
+            multi_cache: None,
+            literal: cache,
         });
     }
 
@@ -876,6 +908,7 @@ fn parse_multi_lvl_str_ref(
         formula,
         cache: None,
         multi_cache,
+        literal: None,
     }
 }
 
@@ -890,6 +923,7 @@ fn parse_multi_lvl_str_lit(
         formula: None,
         cache: None,
         multi_cache,
+        literal: None,
     }
 }
 
@@ -928,10 +962,27 @@ fn parse_series_number_data(
     diagnostics: &mut Vec<ChartDiagnostic>,
     context: &str,
 ) -> Option<SeriesNumberData> {
-    let num_ref = data_node
+    if let Some(num_ref) = data_node
         .children()
-        .find(|n| n.is_element() && n.tag_name().name() == "numRef")?;
-    Some(parse_num_ref(num_ref, diagnostics, context))
+        .find(|n| n.is_element() && n.tag_name().name() == "numRef")
+    {
+        return Some(parse_num_ref(num_ref, diagnostics, context));
+    }
+
+    if let Some(num_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "numLit")
+    {
+        let (cache, format_code) = parse_num_cache(num_lit, diagnostics, context);
+        return Some(SeriesNumberData {
+            formula: None,
+            cache: cache.clone(),
+            format_code,
+            literal: cache,
+        });
+    }
+
+    None
 }
 
 fn parse_series_data(
@@ -961,6 +1012,32 @@ fn parse_series_data(
         )));
     }
 
+    if let Some(str_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "strLit")
+    {
+        let values = parse_str_cache(str_lit, diagnostics, context);
+        return Some(SeriesData::Text(SeriesTextData {
+            formula: None,
+            cache: values.clone(),
+            multi_cache: None,
+            literal: values,
+        }));
+    }
+
+    if let Some(num_lit) = data_node
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "numLit")
+    {
+        let (cache, format_code) = parse_num_cache(num_lit, diagnostics, context);
+        return Some(SeriesData::Number(SeriesNumberData {
+            formula: None,
+            cache: cache.clone(),
+            format_code,
+            literal: cache,
+        }));
+    }
+
     None
 }
 
@@ -979,6 +1056,7 @@ fn parse_str_ref(
         formula,
         cache,
         multi_cache: None,
+        literal: None,
     }
 }
 
@@ -998,6 +1076,7 @@ fn parse_num_ref(
         formula,
         cache,
         format_code,
+        literal: None,
     }
 }
 

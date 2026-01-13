@@ -313,6 +313,9 @@ pub struct SeriesTextData {
     /// Outer index = level, inner index = point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multi_cache: Option<Vec<Vec<String>>>,
+    /// Literal values embedded in the chart XML (`c:strLit`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub literal: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -321,6 +324,11 @@ pub struct SeriesNumberData {
     pub formula: Option<String>,
     pub cache: Option<Vec<f64>>,
     pub format_code: Option<String>,
+    /// Literal values embedded in the chart XML (`c:numLit`).
+    ///
+    /// See [`SeriesTextData::literal`] for rationale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub literal: Option<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
