@@ -34,6 +34,7 @@ import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.ts";
 import { verifyExtensionPackageV2Desktop } from "./marketplace/verifyExtensionPackageV2Desktop.ts";
 import { showInputBox } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
+import { t, tWithVars } from "../i18n/index.js";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
@@ -108,18 +109,18 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   if (loadError) {
     return (
       <div className="collab-panel__message collab-panel__message--error">
-        Version history is unavailable: {loadError}
+        {tWithVars("versionHistory.panel.unavailableWithMessage", { message: loadError })}
       </div>
     );
   }
 
   if (!collabVersioning) {
-    return <div className="collab-panel__message">Loading version history…</div>;
+    return <div className="collab-panel__message">{t("versionHistory.panel.loading")}</div>;
   }
 
   return (
     <div className="collab-version-history">
-      <h3 className="collab-version-history__title">Version history</h3>
+      <h3 className="collab-version-history__title">{t("panels.versionHistory.title")}</h3>
 
       {error ? <div className="collab-version-history__error">{error}</div> : null}
 
@@ -127,7 +128,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
         <button
           disabled={busy}
           onClick={async () => {
-            const name = await showInputBox({ prompt: "Checkpoint name?" });
+            const name = await showInputBox({ prompt: t("versionHistory.prompt.checkpointName") });
             if (!name || !name.trim()) return;
             try {
               setBusy(true);
@@ -141,7 +142,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
             }
           }}
         >
-          Create checkpoint
+          {t("versionHistory.actions.createCheckpoint")}
         </button>
 
         <button
@@ -149,9 +150,7 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
           onClick={async () => {
             const id = selectedId;
             if (!id) return;
-            const ok = await nativeDialogs.confirm(
-              "Restore this version? This will overwrite the current collaborative document state.",
-            );
+            const ok = await nativeDialogs.confirm(t("versionHistory.confirm.restoreOverwrite"));
             if (!ok) return;
             try {
               setBusy(true);
@@ -165,20 +164,28 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
             }
           }}
         >
-          Restore selected
+          {t("versionHistory.actions.restoreSelected")}
         </button>
 
         <button disabled={busy} onClick={() => void refresh()}>
-          Refresh
+          {t("versionHistory.actions.refresh")}
         </button>
       </div>
 
       {items.length === 0 ? (
-        <div className="collab-version-history__empty">No versions yet.</div>
+        <div className="collab-version-history__empty">{t("versionHistory.panel.empty")}</div>
       ) : (
         <ul className="collab-version-history__list">
           {items.map((item) => {
             const selected = item.id === selectedId;
+            const kindLabel =
+              item.kind === "checkpoint"
+                ? t("versionHistory.checkpoint")
+                : item.kind === "snapshot"
+                  ? t("versionHistory.autoSave")
+                  : item.kind === "restore"
+                    ? t("versionHistory.restore")
+                    : item.kind;
             return (
               <li
                 key={item.id}
@@ -193,8 +200,8 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
                 <div className="collab-version-history__item-content">
                   <div className="collab-version-history__item-title">{item.title}</div>
                   <div className="collab-version-history__item-meta">
-                    {formatVersionTimestamp(item.timestampMs)} • {item.kind}
-                    {item.locked ? " • locked" : ""}
+                    {formatVersionTimestamp(item.timestampMs)} • {kindLabel}
+                    {item.locked ? ` • ${t("versionHistory.meta.locked")}` : ""}
                   </div>
                 </div>
               </li>
@@ -692,7 +699,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     if (panelId === PanelIds.VERSION_HISTORY) {
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        body.textContent = "Version history will appear here.";
+        body.textContent = t("versionHistory.panel.noSession");
         return;
       }
       makeBodyFillAvailableHeight(body);

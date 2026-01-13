@@ -466,5 +466,21 @@ export const enUS = {
   "updater.errorWithMessage": "Error: {message}",
   "versionHistory.checkpoint": "Checkpoint",
   "versionHistory.autoSave": "Auto-save",
-  "versionHistory.restore": "Restored"
+  "versionHistory.restore": "Restored",
+  "versionHistory.panel.loading": "Loading version history…",
+  "versionHistory.panel.unavailableWithMessage": "Version history is unavailable: {message}",
+  "versionHistory.panel.noSession": "Version history will appear here.",
+  "versionHistory.panel.empty": "No versions yet.",
+  "versionHistory.prompt.checkpointName": "Checkpoint name?",
+  "versionHistory.confirm.restoreOverwrite": "Restore this version? This will overwrite the current collaborative document state.",
+  "versionHistory.actions.createCheckpoint": "Create checkpoint",
+  "versionHistory.actions.restoreSelected": "Restore selected",
+  "versionHistory.actions.refresh": "Refresh",
+  "versionHistory.actions.lock": "Lock",
+  "versionHistory.actions.unlock": "Unlock",
+  "versionHistory.actions.delete": "Delete",
+  "versionHistory.actions.diff": "Diff",
+  "versionHistory.diff.current": "Current",
+  "versionHistory.diff.selected": "Selected",
+  "versionHistory.meta.locked": "locked"
 };
