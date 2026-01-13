@@ -163,6 +163,7 @@ import { WORKBENCH_FILE_COMMANDS } from "./commands/registerWorkbenchFileCommand
 import { FORMAT_PAINTER_COMMAND_ID } from "./commands/formatPainterCommand.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
+import { rangeToA1 } from "./selection/a1.js";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import {
@@ -190,7 +191,10 @@ import {
   type CellRange,
 } from "./formatting/toolbar.js";
 import { applyFormatAsTablePreset } from "./formatting/formatAsTablePresets.js";
+import { sortSelection } from "./sort-filter/sortSelection.js";
+import { computeFilterHiddenRows, RibbonAutoFilterStore } from "./sort-filter/ribbonAutoFilter.js";
 import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
+import { AutoFilterDropdown, type TableViewRow } from "./table/index.js";
 import {
   getDefaultSeedStoreStorage,
   readContributedPanelsSeedStore,
@@ -1271,6 +1275,9 @@ window.__formulaApp = app;
 (app as unknown as { getWorkbookSheetStore: () => unknown }).getWorkbookSheetStore = () => workbookSheetStore;
 window.__workbookSheetStore = workbookSheetStore;
 
+// Ribbon AutoFilter MVP: keep filter state in-memory for the current session.
+const ribbonAutoFilterStore = new RibbonAutoFilterStore();
+
 // DocumentController creates sheets lazily whenever code reads/writes a new sheet id (via `getCell`).
 // When undo/redo removes the currently active sheet id, downstream listeners can accidentally
 // "recreate" the sheet by reading from it during the same `document.on("change")` dispatch.
@@ -2159,6 +2166,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.togglePanel.extensions": isPanelOpen(PanelIds.EXTENSIONS),
       "data.queriesConnections.queriesConnections": isPanelOpen(PanelIds.DATA_QUERIES),
       "comments.togglePanel": app.isCommentsPanelVisible(),
+      // MVP ribbon AutoFilter: treat "Filter" as pressed when any filter is active on the sheet.
+      "data.sortFilter.filter": ribbonAutoFilterStore.hasAny(sheetId),
       [FORMAT_PAINTER_COMMAND_ID]: Boolean(formatPainterState),
     };
 
@@ -2359,6 +2368,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "data.outline.subtotal": true,
             "data.outline.showDetail": true,
             "data.outline.hideDetail": true,
+            // MVP ribbon AutoFilter uses outline.hidden.filter, which isn't implemented in shared-grid mode yet.
+            "home.editing.sortFilter.filter": true,
+            "home.editing.sortFilter.clear": true,
+            "home.editing.sortFilter.reapply": true,
+            "data.sortFilter.filter": true,
+            "data.sortFilter.clear": true,
+            "data.sortFilter.reapply": true,
+            "data.sortFilter.advanced.clearFilter": true,
           }
         : null),
     };
@@ -3671,6 +3688,10 @@ app.restoreDocumentState = async (...args: Parameters<SpreadsheetApp["restoreDoc
   // `restoreDocumentState` is used by workbook open + version restore. Never carry
   // Format Painter mode across workbook boundaries.
   disarmFormatPainter();
+  // Ribbon AutoFilter MVP state is view-local and should not survive workbook/model replacement.
+  ribbonAutoFilterStore.clearAll();
+  // Clear any filter-hidden outline rows so they do not "leak" across workbooks (e.g. Sheet1 -> Sheet1).
+  if (app.getGridMode() === "legacy") app.clearAllFilteredHiddenRows();
   await originalRestoreDocumentState(...args);
 
   // `restoreDocumentState()` is used by version restore and workbook open. Ensure the doc->store sync
@@ -8132,6 +8153,199 @@ const ribbonCommandHandlersCtx = {
     });
   },
 };
+// --- Ribbon: AutoFilter MVP ----------------------------------------------------
+//
+// Excel's AutoFilter is normally driven by header dropdowns inside the grid. For an MVP we wire the
+// ribbon commands to a simple checklist UI that filters the current selection range by hiding rows
+// via the legacy outline layer (`outline.hidden.filter`).
+//
+// Note: Shared-grid mode does not currently support outline-based hidden rows; we disable the ribbon
+// controls in `scheduleRibbonSelectionFormatStateUpdate()` to avoid noisy toasts.
+
+function getRibbonAutoFilterCellText(sheetId: string, cell: { row: number; col: number }): string {
+  const doc = app.getDocument();
+  const state = doc.getCell(sheetId, cell) as { value?: unknown; formula?: string | null } | null;
+
+  // Prefer computed values for formula cells so filtering matches what users see.
+  const hasFormula = typeof state?.formula === "string" && state.formula.trim() !== "";
+  if (hasFormula) {
+    const computed = app.getCellComputedValueForSheet(sheetId, cell);
+    return computed == null ? "" : String(computed);
+  }
+
+  const value = state?.value ?? null;
+  if (value == null) return "";
+  const maybeText = typeof value === "object" && value != null ? (value as any)?.text : null;
+  if (typeof maybeText === "string") return maybeText;
+  return String(value);
+}
+
+async function showRibbonAutoFilterDialog(args: {
+  rows: TableViewRow[];
+  initialSelected: string[];
+}): Promise<string[] | null> {
+  return await new Promise<string[] | null>((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "dialog";
+    dialog.dataset.keybindingBarrier = "true";
+    dialog.setAttribute("aria-label", "Filter");
+
+    const container = document.createElement("div");
+    dialog.appendChild(container);
+    document.body.appendChild(dialog);
+    const root = createRoot(container);
+
+    let result: string[] | null = null;
+
+    const close = () => dialog.close();
+    root.render(
+      React.createElement(AutoFilterDropdown, {
+        rows: args.rows,
+        colId: 0,
+        initialSelected: args.initialSelected,
+        onApply: (selected: string[]) => {
+          result = selected;
+        },
+        onClose: close,
+      }),
+    );
+
+    dialog.addEventListener(
+      "close",
+      () => {
+        try {
+          root.unmount();
+        } finally {
+          dialog.remove();
+          resolve(result);
+          app.focus();
+        }
+      },
+      { once: true },
+    );
+
+    dialog.addEventListener("cancel", (e) => {
+      e.preventDefault();
+      dialog.close();
+    });
+
+    dialog.showModal();
+  });
+}
+
+async function applyRibbonAutoFilterFromSelection(): Promise<boolean> {
+  if (app.getGridMode() !== "legacy") {
+    // Defensive: shared-grid mode should have these commands disabled in the ribbon, but keep the
+    // toggle state consistent if invoked via another surface.
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+    return false;
+  }
+
+  if (isSpreadsheetEditing()) {
+    scheduleRibbonSelectionFormatStateUpdate();
+    return false;
+  }
+
+  const selection = currentSelectionRect();
+  const sheetId = selection.sheetId;
+  const range = { startRow: selection.startRow, endRow: selection.endRow, startCol: selection.startCol, endCol: selection.endCol };
+  const rangeA1 = rangeToA1(range);
+
+  const headerRows = 1;
+  const dataStartRow = range.startRow + headerRows;
+  if (dataStartRow > range.endRow) {
+    showToast("Select a range with a header row and at least one data row to filter.", "warning");
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+    return false;
+  }
+
+  const colId = selection.activeCol - range.startCol;
+  if (colId < 0 || range.startCol + colId > range.endCol) {
+    scheduleRibbonSelectionFormatStateUpdate();
+    app.focus();
+    return false;
+  }
+  const absCol = range.startCol + colId;
+
+  // Build dialog rows for the active column only (enough to compute distinct values + selection state).
+  const dialogRows: TableViewRow[] = [];
+  for (let row = dataStartRow; row <= range.endRow; row += 1) {
+    dialogRows.push({ row, values: [getRibbonAutoFilterCellText(sheetId, { row, col: absCol })] });
+  }
+
+  const existing = ribbonAutoFilterStore.get(sheetId, rangeA1);
+  const initialSelected = existing?.filterColumns.find((c) => c.colId === colId)?.values ?? [];
+
+  const selected = await showRibbonAutoFilterDialog({ rows: dialogRows, initialSelected });
+  if (selected == null) {
+    scheduleRibbonSelectionFormatStateUpdate();
+    return false;
+  }
+
+  const next = ribbonAutoFilterStore.setColumn(sheetId, rangeA1, { headerRows, colId, values: selected });
+  const getValue = (row: number, col: number) => getRibbonAutoFilterCellText(sheetId, { row, col });
+  const hiddenRows = computeFilterHiddenRows({ range, headerRows: next.headerRows, filterColumns: next.filterColumns, getValue });
+
+  // Clear prior filter-hidden flags in the target range before applying the new filter.
+  app.clearFilteredHiddenRowsInRange(dataStartRow, range.endRow);
+  app.setRowsFilteredHidden(hiddenRows, true);
+
+  scheduleRibbonSelectionFormatStateUpdate();
+  app.focus();
+  return true;
+}
+
+function clearRibbonAutoFiltersForActiveSheet(): void {
+  if (app.getGridMode() !== "legacy") {
+    app.focus();
+    return;
+  }
+  if (isSpreadsheetEditing()) return;
+
+  const sheetId = app.getCurrentSheetId();
+  ribbonAutoFilterStore.clearSheet(sheetId);
+
+  const limits = app.getGridLimits();
+  app.clearFilteredHiddenRowsInRange(0, limits.maxRows - 1);
+
+  scheduleRibbonSelectionFormatStateUpdate();
+  app.focus();
+}
+
+function reapplyRibbonAutoFiltersForActiveSheet(): void {
+  if (app.getGridMode() !== "legacy") {
+    app.focus();
+    return;
+  }
+  if (isSpreadsheetEditing()) return;
+
+  const sheetId = app.getCurrentSheetId();
+  const filters = ribbonAutoFilterStore.list(sheetId);
+  if (filters.length === 0) {
+    app.focus();
+    return;
+  }
+
+  const limits = app.getGridLimits();
+  app.clearFilteredHiddenRowsInRange(0, limits.maxRows - 1);
+
+  const getValue = (row: number, col: number) => getRibbonAutoFilterCellText(sheetId, { row, col });
+  for (const filter of filters) {
+    const range = parseA1Range(filter.rangeA1);
+    const hidden = computeFilterHiddenRows({
+      range,
+      headerRows: filter.headerRows,
+      filterColumns: filter.filterColumns,
+      getValue,
+    });
+    app.setRowsFilteredHidden(hidden, true);
+  }
+
+  scheduleRibbonSelectionFormatStateUpdate();
+  app.focus();
+}
 
 const ribbonActions = createRibbonActionsFromCommands({
   commandRegistry,
@@ -8296,6 +8510,21 @@ const ribbonActions = createRibbonActionsFromCommands({
     "view.toggleSplitView": async (pressed) => {
       try {
         await commandRegistry.executeCommand("view.toggleSplitView", pressed);
+      } finally {
+        app.focus();
+      }
+    },
+    "data.sortFilter.filter": async (pressed) => {
+      try {
+        if (pressed) {
+          await applyRibbonAutoFilterFromSelection();
+        } else {
+          clearRibbonAutoFiltersForActiveSheet();
+        }
+      } catch (err) {
+        console.error("Failed to toggle filter:", err);
+        showToast(`Failed to toggle filter: ${String(err)}`, "error");
+        scheduleRibbonSelectionFormatStateUpdate();
       } finally {
         app.focus();
       }
@@ -8694,6 +8923,32 @@ function handleRibbonCommand(commandId: string): void {
         return;
       case "navigation.goTo":
         executeBuiltinCommand("navigation.goTo");
+        return;
+      case "home.editing.sortFilter.filter":
+      case "data.sortFilter.filter": {
+        // In Excel, the ribbon "Filter" button is a toggle. For this MVP we treat it as:
+        // - if any filter is active on the sheet, clear it
+        // - otherwise, prompt for values and apply a simple row-hiding filter
+        if (ribbonAutoFilterStore.hasAny(app.getCurrentSheetId())) {
+          clearRibbonAutoFiltersForActiveSheet();
+          return;
+        }
+        void applyRibbonAutoFilterFromSelection().catch((err) => {
+          console.error("Failed to apply filter:", err);
+          showToast(`Failed to apply filter: ${String(err)}`, "error");
+          scheduleRibbonSelectionFormatStateUpdate();
+          app.focus();
+        });
+        return;
+      }
+      case "home.editing.sortFilter.clear":
+      case "data.sortFilter.clear":
+      case "data.sortFilter.advanced.clearFilter":
+        clearRibbonAutoFiltersForActiveSheet();
+        return;
+      case "home.editing.sortFilter.reapply":
+      case "data.sortFilter.reapply":
+        reapplyRibbonAutoFiltersForActiveSheet();
         return;
       case "view.freezePanes":
       case "view.freezeTopRow":

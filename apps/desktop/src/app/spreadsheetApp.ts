@@ -5737,6 +5737,98 @@ export class SpreadsheetApp {
     this.onOutlineUpdated();
   }
 
+  /**
+   * Hide or unhide rows (0-based indices) due to an AutoFilter.
+   *
+   * This sets `outline.rows.*.hidden.filter` (not `.hidden.user`) so that clearing
+   * filters does not clobber user-hidden rows.
+   *
+   * Note: This is only supported in the legacy renderer. Shared-grid mode intentionally does not
+   * currently implement outline-based hidden rows/cols.
+   */
+  setRowsFilteredHidden(rows: number[] | null | undefined, hidden: boolean): void {
+    if (this.gridMode !== "legacy") {
+      showToast("Filter is not supported in shared grid mode yet.", "info");
+      // Preserve keyboard workflows even when the action is unsupported.
+      this.focus();
+      return;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    const outline = this.getOutlineForSheet(this.sheetId);
+    let changed = false;
+    for (const raw of rows) {
+      if (!Number.isFinite(raw)) continue;
+      const row = Math.trunc(raw);
+      if (row < 0 || row >= this.limits.maxRows) continue;
+      const entry = outline.rows.entryMut(row + 1);
+      if (entry.hidden.filter !== hidden) {
+        entry.hidden.filter = hidden;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.onOutlineUpdated();
+  }
+
+  /**
+   * Clear `.hidden.filter` flags for any outline rows in the given (inclusive) 0-based range.
+   *
+   * This is a best-effort operation used by the ribbon AutoFilter MVP; it does not delete outline
+   * entries (so grouping metadata is preserved).
+   */
+  clearFilteredHiddenRowsInRange(startRow: number, endRow: number): void {
+    if (this.gridMode !== "legacy") {
+      showToast("Filter is not supported in shared grid mode yet.", "info");
+      this.focus();
+      return;
+    }
+
+    const start = Math.max(0, Math.min(Math.trunc(startRow), Math.trunc(endRow)));
+    const end = Math.max(Math.trunc(startRow), Math.trunc(endRow));
+
+    const outline = this.getOutlineForSheet(this.sheetId);
+    let changed = false;
+    for (const [index1, entry] of outline.rows.entries.entries()) {
+      const row = index1 - 1;
+      if (row < start || row > end) continue;
+      if (entry?.hidden?.filter) {
+        entry.hidden.filter = false;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.onOutlineUpdated();
+  }
+
+  /**
+   * Clear `.hidden.filter` flags for outline rows across *all* sheets in this app instance.
+   *
+   * Used by the ribbon AutoFilter MVP to avoid leaking view-local filter hidden state across
+   * `restoreDocumentState()` calls (workbook open / version restore).
+   */
+  clearAllFilteredHiddenRows(): void {
+    if (this.gridMode !== "legacy") {
+      showToast("Filter is not supported in shared grid mode yet.", "info");
+      this.focus();
+      return;
+    }
+
+    let changed = false;
+    for (const outline of this.outlinesBySheet.values()) {
+      for (const entry of outline.rows.entries.values()) {
+        if (!entry.hidden.filter) continue;
+        entry.hidden.filter = false;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.onOutlineUpdated();
+  }
+
   hideRows(rows: number[] | null | undefined): void {
     this.setRowsHidden(rows, true);
   }

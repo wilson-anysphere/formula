@@ -123,6 +123,15 @@ const COMMAND_REGISTRY_EXEMPT_IDS = new Set<string>([
   "home.editing.findSelect.find",
   "home.editing.findSelect.replace",
   "home.editing.findSelect.goTo",
+  "home.editing.sortFilter.filter",
+  "home.editing.sortFilter.clear",
+  "home.editing.sortFilter.reapply",
+
+  // --- Sort / filter (ribbon MVP) ---------------------------------------------
+  "data.sortFilter.filter",
+  "data.sortFilter.clear",
+  "data.sortFilter.reapply",
+  "data.sortFilter.advanced.clearFilter",
 
   // Sort/filter (ribbon-only handlers / partially implemented).
   "home.editing.sortFilter.sortAtoZ",
