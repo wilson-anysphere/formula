@@ -112,11 +112,17 @@ Implementation notes:
 
 - `crates/formula-io/src/bin/ooxml-encryption-info.rs` prints a one-line scheme/version summary
   based on the `(majorVersion, minorVersion)` header (e.g. `3.2` → Standard, `4.4` → Agile).
-- `crates/formula-offcrypto` parses `EncryptionInfo` (Standard/CryptoAPI 3.2 and Agile 4.4
-  password-key-encryptor subset) and implements Standard password→key derivation + verifier checks.
+  Run it with:
+
+  ```bash
+  bash scripts/cargo_agent.sh run -p formula-io --bin ooxml-encryption-info -- path/to/encrypted.xlsx
+  ```
+- `crates/formula-offcrypto` parses `EncryptionInfo` for both:
+  - Standard (3.2) header + verifier structures, and
+  - Agile (4.4) XML (password key-encryptor subset),
+  and implements Standard password→key derivation + verifier checks.
 - `crates/formula-io/src/offcrypto/encrypted_package.rs` decrypts the Standard/CryptoAPI
-  `EncryptedPackage` stream once you have the file key and verifier salt (AES-CBC in 0x1000-byte
-  segments).
+  `EncryptedPackage` stream once you have the derived file key and verifier salt.
 
 ### Supported OOXML encryption schemes
 
@@ -147,12 +153,13 @@ archive containing `xl/workbook.bin` for `.xlsb`).
 
 The encryption *mode* differs by scheme:
 
-- **Standard (3.2 / CryptoAPI):** AES-CBC ciphertext split into **0x1000-byte (4096) segments**.
-  Each segment `i` uses `IV = SHA1(verifierSalt || LE32(i))[0..16]` and is decrypted independently;
-  the concatenated plaintext is truncated to `original_package_size`.
-- **Agile (4.4):** encrypted in **0x1000-byte (4096) plaintext segments** with a per-segment IV
-  derived from `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified
-  by the XML descriptor.
+- **Standard (3.2 / CryptoAPI):** AES-CBC over **0x1000 (4096)-byte plaintext segments** with a
+  per-segment IV. Segment `i` uses `IV = SHA1(verifierSalt || LE32(i))[0..16]` and is decrypted
+  independently; the concatenated plaintext is truncated to `original_package_size` (see
+  `docs/offcrypto-standard-encryptedpackage.md`).
+- **Agile (4.4):** encrypted in **4096-byte plaintext segments** with a per-segment IV derived from
+  `keyData/@saltValue` and the segment index, and cipher/chaining parameters specified by the XML
+  descriptor.
 
 ### High-level decrypt/open algorithm (OOXML)
 
@@ -201,9 +208,12 @@ Useful entrypoints when working on encrypted workbook support:
         `Error::UnsupportedOoxmlEncryption`
       - legacy `.xls` `FILEPASS`: `Error::EncryptedWorkbook` (until password plumbing is added)
 - **Standard (CryptoAPI) helpers:**
-  - `crates/formula-offcrypto` — parse Standard `EncryptionInfo`, derive/verify password key
-  - `crates/formula-io/src/offcrypto/encrypted_package.rs` — decrypt Standard `EncryptedPackage`
-    once you have the AES key + verifier salt
+  - Parse `EncryptionInfo`, derive/verify password key:
+    `crates/formula-offcrypto`
+  - Decrypt `EncryptedPackage` (given a derived key + verifier salt):
+    `crates/formula-io/src/offcrypto/encrypted_package.rs`
+  - Segment framing helper (size prefix + 0x1000 segment boundaries):
+    `crates/formula-offcrypto/src/encrypted_package.rs`
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
 - **Standard (CryptoAPI) RC4 algorithm writeup (KDF, 0x200 block size, test vectors):**

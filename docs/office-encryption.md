@@ -1,89 +1,82 @@
 # Office workbook encryption (MS-OFFCRYPTO / MS-XLS) — implementation reference
-This note is **maintainer-facing**. It captures the subset of Office encryption we support for Excel
-workbooks, the *exact* encryption parameters we emit when writing, and the non-obvious key
-derivation / verification details that tend to cause interop bugs.
+This note is **maintainer-facing**. It captures:
+
+- which Excel *workbook encryption* schemes we implement in this repo (OOXML + legacy BIFF),
+- the exact parameters / algorithm choices we expect (and would emit if we implement encryption on
+  save), and
+- the key-derivation / verifier nuances that commonly cause interoperability bugs.
 
 This document is intentionally **not** user-facing (“how do I open a password-protected file?”).
+For a higher-level overview (detection, UX error semantics), see `docs/21-encrypted-workbooks.md`.
 
 ## Terminology / file shapes
 
-### OOXML open-password encryption (`.xlsx`/`.xlsm`/`.xlsb`)
-Excel “Encrypt with Password” (open password) does **not** encrypt the ZIP container directly.
-Instead, Excel writes an **OLE/CFB compound file** containing (at minimum):
+### OOXML “password to open” encryption (`.xlsx`/`.xlsm`/`.xlsb`)
+Excel **Encrypt with Password** (“password to open”) does **not** encrypt the ZIP container
+directly. Instead it writes an **OLE/CFB** (Structured Storage) container with (at minimum):
 
-* `EncryptionInfo` — encryption metadata (either binary “Standard” or XML “Agile”).
-* `EncryptedPackage` — encrypted bytes of the *original* OPC/ZIP package.
+- `EncryptionInfo` — encryption metadata (binary Standard/CryptoAPI or XML Agile).
+- `EncryptedPackage` — encrypted bytes of the *original* OPC/ZIP package.
 
 The decrypted payload of `EncryptedPackage` is the raw `.xlsx`/`.xlsm`/`.xlsb` ZIP bytes.
 
 ### Legacy `.xls` BIFF encryption
-Legacy BIFF `.xls` workbooks are signaled via a `FILEPASS` record in the workbook globals stream
-([MS-XLS]). This is a *different* encryption stack than OOXML open-password encryption.
+Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook globals stream
+([MS-XLS]). This is a different format than the OOXML `EncryptedPackage` wrapper.
 
-## Supported schemes (reader + writer)
+## What is implemented in this repo (today)
 
 ### Summary table
-| Scheme | EncryptionInfo version | Reader | Writer | Notes |
-|---|---:|:---:|:---:|---|
-| **Agile encryption** | 4.4 | ✅ | ✅ (default) | Modern Office (2010+). `EncryptionInfo` contains an XML descriptor. |
-| **Standard encryption (CryptoAPI)** | 3.2 | ✅ | ✅ (opt-in) | Office 2007-era. `EncryptionInfo` contains `EncryptionHeader` + `EncryptionVerifier`. |
-| Certificate-based key encryptors | n/a | ❌ | ❌ | We only implement **password** key encryption (`keyEncryptor uri=".../password"`). |
-| IRM / “DataSpaces” transforms | n/a | ❌ | ❌ | We ignore `DataSpaces/*` and rely on `EncryptionInfo` + `EncryptedPackage`. |
-| Legacy `.xls` FILEPASS decryption | n/a | ❌ | ❌ | We detect and error (do not attempt to decrypt BIFF streams). |
+| Format | Scheme | Marker | Implemented crypto | Notes / entry points |
+|---|---|---|---|---|
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** | ✅ key derivation/verifier + ✅ `EncryptedPackage` decrypt (helpers), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-offcrypto` (parse + standard key derivation + verifier), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
+| Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
-### Agile encryption: supported parameter subset
-We accept (and when writing, emit) the following Agile subset:
+Important: `formula-io`’s public open APIs currently **detect** encryption and return
+`formula_io::Error::EncryptedWorkbook` (password plumbing not yet wired). The crypto code above
+exists to enable that future integration.
 
-* `cipherAlgorithm`: `AES`
-* `cipherChaining`: `ChainingModeCBC`
-* `hashAlgorithm`: `SHA512`
-* `keyBits`: `256`
-* `blockSize`: `16`
-* `saltSize`: `16`
-* `spinCount`: any `u32` **up to** our configured maximum (see [Security notes](#security-notes))
+## Supported schemes / parameter subsets
 
-If a document uses other algorithms (e.g. SHA-1, AES-128, CFB, etc) we currently treat it as
-unsupported rather than attempting partial decryption.
+### OOXML: Agile encryption (4.4)
+We implement the password key encryptor subset of Agile (`keyEncryptor uri=".../password"`).
 
-### Standard encryption (CryptoAPI): supported parameter subset
-We accept (and when writing, emit) the following Standard subset:
+Supported parameters (as enforced by decryptors today):
 
-* `AlgID`: AES-128 (`CALG_AES_128`)
-* `AlgIDHash`: SHA-1 (`CALG_SHA1`)
-* `KeySize`: `128`
-* `ProviderType`: `PROV_RSA_AES`
+- `cipherAlgorithm`: `AES`
+- `cipherChaining`: `ChainingModeCBC`
+- `hashAlgorithm`: `SHA1` / `SHA256` / `SHA384` / `SHA512`
+- `keyBits`: `128` / `192` / `256` (must match AES key size)
+- `blockSize`: `16` (AES block size; parsed from file and used for IV truncation)
+- `saltSize`: typically `16` (parsed; we do not require a fixed value but many writers use 16)
+- `spinCount`: file-provided `u32` (guard with a DoS max; see [Spin count limits](#spin-count-dos-limits))
 
-Other Standard combinations (RC4, AES-256, non-SHA1 hashes) are treated as unsupported.
+Not implemented:
 
-## Writer defaults (encryption we emit)
+- certificate-based key encryptors
+- IRM / “DataSpaces” transforms
 
-Unless explicitly overridden, the writer produces **Agile encryption** compatible with modern Excel
-(tested against Excel 2016/2019/365).
+### OOXML: Standard encryption (3.2, CryptoAPI AES)
+Supported subset (as enforced by parsers/derivers today):
 
-### Defaults (Agile writer)
-* Scheme: **Agile**
-* Cipher: **AES-256-CBC**
-* Hash: **SHA-512**
-* `spinCount`: **100_000**
-* `saltSize`: **16 bytes**
-* `blockSize`: **16 bytes**
-* Package segment size: **4096 bytes** (`0x1000`)
+- Cipher: AES-128/192/256 (`CALG_AES_128/192/256`) with `keySizeBits` matching the AlgID
+- Hash: SHA-1 (`CALG_SHA1`) for key derivation + verifier
+- Salt: `EncryptionVerifier.saltSize == 16`
 
-Randomness:
-* `keyData.saltValue`: 16 bytes, generated from a CSPRNG
-* `passwordKeyEncryptor.saltValue`: 16 bytes, generated independently from a CSPRNG
-* `passwordKeyEncryptor.verifierHashInput`: 16 bytes, generated from a CSPRNG
-* `dataIntegrity.hmacKey`: 64 bytes, generated from a CSPRNG (HMAC-SHA512 key)
+Other combinations (RC4, non-SHA1 verifier hashes, mismatched key sizes) are treated as unsupported
+by the current code.
 
-### Defaults (Standard writer)
-Standard encryption is available only for compatibility testing / fixture generation. Defaults:
+### Legacy `.xls`: BIFF8 `FILEPASS` RC4 CryptoAPI
+Currently supported in `formula-xls`:
 
-* Scheme: **Standard (CryptoAPI)**
-* Cipher: **AES-128-CBC**
-* Hash: **SHA-1**
-* `spinCount`: **50_000**
-* `saltSize`: **16 bytes**
-* Segment size: **512 bytes** (`0x200`)
+- BIFF8 `FILEPASS` with `wEncryptionType=0x0001` (RC4) and `wEncryptionSubType=0x0002` (CryptoAPI)
+- RC4 with SHA-1 and 50,000 password-hash iterations (see [Legacy `.xls` key derivation](#legacy-xls-biff8-filepass-rc4-cryptoapi))
+
+Not implemented:
+
+- XOR obfuscation
+- other BIFF encryption variants (including AES CryptoAPI for BIFF)
 
 ## Container format details (what’s inside the OLE file)
 
@@ -134,7 +127,7 @@ key = derived[0..keyBits/8]
 ```
 
 Notes:
-* `Hash` is the `hashAlgorithm` declared by the relevant XML node (SHA-512 in our supported subset).
+* `Hash` is the `hashAlgorithm` declared by the relevant XML node (`SHA1`/`SHA256`/`SHA384`/`SHA512`).
 * The iteration counter `i` is a **little-endian u32**.
 
 #### Agile blockKey constants
@@ -185,37 +178,60 @@ Agile includes a `dataIntegrity` block that authenticates the plaintext package:
 * `encryptedHmacValue` is decrypted using a key derived from `package_key` and `HMAC_VALUE_BLOCK`
 * `HMAC-SHA512(hmacKey, plaintextPackageBytes)` must match `hmacValue` (constant-time compare)
 
-### Standard (CryptoAPI): password KDF
-Standard uses the same “spinCount loop” shape but always SHA-1 in our supported subset:
+Implementation status:
+
+- `crates/formula-offcrypto` parses `encryptedHmacKey`/`encryptedHmacValue` for completeness but does
+  not currently validate them.
+- `crates/formula-office-crypto` also parses these fields but does not currently validate them.
+- If/when we wire Agile decryption into `formula-io`, we should strongly consider enabling HMAC
+  verification by default to distinguish wrong passwords from “ZIP happened to parse”.
+
+### Standard (CryptoAPI): password KDF + verifier (ECMA-376)
+
+Standard encryption key derivation is **not PBKDF2**. It is CryptoAPI/ECMA-376’s SHA-1 based
+construction with a fixed iteration count of **50,000**.
+
+In this repo, the reference implementation is `crates/formula-offcrypto/src/lib.rs`:
+`standard_derive_key` + `standard_verify_key`.
+
+High-level shape:
 
 ```text
-pw = UTF16LE(password)
-H0 = SHA1(salt + pw)
-H  = H0
-for i in 0..spinCount:
-  H = SHA1(LE32(i) + H)
+pw = UTF16LE(password)                      // no BOM, no NUL
+H  = SHA1(salt || pw)
+for i in 0..50000:
+  H = SHA1(LE32(i) || H)
 
-key = SHA1(H + LE32(0))[0..keySize/8]
+Hfinal = SHA1(H || LE32(0))
+keyMaterial = SHA1((0x36*64) XOR Hfinal) || SHA1((0x5c*64) XOR Hfinal)
+key = keyMaterial[0..keySizeBytes]          // keySizeBytes = keySizeBits/8
 ```
 
-The `LE32(0)` “block key” constant is fixed for Standard encryption key derivation.
+Verifier nuances (very common bug source):
 
-#### Standard password verification
-`EncryptionVerifier` contains:
-* `salt` (16 bytes)
-* `encryptedVerifier` (16 bytes)
-* `encryptedVerifierHash` (20 bytes for SHA-1)
+- `EncryptionVerifier.encryptedVerifier` and `EncryptionVerifier.encryptedVerifierHash` are
+  encrypted with **AES-ECB** (no IV) using the derived key.
+- The verifier hash is SHA-1 (20 bytes) and the encrypted blob is padded to an AES block boundary
+  (typically **32 bytes** on disk).
 
-The verifier bytes are decrypted with AES-CBC using IV=`salt` (per spec). The decrypted verifier is
-then hashed with SHA-1 and compared to the decrypted verifier hash.
+### Standard (CryptoAPI): `EncryptedPackage` decryption (AES-CBC, 0x1000 segments)
 
-#### Standard package decryption (segment IV derivation)
-Standard encrypts `EncryptedPackage` in 512-byte segments. For segment index `i`:
+Standard `EncryptedPackage` decryption uses **AES-CBC** over the package payload, segmented into
+4096-byte plaintext segments with per-segment IV derivation:
 
 ```text
-iv = SHA1(salt + LE32(i))[0..16]
-plaintext_i = AES-CBC-Decrypt(key=key, iv=iv, ciphertext=segment_i)
+iv_i = SHA1(salt || LE32(i))[0..16]
+plaintext_i = AES-CBC-Decrypt(key, iv_i, ciphertext_segment_i)
 ```
+
+Where:
+
+- `salt` is `EncryptionVerifier.salt` (16 bytes).
+- Segment index `i` is 0-based.
+- After concatenation, truncate plaintext to the 8-byte `orig_size` prefix.
+
+See `docs/offcrypto-standard-encryptedpackage.md` for edge cases (notably the “extra full padding
+block” case where the final ciphertext segment can be `0x1010` bytes).
 
 ## Interop notes / fixture generation
 
@@ -238,13 +254,82 @@ To generate fixtures for regression tests:
 For Standard fixtures, prefer using a known Excel 2007 install (or a controlled fixture generator
 tooling in CI) so the output is stable.
 
+Repo fixtures:
+
+- OOXML encrypted fixtures live in `fixtures/encrypted/ooxml/` (see that directory’s README).
+- BIFF8 `.xls` encrypted fixtures for `FILEPASS` live under `crates/formula-xls/tests/fixtures/`.
+
 ### Inspecting the scheme quickly
 To identify the scheme without full parsing:
 
 * Open the file as OLE/CFB and read the first 8 bytes of `EncryptionInfo`.
-* Interpret as `u16 minor, u16 major, u32 flags` (little-endian).
+* Interpret as `u16 major, u16 minor, u32 flags` (little-endian).
   * 3.2 ⇒ Standard
   * 4.4 ⇒ Agile
+
+### Defaults for *writing* encrypted OOXML (planned)
+This repo does not yet re-encrypt workbooks on save (round-tripping an encrypted workbook will
+eventually require emitting a new `EncryptionInfo` + `EncryptedPackage` wrapper).
+
+When implementing an encryption writer, use these defaults unless a compatibility requirement
+dictates otherwise:
+
+- **Agile (default):**
+  - `cipherAlgorithm=AES`, `cipherChaining=ChainingModeCBC`
+  - `hashAlgorithm=SHA512`
+  - `keyBits=256`, `blockSize=16`, `saltSize=16`
+  - `spinCount=100000` (matches common modern Excel output)
+  - `EncryptedPackage` segmentation: 4096-byte plaintext segments (`0x1000`)
+  - Generate independent CSPRNG salts for:
+    - `keyData/@saltValue`
+    - password key encryptor `saltValue`
+  - Generate a random 16-byte verifier input (`verifierHashInput`).
+  - Emit `dataIntegrity` and verify it on read (HMAC-SHA512) once implemented.
+
+- **Standard (opt-in/compat only):**
+  - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
+  - Iteration count is effectively fixed at 50,000 in the key derivation.
+  - `EncryptedPackage` segmentation: 4096-byte plaintext segments (`0x1000`) and IV derivation
+    `SHA1(salt || LE32(i))[0..16]` (see `docs/offcrypto-standard-encryptedpackage.md`).
+
+These defaults are intended for **interoperability** with Excel, not for novel cryptographic
+design.
+
+## Legacy `.xls` (BIFF8) `FILEPASS` RC4 CryptoAPI
+
+This is distinct from OOXML `EncryptedPackage` encryption.
+
+Implementation: `crates/formula-xls/src/decrypt.rs` (used by
+`formula_xls::import_xls_path_with_password`).
+
+### Key derivation (RC4 CryptoAPI)
+
+Terminology:
+
+- `salt` is `EncryptionVerifier.salt` from the CryptoAPI `EncryptionInfo` embedded inside the BIFF
+  `FILEPASS` record.
+- `pw` is UTF-16LE(password) (no BOM, no terminator).
+
+Algorithm (as implemented):
+
+```text
+H0 = SHA1(pw)
+H  = SHA1(salt || H0)
+for i in 0..50000:
+  H = SHA1(LE32(i) || H)
+
+// per-block RC4 key (keyLen is 5, 7, or 16 bytes depending on KeySizeBits)
+K_block = SHA1(H || LE32(blockIndex))[0..keyLen]
+```
+
+### Payload decryption model (record-payload-only RC4 stream)
+
+- The BIFF workbook stream is treated as a stream of **record payload bytes only** (record headers
+  are not decrypted).
+- RC4 keystream is applied across payload bytes, rekeying every **1024 bytes** of payload.
+- After successful decryption, the `FILEPASS` record id is masked to `0xFFFF` (leaving record sizes
+  intact) so downstream parsers that do not implement encryption can parse the stream without
+  shifting offsets.
 
 ## Security notes
 
@@ -274,6 +359,9 @@ To support streaming readers (don’t materialize the entire decrypted ZIP in me
 Spin counts are attacker-controlled and can be set extremely high to cause CPU denial of service.
 The reader should enforce a reasonable maximum spin count (and surface a specific error).
 
+Note: Standard encryption uses a fixed 50,000 iteration count; the DoS concern is primarily for
+Agile’s file-provided `spinCount`.
+
 ## Spec references (sections we implement)
 Primary:
 * **MS-OFFCRYPTO** (Office encryption container, Standard + Agile):
@@ -286,3 +374,7 @@ Useful entry points / keywords inside MS-OFFCRYPTO:
 * “Standard Encryption” (`EncryptionHeader`, `EncryptionVerifier`)
 * “Agile Encryption” (XML descriptor, password key encryptor, `EncryptedPackage` segmenting)
 * “Data Integrity” (`encryptedHmacKey`, `encryptedHmacValue`)
+
+Additional repo-specific references:
+- `docs/offcrypto-standard-encryptedpackage.md` (Standard `EncryptedPackage` segmenting/IV/padding)
+- `docs/21-encrypted-workbooks.md` (detection + UX/API semantics; fixture locations)
