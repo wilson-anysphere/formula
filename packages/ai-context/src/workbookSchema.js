@@ -70,6 +70,10 @@ function getCellRaw(sheet, row, col) {
  */
 function cellToScalar(raw) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    // Treat `{}` as an empty cell; it's a common sparse representation (notably from
+    // `packages/ai-rag` normalization and some SpreadsheetApi adapters).
+    if (raw.constructor === Object && Object.keys(raw).length === 0) return null;
+
     // ai-rag style: { v, f }
     if (Object.prototype.hasOwnProperty.call(raw, "v") || Object.prototype.hasOwnProperty.call(raw, "f")) {
       const formula = raw.f;

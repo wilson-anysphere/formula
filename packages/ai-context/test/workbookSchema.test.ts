@@ -125,4 +125,25 @@ describe("extractWorkbookSchema", () => {
     expect(schema.tables[0].inferredColumnTypes).toEqual(["string", "number", "boolean"]);
     expect(readCount).toBeLessThanOrEqual(15);
   });
+
+  it("treats empty object cells as empty for header/type inference", () => {
+    const workbook = {
+      id: "wb-empty-obj",
+      sheets: [
+        {
+          name: "Sheet1",
+          cells: [
+            [{}, { v: "Sales" }],
+            [{}, { v: 10 }],
+          ],
+        },
+      ],
+      tables: [{ name: "T", sheetName: "Sheet1", rect: { r0: 0, c0: 0, r1: 1, c1: 1 } }],
+    };
+
+    const schema = extractWorkbookSchema(workbook);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.tables[0].headers).toEqual(["Column1", "Sales"]);
+    expect(schema.tables[0].inferredColumnTypes).toEqual(["empty", "number"]);
+  });
 });
