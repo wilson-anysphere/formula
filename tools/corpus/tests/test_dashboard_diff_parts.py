@@ -104,6 +104,68 @@ class DashboardDiffPartsTests(unittest.TestCase):
             self.assertIn("| other | 3 |", md)
             self.assertIn("| doc_props | 1 |", md)
 
+    def test_dashboard_uses_part_groups_fallback_when_group_missing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="corpus-dashboard-") as tmp:
+            triage_dir = Path(tmp)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            report = {
+                "display_name": "book.xlsx",
+                "result": {
+                    "open_ok": True,
+                    "round_trip_ok": False,
+                    "diff_critical_count": 1,
+                    "diff_warning_count": 0,
+                    "diff_info_count": 0,
+                },
+                "steps": {
+                    "diff": {
+                        "status": "ok",
+                        "duration_ms": 1,
+                        "details": {
+                            "ignore": [],
+                            "counts": {"critical": 1, "warning": 0, "info": 0, "total": 1},
+                            "equal": False,
+                            # No per-entry `group`; rely on `part_groups` map.
+                            "parts_with_diffs": [
+                                {
+                                    "part": "docProps/app.xml",
+                                    "critical": 1,
+                                    "warning": 0,
+                                    "info": 0,
+                                    "total": 1,
+                                }
+                            ],
+                            "part_groups": {"docProps/app.xml": "doc_props"},
+                            "critical_parts": ["docProps/app.xml"],
+                            "top_differences": [],
+                        },
+                    }
+                },
+            }
+
+            (reports_dir / "r1.json").write_text(
+                json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+            )
+
+            old_argv = sys.argv
+            try:
+                sys.argv = [
+                    "dashboard.py",
+                    "--triage-dir",
+                    str(triage_dir),
+                ]
+                rc = dashboard_mod.main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertEqual(rc, 0)
+
+            md = (triage_dir / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("## Top diff part groups (CRITICAL)", md)
+            self.assertIn("| doc_props | 1 |", md)
+
 
 if __name__ == "__main__":
     unittest.main()
