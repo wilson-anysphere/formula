@@ -65,7 +65,9 @@ function parseMinisignKeyFileBody(text) {
   const binary = decodeBase64(payloadLine);
   if (!binary) return null;
   if (binary.length < 2 || binary[0] !== 0x45 || binary[1] !== 0x64) return null; // "Ed"
-  return { payloadLine, binary };
+  if (binary.length < 10) return null;
+  const keyIdHex = binary.subarray(2, 10).toString("hex").toUpperCase();
+  return { payloadLine, binary, keyIdHex };
 }
 
 /**
@@ -75,11 +77,11 @@ function parseMinisignKeyFileBody(text) {
  * that decode to a minisign key file (ASCII) whose payload line base64-decodes to a binary key
  * starting with the magic bytes "Ed".
  *
- * @param {string} privateKey
- * @returns {{ kind: 'secret' | 'public', encrypted?: boolean } | null}
+ * @param {string} value
+ * @returns {{ kind: 'secret' | 'public', keyIdHex: string, encrypted?: boolean } | null}
  */
-function analyzeMinisignPrivateKey(privateKey) {
-  const trimmed = privateKey.trim();
+function analyzeMinisignKey(value) {
+  const trimmed = value.trim();
 
   const tryParseKeyFile = (content) => {
     const lowered = content.toLowerCase();
@@ -91,11 +93,11 @@ function analyzeMinisignPrivateKey(privateKey) {
     if (!parsed) return null;
 
     if (hasPublicHeader || parsed.binary.length === MINISIGN_PUBLIC_KEY_BYTES) {
-      return { kind: "public" };
+      return { kind: "public", keyIdHex: parsed.keyIdHex };
     }
 
     const encrypted = parsed.binary.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
-    return { kind: "secret", encrypted };
+    return { kind: "secret", encrypted, keyIdHex: parsed.keyIdHex };
   };
 
   // Raw minisign key file (multiline secret).
@@ -115,10 +117,11 @@ function analyzeMinisignPrivateKey(privateKey) {
   }
 
   // base64-encoded minisign binary key (payload line itself).
-  if (decoded.length >= 2 && decoded[0] === 0x45 && decoded[1] === 0x64) {
-    if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) return { kind: "public" };
+  if (decoded.length >= 10 && decoded[0] === 0x45 && decoded[1] === 0x64) {
+    const keyIdHex = decoded.subarray(2, 10).toString("hex").toUpperCase();
+    if (decoded.length === MINISIGN_PUBLIC_KEY_BYTES) return { kind: "public", keyIdHex };
     const encrypted = decoded.length > MINISIGN_UNENCRYPTED_SECRET_KEY_MAX_BYTES;
-    return { kind: "secret", encrypted };
+    return { kind: "secret", encrypted, keyIdHex };
   }
 
   return null;
@@ -139,7 +142,7 @@ function analyzeMinisignPrivateKey(privateKey) {
 function isEncryptedPrivateKey(privateKey) {
   const trimmed = privateKey.trim();
 
-  const minisign = analyzeMinisignPrivateKey(trimmed);
+  const minisign = analyzeMinisignKey(trimmed);
   if (minisign?.kind === "secret") return minisign.encrypted === true;
 
   // PEM (multiline) keys: the header tells us whether it's encrypted.
@@ -227,7 +230,7 @@ function validatePrivateKeyFormat(privateKey) {
   const trimmed = privateKey.trim();
   if (trimmed.length === 0) return;
 
-  const minisign = analyzeMinisignPrivateKey(trimmed);
+  const minisign = analyzeMinisignKey(trimmed);
   if (minisign) {
     if (minisign.kind === "public") {
       errBlock(`Invalid TAURI_PRIVATE_KEY`, [
@@ -366,6 +369,31 @@ function main() {
 
     err(`\nUpdater signing secrets preflight failed. Fix the missing secrets above before tagging a release.\n`);
     return;
+  }
+
+  // When both keys are minisign keys, verify the configured updater public key matches the
+  // private key used for signing. A mismatch would produce signatures that the app cannot verify,
+  // leading to broken auto-update behavior despite a successful build.
+  const pubkeyValue = updater?.pubkey;
+  if (typeof pubkeyValue === "string" && pubkeyValue.trim().length > 0) {
+    const pubkey = analyzeMinisignKey(pubkeyValue);
+    const secret = analyzeMinisignKey(privateKey);
+    if (pubkey?.kind === "public" && secret?.kind === "secret") {
+      if (pubkey.keyIdHex !== secret.keyIdHex) {
+        errBlock(`Tauri updater key mismatch`, [
+          `The updater public key embedded in the app does not match the private key used for signing.`,
+          `apps/desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey key id: ${pubkey.keyIdHex}`,
+          `GitHub Actions secret TAURI_PRIVATE_KEY key id: ${secret.keyIdHex}`,
+          `Regenerate a matching keypair with:`,
+          `  (cd apps/desktop/src-tauri && cargo tauri signer generate)`,
+          `Then update BOTH:`,
+          `  - tauri.conf.json plugins.updater.pubkey (public key; safe to commit)`,
+          `  - GitHub Actions secret TAURI_PRIVATE_KEY (private key)`,
+        ]);
+        err(`\nUpdater signing secrets preflight failed. Fix the key mismatch above before tagging a release.\n`);
+        return;
+      }
+    }
   }
 
   if (passwordMissing) {

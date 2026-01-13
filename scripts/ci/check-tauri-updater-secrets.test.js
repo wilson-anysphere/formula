@@ -9,6 +9,26 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = path.join(repoRoot, "scripts", "ci", "check-tauri-updater-secrets.mjs");
 
+const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
+const tauriConfig = JSON.parse(readFileSync(configPath, "utf8"));
+const updaterPubkey = tauriConfig?.plugins?.updater?.pubkey;
+assert.equal(typeof updaterPubkey, "string");
+
+function updaterKeyIdBytes() {
+  const decoded = Buffer.from(updaterPubkey, "base64").toString("utf8");
+  const lines = decoded
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const payload = lines.find((line) => !line.toLowerCase().startsWith("untrusted comment:"));
+  assert.ok(payload, "expected minisign payload line in updater public key");
+  const binary = Buffer.from(payload, "base64");
+  assert.equal(binary.slice(0, 2).toString("ascii"), "Ed");
+  return binary.subarray(2, 10);
+}
+
+const updaterKeyId = updaterKeyIdBytes();
+
 /**
  * @param {Record<string, string | undefined>} env
  */
@@ -38,14 +58,14 @@ test("fails when TAURI_PRIVATE_KEY is set but not a supported format", () => {
   assert.match(proc.stderr, /Invalid TAURI_PRIVATE_KEY/);
 });
 
-function fakeMinisignSecretKey({ encrypted }) {
+function fakeMinisignSecretKey({ encrypted, keyId = updaterKeyId }) {
   // minisign keys are binary payloads prefixed with "Ed" + 8-byte key id.
   const header = Buffer.from([0x45, 0x64]); // "Ed"
-  const keyId = Buffer.alloc(8, 0x11);
   const secretPayload = Buffer.alloc(encrypted ? 140 : 64, 0x22);
   const binary = Buffer.concat([header, keyId, secretPayload]);
   const payloadLine = binary.toString("base64").replace(/=+$/, "");
-  const keyFile = `untrusted comment: minisign secret key: 0000000000000000\n${payloadLine}\n`;
+  const keyIdHex = Buffer.from(keyId).toString("hex").toUpperCase();
+  const keyFile = `untrusted comment: minisign secret key: ${keyIdHex}\n${payloadLine}\n`;
 
   // `cargo tauri signer generate` prints base64 strings that decode to minisign key files.
   return Buffer.from(keyFile, "utf8").toString("base64");
@@ -56,6 +76,14 @@ test("passes with an unencrypted minisign secret key and empty password", () => 
   const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
   assert.equal(proc.status, 0, proc.stderr);
   assert.match(proc.stdout, /preflight passed/i);
+});
+
+test("fails when minisign TAURI_PRIVATE_KEY does not match plugins.updater.pubkey", () => {
+  const wrongKeyId = Buffer.alloc(8, 0x33);
+  const key = fakeMinisignSecretKey({ encrypted: false, keyId: wrongKeyId });
+  const proc = run({ TAURI_PRIVATE_KEY: key, TAURI_KEY_PASSWORD: "" });
+  assert.notEqual(proc.status, 0);
+  assert.match(proc.stderr, /Tauri updater key mismatch/i);
 });
 
 test("requires TAURI_KEY_PASSWORD for encrypted minisign secret keys", () => {
@@ -73,12 +101,7 @@ test("requires TAURI_KEY_PASSWORD for encrypted minisign secret keys", () => {
 });
 
 test("fails when TAURI_PRIVATE_KEY is a minisign public key (copied from tauri.conf.json)", () => {
-  const configPath = path.join(repoRoot, "apps", "desktop", "src-tauri", "tauri.conf.json");
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
-  const pubkey = config?.plugins?.updater?.pubkey;
-  assert.equal(typeof pubkey, "string");
-
-  const proc = run({ TAURI_PRIVATE_KEY: pubkey, TAURI_KEY_PASSWORD: "pass" });
+  const proc = run({ TAURI_PRIVATE_KEY: updaterPubkey, TAURI_KEY_PASSWORD: "pass" });
   assert.notEqual(proc.status, 0);
   assert.match(proc.stderr, /minisign \*public\* key/i);
 });
