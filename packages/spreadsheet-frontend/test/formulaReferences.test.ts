@@ -212,6 +212,45 @@ describe("extractFormulaReferences", () => {
     });
   });
 
+  it("extracts structured table specifiers like #All/#Headers/#Data", () => {
+    const tables = new Map([
+      [
+        "Table1",
+        {
+          name: "Table1",
+          sheetName: "Sheet1",
+          // Full table range (including header row) is A1:B4 in Excel terms.
+          startRow: 0,
+          startCol: 0,
+          endRow: 3,
+          endCol: 1,
+          columns: ["Item", "Amount"]
+        }
+      ]
+    ]);
+
+    const allInput = "=SUM(Table1[#All])";
+    const { references: allRefs } = extractFormulaReferences(allInput, 0, 0, { tables });
+    expect(allRefs).toHaveLength(1);
+    expect(allRefs[0]).toEqual({
+      text: "Table1[#All]",
+      range: { sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 3, endCol: 1 },
+      index: 0,
+      start: allInput.indexOf("Table1"),
+      end: allInput.indexOf("Table1") + "Table1[#All]".length
+    });
+
+    const headersInput = "=SUM(Table1[#Headers])";
+    const { references: headerRefs } = extractFormulaReferences(headersInput, 0, 0, { tables });
+    expect(headerRefs).toHaveLength(1);
+    expect(headerRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 0, startCol: 0, endRow: 0, endCol: 1 });
+
+    const dataInput = "=SUM(Table1[#Data])";
+    const { references: dataRefs } = extractFormulaReferences(dataInput, 0, 0, { tables });
+    expect(dataRefs).toHaveLength(1);
+    expect(dataRefs[0]?.range).toEqual({ sheet: "Sheet1", startRow: 1, startCol: 0, endRow: 3, endCol: 1 });
+  });
+
   it("treats a structured ref as the active reference even when the caret is after an internal comma", () => {
     const tables = new Map([
       [

@@ -270,16 +270,49 @@ function resolveStructuredReference(refText: string, opts: ExtractFormulaReferen
   const endCol = table.endCol;
   if (![startRow, endRow, startCol, endCol].every((v) => Number.isFinite(v))) return null;
 
-  const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed.columnName.toLowerCase());
-  if (columnIndex < 0) return null;
-
   const baseStartCol = Math.min(startCol!, endCol!);
   const baseEndCol = Math.max(startCol!, endCol!);
-  const col = baseStartCol + columnIndex;
-  if (col < baseStartCol || col > baseEndCol) return null;
 
   const baseStartRow = Math.min(startRow!, endRow!);
   const baseEndRow = Math.max(startRow!, endRow!);
+
+  // Handle special structured reference specifiers like `Table1[#All]`, `Table1[#Data]`, etc.
+  // These reference whole-table ranges (not a specific column).
+  const maybeSpecifier = parsed.columnName.toLowerCase();
+  if (maybeSpecifier.startsWith("#")) {
+    const sheet = table.sheet ?? table.sheetName;
+    if (!sheet) return null;
+
+    if (maybeSpecifier === "#all") {
+      return { sheet, startRow: baseStartRow, endRow: baseEndRow, startCol: baseStartCol, endCol: baseEndCol };
+    }
+
+    if (maybeSpecifier === "#headers") {
+      return { sheet, startRow: baseStartRow, endRow: baseStartRow, startCol: baseStartCol, endCol: baseEndCol };
+    }
+
+    if (maybeSpecifier === "#data") {
+      let refStartRow = baseStartRow;
+      const refEndRow = baseEndRow;
+      if (refEndRow > refStartRow) {
+        // Exclude header row when the table has at least one data row.
+        refStartRow = refStartRow + 1;
+      }
+      return {
+        sheet,
+        startRow: Math.min(refStartRow, refEndRow),
+        endRow: Math.max(refStartRow, refEndRow),
+        startCol: baseStartCol,
+        endCol: baseEndCol
+      };
+    }
+  }
+
+  const columnIndex = table.columns.findIndex((c) => String(c).toLowerCase() === parsed.columnName.toLowerCase());
+  if (columnIndex < 0) return null;
+
+  const col = baseStartCol + columnIndex;
+  if (col < baseStartCol || col > baseEndCol) return null;
 
   let refStartRow = baseStartRow;
   const refEndRow = baseEndRow;
