@@ -15,6 +15,7 @@ describe("FormulaBarView name box dropdown", () => {
     const onGoTo = vi.fn((reference: string) => {
       if (reference === "Table1[#All]") {
         // Simulate the parent app updating the selection display after navigation.
+        // The Name Box should still keep the chosen label immediately after dropdown selection.
         view.setActiveCell({ address: "A1", input: "", value: null, nameBox: "A1:D10" });
       }
       return true;
@@ -68,7 +69,7 @@ describe("FormulaBarView name box dropdown", () => {
 
     expect(onGoTo).toHaveBeenCalledTimes(1);
     expect(onGoTo).toHaveBeenCalledWith("Table1[#All]");
-    expect(address!.value).toBe("A1:D10");
+    expect(address!.value).toBe("Table1");
     expect(popup!.hidden).toBe(true);
     expect(address!.getAttribute("aria-expanded")).toBe("false");
 

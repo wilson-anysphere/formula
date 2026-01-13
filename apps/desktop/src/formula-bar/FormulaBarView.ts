@@ -712,11 +712,10 @@ export class FormulaBarView {
               return;
             }
 
-            this.#clearNameBoxError();
-            address.blur();
-            this.#addressEl.value = this.#nameBoxValue;
-            return;
-          }
+             this.#clearNameBoxError();
+             address.blur();
+             return;
+           }
           if (e.key === "Escape") {
             e.preventDefault();
             this.#closeNameBoxDropdown({ restoreAddress: true, reason: "escape" });
@@ -782,9 +781,6 @@ export class FormulaBarView {
         this.#clearNameBoxError();
         // Blur after navigating so follow-up renders can update the value.
         address.blur();
-        // In case navigation triggered a render while we were still focused, sync the value now
-        // that the input is no longer focused.
-        this.#addressEl.value = this.#nameBoxValue;
         return;
       }
 
@@ -2793,7 +2789,6 @@ export class FormulaBarView {
     this.#clearNameBoxError();
     // Blur after navigating so follow-up renders can update the value.
     this.#addressEl.blur();
-    this.#addressEl.value = this.#nameBoxValue;
   }
 
   #nameBoxDropdownOptionId(item: NameBoxDropdownItem): string {
