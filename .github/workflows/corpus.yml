@@ -239,7 +239,11 @@ jobs:
           from pathlib import Path
           
           p = Path("tools/corpus/out/private/trend.json")
-          data = json.loads(p.read_text(encoding="utf-8") or "[]")
+          try:
+              raw = p.read_text(encoding="utf-8").strip()
+              data = json.loads(raw or "[]")
+          except json.JSONDecodeError:
+              raise SystemExit(0)
           if not isinstance(data, list) or len(data) < 2:
               raise SystemExit(0)
           
