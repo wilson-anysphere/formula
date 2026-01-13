@@ -1,0 +1,96 @@
+name: Desktop bundle size
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  conflict-marker-guard:
+    name: "Guard: no merge conflict markers"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if merge conflict markers are present
+        run: bash scripts/ci/check-merge-conflict-markers.sh
+
+  linux-desktop-bundle-size:
+    name: Linux desktop bundle size
+    needs: conflict-marker-guard
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Linux dependencies (Tauri/WebView + packaging)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf \
+            rpm \
+            squashfs-tools
+
+          # Some AppImage tooling requires FUSE2 at runtime. Ubuntu 24.04 renamed the
+          # package to `libfuse2t64`; try both, but don't fail the build if neither exists.
+          sudo apt-get install -y libfuse2 || sudo apt-get install -y libfuse2t64 || true
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        run: bash scripts/cargo_agent.sh install wasm-pack --locked
+
+      - name: Install cargo-tauri
+        run: bash scripts/cargo_agent.sh install cargo-tauri --locked
+
+      - name: Build desktop bundles (Tauri)
+        run: cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build
+
+      - name: Report desktop bundle sizes
+        env:
+          # Optional: set these as GitHub Actions "Variables" to enable gating.
+          # - FORMULA_ENFORCE_BUNDLE_SIZE=1 to fail when any artifact exceeds the limit
+          # - FORMULA_BUNDLE_SIZE_LIMIT_MB=50 to adjust the default 50 MB budget
+          FORMULA_ENFORCE_BUNDLE_SIZE: ${{ vars.FORMULA_ENFORCE_BUNDLE_SIZE }}
+          FORMULA_BUNDLE_SIZE_LIMIT_MB: ${{ vars.FORMULA_BUNDLE_SIZE_LIMIT_MB }}
+        run: python scripts/desktop_bundle_size_report.py --json desktop-bundle-size-report.json
+
+      - name: Upload desktop bundle size report (JSON)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-bundle-size-report
+          path: desktop-bundle-size-report.json

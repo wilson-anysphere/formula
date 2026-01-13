@@ -397,7 +397,7 @@ def main() -> int:
     offenders = [a for a in artifacts if a.size_bytes > limit_bytes]
     if offenders:
         print(
-            f"bundle-size: ERROR {len(offenders)} artifact(s) exceed {limit_mb} MiB "
+            f"bundle-size: ERROR {len(offenders)} artifact(s) exceed {limit_mb} MB "
             f"(set FORMULA_BUNDLE_SIZE_LIMIT_MB to adjust).",
             file=sys.stderr,
         )
