@@ -11,7 +11,14 @@ describe("FormulaBarView name box dropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const onGoTo = vi.fn();
+    let view: FormulaBarView;
+    const onGoTo = vi.fn((reference: string) => {
+      if (reference === "Table1[#All]") {
+        // Simulate the parent app updating the selection display after navigation.
+        view.setActiveCell({ address: "A1", input: "", value: null, nameBox: "A1:D10" });
+      }
+      return true;
+    });
     const provider: NameBoxDropdownProvider = {
       getItems: () => [
         {
@@ -31,7 +38,7 @@ describe("FormulaBarView name box dropdown", () => {
       ],
     };
 
-    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+    view = new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
 
     const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]');
     const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]');
@@ -61,7 +68,7 @@ describe("FormulaBarView name box dropdown", () => {
 
     expect(onGoTo).toHaveBeenCalledTimes(1);
     expect(onGoTo).toHaveBeenCalledWith("Table1[#All]");
-    expect(address!.value).toBe("Table1");
+    expect(address!.value).toBe("A1:D10");
     expect(popup!.hidden).toBe(true);
     expect(address!.getAttribute("aria-expanded")).toBe("false");
 

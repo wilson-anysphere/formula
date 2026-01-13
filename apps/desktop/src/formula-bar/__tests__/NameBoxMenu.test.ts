@@ -44,7 +44,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const onGoTo = vi.fn();
+    const onGoTo = vi.fn(() => true);
     new FormulaBarView(host, {
       onCommit: () => {},
       onGoTo,
@@ -101,7 +101,7 @@ describe("FormulaBarView name box dropdown menu", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    const onGoTo = vi.fn();
+    const onGoTo = vi.fn(() => true);
     new FormulaBarView(host, {
       onCommit: () => {},
       onGoTo,
