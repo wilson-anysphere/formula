@@ -137,25 +137,7 @@ function sheetViewStateEquals(a, b) {
 }
 
 function getYMapCell(cellData) {
-  // y-websocket currently pulls in the CJS build of Yjs, which means callers using
-  // ESM `import * as Y from "yjs"` can observe Yjs types that fail `instanceof`
-  // checks (same version, different module instance).
-  //
-  // Use a lightweight duck-type check instead of `instanceof Y.Map` so the
-  // binder can interop with y-websocket providers in pnpm workspaces.
-  if (!cellData || typeof cellData !== "object") return null;
-  // Tolerate differing constructor names across builds (e.g. `YMap` vs `_YMap`)
-  // and multiple `yjs` module instances by relying on structural checks.
-  const maybe = cellData;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  // Plain JS Maps also have get/set/delete/forEach, so additionally require the
-  // Yjs observer APIs.
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe;
+  return getYMap(cellData);
 }
 
 function normalizeFormula(value) {

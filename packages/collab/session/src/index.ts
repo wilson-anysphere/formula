@@ -225,16 +225,8 @@ function normalizeForeignScalar(value: any): any {
     return arr.map((v: any) => normalizeForeignScalar(v));
   }
 
-  if (value instanceof Y.Text) return value.toString();
-  // Avoid relying on constructor names (`YText` vs `_YText`).
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof (value as any).toString === "function" &&
-    typeof (value as any).toDelta === "function"
-  ) {
-    return (value as any).toString();
-  }
+  const text = getYText(value);
+  if (text) return text.toString();
 
   return value;
 }
@@ -539,22 +531,7 @@ export function normalizeCellKey(
 }
 
 function getYMapCell(cellData: unknown): Y.Map<unknown> | null {
-  if (cellData instanceof Y.Map) return cellData;
-
-  // In some environments (notably pnpm workspaces + Node), it's possible to end up with
-  // multiple `yjs` module instances (e.g. one loaded via ESM import and another via CJS require).
-  // When that happens, `instanceof Y.Map` checks fail even though the value is a valid Yjs map.
-  //
-  // Use a small duck-type check so CollabSession APIs keep working regardless of module loader.
-  if (!cellData || typeof cellData !== "object") return null;
-  const maybe = cellData as any;
-  if (typeof maybe.get !== "function") return null;
-  if (typeof maybe.set !== "function") return null;
-  if (typeof maybe.delete !== "function") return null;
-  if (typeof maybe.forEach !== "function") return null;
-  if (typeof maybe.observeDeep !== "function") return null;
-  if (typeof maybe.unobserveDeep !== "function") return null;
-  return maybe as Y.Map<unknown>;
+  return getYMap(cellData) as Y.Map<unknown> | null;
 }
 
 const RECENT_OUTGOING_UPDATE_BYTES_LIMIT = 20;
