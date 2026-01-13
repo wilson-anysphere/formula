@@ -131,7 +131,11 @@ describe("defaultRibbonSchema", () => {
 
       for (const group of tab.groups) {
         expectUniqueIds(
-          group.buttons.map((button) => button.id),
+          // A ribbon group may expose multiple controls that execute the same command id
+          // (e.g. legacy variants that keep stable test hooks). Mirror the runtime React
+          // key selection (testId when available, else command id) so we still catch
+          // collisions that would break rendering.
+          group.buttons.map((button) => button.testId ?? button.id),
           `button (tab: ${tab.id}, group: ${group.id})`,
         );
 

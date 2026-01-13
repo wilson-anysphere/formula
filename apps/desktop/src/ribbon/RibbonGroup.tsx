@@ -27,7 +27,10 @@ export function RibbonGroup({
       <div className="ribbon-group__content">
         {group.buttons.map((button) => (
           <RibbonButton
-            key={button.id}
+            // Multiple controls can legitimately map to the same command id (e.g. legacy
+            // variants that keep stable `testId`s for e2e). Use `testId` as the stable
+            // React key when available to avoid collisions.
+            key={button.testId ?? button.id}
             button={button}
             pressed={pressedById[button.id]}
             labelOverride={labelById?.[button.id]}

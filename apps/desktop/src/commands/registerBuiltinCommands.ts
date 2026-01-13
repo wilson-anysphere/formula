@@ -775,6 +775,18 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "view.togglePanel.vbaMigrate",
+    t("command.view.togglePanel.vbaMigrate"),
+    () => toggleDockPanel(PanelIds.VBA_MIGRATE),
+    {
+      category: t("commandCategory.view"),
+      icon: null,
+      description: t("commandDescription.view.togglePanel.vbaMigrate"),
+      keywords: ["vba", "migrate", "macros", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "view.togglePanel.marketplace",
     t("command.view.togglePanel.marketplace"),
     () => {

@@ -8764,9 +8764,6 @@ function handleRibbonCommand(commandId: string): void {
       case "view.unfreezePanes":
         executeBuiltinCommand(commandId);
         return;
-      case "open-vba-migrate-panel":
-        toggleDockPanel(PanelIds.VBA_MIGRATE);
-        return;
       case "audit-precedents":
         app.toggleAuditingPrecedents();
         app.focus();

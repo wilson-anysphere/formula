@@ -33,6 +33,7 @@ describe("registerBuiltinCommands: panel toggles", () => {
       { commandId: "view.togglePanel.dataQueries", panelId: PanelIds.DATA_QUERIES, expectedSide: "right" },
       { commandId: "view.togglePanel.scriptEditor", panelId: PanelIds.SCRIPT_EDITOR, expectedSide: "bottom" },
       { commandId: "view.togglePanel.python", panelId: PanelIds.PYTHON, expectedSide: "bottom" },
+      { commandId: "view.togglePanel.vbaMigrate", panelId: PanelIds.VBA_MIGRATE, expectedSide: "right" },
     ];
 
     for (const { commandId, panelId, expectedSide } of cases) {

@@ -545,7 +545,7 @@ export const homeTab: RibbonTabDefinition = {
           size: "icon",
         },
         {
-          id: "open-vba-migrate-panel",
+          id: "view.togglePanel.vbaMigrate",
           label: "Migrate Macros",
           ariaLabel: "Toggle VBA migrate panel",
           iconId: "settings",
