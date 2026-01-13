@@ -90,6 +90,10 @@ benchmark-details.json
 benchmark-results.tab-completion.json
 benchmark-details.tab-completion.json
 
+# CI size report outputs (generated locally/CI)
+desktop-size-report.json
+desktop-bundle-size-report.json
+ 
 # App artifacts
 .formula/
 
