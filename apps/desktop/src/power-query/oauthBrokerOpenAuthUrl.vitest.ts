@@ -35,4 +35,43 @@ describe("DesktopOAuthBroker.openAuthUrl", () => {
     await expect(broker.openAuthUrl("ftp://example.com")).rejects.toThrow(/untrusted protocol/i);
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["127.0.0.1", "http://127.0.0.1:4242/oauth/callback"],
+    ["localhost", "http://localhost:4242/oauth/callback"],
+    ["::1", "http://[::1]:4242/oauth/callback"],
+  ] as const)("starts the Rust loopback listener for %s redirect URIs", async (_hostLabel, redirectUri) => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    // Guard against accidental webview navigation fallback.
+    const windowOpen = vi.fn();
+    (globalThis as any).window = { open: windowOpen };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = new URL("https://example.com/oauth/authorize");
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+
+    await broker.openAuthUrl(authUrl.toString());
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenNthCalledWith(1, "oauth_loopback_listen", { redirect_uri: redirectUri });
+    expect(invoke).toHaveBeenNthCalledWith(2, "open_external_url", { url: authUrl.toString() });
+    expect(windowOpen).not.toHaveBeenCalled();
+  });
+
+  it("does not start the loopback listener for non-loopback redirect URIs", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const broker = new DesktopOAuthBroker();
+    const authUrl = new URL("https://example.com/oauth/authorize");
+    authUrl.searchParams.set("redirect_uri", "http://example.com:4242/oauth/callback");
+
+    await broker.openAuthUrl(authUrl.toString());
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: authUrl.toString() });
+    expect(invoke).not.toHaveBeenCalledWith("oauth_loopback_listen", expect.anything());
+  });
 });

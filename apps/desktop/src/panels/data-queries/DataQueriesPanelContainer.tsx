@@ -58,6 +58,7 @@ function hasTauri(): boolean {
 
 const RECOMMENDED_DESKTOP_OAUTH_REDIRECT_URI = "formula://oauth/callback";
 const EXAMPLE_LOOPBACK_OAUTH_REDIRECT_URI = "http://127.0.0.1:4242/oauth/callback";
+const LOOPBACK_REDIRECT_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
 function hasTauriEventApi(): boolean {
   return typeof (globalThis as any).__TAURI__?.event?.listen === "function";
@@ -74,9 +75,7 @@ function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
     if (protocol === "formula:") return true;
 
     // Loopback redirect capture (RFC 8252) for providers that support it.
-    // Note: we currently only support 127.0.0.1 (not `localhost` / `::1`) to avoid
-    // IPv6 resolution differences between platforms.
-    if (protocol === "http:" && url.hostname === "127.0.0.1" && url.port) {
+    if (protocol === "http:" && LOOPBACK_REDIRECT_HOSTS.has(url.hostname) && url.port) {
       return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
     }
 

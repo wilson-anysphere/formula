@@ -170,8 +170,9 @@ test.describe("data queries: desktop OAuth redirect capture", () => {
     expect(promptCalls).toBe(0);
   });
 
-  test("loopback redirectUri invokes oauth_loopback_listen and resolves without prompting", async ({ page }) => {
-    await page.addInitScript(() => {
+  for (const redirectUri of ["http://localhost:4242/oauth/callback", "http://[::1]:4242/oauth/callback"] as const) {
+    test(`loopback redirectUri (${redirectUri}) invokes oauth_loopback_listen and resolves without prompting`, async ({ page }) => {
+      await page.addInitScript((redirectUri) => {
       const listeners: Record<string, any> = {};
       (window as any).__tauriListeners = listeners;
 
@@ -217,7 +218,7 @@ test.describe("data queries: desktop OAuth redirect capture", () => {
             clientId: "client-id",
             tokenEndpoint: "https://example.com/oauth/token",
             authorizationEndpoint: "https://example.com/oauth/authorize",
-            redirectUri: "http://127.0.0.1:4242/oauth/callback",
+            redirectUri,
             defaultScopes: ["scope-a"],
           },
         ]),
@@ -302,59 +303,60 @@ test.describe("data queries: desktop OAuth redirect capture", () => {
           }),
         },
       };
+      }, redirectUri);
+
+      await gotoDesktop(page);
+
+      // Open the Data Queries panel.
+      await page.evaluate(() => {
+        window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "dataQueries" } }));
+      });
+
+      const signIn = page.getByRole("button", { name: "Sign in" }).first();
+      await expect(signIn).toBeVisible();
+      await signIn.click();
+
+      // Loopback redirect capture should show the awaiting state with no paste prompt.
+      await expect(page.getByText("Awaiting OAuth redirect…")).toBeVisible();
+      await expect(page.getByRole("button", { name: /Paste redirect URL/i })).toHaveCount(0);
+
+      // Ensure the host was asked to start the loopback listener.
+      await page.waitForFunction(
+        () => (window as any).__tauriInvokeCalls?.some((c: any) => c?.cmd === "oauth_loopback_listen"),
+        undefined,
+        { timeout: 10_000 },
+      );
+
+      const loopbackArgs = await page.evaluate(() => {
+        const calls = (window as any).__tauriInvokeCalls as Array<{ cmd: string; args: any }> | undefined;
+        const call = calls?.find((c) => c.cmd === "oauth_loopback_listen");
+        return call?.args ?? null;
+      });
+      expect(loopbackArgs).toEqual({ redirect_uri: redirectUri });
+
+      // Wait until the auth URL is opened so we can reuse the generated `state` parameter.
+      const authUrl = await page.waitForFunction(() => (window as any).__oauthOpenedUrls?.[0] ?? null);
+      const authUrlText = await authUrl.jsonValue();
+      const parsed = new URL(String(authUrlText));
+      const state = parsed.searchParams.get("state");
+      const openedRedirectUri = parsed.searchParams.get("redirect_uri");
+      if (!state || !openedRedirectUri) {
+        throw new Error(`Expected authorization URL to include state + redirect_uri: ${authUrlText}`);
+      }
+
+      // Deliver the redirect back to the running app via the stubbed Tauri event channel.
+      await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["oauth-redirect"]));
+      const redirectUrl = `${openedRedirectUri}?code=fake_code&state=${encodeURIComponent(state)}`;
+      await page.evaluate((url) => {
+        (window as any).__tauriListeners["oauth-redirect"]({ payload: url });
+      }, redirectUrl);
+
+      await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible();
+
+      const promptCalls = await page.evaluate(() => (window as any).__promptCalls?.length ?? 0);
+      expect(promptCalls).toBe(0);
     });
-
-    await gotoDesktop(page);
-
-    // Open the Data Queries panel.
-    await page.evaluate(() => {
-      window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "dataQueries" } }));
-    });
-
-    const signIn = page.getByRole("button", { name: "Sign in" }).first();
-    await expect(signIn).toBeVisible();
-    await signIn.click();
-
-    // Loopback redirect capture should show the awaiting state with no paste prompt.
-    await expect(page.getByText("Awaiting OAuth redirect…")).toBeVisible();
-    await expect(page.getByRole("button", { name: /Paste redirect URL/i })).toHaveCount(0);
-
-    // Ensure the host was asked to start the loopback listener.
-    await page.waitForFunction(
-      () => (window as any).__tauriInvokeCalls?.some((c: any) => c?.cmd === "oauth_loopback_listen"),
-      undefined,
-      { timeout: 10_000 },
-    );
-
-    const loopbackArgs = await page.evaluate(() => {
-      const calls = (window as any).__tauriInvokeCalls as Array<{ cmd: string; args: any }> | undefined;
-      const call = calls?.find((c) => c.cmd === "oauth_loopback_listen");
-      return call?.args ?? null;
-    });
-    expect(loopbackArgs).toEqual({ redirect_uri: "http://127.0.0.1:4242/oauth/callback" });
-
-    // Wait until the auth URL is opened so we can reuse the generated `state` parameter.
-    const authUrl = await page.waitForFunction(() => (window as any).__oauthOpenedUrls?.[0] ?? null);
-    const authUrlText = await authUrl.jsonValue();
-    const parsed = new URL(String(authUrlText));
-    const state = parsed.searchParams.get("state");
-    const redirectUri = parsed.searchParams.get("redirect_uri");
-    if (!state || !redirectUri) {
-      throw new Error(`Expected authorization URL to include state + redirect_uri: ${authUrlText}`);
-    }
-
-    // Deliver the redirect back to the running app via the stubbed Tauri event channel.
-    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["oauth-redirect"]));
-    const redirectUrl = `${redirectUri}?code=fake_code&state=${encodeURIComponent(state)}`;
-    await page.evaluate((url) => {
-      (window as any).__tauriListeners["oauth-redirect"]({ payload: url });
-    }, redirectUrl);
-
-    await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible();
-
-    const promptCalls = await page.evaluate(() => (window as any).__promptCalls?.length ?? 0);
-    expect(promptCalls).toBe(0);
-  });
+  }
 
   test("ignores oauth-redirect events that don't match the pending redirectUri", async ({ page }) => {
     await page.addInitScript(() => {
