@@ -85,4 +85,18 @@ describe("sampling", () => {
     expect(sampleA).toEqual(sampleB);
     expect(sampleA).toEqual([1, 4, 6, 9]);
   });
+
+  it("sampling helpers validate sampleSize / options", () => {
+    const rows = Array.from({ length: 10 }, (_v, i) => i);
+
+    expect(() => headSampleRows(rows, -1 as any)).toThrow(/sampleSize must be a non-negative integer/);
+    expect(() => tailSampleRows(rows, 1.5 as any)).toThrow(/sampleSize must be a non-negative integer/);
+    expect(() => systematicSampleRows(rows, -1 as any)).toThrow(/sampleSize must be a non-negative integer/);
+    expect(() => systematicSampleRows(rows, 3, { offset: Number.NaN as any })).toThrow(/offset must be a finite number/);
+
+    const stratifiedRows = rows.map((v) => ["S", v]);
+    expect(() =>
+      stratifiedSampleRows(stratifiedRows, 1.1 as any, { getStratum: (r: any) => r[0], seed: 1 }),
+    ).toThrow(/sampleSize must be a non-negative integer/);
+  });
 });
