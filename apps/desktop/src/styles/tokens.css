@@ -310,6 +310,18 @@
   --chart-series-2: LinkText;
   --chart-series-3: VisitedText;
   --chart-series-4: CanvasText;
+
+  /*
+    Workbook chart theme bridge: when a workbook provides its own accent palette we still
+    want forced-colors/high-contrast modes to swap those colors to system colors. The
+    chart theme uses these as `var(--chart-series-hc-N, <workbook-accentN>)` fallbacks.
+  */
+  --chart-series-hc-1: var(--chart-series-1);
+  --chart-series-hc-2: var(--chart-series-2);
+  --chart-series-hc-3: var(--chart-series-3);
+  --chart-series-hc-4: var(--chart-series-4);
+  --chart-series-hc-5: Mark;
+  --chart-series-hc-6: ButtonText;
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
@@ -396,6 +408,13 @@
     --chart-series-2: LinkText;
     --chart-series-3: VisitedText;
     --chart-series-4: CanvasText;
+
+    --chart-series-hc-1: var(--chart-series-1);
+    --chart-series-hc-2: var(--chart-series-2);
+    --chart-series-hc-3: var(--chart-series-3);
+    --chart-series-hc-4: var(--chart-series-4);
+    --chart-series-hc-5: Mark;
+    --chart-series-hc-6: ButtonText;
   }
 }
 
