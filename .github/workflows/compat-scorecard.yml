@@ -97,7 +97,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: excel-oracle-artifacts
+          name: excel-oracle-summary
           path: artifacts/excel
           run-id: ${{ steps.runs.outputs.excel_run_id }}
           github-token: ${{ github.token }}

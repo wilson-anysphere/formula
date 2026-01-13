@@ -433,7 +433,8 @@ Corpus summary artifacts:
 
 Excel-oracle artifacts:
 
-- `excel-oracle-artifacts` → includes `tests/compatibility/excel-oracle/reports/mismatch-report.json`
+- `excel-oracle-summary` → `tests/compatibility/excel-oracle/reports/mismatch-report.json` + `summary.md`
+- `excel-oracle-artifacts` → full datasets + reports (useful for deep debugging)
 
 ### Workflow dispatch knobs (Calculate/Render coverage)
 

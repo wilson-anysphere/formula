@@ -329,3 +329,13 @@ jobs:
           path: |
             tests/compatibility/excel-oracle/datasets/**/*.json
             tests/compatibility/excel-oracle/reports/*.json
+
+      - name: Upload excel-oracle summary (stable paths)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: excel-oracle-summary
+          path: |
+            tests/compatibility/excel-oracle/reports/mismatch-report.json
+            tests/compatibility/excel-oracle/reports/summary.md
+          if-no-files-found: ignore
