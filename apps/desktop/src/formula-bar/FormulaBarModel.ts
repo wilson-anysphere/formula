@@ -261,7 +261,17 @@ export class FormulaBarModel {
       };
     }
 
-    return getFunctionHint(this.#draft, this.#cursorStart);
+    const hint = getFunctionHint(this.#draft, this.#cursorStart);
+    if (!hint) return null;
+
+    // Best-effort locale-aware separator in fallback mode (engine absent/unavailable).
+    // This uses the document language (set by the i18n layer) as a proxy for the
+    // formula locale, defaulting to en-US in non-DOM environments (tests).
+    const localeId =
+      (typeof document !== "undefined" ? document.documentElement?.lang : "")?.trim?.() || "en-US";
+    const argSeparator = inferArgSeparator(localeId);
+    if (argSeparator === ", ") return hint;
+    return { ...hint, parts: signatureParts(hint.signature, hint.context.argIndex, { argSeparator }) };
   }
 
   errorExplanation(): ErrorExplanation | null {
