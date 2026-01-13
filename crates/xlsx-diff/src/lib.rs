@@ -22,6 +22,10 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 pub use xml::{diff_xml, NormalizedXml};
 
+#[cfg(test)]
+static FAST_PATH_SKIPPED_PARTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     Critical,
@@ -252,6 +256,16 @@ pub fn diff_archives_with_options(
     for part in expected_parts.intersection(&actual_parts) {
         let expected_bytes = expected.get(part).unwrap_or_default();
         let actual_bytes = actual.get(part).unwrap_or_default();
+
+        // Fast path: for large corpora, most parts often round-trip byte-identically.
+        // Avoid XML parsing/normalization work when there is nothing to diff.
+        if expected_bytes == actual_bytes {
+            #[cfg(test)]
+            {
+                FAST_PATH_SKIPPED_PARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            continue;
+        }
 
         let forced_xml = is_xml_extension(part);
         let xml_candidate =
@@ -627,6 +641,32 @@ mod tests {
             "xl/worksheets/sheet1.xml"
         );
         assert_eq!(resolve_relationship_target("_rels/.rels", "#frag"), "");
+    }
+
+    #[test]
+    fn diff_archives_fast_path_skips_byte_identical_parts() {
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert("xl/workbook.xml".to_string(), b"<workbook/>".to_vec());
+        parts.insert(
+            "xl/_rels/workbook.xml.rels".to_string(),
+            br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#
+                .to_vec(),
+        );
+
+        let expected = WorkbookArchive {
+            parts: parts.clone(),
+        };
+        let actual = WorkbookArchive { parts };
+
+        let before = FAST_PATH_SKIPPED_PARTS.load(std::sync::atomic::Ordering::Relaxed);
+        let report = diff_archives(&expected, &actual);
+        let after = FAST_PATH_SKIPPED_PARTS.load(std::sync::atomic::Ordering::Relaxed);
+
+        assert!(report.is_empty());
+        assert!(
+            after > before,
+            "expected fast path to skip at least one part (before={before}, after={after})"
+        );
     }
 }
 

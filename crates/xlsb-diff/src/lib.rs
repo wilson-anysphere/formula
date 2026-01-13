@@ -20,6 +20,10 @@ use zip::ZipArchive;
 
 pub use xlsx_diff::Severity;
 
+#[cfg(test)]
+static FAST_PATH_SKIPPED_PARTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 #[derive(Debug, Clone)]
 pub struct Difference {
     pub severity: Severity,
@@ -228,6 +232,15 @@ pub fn diff_archives_with_options(
     for part in expected_parts.intersection(&actual_parts) {
         let expected_bytes = expected.get(part).unwrap_or_default();
         let actual_bytes = actual.get(part).unwrap_or_default();
+
+        // Fast path: avoid parsing XML (and other work) when parts are byte-identical.
+        if expected_bytes == actual_bytes {
+            #[cfg(test)]
+            {
+                FAST_PATH_SKIPPED_PARTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            continue;
+        }
 
         if is_xmlish_part(part) {
             let calc_chain_rel_ids = if part.ends_with(".rels") {
@@ -469,4 +482,37 @@ pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
 
     files.sort();
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_archives_fast_path_skips_byte_identical_parts() {
+        let mut parts: BTreeMap<String, Arc<Vec<u8>>> = BTreeMap::new();
+        parts.insert("xl/workbook.xml".to_string(), Arc::new(b"<workbook/>".to_vec()));
+        parts.insert(
+            "xl/_rels/workbook.bin.rels".to_string(),
+            Arc::new(
+                br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#
+                    .to_vec(),
+            ),
+        );
+
+        let expected = WorkbookArchive {
+            parts: parts.clone(),
+        };
+        let actual = WorkbookArchive { parts };
+
+        let before = FAST_PATH_SKIPPED_PARTS.load(std::sync::atomic::Ordering::Relaxed);
+        let report = diff_archives(&expected, &actual);
+        let after = FAST_PATH_SKIPPED_PARTS.load(std::sync::atomic::Ordering::Relaxed);
+
+        assert!(report.is_empty());
+        assert!(
+            after > before,
+            "expected fast path to skip at least one part (before={before}, after={after})"
+        );
+    }
 }
