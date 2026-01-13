@@ -69,7 +69,13 @@ pub struct PivotResultGrid {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PivotCrosstabOptions {
     /// Separator used to join multiple column-field values into a single column header label.
-    pub column_key_separator: &'static str,
+    ///
+    /// This matches how the worksheet pivot engine flattens multi-level column keys in its header
+    /// row (e.g. `2024 / Q1`).
+    pub column_field_separator: &'static str,
+    /// Separator used between a column-key label and a measure name when rendering multiple
+    /// measures (e.g. `A - Total`).
+    pub column_measure_separator: &'static str,
     /// If true, include the measure name in the column headers even when there is only a single
     /// measure (e.g. `A - Total` instead of just `A`).
     pub include_measure_name_when_single: bool,
@@ -78,7 +84,8 @@ pub struct PivotCrosstabOptions {
 impl Default for PivotCrosstabOptions {
     fn default() -> Self {
         Self {
-            column_key_separator: " - ",
+            column_field_separator: " / ",
+            column_measure_separator: " - ",
             include_measure_name_when_single: false,
         }
     }
@@ -106,6 +113,7 @@ fn key_display_string(key: &[Value], separator: &str) -> String {
     }
     key.iter()
         .map(header_value_display_string)
+        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(separator)
 }
@@ -1684,16 +1692,20 @@ pub fn pivot_crosstab_with_options(
         header.extend(measures.iter().map(|m| Value::from(m.name.clone())));
     } else {
         for col_key in &col_keys {
-            let key_label = key_display_string(col_key, options.column_key_separator);
+            let key_label = key_display_string(col_key, options.column_field_separator);
             let include_measure_suffix =
                 measures.len() > 1 || options.include_measure_name_when_single;
-            if !include_measure_suffix {
+            if key_label.is_empty() {
+                for measure in measures {
+                    header.push(Value::from(measure.name.clone()));
+                }
+            } else if !include_measure_suffix {
                 header.push(Value::from(key_label));
             } else {
                 for measure in measures {
                     header.push(Value::from(format!(
                         "{key_label}{}{}",
-                        options.column_key_separator, measure.name
+                        options.column_measure_separator, measure.name
                     )));
                 }
             }

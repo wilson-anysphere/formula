@@ -149,3 +149,44 @@ fn pivot_crosstab_renders_blank_for_missing_row_column_combinations() {
         ]
     );
 }
+
+#[test]
+fn pivot_crosstab_multiple_column_fields_join_with_slash() {
+    let mut model = DataModel::new();
+    let mut fact = Table::new("Fact", vec!["Region", "Year", "Quarter", "Amount"]);
+    fact.push_row(vec!["East".into(), 2024.0.into(), "Q1".into(), 10.0.into()])
+        .unwrap();
+    fact.push_row(vec!["East".into(), 2024.0.into(), "Q2".into(), 20.0.into()])
+        .unwrap();
+    fact.push_row(vec!["West".into(), 2024.0.into(), "Q1".into(), 7.0.into()])
+        .unwrap();
+    // Note: West/Q2 intentionally missing.
+    model.add_table(fact).unwrap();
+    model.add_measure("Total", "SUM(Fact[Amount])").unwrap();
+
+    let result = pivot_crosstab(
+        &model,
+        "Fact",
+        &[GroupByColumn::new("Fact", "Region")],
+        &[
+            GroupByColumn::new("Fact", "Year"),
+            GroupByColumn::new("Fact", "Quarter"),
+        ],
+        &[PivotMeasure::new("Total", "[Total]").unwrap()],
+        &FilterContext::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.data,
+        vec![
+            vec![
+                Value::from("Fact[Region]"),
+                Value::from("2024 / Q1"),
+                Value::from("2024 / Q2"),
+            ],
+            vec![Value::from("East"), 10.0.into(), 20.0.into()],
+            vec![Value::from("West"), 7.0.into(), Value::Blank],
+        ]
+    );
+}
