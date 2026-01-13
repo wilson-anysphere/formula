@@ -20,6 +20,10 @@ Implementation (actual):
 - XLSX import/export of pivot parts: `formula-xlsx`
 - JS API surface: `formula-wasm`
 
+See also:
+- [`docs/21-xlsx-pivots.md`](./21-xlsx-pivots.md) — OpenXML pivot parts (pivotTables/pivotCache/slicers/timelines) compatibility + roadmap
+- [`docs/21-dax-engine.md`](./21-dax-engine.md) — Data Model/DAX pivot execution details
+
 ### Architecture
 
 ```typescript
