@@ -4,9 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createSqliteFileVectorStore } from "../src/store/sqliteFileVectorStore.js";
 import { InMemoryVectorStore } from "../src/store/inMemoryVectorStore.js";
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +19,31 @@ try {
   sqlJsAvailable = false;
 }
 
+/** @type {Promise<any> | null} */
+let sqliteVectorStorePromise = null;
+/** @type {Promise<any> | null} */
+let sqliteFileVectorStorePromise = null;
+
+async function getSqliteVectorStore() {
+  if (!sqliteVectorStorePromise) {
+    // Avoid a literal specifier in a dynamic import so dependency-free environments
+    // can still execute this file (tests will be skipped when sql.js is unavailable).
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    sqliteVectorStorePromise = import(modulePath).then((mod) => mod.SqliteVectorStore);
+  }
+  return sqliteVectorStorePromise;
+}
+
+async function getCreateSqliteFileVectorStore() {
+  if (!sqliteFileVectorStorePromise) {
+    const modulePath = "../src/store/" + "sqliteFileVectorStore.js";
+    sqliteFileVectorStorePromise = import(modulePath).then((mod) => mod.createSqliteFileVectorStore);
+  }
+  return sqliteFileVectorStorePromise;
+}
+
 test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAvailable }, async () => {
+  const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-"));
@@ -52,6 +74,7 @@ test(
   "SqliteVectorStore can reset persisted DB on dimension mismatch (file storage)",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-dim-mismatch-"));
@@ -90,6 +113,7 @@ test(
   "SqliteVectorStore throws typed error on dimension mismatch when reset is disabled (file storage)",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-dim-mismatch-throw-"));
@@ -171,6 +195,7 @@ test(
 );
 
 test("SqliteVectorStore.vacuum() VACUUMs and persists a smaller DB (even with autoSave:false)", { skip: !sqlJsAvailable }, async () => {
+  const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-compact-"));
@@ -233,6 +258,7 @@ test(
   "SqliteVectorStore.compact() waits for in-flight persistence before running VACUUM",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     class BlockingStorage {
       saveCalls = 0;
       #data = null;
@@ -294,6 +320,7 @@ test(
   "SqliteVectorStore migrates v1 schema to v2 (structured metadata columns)",
   { skip: !sqlJsAvailable },
   async () => {
+    const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
     const tmpRoot = path.join(__dirname, ".tmp");
     await mkdir(tmpRoot, { recursive: true });
     const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-migrate-"));
@@ -320,7 +347,11 @@ test(
         return prefix ? `${prefix}${file}` : file;
       }
 
-      const sqlMod = await import("sql.js");
+      // Keep this as a computed dynamic import (no literal bare specifier) so
+      // `scripts/run-node-tests.mjs` can still execute this file when `node_modules/`
+      // is missing.
+      const sqlJsModuleName = "sql" + ".js";
+      const sqlMod = await import(sqlJsModuleName);
       const initSqlJs = sqlMod.default ?? sqlMod;
       const SQL = await initSqlJs({ locateFile: locateSqlJsFile });
       const db = new SQL.Database();
@@ -779,6 +810,7 @@ test(
 );
 
 test("SqliteVectorStore.list respects AbortSignal", { skip: !sqlJsAvailable }, async () => {
+  const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-abort-"));
@@ -849,6 +881,7 @@ test(
 );
 
 test("SqliteVectorStore.query returns topK matching results after filtering", { skip: !sqlJsAvailable }, async () => {
+  const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-filter-"));
@@ -903,6 +936,7 @@ test("SqliteVectorStore.query returns topK matching results after filtering", { 
 });
 
 test("SqliteVectorStore.query respects AbortSignal", { skip: !sqlJsAvailable }, async () => {
+  const createSqliteFileVectorStore = await getCreateSqliteFileVectorStore();
   const tmpRoot = path.join(__dirname, ".tmp");
   await mkdir(tmpRoot, { recursive: true });
   const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-query-abort-"));
@@ -922,6 +956,7 @@ test("SqliteVectorStore.query respects AbortSignal", { skip: !sqlJsAvailable }, 
 });
 
 test("SqliteVectorStore.query throws on query vector dimension mismatch", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     await assert.rejects(store.query([1, 0], 1), /expected 3/);
@@ -931,6 +966,7 @@ test("SqliteVectorStore.query throws on query vector dimension mismatch", { skip
 });
 
 test("SqliteVectorStore.get throws when stored vector blob has wrong length", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
@@ -945,6 +981,7 @@ test("SqliteVectorStore.get throws when stored vector blob has wrong length", { 
 });
 
 test("SqliteVectorStore.list throws when stored vector blob has wrong length", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
@@ -960,6 +997,7 @@ test("SqliteVectorStore.list throws when stored vector blob has wrong length", {
 });
 
 test("SqliteVectorStore.query throws when stored vector blob has wrong length (dot() validation)", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     const badBlob = new Uint8Array(new Float32Array([1, 0]).buffer);
@@ -977,6 +1015,7 @@ test(
   "SqliteVectorStore throws when stored vector blob byte length is not a multiple of 4",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
       const badBlob = new Uint8Array([1, 2, 3, 4, 5]);
@@ -1021,6 +1060,7 @@ test(
   "SqliteVectorStore dot() throws when blobs have matching but non-store dimension",
   { skip: !sqlJsAvailable },
   async () => {
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
     try {
       const badVec = new Uint8Array(new Float32Array([1, 0]).buffer);
@@ -1043,6 +1083,7 @@ test(
 );
 
 test("SqliteVectorStore dot() handles unaligned Uint8Array blobs (copies into aligned buffer)", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     // Create a Uint8Array view with an unaligned byteOffset.
@@ -1066,6 +1107,7 @@ test("SqliteVectorStore dot() handles unaligned Uint8Array blobs (copies into al
 });
 
 test("SqliteVectorStore dot() throws when blob dimensions mismatch (arg lengths differ)", { skip: !sqlJsAvailable }, async () => {
+  const SqliteVectorStore = await getSqliteVectorStore();
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     const vec3 = new Uint8Array(new Float32Array([1, 0, 0]).buffer);

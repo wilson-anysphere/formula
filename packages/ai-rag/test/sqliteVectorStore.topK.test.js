@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
-
 let sqlJsAvailable = true;
 try {
   // Keep this as a computed dynamic import (no literal bare specifier) so
@@ -15,6 +13,8 @@ try {
 }
 
 test("SqliteVectorStore.query validates topK", { skip: !sqlJsAvailable }, async () => {
+  const modulePath = "../src/store/" + "sqliteVectorStore.js";
+  const { SqliteVectorStore } = await import(modulePath);
   const store = await SqliteVectorStore.create({ dimension: 3, autoSave: false });
   try {
     await store.upsert([

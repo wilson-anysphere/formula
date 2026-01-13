@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { InMemoryBinaryStorage } from "../src/store/binaryStorage.js";
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
 
 function sortIds(records) {
   return records.map((r) => r.id).sort();
@@ -21,6 +20,9 @@ try {
 
 test("SqliteVectorStore.deleteWorkbook + clear (autoSave persists)", { skip: !sqlJsAvailable }, async () => {
   const storage = new InMemoryBinaryStorage();
+
+  const modulePath = "../src/store/" + "sqliteVectorStore.js";
+  const { SqliteVectorStore } = await import(modulePath);
 
   const store1 = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: true });
   await store1.upsert([

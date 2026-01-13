@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SqliteVectorStore } from "../src/store/sqliteVectorStore.js";
-
 let sqlJsAvailable = true;
 try {
   // Keep this as a computed dynamic import (no literal bare specifier) so
@@ -12,6 +10,17 @@ try {
   await import(sqlJsModuleName);
 } catch {
   sqlJsAvailable = false;
+}
+
+/** @type {Promise<any> | null} */
+let sqliteVectorStorePromise = null;
+
+async function getSqliteVectorStore() {
+  if (!sqliteVectorStorePromise) {
+    const modulePath = "../src/store/" + "sqliteVectorStore.js";
+    sqliteVectorStorePromise = import(modulePath).then((mod) => mod.SqliteVectorStore);
+  }
+  return sqliteVectorStorePromise;
 }
 
 class TestBinaryStorage {
@@ -47,6 +56,7 @@ test(
   async () => {
     // Not a real SQLite file header; should fail to open as an existing DB.
     const storage = new TestBinaryStorage(new TextEncoder().encode("not a sqlite database"));
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
     assert.equal(storage.removed, true, "expected SqliteVectorStore to clear persisted bytes on corruption");
 
@@ -86,6 +96,7 @@ test(
       },
     };
 
+    const SqliteVectorStore = await getSqliteVectorStore();
     const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
     await store.close();
 
@@ -122,6 +133,7 @@ test(
       },
     };
 
+    const SqliteVectorStore = await getSqliteVectorStore();
     await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
     assert.ok(saves >= 1, "expected SqliteVectorStore to overwrite corrupted payload via save()");
     assert.ok(stored && stored.length >= 16);
@@ -138,6 +150,7 @@ test(
   async () => {
     // Not a real SQLite file header; should fail to open as an existing DB.
     const storage = new TestBinaryStorage(new TextEncoder().encode("not a sqlite database"));
+    const SqliteVectorStore = await getSqliteVectorStore();
     await assert.rejects(SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: false }));
     assert.equal(storage.removed, false);
   }
