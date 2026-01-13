@@ -497,7 +497,6 @@ def main() -> int:
             {"workbook": name, "cellXfs": cellxfs}
             for cellxfs, name in failing_cellxfs_by_workbook[:20]
         ]
-
     summary: dict[str, Any] = {
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),

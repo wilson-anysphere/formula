@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from tools.corpus.dashboard import _markdown_summary
 from tools.corpus.triage import _compare_expectations
@@ -125,6 +130,52 @@ class TriageSchemaTests(unittest.TestCase):
             "37a012601a0da63445b4fbe412c6c753406e776b652013e0ca21a56a36fb634e", md
         )
         self.assertIn("xl/workbook.xml.rels", md)
+
+    def test_dashboard_rates_use_attempted_denominator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            triage_dir = Path(tmpdir)
+            reports_dir = triage_dir / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+
+            # One workbook attempted calculation (PASS), one skipped calculation entirely.
+            (reports_dir / "a.json").write_text(
+                json.dumps(
+                    {
+                        "display_name": "attempted.xlsx",
+                        "result": {
+                            "open_ok": True,
+                            "calculate_ok": True,
+                            "render_ok": None,
+                            "round_trip_ok": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (reports_dir / "b.json").write_text(
+                json.dumps(
+                    {
+                        "display_name": "skipped.xlsx",
+                        "result": {
+                            "open_ok": True,
+                            "calculate_ok": None,
+                            "render_ok": None,
+                            "round_trip_ok": True,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            subprocess.run(
+                [sys.executable, "-m", "tools.corpus.dashboard", "--triage-dir", str(triage_dir)],
+                check=True,
+            )
+
+            summary = json.loads((triage_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(summary["counts"]["calculate_attempted"], 1)
+            # Pass rate should be 1/1 among attempted, not 1/2 across all workbooks.
+            self.assertEqual(summary["rates"]["calculate"], 1.0)
 
 if __name__ == "__main__":
     unittest.main()

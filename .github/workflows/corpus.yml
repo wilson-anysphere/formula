@@ -26,6 +26,17 @@ on:
     # Nightly full-corpus run (requires secrets)
     - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      recalc:
+        description: "Enable recalculation check (--recalc). Nightly schedule enables this by default."
+        required: false
+        default: false
+        type: boolean
+      render_smoke:
+        description: "Enable lightweight render smoke test (--render-smoke)."
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   conflict-marker-guard:
@@ -77,6 +88,10 @@ jobs:
     needs: conflict-marker-guard
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    env:
+      # Nightly schedule runs at least the Calculate (L2) check. Render smoke (L3) is opt-in.
+      CORPUS_RUN_RECALC: ${{ github.event_name == 'schedule' || github.event.inputs.recalc }}
+      CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -110,9 +125,17 @@ jobs:
             echo "Private corpus directory missing; skipping."
             exit 0
           fi
+          EXTRA_FLAGS=()
+          if [ "${CORPUS_RUN_RECALC}" = "true" ]; then
+            EXTRA_FLAGS+=(--recalc)
+          fi
+          if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
+            EXTRA_FLAGS+=(--render-smoke)
+          fi
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/private \
-            --out-dir tools/corpus/out/private
+            --out-dir tools/corpus/out/private \
+            "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard (private)
         run: |
           if [ ! -d tools/corpus/out/private ]; then
