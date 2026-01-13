@@ -122,6 +122,63 @@ def _binary_path(target_dir: Path, bin_name: str, target: str | None) -> Path:
     return rel_dir / exe
 
 
+def _candidate_binary_paths(repo_root: Path, target_dir: Path, bin_name: str, target: str | None) -> list[Path]:
+    """
+    Return a small set of plausible binary paths.
+
+    In this repo, workspace builds typically land in `<repo>/target`, but some
+    Tauri workflows (or historical layouts) may place artifacts under
+    `apps/desktop/src-tauri/target`.
+    """
+    candidate_target_dirs = [
+        target_dir,
+        repo_root / "target",
+        repo_root / "apps" / "desktop" / "src-tauri" / "target",
+    ]
+
+    # De-dupe while preserving order.
+    seen: set[Path] = set()
+    uniq_target_dirs: list[Path] = []
+    for td in candidate_target_dirs:
+        try:
+            key = td.resolve()
+        except OSError:
+            key = td
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq_target_dirs.append(td)
+
+    candidates: list[Path] = []
+    for td in uniq_target_dirs:
+        candidates.append(_binary_path(td, bin_name, target))
+        # If callers pass --target but the binary was built for the host
+        # (or vice-versa), check the alternate location too.
+        if target is not None:
+            candidates.append(_binary_path(td, bin_name, None))
+
+    # De-dupe paths.
+    seen_paths: set[Path] = set()
+    uniq_paths: list[Path] = []
+    for p in candidates:
+        try:
+            key = p.resolve()
+        except OSError:
+            key = p
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        uniq_paths.append(p)
+    return uniq_paths
+
+
+def _first_existing_path(paths: list[Path]) -> Path | None:
+    for p in paths:
+        if p.is_file():
+            return p
+    return None
+
+
 def _run_capture(cmd: list[str], *, cwd: Path) -> CmdResult:
     cp = subprocess.run(
         cmd,
@@ -357,7 +414,9 @@ def main() -> int:
             args.out.write_text(md, encoding="utf-8")
         return 1
 
-    bin_path = _binary_path(target_dir, bin_name, target)
+    candidate_bin_paths = _candidate_binary_paths(repo_root, target_dir, bin_name, target)
+    default_bin_path = candidate_bin_paths[0] if candidate_bin_paths else _binary_path(target_dir, bin_name, target)
+    bin_path = default_bin_path
 
     build_cmd: list[str] | None = [
         "cargo",
@@ -384,7 +443,7 @@ def main() -> int:
                 features=features,
                 target=target,
                 target_dir=target_dir,
-                bin_path=bin_path,
+                bin_path=default_bin_path,
                 bin_size_bytes=bin_path.stat().st_size if bin_path.exists() else None,
                 limit_mb=limit_mb,
                 enforce=enforce,
@@ -404,14 +463,21 @@ def main() -> int:
                 args.out.write_text(md, encoding="utf-8")
             return 1
 
+    existing = _first_existing_path(candidate_bin_paths)
+    if existing is not None:
+        bin_path = existing
+
     if not bin_path.exists():
+        searched_lines = "\n".join(f"- `{p}`" for p in candidate_bin_paths[:8])
+        if len(candidate_bin_paths) > 8:
+            searched_lines += "\n- …"
         md = _render_markdown(
             package=package,
             bin_name=bin_name,
             features=features,
             target=target,
             target_dir=target_dir,
-            bin_path=bin_path,
+            bin_path=default_bin_path,
             bin_size_bytes=None,
             limit_mb=limit_mb,
             enforce=enforce,
@@ -422,7 +488,12 @@ def main() -> int:
             symbols_out=None,
             llvm_size_cmd=None,
             llvm_size_out=None,
-            tool_note="Binary not found. Hint: run the build command in this report (or omit `--no-build`).",
+            tool_note=(
+                "Binary not found.\n\n"
+                "Searched:\n"
+                f"{searched_lines}\n\n"
+                "Hint: run the build command in this report (or omit `--no-build`)."
+            ),
         )
         print(md)
         _append_step_summary(md)
