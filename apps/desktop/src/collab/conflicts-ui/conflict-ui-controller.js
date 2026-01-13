@@ -114,8 +114,14 @@ export class ConflictUiController {
       side: "local"
     });
 
-    const resolvedRemote =
-      conflict.remoteUserId && this.resolveUserLabel ? this.resolveUserLabel(conflict.remoteUserId) : "";
+    let resolvedRemote = "";
+    if (conflict.remoteUserId && this.resolveUserLabel) {
+      try {
+        resolvedRemote = this.resolveUserLabel(conflict.remoteUserId);
+      } catch {
+        resolvedRemote = "";
+      }
+    }
     const remoteLabel =
       conflict.remoteUserId && typeof resolvedRemote === "string" && resolvedRemote.trim()
         ? resolvedRemote
