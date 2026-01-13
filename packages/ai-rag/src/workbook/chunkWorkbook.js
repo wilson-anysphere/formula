@@ -284,7 +284,7 @@ function detectRegions(sheet, predicate, opts) {
         if (curKey == null) continue;
         count += 1;
         if (typeof curKey === "number") {
-          const r = (curKey / PACK_COL_FACTOR) | 0;
+          const r = Math.floor(curKey / PACK_COL_FACTOR);
           const c = curKey - r * PACK_COL_FACTOR;
           r0 = Math.min(r0, r);
           r1 = Math.max(r1, r);
@@ -333,7 +333,12 @@ function detectRegions(sheet, predicate, opts) {
           c1 = Math.max(c1, c);
 
           if (r > 0) {
-            const nk = curKey - rowStep;
+            // If the neighbor would be represented as a Number key, use that form so
+            // cross-representation boundaries (BigInt <-> Number) still connect.
+            const nk =
+              r - 1 <= MAX_SAFE_PACKED_ROW && c < PACK_COL_FACTOR
+                ? (r - 1) * PACK_COL_FACTOR + c
+                : curKey - rowStep;
             if (coords.delete(nk)) stack.push(nk);
           }
 
@@ -343,7 +348,10 @@ function detectRegions(sheet, predicate, opts) {
           }
 
           if (c > 0) {
-            const nk = curKey - one;
+            const nk =
+              r <= MAX_SAFE_PACKED_ROW && c - 1 < PACK_COL_FACTOR
+                ? r * PACK_COL_FACTOR + (c - 1)
+                : curKey - one;
             if (coords.delete(nk)) stack.push(nk);
           }
 
@@ -505,7 +513,7 @@ function detectRegions(sheet, predicate, opts) {
         if (curKey == null) continue;
         count += 1;
         if (typeof curKey === "number") {
-          const r = (curKey / PACK_COL_FACTOR) | 0;
+          const r = Math.floor(curKey / PACK_COL_FACTOR);
           const c = curKey - r * PACK_COL_FACTOR;
           r0 = Math.min(r0, r);
           r1 = Math.max(r1, r);
@@ -554,7 +562,10 @@ function detectRegions(sheet, predicate, opts) {
           c1 = Math.max(c1, c);
 
           if (r > 0) {
-            const nk = curKey - rowStep;
+            const nk =
+              r - 1 <= MAX_SAFE_PACKED_ROW && c < PACK_COL_FACTOR
+                ? (r - 1) * PACK_COL_FACTOR + c
+                : curKey - rowStep;
             if (coords.delete(nk)) stack.push(nk);
           }
 
@@ -564,7 +575,10 @@ function detectRegions(sheet, predicate, opts) {
           }
 
           if (c > 0) {
-            const nk = curKey - one;
+            const nk =
+              r <= MAX_SAFE_PACKED_ROW && c - 1 < PACK_COL_FACTOR
+                ? r * PACK_COL_FACTOR + (c - 1)
+                : curKey - one;
             if (coords.delete(nk)) stack.push(nk);
           }
 
