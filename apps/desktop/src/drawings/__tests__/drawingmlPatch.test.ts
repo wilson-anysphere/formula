@@ -164,6 +164,17 @@ describe("duplicateDrawingObject", () => {
 });
 
 describe("DrawingInteractionController commit-time patching", () => {
+  function createPointerEvent(clientX: number, clientY: number, pointerId: number): any {
+    return {
+      clientX,
+      clientY,
+      pointerId,
+      preventDefault: () => {},
+      stopPropagation: () => {},
+      stopImmediatePropagation: () => {},
+    };
+  }
+
   function createStubCanvas() {
     const listeners = new Map<string, (e: any) => void>();
     const canvas: any = {
@@ -171,6 +182,7 @@ describe("DrawingInteractionController commit-time patching", () => {
       removeEventListener: (type: string) => listeners.delete(type),
       setPointerCapture: () => {},
       releasePointerCapture: () => {},
+      getBoundingClientRect: () => ({ left: 0, top: 0 } as DOMRect),
       style: { cursor: "default" },
       dispatch: (type: string, event: any) => listeners.get(type)?.(event),
     };
@@ -215,8 +227,8 @@ describe("DrawingInteractionController commit-time patching", () => {
     });
 
     // Start resizing at the bottom-right corner (se handle).
-    canvas.dispatch("pointerdown", { offsetX: 100, offsetY: 100, pointerId: 1 });
-    canvas.dispatch("pointermove", { offsetX: 120, offsetY: 130, pointerId: 1 });
+    canvas.dispatch("pointerdown", createPointerEvent(100, 100, 1));
+    canvas.dispatch("pointermove", createPointerEvent(120, 130, 1));
 
     // Pointermove updates the anchor, but should not patch xml yet.
     expect(objects[0]!.anchor).toMatchObject({
@@ -226,7 +238,7 @@ describe("DrawingInteractionController commit-time patching", () => {
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cx="${startCx}"`);
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cy="${startCy}"`);
 
-    canvas.dispatch("pointerup", { offsetX: 120, offsetY: 130, pointerId: 1 });
+    canvas.dispatch("pointerup", createPointerEvent(120, 130, 1));
 
     // Commit-time: preserved xml is patched to the new size.
     expect(objects[0]!.preserved?.["xlsx.pic_xml"]).toContain(`cx="${pxToEmu(120)}"`);
@@ -263,9 +275,9 @@ describe("DrawingInteractionController commit-time patching", () => {
       },
     });
 
-    canvas.dispatch("pointerdown", { offsetX: 50, offsetY: 50, pointerId: 2 });
-    canvas.dispatch("pointermove", { offsetX: 55, offsetY: 57, pointerId: 2 });
-    canvas.dispatch("pointerup", { offsetX: 55, offsetY: 57, pointerId: 2 });
+    canvas.dispatch("pointerdown", createPointerEvent(50, 50, 2));
+    canvas.dispatch("pointermove", createPointerEvent(55, 57, 2));
+    canvas.dispatch("pointerup", createPointerEvent(55, 57, 2));
 
     const xml = (objects[0]!.kind as any).rawXml as string;
     expect(xml).toContain(`x="${pxToEmu(15)}"`);
