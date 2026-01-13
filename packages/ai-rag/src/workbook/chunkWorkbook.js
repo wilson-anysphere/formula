@@ -8,6 +8,8 @@ const DEFAULT_EXTRACT_MAX_COLS = 50;
 // Cap the number of cells we consider to avoid catastrophic allocations on
 // Excel-scale sheets.
 const DEFAULT_DETECT_REGIONS_CELL_LIMIT = 200000;
+const DEFAULT_MAX_DATA_REGIONS_PER_SHEET = 50;
+const DEFAULT_MAX_FORMULA_REGIONS_PER_SHEET = 50;
 
 function createAbortError(message = "Aborted") {
   const err = new Error(message);
@@ -47,16 +49,26 @@ function sheetMap(workbook) {
  *
  * @param {import('./workbookTypes').Sheet} sheet
  * @param {(cell: any) => boolean} predicate
- * @param {AbortSignal | undefined} [signal]
- * @returns {{ r0: number, c0: number, r1: number, c1: number }[]}
+ * @param {{ signal?: AbortSignal, cellLimit?: number } | undefined} [opts]
+ * @returns {{
+ *   components: { rect: { r0: number, c0: number, r1: number, c1: number }, count: number }[],
+ *   truncated: boolean,
+ *   boundsRect: { r0: number, c0: number, r1: number, c1: number } | null
+ * }}
  */
-function detectRegions(sheet, predicate, signal) {
+function detectRegions(sheet, predicate, opts) {
+  const signal = opts?.signal;
+  const cellLimit = opts?.cellLimit ?? DEFAULT_DETECT_REGIONS_CELL_LIMIT;
   throwIfAborted(signal);
   const matrix = getSheetMatrix(sheet);
   if (matrix) {
     /** @type {Map<string, { row: number, col: number }>} */
     const coords = new Map();
     let truncated = false;
+    let minRow = Number.POSITIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
 
     // Treat matrix-backed sheets as sparse: use `for..in` to iterate only defined
     // rows/cols (avoids scanning/allocating for large sparse arrays).
@@ -74,7 +86,12 @@ function detectRegions(sheet, predicate, signal) {
           const cell = normalizeCell(row[c]);
           if (!predicate(cell)) continue;
           coords.set(`${r},${c}`, { row: r, col: c });
-          if (coords.size > DEFAULT_DETECT_REGIONS_CELL_LIMIT) {
+          minRow = Math.min(minRow, r);
+          minCol = Math.min(minCol, c);
+          maxRow = Math.max(maxRow, r);
+          maxCol = Math.max(maxCol, c);
+
+          if (coords.size > cellLimit) {
             truncated = true;
             break;
           }
@@ -83,10 +100,11 @@ function detectRegions(sheet, predicate, signal) {
       }
     } catch {
       // Fall back to no regions on unexpected enumerable shapes.
-      return [];
+      return { components: [], truncated: false, boundsRect: null };
     }
 
-    if (coords.size === 0) return [];
+    if (coords.size === 0)
+      return { components: [], truncated: false, boundsRect: null };
 
     /** @type {Set<string>} */
     const visited = new Set();
@@ -143,8 +161,23 @@ function detectRegions(sheet, predicate, signal) {
         a.rect.c1 - b.rect.c1
     );
 
+    /** @type {{ r0: number, c0: number, r1: number, c1: number } | null} */
+    const boundsRect =
+      minRow === Number.POSITIVE_INFINITY
+        ? null
+        : {
+            r0: minRow,
+            c0: minCol,
+            r1: maxRow,
+            c1: maxCol,
+          };
+
     // Drop trivial single-cell regions (often incidental labels).
-    return components.filter((c) => c.count >= 2).map((c) => c.rect);
+    return {
+      components: components.filter((c) => c.count >= 2),
+      truncated,
+      boundsRect,
+    };
   }
 
   const map = getSheetCellMap(sheet);
@@ -166,6 +199,12 @@ function detectRegions(sheet, predicate, signal) {
 
     /** @type {Map<string, { row: number, col: number }>} */
     const coords = new Map();
+    let truncated = false;
+    let minRow = Number.POSITIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
+
     for (const [key, raw] of map.entries()) {
       throwIfAborted(signal);
       const parsed = parseRowColKey(key);
@@ -173,7 +212,20 @@ function detectRegions(sheet, predicate, signal) {
       const cell = normalizeCell(raw);
       if (!predicate(cell)) continue;
       coords.set(`${parsed.row},${parsed.col}`, parsed);
+
+      minRow = Math.min(minRow, parsed.row);
+      minCol = Math.min(minCol, parsed.col);
+      maxRow = Math.max(maxRow, parsed.row);
+      maxCol = Math.max(maxCol, parsed.col);
+
+      if (coords.size > cellLimit) {
+        truncated = true;
+        break;
+      }
     }
+
+    if (coords.size === 0)
+      return { components: [], truncated: false, boundsRect: null };
 
     /** @type {Set<string>} */
     const visited = new Set();
@@ -230,10 +282,25 @@ function detectRegions(sheet, predicate, signal) {
         a.rect.c1 - b.rect.c1
     );
 
-    return components.filter((c) => c.count >= 2).map((c) => c.rect);
+    /** @type {{ r0: number, c0: number, r1: number, c1: number } | null} */
+    const boundsRect =
+      minRow === Number.POSITIVE_INFINITY
+        ? null
+        : {
+            r0: minRow,
+            c0: minCol,
+            r1: maxRow,
+            c1: maxCol,
+          };
+
+    return {
+      components: components.filter((c) => c.count >= 2),
+      truncated,
+      boundsRect,
+    };
   }
 
-  return [];
+  return { components: [], truncated: false, boundsRect: null };
 }
 
 /**
@@ -251,6 +318,50 @@ function overlapsExisting(rect, existing) {
 }
 
 /**
+ * Sort most-important first (largest component), deterministically.
+ *
+ * @param {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }} a
+ * @param {{ rect: { r0: number, c0: number, r1: number, c1: number }, count: number }} b
+ */
+function compareComponentImportance(a, b) {
+  return (
+    b.count - a.count ||
+    a.rect.r0 - b.rect.r0 ||
+    a.rect.c0 - b.rect.c0 ||
+    a.rect.r1 - b.rect.r1 ||
+    a.rect.c1 - b.rect.c1
+  );
+}
+
+/**
+ * Stable ordering for ids/tests (reading order).
+ *
+ * @param {{ rect: { r0: number, c0: number, r1: number, c1: number } }} a
+ * @param {{ rect: { r0: number, c0: number, r1: number, c1: number } }} b
+ */
+function compareComponentRect(a, b) {
+  return (
+    a.rect.r0 - b.rect.r0 ||
+    a.rect.c0 - b.rect.c0 ||
+    a.rect.r1 - b.rect.r1 ||
+    a.rect.c1 - b.rect.c1
+  );
+}
+
+/**
+ * @template T extends { rect: any, count: number }
+ * @param {T[]} components
+ * @param {number} max
+ * @returns {T[]}
+ */
+function capComponents(components, max) {
+  if (!Number.isFinite(max) || max <= 0) return [];
+  if (components.length <= max) return components.slice().sort(compareComponentRect);
+  const mostImportant = components.slice().sort(compareComponentImportance).slice(0, max);
+  return mostImportant.sort(compareComponentRect);
+}
+
+/**
  * Chunk workbook into semantic regions.
  *
  * Strategy:
@@ -259,11 +370,30 @@ function overlapsExisting(rect, existing) {
  * - Detect formula-heavy regions by connected formula blocks.
  *
  * @param {import('./workbookTypes').Workbook} workbook
- * @param {{ signal?: AbortSignal }} [options]
+ * @param {{
+ *   signal?: AbortSignal,
+ *   extractMaxRows?: number,
+ *   extractMaxCols?: number,
+ *   detectRegionsCellLimit?: number,
+ *   maxDataRegionsPerSheet?: number,
+ *   maxFormulaRegionsPerSheet?: number,
+ *   // Back-compat alias: treat as maxDataRegionsPerSheet/maxFormulaRegionsPerSheet when provided.
+ *   maxRegionsPerSheet?: number
+ * }} [options]
  * @returns {import('./workbookTypes').WorkbookChunk[]}
  */
 function chunkWorkbook(workbook, options = {}) {
   const signal = options.signal;
+  const extractMaxRows = options.extractMaxRows ?? DEFAULT_EXTRACT_MAX_ROWS;
+  const extractMaxCols = options.extractMaxCols ?? DEFAULT_EXTRACT_MAX_COLS;
+  const detectRegionsCellLimit = options.detectRegionsCellLimit ?? DEFAULT_DETECT_REGIONS_CELL_LIMIT;
+  const maxRegionsAlias = options.maxRegionsPerSheet;
+  const maxDataRegionsPerSheet =
+    options.maxDataRegionsPerSheet ??
+    (typeof maxRegionsAlias === "number" ? maxRegionsAlias : DEFAULT_MAX_DATA_REGIONS_PER_SHEET);
+  const maxFormulaRegionsPerSheet =
+    options.maxFormulaRegionsPerSheet ??
+    (typeof maxRegionsAlias === "number" ? maxRegionsAlias : DEFAULT_MAX_FORMULA_REGIONS_PER_SHEET);
   throwIfAborted(signal);
   const sheets = sheetMap(workbook);
   /** @type {import('./workbookTypes').WorkbookChunk[]} */
@@ -285,8 +415,8 @@ function chunkWorkbook(workbook, options = {}) {
       title: table.name,
       rect: table.rect,
       cells: extractCells(sheet, table.rect, {
-        maxRows: DEFAULT_EXTRACT_MAX_ROWS,
-        maxCols: DEFAULT_EXTRACT_MAX_COLS,
+        maxRows: extractMaxRows,
+        maxCols: extractMaxCols,
       }),
       meta: { tableName: table.name },
     });
@@ -306,8 +436,8 @@ function chunkWorkbook(workbook, options = {}) {
       title: nr.name,
       rect: nr.rect,
       cells: extractCells(sheet, nr.rect, {
-        maxRows: DEFAULT_EXTRACT_MAX_ROWS,
-        maxCols: DEFAULT_EXTRACT_MAX_COLS,
+        maxRows: extractMaxRows,
+        maxCols: extractMaxCols,
       }),
       meta: { namedRange: nr.name },
     });
@@ -320,45 +450,103 @@ function chunkWorkbook(workbook, options = {}) {
       .filter((o) => o.sheetName === sheet.name)
       .map((o) => o.rect);
 
-    const dataRegions = detectRegions(sheet, isNonEmptyCell, signal).filter(
-      (rect) => !overlapsExisting(rect, existingRects)
+    const dataDetection = detectRegions(sheet, isNonEmptyCell, {
+      signal,
+      cellLimit: detectRegionsCellLimit,
+    });
+    const dataComponents = dataDetection.components.filter(
+      (c) => !overlapsExisting(c.rect, existingRects)
     );
-    for (const rect of dataRegions) {
+
+    /** @type {Array<{ rect: any, count: number, isTruncationFallback?: boolean }>} */
+    const dataCandidates = dataComponents.map((c) => ({ ...c }));
+    if (dataDetection.truncated && dataDetection.boundsRect) {
+      if (!overlapsExisting(dataDetection.boundsRect, existingRects)) {
+        dataCandidates.push({
+          rect: dataDetection.boundsRect,
+          count: Number.POSITIVE_INFINITY,
+          isTruncationFallback: true,
+        });
+      }
+    }
+
+    const dataRegions = capComponents(dataCandidates, maxDataRegionsPerSheet);
+    for (const region of dataRegions) {
       throwIfAborted(signal);
+      const rect = region.rect;
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
-      const id = `${workbook.id}::${sheet.name}::dataRegion::${coordKey}`;
+      const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
+      const id = `${workbook.id}::${sheet.name}::dataRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
         sheetName: sheet.name,
         kind: "dataRegion",
-        title: `Data region ${rectToA1(rect)}`,
+        title: region.isTruncationFallback
+          ? `Data region (truncated) ${rectToA1(rect)}`
+          : `Data region ${rectToA1(rect)}`,
         rect,
         cells: extractCells(sheet, rect, {
-          maxRows: DEFAULT_EXTRACT_MAX_ROWS,
-          maxCols: DEFAULT_EXTRACT_MAX_COLS,
+          maxRows: extractMaxRows,
+          maxCols: extractMaxCols,
         }),
+        meta: region.isTruncationFallback
+          ? {
+              truncated: true,
+              reason: "detectRegionsCellLimit",
+              detectRegionsCellLimit,
+            }
+          : undefined,
       });
     }
 
-    const formulaRegions = detectRegions(sheet, isFormulaCell, signal).filter(
-      (rect) => !overlapsExisting(rect, existingRects)
+    const formulaDetection = detectRegions(sheet, isFormulaCell, {
+      signal,
+      cellLimit: detectRegionsCellLimit,
+    });
+    const formulaComponents = formulaDetection.components.filter(
+      (c) => !overlapsExisting(c.rect, existingRects)
     );
-    for (const rect of formulaRegions) {
+
+    /** @type {Array<{ rect: any, count: number, isTruncationFallback?: boolean }>} */
+    const formulaCandidates = formulaComponents.map((c) => ({ ...c }));
+    if (formulaDetection.truncated && formulaDetection.boundsRect) {
+      if (!overlapsExisting(formulaDetection.boundsRect, existingRects)) {
+        formulaCandidates.push({
+          rect: formulaDetection.boundsRect,
+          count: Number.POSITIVE_INFINITY,
+          isTruncationFallback: true,
+        });
+      }
+    }
+
+    const formulaRegions = capComponents(formulaCandidates, maxFormulaRegionsPerSheet);
+    for (const region of formulaRegions) {
       throwIfAborted(signal);
+      const rect = region.rect;
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
-      const id = `${workbook.id}::${sheet.name}::formulaRegion::${coordKey}`;
+      const suffix = region.isTruncationFallback ? `truncated::${coordKey}` : coordKey;
+      const id = `${workbook.id}::${sheet.name}::formulaRegion::${suffix}`;
       chunks.push({
         id,
         workbookId: workbook.id,
         sheetName: sheet.name,
         kind: "formulaRegion",
-        title: `Formula region ${rectToA1(rect)}`,
+        title: region.isTruncationFallback
+          ? `Formula region (truncated) ${rectToA1(rect)}`
+          : `Formula region ${rectToA1(rect)}`,
         rect,
         cells: extractCells(sheet, rect, {
-          maxRows: DEFAULT_EXTRACT_MAX_ROWS,
-          maxCols: DEFAULT_EXTRACT_MAX_COLS,
+          maxRows: extractMaxRows,
+          maxCols: extractMaxCols,
         }),
+        meta: region.isTruncationFallback
+          ? {
+              truncated: true,
+              reason: "detectRegionsCellLimit",
+              detectRegionsCellLimit,
+            }
+          : undefined,
       });
     }
   }

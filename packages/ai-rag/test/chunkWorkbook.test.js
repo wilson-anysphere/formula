@@ -74,3 +74,57 @@ test("chunkWorkbook respects AbortSignal", () => {
 
   assert.throws(() => chunkWorkbook(workbook, { signal: abortController.signal }), { name: "AbortError" });
 });
+
+test("chunkWorkbook caps the number of disconnected data regions per sheet", () => {
+  const map = new Map();
+  // 20 disconnected 2-cell regions (each region is horizontal, with an empty row between).
+  for (let i = 0; i < 20; i += 1) {
+    const r = i * 2;
+    map.set(`${r},0`, { v: `R${i}` });
+    map.set(`${r},1`, { v: `R${i}` });
+  }
+
+  const workbook = {
+    id: "wb1",
+    sheets: [{ name: "Sheet1", cells: map }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook, { maxDataRegionsPerSheet: 10 });
+  const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+  assert.equal(dataRegions.length, 10);
+  assert.deepEqual(
+    dataRegions.map((c) => c.rect),
+    Array.from({ length: 10 }, (_, i) => ({ r0: i * 2, c0: 0, r1: i * 2, c1: 1 }))
+  );
+});
+
+test("chunkWorkbook: truncation fallback still produces a deterministic chunk", () => {
+  // Create >cellLimit matching cells, but ensure they're *not* connected (so without the
+  // truncation fallback we would drop them as trivial 1-cell components).
+  const cells = [];
+  cells[0] = [];
+  const cellLimit = 25;
+  for (let i = 0; i < cellLimit + 5; i += 1) {
+    // Space out cells so they aren't 4-neighbor connected.
+    const r = i * 2;
+    cells[r] = [];
+    cells[r][0] = { v: `V${i}` };
+  }
+
+  const workbook = {
+    id: "wb1",
+    sheets: [{ name: "Sheet1", cells }],
+    tables: [],
+    namedRanges: [],
+  };
+
+  const chunks = chunkWorkbook(workbook, { detectRegionsCellLimit: cellLimit });
+  const dataRegions = chunks.filter((c) => c.kind === "dataRegion");
+  assert.ok(dataRegions.length >= 1, "expected at least one dataRegion chunk");
+  assert.ok(
+    dataRegions.some((c) => c.meta?.truncated === true),
+    "expected a truncation fallback chunk"
+  );
+});
