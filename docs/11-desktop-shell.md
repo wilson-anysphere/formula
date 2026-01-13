@@ -607,12 +607,13 @@ Both deep-link and loopback flows end up as the same desktop event:
 - **Rust → frontend:** `oauth-redirect` (payload: full redirect URL string)
 - **Frontend → Rust:** `oauth-redirect-ready` once `listen("oauth-redirect", ...)` is installed (flushes any queued early redirects)
 
-The backend buffers early redirects in memory (`OauthRedirectState`) so fast redirects at cold start aren’t dropped. The frontend listener lives in `apps/desktop/src/main.ts` and forwards URLs into the in-process OAuth broker (`oauthBroker.observeRedirect(...)`).
+The backend buffers early redirects in memory (`OauthRedirectState` in `apps/desktop/src-tauri/src/oauth_redirect_ipc.rs`) so fast redirects at cold start aren’t dropped. The frontend listener lives in `apps/desktop/src/main.ts` and forwards URLs into the in-process OAuth broker (`oauthBroker.observeRedirect(...)`).
 
 ##### Troubleshooting
 
 - **Provider rejects `formula://…` redirect URIs:** use a loopback redirect and register one of `http://127.0.0.1:<port>/<path>`, `http://localhost:<port>/<path>`, or `http://[::1]:<port>/<path>` with the provider.
 - **Loopback listener fails to start / port already in use:** pick a different port. The Rust command returns an error like `Failed to bind loopback OAuth redirect listener on 127.0.0.1:<port>: ...` (or `localhost:` / `[::1]:` depending on the host).
+- **Provider uses port `0` (dynamic port selection):** not supported — the redirect URI must include an explicit, non-zero port.
 - **Redirect is received but auth doesn’t complete:** ensure the redirect URI used in the auth request matches exactly (scheme/host/port/path). The frontend matcher is strict about `pathname` (e.g. `/callback` vs `/callback/`).
 - **Using implicit flow (`#access_token` fragments):** loopback capture can only see query parameters; use auth-code + PKCE (code in the query string).
 
