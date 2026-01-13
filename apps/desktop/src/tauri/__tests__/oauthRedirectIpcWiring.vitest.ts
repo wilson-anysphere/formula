@@ -18,24 +18,37 @@ describe("oauthRedirectIpc wiring", () => {
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
     // and close equivalents (e.g. `await x; emit(...)`).
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const assignment = /(?:const|let)\s+(\w+)\s*=\s*listen\s*\(\s*["']oauth-redirect["']/.exec(source);
+    const assignment =
+      /(?:const|let)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*\(\s*["']oauth-redirect["']/.exec(source);
     if (assignment) {
       const varName = escapeForRegExp(assignment[1]!);
-      expect(source).toMatch(
+      const hasThen =
         new RegExp(
-          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?\(\s*\)\s*=>[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']`,
+          String.raw`\b${varName}\b\s*\.\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']`,
           "m",
-        ),
-      );
+        ).test(source);
+      const hasAwait =
+        new RegExp(
+          String.raw`await\s+\b${varName}\b[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']`,
+          "m",
+        ).test(source);
+      expect(hasThen || hasAwait).toBe(true);
     } else {
-      // Fallback for inlined promise chaining.
-      expect(source).toMatch(
-        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?\(\s*\)\s*=>[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']/,
-      );
+      // Fallback for inlined promise chaining / top-level await.
+      const hasThen =
+        /\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*\)\s*=>|function\s*\(\s*\))[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']/.test(
+          source,
+        );
+      const hasAwait =
+        /await\s+listen\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*;?[\s\S]{0,750}?\bemit\s*\(\s*["']oauth-redirect-ready["']/.test(
+          source,
+        );
+      expect(hasThen || hasAwait).toBe(true);
     }
 
     // 3) Ensure the listener forwards the payload into the OAuth broker.
-    expect(source).toMatch(/\blisten\s*\(\s*["']oauth-redirect["'][\s\S]{0,1000}?\boauthBroker\.observeRedirect\s*\(/);
+    expect(source).toMatch(
+      /\blisten\s*\(\s*["']oauth-redirect["']\s*,[\s\S]{0,200}?(?:=>|function)[\s\S]{0,1000}?\boauthBroker\.observeRedirect\s*\(/,
+    );
   });
 });
-
