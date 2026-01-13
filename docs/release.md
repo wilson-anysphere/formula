@@ -298,6 +298,25 @@ Timestamping:
 - If a release fails due to timestamping/network issues, switch `timestampUrl` to another **HTTPS**
   timestamp server provided/recommended by your signing certificate vendor and re-run the workflow.
 
+## Windows ARM64 build prerequisites (MSVC)
+
+The release workflow builds **Windows ARM64** installers by cross-compiling from an x64 GitHub-hosted
+Windows runner (MSVC target `aarch64-pc-windows-msvc`).
+
+This requires the Visual Studio **MSVC ARM64** toolchain to be present on the runner:
+
+- Visual Studio component: `Microsoft.VisualStudio.Component.VC.Tools.ARM64`
+
+GitHub-hosted runner images do not always include this workload by default. The release workflow
+checks for `VC\\Tools\\MSVC\\*\\lib\\arm64` and installs the component via `vs_installer.exe` when it
+is missing.
+
+CI smoke test:
+
+- `.github/workflows/windows-arm64-smoke.yml` runs `cargo tauri build --target aarch64-pc-windows-msvc`
+  and asserts that the expected Windows bundles land under
+  `apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**`.
+
 ## Windows: WebView2 runtime installation (required)
 
 Formula relies on the **Microsoft Edge WebView2 Evergreen Runtime** on Windows. The Windows installers are configured to

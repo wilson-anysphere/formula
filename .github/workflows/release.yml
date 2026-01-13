@@ -325,6 +325,53 @@ jobs:
         if: matrix.rust_target != ''
         run: rustup target add ${{ matrix.rust_target }}
 
+      - name: Ensure MSVC ARM64 build tools are installed (Windows ARM64)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (!(Test-Path $vswhere)) {
+            throw "vswhere not found at $vswhere (expected on GitHub-hosted Windows runners)."
+          }
+          $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$installPath) {
+            throw "Failed to locate a Visual Studio installation via vswhere."
+          }
+          Write-Host "Visual Studio install path: $installPath"
+          $msvcRoot = Join-Path $installPath "VC\Tools\MSVC"
+          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$msvcVersionDir) {
+            throw "MSVC toolset directory not found under $msvcRoot"
+          }
+          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+          if (Test-Path $arm64LibDir) {
+            Write-Host "MSVC ARM64 libs already present at $arm64LibDir"
+            exit 0
+          }
+          Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          if (!(Test-Path $vsInstaller)) {
+            throw "Visual Studio installer not found at $vsInstaller"
+          }
+          & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
+          $exitCode = $LASTEXITCODE
+          # 3010 is a common "success, reboot required" code for Windows installers.
+          if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+            throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+          }
+          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+          if (!(Test-Path $arm64LibDir)) {
+            throw "MSVC ARM64 libraries were not found after installation. Windows ARM64 builds require the MSVC ARM64 toolchain to be present on the runner."
+          }
+
+      - name: Setup MSVC cross-compilation environment (amd64 → arm64)
+        if: runner.os == 'Windows' && matrix.rust_target == 'aarch64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
+        with:
+          arch: amd64_arm64
+
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:

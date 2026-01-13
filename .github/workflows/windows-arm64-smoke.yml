@@ -1,0 +1,187 @@
+name: Windows ARM64 (Tauri) smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packages/**"
+      - "Cargo.lock"
+      - ".github/workflows/windows-arm64-smoke.yml"
+      - ".github/workflows/release.yml"
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packages/**"
+      - "Cargo.lock"
+      - ".github/workflows/windows-arm64-smoke.yml"
+      - ".github/workflows/release.yml"
+
+jobs:
+  windows-arm64:
+    name: Build + bundle (aarch64-pc-windows-msvc)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install Rust targets (wasm32 + Windows ARM64)
+        run: rustup target add wasm32-unknown-unknown aarch64-pc-windows-msvc
+
+      - name: Ensure MSVC ARM64 components are installed
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (!(Test-Path $vswhere)) {
+            throw "vswhere not found at $vswhere (expected on windows-latest)."
+          }
+          $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (!$installPath) {
+            throw "Failed to locate a Visual Studio installation via vswhere."
+          }
+          Write-Host "Visual Studio install path: $installPath"
+          $msvcRoot = Join-Path $installPath "VC\Tools\MSVC"
+          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          if (!$msvcVersionDir) {
+            throw "MSVC toolset directory not found under $msvcRoot"
+          }
+          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+          if (Test-Path $arm64LibDir) {
+            Write-Host "MSVC ARM64 libs already present at $arm64LibDir"
+            exit 0
+          }
+          Write-Host "MSVC ARM64 libs not found; installing Visual Studio component Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          if (!(Test-Path $vsInstaller)) {
+            throw "Visual Studio installer not found at $vsInstaller"
+          }
+          & $vsInstaller modify --installPath $installPath --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --includeRecommended --passive --norestart
+          $exitCode = $LASTEXITCODE
+          # 3010 is a common "success, reboot required" code for Windows installers.
+          if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+            throw "vs_installer.exe failed with exit code $exitCode while installing MSVC ARM64 components."
+          }
+          $msvcVersionDir = Get-ChildItem -Path $msvcRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $arm64LibDir = Join-Path $msvcVersionDir.FullName "lib\arm64"
+          if (!(Test-Path $arm64LibDir)) {
+            throw "MSVC ARM64 libraries were not found after installation. GitHub-hosted runners may not include the required MSVC ARM64 workload; use a self-hosted runner with ARM64 build tools preinstalled."
+          }
+
+      - name: Install WiX Toolset (required for MSI builds)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $candle = Get-Command candle.exe -ErrorAction SilentlyContinue
+          $light = Get-Command light.exe -ErrorAction SilentlyContinue
+          if (-not $candle -or -not $light) {
+            choco install wixtoolset --yes --no-progress
+            if (Test-Path "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1") {
+              Import-Module "$env:ChocolateyInstall\\helpers\\chocolateyProfile.psm1"
+              refreshenv
+            }
+          }
+
+          # Add common WiX install locations to PATH for subsequent steps.
+          $wixRoots = Get-ChildItem -Path (Join-Path ${env:ProgramFiles(x86)} "WiX Toolset v*") -Directory -ErrorAction SilentlyContinue
+          foreach ($root in $wixRoots) {
+            $bin = Join-Path $root.FullName "bin"
+            if (Test-Path $bin) {
+              $env:PATH = "$bin;$env:PATH"
+              $bin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            }
+          }
+
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: candle.exe not found on PATH."
+          }
+          if (-not (Get-Command light.exe -ErrorAction SilentlyContinue)) {
+            throw "WiX Toolset installation failed: light.exe not found on PATH."
+          }
+
+      - name: Install NSIS (required for NSIS .exe bundling)
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          $nsisHome = "${env:ProgramFiles(x86)}\NSIS"
+          if (Test-Path $nsisHome) {
+            $nsisHome | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        run: cargo install wasm-pack --locked
+
+      - name: Install cargo-tauri
+        run: cargo install cargo-tauri --locked
+
+      - name: Setup MSVC cross-compilation environment (amd64 → arm64)
+        uses: ilammy/msvc-dev-cmd@7defe9254715b088f12dddd9942945a3d75cdad5 # v1.9.0
+        with:
+          arch: amd64_arm64
+
+      - name: Build Windows ARM64 bundles (MSI + NSIS)
+        run: |
+          cd apps/desktop
+          cargo tauri build --target aarch64-pc-windows-msvc --bundles msi,nsis
+
+      - name: Verify bundles exist
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bundleDir = "apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle"
+          if (!(Test-Path $bundleDir)) {
+            throw "Expected bundle directory not found: $bundleDir"
+          }
+          $exe = Get-ChildItem -Path $bundleDir -Recurse -File -Filter *.exe
+          $msi = Get-ChildItem -Path $bundleDir -Recurse -File -Filter *.msi
+          if ($exe.Count -eq 0) {
+            throw "No .exe installer found under $bundleDir (expected NSIS)."
+          }
+          if ($msi.Count -eq 0) {
+            throw "No .msi installer found under $bundleDir (expected WiX)."
+          }
+          "## Windows ARM64 bundles" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $files = @($exe + $msi) | Sort-Object FullName
+          foreach ($f in $files) {
+            $rel = $f.FullName.Replace((Resolve-Path ".").Path + "\", "")
+            $mb = [Math]::Round($f.Length / 1MB, 2)
+            "- `$rel` (${mb} MB)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-bundles
+          path: apps/desktop/src-tauri/target/aarch64-pc-windows-msvc/release/bundle/**
