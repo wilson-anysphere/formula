@@ -23,7 +23,7 @@ live outside `fixtures/xlsx/`.
 
 Encrypted OOXML fixtures live under:
 
-- `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md`; includes `agile.xlsx` and `standard.xlsx`)
+- `fixtures/encrypted/ooxml/` (see `fixtures/encrypted/ooxml/README.md`; includes `plaintext.xlsx`, `agile.xlsx`, `standard.xlsx`, and `agile-empty-password.xlsx`)
 
 For background on how Excel encryption works (and how it differs from workbook/worksheet
 protection), see `docs/21-encrypted-workbooks.md`.
