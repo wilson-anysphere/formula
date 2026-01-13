@@ -16,6 +16,12 @@ fn dax_function_golden_suite() {
         ("COUNTROWS(Orders)", 4.into()),
         ("COUNTROWS(FILTER(Orders, Orders[Amount] > 10))", 1.into()),
         ("COUNTROWS(ALL(Customers))", 3.into()),
+        ("COUNT(Orders[Amount])", 4.into()),
+        ("COUNTA(Orders[Amount])", 4.into()),
+        ("COUNTBLANK(Orders[Amount])", 0.into()),
+        // COUNT ignores text values (treat them as blanks).
+        ("COUNT(Customers[Name])", 0.into()),
+        ("COUNTA(Customers[Name])", 3.into()),
         ("COUNTROWS(VALUES(Customers[Region]))", 2.into()),
         ("COUNTROWS(DISTINCT(Customers[Region]))", 2.into()),
         ("COUNTROWS(SUMMARIZE(Orders, Orders[CustomerId]))", 3.into()),
