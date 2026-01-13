@@ -108,10 +108,10 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     Some((1, 1)),   //  86 TYPE
     None,           //  87 ECHO
     None,           //  88 SET.NAME
-    None,           //  89 CALLER
+    Some((0, 0)),   //  89 CALLER
     None,           //  90 DEREF
     None,           //  91 WINDOWS
-    None,           //  92 SERIES
+    Some((4, 4)),   //  92 SERIES
     None,           //  93 DOCUMENTS
     None,           //  94 ACTIVE.CELL
     None,           //  95 SELECTION
@@ -204,10 +204,10 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     None,           // 182 GET.BAR
     Some((1, 255)), // 183 PRODUCT
     Some((1, 1)),   // 184 FACT
-    None,           // 185 GET.CELL
-    None,           // 186 GET.WORKSPACE
-    None,           // 187 GET.WINDOW
-    None,           // 188 GET.DOCUMENT
+    Some((2, 2)),   // 185 GET.CELL
+    Some((1, 1)),   // 186 GET.WORKSPACE
+    Some((1, 1)),   // 187 GET.WINDOW
+    Some((1, 1)),   // 188 GET.DOCUMENT
     Some((3, 3)),   // 189 DPRODUCT
     Some((1, 1)),   // 190 ISNONTEXT
     None,           // 191 GET.NOTE
@@ -276,7 +276,7 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     None,           // 254 DELETE.TOOLBAR
     None,           // 255 USER
     None,           // 256 RESET.TOOLBAR
-    None,           // 257 EVALUATE
+    Some((1, 1)),   // 257 EVALUATE
     None,           // 258 GET.TOOLBAR
     None,           // 259 GET.TOOL
     None,           // 260 SPELLING.CHECK
@@ -287,7 +287,7 @@ pub(crate) const FTAB_ARG_RANGES: [Option<(u8, u8)>; 485] = [
     None,           // 265 ENABLE.TOOL
     None,           // 266 PRESS.TOOL
     None,           // 267 REGISTER.ID
-    None,           // 268 GET.WORKBOOK
+    Some((1, 1)),   // 268 GET.WORKBOOK
     Some((1, 255)), // 269 AVEDEV
     Some((3, 5)),   // 270 BETADIST
     Some((1, 1)),   // 271 GAMMALN
