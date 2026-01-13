@@ -193,6 +193,10 @@ function defineVectorStoreConformanceSuite(name, createStore, opts) {
         assert.ok(hits[0].score >= hits[1].score);
       });
 
+      await t.test("query throws on query vector dimension mismatch", async () => {
+        await assert.rejects(store.query([1, 0], 1, { workbookId: "wb-query" }), /expected 3/);
+      });
+
       await t.test("AbortSignal: already-aborted signals reject for list/query", async () => {
         const abortController = new AbortController();
         abortController.abort();
