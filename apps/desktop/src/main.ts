@@ -2184,8 +2184,26 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.superscript": true,
             "home.font.fontName": true,
             "home.font.fontSize": true,
-            "home.font.increaseFont": true,
-            "home.font.decreaseFont": true,
+            "format.fontName.calibri": true,
+            "format.fontName.arial": true,
+            "format.fontName.times": true,
+            "format.fontName.courier": true,
+            "format.fontSize.8": true,
+            "format.fontSize.9": true,
+            "format.fontSize.10": true,
+            "format.fontSize.11": true,
+            "format.fontSize.12": true,
+            "format.fontSize.14": true,
+            "format.fontSize.16": true,
+            "format.fontSize.18": true,
+            "format.fontSize.20": true,
+            "format.fontSize.24": true,
+            "format.fontSize.28": true,
+            "format.fontSize.36": true,
+            "format.fontSize.48": true,
+            "format.fontSize.72": true,
+            "format.increaseFontSize": true,
+            "format.decreaseFontSize": true,
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
@@ -8303,43 +8321,6 @@ function handleRibbonCommand(commandId: string): void {
       }));
     };
 
-    const fontNamePrefix = "home.font.fontName.";
-    if (commandId.startsWith(fontNamePrefix)) {
-      const preset = commandId.slice(fontNamePrefix.length);
-      const fontName = (() => {
-        switch (preset) {
-          case "calibri":
-            return "Calibri";
-          case "arial":
-            return "Arial";
-          case "times":
-            return "Times New Roman";
-          case "courier":
-            return "Courier New";
-          default:
-            return null;
-        }
-      })();
-      if (!fontName) return;
-      applyFormattingToSelection("Font", (doc, sheetId, ranges) => {
-        let applied = true;
-        for (const range of ranges) {
-          const ok = doc.setRangeFormat(sheetId, range, { font: { name: fontName } }, { label: "Font" });
-          if (ok === false) applied = false;
-        }
-        return applied;
-      });
-      return;
-    }
-
-    const fontSizePrefix = "home.font.fontSize.";
-    if (commandId.startsWith(fontSizePrefix)) {
-      const size = Number(commandId.slice(fontSizePrefix.length));
-      if (!Number.isFinite(size) || size <= 0) return;
-      executeBuiltinCommand("format.fontSize.set", size);
-      return;
-    }
-
     const command = commandRegistry.getCommand(commandId);
     if (command) {
       executeCommand(commandId);
@@ -8623,15 +8604,131 @@ function handleRibbonCommand(commandId: string): void {
         executeBuiltinCommand("format.fontSize.set");
         return;
 
-      case "home.font.increaseFont": {
-        executeBuiltinCommand("format.fontSize.increase");
+      case "home.alignment.alignLeft":
+        applyFormattingToSelection("Align left", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "left"));
+        return;
+      case "home.alignment.topAlign":
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.middleAlign":
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.bottomAlign":
+        applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.center":
+        applyFormattingToSelection("Align center", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "center"));
+        return;
+      case "home.alignment.alignRight":
+        applyFormattingToSelection("Align right", (doc, sheetId, ranges) => setHorizontalAlign(doc, sheetId, ranges, "right"));
+        return;
+
+      case "home.alignment.increaseIndent": {
+        const current = activeCellIndentLevel();
+        const next = Math.min(250, current + 1);
+        if (next === current) return;
+        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
         return;
       }
 
-      case "home.font.decreaseFont": {
-        executeBuiltinCommand("format.fontSize.decrease");
+      case "home.alignment.decreaseIndent": {
+        const current = activeCellIndentLevel();
+        const next = Math.max(0, current - 1);
+        if (next === current) return;
+        applyFormattingToSelection("Indent", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { indent: next } }, { label: "Indent" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
         return;
       }
+
+      case "home.alignment.orientation.angleCounterclockwise":
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.orientation.angleClockwise":
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.orientation.verticalText":
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.orientation.rotateUp":
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.orientation.rotateDown":
+        applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
+          for (const range of ranges) {
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
+          }
+          return applied;
+        });
+        return;
+      case "home.alignment.orientation.formatCellAlignment":
+        executeBuiltinCommand("format.openFormatCells");
+        return;
       case "format.openFormatCells":
       case "home.number.formatCells": // legacy ribbon schema id
       case "home.number.moreFormats.formatCells": // legacy ribbon schema id

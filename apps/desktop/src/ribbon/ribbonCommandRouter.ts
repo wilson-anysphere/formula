@@ -39,16 +39,11 @@ function routeRibbonCommand(commandId: string): RoutedRibbonCommand | null {
     return { kind: "execute", commandId };
   }
 
-  switch (commandId) {
-    case "format.toggleBold":
-    case "format.toggleItalic":
-    case "format.toggleUnderline":
-      return { kind: "execute", commandId };
+  if (commandId.startsWith("format.")) {
+    return { kind: "execute", commandId };
+  }
 
-    case "home.font.increaseFont":
-      return { kind: "execute", commandId: "format.fontSize.increase" };
-    case "home.font.decreaseFont":
-      return { kind: "execute", commandId: "format.fontSize.decrease" };
+  switch (commandId) {
     case "home.font.fontSize":
       return { kind: "execute", commandId: "format.fontSize.set" };
     case "home.font.fontColor":
@@ -56,22 +51,10 @@ function routeRibbonCommand(commandId: string): RoutedRibbonCommand | null {
     case "home.font.fillColor":
       return { kind: "execute", commandId: "format.fillColor" };
 
-    case "format.numberFormat.currency":
-    case "format.numberFormat.percent":
-    case "format.numberFormat.date":
-      return { kind: "execute", commandId };
-
     case "edit.find":
     case "edit.replace":
     case "navigation.goTo":
       return { kind: "execute", commandId };
-  }
-
-  const fontSizePrefix = "home.font.fontSize.";
-  if (commandId.startsWith(fontSizePrefix)) {
-    const size = Number(commandId.slice(fontSizePrefix.length));
-    if (!Number.isFinite(size) || size <= 0) return null;
-    return { kind: "execute", commandId: "format.fontSize.set", args: [size] };
   }
 
   const fillColorPrefix = "home.font.fillColor.";

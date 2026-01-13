@@ -13,6 +13,7 @@ import {
 } from "../formatting/toolbar.js";
 
 import { registerBuiltinCommands } from "./registerBuiltinCommands.js";
+import { registerBuiltinFormatFontCommands } from "./registerBuiltinFormatFontCommands.js";
 import { registerFormatAlignmentCommands } from "./registerFormatAlignmentCommands.js";
 import { registerNumberFormatCommands } from "./registerNumberFormatCommands.js";
 import { registerPageLayoutCommands, type PageLayoutCommandHandlers } from "./registerPageLayoutCommands.js";
@@ -112,6 +113,12 @@ export function registerDesktopCommands(params: {
   }
 
   registerWorkbenchFileCommands({ commandRegistry, handlers: workbenchFileHandlers });
+
+  registerBuiltinFormatFontCommands({
+    commandRegistry,
+    app,
+    applyFormattingToSelection,
+  });
 
   registerFormatAlignmentCommands({
     commandRegistry,
