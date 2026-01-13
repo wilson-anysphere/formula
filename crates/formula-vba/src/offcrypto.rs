@@ -24,6 +24,10 @@
 //! - DigSigInfoSerialized (§2.3.2.1): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
 //! - DigSigBlob (§2.3.2.2): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/bc21c922-b7ae-4736-90aa-86afb6403462
 
+use md5::Md5;
+use sha1::Sha1;
+use sha2::Digest as _;
+
 /// Parsed information from the length-prefixed DigSigInfoSerialized-like prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DigSigInfoSerialized {
@@ -590,9 +594,68 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
     enc_tag.tag_byte == 0x30 && enc_tag.constructed
 }
 
+pub(crate) const CALG_MD5: u32 = 0x8003;
+pub(crate) const CALG_SHA1: u32 = 0x8004;
+
+#[allow(dead_code)]
+pub(crate) fn standard_cryptoapi_rc4_block_key(
+    alg_id_hash: u32,
+    password: &str,
+    salt: &[u8],
+    spin_count: u32,
+    block: u32,
+    key_size_bits: usize,
+) -> Option<Vec<u8>> {
+    if !key_size_bits.is_multiple_of(8) {
+        return None;
+    }
+    let key_size_bytes = key_size_bits / 8;
+
+    let mut password_utf16le = Vec::with_capacity(password.len().saturating_mul(2));
+    for ch in password.encode_utf16() {
+        password_utf16le.extend_from_slice(&ch.to_le_bytes());
+    }
+
+    let mut h = cryptoapi_hash2(alg_id_hash, salt, &password_utf16le)?;
+    for i in 0..spin_count {
+        let i_bytes = (i as u32).to_le_bytes();
+        h = cryptoapi_hash2(alg_id_hash, &i_bytes, &h)?;
+    }
+
+    let block_bytes = block.to_le_bytes();
+    let mut key = cryptoapi_hash2(alg_id_hash, &h, &block_bytes)?;
+    if key_size_bytes > key.len() {
+        return None;
+    }
+    key.truncate(key_size_bytes);
+    Some(key)
+}
+
+fn cryptoapi_hash2(alg_id_hash: u32, a: &[u8], b: &[u8]) -> Option<Vec<u8>> {
+    match alg_id_hash {
+        CALG_MD5 => {
+            let mut hasher = Md5::new();
+            hasher.update(a);
+            hasher.update(b);
+            Some(hasher.finalize().to_vec())
+        }
+        CALG_SHA1 => {
+            let mut hasher = Sha1::new();
+            hasher.update(a);
+            hasher.update(b);
+            Some(hasher.finalize().to_vec())
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hex_lower(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
@@ -1069,5 +1132,28 @@ mod tests {
         let parsed = parse_wordsig_blob(&stream).expect("should parse wordsig blob");
         assert_eq!(parsed.pkcs7_offset, signature_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
+    }
+
+    #[test]
+    fn standard_cryptoapi_rc4_key_derivation_md5_vectors() {
+        let password = "password";
+        let salt: Vec<u8> = (0u8..=0x0F).collect();
+
+        let expected = [
+            (0u32, "69badcae244868e209d4e053ccd2a3bc"),
+            (1u32, "6f4d502ab37700ffdab5704160455b47"),
+            (2u32, "ac69022e396c7750872133f37e2c7afc"),
+            (3u32, "1b056e7118ab8d35e9d67adee8b11104"),
+        ];
+
+        for (block, expected_hex) in expected {
+            let key = standard_cryptoapi_rc4_block_key(CALG_MD5, password, &salt, 50_000, block, 128)
+                .expect("should derive md5 rc4 block key");
+            assert_eq!(hex_lower(&key), expected_hex, "block={block}");
+        }
+
+        let key_40 = standard_cryptoapi_rc4_block_key(CALG_MD5, password, &salt, 50_000, 0, 40)
+            .expect("should derive md5 rc4 block key");
+        assert_eq!(hex_lower(&key_40), "69badcae24");
     }
 }
