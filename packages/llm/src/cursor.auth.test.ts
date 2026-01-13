@@ -53,6 +53,49 @@ describe("CursorLLMClient auth integration", () => {
     await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
   });
 
+  it("treats auth headers case-insensitively so `getAuthHeaders()` overrides `authToken`", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      expect(init.headers.Authorization).toBe("Bearer tokenB");
+      expect(init.headers).not.toHaveProperty("authorization");
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const client = new CursorLLMClient({
+      baseUrl: "https://example.com",
+      model: "gpt-test",
+      timeoutMs: 1_000,
+      authToken: "tokenA",
+      getAuthHeaders: async () => ({ authorization: "Bearer tokenB" }),
+    });
+    await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
+  });
+
+  it("always enforces JSON `Content-Type` even if `getAuthHeaders()` returns another value", async () => {
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      expect(init.headers["Content-Type"]).toBe("application/json");
+      expect(init.headers).not.toHaveProperty("content-type");
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "ok" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock as any);
+
+    const client = new CursorLLMClient({
+      baseUrl: "https://example.com",
+      model: "gpt-test",
+      timeoutMs: 1_000,
+      getAuthHeaders: async () => ({ "content-type": "text/plain" }),
+    });
+    await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
+  });
+
   it("does not read legacy env vars for auth", async () => {
     const legacyApiKeyEnv = ["OPEN", "AI_API_KEY"].join("");
     const otherProviderApiKeyEnv = ["AN", "THROPIC_API_KEY"].join("");

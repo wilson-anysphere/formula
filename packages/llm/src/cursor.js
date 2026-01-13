@@ -211,10 +211,39 @@ export class CursorLLMClient {
    */
   async _resolveHeaders() {
     /** @type {Record<string, string>} */
-    const headers = { "Content-Type": "application/json" };
+    const headers = {};
+    /** @type {Map<string, string>} */
+    const keyByLower = new Map();
+
+    /**
+     * Set/overwrite a header name case-insensitively.
+     *
+     * Fetch treats header names case-insensitively and may combine duplicate
+     * header names when it converts a plain object to `Headers`. We avoid this
+     * by ensuring we never return the same header name twice with different
+     * casing (e.g. `Authorization` and `authorization`).
+     *
+     * @param {string} key
+     * @param {string} value
+     */
+    const setHeader = (key, value) => {
+      const lower = String(key).toLowerCase();
+      const canonicalKey =
+        lower === "authorization" ? "Authorization" : lower === "content-type" ? "Content-Type" : key;
+
+      const existingKey = keyByLower.get(lower);
+      if (existingKey && existingKey !== canonicalKey) {
+        delete headers[existingKey];
+      }
+
+      headers[canonicalKey] = value;
+      keyByLower.set(lower, canonicalKey);
+    };
+
+    setHeader("Content-Type", "application/json");
 
     if (this.authToken) {
-      headers.Authorization = `Bearer ${this.authToken}`;
+      setHeader("Authorization", `Bearer ${this.authToken}`);
     }
 
     // Prefer `getAuthHeaders()` so Cursor can manage authentication. If it
@@ -223,12 +252,12 @@ export class CursorLLMClient {
     if (extra && typeof extra === "object") {
       for (const [key, value] of Object.entries(extra)) {
         if (typeof value !== "string") continue;
-        headers[key] = value;
+        setHeader(key, value);
       }
     }
 
     // Always ensure JSON content type.
-    headers["Content-Type"] = "application/json";
+    setHeader("Content-Type", "application/json");
 
     return headers;
   }
