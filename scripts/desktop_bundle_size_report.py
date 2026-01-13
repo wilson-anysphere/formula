@@ -325,10 +325,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--json",
+        nargs="?",
         type=Path,
+        const=Path("desktop-bundle-size-report.json"),
         default=None,
-        help="Write a machine-readable JSON report to the given path "
-        "(also via env FORMULA_BUNDLE_SIZE_JSON_PATH).",
+        help="Write a machine-readable JSON report to PATH "
+        "(default: desktop-bundle-size-report.json; also via env FORMULA_BUNDLE_SIZE_JSON_PATH).",
     )
     args = parser.parse_args()
 
