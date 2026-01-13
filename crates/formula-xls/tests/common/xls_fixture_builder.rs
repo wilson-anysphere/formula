@@ -1550,6 +1550,8 @@ fn build_sheet_print_settings_sheet_stream(xf_cell: u16) -> Vec<u8> {
             0.6,  // footer margin
         ),
     );
+    // WSBOOL.fFitToPage (bit 8) controls whether SETUP.iScale or SETUP.iFit* fields apply.
+    push_record(&mut sheet, RECORD_WSBOOL, &0x0100u16.to_le_bytes()); // fFitToPage=1
 
     // WSBOOL: Excel stores `Fit to page` as a worksheet boolean flag (fFitToPage = bit 0x0100).
     // Use the same base value (0x0C01) as other fixtures so outline defaults remain consistent.
@@ -1844,6 +1846,24 @@ fn vpagebreaks_record(breaks: &[u16]) -> Vec<u8> {
 /// page setup metadata to the correct sheet in multi-sheet workbooks.
 pub fn build_page_setup_multisheet_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_page_setup_multisheet_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a worksheet with a corrupt page margin value.
+///
+/// This is used to validate that the importer ignores invalid BIFF margin records and surfaces a
+/// warning, rather than importing NaN/Inf/negative/out-of-range values into `PageSetup`.
+pub fn build_invalid_margins_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_invalid_margins_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -4549,6 +4569,52 @@ fn build_fit_to_clamp_sheet_stream(xf_cell: u16) -> Vec<u8> {
 
     // Provide at least one cell so calamine returns a non-empty range.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_invalid_margins_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream("Margins", &build_invalid_margins_sheet_stream(), 1252)
+}
+
+fn build_invalid_margins_sheet_stream() -> Vec<u8> {
+    // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
+    // cell XF index is 16.
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1) => A1.
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // LEFTMARGIN with an invalid Xnum value (out of spec range).
+    let invalid_left = 100.0f64.to_le_bytes();
+    push_record(&mut sheet, RECORD_LEFTMARGIN, &invalid_left);
+
+    // RIGHTMARGIN with a valid non-default value so the importer produces a non-default PageSetup.
+    let right = 1.2f64.to_le_bytes();
+    push_record(&mut sheet, RECORD_RIGHTMARGIN, &right);
+
+    // SETUP record: only `numHdr` and `numFtr` are relevant for our importer, but the BIFF layout
+    // is fixed-size. Offsets 16 and 24 contain Xnum header/footer margins.
+    let mut setup = vec![0u8; 34];
+    setup[16..24].copy_from_slice(&0.4f64.to_le_bytes()); // numHdr
+    setup[24..32].copy_from_slice(&0.5f64.to_le_bytes()); // numFtr
+    setup[32..34].copy_from_slice(&1u16.to_le_bytes()); // iCopies
+    push_record(&mut sheet, RECORD_SETUP, &setup);
+
+    // Provide at least one cell so calamine returns a non-empty range.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, XF_GENERAL_CELL, 1.0));
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet

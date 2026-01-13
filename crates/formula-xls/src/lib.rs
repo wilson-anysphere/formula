@@ -928,10 +928,8 @@ fn import_xls_path_with_biff_reader(
                             &mut warnings_suppressed,
                         );
                     } else {
-                        match biff::parse_biff_sheet_print_settings(
-                            workbook_stream,
-                            sheet_info.offset,
-                        ) {
+                        match biff::parse_biff_sheet_print_settings(workbook_stream, sheet_info.offset)
+                        {
                             Ok(mut parsed) => {
                                 for warning in parsed.warnings.drain(..) {
                                     push_import_warning(
@@ -944,11 +942,14 @@ fn import_xls_path_with_biff_reader(
                                     );
                                 }
 
-                            // Even if the sheet has default page setup and no breaks, updating is
-                            // harmless and ensures later print settings (print area/titles) share a
-                            // single `SheetPrintSettings` entry when needed.
-                            out.set_sheet_page_setup(sheet_id, parsed.page_setup.unwrap_or_default());
-                            out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
+                                // Even if the sheet has default page setup and no breaks, updating
+                                // is harmless and ensures later print settings (print area/titles)
+                                // share a single `SheetPrintSettings` entry when needed.
+                                out.set_sheet_page_setup(
+                                    sheet_id,
+                                    parsed.page_setup.unwrap_or_default(),
+                                );
+                                out.set_manual_page_breaks(sheet_id, parsed.manual_page_breaks);
                             }
                             Err(err) => push_import_warning(
                                 &mut warnings,

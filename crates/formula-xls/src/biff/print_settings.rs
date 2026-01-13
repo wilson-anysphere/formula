@@ -51,6 +51,10 @@ fn push_warning_bounded_force(warnings: &mut Vec<String>, warning: impl Into<Str
         push_warning_bounded(warnings, warning);
     }
 }
+// Excel constrains page margin values (in inches) to the range 0 <= x < 49.
+// Treat 49 as inclusive for simplicity.
+const MARGIN_MIN_INCHES: f64 = 0.0;
+const MARGIN_MAX_INCHES: f64 = 49.0;
 
 // Worksheet print/page setup related record ids.
 // See [MS-XLS] sections:
@@ -363,22 +367,22 @@ fn parse_setup_record(
         }
     }
     if let Some(v) = header_margin {
-        if v.is_finite() {
+        if is_valid_margin(v) {
             page_setup.margins.header = v;
         } else {
             push_warning_bounded(
                 warnings,
-                format!("invalid SETUP header margin value {v:?} at offset {offset}"),
+                format!("invalid SETUP.numHdr value {v:?} at offset {offset}"),
             );
         }
     }
     if let Some(v) = footer_margin {
-        if v.is_finite() {
+        if is_valid_margin(v) {
             page_setup.margins.footer = v;
         } else {
             push_warning_bounded(
                 warnings,
-                format!("invalid SETUP footer margin value {v:?} at offset {offset}"),
+                format!("invalid SETUP.numFtr value {v:?} at offset {offset}"),
             );
         }
     }
@@ -404,7 +408,7 @@ fn parse_margin_record(
         return;
     }
     let value = parse_f64_at(data, 0).expect("len check");
-    if !value.is_finite() {
+    if !is_valid_margin(value) {
         push_warning_bounded(
             warnings,
             format!("invalid {name} value {value:?} at offset {offset}"),
@@ -412,6 +416,10 @@ fn parse_margin_record(
         return;
     }
     *out = value;
+}
+
+fn is_valid_margin(value: f64) -> bool {
+    value.is_finite() && value >= MARGIN_MIN_INCHES && value <= MARGIN_MAX_INCHES
 }
 
 #[cfg(test)]
