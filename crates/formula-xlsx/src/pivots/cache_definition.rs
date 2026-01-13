@@ -126,29 +126,30 @@ impl XlsxPackage {
         &self,
         cache_id: u32,
     ) -> Result<Option<(String, PivotCacheDefinition)>, XlsxError> {
-        let guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
-        if let Some(bytes) = self.part(&guess) {
-            return Ok(Some((guess, parse_pivot_cache_definition(bytes)?)));
-        }
-
         let workbook_xml = match self.part("xl/workbook.xml") {
             Some(bytes) => bytes,
             None => return Ok(None),
         };
 
-        let rel_id = match workbook_pivot_cache_rel_id(workbook_xml, cache_id)? {
-            Some(id) => id,
-            None => return Ok(None),
-        };
+        // Prefer the workbook-level pivotCaches mapping over filename guessing. In practice the
+        // numeric suffix in `pivotCacheDefinitionN.xml` does not always line up with `cacheId`.
+        if let Some(rel_id) = workbook_pivot_cache_rel_id(workbook_xml, cache_id)? {
+            if let Some(part_name) =
+                resolve_relationship_target(self, "xl/workbook.xml", &rel_id)?
+            {
+                if let Some(bytes) = self.part(&part_name) {
+                    return Ok(Some((part_name, parse_pivot_cache_definition(bytes)?)));
+                }
+            }
+        }
 
-        let Some(part_name) = resolve_relationship_target(self, "xl/workbook.xml", &rel_id)? else {
+        // Fall back to the historical filename guess only when the workbook mapping is missing
+        // or cannot be resolved.
+        let guess = format!("xl/pivotCache/pivotCacheDefinition{cache_id}.xml");
+        let Some(bytes) = self.part(&guess) else {
             return Ok(None);
         };
-        let Some(bytes) = self.part(&part_name) else {
-            return Ok(None);
-        };
-
-        Ok(Some((part_name, parse_pivot_cache_definition(bytes)?)))
+        Ok(Some((guess, parse_pivot_cache_definition(bytes)?)))
     }
 
     /// Parse a single pivot cache definition part.

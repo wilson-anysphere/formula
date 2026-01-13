@@ -93,6 +93,14 @@ fn build_synthetic_workbook_cache_id_package() -> Vec<u8> {
   <cacheFields count="0"/>
 </pivotCacheDefinition>"#;
 
+    let misleading_guess_definition_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cacheSource type="worksheet">
+    <worksheetSource ref="Z1:Z2" sheet="WrongSheet"/>
+  </cacheSource>
+  <cacheFields count="0"/>
+</pivotCacheDefinition>"#;
+
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
@@ -103,6 +111,12 @@ fn build_synthetic_workbook_cache_id_package() -> Vec<u8> {
         (
             "xl/pivotCache/pivotCacheDefinition1.xml",
             cache_definition_xml,
+        ),
+        // A misleading `pivotCacheDefinition{cacheId}.xml` part that should be ignored in favor of
+        // the workbook mapping above.
+        (
+            "xl/pivotCache/pivotCacheDefinition7.xml",
+            misleading_guess_definition_xml,
         ),
     ] {
         zip.start_file(name, options).unwrap();
