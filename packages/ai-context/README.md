@@ -24,6 +24,21 @@ This package focuses on:
 
 ---
 
+## Contents
+
+- [Exports](#exports-high-level)
+- [`ContextManager` options](#contextmanager-constructor-options)
+- Examples
+  - [Extract schema + summarize](#example-extract-sheet-schema--summarize)
+  - [Single-sheet context](#example-build-single-sheet-context-with-contextmanagerbuildcontext)
+  - [Workbook context](#example-build-workbook-context-with-contextmanagerbuildworkbookcontextfromspreadsheetapi)
+  - [Trim conversation history](#example-trim-conversation-history-with-trimmessagestobudget)
+- [DLP safety](#dlp-safety)
+- [Token budgeting](#token-budgeting-how-it-works-how-to-tune-it)
+- [Troubleshooting](#troubleshooting--gotchas)
+
+---
+
 ## Exports (high level)
 
 ```js
