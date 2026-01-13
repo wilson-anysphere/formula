@@ -300,7 +300,10 @@ export class FormulaBarFunctionAutocompleteController {
       return true;
     }
 
-    if (e.key === "Tab" || (e.key === "Enter" && !e.altKey)) {
+    // Match typical editor UX:
+    // - Tab accepts the selected item (Shift+Tab should keep its usual meaning in the formula bar)
+    // - Enter accepts (Shift+Enter remains available for formula-bar commit/navigation semantics)
+    if ((e.key === "Tab" && !e.shiftKey) || (e.key === "Enter" && !e.altKey && !e.shiftKey)) {
       e.preventDefault();
       this.acceptSelected();
       return true;
