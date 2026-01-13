@@ -6,6 +6,7 @@ import { classifyText, redactText } from "./dlp.js";
 import { isCellEmpty, parseA1Range, rangeToA1 } from "./a1.js";
 import { awaitWithAbort, throwIfAborted } from "./abort.js";
 import { extractWorkbookSchema } from "./workbookSchema.js";
+import { summarizeSheetSchema } from "./summarizeSheet.js";
 
 import { indexWorkbook } from "../../ai-rag/src/pipeline/indexWorkbook.js";
 import { searchWorkbookRag } from "../../ai-rag/src/retrieval/searchWorkbookRag.js";
@@ -618,15 +619,28 @@ export class ContextManager {
            ]
          : []),
       ...(attachmentData
-        ? [
-            {
+         ? [
+             {
               key: "attachment_data",
               // Slightly below DLP policy notes, but above retrieved/schema/samples.
               priority: 4.5,
               text: this.redactor(attachmentData),
             },
-          ]
-        : []),
+           ]
+         : []),
+      {
+        key: "schema_summary",
+        // Prefer the compact summary over raw JSON when budgets are tight.
+        priority: 3.5,
+        text: this.redactor(
+          `Sheet schema summary:\n${summarizeSheetSchema(schemaOut, {
+            maxTables: 10,
+            maxRegions: 10,
+            maxHeadersPerTable: 8,
+            maxHeadersPerRegion: 8,
+          })}`,
+        ),
+      },
       {
         key: "schema",
         priority: 3,

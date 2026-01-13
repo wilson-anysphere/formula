@@ -23,6 +23,8 @@ describe("ContextManager promptContext", () => {
     const out2 = await cm.buildContext({ sheet, query: "col1", attachments });
 
     expect(out1.promptContext).toEqual(out2.promptContext);
+    expect(out1.promptContext).toContain("## schema_summary");
+    expect(out1.promptContext).toContain("sheet=[Sheet1]");
 
     // The compact format should not include pretty-print indentation.
     expect(out1.promptContext).not.toContain('\n  "');
