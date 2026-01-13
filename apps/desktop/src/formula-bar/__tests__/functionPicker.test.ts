@@ -104,6 +104,7 @@ describe("FormulaBarView fx function picker", () => {
     pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
     expect(items[0]!.getAttribute("aria-selected")).toBe("false");
     expect(items[1]!.getAttribute("aria-selected")).toBe("true");
+    expect(pickerInput.getAttribute("aria-activedescendant")).toBe(items[1]!.id);
 
     // Insert selected function.
     pickerInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));

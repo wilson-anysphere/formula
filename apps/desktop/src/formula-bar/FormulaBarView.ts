@@ -168,6 +168,12 @@ function nextNameBoxListId(): string {
   return `formula-name-box-list-${nameBoxListIdCounter}`;
 }
 
+let functionPickerListIdCounter = 0;
+function nextFunctionPickerListId(): string {
+  functionPickerListIdCounter += 1;
+  return `formula-function-picker-list-${functionPickerListIdCounter}`;
+}
+
 export type FormulaBarCommitReason = "enter" | "tab" | "command";
 
 export interface FormulaBarCommit {
@@ -525,6 +531,9 @@ export class FormulaBarView {
     functionPickerInput.className = "command-palette__input";
     functionPickerInput.dataset.testid = "formula-function-picker-input";
     functionPickerInput.placeholder = "Search functions";
+    functionPickerInput.setAttribute("role", "combobox");
+    functionPickerInput.setAttribute("aria-autocomplete", "list");
+    functionPickerInput.setAttribute("aria-expanded", "false");
     functionPickerInput.setAttribute("aria-label", "Search functions");
     // Avoid browser spellcheck/autofill UI interfering with keyboard navigation + e2e tests.
     functionPickerInput.spellcheck = false;
@@ -534,9 +543,12 @@ export class FormulaBarView {
     const functionPickerList = document.createElement("ul");
     functionPickerList.className = "command-palette__list";
     functionPickerList.dataset.testid = "formula-function-picker-list";
+    functionPickerList.id = nextFunctionPickerListId();
     functionPickerList.setAttribute("role", "listbox");
     // Ensure there is at least one tabbable element besides the input so Tab doesn't escape.
     functionPickerList.tabIndex = 0;
+    functionPickerInput.setAttribute("aria-controls", functionPickerList.id);
+    functionPickerInput.setAttribute("aria-haspopup", "listbox");
 
     functionPickerPanel.appendChild(functionPickerInput);
     functionPickerPanel.appendChild(functionPickerList);
@@ -1565,6 +1577,7 @@ export class FormulaBarView {
     this.#functionPickerOpen = true;
     this.#functionPickerEl.hidden = false;
     this.#fxButtonEl.setAttribute("aria-expanded", "true");
+    this.#functionPickerInputEl.setAttribute("aria-expanded", "true");
     this.#isFunctionPickerComposing = false;
     this.#functionPickerInputEl.value = "";
     this.#functionPickerSelectedIndex = 0;
@@ -1583,6 +1596,8 @@ export class FormulaBarView {
     this.#functionPickerOpen = false;
     this.#functionPickerEl.hidden = true;
     this.#fxButtonEl.setAttribute("aria-expanded", "false");
+    this.#functionPickerInputEl.setAttribute("aria-expanded", "false");
+    this.#functionPickerInputEl.removeAttribute("aria-activedescendant");
     this.#isFunctionPickerComposing = false;
     this.#functionPickerItems = [];
     this.#functionPickerItemEls = [];
@@ -1678,6 +1693,7 @@ export class FormulaBarView {
   #updateFunctionPickerSelection(nextIndex: number): void {
     if (this.#functionPickerItems.length === 0) {
       this.#functionPickerSelectedIndex = 0;
+      this.#functionPickerInputEl.removeAttribute("aria-activedescendant");
       return;
     }
 
@@ -1691,7 +1707,14 @@ export class FormulaBarView {
     const nextEl = this.#functionPickerItemEls[clamped];
     if (nextEl) {
       nextEl.setAttribute("aria-selected", "true");
+      if (nextEl.id) {
+        this.#functionPickerInputEl.setAttribute("aria-activedescendant", nextEl.id);
+      } else {
+        this.#functionPickerInputEl.removeAttribute("aria-activedescendant");
+      }
       if (typeof nextEl.scrollIntoView === "function") nextEl.scrollIntoView({ block: "nearest" });
+    } else {
+      this.#functionPickerInputEl.removeAttribute("aria-activedescendant");
     }
   }
 
@@ -1750,6 +1773,10 @@ export class FormulaBarView {
       selectedIndex: this.#functionPickerSelectedIndex,
       onSelect: (index) => this.#selectFunctionPickerItem(index),
     });
+    const optionPrefix = `${this.#functionPickerListEl.id || "formula-function-picker-list"}-option-`;
+    for (let i = 0; i < this.#functionPickerItemEls.length; i += 1) {
+      this.#functionPickerItemEls[i]!.id = `${optionPrefix}${i}`;
+    }
 
     // Ensure selection is valid after query changes.
     this.#updateFunctionPickerSelection(this.#functionPickerSelectedIndex);
