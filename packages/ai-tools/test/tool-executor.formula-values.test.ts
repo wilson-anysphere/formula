@@ -80,6 +80,47 @@ describe("ToolExecutor include_formula_values", () => {
     expect(result.data?.statistics).toEqual({ mean: 3, sum: 6, count: 2 });
   });
 
+  it("compute_statistics includes numeric values from formula cells under DLP ALLOW decisions when enabled", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { formula: "=1+1", value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!B1"), { value: 4 });
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      include_formula_values: true,
+      dlp: {
+        document_id: "doc-1",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true,
+            },
+          },
+        },
+        audit_logger,
+      },
+    });
+
+    const result = await executor.execute({
+      name: "compute_statistics",
+      parameters: { range: "Sheet1!A1:B1", measures: ["mean", "sum", "count"] },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("compute_statistics");
+    if (!result.ok || result.tool !== "compute_statistics") throw new Error("Unexpected tool result");
+    expect(result.data?.statistics).toEqual({ mean: 3, sum: 6, count: 2 });
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event.decision?.decision).toBe("allow");
+    expect(event.redactedCellCount).toBe(0);
+  });
+
   it("filter_range compares formula cells using computed values when enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "Value" });
