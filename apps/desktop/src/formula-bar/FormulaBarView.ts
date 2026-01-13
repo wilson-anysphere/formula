@@ -697,6 +697,12 @@ export class FormulaBarView {
           if (e.key === "Escape") {
             e.preventDefault();
             this.#closeNameBoxDropdown({ restoreAddress: true, reason: "escape" });
+            // If the user was in an invalid-reference state before opening the dropdown,
+            // treat Escape as "cancel the invalid entry" (Excel-like behavior).
+            if (this.#isNameBoxInvalid) {
+              this.#clearNameBoxError();
+              address.value = this.#nameBoxValue;
+            }
             return;
           }
         }

@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { FormulaBarView } from "./FormulaBarView.js";
+import { FormulaBarView, type NameBoxDropdownProvider } from "./FormulaBarView.js";
 
 describe("FormulaBarView name box invalid reference feedback", () => {
   it("keeps focus + sets aria-invalid when navigation fails, then clears on input and navigates", () => {
@@ -60,6 +60,37 @@ describe("FormulaBarView name box invalid reference feedback", () => {
 
     expect(address.getAttribute("aria-invalid")).not.toBe("true");
     // `FormulaBarView` keeps the name box in sync with the selection; the default selection is A1.
+    expect(address.value).toBe("A1");
+
+    host.remove();
+  });
+
+  it("clears invalid state on Escape when dismissing the name box dropdown", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onGoTo = vi.fn(() => false);
+    const provider: NameBoxDropdownProvider = { getItems: () => [] };
+    new FormulaBarView(host, { onCommit: () => {}, onGoTo }, { nameBoxDropdownProvider: provider });
+
+    const address = host.querySelector<HTMLInputElement>('[data-testid="formula-address"]')!;
+    const dropdown = host.querySelector<HTMLButtonElement>('[data-testid="name-box-dropdown"]')!;
+    const popup = host.querySelector<HTMLDivElement>('[data-testid="formula-name-box-popup"]')!;
+
+    // Trigger invalid state.
+    address.focus();
+    address.value = "NotARef";
+    address.dispatchEvent(new Event("input", { bubbles: true }));
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(address.getAttribute("aria-invalid")).toBe("true");
+
+    // Open then dismiss the dropdown with Escape.
+    dropdown.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(popup.hidden).toBe(false);
+
+    address.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(popup.hidden).toBe(true);
+    expect(address.getAttribute("aria-invalid")).not.toBe("true");
     expect(address.value).toBe("A1");
 
     host.remove();
