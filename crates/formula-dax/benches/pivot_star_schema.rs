@@ -196,7 +196,9 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
     // Optional pivot path tracing.
     //
     // Set `FORMULA_DAX_PIVOT_TRACE=1` when running the bench to print the chosen execution paths
-    // once per process (e.g. `columnar_group_by`, `planned_row_group_by`, `row_scan`).
+    // once per process (e.g. `columnar_group_by`, `columnar_star_schema_group_by`,
+    // `planned_row_group_by`, `row_scan`).
+    std::env::remove_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA");
 
     let rows = bench_rows();
     let model = build_star_schema_model(rows);
@@ -260,6 +262,14 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
         &star_if_result.columns[star_region_group_by.len()..]
     );
 
+    // Sanity check: disabling the star-schema fast path should still produce identical rows, but
+    // use a slower planned row-group-by fallback.
+    std::env::set_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA", "1");
+    let star_result_row_scan =
+        pivot(&model, "Sales", &star_group_by, &measures, &FilterContext::empty()).unwrap();
+    std::env::remove_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA");
+    assert_eq!(base_result.rows, star_result_row_scan.rows);
+
     let mut group = c.benchmark_group("pivot_star_schema");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
@@ -279,6 +289,21 @@ fn bench_pivot_star_schema(c: &mut Criterion) {
             black_box(result);
         })
     });
+
+    std::env::set_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA", "1");
+    group.bench_with_input(
+        BenchmarkId::new("dimension_group_by_row_scan", rows),
+        &rows,
+        |b, _| {
+            b.iter(|| {
+                let result =
+                    pivot(&model, "Sales", &star_group_by, &measures, &FilterContext::empty())
+                        .unwrap();
+                black_box(result);
+            })
+        },
+    );
+    std::env::remove_var("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA");
 
     group.finish();
 

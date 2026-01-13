@@ -1227,6 +1227,10 @@ fn pivot_columnar_star_schema_group_by(
     measures: &[PivotMeasure],
     filter: &FilterContext,
 ) -> DaxResult<Option<PivotResult>> {
+    if std::env::var_os("FORMULA_DAX_PIVOT_DISABLE_STAR_SCHEMA").is_some() {
+        return Ok(None);
+    }
+
     if group_by.is_empty() {
         // Preserve the existing grand-total behavior by falling back to the legacy code paths.
         return Ok(None);
@@ -1393,6 +1397,8 @@ fn pivot_columnar_star_schema_group_by(
         Min { best: Option<f64> },
         Max { best: Option<f64> },
         CountRows { count: i64 },
+        CountNonBlank { count: i64 },
+        CountNumbers { count: i64 },
         DistinctCountConst { any: bool },
     }
 
@@ -1402,9 +1408,9 @@ fn pivot_columnar_star_schema_group_by(
                 AggregationKind::Sum => RollupAggState::Sum { sum: 0.0, count: 0 },
                 AggregationKind::Min => RollupAggState::Min { best: None },
                 AggregationKind::Max => RollupAggState::Max { best: None },
-                AggregationKind::CountRows
-                | AggregationKind::CountNonBlank
-                | AggregationKind::CountNumbers => RollupAggState::CountRows { count: 0 },
+                AggregationKind::CountRows => RollupAggState::CountRows { count: 0 },
+                AggregationKind::CountNonBlank => RollupAggState::CountNonBlank { count: 0 },
+                AggregationKind::CountNumbers => RollupAggState::CountNumbers { count: 0 },
                 AggregationKind::DistinctCount => RollupAggState::DistinctCountConst { any: false },
                 AggregationKind::Average => return None,
             })
@@ -1433,6 +1439,16 @@ fn pivot_columnar_star_schema_group_by(
                         *count += n.0 as i64;
                     }
                 }
+                RollupAggState::CountNonBlank { count } => {
+                    if let Value::Number(n) = value {
+                        *count += n.0 as i64;
+                    }
+                }
+                RollupAggState::CountNumbers { count } => {
+                    if let Value::Number(n) = value {
+                        *count += n.0 as i64;
+                    }
+                }
                 RollupAggState::DistinctCountConst { any } => {
                     if !value.is_blank() {
                         *any = true;
@@ -1453,6 +1469,8 @@ fn pivot_columnar_star_schema_group_by(
                 RollupAggState::Min { best } => best.map(Value::from).unwrap_or(Value::Blank),
                 RollupAggState::Max { best } => best.map(Value::from).unwrap_or(Value::Blank),
                 RollupAggState::CountRows { count } => Value::from(count),
+                RollupAggState::CountNonBlank { count } => Value::from(count),
+                RollupAggState::CountNumbers { count } => Value::from(count),
                 RollupAggState::DistinctCountConst { any } => {
                     if any {
                         Value::from(1)
@@ -1880,6 +1898,7 @@ pub fn pivot(
     if let Some(result) =
         pivot_columnar_star_schema_group_by(model, base_table, group_by, measures, filter)?
     {
+        maybe_trace_pivot_path(PivotPath::ColumnarStarSchemaGroupBy);
         return Ok(result);
     }
 
@@ -2038,8 +2057,9 @@ pub fn pivot_crosstab_with_options(
 enum PivotPath {
     ColumnarGroupBy = 1 << 0,
     ColumnarGroupsWithMeasureEval = 1 << 1,
-    PlannedRowGroupBy = 1 << 2,
-    RowScan = 1 << 3,
+    ColumnarStarSchemaGroupBy = 1 << 2,
+    PlannedRowGroupBy = 1 << 3,
+    RowScan = 1 << 4,
 }
 
 impl PivotPath {
@@ -2047,6 +2067,7 @@ impl PivotPath {
         match self {
             PivotPath::ColumnarGroupBy => "columnar_group_by",
             PivotPath::ColumnarGroupsWithMeasureEval => "columnar_groups_with_measure_eval",
+            PivotPath::ColumnarStarSchemaGroupBy => "columnar_star_schema_group_by",
             PivotPath::PlannedRowGroupBy => "planned_row_group_by",
             PivotPath::RowScan => "row_scan",
         }
