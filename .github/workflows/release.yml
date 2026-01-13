@@ -1859,6 +1859,32 @@ jobs:
               missing=1
             fi
 
+            require_sigs_for_arch() {
+              local label="$1"
+              local arch_re="$2"
+              local other_arch_re="$3"
+              local missing_sig_bases
+              missing_sig_bases="$(echo "$json" | jq -r --arg arch "$arch_re" --arg other "$other_arch_re" '
+                ([.[].name] | unique) as $names |
+                [ $names[]
+                  | select(test("\\.(msi|exe)$"; "i"))
+                  | select(test($arch; "i"))
+                  | select(test($other; "i") | not)
+                  | select(($names | index(. + ".sig")) == null)
+                ] | .[]')"
+              if [[ -n "${missing_sig_bases}" ]]; then
+                echo "missing: ${label} signature files (<asset>.sig) for:" >&2
+                echo "${missing_sig_bases}" | sed 's/^/  - /' >&2
+                missing=1
+              fi
+            }
+
+            # For Tauri auto-update, each Windows installer asset must have a corresponding
+            # signature file uploaded alongside it (<asset>.sig). Missing signatures can be a
+            # sign of partial uploads or asset clobbering in multi-arch runs.
+            require_sigs_for_arch "Windows x64 installer" "$win_x64_re" "$win_arm64_re"
+            require_sigs_for_arch "Windows arm64 installer" "$win_arm64_re" "$win_x64_re"
+
             [[ "$missing" -eq 0 ]]
           }
 
