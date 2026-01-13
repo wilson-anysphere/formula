@@ -75,6 +75,46 @@ describe("Ribbon UI state overrides", () => {
     act(() => root.unmount());
   });
 
+  it("disables individual dropdown menu items via disabledById overrides", async () => {
+    const { container, root } = renderRibbon();
+
+    const clearFormatting = container.querySelector<HTMLButtonElement>('[data-command-id="home.font.clearFormatting"]');
+    expect(clearFormatting).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      clearFormatting?.click();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    const menu = container.querySelector<HTMLElement>(".ribbon-dropdown__menu");
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing dropdown menu");
+
+    const menuItemId = "format.clearFormats";
+    const clearFormats = menu.querySelector<HTMLButtonElement>(`[data-command-id="${menuItemId}"]`);
+    expect(clearFormats).toBeInstanceOf(HTMLButtonElement);
+    expect(clearFormats?.disabled).toBe(false);
+    expect(clearFormats?.hasAttribute("disabled")).toBe(false);
+
+    act(() => {
+      setRibbonUiState({
+        pressedById: Object.create(null),
+        labelById: Object.create(null),
+        disabledById: { [menuItemId]: true },
+        shortcutById: Object.create(null),
+        ariaKeyShortcutsById: Object.create(null),
+      });
+    });
+
+    const updated = menu.querySelector<HTMLButtonElement>(`[data-command-id="${menuItemId}"]`);
+    expect(updated).toBeInstanceOf(HTMLButtonElement);
+    expect(updated?.disabled).toBe(true);
+    expect(updated?.hasAttribute("disabled")).toBe(true);
+    expect(menu.querySelector(`.ribbon-dropdown__menuitem:not(:disabled)[data-command-id="${menuItemId}"]`)).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it("includes shortcut hints in the button title when provided", () => {
     const { container, root } = renderRibbon();
     const copy = container.querySelector<HTMLButtonElement>('[data-command-id="clipboard.copy"]');

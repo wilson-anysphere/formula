@@ -313,9 +313,7 @@ export const RibbonButton = React.memo(function RibbonButton({
           {button.menuItems?.map((item, idx) => {
             const menuItemLabelOverride = menuItemLabelOverrides?.[idx];
             const menuItemLabel = menuItemLabelOverride ?? item.label;
-            const menuItemDisabledOverride = menuItemDisabledOverrides?.[idx];
-            const menuItemDisabled =
-              typeof menuItemDisabledOverride === "boolean" ? menuItemDisabledOverride : Boolean(item.disabled);
+            const menuItemDisabled = Boolean(item.disabled) || menuItemDisabledOverrides?.[idx] === true;
             const itemShortcut = shortcutById?.[item.id];
             const itemTitle = formatTooltipTitle(item.ariaLabel, itemShortcut);
             const itemAriaKeyShortcuts = ariaKeyShortcutsById?.[item.id];
