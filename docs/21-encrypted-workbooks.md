@@ -103,7 +103,7 @@ Useful entrypoints when working on encrypted workbook support:
     - `detect_workbook_encryption`
     - `WorkbookEncryptionKind`
     - `Error::EncryptedWorkbook` (legacy “not supported” umbrella error)
-- **Standard (CryptoAPI) `EncryptionInfo` parsing + `EncryptedPackage` AES decrypt helper:**
+- **Standard (CryptoAPI) `EncryptedPackage` AES-ECB decrypt helper (given a derived key):**
   - `crates/formula-offcrypto/src/lib.rs`
 - **Agile encryption primitives (password hash / key+IV derivation):**
   - `crates/formula-xlsx/src/offcrypto/crypto.rs`
@@ -144,7 +144,8 @@ Formula’s decryption support is intentionally scoped:
 
 ### `formula-io` API
 
-Callers supply an *open password* via `OpenOptions.password`:
+When password-based decryption is implemented, callers will supply an *open password* via
+`OpenOptions.password`:
 
 ```rust
 use formula_io::{open_workbook_with_options, OpenOptions};
