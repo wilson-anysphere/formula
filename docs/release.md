@@ -370,7 +370,8 @@ For a clean install test (no GUI required), use a Fedora container:
 docker run --rm -it \
   -v "$PWD/target/release/bundle/rpm:/rpm" \
   fedora:40 bash -lc '
-    dnf -y install /rpm/*.rpm
+    # The Tauri updater `.sig` files are *not* RPM GPG signatures, so install with --nogpgcheck.
+    dnf -y install --nogpgcheck /rpm/*.rpm
     ldd /usr/bin/formula-desktop | grep -q "not found" && exit 1 || true
   '
 ```
