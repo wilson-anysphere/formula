@@ -76,14 +76,14 @@ release where `latest.json` points at missing artifacts or missing signature fil
 CI runs:
 
 ```bash
-node scripts/ci/validate-updater-manifest.mjs vX.Y.Z
+node scripts/verify-tauri-latest-json.mjs vX.Y.Z
 ```
 
 You can run it locally too (requires a GitHub token with access to the release assets):
 
 ```bash
 GITHUB_REPOSITORY=owner/repo GH_TOKEN=... \
-  node scripts/ci/validate-updater-manifest.mjs vX.Y.Z
+  node scripts/verify-tauri-latest-json.mjs vX.Y.Z
 ```
 
 Optional extra (stricter) local check that also validates the “human install” artifact set:

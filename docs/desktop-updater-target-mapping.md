@@ -22,7 +22,7 @@ release contains **exactly** these `latest.json.platforms` keys:
 - `linux-x86_64`
 
 If Tauri changes these identifiers in a future upgrade, our CI guardrail
-(`scripts/ci/validate-updater-manifest.mjs`) is expected to fail with a clear “expected vs actual”
+(`scripts/verify-tauri-latest-json.mjs`, which wraps `scripts/ci/validate-updater-manifest.mjs`) is expected to fail with a clear “expected vs actual”
 diff, and this document should be updated alongside the validator.
 
 ## Mapping table (build target → platform key → updater artifact)
