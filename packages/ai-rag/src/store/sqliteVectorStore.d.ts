@@ -36,6 +36,9 @@ export class SqliteVectorStore {
   /**
    * Run SQLite `VACUUM` to reclaim space after large deletions and persist the
    * compacted database snapshot.
+   *
+   * This persists regardless of the `autoSave` setting (compaction is an explicit,
+   * manual operation intended to reclaim storage).
    */
   compact(): Promise<void>;
   /**
