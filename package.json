@@ -19,6 +19,7 @@
     "lint": "node tools/ci/check-desktop-renderer-node-free.mjs && pnpm -C apps/desktop check:no-node",
     "generate:function-catalog": "node scripts/generate-function-catalog.js",
     "report:function-parity": "node scripts/report-function-parity.mjs",
+    "report:desktop-dist-assets": "node scripts/desktop_dist_asset_report.mjs",
     "test": "pnpm test:vitest && pnpm test:node && pnpm test:sync && pnpm -C apps/desktop test",
     "test:sync": "pnpm -C services/sync-server test",
     "test:vitest": "node scripts/run-vitest.mjs",

@@ -64,6 +64,13 @@ pnpm build:desktop
 node scripts/desktop_dist_asset_report.mjs
 ```
 
+Alternatively, from `apps/desktop/`:
+
+```bash
+pnpm build
+pnpm report:dist-assets
+```
+
 This prints a Markdown report of:
 
 - total `dist/` size

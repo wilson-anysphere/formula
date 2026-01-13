@@ -13,6 +13,7 @@
     "preview": "vite preview --port 4174 --strictPort",
     "check:coi": "node scripts/check-cross-origin-isolation.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
+    "report:dist-assets": "node ../../scripts/desktop_dist_asset_report.mjs",
     "pretest": "pnpm check:no-node",
     "test:node": "node scripts/run-node-tests.mjs",
     "vitest": "node scripts/run-vitest.mjs",

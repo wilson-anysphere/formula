@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { appendFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -62,7 +63,7 @@ function usage() {
     "Options:",
     "  --dist-dir <path>   Directory to scan (default: apps/desktop/dist).",
     "  --top N             Number of largest files to show (default: 25).",
-    "  --group-depth N     Group totals by the first N path segments (default: 1).",
+    "  --group-depth N     Group totals by the first N directory segments (default: 1).",
     "  --no-groups         Disable grouped totals output.",
     "",
     "Budgets (env vars):",
@@ -148,7 +149,12 @@ function parseArgs(argv) {
   }
 
   if (!path.isAbsolute(out.distDir)) {
-    out.distDir = path.resolve(repoRoot, out.distDir);
+    // Prefer resolving relative paths against the current working directory (expected CLI behavior),
+    // but fall back to repo-root resolution so `--dist-dir apps/desktop/dist` still works when
+    // invoked from within `apps/desktop/`.
+    const fromCwd = path.resolve(process.cwd(), out.distDir);
+    const fromRepo = path.resolve(repoRoot, out.distDir);
+    out.distDir = existsSync(fromCwd) ? fromCwd : fromRepo;
   }
 
   return out;
