@@ -135,7 +135,6 @@ import { KeybindingService } from "./extensions/keybindingService.js";
 import { isEventWithinKeybindingBarrier, KEYBINDING_BARRIER_ATTRIBUTE, markKeybindingBarrier } from "./keybindingBarrier.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { installKeyboardContextKeys, KeyboardContextKeyIds } from "./keyboard/installKeyboardContextKeys.js";
-import { installExcelStyleFocusCycle } from "./keyboard/installExcelStyleFocusCycle.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerDesktopCommands } from "./commands/registerDesktopCommands.js";
@@ -2318,27 +2317,6 @@ window.addEventListener("keydown", (e) => {
   disarmFormatPainter();
 });
 
-// --- Focus cycling (Excel-style F6) --------------------------------------------
-//
-// With Tab/Shift+Tab used for in-grid navigation (Excel mental model), we need a
-// dedicated shortcut to move focus between major UI regions so the rest of the
-// desktop shell remains keyboard-accessible.
-//
-// Excel uses F6 / Shift+F6 to cycle focus between panes; we mirror that pattern.
-{
-  const sheetTabsRoot = document.getElementById("sheet-tabs");
-  if (sheetTabsRoot) {
-    installExcelStyleFocusCycle({
-      ribbonRoot: ribbonRootEl,
-      formulaBarRoot: formulaBarRootEl,
-      gridRoot,
-      gridSecondaryRoot: document.getElementById("grid-secondary"),
-      sheetTabsRoot,
-      statusBarRoot: statusBarRootEl,
-      focusGrid: () => app.focus(),
-    });
-  }
-}
 const ZOOM_PRESET_VALUES = new Set<number>(
   Array.from(zoomControlEl.querySelectorAll("option"))
     .map((opt) => Number(opt.value))
