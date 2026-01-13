@@ -201,28 +201,28 @@ fn normalize_child_order(parent: &QName, children: &mut Vec<XmlNode>, part_name:
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "mergeCells"
     {
-        children.sort_by_key(merge_cells_child_sort_key);
+        sort_selected_children(children, merge_cells_child_sort_key);
     }
 
     if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "hyperlinks"
     {
-        children.sort_by_key(hyperlinks_child_sort_key);
+        sort_selected_children(children, hyperlinks_child_sort_key);
     }
 
     if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "dataValidations"
     {
-        children.sort_by_key(data_validations_child_sort_key);
+        sort_selected_children(children, data_validations_child_sort_key);
     }
 
     if is_worksheet_part
         && parent.ns.as_deref() == Some(SPREADSHEETML_NS)
         && parent.local == "conditionalFormatting"
     {
-        children.sort_by_key(conditional_formatting_child_sort_key);
+        sort_selected_children(children, conditional_formatting_child_sort_key);
     }
 
     if part_name == "xl/workbook.xml"
@@ -314,56 +314,75 @@ fn cols_child_sort_key(node: &XmlNode) -> (u8, u32, u32, String) {
     }
 }
 
-fn merge_cells_child_sort_key(node: &XmlNode) -> (u8, String, String) {
-    match node {
-        XmlNode::Element(el) if el.name.local == "mergeCell" => (
-            0,
-            attr_value(el, "ref").unwrap_or_default().to_string(),
-            String::new(),
-        ),
-        XmlNode::Element(_el) => (1, String::new(), String::new()),
-        XmlNode::Text(_) => (2, String::new(), String::new()),
+fn sort_selected_children<K, F>(children: &mut Vec<XmlNode>, mut key_for: F)
+where
+    K: Ord,
+    F: FnMut(&XmlNode) -> Option<K>,
+{
+    let mut positions = Vec::new();
+    let mut keyed = Vec::new();
+    for idx in 0..children.len() {
+        let key = key_for(&children[idx]);
+        if let Some(key) = key {
+            positions.push(idx);
+            let node = std::mem::replace(&mut children[idx], XmlNode::Text(String::new()));
+            keyed.push((key, node));
+        }
+    }
+
+    if keyed.len() >= 2 {
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
+    for (pos, (_, node)) in positions.into_iter().zip(keyed.into_iter()) {
+        children[pos] = node;
     }
 }
 
-fn hyperlinks_child_sort_key(node: &XmlNode) -> (u8, String, String) {
+fn merge_cells_child_sort_key(node: &XmlNode) -> Option<String> {
+    match node {
+        XmlNode::Element(el) if el.name.local == "mergeCell" => Some(
+            attr_value(el, "ref")
+                .unwrap_or_default()
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+fn hyperlinks_child_sort_key(node: &XmlNode) -> Option<String> {
     match node {
         XmlNode::Element(el) if el.name.local == "hyperlink" => {
             let key = attr_value(el, "ref")
                 .or_else(|| attr_value_ns(el, Some(OFFICE_DOCUMENT_REL_NS), "id"))
                 .unwrap_or_default()
                 .to_string();
-            (0, key, String::new())
+            Some(key)
         }
-        XmlNode::Element(_el) => (1, String::new(), String::new()),
-        XmlNode::Text(_) => (2, String::new(), String::new()),
+        _ => None,
     }
 }
 
-fn data_validations_child_sort_key(node: &XmlNode) -> (u8, String, String, String) {
+fn data_validations_child_sort_key(node: &XmlNode) -> Option<(String, String)> {
     match node {
-        XmlNode::Element(el) if el.name.local == "dataValidation" => (
-            0,
+        XmlNode::Element(el) if el.name.local == "dataValidation" => Some((
             attr_value(el, "sqref").unwrap_or_default().to_string(),
             attr_value(el, "type").unwrap_or_default().to_string(),
-            String::new(),
-        ),
-        XmlNode::Element(_el) => (1, String::new(), String::new(), String::new()),
-        XmlNode::Text(_) => (2, String::new(), String::new(), String::new()),
+        )),
+        _ => None,
     }
 }
 
-fn conditional_formatting_child_sort_key(node: &XmlNode) -> (u8, u32, String, String) {
+fn conditional_formatting_child_sort_key(node: &XmlNode) -> Option<(u32, String)> {
     match node {
         XmlNode::Element(el) if el.name.local == "cfRule" => {
             let priority = attr_value(el, "priority")
                 .and_then(|v| v.parse::<u32>().ok())
                 .unwrap_or(u32::MAX);
             let ty = attr_value(el, "type").unwrap_or_default().to_string();
-            (0, priority, ty, String::new())
+            Some((priority, ty))
         }
-        XmlNode::Element(_el) => (1, u32::MAX, String::new(), String::new()),
-        XmlNode::Text(_) => (2, u32::MAX, String::new(), String::new()),
+        _ => None,
     }
 }
 
