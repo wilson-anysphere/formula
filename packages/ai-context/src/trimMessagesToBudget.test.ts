@@ -262,6 +262,47 @@ describe("trimMessagesToBudget", () => {
     expect(trimmed.some((m) => m.role === "tool" && m.toolCallId === "call-1")).toBe(true);
   });
 
+  it("preserves coherence for assistant messages with multiple toolCalls", async () => {
+    const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
+
+    const messages = [
+      { role: "system", content: "sys" },
+      { role: "user", content: "older-" + "x".repeat(300) },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "call-1", name: "t1", arguments: { q: "a" } },
+          { id: "call-2", name: "t2", arguments: { q: "b" } }
+        ]
+      },
+      { role: "tool", toolCallId: "call-1", content: "r1" },
+      { role: "tool", toolCallId: "call-2", content: "r2" },
+      { role: "assistant", content: "after tool" },
+      { role: "user", content: "latest" }
+    ];
+
+    const trimmed = await trimMessagesToBudget({
+      messages,
+      maxTokens: 260,
+      reserveForOutputTokens: 0,
+      estimator,
+      keepLastMessages: 3,
+      summaryMaxTokens: 0
+    });
+
+    const assistantIdx = trimmed.findIndex(
+      (m) => m.role === "assistant" && Array.isArray(m.toolCalls) && m.toolCalls.length > 0
+    );
+    expect(assistantIdx).toBeGreaterThanOrEqual(0);
+    const toolIds = new Set<string>();
+    for (let i = assistantIdx + 1; i < trimmed.length; i += 1) {
+      if (trimmed[i].role !== "tool") break;
+      toolIds.add(trimmed[i].toolCallId);
+    }
+    expect(toolIds).toEqual(new Set(["call-1", "call-2"]));
+  });
+
   it("can disable tool-call coherence (preserveToolCallPairs=false)", async () => {
     const estimator = createHeuristicTokenEstimator({ charsPerToken: 1, tokensPerMessageOverhead: 0 });
 
