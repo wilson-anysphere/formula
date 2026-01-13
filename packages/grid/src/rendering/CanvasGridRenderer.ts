@@ -85,6 +85,12 @@ export interface CanvasGridRendererOptions {
    */
   imageResolver?: CanvasGridImageResolver | null;
   /**
+   * Maximum number of decoded image entries to retain.
+   *
+   * This bounds memory usage when scrolling through sheets with many distinct images.
+   */
+  imageBitmapCacheMaxEntries?: number;
+  /**
    * Default font family used when rendering/measuring cell text if `CellStyle.fontFamily` is unset.
    *
    * Defaults to `"system-ui"` to preserve existing behavior.
@@ -523,6 +529,8 @@ export class CanvasGridRenderer {
 
   private readonly imageResolver: CanvasGridImageResolver | null;
   private readonly imageErrorRetryMs = 250;
+  private readonly imageBitmapCacheMaxEntries: number;
+  private imageBitmapCacheReadyCount = 0;
   private readonly imageBitmapCache = new Map<
     string,
     | { state: "pending"; promise: Promise<void>; bitmap: null }
@@ -633,6 +641,7 @@ export class CanvasGridRenderer {
     this.prefetchOverscanCols = CanvasGridRenderer.sanitizeOverscan(options.prefetchOverscanCols);
     this.theme = resolveGridTheme(options.theme);
     this.imageResolver = options.imageResolver ?? null;
+    this.imageBitmapCacheMaxEntries = CanvasGridRenderer.sanitizeImageBitmapCacheMaxEntries(options.imageBitmapCacheMaxEntries);
 
     const sanitizeFontFamily = (value: string | undefined): string | null => {
       if (typeof value !== "string") return null;
@@ -665,6 +674,15 @@ export class CanvasGridRenderer {
     const nodeEnv = (globalThis as any)?.process?.env?.NODE_ENV as string | undefined;
     const isProd = metaEnv?.PROD === true || nodeEnv === "production";
     this.perfStats.enabled = !isProd;
+  }
+
+  private static sanitizeImageBitmapCacheMaxEntries(value: number | undefined): number {
+    // Keep the default fairly small; ImageBitmaps can be large (full source resolution).
+    const DEFAULT_MAX = 256;
+    if (value === undefined) return DEFAULT_MAX;
+    if (!Number.isFinite(value)) return DEFAULT_MAX;
+    // Disallow 0 here; the renderer relies on caching ready images to ever draw them.
+    return Math.max(1, Math.floor(value));
   }
 
   getPerfStats(): Readonly<GridPerfStats> {
@@ -956,6 +974,7 @@ export class CanvasGridRenderer {
     if (typeof imageId !== "string" || imageId.trim() === "") return;
     const existing = this.imageBitmapCache.get(imageId);
     if (existing?.state === "ready") {
+      this.imageBitmapCacheReadyCount = Math.max(0, this.imageBitmapCacheReadyCount - 1);
       const bitmap = existing.bitmap as any;
       if (bitmap && typeof bitmap.close === "function") {
         try {
@@ -974,6 +993,7 @@ export class CanvasGridRenderer {
       this.invalidateImage(imageId);
     }
     this.imageBitmapCache.clear();
+    this.imageBitmapCacheReadyCount = 0;
     this.imagePlaceholderPattern = null;
     this.markContentDirtyForImageUpdate();
   }
@@ -991,7 +1011,12 @@ export class CanvasGridRenderer {
     if (typeof imageId !== "string" || imageId.trim() === "") return null;
 
     const existing = this.imageBitmapCache.get(imageId);
-    if (existing?.state === "ready") return existing.bitmap;
+    if (existing?.state === "ready") {
+      // Touch for LRU eviction.
+      this.imageBitmapCache.delete(imageId);
+      this.imageBitmapCache.set(imageId, existing);
+      return existing.bitmap;
+    }
     if (existing?.state === "error") {
       if (existing.expiresAtMs <= Date.now()) {
         this.imageBitmapCache.delete(imageId);
@@ -1043,7 +1068,12 @@ export class CanvasGridRenderer {
           return;
         }
 
+        this.imageBitmapCacheReadyCount++;
+        // Replace + touch for LRU ordering (Map#set for an existing key does not
+        // update insertion order).
+        this.imageBitmapCache.delete(imageId);
         this.imageBitmapCache.set(imageId, { state: "ready", promise: null, bitmap: decoded });
+        this.evictImageBitmapsIfNeeded();
       } catch (error) {
         if (this.destroyed) return;
         if (this.imageBitmapCache.get(imageId) !== placeholder) return;
@@ -1061,6 +1091,28 @@ export class CanvasGridRenderer {
     })();
 
     placeholder.promise = promise;
+  }
+
+  private evictImageBitmapsIfNeeded(): void {
+    while (this.imageBitmapCacheReadyCount > this.imageBitmapCacheMaxEntries) {
+      let evicted = false;
+      for (const [imageId, entry] of this.imageBitmapCache) {
+        if (entry.state !== "ready") continue;
+        this.imageBitmapCache.delete(imageId);
+        this.imageBitmapCacheReadyCount = Math.max(0, this.imageBitmapCacheReadyCount - 1);
+        const bitmap = entry.bitmap as any;
+        if (bitmap && typeof bitmap.close === "function") {
+          try {
+            bitmap.close();
+          } catch {
+            // Ignore disposal failures (best-effort).
+          }
+        }
+        evicted = true;
+        break;
+      }
+      if (!evicted) return;
+    }
   }
 
   private async decodeImageSource(source: CanvasGridImageSource): Promise<CanvasImageSource | null> {

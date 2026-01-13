@@ -254,6 +254,89 @@ describe("CanvasGridRenderer image cells", () => {
     expect(content.rec.fillTexts.some((args) => args[0] === "Missing image")).toBe(true);
   });
 
+  it("evicts least-recently-used decoded images when the image cache exceeds its max size", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: null,
+              image: { imageId: "img1", altText: "img1", width: 100, height: 50 }
+            }
+          : row === 0 && col === 1
+            ? {
+                row,
+                col,
+                value: null,
+                image: { imageId: "img2", altText: "img2", width: 100, height: 50 }
+              }
+            : null
+    };
+
+    const bitmap1 = { width: 200, height: 100, close: vi.fn() } as any;
+    const bitmap2 = { width: 200, height: 100, close: vi.fn() } as any;
+    const createImageBitmapSpy = vi.fn().mockResolvedValueOnce(bitmap1).mockResolvedValueOnce(bitmap2);
+    vi.stubGlobal("createImageBitmap", createImageBitmapSpy);
+
+    const imageResolver = vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" }));
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 1,
+      colCount: 2,
+      defaultColWidth: 100,
+      defaultRowHeight: 50,
+      imageResolver,
+      imageBitmapCacheMaxEntries: 1
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 50, 1);
+
+    // Load + decode the first image.
+    renderer.renderImmediately();
+    await flushMicrotasks();
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    expect(createImageBitmapSpy).toHaveBeenCalledTimes(1);
+
+    // Scroll to the second image so the first is no longer visible.
+    renderer.setScroll(100, 0);
+    renderer.markAllDirty();
+    renderer.renderImmediately();
+    await flushMicrotasks();
+    renderer.renderImmediately();
+    await flushMicrotasks();
+
+    // Second decode pushes the cache over the limit; the first bitmap should be evicted+closed.
+    expect(createImageBitmapSpy).toHaveBeenCalledTimes(2);
+    expect(bitmap1.close).toHaveBeenCalledTimes(1);
+    expect(bitmap2.close).not.toHaveBeenCalled();
+  });
+
   it("dedupes image requests and marks content dirty when decoding completes", async () => {
     const provider: CellProvider = {
       getCell: (row, col) =>
