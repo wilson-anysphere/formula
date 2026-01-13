@@ -130,6 +130,22 @@ def _find_windows_installers(target_dir: Path) -> list[Path]:
     for pattern in patterns:
         installers.extend([p for p in target_dir.glob(pattern) if p.is_file()])
 
+    # Tauri may place helper executables (e.g. the WebView2 bootstrapper itself) alongside
+    # the main installer outputs. We only want to validate the *installers* here.
+    def is_installer_candidate(p: Path) -> bool:
+        name = p.name.lower()
+        if name.endswith(".msi"):
+            return True
+        if not name.endswith(".exe"):
+            return False
+        if "microsoftedgewebview2setup.exe" in name:
+            return False
+        if "microsoftedgewebview2runtimeinstaller" in name:
+            return False
+        return True
+
+    installers = [p for p in installers if is_installer_candidate(p)]
+
     # De-dupe.
     seen: set[Path] = set()
     uniq: list[Path] = []
