@@ -123,6 +123,30 @@ describe("FormulaBarView commit/cancel UX", () => {
     host.remove();
   });
 
+  it("keeps edit mode active when the textarea blurs (Excel-style range selection mode)", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    const { cancel, commit } = queryActions(host);
+
+    view.textarea.focus();
+    view.textarea.value = "=SUM(";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.blur();
+
+    expect(view.model.isEditing).toBe(true);
+    expect(view.root.classList.contains("formula-bar--editing")).toBe(true);
+    expect(cancel.hidden).toBe(false);
+    expect(cancel.disabled).toBe(false);
+    expect(commit.hidden).toBe(false);
+    expect(commit.disabled).toBe(false);
+
+    host.remove();
+  });
+
   it("commits via commitEdit() API with reason=command by default", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -167,6 +191,51 @@ describe("FormulaBarView commit/cancel UX", () => {
     expect(view.model.draft).toBe("original");
     expect(view.model.activeCell.input).toBe("original");
     expect(view.textarea.value).toBe("original");
+
+    host.remove();
+  });
+
+  it("commitEdit('enter') commits even when the textarea is not focused", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCommit = vi.fn();
+    const view = new FormulaBarView(host, { onCommit });
+
+    view.textarea.focus();
+    view.textarea.value = "grid-style";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    view.textarea.blur();
+
+    view.commitEdit("enter", false);
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("grid-style", { reason: "enter", shift: false });
+    expect(view.model.isEditing).toBe(false);
+
+    host.remove();
+  });
+
+  it("cancelEdit() cancels even when the textarea is not focused", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const onCancel = vi.fn();
+    const view = new FormulaBarView(host, { onCommit: () => {}, onCancel });
+    view.setActiveCell({ address: "A1", input: "original", value: null });
+
+    view.textarea.focus();
+    view.textarea.value = "changed";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+    view.textarea.blur();
+
+    view.cancelEdit();
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(view.model.isEditing).toBe(false);
+    expect(view.model.draft).toBe("original");
 
     host.remove();
   });
