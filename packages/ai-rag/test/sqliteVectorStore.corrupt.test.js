@@ -44,6 +44,7 @@ test(
     // Not a real SQLite file header; should fail to open as an existing DB.
     const storage = new TestBinaryStorage(new TextEncoder().encode("not a sqlite database"));
     const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
+    assert.equal(storage.removed, true, "expected SqliteVectorStore to clear persisted bytes on corruption");
 
     await store.upsert([
       { id: "a", vector: [1, 0, 0], metadata: { workbookId: "wb", label: "A" } },
@@ -60,3 +61,36 @@ test(
   }
 );
 
+test(
+  "SqliteVectorStore resetOnCorrupt overwrites invalid persisted bytes when storage lacks remove()",
+  { skip: !sqlJsAvailable },
+  async () => {
+    // Definitely not a SQLite database (header is wrong).
+    const badBytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+    /** @type {Uint8Array | null} */
+    let stored = new Uint8Array(badBytes);
+    let saves = 0;
+
+    const storage = {
+      async load() {
+        return stored ? new Uint8Array(stored) : null;
+      },
+      async save(data) {
+        saves += 1;
+        stored = new Uint8Array(data);
+      },
+    };
+
+    const store = await SqliteVectorStore.create({ storage, dimension: 3, autoSave: false, resetOnCorrupt: true });
+    await store.close();
+
+    assert.ok(saves >= 1, "expected SqliteVectorStore to overwrite corrupted bytes via save()");
+    assert.ok(stored && stored.length >= 16, "expected persisted DB bytes to exist after reset");
+    // SQLite database files begin with the 16-byte header: "SQLite format 3\\0".
+    const expectedHeader = [
+      83, 81, 76, 105, 116, 101, 32, 102, 111, 114, 109, 97, 116, 32, 51, 0,
+    ];
+    assert.deepEqual(Array.from(stored.slice(0, 16)), expectedHeader);
+  }
+);
