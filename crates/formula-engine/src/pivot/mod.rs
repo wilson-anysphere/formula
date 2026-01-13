@@ -3474,6 +3474,56 @@ mod tests {
     }
 
     #[test]
+    fn show_as_percent_difference_from_base_item_column_field() {
+        let data = vec![
+            pv_row(&["Region".into(), "Year".into(), "Sales".into()]),
+            pv_row(&["East".into(), "2019".into(), 2.into()]),
+            pv_row(&["East".into(), "2020".into(), 6.into()]),
+            pv_row(&["West".into(), "2019".into(), 4.into()]),
+            pv_row(&["West".into(), "2020".into(), 8.into()]),
+        ];
+
+        let cache = PivotCache::from_range(&data).unwrap();
+        let cfg = PivotConfig {
+            row_fields: vec![PivotField::new("Region")],
+            column_fields: vec![PivotField::new("Year")],
+            value_fields: vec![ValueField {
+                source_field: "Sales".to_string(),
+                name: "Sum of Sales".to_string(),
+                aggregation: AggregationType::Sum,
+                number_format: None,
+                show_as: Some(ShowAsType::PercentDifferenceFrom),
+                base_field: Some("Year".to_string()),
+                base_item: Some("2019".to_string()),
+            }],
+            filter_fields: vec![],
+            calculated_fields: vec![],
+            calculated_items: vec![],
+            layout: Layout::Tabular,
+            subtotals: SubtotalPosition::None,
+            grand_totals: GrandTotals {
+                rows: false,
+                columns: false,
+            },
+        };
+
+        let result = PivotEngine::calculate(&cache, &cfg).unwrap();
+
+        assert_eq!(
+            result.data,
+            vec![
+                vec![
+                    "Region".into(),
+                    "2019 - Sum of Sales".into(),
+                    "2020 - Sum of Sales".into(),
+                ],
+                vec!["East".into(), 0.0.into(), 2.0.into()],
+                vec!["West".into(), 0.0.into(), 1.0.into()],
+            ]
+        );
+    }
+
+    #[test]
     fn show_as_percent_of_base_item_row_field_applies_to_subtotals() {
         let data = vec![
             pv_row(&["Region".into(), "Product".into(), "Sales".into()]),
