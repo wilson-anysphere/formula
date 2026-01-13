@@ -10,7 +10,10 @@ function uniqueInToolOrder(names: Iterable<ToolName>): ToolName[] {
   return (ToolNameSchema.options as ToolName[]).filter((name) => set.has(name));
 }
 
-const AGENT_POLICY: ToolPolicy = {};
+// Agent mode should be least-privilege by default. Even if a host integration later
+// enables `allow_external_data`, we still explicitly deny external network tools for
+// desktop agents unless/until we add a dedicated, user-visible approval flow.
+const AGENT_POLICY: ToolPolicy = { externalNetworkAllowed: false };
 
 export function getDesktopToolPolicy(params: {
   mode: DesktopAiMode;
