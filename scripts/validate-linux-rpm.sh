@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Validate a Linux RPM bundle produced by the Tauri desktop build.
 #
@@ -16,6 +16,12 @@
 set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORIG_PWD="$(pwd)"
+
+# Ensure relative-path discovery works regardless of the caller's cwd.
+cd "$REPO_ROOT"
 
 usage() {
   cat <<EOF
@@ -36,11 +42,11 @@ EOF
 }
 
 err() {
-  echo "ERROR: $*" >&2
+  echo "${SCRIPT_NAME}: ERROR: $*" >&2
 }
 
 note() {
-  echo "==> $*"
+  echo "${SCRIPT_NAME}: $*"
 }
 
 die() {
@@ -88,6 +94,10 @@ find_rpms() {
   local -a rpms=()
 
   if [[ -n "${RPM_OVERRIDE}" ]]; then
+    # Resolve relative paths against the invocation directory, not the repo root.
+    if [[ "${RPM_OVERRIDE}" != /* ]]; then
+      RPM_OVERRIDE="${ORIG_PWD}/${RPM_OVERRIDE}"
+    fi
     if [[ -d "${RPM_OVERRIDE}" ]]; then
       # Accept a directory to make local usage convenient.
       while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "${RPM_OVERRIDE}" -maxdepth 1 -type f -name '*.rpm' -print0)
@@ -95,11 +105,41 @@ find_rpms() {
       rpms+=("${RPM_OVERRIDE}")
     fi
   else
-    if [[ -d "apps/desktop/src-tauri/target" ]]; then
-      while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "apps/desktop/src-tauri/target" -type f -path '*/release/bundle/rpm/*.rpm' -print0)
+    # Prefer predictable bundle globs (fast), but fall back to `find` for odd layouts.
+    local -a roots=()
+    if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+      cargo_target_dir="${CARGO_TARGET_DIR}"
+      if [[ "${cargo_target_dir}" != /* ]]; then
+        cargo_target_dir="${REPO_ROOT}/${cargo_target_dir}"
+      fi
+      if [[ -d "${cargo_target_dir}" ]]; then
+        roots+=("${cargo_target_dir}")
+      fi
     fi
-    if [[ -d "target" ]]; then
-      while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "target" -type f -path '*/release/bundle/rpm/*.rpm' -print0)
+    for root in "apps/desktop/src-tauri/target" "apps/desktop/target" "target"; do
+      if [[ -d "${root}" ]]; then
+        roots+=("${root}")
+      fi
+    done
+
+    local nullglob_was_set=0
+    if shopt -q nullglob; then
+      nullglob_was_set=1
+    fi
+    shopt -s nullglob
+    for root in "${roots[@]}"; do
+      rpms+=("${root}/release/bundle/rpm/"*.rpm)
+      rpms+=("${root}/"*/release/bundle/rpm/*.rpm)
+    done
+    if [[ "${nullglob_was_set}" -eq 0 ]]; then
+      shopt -u nullglob
+    fi
+
+    if [[ ${#rpms[@]} -eq 0 ]]; then
+      # Fallback: traverse the expected roots to locate RPM bundles.
+      for root in "${roots[@]}"; do
+        while IFS= read -r -d '' f; do rpms+=("$f"); done < <(find "${root}" -type f -path '*/release/bundle/rpm/*.rpm' -print0 2>/dev/null || true)
+      done
     fi
   fi
 
@@ -165,15 +205,22 @@ validate_container() {
   local container_cmd
   container_cmd=$'set -euo pipefail\n'
   container_cmd+=$'echo "Fedora: $(cat /etc/fedora-release 2>/dev/null || true)"\n'
-  container_cmd+=$'dnf -y install /rpms/*.rpm\n'
+  # We generally do not GPG-sign the built RPM in CI; use --nogpgcheck so this
+  # validates runtime deps/installability rather than signature policy.
+  container_cmd+=$'dnf -y install --nogpgcheck --setopt=install_weak_deps=False /rpms/*.rpm\n'
   container_cmd+=$'test -x /usr/bin/formula-desktop\n'
-  # ldd returns non-zero for static binaries; treat that as OK as long as we
-  # don\'t have any missing dynamic deps.
-  container_cmd+=$'ldd_out="$(ldd /usr/bin/formula-desktop 2>&1 || true)"\n'
+  container_cmd+=$'set +e\n'
+  container_cmd+=$'ldd_out="$(ldd /usr/bin/formula-desktop 2>&1)"\n'
+  container_cmd+=$'ldd_status=$?\n'
+  container_cmd+=$'set -e\n'
   container_cmd+=$'echo "${ldd_out}"\n'
   container_cmd+=$'if echo "${ldd_out}" | grep -q "not found"; then\n'
   container_cmd+=$'  echo "Missing shared library dependencies detected:" >&2\n'
   container_cmd+=$'  echo "${ldd_out}" | grep "not found" >&2 || true\n'
+  container_cmd+=$'  exit 1\n'
+  container_cmd+=$'fi\n'
+  container_cmd+=$'if [ "${ldd_status}" -ne 0 ] && ! echo "${ldd_out}" | grep -q "not a dynamic executable" && ! echo "${ldd_out}" | grep -q "statically linked"; then\n'
+  container_cmd+=$'  echo "ldd exited with status ${ldd_status}" >&2\n'
   container_cmd+=$'  exit 1\n'
   container_cmd+=$'fi\n'
 
@@ -202,4 +249,3 @@ main() {
 }
 
 main "$@"
-
