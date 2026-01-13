@@ -83,13 +83,13 @@ test("Desktop theme switching commands are wired via registerDesktopCommands/reg
         commandId,
       )}["'][\\s\\S]*?themeController\\.setThemePreference\\(["']${escapeRegExp(
         preference,
-      )}["']\\)[\\s\\S]*?\\brefresh\\(\\)`,
+      )}["']\\)[\\s\\S]*?\\brefresh\\(\\)[\\s\\S]*?\\bfocusApp\\(\\)`,
       "m",
     );
     assert.match(
       commands,
       pattern,
-      `Expected registerBuiltinCommands.ts to handle ${commandId} by calling themeController.setThemePreference("${preference}") and refreshing ribbon UI state`,
+      `Expected registerBuiltinCommands.ts to handle ${commandId} (setThemePreference("${preference}"), refresh, focusApp)`,
     );
   }
 });

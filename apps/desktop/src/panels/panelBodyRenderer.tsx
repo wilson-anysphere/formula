@@ -399,12 +399,16 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.VERSION_HISTORY) {
+      makeBodyFillAvailableHeight(body);
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        body.textContent = t("versionHistory.panel.noSession");
+        renderReactPanel(
+          panelId,
+          body,
+          <div className="collab-panel__message collab-panel__message--error">{t("versionHistory.panel.noSession")}</div>,
+        );
         return;
       }
-      makeBodyFillAvailableHeight(body);
       renderReactPanel(
         panelId,
         body,
@@ -414,12 +418,16 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.BRANCH_MANAGER) {
+      makeBodyFillAvailableHeight(body);
       const session = options.getCollabSession?.() ?? null;
       if (!session) {
-        body.textContent = "Branch manager requires collaboration mode.";
+        renderReactPanel(
+          panelId,
+          body,
+          <div className="collab-panel__message collab-panel__message--error">Branch manager requires collaboration mode.</div>,
+        );
         return;
       }
-      makeBodyFillAvailableHeight(body);
       renderReactPanel(
         panelId,
         body,
