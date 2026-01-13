@@ -363,4 +363,60 @@ describe("sync-server reserved root guard disconnect UX", () => {
       root.unmount();
     });
   });
+
+  it("allows clearing the lockout via Retry", async () => {
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const ws = new FakeBrowserWebSocket();
+    const provider = new FakeProvider(ws);
+    const session = { doc: new Y.Doc({ guid: "doc-7" }), provider, presence: null } as any;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<CollabVersionHistoryPanel session={session} />);
+    });
+
+    await act(async () => {
+      await waitFor(() => container.querySelector(".collab-version-history__input") instanceof HTMLInputElement);
+    });
+
+    await act(async () => {
+      ws.emitClose(1008, "reserved root mutation");
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false);
+    });
+
+    const retryBtn = container.querySelector('[data-testid="reserved-root-guard-retry"]') as HTMLButtonElement | null;
+    expect(retryBtn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      retryBtn?.click();
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await waitFor(() => (container.textContent?.includes("SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED") ?? false) === false);
+    });
+
+    // The panel should eventually return to the interactive UI state.
+    await act(async () => {
+      await waitFor(
+        () => {
+          const input = container.querySelector(".collab-version-history__input") as HTMLInputElement | null;
+          return Boolean(input && !input.disabled);
+        },
+        5_000,
+      );
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

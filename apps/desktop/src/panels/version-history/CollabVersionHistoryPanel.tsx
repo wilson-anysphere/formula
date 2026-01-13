@@ -43,6 +43,7 @@ export function CollabVersionHistoryPanel({
       <div>{reservedRootGuardError}</div>
       <button
         type="button"
+        data-testid="reserved-root-guard-retry"
         disabled={busy}
         onClick={() => {
           try {

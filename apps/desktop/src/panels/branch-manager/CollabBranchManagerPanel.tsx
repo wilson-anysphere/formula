@@ -107,6 +107,7 @@ export function CollabBranchManagerPanel({
       <div>{reservedRootGuardError}</div>
       <button
         type="button"
+        data-testid="reserved-root-guard-retry"
         onClick={() => {
           clearReservedRootGuardError((session as any)?.provider ?? null);
           setError(null);
