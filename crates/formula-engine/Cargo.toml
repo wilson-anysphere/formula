@@ -23,6 +23,7 @@ serde_json = "1.0"
 thiserror = "2.0"
 statrs = { version = "0.16", default-features = false }
 unicode-segmentation = "1.12"
+unicode-ident = "1.0"
 libm = "0.2"
 num-complex = "0.4"
 

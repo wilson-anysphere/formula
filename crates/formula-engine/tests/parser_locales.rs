@@ -50,3 +50,44 @@ fn lex_de_de_array_separators() {
     assert!(matches!(tokens[8].kind, TokenKind::RBrace));
     assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
 }
+
+#[test]
+fn lex_localized_error_literal_inverted_exclamation() {
+    let mut opts = ParseOptions::default();
+    opts.locale = LocaleConfig::en_us();
+
+    let tokens = lex("#¡VALOR!", &opts).unwrap();
+    assert!(matches!(tokens[0].kind, TokenKind::Error(ref s) if s == "#¡VALOR!"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
+fn lex_localized_error_literal_inverted_question() {
+    let mut opts = ParseOptions::default();
+    opts.locale = LocaleConfig::en_us();
+
+    let tokens = lex("#¿NOMBRE?", &opts).unwrap();
+    assert!(matches!(tokens[0].kind, TokenKind::Error(ref s) if s == "#¿NOMBRE?"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
+fn lex_hash_postfix_spill_range_not_error_literal() {
+    let mut opts = ParseOptions::default();
+    opts.locale = LocaleConfig::en_us();
+
+    let tokens = lex("A1#", &opts).unwrap();
+    assert!(matches!(tokens[0].kind, TokenKind::Cell(_)));
+    assert!(matches!(tokens[1].kind, TokenKind::Hash));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}
+
+#[test]
+fn lex_localized_error_literal_with_non_ascii_letters() {
+    let mut opts = ParseOptions::default();
+    opts.locale = LocaleConfig::en_us();
+
+    let tokens = lex("#ÜBERLAUF!", &opts).unwrap();
+    assert!(matches!(tokens[0].kind, TokenKind::Error(ref s) if s == "#ÜBERLAUF!"));
+    assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
+}

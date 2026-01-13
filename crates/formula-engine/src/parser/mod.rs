@@ -1769,7 +1769,13 @@ fn match_error_literal(input: &str) -> Option<usize> {
 }
 
 fn is_error_body_char(c: char) -> bool {
-    matches!(c, '_' | '/' | '.') || c.is_alphanumeric()
+    // Error literals start with `#` and are followed by a locale-dependent name that can include
+    // non-ASCII letters (e.g. `#ÜBERLAUF!`) and, in some locales, inverted punctuation (e.g.
+    // `#¡VALOR!`, `#¿NOMBRE?`).
+    //
+    // We treat the error "body" as a superset of identifier-continue characters plus a small set
+    // of ASCII punctuation used by canonical error names.
+    matches!(c, '_' | '/' | '.' | '¡' | '¿') || unicode_ident::is_xid_continue(c)
 }
 
 fn prev_significant(tokens: &[Token], idx: usize) -> Option<usize> {
