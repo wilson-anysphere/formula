@@ -247,6 +247,7 @@ function createFallbackMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "missing_doc_id" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "method_not_allowed" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "origin_not_allowed" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "persistence_load_failed" }, 0);
 
   const wsClosesTotal = createCounter<"code">({
     name: "sync_server_ws_closes_total",
@@ -468,7 +469,8 @@ export type WsConnectionRejectionReason =
   | "doc_id_too_long"
   | "missing_doc_id"
   | "method_not_allowed"
-  | "origin_not_allowed";
+  | "origin_not_allowed"
+  | "persistence_load_failed";
 
 export type RetentionSweepKind = "leveldb" | "tombstone";
 
@@ -574,6 +576,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "missing_doc_id" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "method_not_allowed" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "origin_not_allowed" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "persistence_load_failed" }, 0);
 
   const wsClosesTotal = new promClient.Counter({
     name: "sync_server_ws_closes_total",

@@ -467,6 +467,7 @@ export function createSyncServer(
   let persistenceCleanup: (() => Promise<void>) | null = null;
   let persistenceBackend: "file" | "leveldb" | null = null;
   let clearPersistedDocument: ((docName: string) => Promise<void>) | null = null;
+  let waitForDocLoaded: ((docName: string) => Promise<void>) | null = null;
 
   let retentionManager: LeveldbRetentionManager | null = null;
   let retentionSweepTimer: NodeJS.Timeout | null = null;
@@ -560,6 +561,7 @@ export function createSyncServer(
         }
       );
       persistenceCleanup = () => persistence.flush();
+      waitForDocLoaded = (docName: string) => persistence.waitForLoaded(docName);
       setPersistence(persistence);
       metrics.setPersistenceInfo({
         backend: "file",
@@ -625,6 +627,7 @@ export function createSyncServer(
         });
         return next;
       };
+      const docLoadPromises = new Map<string, Promise<void>>();
 
       leveldbTombstoneSweep = {
         getAllDocNames: () => ldb.getAllDocNames(),
@@ -664,79 +667,93 @@ export function createSyncServer(
 
       setPersistence({
         provider: hashedLdb,
-        bindState: async (docName: string, ydoc: any) => {
-          const persistenceOrigin = "persistence:leveldb";
-          const retentionDocName = persistedDocNameForLeveldb(docName);
-
-          ydoc.on("update", (update: Uint8Array, origin: unknown) => {
-            if (origin === persistenceOrigin) return;
-            if (!shouldPersist(docName)) return;
-            if (retentionManager?.isPurging(retentionDocName)) return;
-            if (disabledDocs.has(docName)) return;
-
-            const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
-            if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
-              disabledDocs.add(docName);
-              triggerPersistenceOverload(docName, "doc");
-              return;
-            }
-            if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
-              disabledDocs.add(docName);
-              triggerPersistenceOverload(docName, "total");
-              return;
-            }
-
-            void enqueue(retentionDocName, async () => {
-              await hashedLdb.storeUpdate(docName, update);
+        bindState: (docName: string, ydoc: any) => {
+          // Important: `y-websocket` does not await `bindState()`. Track the
+          // async loading promise so websocket upgrades can wait for the doc to
+          // be fully hydrated before allowing the initial sync handshake.
+          const loadPromise = (async () => {
+            const persistenceOrigin = "persistence:leveldb";
+            const retentionDocName = persistedDocNameForLeveldb(docName);
+ 
+            ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+              if (origin === persistenceOrigin) return;
+              if (!shouldPersist(docName)) return;
+              if (retentionManager?.isPurging(retentionDocName)) return;
+              if (disabledDocs.has(docName)) return;
+ 
+              const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
+              if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
+                disabledDocs.add(docName);
+                triggerPersistenceOverload(docName, "doc");
+                return;
+              }
+              if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
+                disabledDocs.add(docName);
+                triggerPersistenceOverload(docName, "total");
+                return;
+              }
+ 
+              void enqueue(retentionDocName, async () => {
+                await hashedLdb.storeUpdate(docName, update);
+              });
+              void retentionManager?.markSeen(retentionDocName);
             });
-            void retentionManager?.markSeen(retentionDocName);
-          });
-          ydoc.on("destroy", () => {
-            disabledDocs.delete(docName);
-          });
+            ydoc.on("destroy", () => {
+              disabledDocs.delete(docName);
+            });
+ 
+            if (shouldPersist(docName)) {
+              void retentionManager?.markSeen(retentionDocName, { force: true });
 
-          if (shouldPersist(docName)) {
-            void retentionManager?.markSeen(retentionDocName, { force: true });
+              const persistedYdoc = await hashedLdb.getYDoc(docName);
+              Y.applyUpdate(
+                ydoc,
+                Y.encodeStateAsUpdate(persistedYdoc),
+                persistenceOrigin
+              );
 
-            const persistedYdoc = await hashedLdb.getYDoc(docName);
-            Y.applyUpdate(
-              ydoc,
-              Y.encodeStateAsUpdate(persistedYdoc),
-              persistenceOrigin
-            );
+              if (hashingEnabled) {
+                const legacyYdoc = await ldb.getYDoc(docName);
+                const legacyMetas =
+                  typeof ldb.getMetas === "function"
+                    ? await ldb.getMetas(docName)
+                    : null;
 
-            if (hashingEnabled) {
-              const legacyYdoc = await ldb.getYDoc(docName);
-              const legacyMetas =
-                typeof ldb.getMetas === "function"
-                  ? await ldb.getMetas(docName)
-                  : null;
+                let needsMigration = false;
 
-              let needsMigration = false;
+                if (!isEmptyYDoc(legacyYdoc)) {
+                  needsMigration = true;
+                  Y.applyUpdate(
+                    ydoc,
+                    Y.encodeStateAsUpdate(legacyYdoc),
+                    persistenceOrigin
+                  );
+                }
 
-              if (!isEmptyYDoc(legacyYdoc)) {
-                needsMigration = true;
-                Y.applyUpdate(
-                  ydoc,
-                  Y.encodeStateAsUpdate(legacyYdoc),
-                  persistenceOrigin
-                );
-              }
+                if (legacyMetas && legacyMetas.size > 0) {
+                  needsMigration = true;
+                  await enqueue(retentionDocName, async () => {
+                    for (const [metaKey, value] of legacyMetas.entries()) {
+                      await hashedLdb.setMeta(docName, metaKey, value);
+                    }
+                  });
+                }
 
-               if (legacyMetas && legacyMetas.size > 0) {
-                 needsMigration = true;
-                 await enqueue(retentionDocName, async () => {
-                   for (const [metaKey, value] of legacyMetas.entries()) {
-                     await hashedLdb.setMeta(docName, metaKey, value);
-                   }
-                 });
-               }
-
-              if (needsMigration) {
-                docsNeedingMigration.add(docName);
+                if (needsMigration) {
+                  docsNeedingMigration.add(docName);
+                }
               }
             }
-          }
+          })();
+
+          docLoadPromises.set(docName, loadPromise);
+          loadPromise.catch(() => {});
+          ydoc.on("destroy", () => {
+            if (docLoadPromises.get(docName) === loadPromise) {
+              docLoadPromises.delete(docName);
+            }
+          });
+          return loadPromise;
         },
         writeState: async (docName: string, ydoc: any) => {
           if (!shouldPersist(docName)) return;
@@ -762,6 +779,7 @@ export function createSyncServer(
           void retentionManager?.markFlushed(retentionDocName);
         },
       });
+      waitForDocLoaded = (docName: string) => docLoadPromises.get(docName) ?? Promise.resolve();
 
       metrics.setPersistenceInfo({
         backend: "leveldb",
@@ -832,6 +850,7 @@ export function createSyncServer(
             onOverload: (docName, scope) => triggerPersistenceOverload(docName, scope),
           }
         );
+        waitForDocLoaded = (docName: string) => persistence.waitForLoaded(docName);
         setPersistence(persistence);
         metrics.setPersistenceInfo({
           backend: "file",
@@ -912,6 +931,7 @@ export function createSyncServer(
           });
           return next;
         };
+        const docLoadPromises = new Map<string, Promise<void>>();
 
         leveldbTombstoneSweep = {
           getAllDocNames: () => ldb.getAllDocNames(),
@@ -951,79 +971,92 @@ export function createSyncServer(
 
         setPersistence({
           provider: hashedLdb,
-          bindState: async (docName: string, ydoc: any) => {
-            // Important: `y-websocket` does not await `bindState()`. Attach the
-            // update listener first so we don't miss early client updates.
-            const persistenceOrigin = "persistence:leveldb";
-            const retentionDocName = persistedDocNameForLeveldb(docName);
-
-            ydoc.on("update", (update: Uint8Array, origin: unknown) => {
-              if (origin === persistenceOrigin) return;
-              if (!shouldPersist(docName)) return;
-              if (retentionManager?.isPurging(retentionDocName)) return;
-              if (disabledDocs.has(docName)) return;
-
-              const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
-              if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
-                disabledDocs.add(docName);
-                triggerPersistenceOverload(docName, "doc");
-                return;
-              }
-              if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
-                disabledDocs.add(docName);
-                triggerPersistenceOverload(docName, "total");
-                return;
-              }
-              void enqueue(retentionDocName, async () => {
-                await hashedLdb.storeUpdate(docName, update);
+          bindState: (docName: string, ydoc: any) => {
+            // Important: `y-websocket` does not await `bindState()`. Track the
+            // async loading promise so websocket upgrades can wait for the doc to
+            // be fully hydrated before allowing the initial sync handshake.
+            const loadPromise = (async () => {
+              // Attach the update listener first so we don't miss early client updates.
+              const persistenceOrigin = "persistence:leveldb";
+              const retentionDocName = persistedDocNameForLeveldb(docName);
+ 
+              ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+                if (origin === persistenceOrigin) return;
+                if (!shouldPersist(docName)) return;
+                if (retentionManager?.isPurging(retentionDocName)) return;
+                if (disabledDocs.has(docName)) return;
+ 
+                const pendingForDoc = pendingCountsByDoc.get(retentionDocName) ?? 0;
+                if (maxQueueDepthPerDoc > 0 && pendingForDoc >= maxQueueDepthPerDoc) {
+                  disabledDocs.add(docName);
+                  triggerPersistenceOverload(docName, "doc");
+                  return;
+                }
+                if (maxQueueDepthTotal > 0 && pendingTotal >= maxQueueDepthTotal) {
+                  disabledDocs.add(docName);
+                  triggerPersistenceOverload(docName, "total");
+                  return;
+                }
+                void enqueue(retentionDocName, async () => {
+                  await hashedLdb.storeUpdate(docName, update);
+                });
+                void retentionManager?.markSeen(retentionDocName);
               });
-              void retentionManager?.markSeen(retentionDocName);
-            });
-            ydoc.on("destroy", () => {
-              disabledDocs.delete(docName);
-            });
+              ydoc.on("destroy", () => {
+                disabledDocs.delete(docName);
+              });
 
-            if (shouldPersist(docName)) {
-              void retentionManager?.markSeen(retentionDocName, { force: true });
-              const persistedYdoc = await hashedLdb.getYDoc(docName);
-              Y.applyUpdate(
-                ydoc,
-                Y.encodeStateAsUpdate(persistedYdoc),
-                persistenceOrigin
-              );
+              if (shouldPersist(docName)) {
+                void retentionManager?.markSeen(retentionDocName, { force: true });
+                const persistedYdoc = await hashedLdb.getYDoc(docName);
+                Y.applyUpdate(
+                  ydoc,
+                  Y.encodeStateAsUpdate(persistedYdoc),
+                  persistenceOrigin
+                );
 
-              if (hashingEnabled) {
-                const legacyYdoc = await ldb.getYDoc(docName);
-                const legacyMetas =
-                  typeof ldb.getMetas === "function"
-                    ? await ldb.getMetas(docName)
-                    : null;
+                if (hashingEnabled) {
+                  const legacyYdoc = await ldb.getYDoc(docName);
+                  const legacyMetas =
+                    typeof ldb.getMetas === "function"
+                      ? await ldb.getMetas(docName)
+                      : null;
 
-                let needsMigration = false;
+                  let needsMigration = false;
 
-                if (!isEmptyYDoc(legacyYdoc)) {
-                  needsMigration = true;
-                  Y.applyUpdate(
-                    ydoc,
-                    Y.encodeStateAsUpdate(legacyYdoc),
-                    persistenceOrigin
-                  );
-                }
+                  if (!isEmptyYDoc(legacyYdoc)) {
+                    needsMigration = true;
+                    Y.applyUpdate(
+                      ydoc,
+                      Y.encodeStateAsUpdate(legacyYdoc),
+                      persistenceOrigin
+                    );
+                  }
 
-                if (legacyMetas && legacyMetas.size > 0) {
-                  needsMigration = true;
-                  await enqueue(retentionDocName, async () => {
-                    for (const [metaKey, value] of legacyMetas.entries()) {
-                      await hashedLdb.setMeta(docName, metaKey, value);
-                    }
-                  });
-                }
+                  if (legacyMetas && legacyMetas.size > 0) {
+                    needsMigration = true;
+                    await enqueue(retentionDocName, async () => {
+                      for (const [metaKey, value] of legacyMetas.entries()) {
+                        await hashedLdb.setMeta(docName, metaKey, value);
+                      }
+                    });
+                  }
 
-                if (needsMigration) {
-                  docsNeedingMigration.add(docName);
+                  if (needsMigration) {
+                    docsNeedingMigration.add(docName);
+                  }
                 }
               }
-            }
+            })();
+
+            docLoadPromises.set(docName, loadPromise);
+            loadPromise.catch(() => {});
+            ydoc.on("destroy", () => {
+              if (docLoadPromises.get(docName) === loadPromise) {
+                docLoadPromises.delete(docName);
+              }
+            });
+            return loadPromise;
           },
           writeState: async (docName: string, ydoc: any) => {
             // Compact updates on last client disconnect to keep DB size bounded.
@@ -1050,6 +1083,7 @@ export function createSyncServer(
             void retentionManager?.markFlushed(retentionDocName);
           },
         });
+        waitForDocLoaded = (docName: string) => docLoadPromises.get(docName) ?? Promise.resolve();
 
         metrics.setPersistenceInfo({
           backend: "leveldb",
@@ -1865,6 +1899,34 @@ export function createSyncServer(
         }
 
         (req as IncomingMessage & { auth?: unknown }).auth = authCtx;
+
+        // `y-websocket` does not await persistence `bindState()`. Ensure the
+        // document is fully hydrated from persistence before allowing the client
+        // to complete the websocket upgrade, so the initial sync never observes
+        // a transient empty Y.Doc.
+        try {
+          getYDoc(docName, config.gc);
+          await waitForDocLoaded?.(docName);
+        } catch (err) {
+          connectionTracker.unregister(ip);
+          docConnectionTracker.unregister(persistedName);
+          if (leveldbDocNameHashingEnabled) {
+            docConnectionTracker.unregister(docName);
+          }
+          recordUpgradeRejection("persistence_load_failed");
+          logger.error(
+            {
+              err,
+              ip,
+              docName,
+              userId: authCtx.userId,
+              backend: persistenceBackend,
+            },
+            "ws_connection_rejected_persistence_load_failed"
+          );
+          sendUpgradeRejection(socket, 503, "Persistence unavailable");
+          return;
+        }
 
         try {
           wss.handleUpgrade(req, socket, head, (ws) => {
