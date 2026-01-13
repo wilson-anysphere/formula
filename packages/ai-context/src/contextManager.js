@@ -922,8 +922,8 @@ export class ContextManager {
     }
 
     const attachmentDataRaw = buildRangeAttachmentSectionText(
-      { sheet: sheetForContext, attachments: params.attachments },
-      { maxRows: 30, maxAttachments: 3 },
+      { sheet: sheetForContext, attachments: params.attachments, signal },
+      { maxRows: 30, maxAttachments: 3, signal },
     );
 
     const shouldReturnRedactedStructured = Boolean(dlp) && dlpDecision?.decision === DLP_DECISION.REDACT;
@@ -2102,12 +2102,13 @@ function getSheetOrigin(sheet) {
 }
 
 /**
- * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[] }} params
- * @param {{ maxRows?: number, maxAttachments?: number }} [options]
+ * @param {{ sheet: { name: string, values: unknown[][], origin?: { row: number, col: number } }, attachments?: Attachment[], signal?: AbortSignal }} params
+ * @param {{ maxRows?: number, maxAttachments?: number, signal?: AbortSignal }} [options]
  */
 function buildRangeAttachmentSectionText(params, options = {}) {
   const attachments = Array.isArray(params.attachments) ? params.attachments : [];
   if (attachments.length === 0) return "";
+  const signal = options.signal ?? params.signal;
   const sheet = params.sheet;
   const sheetName = sheet?.name ?? "";
   const normalizedSheetName = normalizeSheetNameForComparison(sheetName);
@@ -2118,6 +2119,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
   const matrixRowCount = values.length;
   let matrixColCount = 0;
   for (const row of values) {
+    throwIfAborted(signal);
     if (!Array.isArray(row)) continue;
     if (row.length > matrixColCount) matrixColCount = row.length;
   }
@@ -2138,6 +2140,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
   let included = 0;
 
   for (const attachment of attachments) {
+    throwIfAborted(signal);
     if (included >= maxAttachments) break;
     if (!attachment || attachment.type !== "range" || typeof attachment.reference !== "string") continue;
 
@@ -2183,7 +2186,7 @@ function buildRangeAttachmentSectionText(params, options = {}) {
       endCol: Math.min(matrixColCount - 1, local.endCol),
     };
 
-    entries.push(`${canonicalRange}:\n${valuesRangeToTsv(values, clamped, { maxRows })}`);
+    entries.push(`${canonicalRange}:\n${valuesRangeToTsv(values, clamped, { maxRows, signal })}`);
     included += 1;
   }
 
@@ -2203,13 +2206,16 @@ function buildRangeAttachmentSectionText(params, options = {}) {
  *
  * @param {unknown[][]} values
  * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} range
- * @param {{ maxRows: number }} options
+ * @param {{ maxRows: number, signal?: AbortSignal }} options
  */
 function valuesRangeToTsv(values, range, options) {
+  const signal = options.signal;
+  const shouldCheckAbort = Boolean(signal);
   const lines = [];
   const totalRows = range.endRow - range.startRow + 1;
   const limit = Math.min(totalRows, options.maxRows);
   for (let rOffset = 0; rOffset < limit; rOffset++) {
+    if (shouldCheckAbort) throwIfAborted(signal);
     const row = values[range.startRow + rOffset];
     if (!Array.isArray(row)) {
       lines.push("");
@@ -2231,6 +2237,7 @@ function valuesRangeToTsv(values, range, options) {
     /** @type {string[]} */
     const cells = new Array(sliceLen);
     for (let cOffset = 0; cOffset < sliceLen; cOffset++) {
+      if (shouldCheckAbort && (cOffset & 0x7f) === 0) throwIfAborted(signal);
       const v = row[range.startCol + cOffset];
       cells[cOffset] = isCellEmpty(v) ? "" : String(v);
     }
