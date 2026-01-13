@@ -791,16 +791,7 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "view.togglePanel.marketplace",
     t("command.view.togglePanel.marketplace"),
-    () => {
-      if (ensureExtensionsLoaded) {
-        void ensureExtensionsLoaded()
-          .then(() => onExtensionsLoaded?.())
-          .catch(() => {
-            // ignore; panel open/close should still work
-          });
-      }
-      toggleDockPanel(PanelIds.MARKETPLACE);
-    },
+    () => toggleDockPanel(PanelIds.MARKETPLACE),
     {
       category: t("commandCategory.view"),
       icon: null,
