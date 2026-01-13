@@ -69,8 +69,7 @@ fn decode_ptg_array_unknown_error_code_is_best_effort() {
 fn decode_ptg_array_without_rgcb_is_unsupported() {
     let rgce = rgce_ptg_array();
     match decode_rgce(&rgce) {
-        Err(DecodeRgceError::UnsupportedToken { ptg: 0x20 }) => {}
+        Err(DecodeRgceError::UnsupportedToken { offset: 0, ptg: 0x20 }) => {}
         other => panic!("expected UnsupportedToken(0x20), got {other:?}"),
     }
 }
-

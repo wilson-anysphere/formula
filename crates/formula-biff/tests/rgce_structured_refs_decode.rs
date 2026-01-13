@@ -481,20 +481,40 @@ fn rejects_legacy_placeholder_ptglist_token() {
         0x00, 0x00, // col2 (utf16 len=0)
     ];
     let err = decode_rgce(&rgce).unwrap_err();
-    assert!(matches!(err, DecodeRgceError::UnsupportedToken { ptg: 0x30 }));
+    assert!(matches!(
+        err,
+        DecodeRgceError::UnsupportedToken {
+            offset: 0,
+            ptg: 0x30
+        }
+    ));
 }
 
 #[test]
 fn ptg_extend_missing_etpg_is_unexpected_eof() {
     // PtgExtend without the following etpg subtype byte.
     let err = decode_rgce(&[0x18]).unwrap_err();
-    assert!(matches!(err, DecodeRgceError::UnexpectedEof));
+    assert!(matches!(
+        err,
+        DecodeRgceError::UnexpectedEof {
+            offset: 0,
+            ptg: 0x18,
+            needed: 1,
+            remaining: 0
+        }
+    ));
 }
 
 #[test]
 fn ptg_extend_unknown_etpg_is_unsupported() {
     let err = decode_rgce(&[0x18, 0xFF]).unwrap_err();
-    assert!(matches!(err, DecodeRgceError::UnsupportedToken { ptg: 0x18 }));
+    assert!(matches!(
+        err,
+        DecodeRgceError::UnsupportedToken {
+            offset: 0,
+            ptg: 0x18
+        }
+    ));
 }
 
 #[test]
@@ -502,5 +522,13 @@ fn ptg_extend_list_truncated_payload_is_unexpected_eof() {
     // PtgExtend + PtgList etpg, but not enough bytes for the fixed 12-byte payload.
     let rgce = vec![0x18, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00];
     let err = decode_rgce(&rgce).unwrap_err();
-    assert!(matches!(err, DecodeRgceError::UnexpectedEof));
+    assert!(matches!(
+        err,
+        DecodeRgceError::UnexpectedEof {
+            offset: 0,
+            ptg: 0x18,
+            needed: 12,
+            remaining: 5
+        }
+    ));
 }
