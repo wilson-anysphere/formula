@@ -404,8 +404,13 @@ rustup target add aarch64-pc-windows-msvc
 ```
 
 GitHub-hosted runner images do not always include this workload by default. The release workflow
-checks for `VC\\Tools\\MSVC\\*\\lib\\arm64` and installs the component via `vs_installer.exe` when it
-is missing.
+checks for a complete ARM64 MSVC + SDK toolchain:
+
+- MSVC: `VC\\Tools\\MSVC\\*\\lib\\arm64` + `VC\\Tools\\MSVC\\*\\bin\\Hostx64\\arm64\\{cl.exe,link.exe}`
+- Windows SDK: `Windows Kits\\10\\Lib\\*\\{um,ucrt}\\arm64`
+
+If any of these are missing, CI installs the MSVC ARM64 component via `vs_installer.exe` and fails
+with a clear error if the runner image still lacks the required ARM64 SDK libraries.
 
 CI smoke test:
 
