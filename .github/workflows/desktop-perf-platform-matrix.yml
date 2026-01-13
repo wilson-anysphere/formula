@@ -1,0 +1,168 @@
+name: Desktop performance (platform matrix)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily (UTC). Adjust as needed; goal is continuous cross-platform visibility.
+    - cron: "0 7 * * *"
+
+jobs:
+  desktop-startup-perf:
+    name: Desktop startup perf (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust toolchain (stable + wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # Our dev scripts default to a repo-local CARGO_HOME to avoid cross-agent
+      # contention on shared ~/.cargo. In GitHub Actions we prefer the default
+      # CARGO_HOME so cargo installs/builds share the same cache.
+      - name: Use shared Cargo home for CI caching (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cargoHome = Join-Path $env:USERPROFILE ".cargo"
+          "CARGO_HOME=$cargoHome" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Use shared Cargo home for CI caching (Unix)
+        if: matrix.os != 'windows-latest'
+        run: echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies (Tauri/WebView + headless display)
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            patchelf
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install wasm-pack (required for @formula/engine WASM build)
+        run: cargo install wasm-pack --locked
+
+      - name: Build desktop frontend (Vite + WASM)
+        run: pnpm build:desktop
+
+      - name: Build desktop binary (release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo build -p formula-desktop-tauri --bin formula-desktop --features desktop --release --locked
+          else
+            cargo build -p desktop --bin formula-desktop --features desktop --release --locked
+          fi
+
+      - name: Run desktop startup benchmark (5 runs)
+        id: startup
+        shell: bash
+        env:
+          # Isolate any per-run caches/config so they don't pollute the real home dir.
+          HOME: ${{ github.workspace }}/target/perf-home
+          USERPROFILE: ${{ github.workspace }}/target/perf-home
+        run: |
+          set -euo pipefail
+          mkdir -p perf-artifacts
+          node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-startup-runner.ts \
+            --runs 5 \
+            --timeout-ms 20000 \
+            --allow-ci 2>&1 | tee perf-artifacts/desktop-startup.log
+
+      - name: Run idle memory benchmark (if implemented)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f apps/desktop/tests/performance/desktop-idle-memory-runner.ts ]; then
+            mkdir -p perf-artifacts
+            node scripts/run-node-ts.mjs apps/desktop/tests/performance/desktop-idle-memory-runner.ts 2>&1 | tee perf-artifacts/desktop-idle-memory.log
+          else
+            echo "[desktop-idle-memory] not implemented; skipping."
+          fi
+
+      - name: Generate metrics JSON artifact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const logPath = path.resolve("perf-artifacts/desktop-startup.log");
+            const outPath = path.resolve("perf-artifacts/desktop-startup-metrics.json");
+            let log = "";
+            try { log = fs.readFileSync(logPath, "utf8"); } catch {}
+            const lines = log.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            const summaryLine = [...lines].reverse().find(l => l.startsWith("[desktop-startup] runs="));
+            const m = summaryLine
+              ? summaryLine.match(/^\\[desktop-startup\\]\\s+runs=(\\d+)\\s+windowVisible\\(p50=(\\d+(?:\\.\\d+)?)ms,p95=(\\d+(?:\\.\\d+)?)ms\\)\\s+tti\\(p50=(\\d+(?:\\.\\d+)?)ms,p95=(\\d+(?:\\.\\d+)?)ms\\)\\s*$/)
+              : null;
+            const metrics = m
+              ? {
+                  runs: Number(m[1]),
+                  windowVisibleMs: { p50: Number(m[2]), p95: Number(m[3]) },
+                  ttiMs: { p50: Number(m[4]), p95: Number(m[5]) },
+                }
+              : null;
+            const payload = {
+              generatedAt: new Date().toISOString(),
+              git: { sha: process.env.GITHUB_SHA || null, ref: process.env.GITHUB_REF || null },
+              ci: {
+                workflow: process.env.GITHUB_WORKFLOW || null,
+                runId: process.env.GITHUB_RUN_ID || null,
+                runNumber: process.env.GITHUB_RUN_NUMBER || null,
+                attempt: process.env.GITHUB_RUN_ATTEMPT || null,
+              },
+              runner: {
+                os: process.env.RUNNER_OS || null,
+                arch: process.env.RUNNER_ARCH || null,
+                name: process.env.RUNNER_NAME || null,
+              },
+              metrics,
+              parseOk: Boolean(metrics),
+              summaryLine: summaryLine || null,
+            };
+            fs.mkdirSync(path.dirname(outPath), { recursive: true });
+            fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));
+            if (metrics) {
+              console.log("[desktop-startup-metrics]", JSON.stringify(metrics));
+            } else {
+              console.warn("[desktop-startup-metrics] failed to parse summary; see log artifact");
+            }
+          '
+
+      - name: Upload desktop perf artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-perf-${{ matrix.os }}
+          path: |
+            perf-artifacts/*.json
+            perf-artifacts/*.log
