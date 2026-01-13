@@ -125,3 +125,41 @@ test("accepts Windows updater installers ending with .exe (NSIS strategy)", () =
   const result = validatePlatformEntries({ platforms, assetNames });
   assert.deepEqual(result.errors, []);
 });
+
+test("fails when latest.json.platforms is missing a required platform key", () => {
+  const { platforms, assetNames } = baseline();
+  delete platforms["linux-x86_64"];
+  assetNames.delete("Formula.AppImage");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.ok(
+    result.errors.some((e) => e.includes("Unexpected latest.json.platforms keys")),
+    `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
+});
+
+test("fails when latest.json.platforms contains an unexpected platform key", () => {
+  const { platforms, assetNames } = baseline();
+  platforms["windows-i686"] = {
+    url: "https://github.com/example/repo/releases/download/v0.1.0/Formula_0.1.0_x86.msi",
+    signature: "sig",
+  };
+  assetNames.add("Formula_0.1.0_x86.msi");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.ok(
+    result.errors.some((e) => e.includes("Unexpected latest.json.platforms keys")),
+    `Expected strict platforms key mismatch error, got:\n${result.errors.join("\n\n")}`,
+  );
+});
+
+test("reports missing release assets referenced by platforms[*].url", () => {
+  const { platforms, assetNames } = baseline();
+  // Keep the file extension valid, but remove it from the release asset set.
+  assetNames.delete("Formula_0.1.0_x64.msi");
+
+  const result = validatePlatformEntries({ platforms, assetNames });
+  assert.equal(result.missingAssets.length, 1);
+  assert.equal(result.missingAssets[0].target, "windows-x86_64");
+  assert.equal(result.missingAssets[0].assetName, "Formula_0.1.0_x64.msi");
+});
