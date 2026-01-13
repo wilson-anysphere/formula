@@ -56,6 +56,7 @@ class DashboardTrendTests(unittest.TestCase):
         self.assertEqual(entry["schema_version"], 1)
         self.assertNotIn("commit", entry)
         self.assertNotIn("run_url", entry)
+        self.assertNotIn("round_trip_fail_on", entry)
 
         self.assertEqual(entry["total"], 3)
         self.assertEqual(entry["open_ok"], 3)

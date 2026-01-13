@@ -318,6 +318,10 @@ def _trend_entry(summary: dict[str, Any]) -> dict[str, Any]:
         "failures_by_round_trip_failure_kind": rt_kinds,
     }
 
+    rt_fail_on = summary.get("round_trip_fail_on")
+    if rt_fail_on is not None:
+        entry["round_trip_fail_on"] = rt_fail_on
+
     def _top_list(
         key: str,
         *,
