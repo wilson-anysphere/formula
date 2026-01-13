@@ -1936,6 +1936,58 @@ fn measure_in_iterator_performs_implicit_context_transition() {
 }
 
 #[test]
+fn sumx_values_column_measure_context_transition_filters_only_that_column() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(VALUES(Orders[CustomerId]), [Total Sales])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 43.0.into());
+}
+
+#[test]
+fn sumx_values_column_iterates_distinct_values() {
+    let model = build_model();
+    let value = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(VALUES(Customers[Region]), 1)",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap();
+
+    assert_eq!(value, 2.into());
+}
+
+#[test]
+fn values_column_row_context_disallows_other_columns() {
+    let model = build_model();
+    let err = DaxEngine::new()
+        .evaluate(
+            &model,
+            "SUMX(VALUES(Orders[CustomerId]), Orders[Amount])",
+            &FilterContext::empty(),
+            &RowContext::default(),
+        )
+        .unwrap_err();
+
+    assert!(matches!(err, DaxError::Eval(_)));
+    assert!(err
+        .to_string()
+        .contains("not available in the current row context"));
+}
+
+#[test]
 fn allexcept_keeps_only_listed_columns() {
     let mut model = build_model();
     model

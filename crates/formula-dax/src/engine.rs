@@ -198,29 +198,58 @@ impl FilterContext {
 
 #[derive(Clone, Debug, Default)]
 pub struct RowContext {
-    stack: Vec<(String, usize)>,
+    stack: Vec<RowFrame>,
 }
 
 impl RowContext {
+    /// Push a full row context frame for `table`/`row` (all columns visible).
     pub fn push(&mut self, table: &str, row: usize) {
-        self.stack.push((table.to_string(), row));
+        self.push_with_visible_cols(table, row, None);
+    }
+
+    pub(crate) fn push_with_visible_cols(
+        &mut self,
+        table: &str,
+        row: usize,
+        visible_cols: Option<Vec<usize>>,
+    ) {
+        self.stack.push(RowFrame {
+            table: table.to_string(),
+            row,
+            visible_cols,
+        });
     }
 
     pub fn pop(&mut self) {
         self.stack.pop();
     }
 
-    fn current_table(&self) -> Option<&str> {
-        self.stack.last().map(|(t, _)| t.as_str())
+    fn current_frame(&self) -> Option<&RowFrame> {
+        self.stack.last()
     }
 
-    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
+    fn current_table(&self) -> Option<&str> {
+        self.current_frame().map(|f| f.table.as_str())
+    }
+
+    fn frame_for_level(&self, table: &str, level_from_inner: usize) -> Option<&RowFrame> {
         self.stack
             .iter()
             .rev()
-            .filter(|(t, _)| t == table)
+            .filter(|frame| frame.table == table)
             .nth(level_from_inner)
-            .map(|(_, r)| *r)
+    }
+
+    fn frame_for(&self, table: &str) -> Option<&RowFrame> {
+        self.frame_for_level(table, 0)
+    }
+
+    fn frame_for_outermost(&self, table: &str) -> Option<&RowFrame> {
+        self.stack.iter().find(|frame| frame.table == table)
+    }
+
+    fn row_for_level(&self, table: &str, level_from_inner: usize) -> Option<usize> {
+        self.frame_for_level(table, level_from_inner).map(|f| f.row)
     }
 
     fn row_for(&self, table: &str) -> Option<usize> {
@@ -228,22 +257,45 @@ impl RowContext {
     }
 
     fn row_for_outermost(&self, table: &str) -> Option<usize> {
-        self.stack
-            .iter()
-            .find(|(t, _)| t == table)
-            .map(|(_, r)| *r)
+        self.frame_for_outermost(table).map(|f| f.row)
     }
 
-    fn tables_with_current_rows(&self) -> impl Iterator<Item = (&str, usize)> {
+    fn is_column_visible(&self, table: &str, col_idx: usize) -> bool {
+        match self
+            .frame_for(table)
+            .and_then(|f| f.visible_cols.as_deref())
+        {
+            None => true,
+            Some(cols) => cols.contains(&col_idx),
+        }
+    }
+
+    fn tables_with_current_rows(&self) -> impl Iterator<Item = (&str, usize, Option<&[usize]>)> {
         let mut seen = HashSet::new();
-        self.stack.iter().rev().filter_map(move |(t, r)| {
-            if seen.insert(t.as_str()) {
-                Some((t.as_str(), *r))
+        self.stack.iter().rev().filter_map(move |frame| {
+            if seen.insert(frame.table.as_str()) {
+                Some((
+                    frame.table.as_str(),
+                    frame.row,
+                    frame.visible_cols.as_deref(),
+                ))
             } else {
                 None
             }
         })
     }
+}
+
+#[derive(Clone, Debug)]
+struct RowFrame {
+    table: String,
+    row: usize,
+    /// When set, this row context frame only exposes the listed column indices.
+    ///
+    /// This is used to model iterators over virtual one-column (or grouped) tables like
+    /// `VALUES(Table[Column])`, where row context and implicit context transition should only
+    /// consider the columns present in the virtual table.
+    visible_cols: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -382,15 +434,20 @@ impl DaxEngine {
                 let table_ref = model
                     .table(current_table)
                     .ok_or_else(|| DaxError::UnknownTable(current_table.to_string()))?;
+                let Some(col_idx) = table_ref.column_idx(&normalized) else {
+                    return Err(DaxError::Eval(format!(
+                        "unknown measure [{normalized}] and no column {current_table}[{normalized}]"
+                    )));
+                };
+                if !row_ctx.is_column_visible(current_table, col_idx) {
+                    return Err(DaxError::Eval(format!(
+                        "column {current_table}[{normalized}] is not available in the current row context"
+                    )));
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value = table_ref.value(row, &normalized).ok_or_else(|| {
-                    DaxError::Eval(format!(
-                        "unknown measure [{normalized}] and no column {current_table}[{normalized}]"
-                    ))
-                })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank))
             }
             Expr::Let { bindings, body } => {
                 env.push_scope();
@@ -412,17 +469,21 @@ impl DaxEngine {
                 let table_ref = model
                     .table(table)
                     .ok_or_else(|| DaxError::UnknownTable(table.clone()))?;
+                let idx = table_ref
+                    .column_idx(column)
+                    .ok_or_else(|| DaxError::UnknownColumn {
+                        table: table.clone(),
+                        column: column.clone(),
+                    })?;
+                if !row_ctx.is_column_visible(table, idx) {
+                    return Err(DaxError::Eval(format!(
+                        "column {table}[{column}] is not available in the current row context"
+                    )));
+                }
                 if row >= table_ref.row_count() {
                     return Ok(Value::Blank);
                 }
-                let value =
-                    table_ref
-                        .value(row, column)
-                        .ok_or_else(|| DaxError::UnknownColumn {
-                            table: table.clone(),
-                            column: column.clone(),
-                        })?;
-                Ok(value)
+                Ok(table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
             }
             Expr::UnaryOp { op, expr } => {
                 let value = self.eval_scalar(model, expr, filter, row_ctx, env)?;
@@ -1020,7 +1081,11 @@ impl DaxEngine {
                 };
 
                 let Some(row) = row_ctx.row_for_level(table, level_from_inner) else {
-                    let available = row_ctx.stack.iter().filter(|(t, _)| t == table).count();
+                    let available = row_ctx
+                        .stack
+                        .iter()
+                        .filter(|frame| frame.table.as_str() == table.as_str())
+                        .count();
                     return Err(DaxError::Eval(format!(
                         "EARLIER refers to an outer row context that does not exist for {table}[{column}] (requested level {level_from_inner}, available {available})"
                     )));
@@ -1450,7 +1515,11 @@ impl DaxEngine {
 
         for row in table_result.rows {
             let mut inner_ctx = row_ctx.clone();
-            inner_ctx.push(&table_result.table, row);
+            inner_ctx.push_with_visible_cols(
+                &table_result.table,
+                row,
+                table_result.visible_cols.clone(),
+            );
             let value = self.eval_scalar(model, value_expr, filter, &inner_ctx, env)?;
             match kind {
                 IteratorKind::Sum | IteratorKind::Average => match value {
@@ -1711,23 +1780,46 @@ impl DaxEngine {
         row_ctx: &RowContext,
     ) -> DaxResult<FilterContext> {
         let mut new_filter = filter.clone();
-        for (table, row) in row_ctx.tables_with_current_rows() {
+        for (table, row, visible_cols) in row_ctx.tables_with_current_rows() {
             let table_ref = model
                 .table(table)
                 .ok_or_else(|| DaxError::UnknownTable(table.to_string()))?;
             let table_name = table.to_string();
 
-            for (col_idx, column) in table_ref.columns().iter().enumerate() {
-                let value = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
-                let key = (table_name.clone(), column.clone());
-                match new_filter.column_filters.get_mut(&key) {
-                    Some(existing) => {
-                        existing.retain(|v| v == &value);
+            let columns = table_ref.columns();
+            if let Some(visible_cols) = visible_cols {
+                for &col_idx in visible_cols {
+                    let Some(column) = columns.get(col_idx) else {
+                        return Err(DaxError::Eval(format!(
+                            "row context refers to out-of-bounds column index {col_idx} for table {table}"
+                        )));
+                    };
+                    let value = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                    let key = (table_name.clone(), column.clone());
+                    match new_filter.column_filters.get_mut(&key) {
+                        Some(existing) => {
+                            existing.retain(|v| v == &value);
+                        }
+                        None => {
+                            new_filter
+                                .column_filters
+                                .insert(key, HashSet::from([value]));
+                        }
                     }
-                    None => {
-                        new_filter
-                            .column_filters
-                            .insert(key, HashSet::from([value]));
+                }
+            } else {
+                for (col_idx, column) in columns.iter().enumerate() {
+                    let value = table_ref.value_by_idx(row, col_idx).unwrap_or(Value::Blank);
+                    let key = (table_name.clone(), column.clone());
+                    match new_filter.column_filters.get_mut(&key) {
+                        Some(existing) => {
+                            existing.retain(|v| v == &value);
+                        }
+                        None => {
+                            new_filter
+                                .column_filters
+                                .insert(key, HashSet::from([value]));
+                        }
                     }
                 }
             }
@@ -2379,6 +2471,7 @@ impl DaxEngine {
                 None => Ok(TableResult {
                     table: name.clone(),
                     rows: resolve_table_rows(model, filter, name)?,
+                    visible_cols: None,
                 }),
             },
             Expr::Call { name, args } => match name.to_ascii_uppercase().as_str() {
@@ -2390,9 +2483,12 @@ impl DaxEngine {
                     let mut rows = Vec::new();
                     for row in base.rows.iter().copied() {
                         let mut inner_ctx = row_ctx.clone();
-                        inner_ctx.push(&base.table, row);
-                        let pred =
-                            self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
+                        inner_ctx.push_with_visible_cols(
+                            &base.table,
+                            row,
+                            base.visible_cols.clone(),
+                        );
+                        let pred = self.eval_scalar(model, predicate, filter, &inner_ctx, env)?;
                         if pred.truthy().map_err(|e| DaxError::Type(e.to_string()))? {
                             rows.push(row);
                         }
@@ -2400,6 +2496,7 @@ impl DaxEngine {
                     Ok(TableResult {
                         table: base.table,
                         rows,
+                        visible_cols: base.visible_cols,
                     })
                 }
                 "ALL" => {
@@ -2414,6 +2511,7 @@ impl DaxEngine {
                             Ok(TableResult {
                                 table: name.clone(),
                                 rows: (0..table_ref.row_count()).collect(),
+                                visible_cols: None,
                             })
                         }
                         Expr::ColumnRef { table, column } => {
@@ -2443,11 +2541,6 @@ impl DaxEngine {
                                     rows.push(row);
                                 }
                             }
-
-                            // If the table participates as the one-side of a relationship and has
-                            // unmatched fact-side keys, tabular models materialize an "unknown"
-                            // (blank) member. Include that member when it exists and is not
-                            // excluded by the remaining filters.
                             if !seen.contains(&Value::Blank)
                                 && blank_row_allowed(&modified_filter, table)
                                 && virtual_blank_row_exists(model, &modified_filter, table, None)?
@@ -2457,6 +2550,7 @@ impl DaxEngine {
                             Ok(TableResult {
                                 table: table.clone(),
                                 rows,
+                                visible_cols: Some(vec![idx]),
                             })
                         }
                         other => Err(DaxError::Type(format!(
@@ -2572,6 +2666,7 @@ impl DaxEngine {
                             Ok(TableResult {
                                 table: table.clone(),
                                 rows,
+                                visible_cols: Some(vec![idx]),
                             })
                         }
                         _ => {
@@ -2652,6 +2747,7 @@ impl DaxEngine {
                     Ok(TableResult {
                         table: table.clone(),
                         rows: resolve_table_rows(model, &modified_filter, table)?,
+                        visible_cols: None,
                     })
                 }
                 "CALCULATETABLE" => {
@@ -2866,6 +2962,7 @@ impl DaxEngine {
                     Ok(TableResult {
                         table: base.table,
                         rows,
+                        visible_cols: None,
                     })
                 }
                 "SUMMARIZECOLUMNS" => {
@@ -3167,6 +3264,7 @@ impl DaxEngine {
                     Ok(TableResult {
                         table: base_table,
                         rows,
+                        visible_cols: None,
                     })
                 }
                 "RELATEDTABLE" => {
@@ -3268,6 +3366,7 @@ impl DaxEngine {
                         return Ok(TableResult {
                             table: target_table.clone(),
                             rows,
+                            visible_cols: None,
                         });
                     }
                     let mut current_rows: Vec<usize> = vec![current_row];
@@ -3333,6 +3432,7 @@ impl DaxEngine {
                     Ok(TableResult {
                         table: target_table.clone(),
                         rows,
+                        visible_cols: None,
                     })
                 }
                 other => Err(DaxError::Eval(format!(
@@ -3350,6 +3450,7 @@ impl DaxEngine {
 struct TableResult {
     table: String,
     rows: Vec<usize>,
+    visible_cols: Option<Vec<usize>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -3729,11 +3830,17 @@ fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxRes
         .table(&base.table)
         .ok_or_else(|| DaxError::UnknownTable(base.table.clone()))?;
 
+    let column_indices: Vec<usize> = match base.visible_cols.as_deref() {
+        Some(cols) => cols.to_vec(),
+        None => (0..table_ref.columns().len()).collect(),
+    };
+
     let mut seen: HashSet<Vec<Value>> = HashSet::new();
     let mut rows = Vec::new();
     for row in base.rows.iter().copied() {
-        let key: Vec<Value> = (0..table_ref.columns().len())
-            .map(|idx| table_ref.value_by_idx(row, idx).unwrap_or(Value::Blank))
+        let key: Vec<Value> = column_indices
+            .iter()
+            .map(|idx| table_ref.value_by_idx(row, *idx).unwrap_or(Value::Blank))
             .collect();
         if seen.insert(key) {
             rows.push(row);
@@ -3743,6 +3850,7 @@ fn distinct_rows_by_all_columns(model: &DataModel, base: &TableResult) -> DaxRes
     Ok(TableResult {
         table: base.table.clone(),
         rows,
+        visible_cols: base.visible_cols.clone(),
     })
 }
 
