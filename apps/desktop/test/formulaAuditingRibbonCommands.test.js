@@ -86,17 +86,6 @@ test("Desktop main.ts wires Formulas → Formula Auditing commands to Spreadshee
 
   assert.match(
     main,
-    // Ribbon toggles are handled via createRibbonActionsFromCommands toggleOverrides.
-    new RegExp(
-      `toggleOverrides:\\s*\\{[\\s\\S]*?["']view\\.toggleShowFormulas["']\\s*:\\s*\\(pressed\\)\\s*=>\\s*\\{` +
-        `[\\s\\S]*?commandRegistry\\.executeCommand\\(["']view\\.toggleShowFormulas["']\\)`,
-      "m",
-    ),
-    "Expected main.ts to handle view.toggleShowFormulas via the ribbon toggleOverrides hook",
-  );
-
-  assert.match(
-    main,
     /"view\.toggleShowFormulas":\s*app\.getShowFormulas\(\)/,
     "Expected ribbon pressed state to include view.toggleShowFormulas",
   );

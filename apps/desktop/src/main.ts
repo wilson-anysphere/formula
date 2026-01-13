@@ -7959,16 +7959,6 @@ const ribbonActions = createRibbonActionsFromCommands({
       else layoutController.closePanel(PanelIds.DATA_QUERIES);
       app.focus();
     },
-    "view.toggleShowFormulas": (pressed) => {
-      // Route all ribbon "Show Formulas" toggles through the canonical command so
-      // ribbon, command palette, and keybindings share the same logic/guards.
-      if (app.getShowFormulas() !== pressed) {
-        void commandRegistry.executeCommand("view.toggleShowFormulas").catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-      }
-      app.focus();
-    },
     "view.togglePerformanceStats": (pressed) => {
       void commandRegistry.executeCommand("view.togglePerformanceStats", pressed).catch((err) => {
         showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");

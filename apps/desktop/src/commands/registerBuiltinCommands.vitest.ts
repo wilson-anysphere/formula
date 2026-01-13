@@ -413,6 +413,7 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
       undo: vi.fn(),
       redo: vi.fn(),
       isEditing: vi.fn(() => false),
+      setShowFormulas: vi.fn(),
       toggleShowFormulas: vi.fn(),
       toggleAuditingPrecedents: vi.fn(),
       toggleAuditingDependents: vi.fn(),
@@ -440,11 +441,14 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     expect(app.redo).toHaveBeenCalledTimes(1);
 
     await commandRegistry.executeCommand("view.toggleShowFormulas");
+    await commandRegistry.executeCommand("view.toggleShowFormulas", true);
     await commandRegistry.executeCommand("audit.togglePrecedents");
     await commandRegistry.executeCommand("audit.toggleDependents");
     await commandRegistry.executeCommand("edit.editCell");
     await commandRegistry.executeCommand("edit.selectCurrentRegion");
     expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
+    expect(app.setShowFormulas).toHaveBeenCalledTimes(1);
+    expect(app.setShowFormulas).toHaveBeenCalledWith(true);
     expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
     expect(app.openCellEditorAtActiveCell).toHaveBeenCalledTimes(1);
@@ -453,11 +457,13 @@ describe("registerBuiltinCommands: core editing/view/audit commands", () => {
     // When editing, these commands should no-op (Excel-like behavior).
     app.isEditing.mockReturnValue(true);
     await commandRegistry.executeCommand("view.toggleShowFormulas");
+    await commandRegistry.executeCommand("view.toggleShowFormulas", false);
     await commandRegistry.executeCommand("audit.togglePrecedents");
     await commandRegistry.executeCommand("audit.toggleDependents");
     await commandRegistry.executeCommand("edit.editCell");
     await commandRegistry.executeCommand("edit.selectCurrentRegion");
     expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
+    expect(app.setShowFormulas).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
     expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
     expect(app.openCellEditorAtActiveCell).toHaveBeenCalledTimes(1);

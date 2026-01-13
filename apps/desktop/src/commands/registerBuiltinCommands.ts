@@ -411,9 +411,13 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "view.toggleShowFormulas",
     t("command.view.toggleShowFormulas"),
-    () => {
+    (next?: boolean) => {
       if (app.isEditing()) return;
       if (getTextEditingTarget()) return;
+      if (typeof next === "boolean") {
+        app.setShowFormulas(next);
+        return;
+      }
       app.toggleShowFormulas();
     },
     {
