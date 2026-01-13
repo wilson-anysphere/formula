@@ -1,4 +1,70 @@
-export type Attachment = { type: "range" | "formula" | "table" | "chart"; reference: string; data?: any };
+import type { SheetSchema } from "./schema.js";
+import type { TokenEstimator } from "./tokenBudget.js";
+
+export type Attachment = { type: "range" | "formula" | "table" | "chart"; reference: string; data?: unknown };
+
+export interface RetrievedSheetChunk {
+  range: string;
+  score: number;
+  preview: string;
+}
+
+export interface WorkbookChunkDlpInfo {
+  level: string;
+  findings: string[];
+}
+
+export interface RetrievedWorkbookChunk {
+  id: string;
+  score: number;
+  metadata: Record<string, unknown>;
+  text: string;
+  dlp: WorkbookChunkDlpInfo;
+}
+
+export interface BuildContextResult {
+  schema: SheetSchema;
+  retrieved: RetrievedSheetChunk[];
+  sampledRows: unknown[][];
+  promptContext: string;
+}
+
+export interface BuildWorkbookContextResult {
+  indexStats: unknown | null;
+  retrieved: RetrievedWorkbookChunk[];
+  promptContext: string;
+}
+
+/**
+ * DLP configuration and inputs for ContextManager.
+ *
+ * Note: ContextManager accepts both camelCase and snake_case field names for
+ * compatibility with a variety of hosts.
+ */
+export interface DlpOptions {
+  documentId?: string;
+  document_id?: string;
+  sheetId?: string;
+  sheet_id?: string;
+  /**
+   * Policy object passed through to `packages/security/dlp`.
+   *
+   * Kept intentionally generic to avoid cross-package type coupling.
+   */
+  policy?: unknown;
+  classificationRecords?: Array<{ selector: unknown; classification: unknown }>;
+  classification_records?: Array<{ selector: unknown; classification: unknown }>;
+  classificationStore?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
+  classification_store?: { list(documentId: string): Array<{ selector: unknown; classification: unknown }> };
+  includeRestrictedContent?: boolean;
+  include_restricted_content?: boolean;
+  auditLogger?: { log(event: any): void };
+  /**
+   * Optional sheet name <-> id resolver used for structured DLP enforcement.
+   */
+  sheetNameResolver?: { getSheetIdByName(name: string): string | null | undefined };
+  sheet_name_resolver?: { getSheetIdByName(name: string): string | null | undefined };
+}
 
 export type WorkbookRagOptions = {
   vectorStore: any;
@@ -13,40 +79,6 @@ export type WorkbookRagOptions = {
   topK?: number;
   sampleRows?: number;
 };
-
-/**
- * DLP options accepted by ContextManager methods.
- *
- * Both camelCase and snake_case field names are supported so callers can pass options
- * deserialized from JSON or from non-TS hosts.
- */
-export type DlpOptions = {
-  // Required identifiers (at least one form should be provided).
-  documentId?: string;
-  document_id?: string;
-
-  // Single-sheet contexts may provide a stable sheet id.
-  sheetId?: string;
-  sheet_id?: string;
-
-  policy?: any;
-
-  classificationRecords?: Array<{ selector: any; classification: any }>;
-  classification_records?: Array<{ selector: any; classification: any }>;
-  classificationStore?: { list(documentId: string): Array<{ selector: any; classification: any }> };
-  classification_store?: { list(documentId: string): Array<{ selector: any; classification: any }> };
-
-  includeRestrictedContent?: boolean;
-  include_restricted_content?: boolean;
-
-  auditLogger?: { log(event: any): void };
-
-  sheetNameResolver?: any;
-  sheet_name_resolver?: any;
-};
-
-import type { TokenEstimator } from "./tokenBudget.js";
-
 export class ContextManager {
   constructor(options?: {
     tokenBudgetTokens?: number;
@@ -91,7 +123,7 @@ export class ContextManager {
     limits?: { maxContextRows?: number; maxContextCells?: number; maxChunkRows?: number };
     signal?: AbortSignal;
     dlp?: DlpOptions;
-  }): Promise<{ schema: any; retrieved: any[]; sampledRows: any[]; promptContext: string }>;
+  }): Promise<BuildContextResult>;
 
   buildWorkbookContext(params: {
     workbook: any;
@@ -103,7 +135,7 @@ export class ContextManager {
     includePromptContext?: boolean;
     signal?: AbortSignal;
     dlp?: DlpOptions;
-  }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
+  }): Promise<BuildWorkbookContextResult>;
 
   buildWorkbookContextFromSpreadsheetApi(params: {
     spreadsheet: any;
@@ -116,5 +148,5 @@ export class ContextManager {
     includePromptContext?: boolean;
     signal?: AbortSignal;
     dlp?: DlpOptions;
-  }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
+  }): Promise<BuildWorkbookContextResult>;
 }
