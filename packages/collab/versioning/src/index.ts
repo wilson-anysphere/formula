@@ -36,6 +36,29 @@ export type VersionStore = {
   deleteVersion(versionId: string): Promise<void>;
 };
 
+export type DefaultYjsVersionStoreOptions = {
+  /**
+   * Controls how snapshot blobs are written into the collaborative Y.Doc.
+   *
+   * - `"single"` writes the full snapshot in a single Yjs transaction/update
+   *   (legacy behavior; can exceed websocket message size limits for large docs).
+   * - `"stream"` appends snapshot chunks across multiple transactions/updates so
+   *   each update stays small.
+   */
+  writeMode?: "single" | "stream";
+  /**
+   * Snapshot chunk size in bytes when storing as `snapshotChunks`.
+   */
+  chunkSize?: number;
+  /**
+   * Maximum number of chunks appended per Yjs transaction when `writeMode:
+   * "stream"`.
+   */
+  maxChunksPerTransaction?: number | null;
+  compression?: "none" | "gzip";
+  snapshotEncoding?: "chunks" | "base64";
+};
+
 function isYMapLike(value: unknown): value is {
   get: (...args: any[]) => any;
   set: (...args: any[]) => any;
@@ -79,6 +102,12 @@ export type CollabVersioningOptions = {
    * inside the collaborative Yjs document and syncs via sync-server/y-websocket.
    */
   store?: VersionStore;
+  /**
+   * Options used when constructing the default {@link YjsVersionStore}.
+   *
+   * This is ignored when `store` is provided.
+   */
+  yjsStoreOptions?: DefaultYjsVersionStoreOptions;
   user?: Partial<CollabVersioningUser>;
   retention?: VersionRetention;
   autoSnapshotIntervalMs?: number;
@@ -114,7 +143,41 @@ export class CollabVersioning {
   constructor(opts: CollabVersioningOptions) {
     this.session = opts.session;
 
-    const store = opts.store ?? new YjsVersionStore({ doc: opts.session.doc });
+    const store =
+      opts.store ??
+      (() => {
+        // Default to streaming snapshot writes so large version snapshots are
+        // split across many small Yjs updates. This creates more Yjs transactions
+        // (and therefore more websocket messages), but avoids catastrophic
+        // message-size failures (WS close code 1009) when snapshots exceed the
+        // sync-server's `SYNC_SERVER_MAX_MESSAGE_BYTES`.
+        const DEFAULT_CHUNK_SIZE_BYTES = 64 * 1024;
+        const DEFAULT_TARGET_UPDATE_BYTES = 512 * 1024;
+        const DEFAULT_MAX_CHUNKS = 16;
+
+        const userOpts = opts.yjsStoreOptions ?? {};
+        const chunkSize = userOpts.chunkSize ?? DEFAULT_CHUNK_SIZE_BYTES;
+
+        // Keep each streamed update comfortably below typical sync-server message limits
+        // while avoiding excessively chatty streams for very large docs.
+        const defaultMaxChunksPerTransaction = Math.max(
+          1,
+          Math.min(DEFAULT_MAX_CHUNKS, Math.floor(DEFAULT_TARGET_UPDATE_BYTES / Math.max(1, chunkSize))),
+        );
+
+        const maxChunksPerTransaction =
+          userOpts.maxChunksPerTransaction === undefined
+            ? defaultMaxChunksPerTransaction
+            : userOpts.maxChunksPerTransaction;
+
+        return new YjsVersionStore({
+          doc: opts.session.doc,
+          ...userOpts,
+          writeMode: userOpts.writeMode ?? "stream",
+          chunkSize,
+          maxChunksPerTransaction,
+        });
+      })();
 
     // CollabVersioning snapshots/restores should only affect user workbook state,
     // not internal collaboration metadata stored inside the same Y.Doc.
