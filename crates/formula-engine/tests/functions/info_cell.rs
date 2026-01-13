@@ -1279,6 +1279,10 @@ fn info_exposes_host_provided_metadata() {
         totmem: Some(5678.0),
         ..EngineInfo::default()
     });
+    // INFO("origin") is driven by worksheet view state (scroll position). Default is "$A$1".
+    // Set a sheet-specific origin to verify per-sheet overrides.
+    engine.set_cell_value("Sheet2", "B1", 0.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 0.0).unwrap();
     engine.set_sheet_origin("Sheet1", Some("$C$3")).unwrap();
     engine.set_sheet_origin("Sheet2", Some("$B$2")).unwrap();
     engine.recalculate_single_threaded();

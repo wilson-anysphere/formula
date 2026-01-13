@@ -198,13 +198,19 @@ pub(crate) fn midb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value
 }
 
 pub(crate) fn lenb_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    // Excel's `LENB` only diverges from `LEN` in DBCS locales. For single-byte locales/codepages
-    // (including the engine default: 1252 / en-US), `LENB` behaves like `LEN`.
-    if !is_dbcs_codepage(ctx.text_codepage()) {
+    let codepage = ctx.text_codepage();
+    // Excel's `*B` byte-count text functions are only meaningful in DBCS locales. In single-byte
+    // locales, they are defined to behave identically to their non-`B` equivalents.
+    //
+    // The engine approximates this by gating byte-count behavior on the workbook legacy text
+    // codepage. Only classic DBCS codepages (Japanese/Chinese/Korean) opt into byte counting.
+    //
+    // This avoids surprising behavior for Unicode-only strings under single-byte locales like
+    // en-US (e.g. `LENB("漢")` should match `LEN("漢")`).
+    if !is_dbcs_codepage(codepage) {
         return call_function(ctx, "LEN", args);
     }
 
-    let codepage = ctx.text_codepage();
     let text = array_lift::eval_arg(ctx, &args[0]);
     array_lift::lift1(text, |text| {
         let s = text.coerce_to_string_with_ctx(ctx)?;

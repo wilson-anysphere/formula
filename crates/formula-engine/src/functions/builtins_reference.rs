@@ -580,9 +580,10 @@ fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         crate::eval::Expr::CellRef(_) | crate::eval::Expr::RangeRef(_) => {
             let mut resolve_sheet = |name: &str| {
                 // Avoid interpreting bracketed external sheet keys like `"[Book.xlsx]Sheet1"` as a
-                // local sheet name (a workbook could contain such a sheet name). External workbook
-                // refs are represented separately by the parser/lowerer and do not go through this
-                // resolver.
+                // local sheet name (a workbook could contain such a sheet name).
+                //
+                // Note: `INDIRECT` does not resolve external workbook references (Excel semantics),
+                // so these will still produce `#REF!`.
                 if name.starts_with('[') {
                     return None;
                 }

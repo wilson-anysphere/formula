@@ -357,6 +357,10 @@ fn lex_disambiguates_dot_between_decimal_and_thousands_grouping_in_comma_decimal
     for locale in [LocaleConfig::de_de(), LocaleConfig::es_es()] {
         let mut opts = ParseOptions::default();
         opts.locale = locale;
+
+        let tokens = lex("1.5", &opts).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == "1.5"));
+        assert!(matches!(tokens.last().unwrap().kind, TokenKind::Eof));
         let tokens = lex("1.234", &opts).unwrap();
 
         assert!(matches!(tokens[0].kind, TokenKind::Number(ref n) if n == "1234"));

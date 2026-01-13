@@ -4024,7 +4024,6 @@ fn split_external_sheet_name(name: &str) -> (Option<String>, String) {
         }
         return (Some(book.to_string()), sheet.to_string());
     }
-
     let bytes = name.as_bytes();
     let mut i = 0usize;
     let mut best: Option<(usize, usize)> = None; // (start, end) where end is exclusive of the closing `]`

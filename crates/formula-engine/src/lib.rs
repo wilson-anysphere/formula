@@ -92,6 +92,7 @@ pub use parser::{
     lex, lex_partial, parse_formula_partial, FunctionContext, ParseContext, PartialLex,
     PartialParse, Token, TokenKind,
 };
+pub use metadata::FormatRun;
 pub use perf::{run_benchmarks, BenchmarkResult};
 pub use value::{Entity, ErrorKind, Record, Value};
 

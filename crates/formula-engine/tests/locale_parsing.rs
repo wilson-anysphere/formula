@@ -278,6 +278,12 @@ fn localize_emits_locale_decimal_separator_for_canonical_leading_decimal() {
 }
 
 #[test]
+fn canonicalize_supports_canonical_dot_decimal_in_de_de() {
+    let canonical = locale::canonicalize_formula("=SUMME(1.5;2)", &locale::DE_DE).unwrap();
+    assert_eq!(canonical, "=SUM(1.5,2)");
+}
+
+#[test]
 fn canonicalize_and_localize_array_literals_for_de_de() {
     let localized = "=SUMME({1\\2;3\\4})";
     let canonical = locale::canonicalize_formula(localized, &locale::DE_DE).unwrap();

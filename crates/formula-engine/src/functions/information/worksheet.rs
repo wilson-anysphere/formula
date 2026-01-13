@@ -406,7 +406,8 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             //
             // Mirror `get_cell_value` bounds behavior: out-of-bounds references should surface
             // `#REF!` rather than defaulting to a sheet/Excel width fallback.
-            let (rows, cols) = ctx.sheet_dimensions(&reference.sheet_id);
+            let sheet_id = &reference.sheet_id;
+            let (rows, cols) = ctx.sheet_dimensions(sheet_id);
             if addr.row >= rows || addr.col >= cols {
                 return Value::Error(ErrorKind::Ref);
             }
@@ -421,14 +422,14 @@ pub fn cell(ctx: &dyn FunctionContext, info_type: &str, reference: Option<Refere
             const EXCEL_STANDARD_COL_WIDTH: f64 = 8.43;
             const EXCEL_EXPLICIT_WIDTH_MARKER: f64 = 0.1;
 
-            let props = ctx.col_properties(&reference.sheet_id, addr.col);
+            let props = ctx.col_properties(sheet_id, addr.col);
             if props.as_ref().is_some_and(|p| p.hidden) {
                 return Value::Number(0.0);
             }
 
             let (width, is_custom) = match props.and_then(|p| p.width) {
                 Some(w) => (w as f64, true),
-                None => match ctx.sheet_default_col_width(&reference.sheet_id) {
+                None => match ctx.sheet_default_col_width(sheet_id) {
                     Some(w) => (w as f64, false),
                     None => (EXCEL_STANDARD_COL_WIDTH, false),
                 },
