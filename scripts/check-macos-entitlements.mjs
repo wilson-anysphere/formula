@@ -187,19 +187,32 @@ function main() {
 
   // Hardened Runtime + WKWebView (wry) commonly require these two entitlements
   // for JavaScript/WASM execution in signed/notarized builds.
+  //
+  // We also require outbound network entitlement so that if/when we enable the App Sandbox,
+  // core app functionality (updater, HTTPS fetches) doesn't break silently.
   const required = [
-    "com.apple.security.cs.allow-jit",
-    "com.apple.security.cs.allow-unsigned-executable-memory",
+    {
+      key: "com.apple.security.cs.allow-jit",
+      reason: "WKWebView/JavaScriptCore JIT (blank WebView/crash if missing under hardened runtime).",
+    },
+    {
+      key: "com.apple.security.cs.allow-unsigned-executable-memory",
+      reason: "WKWebView/JavaScriptCore JIT executable memory (required for JS/WASM).",
+    },
+    {
+      key: "com.apple.security.network.client",
+      reason:
+        "Outbound network access (required for updater/HTTPS when sandboxing is enabled).",
+    },
   ];
 
-  const missing = required.filter((key) => !hasTrueEntitlement(xml, key));
+  const missing = required.filter(({ key }) => !hasTrueEntitlement(xml, key));
   if (missing.length > 0) {
     errBlock(`Invalid macOS entitlements (${relativeEntitlementsPath})`, [
-      `Missing required hardened-runtime JIT entitlements:`,
-      ...missing.map((key) => key),
+      `Missing required entitlement(s) (must be present and set to <true/>):`,
+      ...missing.map(({ key, reason }) => `${key} — ${reason}`),
       ``,
-      `These are required for WKWebView/JavaScriptCore (including WebAssembly) to run reliably under the hardened runtime.`,
-      `A common symptom is a signed/notarized build launching with a blank window.`,
+      `Common symptom for missing WKWebView JIT entitlements: a signed/notarized build launches with a blank window.`,
     ]);
   }
 
