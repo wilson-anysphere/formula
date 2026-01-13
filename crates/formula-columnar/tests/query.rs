@@ -677,6 +677,83 @@ fn group_by_var_and_stddev_sample_vs_population_semantics() {
 }
 
 #[test]
+fn group_by_distinct_count_boolean_and_datetime_types() {
+    // Boolean distinct count.
+    let schema_bool = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "b".to_owned(),
+            column_type: ColumnType::Boolean,
+        },
+    ];
+    let rows_bool = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::Boolean(true)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Boolean(false)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Boolean(true)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("C")), Value::Boolean(false)],
+    ];
+    let table_bool = build_table(schema_bool, rows_bool);
+    let result_bool = table_bool
+        .group_by(&[0], &[AggSpec::distinct_count(1)])
+        .unwrap()
+        .to_values();
+    let mut lookup_bool = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result_bool[0].len() {
+        let k = match &result_bool[0][r] {
+            Value::String(s) => s.as_ref().to_owned(),
+            Value::Null => "<null>".to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup_bool.insert(k, result_bool[1][r].clone());
+    }
+    assert_eq!(lookup_bool.get("A"), Some(&Value::Number(2.0)));
+    assert_eq!(lookup_bool.get("B"), Some(&Value::Number(0.0)));
+    assert_eq!(lookup_bool.get("C"), Some(&Value::Number(1.0)));
+
+    // DateTime (int-backed) distinct count.
+    let schema_dt = vec![
+        ColumnSchema {
+            name: "k".to_owned(),
+            column_type: ColumnType::String,
+        },
+        ColumnSchema {
+            name: "t".to_owned(),
+            column_type: ColumnType::DateTime,
+        },
+    ];
+    let rows_dt = vec![
+        vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+        vec![Value::String(Arc::<str>::from("A")), Value::DateTime(1)],
+        vec![Value::String(Arc::<str>::from("A")), Value::DateTime(2)],
+        vec![Value::String(Arc::<str>::from("A")), Value::Null],
+        vec![Value::String(Arc::<str>::from("B")), Value::Null],
+        vec![Value::String(Arc::<str>::from("C")), Value::DateTime(-7)],
+    ];
+    let table_dt = build_table(schema_dt, rows_dt);
+    let result_dt = table_dt
+        .group_by(&[0], &[AggSpec::distinct_count(1)])
+        .unwrap()
+        .to_values();
+    let mut lookup_dt = std::collections::HashMap::<String, Value>::new();
+    for r in 0..result_dt[0].len() {
+        let k = match &result_dt[0][r] {
+            Value::String(s) => s.as_ref().to_owned(),
+            Value::Null => "<null>".to_owned(),
+            other => format!("{other:?}"),
+        };
+        lookup_dt.insert(k, result_dt[1][r].clone());
+    }
+    assert_eq!(lookup_dt.get("A"), Some(&Value::Number(2.0)));
+    assert_eq!(lookup_dt.get("B"), Some(&Value::Number(0.0)));
+    assert_eq!(lookup_dt.get("C"), Some(&Value::Number(1.0)));
+}
+
+#[test]
 fn hash_join_handles_duplicate_keys() {
     let schema = vec![ColumnSchema {
         name: "k".to_owned(),
