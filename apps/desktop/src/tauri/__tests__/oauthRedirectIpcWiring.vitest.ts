@@ -120,7 +120,7 @@ describe("oauthRedirectIpc wiring", () => {
     const code = stripComments(source);
 
     // 1) Ensure we listen for Rust -> JS oauth redirect events.
-    expect(code).toMatch(/\blisten\s*(?:<[^>]*>)?\s*\(\s*["']oauth-redirect["']/);
+    expect(code).toMatch(/\blisten\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["']/);
 
     // 2) Ensure we only emit readiness after the listener promise resolves.
     // Accept `const x = listen("oauth-redirect", ...); x.then(() => emit("oauth-redirect-ready"))`
@@ -130,7 +130,7 @@ describe("oauthRedirectIpc wiring", () => {
 
     const escapeForRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const assignment =
-      /^(?:\s*)(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*(?:<[^>]*>)?\s*\(\s*["']oauth-redirect["']/m.exec(
+      /^(?:\s*)(?:const|let|var)\s+(\w+)(?:\s*:\s*[^=]+)?\s*=\s*listen\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["']/m.exec(
         code,
       );
     if (assignment) {
@@ -161,18 +161,18 @@ describe("oauthRedirectIpc wiring", () => {
     } else {
       // Fallback for inlined promise chaining / top-level await.
       const hasThen =
-        /\blisten\s*(?:<[^>]*>)?\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*[^)]*\)\s*=>|\w+\s*=>|function\s*\(\s*[^)]*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
+        /\blisten\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*\.?\s*then\s*\(\s*(?:async\s*)?(?:\(\s*[^)]*\)\s*=>|\w+\s*=>|function\s*\(\s*[^)]*\))[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
           code,
         );
       const hasAwait =
-        /await\s+listen\s*(?:<[^>]*>)?\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*;?[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
+        /await\s+listen\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["'][\s\S]{0,750}?\)\s*;?[\s\S]{0,750}?\bemit\s*(?:\?\.)?\s*\(\s*["']oauth-redirect-ready["']/.test(
           code,
         );
       expect(hasThen || hasAwait).toBe(true);
     }
 
     // 3) Ensure the listener forwards the payload into the OAuth broker.
-    const listenCall = /\blisten\s*(?:<[^>]*>)?\s*\(\s*["']oauth-redirect["']/.exec(code);
+    const listenCall = /\blisten\s*(?:<[^\n]*>)?\s*\(\s*["']oauth-redirect["']/.exec(code);
     expect(listenCall).toBeTruthy();
     if (listenCall) {
       const openParen = code.indexOf("(", listenCall.index);
