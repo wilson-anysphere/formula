@@ -102,6 +102,33 @@ fn measure_respects_filter_propagation_across_relationships() {
 }
 
 #[test]
+fn filter_context_supports_multi_value_column_filters() {
+    let mut model = build_model();
+    model
+        .add_measure("Total Sales", "SUM(Orders[Amount])")
+        .unwrap();
+
+    let empty_total = model
+        .evaluate_measure("Total Sales", &FilterContext::empty())
+        .unwrap();
+
+    // Customers[Region] IN {"East","West"} includes all rows in the dimension table, so it should
+    // yield the same result as an empty filter context.
+    let all_regions_filter = FilterContext::empty().with_column_in(
+        "Customers",
+        "Region",
+        [Value::from("East"), Value::from("West")],
+    );
+    let all_regions_total = model.evaluate_measure("Total Sales", &all_regions_filter).unwrap();
+    assert_eq!(all_regions_total, empty_total);
+
+    let east_filter =
+        FilterContext::empty().with_column_in("Customers", "Region", [Value::from("East")]);
+    let east_total = model.evaluate_measure("Total Sales", &east_filter).unwrap();
+    assert_eq!(east_total, Value::from(38.0));
+}
+
+#[test]
 fn calculate_overrides_existing_column_filters() {
     let mut model = build_model();
     model

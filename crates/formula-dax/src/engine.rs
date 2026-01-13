@@ -98,11 +98,37 @@ impl FilterContext {
         self
     }
 
+    pub fn with_column_in(
+        mut self,
+        table: &str,
+        column: &str,
+        values: impl IntoIterator<Item = Value>,
+    ) -> Self {
+        self.set_column_in(table, column, values);
+        self
+    }
+
     pub fn set_column_equals(&mut self, table: &str, column: &str, value: Value) {
         self.column_filters.insert(
             (table.to_string(), column.to_string()),
             HashSet::from([value]),
         );
+    }
+
+    pub fn set_column_in(
+        &mut self,
+        table: &str,
+        column: &str,
+        values: impl IntoIterator<Item = Value>,
+    ) {
+        self.column_filters.insert(
+            (table.to_string(), column.to_string()),
+            values.into_iter().collect(),
+        );
+    }
+
+    pub fn clear_column_filter_public(&mut self, table: &str, column: &str) {
+        self.clear_column_filter(table, column);
     }
 
     fn activate_relationship(&mut self, relationship_idx: usize) {
