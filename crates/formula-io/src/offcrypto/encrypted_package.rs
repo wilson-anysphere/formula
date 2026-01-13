@@ -87,26 +87,41 @@ pub fn decrypt_standard_encrypted_package_stream(
         return Ok(Vec::new());
     }
 
-    let orig_size_usize = usize::try_from(orig_size)
-        .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
-
-    // Guardrail: the encrypted package stream carries the original size separately, so avoid
-    // allocating based on obviously bogus metadata.
-    if orig_size > (ciphertext.len() as u64).saturating_add(AES_BLOCK_LEN as u64) {
-        return Err(EncryptedPackageError::ImplausibleOrigSize {
-            orig_size,
-            ciphertext_len: ciphertext.len(),
-        });
-    }
-
     if ciphertext.len() % AES_BLOCK_LEN != 0 {
         return Err(EncryptedPackageError::CiphertextLenNotBlockAligned {
             ciphertext_len: ciphertext.len(),
         });
     }
 
+    let orig_size_usize = usize::try_from(orig_size)
+        .map_err(|_| EncryptedPackageError::OrigSizeTooLargeForPlatform { orig_size })?;
+
+    // Guardrail: `EncryptedPackage` carries the original plaintext size separately. Treat inputs as
+    // malformed when the ciphertext is too short to possibly contain `orig_size` bytes (accounting
+    // for AES block padding).
+    //
+    // This prevents:
+    // - panics from segment math/slicing when the length header is corrupt
+    // - OOM from allocating based on attacker-controlled `orig_size`
+    let expected_min_ciphertext_len = orig_size
+        .checked_add((AES_BLOCK_LEN - 1) as u64)
+        .and_then(|v| v.checked_div(AES_BLOCK_LEN as u64))
+        .and_then(|blocks| blocks.checked_mul(AES_BLOCK_LEN as u64))
+        .ok_or(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        })?;
+    if (ciphertext.len() as u64) < expected_min_ciphertext_len {
+        return Err(EncryptedPackageError::ImplausibleOrigSize {
+            orig_size,
+            ciphertext_len: ciphertext.len(),
+        });
+    }
+
     // Decrypt segment-by-segment until we have produced `orig_size` bytes (or run out of input).
-    let mut out = Vec::with_capacity(orig_size_usize);
+    //
+    // Allocate based on ciphertext length (bounded by input size), not the untrusted `orig_size`.
+    let mut out = Vec::with_capacity(ciphertext.len());
     let mut offset = 0usize;
     let mut segment_index: u32 = 0;
     while offset < ciphertext.len() && out.len() < orig_size_usize {
@@ -316,6 +331,26 @@ mod tests {
         assert_eq!(
             err,
             EncryptedPackageError::CiphertextLenNotBlockAligned { ciphertext_len: 15 }
+        );
+    }
+
+    #[test]
+    fn errors_when_length_header_exceeds_ciphertext() {
+        let key = fixed_key_16();
+        let salt = fixed_salt_16();
+
+        // orig_size claims 32 bytes, but we only have 16 bytes of ciphertext.
+        let mut encrypted = Vec::new();
+        encrypted.extend_from_slice(&(32u64).to_le_bytes());
+        encrypted.extend_from_slice(&[0u8; 16]);
+
+        let err = decrypt_standard_encrypted_package_stream(&encrypted, &key, &salt).unwrap_err();
+        assert_eq!(
+            err,
+            EncryptedPackageError::ImplausibleOrigSize {
+                orig_size: 32,
+                ciphertext_len: 16
+            }
         );
     }
 }
