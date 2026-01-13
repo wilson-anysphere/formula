@@ -902,7 +902,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Keep Node pinned to the same major used by CI/release workflows.
+          node-version: 22
       - run: npm ci
       - run: npm run test:unit
       - uses: codecov/codecov-action@v3
