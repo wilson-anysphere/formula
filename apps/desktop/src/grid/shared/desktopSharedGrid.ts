@@ -13,10 +13,9 @@ import {
   applySrOnlyStyle,
   CanvasGridRenderer,
   computeScrollbarThumb,
+  describeActiveCellLabel,
   describeCell,
-  formatCellDisplayText,
   resolveGridThemeFromCssVars,
-  toA1Address
 } from "@formula/grid";
 
 import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
@@ -480,15 +479,7 @@ export class DesktopSharedGrid {
     this.a11yActiveCellEl.setAttribute("aria-selected", "true");
     this.container.setAttribute("aria-activedescendant", this.a11yActiveCellId);
 
-    const row0 = selection.row - this.headerRows;
-    const col0 = selection.col - this.headerCols;
-    const address =
-      row0 >= 0 && col0 >= 0 ? toA1Address(row0, col0) : `row ${selection.row + 1}, column ${selection.col + 1}`;
-
-    const cell = this.provider.getCell(selection.row, selection.col);
-    const valueText = formatCellDisplayText(cell?.value ?? null);
-    const valueDescription = valueText.trim() === "" ? "blank" : valueText;
-    this.a11yActiveCellEl.textContent = `Cell ${address}, value ${valueDescription}.`;
+    this.a11yActiveCellEl.textContent = describeActiveCellLabel(selection, this.provider, this.headerRows, this.headerCols) ?? "";
   }
 
   private emitScroll(): void {

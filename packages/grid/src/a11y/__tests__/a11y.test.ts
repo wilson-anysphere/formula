@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CellProvider } from "../../model/CellProvider";
-import { describeCell, toA1Address, toColumnName } from "../a11y";
+import { describeActiveCellLabel, describeCell, toA1Address, toColumnName } from "../a11y";
 
 describe("a11y helpers", () => {
   it("converts 0-based columns to Excel names", () => {
@@ -34,6 +34,7 @@ describe("a11y helpers", () => {
     };
 
     expect(describeCell({ row: 1, col: 1 }, null, provider, 1, 1)).toBe("Active cell A1, value hello. Selection none.");
+    expect(describeActiveCellLabel({ row: 1, col: 1 }, provider, 1, 1)).toBe("Cell A1, value hello.");
   });
 
   it("describes a range selection as A1:B2", () => {

@@ -24,6 +24,34 @@ export function toA1Address(row0: number, col0: number): string {
   return `${toColumnName(col0)}${row0 + 1}`;
 }
 
+/**
+ * A short label for the active gridcell element (used with `aria-activedescendant`).
+ *
+ * This intentionally differs from {@link describeCell} which includes selection-range context
+ * for the live region.
+ */
+export function describeActiveCellLabel(
+  selection: { row: number; col: number } | null,
+  provider: CellProvider,
+  headerRows: number,
+  headerCols: number
+): string | null {
+  if (!selection) return null;
+
+  const row0 = selection.row - headerRows;
+  const col0 = selection.col - headerCols;
+  const address =
+    row0 >= 0 && col0 >= 0 ? toA1Address(row0, col0) : `row ${selection.row + 1}, column ${selection.col + 1}`;
+
+  const cell = provider.getCell(selection.row, selection.col);
+  let valueText = formatCellDisplayText(cell?.value ?? null);
+  if (valueText.trim() === "" && cell?.image) {
+    valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
+  }
+  const valueDescription = valueText.trim() === "" ? "blank" : valueText;
+  return `Cell ${address}, value ${valueDescription}.`;
+}
+
 export function describeCell(
   selection: { row: number; col: number } | null,
   range: CellRange | null,

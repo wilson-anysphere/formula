@@ -34,6 +34,7 @@ export type { GridViewportState } from "./virtualization/VirtualScrollManager.ts
 export {
   SR_ONLY_STYLE,
   applySrOnlyStyle,
+  describeActiveCellLabel,
   describeCell,
   formatCellDisplayText,
   toA1Address,

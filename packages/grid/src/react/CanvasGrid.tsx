@@ -13,7 +13,7 @@ import type { FillMode } from "../interaction/fillHandle";
 import { computeScrollbarThumb } from "../virtualization/scrollbarMath";
 import type { GridViewportState } from "../virtualization/VirtualScrollManager";
 import { wheelDeltaToPixels } from "./wheelDeltaToPixels";
-import { describeCell, formatCellDisplayText, SR_ONLY_STYLE, toA1Address } from "../a11y/a11y";
+import { describeActiveCellLabel, describeCell, SR_ONLY_STYLE } from "../a11y/a11y";
 
 export type ScrollToCellAlign = "auto" | "start" | "center" | "end";
 
@@ -400,20 +400,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     setA11yActiveCell((prev) => {
       if (!selection) return prev === null ? prev : null;
 
-      const row0 = selection.row - headerRowsRef.current;
-      const col0 = selection.col - headerColsRef.current;
-      const address =
-        row0 >= 0 && col0 >= 0
-          ? toA1Address(row0, col0)
-          : `row ${selection.row + 1}, column ${selection.col + 1}`;
-
-      const cell = providerRef.current.getCell(selection.row, selection.col);
-      let valueText = formatCellDisplayText(cell?.value ?? null);
-      if (valueText.trim() === "" && cell?.image) {
-        valueText = cell.image.altText?.trim() ? cell.image.altText : "[Image]";
-      }
-      const valueDescription = valueText.trim() === "" ? "blank" : valueText;
-      const label = `Cell ${address}, value ${valueDescription}.`;
+      const label = describeActiveCellLabel(
+        selection,
+        providerRef.current,
+        headerRowsRef.current,
+        headerColsRef.current
+      );
+      if (!label) return prev === null ? prev : null;
 
       if (prev && prev.row === selection.row && prev.col === selection.col && prev.label === label) return prev;
       return { row: selection.row, col: selection.col, label };

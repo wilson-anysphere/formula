@@ -48,6 +48,7 @@ export type { GridPlaceholderProps } from "./GridPlaceholder";
 export {
   SR_ONLY_STYLE,
   applySrOnlyStyle,
+  describeActiveCellLabel,
   describeCell,
   formatCellDisplayText,
   toA1Address,
