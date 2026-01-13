@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::{Mutex, Notify};
+use tokio::time::{timeout, Duration, Instant};
 
 use crate::ipc_origin;
 use crate::updater_download_cache::UpdaterDownloadCache;
@@ -314,6 +315,10 @@ pub async fn install_downloaded_update(window: tauri::WebviewWindow) -> Result<(
     ipc_origin::ensure_trusted_origin(&url, "update installation", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "update installation", ipc_origin::Verb::Is)?;
 
+    // Avoid hanging the IPC handler indefinitely if the background download never resolves.
+    const WAIT_TIMEOUT: Duration = Duration::from_secs(60);
+    let start = Instant::now();
+
     loop {
         // Create the wait handle *before* checking state so we can't miss a `notify_waiters()`
         // that happens between observing `in_flight` and calling `.notified().await`.
@@ -370,6 +375,14 @@ pub async fn install_downloaded_update(window: tauri::WebviewWindow) -> Result<(
             return result;
         }
 
-        notified.await;
+        let remaining = WAIT_TIMEOUT
+            .checked_sub(start.elapsed())
+            .unwrap_or(Duration::ZERO);
+        if remaining.is_zero() {
+            return Err("Timed out waiting for a downloaded update".to_string());
+        }
+        timeout(remaining, notified)
+            .await
+            .map_err(|_| "Timed out waiting for a downloaded update".to_string())?;
     }
 }

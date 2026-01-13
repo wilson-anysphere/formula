@@ -110,6 +110,5 @@ pub fn set_tray_status(
     ipc_origin::ensure_main_window(window.label(), "tray status", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_trusted_origin(&url, "tray status", ipc_origin::Verb::Is)?;
     ipc_origin::ensure_stable_origin(&window, "tray status", ipc_origin::Verb::Is)?;
-
     state.inner().update_status(&status)
 }

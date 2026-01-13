@@ -7263,11 +7263,10 @@ pub fn check_for_updates(
     source: crate::updater::UpdateCheckSource,
 ) -> Result<(), String> {
     use tauri::Manager as _;
-    ipc_origin::ensure_main_window_and_stable_origin(
-        &window,
-        "update checks",
-        ipc_origin::Verb::Are,
-    )?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "update checks", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_trusted_origin(&url, "update checks", ipc_origin::Verb::Are)?;
+    ipc_origin::ensure_stable_origin(&window, "update checks", ipc_origin::Verb::Are)?;
 
     let app = window.app_handle();
     crate::updater::spawn_update_check(&app, source);
@@ -7324,7 +7323,10 @@ pub fn quit_app(window: tauri::WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn restart_app(window: tauri::WebviewWindow) -> Result<(), String> {
     use tauri::Manager as _;
-    ipc_origin::ensure_main_window_and_stable_origin(&window, "app lifecycle", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_main_window(window.label(), "app lifecycle", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_trusted_origin(&url, "app lifecycle", ipc_origin::Verb::Is)?;
+    ipc_origin::ensure_stable_origin(&window, "app lifecycle", ipc_origin::Verb::Is)?;
 
     let app = window.app_handle();
     // For update flows we need a graceful shutdown so Tauri and its plugins (notably
