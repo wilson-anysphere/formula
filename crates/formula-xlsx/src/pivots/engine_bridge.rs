@@ -240,6 +240,31 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
+    fn map_show_data_as_handles_known_strings_case_insensitively() {
+        let cases = [
+            ("normal", Some(ShowAsType::Normal)),
+            ("Normal", Some(ShowAsType::Normal)),
+            ("percentOfGrandTotal", Some(ShowAsType::PercentOfGrandTotal)),
+            ("PERCENTOFGRANDTOTAL", Some(ShowAsType::PercentOfGrandTotal)),
+            ("percentOfRowTotal", Some(ShowAsType::PercentOfRowTotal)),
+            ("percentOfColumnTotal", Some(ShowAsType::PercentOfColumnTotal)),
+            ("percentOf", Some(ShowAsType::PercentOf)),
+            ("percentDifferenceFrom", Some(ShowAsType::PercentDifferenceFrom)),
+            ("runningTotal", Some(ShowAsType::RunningTotal)),
+            ("rankAscending", Some(ShowAsType::RankAscending)),
+            ("rankDescending", Some(ShowAsType::RankDescending)),
+            ("unknownValue", None),
+            ("", None),
+            ("   ", None),
+        ];
+
+        for (raw, expected) in cases {
+            assert_eq!(map_show_data_as(Some(raw)), expected, "showDataAs={raw:?}");
+        }
+        assert_eq!(map_show_data_as(None), None);
+    }
+
+    #[test]
     fn maps_show_data_as_percent_of_grand_total() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
