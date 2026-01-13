@@ -3770,7 +3770,8 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     } else {
         false
     };
-    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
+    let patch_is_rich_value_placeholder =
+        matches!(&patch.value, CellValue::Error(ErrorValue::Value));
 
     let value_eq = if drop_vm_on_value_change {
         cell_value_semantics_eq(

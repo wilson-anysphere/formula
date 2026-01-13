@@ -442,6 +442,7 @@ fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, Xlsx
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
+    let mut inner_buf = Vec::new();
 
     let mut available_items = Vec::new();
     let mut seen_items: HashSet<String> = HashSet::new();
@@ -454,7 +455,13 @@ fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, Xlsx
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"slicerCacheItem") {
-                    let (key, selected, saw_attr) = parse_slicer_cache_item(&start)?;
+                    // Some third-party generators nest the item key as text (often within a `<t>`
+                    // element) rather than persisting a `name`/`n` attribute. Consume the element
+                    // and treat the first nested text node as the key if no usable attribute is
+                    // present.
+                    let nested_text = read_slicer_cache_item_text(&mut reader, &mut inner_buf)?;
+                    let (key, selected, saw_attr) =
+                        parse_slicer_cache_item(&start, nested_text.as_deref())?;
                     if key.is_empty() {
                         continue;
                     }
@@ -473,7 +480,7 @@ fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, Xlsx
                 let element_name = start.name();
                 let tag = local_name(element_name.as_ref());
                 if tag.eq_ignore_ascii_case(b"slicerCacheItem") {
-                    let (key, selected, saw_attr) = parse_slicer_cache_item(&start)?;
+                    let (key, selected, saw_attr) = parse_slicer_cache_item(&start, None)?;
                     if key.is_empty() {
                         continue;
                     }
@@ -508,8 +515,56 @@ fn parse_slicer_cache_selection(xml: &[u8]) -> Result<SlicerSelectionState, Xlsx
     })
 }
 
+fn read_slicer_cache_item_text<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+    buf: &mut Vec<u8>,
+) -> Result<Option<String>, XlsxError> {
+    let mut depth = 0u32;
+    let mut text = None;
+
+    loop {
+        match reader.read_event_into(buf)? {
+            Event::Start(start) => {
+                if local_name(start.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    depth = depth.saturating_add(1);
+                }
+            }
+            Event::End(end) => {
+                if local_name(end.name().as_ref()).eq_ignore_ascii_case(b"slicerCacheItem") {
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                }
+            }
+            Event::Text(value) => {
+                if text.is_none() {
+                    let value = value.unescape()?.into_owned();
+                    if !value.is_empty() {
+                        text = Some(value);
+                    }
+                }
+            }
+            Event::CData(value) => {
+                if text.is_none() {
+                    let value = String::from_utf8_lossy(value.as_ref()).into_owned();
+                    if !value.is_empty() {
+                        text = Some(value);
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(text)
+}
+
 fn parse_slicer_cache_item(
     start: &quick_xml::events::BytesStart<'_>,
+    fallback_text: Option<&str>,
 ) -> Result<(String, bool, bool), XlsxError> {
     let mut key = None;
     let mut index_key = None;
@@ -522,6 +577,7 @@ fn parse_slicer_cache_item(
 
         if attr_key.eq_ignore_ascii_case(b"n")
             || attr_key.eq_ignore_ascii_case(b"name")
+            || attr_key.eq_ignore_ascii_case(b"itemName")
             || attr_key.eq_ignore_ascii_case(b"caption")
             || attr_key.eq_ignore_ascii_case(b"uniqueName")
             || attr_key.eq_ignore_ascii_case(b"v")
@@ -537,11 +593,82 @@ fn parse_slicer_cache_item(
         }
     }
 
-    let key = key.or(index_key).unwrap_or_default();
+    let mut key = key.or(index_key).unwrap_or_default();
+    if key.is_empty() {
+        if let Some(value) = fallback_text {
+            let value = value.trim();
+            if !value.is_empty() {
+                key = value.to_string();
+            }
+        }
+    }
     let saw_selection_attr = selected.is_some();
     let selected = selected.unwrap_or(true);
 
     Ok((key, selected, saw_selection_attr))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::HashSet;
+
+    #[test]
+    fn parse_slicer_cache_selection_attribute_items() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache>
+  <slicerCacheItems>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="West" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let selection = parse_slicer_cache_selection(xml).expect("parse selection");
+        assert_eq!(selection.available_items, vec!["East", "West"]);
+
+        let selected = selection.selected_items.expect("explicit selection");
+        let expected: HashSet<String> = ["East".to_string()].into_iter().collect();
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn parse_slicer_cache_selection_nested_text_items() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache>
+  <slicerCacheItems>
+    <slicerCacheItem s="1"><t>East</t></slicerCacheItem>
+    <slicerCacheItem s="0"><t>West</t></slicerCacheItem>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let selection = parse_slicer_cache_selection(xml).expect("parse selection");
+        assert_eq!(selection.available_items, vec!["East", "West"]);
+
+        let selected = selection.selected_items.expect("explicit selection");
+        let expected: HashSet<String> = ["East".to_string()].into_iter().collect();
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn parse_slicer_cache_selection_dedupes_keys() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<slicerCache>
+  <slicerCacheItems>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="East" s="1"/>
+    <slicerCacheItem n="West" s="0"/>
+    <slicerCacheItem n="West" s="0"/>
+  </slicerCacheItems>
+</slicerCache>"#;
+
+        let selection = parse_slicer_cache_selection(xml).expect("parse selection");
+        assert_eq!(selection.available_items, vec!["East", "West"]);
+
+        let selected = selection.selected_items.expect("explicit selection");
+        let expected: HashSet<String> = ["East".to_string()].into_iter().collect();
+        assert_eq!(selected, expected);
+    }
 }
 
 fn parse_timeline_selection(xml: &[u8]) -> Result<TimelineSelectionState, XlsxError> {
