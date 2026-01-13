@@ -31,6 +31,8 @@ export interface HitTestIndex {
   /** Indices of objects that were too large to bucket efficiently. */
   global: number[];
   bucketSizePx: number;
+  /** Geometry used to derive sheet-space bounds (also used for frozen-pane layout fallbacks). */
+  geom: GridGeometry;
 }
 
 export function buildHitTestIndex(
@@ -101,7 +103,7 @@ export function buildHitTestIndex(
     }
   }
 
-  return { ordered, bounds, buckets, global, bucketSizePx };
+  return { ordered, bounds, buckets, global, bucketSizePx, geom };
 }
 
 export function hitTestDrawings(
@@ -109,7 +111,7 @@ export function hitTestDrawings(
   viewport: Viewport,
   x: number,
   y: number,
-  geom: GridGeometry,
+  geom: GridGeometry = index.geom,
 ): HitTestResult | null {
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
