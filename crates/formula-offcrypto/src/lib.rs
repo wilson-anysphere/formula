@@ -1453,10 +1453,11 @@ mod tests {
 
     #[test]
     fn inspects_minimal_standard_encryption_info() {
-        // Minimal Standard EncryptionInfo buffer sufficient for `parse_encryption_info`:
+        // Minimal Standard EncryptionInfo buffer sufficient for `inspect_encryption_info` / the
+        // Standard parser validation logic:
         // - version (3.2)
-        // - header size + header
-        // - verifier with saltSize=0, encryptedVerifier (16 bytes), verifierHashSize, and empty hash bytes
+        // - header size + header (AES + SHA1, keySize matches algId)
+        // - verifier with saltSize=16, verifierHashSize=20 (SHA1) and a 32-byte encrypted hash
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&3u16.to_le_bytes());
         bytes.extend_from_slice(&2u16.to_le_bytes());
@@ -1465,8 +1466,8 @@ mod tests {
         let mut header = Vec::new();
         header.extend_from_slice(&0u32.to_le_bytes()); // flags
         header.extend_from_slice(&0u32.to_le_bytes()); // sizeExtra
-        header.extend_from_slice(&0x0000_6610u32.to_le_bytes()); // algId = CALG_AES_256
-        header.extend_from_slice(&0u32.to_le_bytes()); // algIdHash
+        header.extend_from_slice(&CALG_AES_256.to_le_bytes()); // algId = CALG_AES_256
+        header.extend_from_slice(&CALG_SHA1.to_le_bytes()); // algIdHash = CALG_SHA1
         header.extend_from_slice(&256u32.to_le_bytes()); // keySize
         header.extend_from_slice(&0u32.to_le_bytes()); // providerType
         header.extend_from_slice(&0u32.to_le_bytes()); // reserved1
@@ -1476,10 +1477,11 @@ mod tests {
         bytes.extend_from_slice(&header);
 
         // EncryptionVerifier
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // saltSize
+        bytes.extend_from_slice(&16u32.to_le_bytes()); // saltSize
+        bytes.extend_from_slice(&[0u8; 16]); // salt
         bytes.extend_from_slice(&[0u8; 16]); // encryptedVerifier
-        bytes.extend_from_slice(&0u32.to_le_bytes()); // verifierHashSize
-        // encryptedVerifierHash is empty
+        bytes.extend_from_slice(&20u32.to_le_bytes()); // verifierHashSize (SHA1)
+        bytes.extend_from_slice(&[0u8; 32]); // encryptedVerifierHash
 
         let summary = inspect_encryption_info(&bytes).expect("inspect");
         assert_eq!(summary.encryption_type, EncryptionType::Standard);
