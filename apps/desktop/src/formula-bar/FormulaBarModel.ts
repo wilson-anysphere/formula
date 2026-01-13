@@ -11,6 +11,7 @@ import {
   extractFormulaReferences,
   type ColoredFormulaReference,
   type ExtractFormulaReferencesOptions,
+  type FormulaReference,
   type FormulaReferenceRange,
 } from "@formula/spreadsheet-frontend";
 import type {
@@ -40,6 +41,16 @@ export class FormulaBarModel {
   #cursorStart = 0;
   #cursorEnd = 0;
   #extractFormulaReferencesOptions: ExtractFormulaReferencesOptions | null = null;
+  #extractFormulaReferencesOptionsVersion = 0;
+  #referenceExtractionCache:
+    | {
+        draft: string;
+        optionsVersion: number;
+        references: FormulaReference[];
+      }
+    | null = null;
+  #highlightedSpansCache: HighlightSpan[] | null = null;
+  #highlightedSpansCacheDraft: string | null = null;
   #rangeInsertion: { start: number; end: number } | null = null;
   #hoveredReference: RangeAddress | null = null;
   #hoveredReferenceText: string | null = null;
@@ -96,6 +107,9 @@ export class FormulaBarModel {
 
   setExtractFormulaReferencesOptions(opts: ExtractFormulaReferencesOptions | null): void {
     this.#extractFormulaReferencesOptions = opts;
+    this.#extractFormulaReferencesOptionsVersion += 1;
+    // Clear any cached reference tokenization so we re-extract with the new options.
+    this.#referenceExtractionCache = null;
     if (this.#isEditing) {
       this.#updateReferenceHighlights();
       this.#updateHoverFromCursor();
@@ -177,7 +191,13 @@ export class FormulaBarModel {
     if (this.#engineToolingFormula === this.#draft && this.#engineHighlightSpans) {
       return this.#engineHighlightSpans;
     }
-    return highlightFormula(this.#draft);
+    if (this.#highlightedSpansCache && this.#highlightedSpansCacheDraft === this.#draft) {
+      return this.#highlightedSpansCache;
+    }
+    const spans = highlightFormula(this.#draft);
+    this.#highlightedSpansCache = spans;
+    this.#highlightedSpansCacheDraft = this.#draft;
+    return spans;
   }
 
   functionHint(): FunctionHint | null {
@@ -410,13 +430,19 @@ export class FormulaBarModel {
       return;
     }
 
-    const tokens = tokenizeFormula(text);
-    const findReferenceTokenAt = (probe: number): string | null => {
+    // Reuse the already-computed reference metadata to avoid re-tokenizing the full
+    // formula string on every cursor move.
+    const refs = this.#coloredReferences;
+    if (refs.length === 0) {
+      this.#hoveredReference = null;
+      this.#hoveredReferenceText = null;
+      return;
+    }
+
+    const findReferenceAt = (probe: number): ColoredFormulaReference | null => {
       if (!Number.isFinite(probe)) return null;
       if (probe < 0 || probe >= text.length) return null;
-      const token = tokens.find((t) => t.start <= probe && probe < t.end);
-      if (!token || token.type !== "reference") return null;
-      return token.text;
+      return refs.find((ref) => ref.start <= probe && probe < ref.end) ?? null;
     };
 
     // In edit mode, support both:
@@ -439,10 +465,13 @@ export class FormulaBarModel {
     }
 
     for (const probe of probes) {
-      const tokenText = findReferenceTokenAt(probe);
-      if (!tokenText) continue;
-      this.#hoveredReferenceText = tokenText;
-      this.#hoveredReference = parseSheetQualifiedA1Range(tokenText);
+      const ref = findReferenceAt(probe);
+      if (!ref) continue;
+      this.#hoveredReferenceText = ref.text;
+      this.#hoveredReference = {
+        start: { row: ref.range.startRow, col: ref.range.startCol },
+        end: { row: ref.range.endRow, col: ref.range.endCol },
+      };
       return;
     }
 
@@ -457,15 +486,36 @@ export class FormulaBarModel {
       return;
     }
 
-    const { references, activeIndex } = extractFormulaReferences(
-      this.#draft,
-      this.#cursorStart,
-      this.#cursorEnd,
-      this.#extractFormulaReferencesOptions ?? undefined
-    );
-    const { colored, nextByText } = assignFormulaReferenceColors(references, this.#referenceColorByText);
-    this.#referenceColorByText = nextByText;
-    this.#coloredReferences = colored;
+    const cache = this.#referenceExtractionCache;
+    let references: FormulaReference[];
+    const cacheHit =
+      cache != null && cache.draft === this.#draft && cache.optionsVersion === this.#extractFormulaReferencesOptionsVersion;
+    if (cacheHit) {
+      references = cache.references;
+    } else {
+      references = extractFormulaReferences(
+        this.#draft,
+        undefined,
+        undefined,
+        this.#extractFormulaReferencesOptions ?? undefined
+      ).references;
+      this.#referenceExtractionCache = {
+        draft: this.#draft,
+        optionsVersion: this.#extractFormulaReferencesOptionsVersion,
+        references,
+      };
+    }
+
+    const activeIndex = findActiveReferenceIndex(references, this.#cursorStart, this.#cursorEnd);
+
+    // Reference colors and ranges are determined by the formula text. When only the cursor/selection
+    // moves, we can keep the existing colored reference list and update just the active index.
+    if (!cacheHit || this.#coloredReferences.length !== references.length) {
+      const { colored, nextByText } = assignFormulaReferenceColors(references, this.#referenceColorByText);
+      this.#referenceColorByText = nextByText;
+      this.#coloredReferences = colored;
+    }
+
     this.#activeReferenceIndex = activeIndex;
   }
 
@@ -475,6 +525,32 @@ export class FormulaBarModel {
     this.#engineSyntaxError = null;
     this.#engineToolingFormula = null;
   }
+}
+
+function findActiveReferenceIndex(
+  references: readonly Pick<FormulaReference, "start" | "end" | "index">[],
+  cursorStart: number,
+  cursorEnd: number
+): number | null {
+  const start = Math.min(cursorStart, cursorEnd);
+  const end = Math.max(cursorStart, cursorEnd);
+
+  // If text is selected, treat a reference as active only when the selection is contained
+  // within that reference token.
+  if (start !== end) {
+    const active = references.find((ref) => start >= ref.start && end <= ref.end);
+    return active ? active.index : null;
+  }
+
+  // Caret: treat the reference containing either the character at the caret or
+  // immediately before it as active. This matches typical editor behavior where
+  // being at the end of a token still counts as "in" the token.
+  const positions = start === 0 ? [0] : [start, start - 1];
+  for (const pos of positions) {
+    const active = references.find((ref) => ref.start <= pos && pos < ref.end);
+    if (active) return active.index;
+  }
+  return null;
 }
 
 function formatRangeReference(range: RangeAddress, sheetId?: string): string {

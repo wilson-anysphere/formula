@@ -211,6 +211,11 @@ export class FormulaBarView {
     | null = null;
   #pendingRender: { preserveTextareaValue: boolean } | null = null;
   #lastHighlightHtml: string | null = null;
+  #lastHighlightDraft: string | null = null;
+  #lastHighlightIsFormulaEditing = false;
+  #lastHighlightHadGhost = false;
+  #lastActiveReferenceIndex: number | null = null;
+  #lastHighlightSpans: ReturnType<FormulaBarModel["highlightedSpans"]> | null = null;
 
   #argumentPreviewProvider: ((expr: string) => unknown | Promise<unknown>) | null = null;
   #argumentPreviewKey: string | null = null;
@@ -1410,106 +1415,150 @@ export class FormulaBarView {
     const ghost = this.model.isEditing ? this.model.aiGhostText() : "";
     const previewRaw = this.model.isEditing ? this.model.aiSuggestionPreview() : null;
     const previewText = ghost && previewRaw != null ? formatPreview(previewRaw) : "";
-    let ghostInserted = false;
-    let previewInserted = false;
-    let highlightHtml = "";
+    const draft = this.model.draft;
 
-    const isFormulaEditing = this.model.isEditing && this.model.draft.trim().startsWith("=");
-    const referenceBySpanKey = new Map<string, { color: string; index: number; active: boolean }>();
+    const isFormulaEditing = this.model.isEditing && draft.trim().startsWith("=");
     const coloredReferences = isFormulaEditing ? this.model.coloredReferences() : [];
     const activeReferenceIndex = isFormulaEditing ? this.model.activeReferenceIndex() : null;
-    if (isFormulaEditing) {
-      for (const ref of coloredReferences) {
-        referenceBySpanKey.set(`${ref.start}:${ref.end}`, {
-          color: ref.color,
-          index: ref.index,
-          active: activeReferenceIndex === ref.index
-        });
-      }
-    }
+    const highlightedSpans = this.model.highlightedSpans();
 
-    const renderSpan = (
-      span: { kind: string; start: number; end: number; className?: string },
-      text: string
-    ): string => {
-      const extraClass = span.className?.trim?.() || "";
-      const classAttr = (base: string | null): string => {
-        const classes = [base, extraClass].filter(Boolean).join(" ").trim();
-        return classes ? ` class="${classes}"` : "";
+    const canFastUpdateActiveReference =
+      isFormulaEditing &&
+      !ghost &&
+      this.#lastHighlightDraft === draft &&
+      this.#lastHighlightIsFormulaEditing &&
+      !this.#lastHighlightHadGhost &&
+      this.#lastHighlightSpans === highlightedSpans;
+
+    if (canFastUpdateActiveReference) {
+      if (this.#lastActiveReferenceIndex !== activeReferenceIndex) {
+        const prev = this.#lastActiveReferenceIndex;
+        const next = activeReferenceIndex;
+        if (prev != null) {
+          this.#highlightEl
+            .querySelectorAll(`[data-ref-index="${prev}"]`)
+            .forEach((el) => el.classList.remove("formula-bar-reference--active"));
+        }
+        if (next != null) {
+          this.#highlightEl
+            .querySelectorAll(`[data-ref-index="${next}"]`)
+            .forEach((el) => el.classList.add("formula-bar-reference--active"));
+        }
+        this.#lastActiveReferenceIndex = next;
+        // We updated class attributes without rebuilding the HTML string; invalidate the
+        // string cache so future full renders don't compare against a stale snapshot.
+        this.#lastHighlightHtml = null;
+      }
+      this.#lastHighlightDraft = draft;
+      this.#lastHighlightIsFormulaEditing = true;
+      this.#lastHighlightHadGhost = false;
+      this.#lastHighlightSpans = highlightedSpans;
+    } else {
+      let ghostInserted = false;
+      let previewInserted = false;
+      let highlightHtml = "";
+
+      const referenceBySpanKey = new Map<string, { color: string; index: number; active: boolean }>();
+      if (isFormulaEditing) {
+        for (const ref of coloredReferences) {
+          referenceBySpanKey.set(`${ref.start}:${ref.end}`, {
+            color: ref.color,
+            index: ref.index,
+            active: activeReferenceIndex === ref.index,
+          });
+        }
+      }
+
+      const renderSpan = (
+        span: { kind: string; start: number; end: number; className?: string },
+        text: string
+      ): string => {
+        const extraClass = span.className?.trim?.() || "";
+        const classAttr = (base: string | null): string => {
+          const classes = [base, extraClass].filter(Boolean).join(" ").trim();
+          return classes ? ` class="${classes}"` : "";
+        };
+
+        if (!isFormulaEditing) {
+          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+        }
+
+        let meta = referenceBySpanKey.get(`${span.start}:${span.end}`) ?? null;
+        if (!meta && span.kind === "reference") {
+          // Engine-backed syntax error highlighting can split reference spans; preserve
+          // reference colors by falling back to a containment lookup.
+          const containing = coloredReferences.find((ref) => ref.start <= span.start && span.end <= ref.end) ?? null;
+          if (containing) {
+            meta = {
+              color: containing.color,
+              index: containing.index,
+              active: activeReferenceIndex === containing.index,
+            };
+          }
+        }
+
+        if (!meta) {
+          return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
+        }
+
+        const activeClass = meta.active ? " formula-bar-reference--active" : "";
+        const baseClass = `formula-bar-reference${activeClass}`;
+        return `<span data-kind="${span.kind}" data-ref-index="${meta.index}"${classAttr(baseClass)} style="color: ${meta.color};">${escapeHtml(
+          text
+        )}</span>`;
       };
 
-      if (!isFormulaEditing) {
-        return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
-      }
-
-      let meta = referenceBySpanKey.get(`${span.start}:${span.end}`) ?? null;
-      if (!meta && span.kind === "reference") {
-        // Engine-backed syntax error highlighting can split reference spans; preserve
-        // reference colors by falling back to a containment lookup.
-        const containing = coloredReferences.find((ref) => ref.start <= span.start && span.end <= ref.end) ?? null;
-        if (containing) {
-          meta = {
-            color: containing.color,
-            index: containing.index,
-            active: activeReferenceIndex === containing.index,
-          };
+      for (const span of highlightedSpans) {
+        if (!ghostInserted && ghost && cursor <= span.start) {
+          highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+          if (previewText && !previewInserted) {
+            highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+            previewInserted = true;
+          }
+          ghostInserted = true;
         }
+
+        if (!ghostInserted && ghost && cursor > span.start && cursor < span.end) {
+          const split = cursor - span.start;
+          const before = span.text.slice(0, split);
+          const after = span.text.slice(split);
+          if (before) {
+            highlightHtml += renderSpan(span, before);
+          }
+          highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
+          if (previewText && !previewInserted) {
+            highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
+            previewInserted = true;
+          }
+          ghostInserted = true;
+          if (after) {
+            highlightHtml += renderSpan(span, after);
+          }
+          continue;
+        }
+
+        highlightHtml += renderSpan(span, span.text);
       }
 
-      if (!meta) {
-        return `<span data-kind="${span.kind}"${classAttr(null)}>${escapeHtml(text)}</span>`;
-      }
-
-      const activeClass = meta.active ? " formula-bar-reference--active" : "";
-      const baseClass = `formula-bar-reference${activeClass}`;
-      return `<span data-kind="${span.kind}" data-ref-index="${meta.index}"${classAttr(baseClass)} style="color: ${meta.color};">${escapeHtml(
-        text
-      )}</span>`;
-    };
-
-    for (const span of this.model.highlightedSpans()) {
-      if (!ghostInserted && ghost && cursor <= span.start) {
+      if (!ghostInserted && ghost) {
         highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
         if (previewText && !previewInserted) {
           highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
           previewInserted = true;
         }
-        ghostInserted = true;
       }
 
-      if (!ghostInserted && ghost && cursor > span.start && cursor < span.end) {
-        const split = cursor - span.start;
-        const before = span.text.slice(0, split);
-        const after = span.text.slice(split);
-        if (before) {
-          highlightHtml += renderSpan(span, before);
-        }
-        highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
-        if (previewText && !previewInserted) {
-          highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
-          previewInserted = true;
-        }
-        ghostInserted = true;
-        if (after) {
-          highlightHtml += renderSpan(span, after);
-        }
-        continue;
+      // Avoid forcing a full DOM re-parse/layout if the highlight HTML is unchanged.
+      if (highlightHtml !== this.#lastHighlightHtml) {
+        this.#highlightEl.innerHTML = highlightHtml;
       }
 
-      highlightHtml += renderSpan(span, span.text);
-    }
-
-    if (!ghostInserted && ghost) {
-      highlightHtml += `<span class="formula-bar-ghost">${escapeHtml(ghost)}</span>`;
-      if (previewText && !previewInserted) {
-        highlightHtml += `<span class="formula-bar-preview">${escapeHtml(previewText)}</span>`;
-        previewInserted = true;
-      }
-    }
-    // Avoid forcing a full DOM re-parse/layout if the highlight HTML is unchanged.
-    if (highlightHtml !== this.#lastHighlightHtml) {
-      this.#highlightEl.innerHTML = highlightHtml;
       this.#lastHighlightHtml = highlightHtml;
+      this.#lastHighlightDraft = draft;
+      this.#lastHighlightIsFormulaEditing = isFormulaEditing;
+      this.#lastHighlightHadGhost = Boolean(ghost);
+      this.#lastActiveReferenceIndex = activeReferenceIndex;
+      this.#lastHighlightSpans = highlightedSpans;
     }
 
     // Toggle editing UI state (textarea visibility, hover hit-testing, etc.) through CSS classes.
