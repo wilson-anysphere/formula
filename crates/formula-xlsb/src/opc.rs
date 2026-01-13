@@ -16,8 +16,9 @@ use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fmt;
 use std::fs::File;
-use std::io::{self, Cursor, Read, Seek, Write};
+use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use zip::write::FileOptions;
@@ -81,13 +82,48 @@ impl Default for OpenOptions {
     }
 }
 
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+#[derive(Clone)]
+enum WorkbookSource {
+    Path(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+impl fmt::Debug for WorkbookSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WorkbookSource::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            WorkbookSource::Bytes(bytes) => f.debug_tuple("Bytes").field(&bytes.len()).finish(),
+        }
+    }
+}
+
+struct ParsedWorkbook {
+    sheets: Vec<SheetMeta>,
+    workbook_part: String,
+    workbook_rels_part: String,
+    shared_strings: Vec<String>,
+    shared_strings_table: Vec<SharedString>,
+    shared_strings_part: Option<String>,
+    workbook_context: WorkbookContext,
+    workbook_properties: WorkbookProperties,
+    defined_names: Vec<DefinedName>,
+    styles: Styles,
+    styles_part: Option<String>,
+    preserved_parts: HashMap<String, Vec<u8>>,
+    preserve_parsed_parts: bool,
+    decode_formulas: bool,
+}
+
 /// An opened XLSB workbook.
 ///
 /// This type keeps enough metadata to stream worksheets on demand. It also optionally stores
 /// raw bytes for parts we do not understand, enabling round-trip preservation later.
 #[derive(Debug)]
 pub struct XlsbWorkbook {
-    path: PathBuf,
+    source: WorkbookSource,
     sheets: Vec<SheetMeta>,
     workbook_part: String,
     workbook_rels_part: String,
@@ -116,200 +152,80 @@ impl XlsbWorkbook {
         let path = path.as_ref().to_path_buf();
         let file = File::open(&path)?;
         let mut zip = ZipArchive::new(file)?;
+        let parsed = parse_xlsb_from_zip(&mut zip, options)?;
+        Ok(Self::from_parsed(WorkbookSource::Path(path), parsed))
+    }
 
-        let mut preserved_parts = HashMap::new();
+    /// Open an XLSB workbook from an in-memory reader.
+    ///
+    /// This is primarily intended for decrypted Office-encrypted XLSB files, where the decrypted
+    /// OPC/ZIP package exists only in memory.
+    pub fn open_from_reader<R: Read + Seek>(reader: R) -> Result<Self, ParseError> {
+        Self::open_from_reader_with_options(reader, OpenOptions::default())
+    }
 
-        // Preserve package-level plumbing we don't parse but will need to re-emit on round-trip.
-        preserve_part(&mut zip, &mut preserved_parts, "[Content_Types].xml")?;
-        preserve_part(&mut zip, &mut preserved_parts, "_rels/.rels")?;
+    /// Open an XLSB workbook from an in-memory reader, controlling preservation options.
+    pub fn open_from_reader_with_options<R: Read + Seek>(
+        mut reader: R,
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
+        reader.seek(SeekFrom::Start(0))?;
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Self::open_from_owned_bytes(bytes, options)
+    }
 
-        let workbook_part = preserved_parts
-            .get("_rels/.rels")
-            .and_then(|root_rels| match relationship_target_by_type(root_rels, OFFICE_DOCUMENT_REL_TYPE) {
-                Ok(Some(target)) => root_target_candidates(&target)
-                    .into_iter()
-                    .find_map(|candidate| find_zip_entry_case_insensitive(&zip, &candidate)),
-                Ok(None) => None,
-                // Be tolerant of malformed root relationships and fall back to the default
-                // workbook location, matching historical behavior.
-                Err(_) => None,
-            })
-            .or_else(|| find_zip_entry_case_insensitive(&zip, DEFAULT_WORKBOOK_PART))
-            .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
+    /// Open an XLSB workbook from in-memory ZIP bytes.
+    pub fn open_from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
+        Self::open_from_bytes_with_options(bytes, OpenOptions::default())
+    }
 
-        let workbook_rels_part = {
-            let candidate = rels_part_name_for_part(&workbook_part);
-            find_zip_entry_case_insensitive(&zip, &candidate)
-                .or_else(|| find_zip_entry_case_insensitive(&zip, DEFAULT_WORKBOOK_RELS_PART))
-                .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?
-        };
+    /// Open an XLSB workbook from in-memory ZIP bytes, controlling preservation options.
+    pub fn open_from_bytes_with_options(
+        bytes: &[u8],
+        options: OpenOptions,
+    ) -> Result<Self, ParseError> {
+        Self::open_from_owned_bytes(bytes.to_vec(), options)
+    }
 
-        let workbook_rels_bytes = read_zip_entry(&mut zip, &workbook_rels_part)?
-            .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
-        preserved_parts.insert(workbook_rels_part.clone(), workbook_rels_bytes.clone());
-        let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
+    fn open_from_owned_bytes(bytes: Vec<u8>, options: OpenOptions) -> Result<Self, ParseError> {
+        let mut zip = ZipArchive::new(Cursor::new(bytes.as_slice()))?;
+        let parsed = parse_xlsb_from_zip(&mut zip, options)?;
+        Ok(Self::from_parsed(WorkbookSource::Bytes(bytes), parsed))
+    }
 
-        let content_types_xml = preserved_parts
-            .get("[Content_Types].xml")
-            .map(|bytes| bytes.as_slice());
-
-        let shared_strings_part = resolve_workbook_part_name(
-            &zip,
-            &workbook_rels_bytes,
-            content_types_xml,
-            SHARED_STRINGS_REL_TYPE,
-            Some(SHARED_STRINGS_CONTENT_TYPE),
-            DEFAULT_SHARED_STRINGS_PART,
-        )?;
-
-        let styles_part = resolve_workbook_part_name(
-            &zip,
-            &workbook_rels_bytes,
-            content_types_xml,
-            STYLES_REL_TYPE,
-            Some(STYLES_CONTENT_TYPE),
-            DEFAULT_STYLES_PART,
-        )?;
-
-        // Styles are required for round-trip. We also parse `cellXfs` so callers can
-        // resolve per-cell `style` indices to number formats (e.g. dates).
-        let styles_bin = match styles_part.as_deref() {
-            Some(part) => read_zip_entry(&mut zip, part)?,
-            None => None,
-        };
-        let styles = match styles_bin.as_deref() {
-            Some(bytes) => Styles::parse(bytes).unwrap_or_default(),
-            None => Styles::default(),
-        };
-        if let Some(bytes) = styles_bin {
-            preserved_parts.insert(
-                styles_part
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_STYLES_PART.to_string()),
-                bytes,
-            );
+    fn from_parsed(source: WorkbookSource, parsed: ParsedWorkbook) -> Self {
+        Self {
+            source,
+            sheets: parsed.sheets,
+            workbook_part: parsed.workbook_part,
+            workbook_rels_part: parsed.workbook_rels_part,
+            shared_strings: parsed.shared_strings,
+            shared_strings_table: parsed.shared_strings_table,
+            shared_strings_part: parsed.shared_strings_part,
+            workbook_context: parsed.workbook_context,
+            workbook_properties: parsed.workbook_properties,
+            defined_names: parsed.defined_names,
+            styles: parsed.styles,
+            styles_part: parsed.styles_part,
+            preserved_parts: parsed.preserved_parts,
+            preserve_parsed_parts: parsed.preserve_parsed_parts,
+            decode_formulas: parsed.decode_formulas,
         }
+    }
 
-        let workbook_bin = {
-            let mut wb = zip.by_name(&workbook_part)?;
-            let mut bytes = Vec::with_capacity(wb.size() as usize);
-            wb.read_to_end(&mut bytes)?;
-            bytes
-        };
-
-        let (mut sheets, workbook_context, workbook_properties, defined_names) = parse_workbook(
-            &mut Cursor::new(&workbook_bin),
-            &workbook_rels,
-            options.decode_formulas,
-        )?;
-        let mut workbook_context = workbook_context;
-
-        load_table_definitions(&mut zip, &mut workbook_context, &sheets)?;
-
-        // `workbook.bin.rels` targets are compared case-insensitively by Excel on Windows/macOS,
-        // but ZIP entry names are case-sensitive. Normalize sheet part paths to the exact entry
-        // name present in the archive so downstream reads/writes don't fail on case-only
-        // mismatches.
-        for sheet in &mut sheets {
-            if let Some(actual) = find_zip_entry_case_insensitive(&zip, &sheet.part_path) {
-                sheet.part_path = actual;
+    fn open_zip(&self) -> Result<ZipArchive<Box<dyn ReadSeek + '_>>, ParseError> {
+        match &self.source {
+            WorkbookSource::Path(path) => {
+                let file = File::open(path)?;
+                let reader: Box<dyn ReadSeek + '_> = Box::new(file);
+                Ok(ZipArchive::new(reader)?)
+            }
+            WorkbookSource::Bytes(bytes) => {
+                let reader: Box<dyn ReadSeek + '_> = Box::new(Cursor::new(bytes.as_slice()));
+                Ok(ZipArchive::new(reader)?)
             }
         }
-        if options.preserve_parsed_parts {
-            preserved_parts.insert(workbook_part.clone(), workbook_bin);
-        }
-
-        let shared_strings = match shared_strings_part.as_deref() {
-            Some(part) => match zip.by_name(part) {
-                Ok(mut sst) => {
-                    let mut bytes = Vec::with_capacity(sst.size() as usize);
-                    sst.read_to_end(&mut bytes)?;
-                    let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
-                    let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
-                    if options.preserve_parsed_parts {
-                        preserved_parts.insert(part.to_string(), bytes);
-                    }
-                    (strings, table)
-                }
-                Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
-                Err(e) => return Err(e.into()),
-            },
-            None => (Vec::new(), Vec::new()),
-        };
-
-        let (shared_strings, shared_strings_table) = shared_strings;
-
-        // Treat part names as case-insensitive and tolerate a leading `/` in ZIP entries (some
-        // producers emit them). Use normalized lowercase names for comparison so we don't
-        // accidentally preserve known parts twice (e.g. both `[Content_Types].xml` and
-        // `/[Content_Types].xml`).
-        let mut known_parts: HashSet<String> = [
-            "[Content_Types].xml",
-            "_rels/.rels",
-            DEFAULT_WORKBOOK_PART,
-            DEFAULT_WORKBOOK_RELS_PART,
-            DEFAULT_SHARED_STRINGS_PART,
-            DEFAULT_STYLES_PART,
-        ]
-        .into_iter()
-        .map(|name| normalize_zip_part_name(name).to_ascii_lowercase())
-        .collect();
-        known_parts.insert(normalize_zip_part_name(&workbook_part).to_ascii_lowercase());
-        known_parts.insert(normalize_zip_part_name(&workbook_rels_part).to_ascii_lowercase());
-        if let Some(part) = &shared_strings_part {
-            known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
-        }
-        if let Some(part) = &styles_part {
-            known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
-        }
-
-        let worksheet_paths: HashSet<String> = sheets
-            .iter()
-            .map(|s| normalize_zip_part_name(&s.part_path).to_ascii_lowercase())
-            .collect();
-        if options.preserve_unknown_parts {
-            for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
-                let normalized = normalize_zip_part_name(&name).to_ascii_lowercase();
-                let is_known =
-                    known_parts.contains(&normalized) || worksheet_paths.contains(&normalized);
-                if is_known {
-                    continue;
-                }
-                if let Ok(mut entry) = zip.by_name(&name) {
-                    let mut bytes = Vec::with_capacity(entry.size() as usize);
-                    entry.read_to_end(&mut bytes)?;
-                    preserved_parts.insert(name, bytes);
-                }
-            }
-        }
-
-        if options.preserve_worksheets {
-            for sheet in &sheets {
-                if let Ok(mut entry) = zip.by_name(&sheet.part_path) {
-                    let mut bytes = Vec::with_capacity(entry.size() as usize);
-                    entry.read_to_end(&mut bytes)?;
-                    preserved_parts.insert(sheet.part_path.clone(), bytes);
-                }
-            }
-        }
-
-        Ok(Self {
-            path,
-            sheets,
-            workbook_part,
-            workbook_rels_part,
-            shared_strings,
-            shared_strings_table,
-            shared_strings_part,
-            workbook_context,
-            workbook_properties,
-            defined_names,
-            styles,
-            styles_part,
-            preserved_parts,
-            preserve_parsed_parts: options.preserve_parsed_parts,
-            decode_formulas: options.decode_formulas,
-        })
     }
 
     pub fn sheet_metas(&self) -> &[SheetMeta] {
@@ -379,8 +295,18 @@ impl XlsbWorkbook {
             .get(sheet_index)
             .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
 
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+        if let Some(bytes) = self.preserved_parts.get(&meta.part_path) {
+            let mut cursor = Cursor::new(bytes.as_slice());
+            return parse_sheet(
+                &mut cursor,
+                &self.shared_strings,
+                &self.workbook_context,
+                self.preserve_parsed_parts,
+                self.decode_formulas,
+            );
+        }
+
+        let mut zip = self.open_zip()?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
         parse_sheet(
@@ -409,8 +335,7 @@ impl XlsbWorkbook {
             return Ok(bytes.clone());
         }
 
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+        let mut zip = self.open_zip()?;
         let mut entry = zip.by_name(&sheet_part)?;
         let mut bytes = Vec::with_capacity(entry.size() as usize);
         entry.read_to_end(&mut bytes)?;
@@ -449,8 +374,20 @@ impl XlsbWorkbook {
             .get(sheet_index)
             .ok_or(ParseError::SheetIndexOutOfBounds(sheet_index))?;
 
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+        if let Some(bytes) = self.preserved_parts.get(&meta.part_path) {
+            let mut cursor = Cursor::new(bytes.as_slice());
+            parse_sheet_stream(
+                &mut cursor,
+                &self.shared_strings,
+                &self.workbook_context,
+                self.preserve_parsed_parts,
+                self.decode_formulas,
+                |cell| f(cell),
+            )?;
+            return Ok(());
+        }
+
+        let mut zip = self.open_zip()?;
         let mut sheet = zip.by_name(&meta.part_path)?;
 
         parse_sheet_stream(
@@ -469,10 +406,11 @@ impl XlsbWorkbook {
     /// This is currently a *lossless* package writer: it repackages the original XLSB ZIP
     /// container by copying every entry's uncompressed payload byte-for-byte.
     ///
-    /// The writer always reads entries from the source workbook at `self.path`. If an entry name
-    /// exists in [`XlsbWorkbook::preserved_parts`], that byte payload is used as an override. This
-    /// provides a forward-compatible hook for future code to patch individual parts (for example
-    /// to write modified worksheets) while keeping the rest of the package intact.
+    /// The writer reads entries from the original source package (either a filesystem path or
+    /// in-memory bytes). If an entry name exists in [`XlsbWorkbook::preserved_parts`], that byte
+    /// payload is used as an override. This provides a forward-compatible hook for future code to
+    /// patch individual parts (for example to write modified worksheets) while keeping the rest of
+    /// the package intact.
     ///
     /// How [`OpenOptions`] affects `save_as`:
     /// - `preserve_unknown_parts`: stores raw bytes for unknown ZIP entries in `preserved_parts`,
@@ -545,8 +483,7 @@ impl XlsbWorkbook {
         let sheet_bytes = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
             bytes.clone()
         } else {
-            let file = File::open(&self.path)?;
-            let mut zip = ZipArchive::new(file)?;
+            let mut zip = self.open_zip()?;
             let mut entry = zip.by_name(&sheet_part)?;
             let mut bytes = Vec::with_capacity(entry.size() as usize);
             entry.read_to_end(&mut bytes)?;
@@ -574,8 +511,7 @@ impl XlsbWorkbook {
         let sheet_bytes = if let Some(bytes) = self.preserved_parts.get(&sheet_part) {
             bytes.clone()
         } else {
-            let file = File::open(&self.path)?;
-            let mut zip = ZipArchive::new(file)?;
+            let mut zip = self.open_zip()?;
             let mut entry = zip.by_name(&sheet_part)?;
             let mut bytes = Vec::with_capacity(entry.size() as usize);
             entry.read_to_end(&mut bytes)?;
@@ -591,8 +527,7 @@ impl XlsbWorkbook {
         let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
             Some(bytes) => bytes.clone(),
             None => {
-                let file = File::open(&self.path)?;
-                let mut zip = ZipArchive::new(file)?;
+                let mut zip = self.open_zip()?;
                 match read_zip_entry(&mut zip, shared_strings_part)? {
                     Some(bytes) => bytes,
                     None => {
@@ -757,8 +692,7 @@ impl XlsbWorkbook {
         let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
             Some(bytes) => bytes.clone(),
             None => {
-                let file = File::open(&self.path)?;
-                let mut zip = ZipArchive::new(file)?;
+                let mut zip = self.open_zip()?;
                 match read_zip_entry(&mut zip, shared_strings_part)? {
                     Some(bytes) => bytes,
                     None => {
@@ -776,8 +710,7 @@ impl XlsbWorkbook {
         } else if let Some(sheet_bytes) = self.preserved_parts.get(&sheet_part) {
             sheet_cell_records(sheet_bytes, &targets)?
         } else {
-            let file = File::open(&self.path)?;
-            let mut zip = ZipArchive::new(file)?;
+            let mut zip = self.open_zip()?;
             let mut entry = zip.by_name(&sheet_part)?;
             sheet_cell_records_streaming(&mut entry, &targets)?
         };
@@ -861,7 +794,10 @@ impl XlsbWorkbook {
 
         self.save_with_part_overrides_streaming(
             dest,
-            &HashMap::from([(shared_strings_part.to_string(), updated_shared_strings_bytes)]),
+            &HashMap::from([(
+                shared_strings_part.to_string(),
+                updated_shared_strings_bytes,
+            )]),
             &sheet_part,
             |input, output| patch_sheet_bin_streaming(input, output, &updated_edits),
         )
@@ -899,12 +835,12 @@ impl XlsbWorkbook {
             &HashMap::new(),
             &stream_parts,
             |part_name, input, output| {
-                let edits = edits_by_part
-                    .get(part_name)
-                    .ok_or_else(|| ParseError::Io(io::Error::new(
+                let edits = edits_by_part.get(part_name).ok_or_else(|| {
+                    ParseError::Io(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("missing worksheet edits for streamed part: {part_name}"),
-                    )))?;
+                    ))
+                })?;
                 patch_sheet_bin_streaming(input, output, edits)
             },
         )
@@ -925,8 +861,7 @@ impl XlsbWorkbook {
         };
 
         // Read sharedStrings.bin once up front so we can intern new strings across all sheets.
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+        let mut zip = self.open_zip()?;
         let shared_strings_bytes = match self.preserved_parts.get(shared_strings_part) {
             Some(bytes) => bytes.clone(),
             None => match read_zip_entry(&mut zip, shared_strings_part)? {
@@ -1034,7 +969,9 @@ impl XlsbWorkbook {
                     }
                 })
                 .sum();
-            total_ref_delta = total_ref_delta.checked_add(sheet_delta).ok_or(ParseError::UnexpectedEof)?;
+            total_ref_delta = total_ref_delta
+                .checked_add(sheet_delta)
+                .ok_or(ParseError::UnexpectedEof)?;
 
             updated_edits_by_part.insert(sheet_part, updated_edits);
         }
@@ -1058,12 +995,12 @@ impl XlsbWorkbook {
             &overrides,
             &stream_parts,
             |part_name, input, output| {
-                let edits = updated_edits_by_part
-                    .get(part_name)
-                    .ok_or_else(|| ParseError::Io(io::Error::new(
+                let edits = updated_edits_by_part.get(part_name).ok_or_else(|| {
+                    ParseError::Io(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("missing worksheet edits for streamed part: {part_name}"),
-                    )))?;
+                    ))
+                })?;
                 patch_sheet_bin_streaming(input, output, edits)
             },
         )
@@ -1085,7 +1022,7 @@ impl XlsbWorkbook {
         edits_by_sheet: &BTreeMap<usize, Vec<CellEdit>>,
     ) -> Result<(), ParseError> {
         let mut overrides: HashMap<String, Vec<u8>> = HashMap::new();
-        let mut zip: Option<ZipArchive<File>> = None;
+        let mut zip: Option<ZipArchive<Box<dyn ReadSeek + '_>>> = None;
 
         for (&sheet_index, edits) in edits_by_sheet {
             if edits.is_empty() {
@@ -1104,8 +1041,7 @@ impl XlsbWorkbook {
                 let zip = match zip.as_mut() {
                     Some(zip) => zip,
                     None => {
-                        let file = File::open(&self.path)?;
-                        zip = Some(ZipArchive::new(file)?);
+                        zip = Some(self.open_zip()?);
                         zip.as_mut().expect("zip just initialized")
                     }
                 };
@@ -1159,8 +1095,7 @@ impl XlsbWorkbook {
         writer: W,
         overrides: &HashMap<String, Vec<u8>>,
     ) -> Result<(), ParseError> {
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+        let mut zip = self.open_zip()?;
 
         let edited = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
@@ -1217,8 +1152,7 @@ impl XlsbWorkbook {
 
         // Use a consistent compression method for output. This does *not* affect payload
         // preservation: we always copy/write the uncompressed part bytes.
-        let options =
-            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+        let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
 
         let mut used_overrides: HashSet<String> = HashSet::new();
 
@@ -1322,17 +1256,14 @@ impl XlsbWorkbook {
             if overrides.contains_key(part) {
                 return Err(ParseError::Io(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!(
-                        "streaming override conflicts with byte override for part: {part}"
-                    ),
+                    format!("streaming override conflicts with byte override for part: {part}"),
                 )));
             }
         }
 
         let dest = dest.as_ref();
         atomic_write_with_path(dest, |tmp_path| {
-            let file = File::open(&self.path)?;
-            let mut zip = ZipArchive::new(file)?;
+            let mut zip = self.open_zip()?;
 
             let edited_by_bytes = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
@@ -1561,6 +1492,206 @@ impl XlsbWorkbook {
     }
 }
 
+fn parse_xlsb_from_zip<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    options: OpenOptions,
+) -> Result<ParsedWorkbook, ParseError> {
+    let mut preserved_parts = HashMap::new();
+
+    // Preserve package-level plumbing we don't parse but will need to re-emit on round-trip.
+    preserve_part(zip, &mut preserved_parts, "[Content_Types].xml")?;
+    preserve_part(zip, &mut preserved_parts, "_rels/.rels")?;
+
+    let workbook_part = preserved_parts
+        .get("_rels/.rels")
+        .and_then(|root_rels| {
+            match relationship_target_by_type(root_rels, OFFICE_DOCUMENT_REL_TYPE) {
+                Ok(Some(target)) => root_target_candidates(&target)
+                    .into_iter()
+                    .find_map(|candidate| find_zip_entry_case_insensitive(zip, &candidate)),
+                Ok(None) => None,
+                // Be tolerant of malformed root relationships and fall back to the default
+                // workbook location, matching historical behavior.
+                Err(_) => None,
+            }
+        })
+        .or_else(|| find_zip_entry_case_insensitive(zip, DEFAULT_WORKBOOK_PART))
+        .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
+
+    let workbook_rels_part = {
+        let candidate = rels_part_name_for_part(&workbook_part);
+        find_zip_entry_case_insensitive(zip, &candidate)
+            .or_else(|| find_zip_entry_case_insensitive(zip, DEFAULT_WORKBOOK_RELS_PART))
+            .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?
+    };
+
+    let workbook_rels_bytes = read_zip_entry(zip, &workbook_rels_part)?
+        .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
+    preserved_parts.insert(workbook_rels_part.clone(), workbook_rels_bytes.clone());
+    let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
+
+    let content_types_xml = preserved_parts
+        .get("[Content_Types].xml")
+        .map(|bytes| bytes.as_slice());
+
+    let shared_strings_part = resolve_workbook_part_name(
+        zip,
+        &workbook_rels_bytes,
+        content_types_xml,
+        SHARED_STRINGS_REL_TYPE,
+        Some(SHARED_STRINGS_CONTENT_TYPE),
+        DEFAULT_SHARED_STRINGS_PART,
+    )?;
+
+    let styles_part = resolve_workbook_part_name(
+        zip,
+        &workbook_rels_bytes,
+        content_types_xml,
+        STYLES_REL_TYPE,
+        Some(STYLES_CONTENT_TYPE),
+        DEFAULT_STYLES_PART,
+    )?;
+
+    // Styles are required for round-trip. We also parse `cellXfs` so callers can
+    // resolve per-cell `style` indices to number formats (e.g. dates).
+    let styles_bin = match styles_part.as_deref() {
+        Some(part) => read_zip_entry(zip, part)?,
+        None => None,
+    };
+    let styles = match styles_bin.as_deref() {
+        Some(bytes) => Styles::parse(bytes).unwrap_or_default(),
+        None => Styles::default(),
+    };
+    if let Some(bytes) = styles_bin {
+        preserved_parts.insert(
+            styles_part
+                .clone()
+                .unwrap_or_else(|| DEFAULT_STYLES_PART.to_string()),
+            bytes,
+        );
+    }
+
+    let workbook_bin = {
+        let mut wb = zip.by_name(&workbook_part)?;
+        let mut bytes = Vec::with_capacity(wb.size() as usize);
+        wb.read_to_end(&mut bytes)?;
+        bytes
+    };
+
+    let (mut sheets, workbook_context, workbook_properties, defined_names) = parse_workbook(
+        &mut Cursor::new(&workbook_bin),
+        &workbook_rels,
+        options.decode_formulas,
+    )?;
+    let mut workbook_context = workbook_context;
+
+    load_table_definitions(zip, &mut workbook_context, &sheets)?;
+
+    // `workbook.bin.rels` targets are compared case-insensitively by Excel on Windows/macOS,
+    // but ZIP entry names are case-sensitive. Normalize sheet part paths to the exact entry
+    // name present in the archive so downstream reads/writes don't fail on case-only
+    // mismatches.
+    for sheet in &mut sheets {
+        if let Some(actual) = find_zip_entry_case_insensitive(zip, &sheet.part_path) {
+            sheet.part_path = actual;
+        }
+    }
+    if options.preserve_parsed_parts {
+        preserved_parts.insert(workbook_part.clone(), workbook_bin);
+    }
+
+    let shared_strings = match shared_strings_part.as_deref() {
+        Some(part) => match zip.by_name(part) {
+            Ok(mut sst) => {
+                let mut bytes = Vec::with_capacity(sst.size() as usize);
+                sst.read_to_end(&mut bytes)?;
+                let table = parse_shared_strings(&mut Cursor::new(&bytes))?;
+                let strings = table.iter().map(|s| s.plain_text().to_string()).collect();
+                if options.preserve_parsed_parts {
+                    preserved_parts.insert(part.to_string(), bytes);
+                }
+                (strings, table)
+            }
+            Err(zip::result::ZipError::FileNotFound) => (Vec::new(), Vec::new()),
+            Err(e) => return Err(e.into()),
+        },
+        None => (Vec::new(), Vec::new()),
+    };
+
+    let (shared_strings, shared_strings_table) = shared_strings;
+
+    // Treat part names as case-insensitive and tolerate a leading `/` in ZIP entries (some
+    // producers emit them). Use normalized lowercase names for comparison so we don't
+    // accidentally preserve known parts twice (e.g. both `[Content_Types].xml` and
+    // `/[Content_Types].xml`).
+    let mut known_parts: HashSet<String> = [
+        "[Content_Types].xml",
+        "_rels/.rels",
+        DEFAULT_WORKBOOK_PART,
+        DEFAULT_WORKBOOK_RELS_PART,
+        DEFAULT_SHARED_STRINGS_PART,
+        DEFAULT_STYLES_PART,
+    ]
+    .into_iter()
+    .map(|name| normalize_zip_part_name(name).to_ascii_lowercase())
+    .collect();
+    known_parts.insert(normalize_zip_part_name(&workbook_part).to_ascii_lowercase());
+    known_parts.insert(normalize_zip_part_name(&workbook_rels_part).to_ascii_lowercase());
+    if let Some(part) = &shared_strings_part {
+        known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
+    }
+    if let Some(part) = &styles_part {
+        known_parts.insert(normalize_zip_part_name(part).to_ascii_lowercase());
+    }
+
+    let worksheet_paths: HashSet<String> = sheets
+        .iter()
+        .map(|s| normalize_zip_part_name(&s.part_path).to_ascii_lowercase())
+        .collect();
+    if options.preserve_unknown_parts {
+        for name in zip.file_names().map(str::to_string).collect::<Vec<_>>() {
+            let normalized = normalize_zip_part_name(&name).to_ascii_lowercase();
+            let is_known =
+                known_parts.contains(&normalized) || worksheet_paths.contains(&normalized);
+            if is_known {
+                continue;
+            }
+            if let Ok(mut entry) = zip.by_name(&name) {
+                let mut bytes = Vec::with_capacity(entry.size() as usize);
+                entry.read_to_end(&mut bytes)?;
+                preserved_parts.insert(name, bytes);
+            }
+        }
+    }
+
+    if options.preserve_worksheets {
+        for sheet in &sheets {
+            if let Ok(mut entry) = zip.by_name(&sheet.part_path) {
+                let mut bytes = Vec::with_capacity(entry.size() as usize);
+                entry.read_to_end(&mut bytes)?;
+                preserved_parts.insert(sheet.part_path.clone(), bytes);
+            }
+        }
+    }
+
+    Ok(ParsedWorkbook {
+        sheets,
+        workbook_part,
+        workbook_rels_part,
+        shared_strings,
+        shared_strings_table,
+        shared_strings_part,
+        workbook_context,
+        workbook_properties,
+        defined_names,
+        styles,
+        styles_part,
+        preserved_parts,
+        preserve_parsed_parts: options.preserve_parsed_parts,
+        decode_formulas: options.decode_formulas,
+    })
+}
+
 fn parse_relationships(xml_bytes: &[u8]) -> Result<HashMap<String, String>, ParseError> {
     let xml = String::from_utf8_lossy(xml_bytes);
     let mut reader = XmlReader::from_str(&xml);
@@ -1761,7 +1892,10 @@ fn resolve_part_name_from_relationship(source_part: &str, target: &str) -> Strin
         return normalize_zip_part_name(&target);
     }
 
-    let base_dir = source_part.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+    let base_dir = source_part
+        .rsplit_once('/')
+        .map(|(dir, _)| dir)
+        .unwrap_or("");
     if base_dir.is_empty() {
         normalize_zip_part_name(&target)
     } else {
@@ -1999,7 +2133,8 @@ fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
                     continue;
                 }
 
-                let id = attr_value(&e, &reader, b"id").or_else(|| attr_value(&e, &reader, b"Id"))?;
+                let id =
+                    attr_value(&e, &reader, b"id").or_else(|| attr_value(&e, &reader, b"Id"))?;
                 table_id = id.parse::<u32>().ok();
 
                 // Excel stores both `name` and `displayName`. Formulas typically use displayName.
@@ -2028,7 +2163,9 @@ fn parse_table_xml_best_effort(xml_bytes: &[u8]) -> Option<ParsedTableXml> {
                     buf.clear();
                     continue;
                 };
-                let Some(name) = attr_value(&e, &reader, b"name").or_else(|| attr_value(&e, &reader, b"Name")) else {
+                let Some(name) =
+                    attr_value(&e, &reader, b"name").or_else(|| attr_value(&e, &reader, b"Name"))
+                else {
                     buf.clear();
                     continue;
                 };
