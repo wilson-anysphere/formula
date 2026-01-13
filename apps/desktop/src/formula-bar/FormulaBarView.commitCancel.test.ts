@@ -653,7 +653,7 @@ describe("FormulaBarView commit/cancel UX", () => {
     const e = new KeyboardEvent("keydown", { key: "Enter", altKey: true, cancelable: true });
     view.textarea.dispatchEvent(e);
 
-    // Alt+Enter inserts a newline (and optional indentation) rather than committing the edit.
+    // Alt+Enter inserts a newline (and editor indentation) rather than committing the edit.
     expect(e.defaultPrevented).toBe(true);
     expect(onCommit).not.toHaveBeenCalled();
     expect(view.model.isEditing).toBe(true);
