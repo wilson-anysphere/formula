@@ -58,6 +58,15 @@ function normalizeNonNegativeInt(value: unknown, fallback: number): number {
   return Math.max(0, Math.trunc(num));
 }
 
+function coerceUint8Array(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return null;
+}
+
 function transactionDone(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     const finishError = () => reject((tx as any).error ?? new Error("IndexedDB transaction failed"));
@@ -341,8 +350,26 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
           const tx = (db as any).transaction([UPDATES_STORE_NAME], "readwrite");
           void transactionDone(tx).then(resolve, reject);
           const store = (tx as any).objectStore(UPDATES_STORE_NAME);
-          store.clear();
-          store.add(snapshot);
+
+          /** @type {Uint8Array[]} */
+          const existingUpdates: Uint8Array[] = [];
+
+          const cursorReq = store.openCursor();
+          cursorReq.onerror = () => reject(cursorReq.error ?? new Error("IndexedDB cursor failed"));
+          cursorReq.onsuccess = () => {
+            const cursor = cursorReq.result;
+            if (!cursor) {
+              const merged =
+                existingUpdates.length > 0 ? Y.mergeUpdates([...existingUpdates, snapshot]) : snapshot;
+              store.clear();
+              store.add(merged);
+              return;
+            }
+
+            const update = coerceUint8Array(cursor.value);
+            if (update) existingUpdates.push(update);
+            cursor.continue();
+          };
         } catch (err) {
           reject(err);
         }
@@ -378,4 +405,3 @@ export class IndexedDbCollabPersistence implements CollabPersistence {
     tmpDoc.destroy();
   }
 }
-
