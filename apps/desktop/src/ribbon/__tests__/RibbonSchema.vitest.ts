@@ -141,6 +141,32 @@ describe("defaultRibbonSchema", () => {
     expect(pivot?.menuItems?.[3]?.disabled).toBe(true);
   });
 
+  it("wires Home → Editing → Clear menu items to canonical command ids", () => {
+    const homeTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "home");
+    expect(homeTab, "Expected Home tab to exist").toBeTruthy();
+    if (!homeTab) return;
+
+    const editingGroup = homeTab.groups.find((group) => group.id === "home.editing");
+    expect(editingGroup, "Expected Home → Editing group to exist").toBeTruthy();
+    if (!editingGroup) return;
+
+    const clearDropdown = editingGroup.buttons.find((button) => button.id === "home.editing.clear");
+    expect(clearDropdown, "Expected Home → Editing → Clear dropdown").toBeTruthy();
+    expect(clearDropdown?.kind).toBe("dropdown");
+
+    const menuIds = clearDropdown?.menuItems?.map((item) => item.id) ?? [];
+    expect(menuIds).toEqual(
+      expect.arrayContaining([
+        "edit.clearContents",
+        "format.clearFormats",
+        "format.clearAll",
+        // Unimplemented items remain ribbon-scoped for now.
+        "home.editing.clear.clearComments",
+        "home.editing.clear.clearHyperlinks",
+      ]),
+    );
+  });
+
   it("does not include legacy icon properties in the schema", () => {
     const offenders: string[] = [];
     for (const tab of defaultRibbonSchema.tabs) {

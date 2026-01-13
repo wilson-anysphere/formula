@@ -469,9 +469,9 @@ export const homeTab: RibbonTabDefinition = {
           iconId: "clear",
           kind: "dropdown",
           menuItems: [
-            { id: "home.editing.clear.clearAll", label: "Clear All", ariaLabel: "Clear All", iconId: "clear" },
-            { id: "home.editing.clear.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats", iconId: "palette" },
-            { id: "home.editing.clear.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents", iconId: "clear" },
+            { id: "format.clearAll", label: "Clear All", ariaLabel: "Clear All", iconId: "clear" },
+            { id: "format.clearFormats", label: "Clear Formats", ariaLabel: "Clear Formats", iconId: "palette" },
+            { id: "edit.clearContents", label: "Clear Contents", ariaLabel: "Clear Contents", iconId: "clear" },
             { id: "home.editing.clear.clearComments", label: "Clear Comments", ariaLabel: "Clear Comments", iconId: "comment" },
             { id: "home.editing.clear.clearHyperlinks", label: "Clear Hyperlinks", ariaLabel: "Clear Hyperlinks", iconId: "link" },
           ],
