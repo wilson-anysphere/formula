@@ -1664,12 +1664,37 @@ def main() -> int:
     if effective_workers > 1 and not os.environ.get("RAYON_NUM_THREADS"):
         cpu = os.cpu_count() or 1
         os.environ["RAYON_NUM_THREADS"] = str(max(1, cpu // effective_workers))
+
+    # Record path-ignore patterns (if any) in the output metadata. In private mode, hash the
+    # patterns to avoid leaking custom namespaces/domains in uploaded artifacts.
+    diff_ignore_path_values = sorted(
+        {p.strip() for p in (args.diff_ignore_path or []) if p and p.strip()}
+    )
+    diff_ignore_path_in_values = sorted(
+        {p.strip() for p in (args.diff_ignore_path_in or []) if p and p.strip()}
+    )
+    if args.privacy_mode == _PRIVACY_PRIVATE:
+        diff_ignore_path_out = [f"sha256={_sha256_text(p)}" for p in diff_ignore_path_values]
+        diff_ignore_path_in_out = [
+            f"sha256={_sha256_text(p)}" for p in diff_ignore_path_in_values
+        ]
+    else:
+        diff_ignore_path_out = diff_ignore_path_values
+        diff_ignore_path_in_out = diff_ignore_path_in_values
+
+    rayon_threads_out: int | None = None
+    rayon_raw = os.environ.get("RAYON_NUM_THREADS")
+    if rayon_raw:
+        try:
+            rayon_threads_out = int(rayon_raw)
+        except ValueError:
+            rayon_threads_out = None
     triage_out = _triage_paths(
         paths,
         rust_exe=str(rust_exe),
         diff_ignore=diff_ignore,
-        diff_ignore_path=tuple(args.diff_ignore_path or []),
-        diff_ignore_path_in=tuple(args.diff_ignore_path_in or []),
+        diff_ignore_path=tuple(diff_ignore_path_values),
+        diff_ignore_path_in=tuple(diff_ignore_path_in_values),
         diff_limit=args.diff_limit,
         round_trip_fail_on=args.round_trip_fail_on,
         recalc=args.recalc,
@@ -1714,6 +1739,7 @@ def main() -> int:
         "input_scope": args.input_scope,
         "input_dir": input_dir_str,
         "jobs": args.jobs,
+        "jobs_effective": effective_workers,
         "privacy_mode": args.privacy_mode,
         "include_xlsb": args.include_xlsb,
         "recalc": args.recalc,
@@ -1721,7 +1747,11 @@ def main() -> int:
         "diff_limit": args.diff_limit,
         "round_trip_fail_on": args.round_trip_fail_on,
         "diff_ignore": sorted(diff_ignore),
+        "diff_ignore_path": diff_ignore_path_out,
+        "diff_ignore_path_in": diff_ignore_path_in_out,
         "no_default_diff_ignore": args.no_default_diff_ignore,
+        "strict_calc_chain": bool(args.strict_calc_chain),
+        "rayon_num_threads": rayon_threads_out,
         "report_count": len(reports),
         "reports": report_index_entries,
     }
