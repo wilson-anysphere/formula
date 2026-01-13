@@ -212,6 +212,8 @@ Important: **masking is not confidentiality**. Masking is a UX/access-control me
 - `session.canReadCell({ sheetId, row, col })`
 - `session.canEditCell({ sheetId, row, col })`
 
+`setPermissions` validates and normalizes `rangeRestrictions` eagerly (using `@formula/collab-permissions`), so misconfigured restrictions fail fast with an actionable error message (e.g. `rangeRestrictions[3] invalid: ...`).
+
 These checks also incorporate encryption invariants (e.g. refusing writes to encrypted cells when no key is available).
 
 #### Desktop binder permissions (`bindYjsToDocumentController`)
