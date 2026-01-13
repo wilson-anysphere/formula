@@ -52,18 +52,21 @@ export class DrawingInteractionController {
   private readonly onPointerDown = (e: PointerEvent) => {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
+    const index = this.getHitTestIndex(objects);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom);
-    const pointPane = resolvePointPane(paneLayout, e.offsetX, e.offsetY);
+    const inHeader = e.offsetX < paneLayout.headerOffsetX || e.offsetY < paneLayout.headerOffsetY;
+    const pointInFrozenCols = !inHeader && e.offsetX < paneLayout.frozenBoundaryX;
+    const pointInFrozenRows = !inHeader && e.offsetY < paneLayout.frozenBoundaryY;
 
     // Allow grabbing a resize handle for the current selection even when the
     // pointer is slightly outside the object's bounds (handles are centered on
     // the outline and extend half their size beyond the rect).
-    const selectedObject =
-      this.selectedId != null ? objects.find((o) => o.id === this.selectedId) : undefined;
-    if (selectedObject && pointPane) {
+    const selectedIndex = this.selectedId != null ? index.byId.get(this.selectedId) : undefined;
+    const selectedObject = selectedIndex != null ? index.ordered[selectedIndex] : undefined;
+    if (selectedObject && !inHeader) {
       const objectPane = resolveAnchorPane(selectedObject.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
-      if (objectPane.inFrozenCols === pointPane.inFrozenCols && objectPane.inFrozenRows === pointPane.inFrozenRows) {
-        const selectedBounds = objectToScreenRect(selectedObject, viewport, this.geom);
+      if (objectPane.inFrozenCols === pointInFrozenCols && objectPane.inFrozenRows === pointInFrozenRows) {
+        const selectedBounds = objectToScreenRect(selectedObject, viewport, this.geom, index.bounds[selectedIndex!]);
         const handle = hitTestResizeHandle(selectedBounds, e.offsetX, e.offsetY);
         if (handle) {
           this.canvas.setPointerCapture(e.pointerId);
@@ -80,7 +83,6 @@ export class DrawingInteractionController {
       }
     }
 
-    const index = this.getHitTestIndex(objects);
     const hit = hitTestDrawings(index, viewport, e.offsetX, e.offsetY, this.geom);
     this.selectedId = hit?.object.id ?? null;
     this.callbacks.onSelectionChange?.(this.selectedId);
@@ -158,22 +160,25 @@ export class DrawingInteractionController {
   private updateCursor(x: number, y: number): void {
     const viewport = this.callbacks.getViewport();
     const objects = this.callbacks.getObjects();
+    const index = this.getHitTestIndex(objects);
     const paneLayout = resolveViewportPaneLayout(viewport, this.geom);
-    const pointPane = resolvePointPane(paneLayout, x, y);
-    if (!pointPane) {
+    if (x < paneLayout.headerOffsetX || y < paneLayout.headerOffsetY) {
       this.canvas.style.cursor = "default";
       return;
     }
+    const pointInFrozenCols = x < paneLayout.frozenBoundaryX;
+    const pointInFrozenRows = y < paneLayout.frozenBoundaryY;
 
     if (this.selectedId != null) {
-      const selected = objects.find((o) => o.id === this.selectedId);
-      if (selected) {
+      const selectedIndex = index.byId.get(this.selectedId);
+      if (selectedIndex != null) {
+        const selected = index.ordered[selectedIndex]!;
         const selectedPane = resolveAnchorPane(selected.anchor, paneLayout.frozenRows, paneLayout.frozenCols);
         if (
-          selectedPane.inFrozenCols === pointPane.inFrozenCols &&
-          selectedPane.inFrozenRows === pointPane.inFrozenRows
+          selectedPane.inFrozenCols === pointInFrozenCols &&
+          selectedPane.inFrozenRows === pointInFrozenRows
         ) {
-          const bounds = objectToScreenRect(selected, viewport, this.geom);
+          const bounds = objectToScreenRect(selected, viewport, this.geom, index.bounds[selectedIndex]);
           const handle = hitTestResizeHandle(bounds, x, y);
           if (handle) {
             this.canvas.style.cursor = cursorForResizeHandle(handle);
@@ -187,7 +192,6 @@ export class DrawingInteractionController {
       }
     }
 
-    const index = this.getHitTestIndex(objects);
     const hit = hitTestDrawings(index, viewport, x, y, this.geom);
     if (hit) {
       this.canvas.style.cursor = "move";
@@ -450,8 +454,13 @@ export function shiftAnchorPoint(
   };
 }
 
-function objectToScreenRect(obj: DrawingObject, viewport: Viewport, geom: GridGeometry) {
-  const rect = anchorToRectPx(obj.anchor, geom);
+function objectToScreenRect(
+  obj: DrawingObject,
+  viewport: Viewport,
+  geom: GridGeometry,
+  sheetRect?: { x: number; y: number; width: number; height: number },
+) {
+  const rect = sheetRect ?? anchorToRectPx(obj.anchor, geom);
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
@@ -485,55 +494,56 @@ type PaneLayout = {
   frozenBoundaryY: number;
 };
 
+const PANE_CELL_SCRATCH = { row: 0, col: 0 };
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
 function resolveViewportPaneLayout(viewport: Viewport, geom: GridGeometry): PaneLayout {
   const headerOffsetX = Number.isFinite(viewport.headerOffsetX) ? Math.max(0, viewport.headerOffsetX!) : 0;
   const headerOffsetY = Number.isFinite(viewport.headerOffsetY) ? Math.max(0, viewport.headerOffsetY!) : 0;
   const frozenRows = Number.isFinite(viewport.frozenRows) ? Math.max(0, Math.trunc(viewport.frozenRows!)) : 0;
   const frozenCols = Number.isFinite(viewport.frozenCols) ? Math.max(0, Math.trunc(viewport.frozenCols!)) : 0;
 
-  const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+  let frozenBoundaryX = headerOffsetX;
+  let frozenBoundaryY = headerOffsetY;
 
-  const derivedFrozenContentWidth = (() => {
-    if (frozenCols <= 0) return 0;
-    try {
-      return geom.cellOriginPx({ row: 0, col: frozenCols }).x;
-    } catch {
-      return 0;
+  if (frozenCols > 0) {
+    let raw = viewport.frozenWidthPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        PANE_CELL_SCRATCH.row = 0;
+        PANE_CELL_SCRATCH.col = frozenCols;
+        derived = geom.cellOriginPx(PANE_CELL_SCRATCH).x;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetX + derived;
     }
-  })();
-  const derivedFrozenContentHeight = (() => {
-    if (frozenRows <= 0) return 0;
-    try {
-      return geom.cellOriginPx({ row: frozenRows, col: 0 }).y;
-    } catch {
-      return 0;
-    }
-  })();
+    frozenBoundaryX = clampNumber(raw as number, headerOffsetX, viewport.width);
+  }
 
-  const frozenBoundaryX = clamp(
-    Number.isFinite(viewport.frozenWidthPx) ? viewport.frozenWidthPx! : headerOffsetX + derivedFrozenContentWidth,
-    headerOffsetX,
-    viewport.width,
-  );
-  const frozenBoundaryY = clamp(
-    Number.isFinite(viewport.frozenHeightPx) ? viewport.frozenHeightPx! : headerOffsetY + derivedFrozenContentHeight,
-    headerOffsetY,
-    viewport.height,
-  );
+  if (frozenRows > 0) {
+    let raw = viewport.frozenHeightPx;
+    if (!Number.isFinite(raw)) {
+      let derived = 0;
+      try {
+        PANE_CELL_SCRATCH.row = frozenRows;
+        PANE_CELL_SCRATCH.col = 0;
+        derived = geom.cellOriginPx(PANE_CELL_SCRATCH).y;
+      } catch {
+        derived = 0;
+      }
+      raw = headerOffsetY + derived;
+    }
+    frozenBoundaryY = clampNumber(raw as number, headerOffsetY, viewport.height);
+  }
 
   return { frozenRows, frozenCols, headerOffsetX, headerOffsetY, frozenBoundaryX, frozenBoundaryY };
-}
-
-function resolvePointPane(
-  layout: PaneLayout,
-  x: number,
-  y: number,
-): { inFrozenRows: boolean; inFrozenCols: boolean } | null {
-  if (x < layout.headerOffsetX || y < layout.headerOffsetY) return null;
-  return {
-    inFrozenCols: x < layout.frozenBoundaryX,
-    inFrozenRows: y < layout.frozenBoundaryY,
-  };
 }
 
 function resolveAnchorPane(

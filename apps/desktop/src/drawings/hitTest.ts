@@ -36,6 +36,8 @@ export interface HitTestIndex {
   bucketSizePx: number;
   /** Geometry used to derive sheet-space bounds (also used for frozen-pane layout fallbacks). */
   geom: GridGeometry;
+  /** Object id -> index into `ordered` / `bounds` (useful for selection/cursor logic). */
+  byId: Map<number, number>;
 }
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -68,9 +70,11 @@ export function buildHitTestIndex(
   const bounds: Rect[] = new Array(ordered.length);
   const buckets: Map<number, Map<number, number[]>> = new Map();
   const global: number[] = [];
+  const byId = new Map<number, number>();
 
   for (let i = 0; i < ordered.length; i += 1) {
     const obj = ordered[i]!;
+    byId.set(obj.id, i);
     const rect = anchorToRectPx(obj.anchor, geom);
     bounds[i] = rect;
 
@@ -112,7 +116,7 @@ export function buildHitTestIndex(
     }
   }
 
-  return { ordered, bounds, buckets, global, bucketSizePx, geom };
+  return { ordered, bounds, buckets, global, bucketSizePx, geom, byId };
 }
 
 export function hitTestDrawings(
