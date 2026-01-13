@@ -9,6 +9,8 @@ not, and avoid security pitfalls (like accidentally persisting decrypted bytes t
 
 ## Related docs
 
+- [`docs/office-encryption.md`](./office-encryption.md) — maintainer-level reference (supported
+  parameter subsets, KDF nuances, writer defaults).
 - [`docs/21-offcrypto.md`](./21-offcrypto.md) — short MS-OFFCRYPTO overview focused on “what the file
   looks like”, scheme detection, and `formula-io` password APIs.
 - [`docs/offcrypto-standard-encryptedpackage.md`](./offcrypto-standard-encryptedpackage.md) —

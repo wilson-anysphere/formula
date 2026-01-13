@@ -10,6 +10,9 @@ This document explains what those files look like on disk and how to debug user 
 Note: the more complete, up-to-date overview lives in
 [`docs/21-encrypted-workbooks.md`](./21-encrypted-workbooks.md) (covers both OOXML + legacy `.xls`).
 
+For maintainer-level implementation notes (supported parameter subsets, KDF nuances, writer
+defaults), see [`docs/office-encryption.md`](./office-encryption.md).
+
 Relevant specs:
 
 - **MS-OFFCRYPTO** (Office document encryption): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
@@ -70,11 +73,13 @@ spreadsheets you will most commonly see:
 
 Current state in this repo (important nuance):
 
-- Low-level decryption primitives exist in multiple crates:
+- Decryption primitives exist in multiple crates:
+  - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes) and an Agile encryption writer:
+    `crates/formula-office-crypto`
   - Standard/CryptoAPI parsing + password key derivation + `EncryptedPackage` helpers:
     `crates/formula-offcrypto`
-  - Higher-level decrypt helpers (OLE wrapper → decrypted ZIP bytes): `crates/formula-office-crypto`
-  - Agile (4.4) parsing/decryption helpers (including `dataIntegrity`): `crates/formula-xlsx::offcrypto`
+  - Agile (4.4) parsing + decryption + `dataIntegrity` HMAC verification:
+    `crates/formula-xlsx::offcrypto`
 - The high-level `formula-io` open path does **not** yet decrypt OOXML workbooks end-to-end; it
   primarily provides **detection + error classification** so callers can prompt for a password and
   route errors correctly.

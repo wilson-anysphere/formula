@@ -29,13 +29,14 @@ Legacy `.xls` encryption is signaled via a `FILEPASS` record in the workbook glo
 ### Summary table
 | Format | Scheme | Marker | Implemented crypto | Notes / entry points |
 |---|---|---|---|---|
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
-| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** | ✅ key derivation/verifier + ✅ `EncryptedPackage` decrypt (helpers), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-offcrypto` (parse + standard key derivation + verifier), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Agile** | `EncryptionInfo` **4.4** | ✅ decrypt (library) + ✅ encrypt (writer), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt + Agile writer), `crates/formula-xlsx/src/offcrypto/*` (Agile primitives), `crates/formula-offcrypto` (Agile XML parsing subset) |
+| OOXML (`.xlsx`/`.xlsm`/`.xlsb`) | **Standard / CryptoAPI (AES)** | `EncryptionInfo` **3.2** (minor=2; major ∈ {2,3,4} in the wild) | ✅ decrypt (library), ❌ not yet plumbed through `formula-io` open APIs | `crates/formula-office-crypto` (end-to-end decrypt), `crates/formula-offcrypto` (parse + standard key derivation + verifier; stricter alg gating), `crates/formula-io/src/offcrypto/encrypted_package.rs` (decrypt `EncryptedPackage` given key+salt), `docs/offcrypto-standard-encryptedpackage.md` |
 | Legacy `.xls` (BIFF8) | **FILEPASS RC4 CryptoAPI** | BIFF `FILEPASS` record | ✅ decrypt when password provided (import API) | `formula_xls::import_xls_path_with_password`, `crates/formula-xls/src/decrypt.rs` |
 
-Important: `formula-io`’s public open APIs currently **detect** encryption and return
-`formula_io::Error::EncryptedWorkbook` (password plumbing not yet wired). The crypto code above
-exists to enable that future integration.
+Important: `formula-io`’s public open APIs currently **detect** encryption and surface dedicated
+errors (OOXML: `PasswordRequired` / `InvalidPassword` / `UnsupportedOoxmlEncryption`; legacy `.xls`:
+`EncryptedWorkbook`), but do not yet decrypt encrypted OOXML workbooks end-to-end. The crypto code
+above exists to enable that future integration.
 
 ## Supported schemes / parameter subsets
 
@@ -57,15 +58,17 @@ Not implemented:
 - certificate-based key encryptors
 - IRM / “DataSpaces” transforms
 
-### OOXML: Standard encryption (3.2, CryptoAPI AES)
-Supported subset (as enforced by parsers/derivers today):
+### OOXML: Standard encryption (CryptoAPI; `versionMinor == 2`)
+Supported subset (CryptoAPI AES):
 
-- Cipher: AES-128/192/256 (`CALG_AES_128/192/256`) with `keySizeBits` matching the AlgID
-- Hash: SHA-1 (`CALG_SHA1`) for key derivation + verifier
-- Salt: `EncryptionVerifier.saltSize == 16`
+- Cipher: AES-128/192/256 (`CALG_AES_128/192/256`).
+- Hash (`AlgIDHash`) for password hashing / key derivation:
+  - `crates/formula-office-crypto` supports `CALG_SHA1`/`CALG_SHA_256`/`CALG_SHA_384`/`CALG_SHA_512`.
+  - `crates/formula-offcrypto` intentionally gates to **SHA-1** only (Excel default) and rejects
+    other hashes as “unsupported algorithm”.
+- Salt size: file-provided (`EncryptionVerifier.saltSize`, typically 16).
 
-Other combinations (RC4, non-SHA1 verifier hashes, mismatched key sizes) are treated as unsupported
-by the current code.
+Other combinations (RC4, mismatched key sizes, etc.) are treated as unsupported by the current code.
 
 ### Legacy `.xls`: BIFF8 `FILEPASS` RC4 CryptoAPI
 Currently supported in `formula-xls`:
@@ -87,11 +90,12 @@ Both Standard and Agile `EncryptionInfo` start with:
 u16 versionMajor
 u16 versionMinor
 u32 flags
+u32 headerSize   // Standard: byte length of `EncryptionHeader`; Agile: byte length of the XML descriptor
 ... scheme-specific payload
 ```
 
 The version pair is used to dispatch:
-* **3.2** ⇒ Standard (CryptoAPI)
+* **minor == 2** and major ∈ {2,3,4} ⇒ Standard (CryptoAPI)
 * **4.4** ⇒ Agile
 
 ### `EncryptedPackage` stream framing
@@ -264,17 +268,20 @@ To identify the scheme without full parsing:
 
 * Open the file as OLE/CFB and read the first 8 bytes of `EncryptionInfo`.
 * Interpret as `u16 major, u16 minor, u32 flags` (little-endian).
-  * 3.2 ⇒ Standard
   * 4.4 ⇒ Agile
+  * `minor == 2` and `major ∈ {2,3,4}` ⇒ Standard (CryptoAPI; commonly 3.2)
 
-### Defaults for *writing* encrypted OOXML (planned)
-This repo does not yet re-encrypt workbooks on save (round-tripping an encrypted workbook will
-eventually require emitting a new `EncryptionInfo` + `EncryptedPackage` wrapper).
+### Defaults for *writing* encrypted OOXML (`formula-office-crypto`)
+This repo does not yet re-encrypt workbooks on save in the `formula-io` export path (round-tripping
+an encrypted workbook will eventually require emitting a new `EncryptionInfo` + `EncryptedPackage`
+wrapper).
 
-When implementing an encryption writer, use these defaults unless a compatibility requirement
-dictates otherwise:
+However, `crates/formula-office-crypto` implements an **Agile encryption writer**
+(`formula_office_crypto::encrypt_package_to_ole`) that is used for round-trip tests. Its defaults
+are the repo’s current “recommended writer settings” unless a compatibility requirement dictates
+otherwise:
 
-- **Agile (default):**
+- **Agile (default; `EncryptOptions::default()`):**
   - `cipherAlgorithm=AES`, `cipherChaining=ChainingModeCBC`
   - `hashAlgorithm=SHA512`
   - `keyBits=256`, `blockSize=16`, `saltSize=16`
@@ -284,9 +291,10 @@ dictates otherwise:
     - `keyData/@saltValue`
     - password key encryptor `saltValue`
   - Generate a random 16-byte verifier input (`verifierHashInput`).
-  - Emit `dataIntegrity` and verify it on read (HMAC-SHA512) once implemented.
+  - Emit `dataIntegrity` (HMAC) in the XML descriptor (note: not all decrypt paths validate it yet).
 
-- **Standard (opt-in/compat only):**
+- **Standard writer:** not implemented yet in `formula-office-crypto`. If we add it, the intended
+  defaults are:
   - AES-128 (`CALG_AES_128`) + SHA-1 (`CALG_SHA1`)
   - Iteration count is effectively fixed at 50,000 in the key derivation.
   - `EncryptedPackage` segmentation: 4096-byte plaintext segments (`0x1000`) and IV derivation
