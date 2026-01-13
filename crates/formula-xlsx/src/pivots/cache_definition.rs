@@ -383,7 +383,7 @@ fn parse_bool(value: &str) -> Option<bool> {
     }
 }
 
-fn split_sheet_ref(reference: &str) -> Option<(String, String)> {
+pub(crate) fn split_sheet_ref(reference: &str) -> Option<(String, String)> {
     let (sheet_part, ref_part) = reference.rsplit_once('!')?;
     if ref_part.is_empty() {
         return None;

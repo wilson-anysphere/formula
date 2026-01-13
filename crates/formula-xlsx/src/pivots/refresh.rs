@@ -5,6 +5,7 @@ use formula_model::{CellRef, Range};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use super::cache_definition::split_sheet_ref;
 use crate::openxml::{local_name, parse_relationships, rels_part_name, resolve_target};
 use crate::package::{XlsxError, XlsxPackage};
 use crate::pivots::cache_records::PivotCacheValue;
@@ -143,8 +144,22 @@ fn parse_worksheet_source_from_cache_definition(xml: &[u8]) -> Result<WorksheetS
         buf.clear();
     }
 
+    let mut sheet = sheet;
+    let mut reference = reference.ok_or(XlsxError::MissingAttr("worksheetSource@ref"))?;
+
+    // Some non-standard producers omit `worksheetSource@sheet` and embed the sheet name in the
+    // ref (e.g. `Sheet1!A1:C5` or `'Sheet 1'!A1:C5`).
+    //
+    // Excel quotes sheet names with spaces/special characters using `'...'`, where any embedded
+    // quote is escaped as `''`. Reuse the same parsing logic as the pivot cache definition parser.
+    if let Some((parsed_sheet, parsed_ref)) = split_sheet_ref(&reference) {
+        if sheet.is_none() {
+            sheet = Some(parsed_sheet);
+        }
+        reference = parsed_ref;
+    }
+
     let sheet = sheet.ok_or(XlsxError::MissingAttr("worksheetSource@sheet"))?;
-    let reference = reference.ok_or(XlsxError::MissingAttr("worksheetSource@ref"))?;
     Ok(WorksheetSource { sheet, reference })
 }
 

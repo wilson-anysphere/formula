@@ -3748,7 +3748,6 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     }
 
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
-
     // `vm="..."` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
     //
     // We generally preserve it for fidelity. The main exception is the embedded in-cell image
@@ -3770,9 +3769,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     } else {
         false
     };
-    let patch_is_rich_value_placeholder =
-        matches!(&patch.value, CellValue::Error(ErrorValue::Value));
-
+    let patch_is_rich_value_placeholder = matches!(&patch.value, CellValue::Error(ErrorValue::Value));
     let value_eq = if drop_vm_on_value_change {
         cell_value_semantics_eq(
             existing_t.as_deref(),
