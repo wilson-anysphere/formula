@@ -65,6 +65,10 @@ jobs:
     name: Public corpus triage
     needs: conflict-marker-guard
     runs-on: ubuntu-latest
+    env:
+      # Manual workflow_dispatch runs can opt into heavier checks even for the public subset.
+      CORPUS_RUN_RECALC: ${{ github.event.inputs.recalc }}
+      CORPUS_RUN_RENDER_SMOKE: ${{ github.event.inputs.render_smoke }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.92.0
@@ -83,12 +87,20 @@ jobs:
         run: python -m unittest discover -s tools/corpus/tests
       - name: Run triage
         run: |
+          EXTRA_FLAGS=()
+          if [ "${CORPUS_RUN_RECALC}" = "true" ]; then
+            EXTRA_FLAGS+=(--recalc)
+          fi
+          if [ "${CORPUS_RUN_RENDER_SMOKE}" = "true" ]; then
+            EXTRA_FLAGS+=(--render-smoke)
+          fi
           python -m tools.corpus.triage \
             --corpus-dir tools/corpus/public \
             --out-dir tools/corpus/out/public \
             --expectations tools/corpus/public/expectations.json \
             --include-xlsb \
-            --leak-scan
+            --leak-scan \
+            "${EXTRA_FLAGS[@]}"
       - name: Generate dashboard
         run: python -m tools.corpus.dashboard --triage-dir tools/corpus/out/public
       - name: Publish summary
