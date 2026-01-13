@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import unittest
 import zipfile
 from pathlib import Path
@@ -187,6 +188,40 @@ class TriagePrivacyModeTests(unittest.TestCase):
         self.assertNotIn("corp.example.com", top[0]["path"])
         # Allowlisted OpenXML schema URIs should remain intact.
         self.assertIn("schemas.openxmlformats.org", top[1]["path"])
+
+    def test_private_mode_hashes_non_github_run_url(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_env = os.environ.copy()
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            os.environ["GITHUB_SERVER_URL"] = "https://github.corp.example.com"
+            os.environ["GITHUB_REPOSITORY"] = "corp/repo"
+            os.environ["GITHUB_RUN_ID"] = "123"
+
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            data = _make_xlsx_with_custom_relationship_uris()
+            report = triage_workbook(
+                WorkbookInput(display_name="book.xlsx", data=data),
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+                privacy_mode="private",
+            )
+        finally:
+            os.environ.clear()
+            os.environ.update(original_env)
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        self.assertIsInstance(report.get("run_url"), str)
+        self.assertTrue(report["run_url"].startswith("sha256="))
+        self.assertNotIn("github.corp.example.com", report["run_url"])
 
 
 if __name__ == "__main__":

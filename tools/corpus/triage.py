@@ -229,6 +229,13 @@ _SAFE_SCHEMA_HOST_SUFFIXES = {
     "schemas.microsoft.com",
 }
 
+# `run_url` can point at a GitHub Enterprise Server domain (e.g. `github.corp.example.com`). When
+# triage output is uploaded as an artifact to a less-trusted environment, this can leak corporate
+# domains. Allowlist github.com (public) and hash everything else in privacy mode.
+_SAFE_RUN_URL_HOST_SUFFIXES = {
+    "github.com",
+}
+
 
 def _anonymized_display_name(*, sha256: str, original_name: str) -> str:
     # Keep the extension as a lightweight hint (xlsx vs xlsm) while avoiding leaking the original
@@ -301,6 +308,27 @@ def _redact_uri_like_in_text(text: str) -> str:
 
     out = re.sub(r"https?://[^\s\"'<>]+", _replace_url, out)
     return out
+
+
+def _is_safe_run_url_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.casefold()
+    return any(
+        host == allowed or host.endswith(f".{allowed}") for allowed in _SAFE_RUN_URL_HOST_SUFFIXES
+    )
+
+
+def _redact_run_url(url: str | None, *, privacy_mode: str) -> str | None:
+    if not url or privacy_mode != _PRIVACY_PRIVATE:
+        return url
+
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme in ("http", "https") and parsed.netloc and _is_safe_run_url_host(parsed.hostname):
+        return url
+    return f"sha256={_sha256_text(url)}"
 
 
 def _now_ms() -> float:
@@ -919,7 +947,7 @@ def triage_workbook(
         "size_bytes": len(workbook.data),
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
-        "run_url": github_run_url(),
+        "run_url": _redact_run_url(github_run_url(), privacy_mode=privacy_mode),
     }
 
     # Best-effort scan for feature/function fingerprints (privacy-safe).
@@ -1180,7 +1208,7 @@ def _triage_one_path(
             "sha256": sha,
             "timestamp": utc_now_iso(),
             "commit": github_commit_sha(),
-            "run_url": github_run_url(),
+            "run_url": _redact_run_url(github_run_url(), privacy_mode=privacy_mode),
             "steps": {"load": asdict(_step_failed(_now_ms(), e))},
             "result": {"open_ok": False},
             "failure_category": "triage_error",
@@ -1482,7 +1510,7 @@ def main() -> int:
     index = {
         "timestamp": utc_now_iso(),
         "commit": github_commit_sha(),
-        "run_url": github_run_url(),
+        "run_url": _redact_run_url(github_run_url(), privacy_mode=args.privacy_mode),
         "corpus_dir": str(args.corpus_dir),
         "input_scope": args.input_scope,
         "input_dir": str(input_dir),
