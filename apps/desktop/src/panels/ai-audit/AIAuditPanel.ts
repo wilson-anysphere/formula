@@ -140,13 +140,17 @@ function sanitizeFileNameComponent(value: string): string {
   return value.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "unknown";
 }
 
-function buildExportFileName(filters: { workbookId?: string; sessionId?: string }): string {
+function buildExportFileName(
+  filters: { workbookId?: string; sessionId?: string },
+  format: "ndjson" | "json" = "ndjson",
+): string {
   const stamp = new Date().toISOString().replaceAll(":", "-");
   const parts: string[] = [];
   if (filters.workbookId) parts.push(`workbook-${sanitizeFileNameComponent(filters.workbookId)}`);
   if (filters.sessionId) parts.push(`session-${sanitizeFileNameComponent(filters.sessionId)}`);
   const suffix = parts.length ? `-${parts.join("_")}` : "";
-  return `ai-audit-log-${stamp}${suffix}.json`;
+  const ext = format === "json" ? "json" : "ndjson";
+  return `ai-audit-log-${stamp}${suffix}.${ext}`;
 }
 
 export interface CreateAIAuditPanelOptions {
@@ -295,7 +299,7 @@ export function createAIAuditPanel(options: CreateAIAuditPanelOptions) {
         downloadAuditLogExport(exp);
       },
     },
-    ["Export JSON"],
+    ["Export log"],
   );
 
   function onFilterKeyDown(event: KeyboardEvent) {
