@@ -1,6 +1,7 @@
 pub(crate) mod atomic_write;
 pub mod commands;
 pub mod ed25519_verifier;
+pub mod external_url;
 #[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
 // Clipboard fallback helpers are only used by the Linux clipboard backend, which itself is behind

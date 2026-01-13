@@ -4612,24 +4612,7 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
         )?;
     }
 
-    let parsed = tauri::Url::parse(url.trim()).map_err(|err| format!("Invalid URL: {err}"))?;
-
-    // SECURITY: enforce a strict scheme allowlist at the Rust boundary so a compromised webview
-    // cannot use this command as an "open arbitrary protocol" primitive.
-    match parsed.scheme() {
-        "http" | "https" | "mailto" => {}
-        "javascript" | "data" | "file" => {
-            return Err(format!(
-                "Refusing to open URL with blocked scheme \"{}:\"",
-                parsed.scheme()
-            ))
-        }
-        other => {
-            return Err(format!(
-                "Refusing to open URL with unsupported scheme \"{other}:\" (allowed: http, https, mailto)"
-            ))
-        }
-    }
+    let parsed = crate::external_url::validate_external_url(&url)?;
 
     window
         .shell()

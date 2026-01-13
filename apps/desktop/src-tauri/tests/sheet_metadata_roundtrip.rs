@@ -302,15 +302,8 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
             .set_sheet_visibility("Sheet3", SheetVisibility::VeryHidden)
             .expect("set sheet3 veryHidden");
         state
-            .set_sheet_tab_color(
-                "Sheet3",
-                Some(TabColor {
-                    theme: Some(1),
-                    tint: Some(0.5),
-                    ..Default::default()
-                }),
-            )
-            .expect("set sheet3 theme tab color");
+            .set_sheet_tab_color("Sheet3", Some(TabColor::rgb("FF0000FF")))
+            .expect("set sheet3 tab color");
     }
 
     // Second session: load the same workbook against the existing autosave DB and verify the
@@ -340,12 +333,5 @@ fn sheet_metadata_restores_from_on_disk_autosave_db() {
         .find(|s| s.id == "Sheet3")
         .expect("sheet3 in workbook_info");
     assert_eq!(sheet3.visibility, SheetVisibility::VeryHidden);
-    assert_eq!(
-        sheet3.tab_color,
-        Some(TabColor {
-            theme: Some(1),
-            tint: Some(0.5),
-            ..Default::default()
-        })
-    );
+    assert_eq!(sheet3.tab_color, Some(TabColor::rgb("FF0000FF")));
 }
